@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { inject, Injectable } from '@angular/core';
+import { inject } from '@angular/core';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { BehaviorSubject, concatMap, from, map, mergeMap, Observable, of, switchMap, tap, timer, toArray } from 'rxjs';
@@ -21,9 +21,6 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 export const LAST_CAT21_MINTS = 'LAST_CAT21_MINTS';
 
-@Injectable({
-  providedIn: 'root'
-})
 export class Cat21Service {
 
   private config = inject(CAT21_SDK_CONFIG);
