@@ -1,6 +1,15 @@
 // ordpool-sdk public API surface.
-//
-// Currently empty — modules will land as concrete needs surface
-// (calendar clients, REST wrappers, signing helpers, etc.).
-// See .claude/CLAUDE.md for the package's scope and conventions.
-export {};
+
+// --- shared abstractions ---
+export * from './storage-like';
+
+// --- wallet (Xverse / Leather / Unisat picker + connect flow) ---
+export * from './wallet/wallet.service';
+export * from './wallet/wallet.service.types';
+
+// --- cat21 mint pipeline (PSBT builder, simulator, broadcaster) ---
+export * from './cat21-mint/cat21-sdk-config';
+export * from './cat21-mint/cat21.service';
+export * from './cat21-mint/cat21.service.helper';
+export * from './cat21-mint/cat21.service.types';
+export * from './cat21-mint/cat21-api.service';
