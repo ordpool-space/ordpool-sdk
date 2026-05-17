@@ -1,7 +1,7 @@
 {
   "name": "ordpool-sdk",
   "version": "0.1.0",
-  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool — REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. MIT, zero AGPL encumbrance. Works in Node.js and browsers.",
+  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool — REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Works in Node.js and browsers.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ordpool-space/ordpool-sdk.git"

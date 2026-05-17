@@ -4,7 +4,7 @@
 
 **ordpool-sdk** is the higher-level domain library for the ordpool ecosystem. It sits one layer above [`ordpool-parser`](https://github.com/ordpool-space/ordpool-parser): the parser extracts artifacts from raw transactions; the SDK does everything one step up from that — REST wrappers, calendar clients, signing helpers, anything that needs to talk to a network or hold side-effecting logic.
 
-- **MIT licensed**, zero AGPL encumbrance.
+- **MIT licensed.**
 - **Dual output**: ESM (`dist/`) and CommonJS (`dist-commonjs/`).
 - Works in Node.js AND browsers.
 - No external consumers yet — only `ordpool.space` and `cat21.space` will use it. No CHANGELOG, no semver gymnastics.
@@ -15,7 +15,7 @@
 |---|---|
 | **ordpool-parser** | Pure function, zero runtime deps, no I/O. Byte-twiddling, hex/base64, format detection, parsers, hash utilities. Anything that could run unchanged in a Cloudflare Worker or a fetch event handler. |
 | **ordpool-sdk** | Higher-level domain code with a sane runtime dependency footprint OR networked / stateful logic. REST clients, calendar walkers, signing helpers, ordpool API wrappers. |
-| **ordpool/frontend & ordpool/backend** | AGPL — anything that imports Angular, the mempool framework, the upstream's internal types. |
+| **ordpool/frontend & ordpool/backend** | Anything that imports Angular, the mempool framework, or the upstream's internal types. |
 
 When in doubt, ask: "could this be the basis for a standalone npm package, a CLI, or a GitHub Action?" If yes → parser or SDK. If it imports Angular or mempool internals → fork.
 
