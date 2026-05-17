@@ -2,6 +2,7 @@ import { describe, expect, it, afterEach } from '@jest/globals';
 
 import { createInputScriptForUnisat, createTransaction, getAddressFormat, getDummyKeypair, getMinimumUtxoSize, getDummyLegacyTransaction, toXOnly, isSegWit } from './cat21.service.helper';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network';
 import { sha256 } from '@noble/hashes/sha256';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
@@ -288,7 +289,7 @@ createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymen
         paymentAddress,
         feesForSingleOutput,
         false,
-        true
+        Network.Mainnet
       );
 
       if (!result.tx) {
@@ -316,7 +317,7 @@ createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymen
         paymentAddress,
         BigInt(5000), // Lower fee to ensure change of 4.454 sats ($1.91) is above dust limit of 546 sats ($0.23)
         false,
-        true
+        Network.Mainnet
       );
 
       if (!result.tx) {
@@ -346,7 +347,7 @@ createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymen
         paymentAddress,
         BigInt(9000 + 1000), // now we are out of money, change would be negative
         false,
-        true
+        Network.Mainnet
       )).toThrowError(new Error('Insufficient funds for transaction'));
     });
 

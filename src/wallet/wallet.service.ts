@@ -1,21 +1,20 @@
 import { inject, Injectable } from '@angular/core';
-import { NavigationEnd, Router } from '@angular/router';
 import {
   BehaviorSubject,
   distinctUntilChanged,
-  filter,
   from,
   map,
   Observable,
-  shareReplay,
-  startWith,
+  of,
   Subject,
   take,
   tap,
   timer,
 } from 'rxjs';
-import { AddressPurpose, BitcoinNetworkType, getAddress } from 'sats-connect';
+import { AddressPurpose, getAddress } from 'sats-connect';
 
+import { Network, toBitcoinNetworkType } from '../network';
+import { SDK_NETWORK } from '../network-token';
 import { STORAGE_LIKE } from '../storage-like';
 import {
   KnownOrdinalWallet,
@@ -40,6 +39,7 @@ export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
 export class WalletService {
 
   storageService = inject(STORAGE_LIKE);
+  network = inject(SDK_NETWORK);
 
   walletConnectRequested$ = new Subject<boolean>();
 
@@ -53,28 +53,18 @@ export class WalletService {
       })
     );
 
-  router = inject(Router);
-  isMainnet$ = this.router.events.pipe(
-    filter(event => event instanceof NavigationEnd),
-    startWith(undefined), // start with current URL
-    map(() => {
-      const url = this.router.url;
-      return !url.includes('testnet');
-    }),
-    shareReplay({
-      refCount: true,
-      bufferSize: 1
-    })
-  );
-  isMainnet = true;
+  // Static derivation from the injected network. Kept as a boolean field
+  // (read by frontend consumers that pick a mainnet-vs-testnet endpoint)
+  // and as a single-emission Observable for legacy subscribers — neither
+  // ever changes after construction; ordpool no longer routes a testnet UI.
+  readonly isMainnet = this.network === Network.Mainnet;
+  readonly isMainnet$: Observable<boolean> = of(this.isMainnet);
 
   constructor() {
     const lastConnectedWallet = this.storageService.getValue(LAST_CONNECTED_WALLET);
     if (lastConnectedWallet) {
       this.connectedWallet$.next(JSON.parse(lastConnectedWallet));
     }
-
-    this.isMainnet$.subscribe(isMainnet => this.isMainnet = isMainnet);
   }
 
 
@@ -172,7 +162,7 @@ export class WalletService {
           purposes: [AddressPurpose.Ordinals, AddressPurpose.Payment],
           message: 'Please share your address for receiving Ordinals and payments.',
           network: {
-            type: this.isMainnet ? BitcoinNetworkType.Mainnet : BitcoinNetworkType.Testnet
+            type: toBitcoinNetworkType(this.network)
           }
         },
         onFinish: (response) => {

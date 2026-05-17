@@ -3,7 +3,6 @@ import { inject, Injectable } from '@angular/core';
 import { Observable, interval, shareReplay, startWith, switchMap, takeWhile } from 'rxjs';
 
 import { CAT21_SDK_CONFIG } from './cat21-sdk-config';
-import { WalletService } from '../wallet/wallet.service';
 
 export interface StatusResult {
   totalCats: number;
@@ -78,14 +77,7 @@ export class Cat21ApiService {
 
   private config = inject(CAT21_SDK_CONFIG);
   private baseUrl = this.config.cat21ApiUrl;
-  private walletService = inject(WalletService);
   private http = inject(HttpClient);
-
-  constructor() {
-    this.walletService.isMainnet$.subscribe(isMainnet => {
-      this.baseUrl = isMainnet ? this.config.cat21ApiUrl : this.config.cat21ApiUrl + '/testnet';
-    });
-  }
 
   /*
   getStatus(): Observable<StatusResult> {

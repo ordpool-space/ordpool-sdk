@@ -4,6 +4,8 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { BehaviorSubject, concatMap, from, map, mergeMap, Observable, of, switchMap, tap, timer, toArray } from 'rxjs';
 
+import { Network, toScureNetwork } from '../network';
+import { SDK_NETWORK } from '../network-token';
 import { STORAGE_LIKE } from '../storage-like';
 import { CAT21_SDK_CONFIG } from './cat21-sdk-config';
 import {
@@ -15,7 +17,6 @@ import {
   signTransactionUnisatAndBroadcast,
 } from './cat21.service.helper';
 import { Cat21Mint, LeatherPSBTBroadcastResponse, SimulateTransactionResult, TxnOutput } from './cat21.service.types';
-import { WalletService } from '../wallet/wallet.service';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 
@@ -25,23 +26,17 @@ export const LAST_CAT21_MINTS = 'LAST_CAT21_MINTS';
 export class Cat21Service {
 
   private config = inject(CAT21_SDK_CONFIG);
+  private network = inject(SDK_NETWORK);
   mempoolApiUrl = this.config.mempoolApiUrl;
 
   http = inject(HttpClient);
-  walletService = inject(WalletService);
   storageService = inject(STORAGE_LIKE);
 
-  isMainnet = true;
   private txHexCache: { [transactionId: string]: string } = {}; // Cache object
 
   allMints$ = new BehaviorSubject<Cat21Mint[]>([]);
 
   constructor() {
-    this.walletService.isMainnet$.subscribe(isMainnet => {
-      this.isMainnet = isMainnet;
-      this.mempoolApiUrl = isMainnet ? this.config.mempoolApiUrl : this.config.mempoolApiUrlTestnet;
-    });
-
     const allMint = this.getAllMints();
     this.allMints$.next(allMint);
   }
@@ -157,7 +152,7 @@ export class Cat21Service {
     transactionFee: bigint
   ): SimulateTransactionResult {
 
-    const { dummyPrivateKey } = getDummyKeypair(this.isMainnet ? btc.NETWORK : btc.TEST_NETWORK);
+    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(this.network));
 
     const result = createTransaction(
       walletType,
@@ -167,7 +162,7 @@ export class Cat21Service {
       paymentAddress,
       transactionFee,
       true, // simulation
-      this.isMainnet
+      this.network
     );
 
     result.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.ALL]);
@@ -211,7 +206,7 @@ export class Cat21Service {
       paymentAddress,
       transactionFee,
       false, // no simulation
-      this.isMainnet
+      this.network
     );
 
     // PSBT as Uint8Array
@@ -223,7 +218,7 @@ export class Cat21Service {
 
     switch (walletType) {
       case KnownOrdinalWalletType.leather: {
-        result = from(signTransactionLeather(psbtBytes, this.isMainnet)).pipe(
+        result = from(signTransactionLeather(psbtBytes, this.network)).pipe(
           switchMap(signedPsbt => this.broadcastTransactionLeather(signedPsbt).pipe(
             // retry({ count: 3, delay: 500 }) // Ordpool has a global interceptor for this, otherwise add this line
           ))
@@ -231,7 +226,7 @@ export class Cat21Service {
         break;
       }
       case KnownOrdinalWalletType.xverse: {
-        result = signTransactionAndBroadcastXverse(psbtBytes, paymentAddress, this.isMainnet);
+        result = signTransactionAndBroadcastXverse(psbtBytes, paymentAddress, this.network);
         break;
       }
       case KnownOrdinalWalletType.unisat: {
@@ -249,7 +244,7 @@ export class Cat21Service {
       }),
       map(({ txId }) => ({
         txId,
-        network: this.isMainnet ? 'mainnet' : 'testnet',
+        network: this.network === Network.Mainnet ? 'mainnet' : 'testnet',
         transactionHex: 'TODO',
         paymentAddress,
         recipientAddress,

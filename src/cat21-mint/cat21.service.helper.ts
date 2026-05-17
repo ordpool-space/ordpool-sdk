@@ -2,7 +2,7 @@ import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { Observable } from 'rxjs';
-import { BitcoinNetworkType, signTransaction, SignTransactionResponse } from 'sats-connect';
+import { signTransaction, SignTransactionResponse } from 'sats-connect';
 
 import {
   CreateTransactionResult,
@@ -12,6 +12,7 @@ import {
   TxnOutput
 } from './cat21.service.types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork } from '../network';
 
 /**
  * Determines the minimum UTXO size based on the Bitcoin address type.
@@ -418,7 +419,7 @@ export function createInput(walletType: KnownOrdinalWalletType,
  * @param paymentAddress - The sender's address, to which change will be returned.
  * @param transactionFee - The miner fee in satoshis.
  * @param isSimulation - Flag indicating whether the transaction should be prepared for a simulation
- * @param isMainnet - Flag indicating whether the transaction is for mainnet or testnet
+ * @param network - The Bitcoin network the transaction is for (mainnet / testnet3 / testnet4 / signet / regtest).
  * @returns The constructed transaction.
  */
 export function createTransaction(
@@ -430,10 +431,10 @@ export function createTransaction(
   paymentAddress: string,
   transactionFee: bigint,
   isSimulation: boolean,
-  isMainnet: boolean,
+  network: Network,
 ): CreateTransactionResult {
 
-  const network: typeof btc.NETWORK = isMainnet ? btc.NETWORK : btc.TEST_NETWORK;
+  const scureNetwork = toScureNetwork(network);
 
   const lockTime = 21;
   const tx = new btc.Transaction({
@@ -442,7 +443,7 @@ export function createTransaction(
     disableScriptCheck: true
   });
 
-  const input = createInput(walletType, paymentOutput, paymentPublicKey, paymentAddress, isSimulation, network);
+  const input = createInput(walletType, paymentOutput, paymentPublicKey, paymentAddress, isSimulation, scureNetwork);
   tx.addInput(input);
 
   // 546 is the best amount, it makes later transfers between different
@@ -463,14 +464,14 @@ export function createTransaction(
   // Check if changeAmount is above the dust limit
   if (changeAmount >= dustLimit) {
     // Add recipient and change outputs
-    tx.addOutputAddress(recipientAddress, amountToRecipient, network);
-    tx.addOutputAddress(paymentAddress, changeAmount, network);
+    tx.addOutputAddress(recipientAddress, amountToRecipient, scureNetwork);
+    tx.addOutputAddress(paymentAddress, changeAmount, scureNetwork);
 
   } else {
     // Absorb change into the transactionFee if below dust limit and only add recipient output
     transactionFee = transactionFee + changeAmount;
     changeAmount = BigInt(0);
-    tx.addOutputAddress(recipientAddress, singleInputAmount - transactionFee, network);
+    tx.addOutputAddress(recipientAddress, singleInputAmount - transactionFee, scureNetwork);
   }
 
   // all remaining sats that the miner will get
@@ -488,16 +489,15 @@ export function createTransaction(
   };
 }
 
-export async function signTransactionLeather(psbtBytes: Uint8Array, isMainnet: boolean): Promise<LeatherPSBTBroadcastResponse> {
+export async function signTransactionLeather(psbtBytes: Uint8Array, network: Network): Promise<LeatherPSBTBroadcastResponse> {
 
-  const network = isMainnet ? 'mainnet' : 'testnet';
   const psbtHex: string = hex.encode(psbtBytes);
 
   const signRequestParams: LeatherSignPsbtRequestParams = {
     hex: psbtHex,
     allowedSighash: [btc.SigHash.ALL],
     signAtIndex: 0,
-    network,
+    network: toLeatherNetworkString(network),
     broadcast: false // we will broadcast it via the Mempool API
   };
 
@@ -505,9 +505,9 @@ export async function signTransactionLeather(psbtBytes: Uint8Array, isMainnet: b
   return await (window as any).btc.request('signPsbt', signRequestParams);
 }
 
-export function signTransactionAndBroadcastXverse(psbtBytes: Uint8Array, paymentAddress: string, isMainnet: boolean): Observable<{ txId: string }> {
+export function signTransactionAndBroadcastXverse(psbtBytes: Uint8Array, paymentAddress: string, network: Network): Observable<{ txId: string }> {
 
-  const networkType = isMainnet ? BitcoinNetworkType.Mainnet : BitcoinNetworkType.Testnet;
+  const networkType = toBitcoinNetworkType(network);
   const psbtBase64 = base64.encode(psbtBytes);
 
   return new Observable<{ txId: string }>((observer) => {

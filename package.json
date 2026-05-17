@@ -38,7 +38,6 @@
   "peerDependencies": {
     "@angular/common": ">=20",
     "@angular/core": ">=20",
-    "@angular/router": ">=20",
     "@noble/curves": ">=1",
     "@scure/base": ">=1",
     "@scure/btc-signer": "1.2.x",
@@ -50,7 +49,6 @@
     "@angular/compiler": "^20.3.21",
     "@angular/compiler-cli": "^20.3.21",
     "@angular/core": "^20.0.0",
-    "@angular/router": "^20.0.0",
     "@noble/curves": "^1.4.0",
     "@noble/hashes": "^1.4.0",
     "@scure/base": "^1.1.5",
