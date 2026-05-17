@@ -10,4 +10,4 @@ import { Network } from './network';
  * Angular-free and tree-shakes / runs in Node without dragging in
  * `@angular/core`.
  */
-export const SDK_NETWORK = new InjectionToken<Network>('SDK_NETWORK');
+export const bitcoinNetwork = new InjectionToken<Network>('bitcoinNetwork');

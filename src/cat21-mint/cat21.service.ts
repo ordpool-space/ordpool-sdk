@@ -5,9 +5,9 @@ import * as btc from '@scure/btc-signer';
 import { BehaviorSubject, concatMap, from, map, mergeMap, Observable, of, switchMap, tap, timer, toArray } from 'rxjs';
 
 import { Network, toScureNetwork } from '../network';
-import { SDK_NETWORK } from '../network-token';
-import { STORAGE_LIKE } from '../storage-like';
-import { CAT21_SDK_CONFIG } from './cat21-sdk-config';
+import { bitcoinNetwork } from '../network-token';
+import { storage } from '../storage-like';
+import { cat21Config } from './cat21-sdk-config';
 import {
   createTransaction,
   getDummyKeypair,
@@ -25,12 +25,12 @@ export const LAST_CAT21_MINTS = 'LAST_CAT21_MINTS';
 @Injectable({ providedIn: 'root' })
 export class Cat21Service {
 
-  private config = inject(CAT21_SDK_CONFIG);
-  private network = inject(SDK_NETWORK);
+  private config = inject(cat21Config);
+  private network = inject(bitcoinNetwork);
   mempoolApiUrl = this.config.mempoolApiUrl;
 
   http = inject(HttpClient);
-  storageService = inject(STORAGE_LIKE);
+  storageService = inject(storage);
 
   private txHexCache: { [transactionId: string]: string } = {}; // Cache object
 

@@ -14,8 +14,8 @@ import {
 import { AddressPurpose, getAddress } from 'sats-connect';
 
 import { Network, toBitcoinNetworkType } from '../network';
-import { SDK_NETWORK } from '../network-token';
-import { STORAGE_LIKE } from '../storage-like';
+import { bitcoinNetwork } from '../network-token';
+import { storage } from '../storage-like';
 import {
   KnownOrdinalWallet,
   KnownOrdinalWallets,
@@ -38,8 +38,8 @@ export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
 @Injectable({ providedIn: 'root' })
 export class WalletService {
 
-  storageService = inject(STORAGE_LIKE);
-  network = inject(SDK_NETWORK);
+  storageService = inject(storage);
+  network = inject(bitcoinNetwork);
 
   walletConnectRequested$ = new Subject<boolean>();
 

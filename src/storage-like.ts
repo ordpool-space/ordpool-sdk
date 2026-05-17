@@ -4,7 +4,7 @@ import { InjectionToken } from '@angular/core';
  * Minimal contract for browser-side key/value persistence the SDK
  * needs (cat21 mint history, last-connected-wallet snapshot). Matches
  * the surface ordpool/frontend's `StorageService` already exposes, so
- * the frontend can satisfy this token with `{ provide: STORAGE_LIKE,
+ * the frontend can satisfy this token with `{ provide: storage,
  * useExisting: StorageService }`.
  *
  * Pure-Node consumers can pass an in-memory shim if they ever need to;
@@ -16,4 +16,4 @@ export interface StorageLike {
   removeItem(key: string): void;
 }
 
-export const STORAGE_LIKE = new InjectionToken<StorageLike>('STORAGE_LIKE');
+export const storage = new InjectionToken<StorageLike>('storage');

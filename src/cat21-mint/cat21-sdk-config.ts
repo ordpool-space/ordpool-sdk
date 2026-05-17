@@ -6,14 +6,14 @@ import { InjectionToken } from '@angular/core';
  *
  * - `mempoolApiUrl` — base URL of the Esplora-compatible backend
  *   (utxo lookups, raw-tx fetch, broadcast). The network the URL
- *   points at must match `SDK_NETWORK`; the consumer picks both.
+ *   points at must match `bitcoinNetwork`; the consumer picks both.
  * - `cat21ApiUrl` — base URL of the cat21-indexer REST API
  *   (status, cats list, whitelist lookup). Same rule — match
- *   the URL to `SDK_NETWORK`.
+ *   the URL to `bitcoinNetwork`.
  */
 export interface Cat21SdkConfig {
   mempoolApiUrl: string;
   cat21ApiUrl: string;
 }
 
-export const CAT21_SDK_CONFIG = new InjectionToken<Cat21SdkConfig>('CAT21_SDK_CONFIG');
+export const cat21Config = new InjectionToken<Cat21SdkConfig>('cat21Config');
