@@ -1,0 +1,57 @@
+{
+  "name": "ordpool-sdk",
+  "version": "0.1.0",
+  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool — REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. MIT, zero AGPL encumbrance. Works in Node.js and browsers.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ordpool-space/ordpool-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ordpool-space/ordpool-sdk/issues"
+  },
+  "main": "dist-commonjs/index.js",
+  "module": "dist/index.js",
+  "scripts": {
+    "clean": "rimraf dist && rimraf dist-commonjs",
+    "build": "tsc --project tsconfig.build.json && tsc --project tsconfig.build-commonjs.json",
+    "start": "npm run test",
+    "test": "npm run test:node && npm run test:browser",
+    "test:node": "npm run clean && jest --config jest.config.node.js",
+    "test:node:watch": "npm run clean && jest --config jest.config.node.js --watch ",
+    "test:browser": "npm run clean && jest --config jest.config.browser.js",
+    "test:browser:watch": "npm run clean && jest --config jest.config.browser.js --watch ",
+    "prepare": "npm run build",
+    "create-link": "npm run build && cd dist && npm link"
+  },
+  "keywords": [
+    "bitcoin",
+    "ordinals",
+    "ordpool",
+    "sdk",
+    "rest",
+    "calendar",
+    "opentimestamps",
+    "signing"
+  ],
+  "author": "HAUS HOPPE",
+  "license": "MIT",
+  "dependencies": {
+    "ordpool-parser": "github:ordpool-space/ordpool-parser#11a0257ff051089e481466c72ace5d18a26d79b0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.14.9",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "rimraf": "^5.0.7",
+    "ts-jest": "^29.1.5",
+    "typescript": "^5.5.2"
+  },
+  "files": [
+    "dist",
+    "dist-commonjs",
+    "src",
+    "*.js",
+    "*.json"
+  ]
+}

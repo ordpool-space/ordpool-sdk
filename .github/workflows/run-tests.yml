@@ -1,0 +1,21 @@
+name: Run Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+
+  test:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-node@v6
+      with:
+        node-version: 20
+
+    - run: npm install
+    - run: npm run test

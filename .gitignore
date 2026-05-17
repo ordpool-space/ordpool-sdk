@@ -1,0 +1,10 @@
+/node_modules/
+/dist
+/dist-commonjs
+
+# System Files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/settings.json
