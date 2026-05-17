@@ -1,4 +1,4 @@
-import { inject } from '@angular/core';
+import { inject, Injectable } from '@angular/core';
 import { NavigationEnd, Router } from '@angular/router';
 import {
   BehaviorSubject,
@@ -36,6 +36,7 @@ export const leatherPaymentAddressType = 'p2wpkh'; // Native Segwit
 export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
 
 
+@Injectable({ providedIn: 'root' })
 export class WalletService {
 
   storageService = inject(STORAGE_LIKE);

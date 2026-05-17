@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { inject } from '@angular/core';
+import { inject, Injectable } from '@angular/core';
 import { Observable, interval, shareReplay, startWith, switchMap, takeWhile } from 'rxjs';
 
 import { CAT21_SDK_CONFIG } from './cat21-sdk-config';
@@ -73,6 +73,7 @@ export interface MintTransaction {
 
 
 
+@Injectable({ providedIn: 'root' })
 export class Cat21ApiService {
 
   private config = inject(CAT21_SDK_CONFIG);
