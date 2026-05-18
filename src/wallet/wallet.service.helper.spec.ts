@@ -16,6 +16,7 @@ import {
   KnownOrdinalWallets,
   KnownOrdinalWalletType,
   LeatherAddressResponse,
+  LeatherBtcAddress,
   XverseAddressResponse,
 } from './wallet.service.types';
 
@@ -157,13 +158,14 @@ describe('parseLeatherAddressResponse', () => {
     paymentAddress: string;
     paymentPublicKey: string;
   }>): LeatherAddressResponse => {
-    const addresses: any[] = [];
+    const addresses: LeatherBtcAddress[] = [];
     if (parts.ordinalsAddress !== undefined) {
       addresses.push({
         address: parts.ordinalsAddress,
         publicKey: parts.ordinalsPublicKey ?? '',
         type: leatherOrdinalsAddressType,
         symbol: 'BTC',
+        derivationPath: 'm/86h/0h/0h/0/0',
       });
     }
     if (parts.paymentAddress !== undefined) {
@@ -172,6 +174,7 @@ describe('parseLeatherAddressResponse', () => {
         publicKey: parts.paymentPublicKey ?? '',
         type: leatherPaymentAddressType,
         symbol: 'BTC',
+        derivationPath: 'm/84h/0h/0h/0/0',
       });
     }
     return {
@@ -211,7 +214,7 @@ describe('parseLeatherAddressResponse', () => {
     const response: LeatherAddressResponse = {
       jsonrpc: '2.0',
       id: 'test',
-      result: { addresses: [] as any },
+      result: { addresses: [] },
     };
     expect(() => parseLeatherAddressResponse(response)).toThrow('Required address not found?!');
   });

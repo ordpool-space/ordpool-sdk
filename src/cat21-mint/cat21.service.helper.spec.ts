@@ -6,7 +6,17 @@ import { Network, toScureNetwork } from '../network';
 import { sha256 } from '@noble/hashes/sha256';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { CreateTransactionResult, TxnOutput } from './cat21.service.types';
+import { CreateTransactionResult, TxnOutput, TxnOutputStatus } from './cat21.service.types';
+
+// Most UTXO fixtures don't care about the confirmation status — the
+// mint flow reads txid / vout / value and ignores `status` entirely.
+// One named constant beats a sprinkling of `{} as any`.
+const unconfirmedStatus: TxnOutputStatus = { confirmed: false };
+
+// Zero-aux makes Schnorr signing deterministic (BIP-340 §3.3 — aux
+// is optional and zeros are explicitly allowed). Without this, the
+// Taproot cases produce a fresh random signature on every run.
+const zeroAux = new Uint8Array(32);
 
 
 describe('getMinimumUtxoSize', () => {
@@ -120,7 +130,7 @@ describe('getDummyLegacyTransaction', () => {
     const txnOutput: TxnOutput = {
       txid: '', // not used
       vout: 2, // Expecting 3 outputs, including the one specified and two placeholders
-      status: {} as any, // not used
+      status: unconfirmedStatus, // not used
       value: 1000
     };
 
@@ -134,7 +144,7 @@ describe('getDummyLegacyTransaction', () => {
     const txnOutput: TxnOutput = {
       txid: '', // not used
       vout: 2, // Expecting 3 outputs, including the one specified and two placeholders
-      status: {} as any, // not used
+      status: unconfirmedStatus, // not used
       value: 1000
     };
 
@@ -272,7 +282,7 @@ describe('createTransaction byte snapshot (pinned for @scure/btc-signer)', () =>
       txid: hex.encode(sha256('text-txid')),
       vout: 0,
       value: 10000,
-      status: {} as any,
+      status: unconfirmedStatus,
       transactionHex: undefined
     };
 
@@ -281,12 +291,6 @@ describe('createTransaction byte snapshot (pinned for @scure/btc-signer)', () =>
       paymentUtxo.txid = dummyTx.id;
       paymentUtxo.transactionHex = dummyTx.hex;
     }
-
-    // Zero-aux makes Schnorr signing deterministic (BIP-340 §3.3 — aux
-    // is optional and zeros are explicitly allowed). Without this, the
-    // Taproot cases produce a fresh random signature on every run and
-    // the snapshot is useless.
-    const zeroAux = new Uint8Array(32);
 
     const signedHexFor = (fee: bigint): string => {
       const result = createTransaction(
@@ -328,7 +332,7 @@ createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymen
       txid: hex.encode(sha256('text-txid')),
       vout: 0,
       value: 10000, // 10000 sats ($4.28)
-      status: {} as any,
+      status: unconfirmedStatus,
       transactionHex: undefined
     };
 
@@ -477,7 +481,7 @@ describe('createTransaction across all Network variants', () => {
         txid: hex.encode(sha256(`utxo-${network}`)),
         vout: 0,
         value: 10000,
-        status: {} as any,
+        status: unconfirmedStatus,
         transactionHex: undefined,
       };
       const result = createTransaction(
@@ -545,7 +549,7 @@ describe('createTransaction dust-limit boundary', () => {
         txid: hex.encode(sha256(`boundary-${label}`)),
         vout: 0,
         value: 10000,
-        status: {} as any,
+        status: unconfirmedStatus,
         transactionHex: undefined,
       };
       if (!isSegWit(paymentAddress)) {

@@ -1,21 +1,32 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { HttpClient } from '@angular/common/http';
 import { Injector, runInInjectionContext } from '@angular/core';
-import { firstValueFrom, of, throwError } from 'rxjs';
+import { firstValueFrom, Observable, of, throwError } from 'rxjs';
 
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
-import { storage } from '../storage-like';
+import { storage, StorageLike } from '../storage-like';
 import { cat21Config } from './cat21-sdk-config';
 import { Cat21Service, LAST_CAT21_MINTS } from './cat21.service';
-import { Cat21Mint } from './cat21.service.types';
+import { Cat21Mint, TxnOutput } from './cat21.service.types';
 
 
 const mempoolApiUrl = 'https://mempool.test';
 const cat21ApiUrl = 'https://api.cat21.test';
 
-type MockHttp = { get: jest.Mock; post: jest.Mock };
-type MockStorage = { getValue: jest.Mock; setValue: jest.Mock; removeItem: jest.Mock };
+// Typed mocks: the second arg of mock.calls[N] keeps its real type
+// instead of degrading to `unknown`, so `JSON.parse(setValue.mock.calls[0][1])`
+// type-checks without any `as` casts.
+type HttpGetResult = TxnOutput[] | string;
+type MockHttp = {
+  get: jest.MockedFunction<(url: string, opts?: { responseType: 'text' }) => Observable<HttpGetResult>>;
+  post: jest.MockedFunction<(url: string, body: string, opts?: { responseType: 'text' }) => Observable<string>>;
+};
+type MockStorage = {
+  getValue: jest.MockedFunction<StorageLike['getValue']>;
+  setValue: jest.MockedFunction<StorageLike['setValue']>;
+  removeItem: jest.MockedFunction<StorageLike['removeItem']>;
+};
 
 const buildService = (storedMints: string | null = null): {
   service: Cat21Service;
@@ -23,13 +34,13 @@ const buildService = (storedMints: string | null = null): {
   store: MockStorage;
 } => {
   const http: MockHttp = {
-    get: jest.fn(),
-    post: jest.fn(),
+    get: jest.fn<MockHttp['get']>(),
+    post: jest.fn<MockHttp['post']>(),
   };
   const store: MockStorage = {
-    getValue: jest.fn().mockImplementation(((key: unknown) => key === LAST_CAT21_MINTS ? storedMints : null) as never),
-    setValue: jest.fn(),
-    removeItem: jest.fn(),
+    getValue: jest.fn<StorageLike['getValue']>().mockImplementation(key => (key === LAST_CAT21_MINTS ? storedMints : null)),
+    setValue: jest.fn<StorageLike['setValue']>(),
+    removeItem: jest.fn<StorageLike['removeItem']>(),
   };
 
   const injector = Injector.create({
@@ -70,14 +81,14 @@ describe('Cat21Service.getUtxos', () => {
       { txid: 'bb'.repeat(32), vout: 0, value: 5000,  status: { confirmed: true } },
     ];
 
-    http.get.mockImplementation(((url: string) => {
+    http.get.mockImplementation(url => {
       if (url.endsWith('/utxo')) return of(utxos);
       if (url.includes('/tx/') && url.endsWith('/hex')) {
         const txid = url.split('/tx/')[1].split('/')[0];
         return of(`hex-of-${txid}`);
       }
       return throwError(() => new Error(`unexpected GET: ${url}`));
-    }) as never);
+    });
 
     const result = await firstValueFrom(service.getUtxos('1LegacyAddress'));
 
@@ -124,11 +135,11 @@ describe('Cat21Service.getTransactionHex', () => {
 
   it('caches per-txid independently', async () => {
     const { service, http } = buildService();
-    http.get.mockImplementation(((url: string) => {
+    http.get.mockImplementation(url => {
       if (url.includes('/tx/aaa/')) return of('hex-a');
       if (url.includes('/tx/bbb/')) return of('hex-b');
       return throwError(() => new Error('unexpected'));
-    }) as never);
+    });
 
     expect(await firstValueFrom(service.getTransactionHex('aaa'))).toBe('hex-a');
     expect(await firstValueFrom(service.getTransactionHex('bbb'))).toBe('hex-b');
@@ -183,7 +194,7 @@ describe('Cat21Service localStorage round-trip', () => {
       LAST_CAT21_MINTS,
       expect.any(String),
     );
-    const persisted: Cat21Mint[] = JSON.parse((store.setValue.mock.calls[0] as unknown as [string, string])[1]);
+    const persisted: Cat21Mint[] = JSON.parse(store.setValue.mock.calls[0][1]);
     expect(persisted).toHaveLength(1);
     expect(persisted[0]).toMatchObject({
       txId: 'new-tx',
@@ -202,7 +213,7 @@ describe('Cat21Service localStorage round-trip', () => {
 
     service.saveNewMint('new-tx', 'new-pay', 'new-rec');
 
-    const persisted: Cat21Mint[] = JSON.parse((store.setValue.mock.calls[0] as unknown as [string, string])[1]);
+    const persisted: Cat21Mint[] = JSON.parse(store.setValue.mock.calls[0][1]);
     expect(persisted).toHaveLength(2);
     expect(persisted[0].txId).toBe('old');
     expect(persisted[1].txId).toBe('new-tx');
