@@ -17,20 +17,28 @@ import { Network, toBitcoinNetworkType } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import {
+  detectInstalledWallets,
+  isLeatherInstalled,
+  isUnisatInstalled,
+  isXverseInstalled,
+  parseLeatherAddressResponse,
+  parseXverseAddressResponse,
+  unisatBasicInfoToWalletInfo,
+  WindowLike,
+} from './wallet.service.helper';
+import {
   KnownOrdinalWallet,
-  KnownOrdinalWallets,
   KnownOrdinalWalletType,
   LeatherAddressResponse,
-  LeatherBtcAddress,
   WalletInfo,
   XverseAddressResponse,
 } from './wallet.service.types';
 
 
-// CodeReview @ Leather
-// is this a correct    assumption? p2wpkh always for payments, p2tr always for ordinals?
-export const leatherOrdinalsAddressType = 'p2tr';  // Taproot
-export const leatherPaymentAddressType = 'p2wpkh'; // Native Segwit
+// Re-exports for backwards compatibility — these used to live here
+// before the pure-logic extraction. Consumers still import them from
+// this module.
+export { leatherOrdinalsAddressType, leatherPaymentAddressType } from './wallet.service.helper';
 
 export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
 
@@ -67,49 +75,27 @@ export class WalletService {
     }
   }
 
+  private get win(): WindowLike | undefined {
+    return typeof window === 'undefined' ? undefined : (window as unknown as WindowLike);
+  }
 
   getInstalledWallets(): {
-    installedWallets: KnownOrdinalWallet[],
-    notInstalledWallets: KnownOrdinalWallet[]
+    installedWallets: KnownOrdinalWallet[];
+    notInstalledWallets: KnownOrdinalWallet[];
   } {
-
-    const installedWallets: KnownOrdinalWallet[] = [];
-    const notInstalledWallets: KnownOrdinalWallet[] = [];
-
-    if (this.getXverseInstalled()) {
-      installedWallets.push(KnownOrdinalWallets.xverse);
-    } else {
-      notInstalledWallets.push(KnownOrdinalWallets.xverse);
-    }
-
-    if (this.getLeatherInstalled()) {
-      installedWallets.push(KnownOrdinalWallets.leather);
-    } else {
-      notInstalledWallets.push(KnownOrdinalWallets.leather);
-    }
-
-    if (this.getUnisatInstalled()) {
-      installedWallets.push(KnownOrdinalWallets.unisat);
-    } else {
-      notInstalledWallets.push(KnownOrdinalWallets.unisat);
-    }
-
-    return {
-      installedWallets,
-      notInstalledWallets
-    };
+    return detectInstalledWallets(this.win);
   }
 
   getUnisatInstalled(): boolean {
-    return !!((window as any).unisat);
+    return isUnisatInstalled(this.win);
   }
 
   getLeatherInstalled(): boolean {
-    return !!((window as any)?.HiroWalletProvider);
+    return isLeatherInstalled(this.win);
   }
 
   getXverseInstalled(): boolean {
-    return !!((window as any)?.XverseProviders);
+    return isXverseInstalled(this.win);
   }
 
   connectWallet(key: KnownOrdinalWalletType): Observable<WalletInfo> {
@@ -166,28 +152,12 @@ export class WalletService {
           }
         },
         onFinish: (response) => {
-          // sats-connect's GetAddressResponse types `purpose: AddressPurpose`
-          // for every entry. We requested Ordinals + Payment specifically
-          // above, so narrow back at the boundary.
-          const addresses = (response as XverseAddressResponse).addresses;
-          const ordinalsAddress = addresses.find(x => x.purpose === AddressPurpose.Ordinals);
-          const paymentAddress = addresses.find(x => x.purpose === AddressPurpose.Payment);
-
-          if (!ordinalsAddress || !paymentAddress) {
-            observer.error(new Error('Required address not found?!'));
-            return;
+          try {
+            observer.next(parseXverseAddressResponse(response as XverseAddressResponse));
+            observer.complete();
+          } catch (error) {
+            observer.error(error);
           }
-
-          observer.next({
-            type: KnownOrdinalWalletType.xverse,
-
-            ordinalsAddress: ordinalsAddress.address,
-            ordinalsPublicKey: ordinalsAddress.publicKey,
-
-            paymentAddress: paymentAddress.address,
-            paymentPublicKey: paymentAddress.publicKey
-          });
-          observer.complete();
         },
         onCancel: () => {
           observer.error(new Error('Request was cancelled'));
@@ -203,27 +173,7 @@ export class WalletService {
   connectWalletLeather(): Observable<WalletInfo> {
 
     return from((window as any).btc.request('getAddresses') as Promise<LeatherAddressResponse>).pipe(
-      map((response: LeatherAddressResponse) => {
-
-        const addresses = response.result.addresses as LeatherBtcAddress[];
-
-        const ordinalsAddress = addresses.find(x => x.type === leatherOrdinalsAddressType);
-        const paymentAddress = addresses.find(x => x.type === leatherPaymentAddressType);
-
-        if (!ordinalsAddress || !paymentAddress) {
-          throw new Error('Required address not found?!');
-        }
-
-        return {
-          type: KnownOrdinalWalletType.leather,
-
-          ordinalsAddress: ordinalsAddress.address,
-          ordinalsPublicKey: ordinalsAddress.publicKey,
-
-          paymentAddress: paymentAddress.address,
-          paymentPublicKey: paymentAddress.publicKey
-        };
-      })
+      map(parseLeatherAddressResponse)
     );
   }
 
@@ -252,18 +202,7 @@ export class WalletService {
    */
   connectWalletUnisat(): Observable<WalletInfo> {
     return from(this.getBasicUnisatInfo()).pipe(
-      map(({ address, publicKey }) => {
-
-        return {
-          type: KnownOrdinalWalletType.unisat,
-
-          ordinalsAddress: address,
-          ordinalsPublicKey: publicKey,
-
-          paymentAddress: address,
-          paymentPublicKey: publicKey
-        };
-      })
+      map(({ address, publicKey }) => unisatBasicInfoToWalletInfo(address, publicKey))
     );
   }
 }
