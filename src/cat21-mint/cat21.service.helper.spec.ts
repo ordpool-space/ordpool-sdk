@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from '@jest/globals';
 
 import { createInputScriptForUnisat, createTransaction, getAddressFormat, getDummyKeypair, getMinimumUtxoSize, getDummyLegacyTransaction, toXOnly, isSegWit } from './cat21.service.helper';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { Network } from '../network';
+import { Network, toScureNetwork } from '../network';
 import { sha256 } from '@noble/hashes/sha256';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
@@ -258,6 +258,65 @@ const createTransactionTestCases = [
   }
 ];
 
+// Byte-snapshot of the finalized mint tx, per wallet / address combo,
+// per dust-vs-change branch. Pinned with the SDK on
+// @scure/btc-signer 1.2.1. Snapshots are the canary for a scure bump
+// — review the diff, re-pin if the new bytes are still valid signed
+// transactions. Snapshots don't promise byte equality across versions;
+// they pin "what we ship today" so a bump's effect is visible.
+describe('createTransaction byte snapshot (pinned for @scure/btc-signer)', () => {
+
+  createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymentPublicKey, paymentAddress, feesForSingleOutput }) => {
+
+    const paymentUtxo: TxnOutput = {
+      txid: hex.encode(sha256('text-txid')),
+      vout: 0,
+      value: 10000,
+      status: {} as any,
+      transactionHex: undefined
+    };
+
+    if (!isSegWit(paymentAddress)) {
+      const dummyTx = getDummyLegacyTransaction(paymentUtxo, btc.NETWORK);
+      paymentUtxo.txid = dummyTx.id;
+      paymentUtxo.transactionHex = dummyTx.hex;
+    }
+
+    // Zero-aux makes Schnorr signing deterministic (BIP-340 §3.3 — aux
+    // is optional and zeros are explicitly allowed). Without this, the
+    // Taproot cases produce a fresh random signature on every run and
+    // the snapshot is useless.
+    const zeroAux = new Uint8Array(32);
+
+    const signedHexFor = (fee: bigint): string => {
+      const result = createTransaction(
+        walletType,
+        recipientAddress,
+        paymentUtxo,
+        paymentPublicKey,
+        paymentAddress,
+        fee,
+        false,
+        Network.Mainnet
+      );
+      result.tx.signIdx(dummyKeypair.dummyPrivateKey, 0, [btc.SigHash.ALL], zeroAux);
+      result.tx.finalize();
+      return result.tx.hex;
+    };
+
+    describe(info, () => {
+
+      it('dust-absorb branch produces the canonical finalized tx hex', () => {
+        expect(signedHexFor(feesForSingleOutput)).toMatchSnapshot();
+      });
+
+      it('change-output branch produces the canonical finalized tx hex', () => {
+        expect(signedHexFor(BigInt(5000))).toMatchSnapshot();
+      });
+    });
+  });
+});
+
 // prices: 1BTC == 42855 USD
 createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymentPublicKey, paymentAddress, feesForSingleOutput }) => {
 
@@ -359,6 +418,190 @@ createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymen
         result.tx.finalize();
         expect(result.tx.vsize).toBeGreaterThan(100);
       }
+    });
+  });
+});
+
+
+// All Network enum variants flow through toScureNetwork. The four
+// testnet variants flatten to btc.TEST_NETWORK; mainnet stays apart.
+// Pin the flattening end-to-end so a future change that introduces
+// signet- or regtest-specific address derivation can't slip past.
+describe('createTransaction across all Network variants', () => {
+
+  const allNetworks: Network[] = [
+    Network.Mainnet,
+    Network.Testnet3,
+    Network.Testnet4,
+    Network.Signet,
+    Network.Regtest,
+  ];
+
+  allNetworks.forEach(network => {
+    it(`derives a usable dummy keypair for ${network}`, () => {
+      const kp = getDummyKeypair(toScureNetwork(network));
+      expect(kp.addressP2PKH).toBeTruthy();
+      expect(kp.addressP2SH_P2WPKH).toBeTruthy();
+      expect(kp.addressP2WPKH).toBeTruthy();
+      expect(kp.addressP2TR).toBeTruthy();
+    });
+  });
+
+  it('produces the canonical mainnet addresses for Network.Mainnet', () => {
+    const kp = getDummyKeypair(toScureNetwork(Network.Mainnet));
+    expect(kp.addressP2PKH).toBe('1C6Rc3w25VHud3dLDamutaqfKWqhrLRTaD');
+    expect(kp.addressP2WPKH).toBe('bc1q0xcqpzrky6eff2g52qdye53xkk9jxkvrh6yhyw');
+    expect(kp.addressP2TR).toBe('bc1p33wm0auhr9kkahzd6l0kqj85af4cswn276hsxg6zpz85xe2r0y8syx4e5t');
+  });
+
+  it('produces identical testnet addresses for every testnet variant (scure flattens them)', () => {
+    const kpT3 = getDummyKeypair(toScureNetwork(Network.Testnet3));
+    const kpT4 = getDummyKeypair(toScureNetwork(Network.Testnet4));
+    const kpSignet = getDummyKeypair(toScureNetwork(Network.Signet));
+    const kpRegtest = getDummyKeypair(toScureNetwork(Network.Regtest));
+    expect(kpT4.addressP2WPKH).toBe(kpT3.addressP2WPKH);
+    expect(kpSignet.addressP2WPKH).toBe(kpT3.addressP2WPKH);
+    expect(kpRegtest.addressP2WPKH).toBe(kpT3.addressP2WPKH);
+    // and confirm they're actually testnet, not mainnet
+    expect(kpT3.addressP2WPKH).toBe('tb1q0xcqpzrky6eff2g52qdye53xkk9jxkvraulyla');
+  });
+
+  // The mint flow itself goes through createTransaction(..., network)
+  // for every Network. Smoke-test that each variant produces a tx with
+  // the recipient output, no scure throw, regardless of which testnet
+  // string was picked.
+  allNetworks.forEach(network => {
+    it(`createTransaction works end-to-end for ${network}`, () => {
+      const kp = getDummyKeypair(toScureNetwork(network));
+      const utxo: TxnOutput = {
+        txid: hex.encode(sha256(`utxo-${network}`)),
+        vout: 0,
+        value: 10000,
+        status: {} as any,
+        transactionHex: undefined,
+      };
+      const result = createTransaction(
+        KnownOrdinalWalletType.leather,
+        kp.addressP2TR,
+        utxo,
+        kp.dummyPublicKey,
+        kp.addressP2WPKH,
+        BigInt(5000),
+        false,
+        network,
+      );
+      expect(result.tx.outputsLength).toBe(2);
+      expect(result.amountToRecipient).toBe(BigInt(546));
+    });
+  });
+});
+
+
+// Dust-limit boundary. The branch at cat21.service.helper.ts:464
+// decides: if changeAmount >= dustLimit, add a change output; if
+// changeAmount < dustLimit, absorb the change into the miner fee.
+//
+// Absorb is deliberate, not a bug — sub-dust change pushed into the
+// fee makes the cat rarer in color (color is derived from feeRate
+// per CAT-21 rarity score) and prioritises the tx. See the
+// project-level memory "dust-absorb-into-fee is a CAT-21 feature".
+// These tests pin the boundary so a future refactor that shifts the
+// threshold by one sat is caught immediately.
+//
+// changeAmount = singleInputAmount - amountToRecipient - transactionFee
+//              = 10000 - 546 - fee
+//              = 9454 - fee
+// We pick `fee` so that `changeAmount` lands at dustLimit-1, dustLimit,
+// or dustLimit+1.
+describe('createTransaction dust-limit boundary', () => {
+
+  type BoundaryCase = {
+    label: string;
+    walletType: KnownOrdinalWalletType;
+    paymentAddressType: 'P2PKH' | 'P2SH-P2WPKH' | 'P2WPKH' | 'P2TR';
+    dustLimit: number;
+  };
+
+  const cases: BoundaryCase[] = [
+    { label: 'Xverse (Nested SegWit, dust 546)', walletType: KnownOrdinalWalletType.xverse,  paymentAddressType: 'P2SH-P2WPKH', dustLimit: 546 },
+    { label: 'Leather (Native SegWit, dust 294)', walletType: KnownOrdinalWalletType.leather, paymentAddressType: 'P2WPKH',      dustLimit: 294 },
+    { label: 'Unisat Legacy (dust 546)',         walletType: KnownOrdinalWalletType.unisat,  paymentAddressType: 'P2PKH',       dustLimit: 546 },
+    { label: 'Unisat Taproot (dust 330)',        walletType: KnownOrdinalWalletType.unisat,  paymentAddressType: 'P2TR',        dustLimit: 330 },
+  ];
+
+  cases.forEach(({ label, walletType, paymentAddressType, dustLimit }) => {
+
+    const paymentAddress = (() => {
+      switch (paymentAddressType) {
+        case 'P2PKH':       return dummyKeypair.addressP2PKH;
+        case 'P2SH-P2WPKH': return dummyKeypair.addressP2SH_P2WPKH;
+        case 'P2WPKH':      return dummyKeypair.addressP2WPKH;
+        case 'P2TR':        return dummyKeypair.addressP2TR;
+      }
+    })();
+
+    const buildUtxo = (): TxnOutput => {
+      const utxo: TxnOutput = {
+        txid: hex.encode(sha256(`boundary-${label}`)),
+        vout: 0,
+        value: 10000,
+        status: {} as any,
+        transactionHex: undefined,
+      };
+      if (!isSegWit(paymentAddress)) {
+        const dummyTx = getDummyLegacyTransaction(utxo, btc.NETWORK);
+        utxo.txid = dummyTx.id;
+        utxo.transactionHex = dummyTx.hex;
+      }
+      return utxo;
+    };
+
+    const callCreateTransaction = (fee: bigint): CreateTransactionResult => createTransaction(
+      walletType,
+      dummyKeypair.addressP2TR,
+      buildUtxo(),
+      dummyKeypair.dummyPublicKey,
+      paymentAddress,
+      fee,
+      false,
+      Network.Mainnet,
+    );
+
+    describe(label, () => {
+
+      // changeAmount == dustLimit - 1 → absorb branch
+      it('absorbs change into the miner fee when changeAmount is one sat below the dust limit', () => {
+        const fee = BigInt(9454 - (dustLimit - 1));
+        const result = callCreateTransaction(fee);
+
+        expect(result.tx.outputsLength).toBe(1);
+        expect(result.changeAmount).toBe(BigInt(0));
+        expect(result.finalTransactionFee).toBe(fee + BigInt(dustLimit - 1));
+        expect(result.tx.getOutput(0).amount).toBe(BigInt(546));
+      });
+
+      // changeAmount == dustLimit → change-output branch (>=, not >)
+      it('returns change as a second output when changeAmount equals the dust limit exactly', () => {
+        const fee = BigInt(9454 - dustLimit);
+        const result = callCreateTransaction(fee);
+
+        expect(result.tx.outputsLength).toBe(2);
+        expect(result.changeAmount).toBe(BigInt(dustLimit));
+        expect(result.finalTransactionFee).toBe(fee);
+        expect(result.tx.getOutput(0).amount).toBe(BigInt(546));
+        expect(result.tx.getOutput(1).amount).toBe(BigInt(dustLimit));
+      });
+
+      // changeAmount == dustLimit + 1 → change-output branch
+      it('returns change as a second output when changeAmount is one sat above the dust limit', () => {
+        const fee = BigInt(9454 - (dustLimit + 1));
+        const result = callCreateTransaction(fee);
+
+        expect(result.tx.outputsLength).toBe(2);
+        expect(result.changeAmount).toBe(BigInt(dustLimit + 1));
+        expect(result.finalTransactionFee).toBe(fee);
+        expect(result.tx.getOutput(1).amount).toBe(BigInt(dustLimit + 1));
+      });
     });
   });
 });
