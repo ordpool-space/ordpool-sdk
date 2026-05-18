@@ -1,4 +1,4 @@
-// Jest Snapshot v1, https://goo.gl/fbAQLP
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
 exports[`createTransaction byte snapshot (pinned for @scure/btc-signer) Leather which always uses Native SegWit for payments and Taproot for ordinals change-output branch produces the canonical finalized tx hex 1`] = `"020000000001013bda18bbd7af13445e8db0c96a737c6e2e5bcb8be96409ae5e2301b4d074e5d70000000000ffffffff0222020000000000002251208c5db7f797196d6edc4dd7df6048f4ea6b883a6af6af032342088f436543790f661100000000000016001479b000887626b294a914501a4cd226b58b23598302483045022100a65cb4652133f28a611e3cd193acb786c2784e7b38f24d3aef49c86ad348014a022059c6dad7bec5ebcff41baf1edfada7e3ed623302a2b02681eceb49e38e4fba3f0121031b84c5567b126440995d3ed5aaba0565d71e1834604819ff9c17f5e9d5dd078f15000000"`;
 

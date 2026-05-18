@@ -1,9 +1,11 @@
-/** @type {import('ts-jest').JestConfigWithTsJest} */
+const { createCjsPreset } = require('jest-preset-angular/presets');
+
+/** @type {import('jest').Config} */
 module.exports = {
-  preset: 'ts-jest',
-  // this test emulates a browser environment
+  ...createCjsPreset(),
   testEnvironment: 'jsdom',
-  setupFilesAfterEnv: ['<rootDir>/jest.config.browser.setup.js'],
+  setupFilesAfterEnv: ['<rootDir>/jest.config.browser.setup.ts'],
+  modulePathIgnorePatterns: ['<rootDir>/dist/'],
 
   // avoids "Do not know how to serialize a BigInt" instead of showing the actual assertion error message
   // see https://github.com/jestjs/jest/issues/11617#issuecomment-1028651059

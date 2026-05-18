@@ -407,7 +407,7 @@ createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymen
         BigInt(9000 + 1000), // now we are out of money, change would be negative
         false,
         Network.Mainnet
-      )).toThrowError(new Error('Insufficient funds for transaction'));
+      )).toThrow(new Error('Insufficient funds for transaction'));
     });
 
     // creating broken transactions is easy, but can we also sign and finalize them?
