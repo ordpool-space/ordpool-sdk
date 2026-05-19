@@ -38,8 +38,7 @@ export interface WalletConnector {
 /**
  * Inputs for {@link WalletSigner.signAndBroadcast}. The signer
  * receives an unsigned PSBT, asks the wallet to sign it, and
- * eventually emits a txid. Different wallets handle broadcasting
- * differently:
+ * eventually emits a txid. Wallets handle the steps differently:
  *
  * - **Xverse / Unisat**: sign and broadcast atomically in one user
  *   dialog. They emit the txid directly; `broadcast` is unused.
@@ -47,10 +46,16 @@ export interface WalletConnector {
  *   via scure and then delegates broadcasting back to the caller
  *   via the `broadcast` callback — the caller owns the mempool API
  *   (electrs `POST /tx` via the configured HttpClient).
+ * - **PSBT-export (Sparrow / Electrum / Coldcard / Ledger / Trezor /
+ *   …)**: signing happens out-of-band in the user's own wallet
+ *   software. The signer hands the unsigned PSBT to
+ *   `promptForSignedPsbt`, which is responsible for showing a
+ *   download / paste UI and emitting the signed PSBT back when the
+ *   user is done. Then finalise via scure and call `broadcast`.
  *
- * Passing the broadcast fn as a parameter keeps signers free of HTTP
- * dependencies while still letting the contract be "PSBT in, txid
- * out" for every wallet uniformly.
+ * Passing the bridges as parameters keeps signers free of HTTP and
+ * DOM dependencies while still letting the contract be "PSBT in,
+ * txid out" for every wallet uniformly.
  */
 export interface SignAndBroadcastInput {
   psbtBytes: Uint8Array;
@@ -58,6 +63,17 @@ export interface SignAndBroadcastInput {
   network: Network;
   /** Broadcast a finalized tx-hex. Returns the txid. */
   broadcast(txHex: string): Observable<string>;
+  /**
+   * Bridge to a user-mediated sign step. Required for watch-only
+   * signers (xpub-based wallets that can't sign inside the browser);
+   * browser-wallet signers (Xverse, Leather, Unisat) ignore it.
+   *
+   * The callback receives the unsigned PSBT (already encoded as
+   * base64 and hex for UI convenience) and emits the signed PSBT
+   * as a base64 string. Accepting hex back too is the signer's
+   * responsibility; the prompt only needs to return one shape.
+   */
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
 }
 
 /**
@@ -79,7 +95,14 @@ export interface WalletSigner {
 export enum KnownOrdinalWalletType {
   xverse = 'xverse',
   leather = 'leather',
-  unisat = 'unisat'
+  unisat = 'unisat',
+  /**
+   * Watch-only via BIP-32 xpub paste. Covers Sparrow, Electrum,
+   * Coldcard, Ledger, Trezor, Specter, Bitcoin Core — every desktop
+   * or hardware wallet that doesn't inject into the browser but
+   * speaks PSBT and exports an xpub.
+   */
+  xpub = 'xpub',
 }
 
 export interface KnownOrdinalWallet {
@@ -109,7 +132,14 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     // subLabel: '(not fully supported)',
     logo: '/resources/ordinal-wallets/btc-unisat-logo.svg',
     downloadLink: 'https://unisat.io/download'
-  }
+  },
+  [KnownOrdinalWalletType.xpub]: {
+    type: KnownOrdinalWalletType.xpub,
+    label: 'Watch-only (xpub)',
+    subLabel: 'Sparrow, Electrum, Coldcard, Ledger, Trezor, …',
+    logo: '/resources/ordinal-wallets/btc-xpub-logo.svg',
+    downloadLink: '',
+  },
 };
 
 export interface WalletInfo {
