@@ -1,18 +1,14 @@
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
-import { base64, hex } from '@scure/base';
+import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { Observable } from 'rxjs';
-import { signTransaction, SignTransactionResponse } from 'sats-connect';
 
 import {
   CreateTransactionResult,
   DummyKeypairResult,
-  LeatherPSBTBroadcastResponse,
-  LeatherSignPsbtRequestParams,
   TxnOutput
 } from './cat21.service.types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { Network, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork } from '../network';
+import { Network, toScureNetwork } from '../network';
 
 /**
  * Determines the minimum UTXO size based on the Bitcoin address type.
@@ -489,65 +485,3 @@ export function createTransaction(
   };
 }
 
-export async function signTransactionLeather(psbtBytes: Uint8Array, network: Network): Promise<LeatherPSBTBroadcastResponse> {
-
-  const psbtHex: string = hex.encode(psbtBytes);
-
-  const signRequestParams: LeatherSignPsbtRequestParams = {
-    hex: psbtHex,
-    allowedSighash: [btc.SigHash.ALL],
-    signAtIndex: 0,
-    network: toLeatherNetworkString(network),
-    broadcast: false // we will broadcast it via the Mempool API
-  };
-
-  // Sign the PSBT (and broadcast)
-  return await (window as any).btc.request('signPsbt', signRequestParams);
-}
-
-export function signTransactionAndBroadcastXverse(psbtBytes: Uint8Array, paymentAddress: string, network: Network): Observable<{ txId: string }> {
-
-  const networkType = toBitcoinNetworkType(network);
-  const psbtBase64 = base64.encode(psbtBytes);
-
-  return new Observable<{ txId: string }>((observer) => {
-
-    signTransaction({
-      payload: {
-        network: {
-          type: networkType
-        },
-        message: 'Sign Transaction (CAT-21 Mint)',
-        psbtBase64,
-        broadcast: true,
-        inputsToSign: [
-          {
-            address: paymentAddress,
-            signingIndexes: [0],
-            sigHash: btc.SigHash.ALL
-          },
-        ],
-      },
-      onFinish: (response: SignTransactionResponse) => {
-
-        const txId = response.txId || '';
-
-        observer.next({ txId });
-        observer.complete();
-      },
-      onCancel: () => {
-        observer.error(new Error('Request was cancelled'));
-      }
-    });
-  });
-}
-
-// as seen here: https://github.com/unisat-wallet/unisat-web3-demo/blob/1109c79b07517ef4abe069c0c80b2d2118915e19/src/App.tsx#L208
-// and here https://github.com/unisat-wallet/unisat-web3-demo/blob/1109c79b07517ef4abe069c0c80b2d2118915e19/src/App.tsx#L313C13
-export async function signTransactionUnisatAndBroadcast(psbtBytes: Uint8Array): Promise<{ txId: string }> {
-
-  const psbtHex: string = hex.encode(psbtBytes);
-  const psbtResult = await (window as any).unisat.signPsbt(psbtHex);
-  const txId = await (window as any).unisat.pushPsbt(psbtResult);
-  return { txId };
-}

@@ -1,23 +1,20 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { BehaviorSubject, concatMap, from, map, mergeMap, Observable, of, switchMap, tap, timer, toArray } from 'rxjs';
+import { BehaviorSubject, concatMap, map, mergeMap, Observable, of, tap, timer, toArray } from 'rxjs';
 
 import { Network, toScureNetwork } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
+import { findSignerOrThrow } from '../wallet/signers';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { cat21Config } from './cat21-sdk-config';
 import {
   createTransaction,
   getDummyKeypair,
   isSegWit,
-  signTransactionAndBroadcastXverse,
-  signTransactionLeather,
-  signTransactionUnisatAndBroadcast,
 } from './cat21.service.helper';
-import { Cat21Mint, LeatherPSBTBroadcastResponse, SimulateTransactionResult, TxnOutput } from './cat21.service.types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Cat21Mint, SimulateTransactionResult, TxnOutput } from './cat21.service.types';
 
 
 export const LAST_CAT21_MINTS = 'LAST_CAT21_MINTS';
@@ -113,28 +110,6 @@ export class Cat21Service {
   }
 
   /**
-   * Broadcast a transaction
-   */
-  private broadcastTransactionLeather(resp: LeatherPSBTBroadcastResponse): Observable<{ txId: string }> {
-
-    // as seen in the Leather docs
-    const hexRespFromLeather = resp.result.hex;
-    const psbt: Uint8Array = hex.decode(hexRespFromLeather);
-    const tx = btc.Transaction.fromPSBT(psbt);
-    tx.finalize();
-
-    // this would use the Mempool Backend
-    // return this.apiService.postTransaction$(tx.hex).pipe(
-    //   map(txId => ({ txId })),
-    // );
-
-    // this directly uses the Blockstream esplora
-    return this.postTransaction(tx.hex).pipe(
-      map(txId => ({ txId }))
-    );
-  }
-
-  /**
    * Constructs a fake CAT-21 mint transaction,
    * finalizes the txn and receives the vsize
    *
@@ -212,31 +187,13 @@ export class Cat21Service {
     // PSBT as Uint8Array
     const psbtBytes = tx.toPSBT(0);
 
-    let result: Observable<{
-      txId: string
-    }>;
-
-    switch (walletType) {
-      case KnownOrdinalWalletType.leather: {
-        result = from(signTransactionLeather(psbtBytes, this.network)).pipe(
-          switchMap(signedPsbt => this.broadcastTransactionLeather(signedPsbt).pipe(
-            // retry({ count: 3, delay: 500 }) // Ordpool has a global interceptor for this, otherwise add this line
-          ))
-        );
-        break;
-      }
-      case KnownOrdinalWalletType.xverse: {
-        result = signTransactionAndBroadcastXverse(psbtBytes, paymentAddress, this.network);
-        break;
-      }
-      case KnownOrdinalWalletType.unisat: {
-        result = from(signTransactionUnisatAndBroadcast(psbtBytes));
-        break;
-      }
-      default:
-        // this case should never happen, but otherwise the code is not type-safe
-        throw new Error('Unknown wallet');
-    }
+    const signer = findSignerOrThrow(walletType);
+    const result = signer.signAndBroadcast({
+      psbtBytes,
+      paymentAddress,
+      network: this.network,
+      broadcast: (txHex: string) => this.postTransaction(txHex),
+    });
 
     return result.pipe(
       tap(({ txId }) => {

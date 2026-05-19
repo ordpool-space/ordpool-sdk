@@ -34,6 +34,48 @@ export interface WalletConnector {
   connect(network: Network): Observable<WalletInfo>;
 }
 
+
+/**
+ * Inputs for {@link WalletSigner.signAndBroadcast}. The signer
+ * receives an unsigned PSBT, asks the wallet to sign it, and
+ * eventually emits a txid. Different wallets handle broadcasting
+ * differently:
+ *
+ * - **Xverse / Unisat**: sign and broadcast atomically in one user
+ *   dialog. They emit the txid directly; `broadcast` is unused.
+ * - **Leather**: signs the PSBT and returns it. The signer finalizes
+ *   via scure and then delegates broadcasting back to the caller
+ *   via the `broadcast` callback — the caller owns the mempool API
+ *   (electrs `POST /tx` via the configured HttpClient).
+ *
+ * Passing the broadcast fn as a parameter keeps signers free of HTTP
+ * dependencies while still letting the contract be "PSBT in, txid
+ * out" for every wallet uniformly.
+ */
+export interface SignAndBroadcastInput {
+  psbtBytes: Uint8Array;
+  paymentAddress: string;
+  network: Network;
+  /** Broadcast a finalized tx-hex. Returns the txid. */
+  broadcast(txHex: string): Observable<string>;
+}
+
+/**
+ * A wallet signer handles the SIGN side of a wallet integration:
+ * given an unsigned PSBT, ask the wallet to sign, and emit a txid
+ * once it's broadcast. Sign roster is intentionally narrow — only
+ * the wallets ordpool has byte-snapshot tests and a manual smoke
+ * test for.
+ *
+ * Generic against the PSBT (not cat21-specific). Used by
+ * `Cat21Service` today; future inscription-creation / rune-etch /
+ * generic-send features will share the same signer registry.
+ */
+export interface WalletSigner {
+  readonly providerId: KnownOrdinalWalletType;
+  signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }>;
+}
+
 export enum KnownOrdinalWalletType {
   xverse = 'xverse',
   leather = 'leather',
