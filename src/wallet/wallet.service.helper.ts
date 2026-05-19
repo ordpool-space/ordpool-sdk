@@ -7,6 +7,7 @@ import {
   LeatherAddressResponse,
   LeatherBtcAddress,
   WalletInfo,
+  WindowLike,
   XverseAddressResponse,
 } from './wallet.service.types';
 
@@ -17,23 +18,14 @@ export const leatherOrdinalsAddressType = 'p2tr';  // Taproot
 export const leatherPaymentAddressType = 'p2wpkh'; // Native Segwit
 
 
-/**
- * Minimal shape of `window` for wallet detection. Real browser
- * extensions inject these properties; in tests we pass a stub
- * object with whatever subset we want present.
- */
-export interface WindowLike {
-  XverseProviders?: unknown;
-  HiroWalletProvider?: unknown;
-  unisat?: unknown;
-}
-
 export function isXverseInstalled(win: WindowLike | undefined): boolean {
   return !!win?.XverseProviders;
 }
 
 export function isLeatherInstalled(win: WindowLike | undefined): boolean {
-  return !!win?.HiroWalletProvider;
+  // `LeatherProvider` is the post-rebrand global; `HiroWalletProvider`
+  // is the pre-rebrand one. Some users still have older versions.
+  return !!(win?.LeatherProvider ?? win?.HiroWalletProvider);
 }
 
 export function isUnisatInstalled(win: WindowLike | undefined): boolean {
@@ -84,6 +76,7 @@ export function parseXverseAddressResponse(response: XverseAddressResponse): Wal
     ordinalsPublicKey: ordinalsAddress.publicKey,
     paymentAddress:    paymentAddress.address,
     paymentPublicKey:  paymentAddress.publicKey,
+    signingSupported:  true,
   };
 }
 
@@ -108,6 +101,7 @@ export function parseLeatherAddressResponse(response: LeatherAddressResponse): W
     ordinalsPublicKey: ordinalsAddress.publicKey,
     paymentAddress:    paymentAddress.address,
     paymentPublicKey:  paymentAddress.publicKey,
+    signingSupported:  true,
   };
 }
 
@@ -123,5 +117,6 @@ export function unisatBasicInfoToWalletInfo(address: string, publicKey: string):
     ordinalsPublicKey: publicKey,
     paymentAddress:    address,
     paymentPublicKey:  publicKey,
+    signingSupported:  true,
   };
 }

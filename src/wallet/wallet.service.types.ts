@@ -1,4 +1,38 @@
+import { Observable } from 'rxjs';
 import { AddressPurpose } from 'sats-connect';
+
+import { Network } from '../network';
+
+
+/**
+ * Minimal shape of `window` for wallet detection. Real browser
+ * extensions inject these properties; in tests we pass a stub
+ * object with whatever subset we want present.
+ */
+export interface WindowLike {
+  XverseProviders?: unknown;
+  LeatherProvider?: unknown;
+  HiroWalletProvider?: unknown;
+  unisat?: unknown;
+}
+
+
+/**
+ * A wallet connector handles the READ side of a wallet integration:
+ * detect whether the wallet is installed, then connect to it to
+ * retrieve the user's addresses. Sign-side lives in `signers/`.
+ *
+ * Each connector is a pure object — no DI dependency, no class
+ * instantiation. The `WalletService` holds a registry of these.
+ */
+export interface WalletConnector {
+  readonly providerId: KnownOrdinalWalletType;
+  readonly wallet: KnownOrdinalWallet;
+  /** True if a matching `WalletSigner` exists in `signers/` for this wallet. */
+  readonly signingSupported: boolean;
+  detect(win: WindowLike | undefined): boolean;
+  connect(network: Network): Observable<WalletInfo>;
+}
 
 export enum KnownOrdinalWalletType {
   xverse = 'xverse',
@@ -37,13 +71,19 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
 };
 
 export interface WalletInfo {
-  type: KnownOrdinalWalletType,
+  type: KnownOrdinalWalletType;
 
   ordinalsAddress: string;
   ordinalsPublicKey: string;
 
   paymentAddress: string;
   paymentPublicKey: string;
+
+  /**
+   * Whether ordpool ships a tested `WalletSigner` for this wallet.
+   * Read flows ignore it; mint flows gate on it. See `signers/`.
+   */
+  signingSupported: boolean;
 }
 
 

@@ -131,6 +131,7 @@ describe('parseXverseAddressResponse', () => {
       ordinalsPublicKey: 'ord-pub',
       paymentAddress: '3payment',
       paymentPublicKey: 'pay-pub',
+      signingSupported: true,
     });
   });
 
@@ -197,6 +198,7 @@ describe('parseLeatherAddressResponse', () => {
       ordinalsPublicKey: 'ord-pub',
       paymentAddress: 'bc1qpayment',
       paymentPublicKey: 'pay-pub',
+      signingSupported: true,
     });
   });
 
@@ -231,6 +233,7 @@ describe('unisatBasicInfoToWalletInfo', () => {
       ordinalsPublicKey: 'unisat-pub',
       paymentAddress: 'bc1qunisat',
       paymentPublicKey: 'unisat-pub',
+      signingSupported: true,
     });
   });
 });

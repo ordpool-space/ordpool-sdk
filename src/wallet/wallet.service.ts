@@ -2,7 +2,6 @@ import { inject, Injectable } from '@angular/core';
 import {
   BehaviorSubject,
   distinctUntilChanged,
-  from,
   map,
   Observable,
   of,
@@ -11,27 +10,18 @@ import {
   tap,
   timer,
 } from 'rxjs';
-import { AddressPurpose, getAddress } from 'sats-connect';
 
-import { Network, toBitcoinNetworkType } from '../network';
+import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
-import {
-  detectInstalledWallets,
-  isLeatherInstalled,
-  isUnisatInstalled,
-  isXverseInstalled,
-  parseLeatherAddressResponse,
-  parseXverseAddressResponse,
-  unisatBasicInfoToWalletInfo,
-  WindowLike,
-} from './wallet.service.helper';
+import { walletConnectors } from './connectors';
+import { detectInstalledWallets } from './wallet.service.helper';
 import {
   KnownOrdinalWallet,
   KnownOrdinalWalletType,
-  LeatherAddressResponse,
+  WalletConnector,
   WalletInfo,
-  XverseAddressResponse,
+  WindowLike,
 } from './wallet.service.types';
 
 
@@ -79,6 +69,14 @@ export class WalletService {
     return typeof window === 'undefined' ? undefined : (window as unknown as WindowLike);
   }
 
+  private findConnector(type: KnownOrdinalWalletType): WalletConnector {
+    const connector = walletConnectors.find(c => c.providerId === type);
+    if (!connector) {
+      throw new Error(`Unknown wallet type: ${type as string}`);
+    }
+    return connector;
+  }
+
   getInstalledWallets(): {
     installedWallets: KnownOrdinalWallet[];
     notInstalledWallets: KnownOrdinalWallet[];
@@ -86,37 +84,20 @@ export class WalletService {
     return detectInstalledWallets(this.win);
   }
 
-  getUnisatInstalled(): boolean {
-    return isUnisatInstalled(this.win);
+  getXverseInstalled(): boolean {
+    return this.findConnector(KnownOrdinalWalletType.xverse).detect(this.win);
   }
 
   getLeatherInstalled(): boolean {
-    return isLeatherInstalled(this.win);
+    return this.findConnector(KnownOrdinalWalletType.leather).detect(this.win);
   }
 
-  getXverseInstalled(): boolean {
-    return isXverseInstalled(this.win);
+  getUnisatInstalled(): boolean {
+    return this.findConnector(KnownOrdinalWalletType.unisat).detect(this.win);
   }
 
   connectWallet(key: KnownOrdinalWalletType): Observable<WalletInfo> {
-
-    let obs: Observable<WalletInfo>;
-    switch (key) {
-      case KnownOrdinalWalletType.xverse:
-        obs = this.connectWalletXverse();
-        break;
-      case KnownOrdinalWalletType.leather:
-        obs = this.connectWalletLeather();
-        break;
-      case KnownOrdinalWalletType.unisat:
-        obs = this.connectWalletUnisat();
-        break;
-      default:
-        // exhaustive — every enum case is handled above
-        throw new Error(`Unknown wallet type: ${key as string}`);
-    }
-
-    return obs.pipe(
+    return this.findConnector(key).connect(this.network).pipe(
       tap(walletInfo => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo))),
       tap(walletInfo => this.connectedWallet$.next(walletInfo))
     );
@@ -137,72 +118,21 @@ export class WalletService {
   }
 
   /**
-   * Get adresses:
-   * see also: https://docs.xverse.app/sats-connect/get-address
+   * @deprecated Use `connectWallet(KnownOrdinalWalletType.xverse)`.
+   * Kept for the few legacy callers; will be removed once the frontend
+   * routes everything through the high-level façade.
    */
   connectWalletXverse(): Observable<WalletInfo> {
-
-    return new Observable<WalletInfo>((observer) => {
-      getAddress({
-        payload: {
-          purposes: [AddressPurpose.Ordinals, AddressPurpose.Payment],
-          message: 'Please share your address for receiving Ordinals and payments.',
-          network: {
-            type: toBitcoinNetworkType(this.network)
-          }
-        },
-        onFinish: (response) => {
-          try {
-            observer.next(parseXverseAddressResponse(response as XverseAddressResponse));
-            observer.complete();
-          } catch (error) {
-            observer.error(error);
-          }
-        },
-        onCancel: () => {
-          observer.error(new Error('Request was cancelled'));
-        }
-      });
-    });
+    return this.findConnector(KnownOrdinalWalletType.xverse).connect(this.network);
   }
 
-  /**
-   * Get addresses
-   * see also: https://leather.gitbook.io/developers/bitcoin/connect-users/get-addresses
-   */
+  /** @deprecated Use `connectWallet(KnownOrdinalWalletType.leather)`. */
   connectWalletLeather(): Observable<WalletInfo> {
-
-    return from((window as any).btc.request('getAddresses') as Promise<LeatherAddressResponse>).pipe(
-      map(parseLeatherAddressResponse)
-    );
+    return this.findConnector(KnownOrdinalWalletType.leather).connect(this.network);
   }
 
-  // as seen here: https://github.com/unisat-wallet/unisat-web3-demo/blob/1109c79b07517ef4abe069c0c80b2d2118915e19/src/App.tsx#L18
-  private async getBasicUnisatInfo(): Promise<{ address: string, publicKey: string }> {
-
-    const unisat = (window as any).unisat;
-    await unisat.requestAccounts();
-
-    // gets the address of the current account (which is only one, so it's weird that this is an array)
-    const [address] = await unisat.getAccounts();
-    const publicKey = await unisat.getPublicKey();
-    // const balance = await unisat.getBalance();
-    // const network = await unisat.getNetwork();
-
-    return { address, publicKey };
-  }
-
-  /**
-   * Get addresses
-   * see https://docs.unisat.io/dev/unisat-developer-service/unisat-wallet#requestaccounts
-   *
-   * Warning: Unisat uses the same address for payments and ordinals! 😱
-   *
-   * TODO: handle accountsChanged / networkChanged!!
-   */
+  /** @deprecated Use `connectWallet(KnownOrdinalWalletType.unisat)`. */
   connectWalletUnisat(): Observable<WalletInfo> {
-    return from(this.getBasicUnisatInfo()).pipe(
-      map(({ address, publicKey }) => unisatBasicInfoToWalletInfo(address, publicKey))
-    );
+    return this.findConnector(KnownOrdinalWalletType.unisat).connect(this.network);
   }
 }
