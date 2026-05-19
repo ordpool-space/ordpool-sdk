@@ -2,7 +2,6 @@ import { describe, expect, it } from '@jest/globals';
 import { AddressPurpose } from 'sats-connect';
 
 import {
-  detectInstalledWallets,
   isLeatherInstalled,
   isUnisatInstalled,
   isXverseInstalled,
@@ -13,7 +12,6 @@ import {
   unisatBasicInfoToWalletInfo,
 } from './wallet.service.helper';
 import {
-  KnownOrdinalWallets,
   KnownOrdinalWalletType,
   LeatherAddressResponse,
   LeatherBtcAddress,
@@ -47,47 +45,6 @@ describe('isXverseInstalled / isLeatherInstalled / isUnisatInstalled', () => {
     expect(isXverseInstalled(onlyXverse)).toBe(true);
     expect(isLeatherInstalled(onlyXverse)).toBe(false);
     expect(isUnisatInstalled(onlyXverse)).toBe(false);
-  });
-});
-
-
-describe('detectInstalledWallets', () => {
-
-  it('returns all three as not-installed when window is undefined', () => {
-    const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
-    expect(installedWallets).toEqual([]);
-    expect(notInstalledWallets).toEqual([
-      KnownOrdinalWallets.xverse,
-      KnownOrdinalWallets.leather,
-      KnownOrdinalWallets.unisat,
-    ]);
-  });
-
-  it('returns all three as installed when every extension is present', () => {
-    const win = { XverseProviders: {}, HiroWalletProvider: {}, unisat: {} };
-    const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
-    expect(installedWallets).toEqual([
-      KnownOrdinalWallets.xverse,
-      KnownOrdinalWallets.leather,
-      KnownOrdinalWallets.unisat,
-    ]);
-    expect(notInstalledWallets).toEqual([]);
-  });
-
-  it('partitions correctly when only some are installed', () => {
-    const win = { XverseProviders: {}, unisat: {} }; // Leather missing
-    const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
-    expect(installedWallets).toEqual([KnownOrdinalWallets.xverse, KnownOrdinalWallets.unisat]);
-    expect(notInstalledWallets).toEqual([KnownOrdinalWallets.leather]);
-  });
-
-  it('keeps a stable detection order (Xverse, Leather, Unisat)', () => {
-    const { installedWallets } = detectInstalledWallets({ unisat: {}, HiroWalletProvider: {}, XverseProviders: {} });
-    expect(installedWallets.map(w => w.label)).toEqual([
-      KnownOrdinalWallets.xverse.label,
-      KnownOrdinalWallets.leather.label,
-      KnownOrdinalWallets.unisat.label,
-    ]);
   });
 });
 

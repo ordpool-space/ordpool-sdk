@@ -1,4 +1,8 @@
-import { WalletConnector } from '../wallet.service.types';
+import {
+  KnownOrdinalWallet,
+  WalletConnector,
+  WindowLike,
+} from '../wallet.service.types';
 import { leatherConnector } from './leather.connector';
 import { unisatConnector } from './unisat.connector';
 import { xverseConnector } from './xverse.connector';
@@ -16,6 +20,30 @@ export const walletConnectors: readonly WalletConnector[] = [
   leatherConnector,
   unisatConnector,
 ];
+
+/**
+ * Sort the roster into installed / not-installed buckets based on
+ * which extension shims are visible on `win`. Order matches
+ * `walletConnectors`, so the picker can render either bucket
+ * deterministically.
+ *
+ * `connectors` defaults to the live roster — tests pass their own
+ * stub list to keep assertions tight.
+ */
+export function detectInstalledWallets(
+  win: WindowLike | undefined,
+  connectors: readonly WalletConnector[] = walletConnectors,
+): { installedWallets: KnownOrdinalWallet[]; notInstalledWallets: KnownOrdinalWallet[] } {
+
+  const installedWallets: KnownOrdinalWallet[] = [];
+  const notInstalledWallets: KnownOrdinalWallet[] = [];
+
+  for (const connector of connectors) {
+    (connector.detect(win) ? installedWallets : notInstalledWallets).push(connector.wallet);
+  }
+
+  return { installedWallets, notInstalledWallets };
+}
 
 export { leatherConnector } from './leather.connector';
 export { unisatConnector } from './unisat.connector';

@@ -1,8 +1,6 @@
 import { AddressPurpose } from 'sats-connect';
 
 import {
-  KnownOrdinalWallet,
-  KnownOrdinalWallets,
   KnownOrdinalWalletType,
   LeatherAddressResponse,
   LeatherBtcAddress,
@@ -31,28 +29,6 @@ export function isLeatherInstalled(win: WindowLike | undefined): boolean {
 export function isUnisatInstalled(win: WindowLike | undefined): boolean {
   return !!win?.unisat;
 }
-
-/**
- * Sort the three known wallets into installed / not-installed buckets
- * based on which extension shims are visible on `win`. Order in the
- * `installedWallets` array reflects detection order (Xverse, Leather,
- * Unisat) for stable rendering in the wallet picker.
- */
-export function detectInstalledWallets(win: WindowLike | undefined): {
-  installedWallets: KnownOrdinalWallet[];
-  notInstalledWallets: KnownOrdinalWallet[];
-} {
-
-  const installedWallets: KnownOrdinalWallet[] = [];
-  const notInstalledWallets: KnownOrdinalWallet[] = [];
-
-  (isXverseInstalled(win)  ? installedWallets : notInstalledWallets).push(KnownOrdinalWallets.xverse);
-  (isLeatherInstalled(win) ? installedWallets : notInstalledWallets).push(KnownOrdinalWallets.leather);
-  (isUnisatInstalled(win)  ? installedWallets : notInstalledWallets).push(KnownOrdinalWallets.unisat);
-
-  return { installedWallets, notInstalledWallets };
-}
-
 
 /**
  * Narrow a raw sats-connect `getAddress` response into the SDK's

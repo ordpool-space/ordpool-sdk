@@ -14,8 +14,7 @@ import {
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
-import { walletConnectors } from './connectors';
-import { detectInstalledWallets } from './wallet.service.helper';
+import { detectInstalledWallets, walletConnectors } from './connectors';
 import {
   KnownOrdinalWallet,
   KnownOrdinalWalletType,
@@ -84,18 +83,6 @@ export class WalletService {
     return detectInstalledWallets(this.win);
   }
 
-  getXverseInstalled(): boolean {
-    return this.findConnector(KnownOrdinalWalletType.xverse).detect(this.win);
-  }
-
-  getLeatherInstalled(): boolean {
-    return this.findConnector(KnownOrdinalWalletType.leather).detect(this.win);
-  }
-
-  getUnisatInstalled(): boolean {
-    return this.findConnector(KnownOrdinalWalletType.unisat).detect(this.win);
-  }
-
   connectWallet(key: KnownOrdinalWalletType): Observable<WalletInfo> {
     return this.findConnector(key).connect(this.network).pipe(
       tap(walletInfo => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo))),
@@ -115,24 +102,5 @@ export class WalletService {
 
   requestWalletConnect(): void {
     this.walletConnectRequested$.next(true);
-  }
-
-  /**
-   * @deprecated Use `connectWallet(KnownOrdinalWalletType.xverse)`.
-   * Kept for the few legacy callers; will be removed once the frontend
-   * routes everything through the high-level façade.
-   */
-  connectWalletXverse(): Observable<WalletInfo> {
-    return this.findConnector(KnownOrdinalWalletType.xverse).connect(this.network);
-  }
-
-  /** @deprecated Use `connectWallet(KnownOrdinalWalletType.leather)`. */
-  connectWalletLeather(): Observable<WalletInfo> {
-    return this.findConnector(KnownOrdinalWalletType.leather).connect(this.network);
-  }
-
-  /** @deprecated Use `connectWallet(KnownOrdinalWalletType.unisat)`. */
-  connectWalletUnisat(): Observable<WalletInfo> {
-    return this.findConnector(KnownOrdinalWalletType.unisat).connect(this.network);
   }
 }
