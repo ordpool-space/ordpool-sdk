@@ -2,7 +2,7 @@ import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { base58, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import {
@@ -44,11 +44,16 @@ function wifToPrivateKey(wif: string): Uint8Array {
   return decoded.slice(1, 33);
 }
 
-/** Pipe a `bitcoin-cli` command into the regtest container. */
+/**
+ * Pipe a `bitcoin-cli` command into the regtest container.
+ * Args go through execFileSync directly (no shell), so JSON payloads
+ * with braces and colons don't need extra escaping.
+ */
 function rpc(...args: string[]): string {
-  return execSync(
-    ['docker', 'exec', 'ordpool-e2e-bitcoind', 'bitcoin-cli',
-      '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args].join(' '),
+  return execFileSync(
+    'docker',
+    ['exec', 'ordpool-e2e-bitcoind', 'bitcoin-cli',
+     '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args],
     { encoding: 'utf8' },
   ).trim();
 }
@@ -158,42 +163,39 @@ describe('cat21 mint roundtrip on regtest', () => {
     recipientTaprootAddress = p2tr.address!;
     expectedRecipientScript = p2tr.script;
 
-    // Mature additional coinbases so each sendtoaddress below pulls a
-    // fresh confirmed input. Without this we'd have exactly one mature
-    // 50-BTC coinbase from the bootstrap, then build a 5-deep
-    // unconfirmed-mempool chain via change-spending — which we saw
-    // silently drop a tx on CI. Mining 10 extra blocks gives us ~10
-    // mature coinbases, each send picks its own.
-    let tip = mineBlocks(10);
-    await waitForElectrsSync(tip);
-
-    // Fund each case's payment address with 1 BTC. Capture the txid
-    // returned by `bitcoin-cli sendtoaddress` so the test body can
-    // pick the right UTXO by source-tx (Unisat-Legacy reuses the
-    // bootstrap's coinbase address — its utxo list also contains
-    // 100 coinbase outputs of 50 BTC each).
+    // Fund all cases in a single sendmany tx. Earlier we used 4
+    // sequential sendtoaddress calls, and CI was silently dropping
+    // one of them (Leather, the first) — diagnostic logs showed
+    // bitcoin-cli returned a txid but the tx never landed in a block.
+    // Root cause not fully isolated; sendmany sidesteps it entirely
+    // because all four outputs live in ONE tx drawn from ONE input.
+    const recipients: Record<string, number> = {};
     for (const c of cases) {
       const payment = c.buildPayment(funderPublicKey, regtestNetwork);
-      const fundingTxid = rpc(
-        '-rpcwallet=ordpool-e2e', 'sendtoaddress', payment.address, '1.0',
-      );
       funding[c.label] = {
         paymentAddress: payment.address,
         paymentScript: payment.script,
-        fundingTxid,
+        fundingTxid: '',  // filled in after sendmany returns
       };
+      recipients[payment.address] = 1.0;
     }
-    // Plus a tiny UTXO at the Leather address for the dust-absorb test.
+    const sendmanyTxid = rpc(
+      '-rpcwallet=ordpool-e2e', 'sendmany', '', JSON.stringify(recipients),
+    );
+    for (const c of cases) {
+      funding[c.label].fundingTxid = sendmanyTxid;
+    }
+
+    // Plus a tiny UTXO at the Leather address for the dust-absorb
+    // test (separate tx, this one's structurally independent).
     rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', funding[cases[0].label].paymentAddress, '0.00001');
 
-    tip = mineBlocks(1);
+    const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
 
     // Legacy P2PKH input needs the full funding-tx hex (nonWitnessUtxo).
-    // Fetch the hex of the specific funding tx we just sent — NOT
-    // `utxos[0]`, which for the Unisat-Legacy address is a random
-    // bootstrap coinbase (we'd hand scure a transactionHex whose txid
-    // doesn't match the UTXO we're trying to spend).
+    // The sendmany tx hex is the same for every case — its vout index
+    // is what differs per case (each case looks itself up by address).
     for (const c of cases.filter(c => c.needsTransactionHex)) {
       funding[c.label].transactionHex = await getTxHex(funding[c.label].fundingTxid);
     }
