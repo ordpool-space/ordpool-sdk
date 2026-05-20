@@ -54,6 +54,11 @@ export function getMinimumUtxoSize(address: string): number {
   if (address.startsWith('tb1q')) return 294; // P2WPKH testnet
   if (address.startsWith('tb1p')) return 330; // P2TR testnet
 
+  // Regtest addresses (same key/script prefixes as testnet, but
+  // bech32 HRP is `bcrt`)
+  if (address.startsWith('bcrt1q')) return 294; // P2WPKH regtest
+  if (address.startsWith('bcrt1p')) return 330; // P2TR regtest
+
   throw new Error('Unsupported address type');
 }
 
@@ -95,13 +100,16 @@ export function getAddressFormat(address: string): 'P2WPKH' | 'P2SH???' | 'P2TR'
     return 'P2SH???';
   }
 
-  // Native Seqwit
-  if (address.startsWith('bc1q') || address.startsWith('tb1q')) {
+  // Native Seqwit — bcrt1q comes before tb1q because every bcrt1q
+  // also starts with `b`; with the ordering inverted, mainnet `bc1q`
+  // would match first and regtest addresses would be mis-categorized
+  // as mainnet. `bcrt1q` is the only regtest-segwit prefix.
+  if (address.startsWith('bcrt1q') || address.startsWith('bc1q') || address.startsWith('tb1q')) {
     return 'P2WPKH';
   }
 
-  // Taproot
-  if (address.startsWith('bc1p') || address.startsWith('tb1p')) {
+  // Taproot — same ordering reason as P2WPKH.
+  if (address.startsWith('bcrt1p') || address.startsWith('bc1p') || address.startsWith('tb1p')) {
     return 'P2TR';
   }
 

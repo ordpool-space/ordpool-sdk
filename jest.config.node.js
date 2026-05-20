@@ -7,7 +7,7 @@ module.exports = {
   // Angular-DI specs (anything that imports @angular/core directly)
   // live in *.angular.spec.ts and run only under the browser config,
   // where jest-preset-angular handles the @angular/* ESM transforms.
-  testPathIgnorePatterns: ['/node_modules/', '/dist/', '\\.angular\\.spec\\.ts$'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '\\.angular\\.spec\\.ts$'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
 
   // avoids "Do not know how to serialize a BigInt" instead of showing the actual assertion error message

@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 
 import { createTransaction } from '../../src/cat21-mint/cat21.service.helper';
 import { TxnOutput } from '../../src/cat21-mint/cat21.service.types';
-import { Network } from '../../src/network';
+import { Network, toScureNetwork } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import {
   ElectrsUtxo,
@@ -52,7 +52,7 @@ describe('cat21 mint roundtrip on regtest', () => {
     // Mint a CAT-21 from a SegWit input — derive a P2WPKH address
     // from the same key and fund it by sending from the bootstrap's
     // legacy coinbase wallet.
-    funderWpkhAddress = btc.p2wpkh(funderPublicKey, btc.TEST_NETWORK).address!;
+    funderWpkhAddress = btc.p2wpkh(funderPublicKey, toScureNetwork(Network.Regtest)).address!;
 
     const sendCmd = `docker exec ordpool-e2e-bitcoind bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool -rpcwallet=ordpool-e2e sendtoaddress ${funderWpkhAddress} 1.0`;
     execSync(sendCmd, { encoding: 'utf8' });
@@ -72,7 +72,7 @@ describe('cat21 mint roundtrip on regtest', () => {
     const recipientPubkey = funderPublicKey; // mint to ourselves
     const recipientTaprootAddress = btc.p2tr(
       recipientPubkey.subarray(1, 33), // x-only
-      undefined, btc.TEST_NETWORK, true
+      undefined, toScureNetwork(Network.Regtest), true
     ).address!;
 
     const paymentOutput: TxnOutput = {

@@ -10,11 +10,18 @@ describe('toScureNetwork', () => {
     expect(toScureNetwork(Network.Mainnet)).toBe(btc.NETWORK);
   });
 
-  it('maps every testnet variant to btc.TEST_NETWORK', () => {
+  it('maps Testnet3 / Testnet4 / Signet to btc.TEST_NETWORK (scure flattens them)', () => {
     expect(toScureNetwork(Network.Testnet3)).toBe(btc.TEST_NETWORK);
     expect(toScureNetwork(Network.Testnet4)).toBe(btc.TEST_NETWORK);
     expect(toScureNetwork(Network.Signet)).toBe(btc.TEST_NETWORK);
-    expect(toScureNetwork(Network.Regtest)).toBe(btc.TEST_NETWORK);
+  });
+
+  it('maps Regtest to a "bcrt"-prefixed network (testnet key params, regtest HRP)', () => {
+    const regtest = toScureNetwork(Network.Regtest);
+    expect(regtest.bech32).toBe('bcrt');
+    expect(regtest.wif).toBe(btc.TEST_NETWORK.wif);
+    expect(regtest.pubKeyHash).toBe(btc.TEST_NETWORK.pubKeyHash);
+    expect(regtest.scriptHash).toBe(btc.TEST_NETWORK.scriptHash);
   });
 });
 

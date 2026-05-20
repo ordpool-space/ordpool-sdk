@@ -458,16 +458,19 @@ describe('createTransaction across all Network variants', () => {
     expect(kp.addressP2TR).toBe('bc1p33wm0auhr9kkahzd6l0kqj85af4cswn276hsxg6zpz85xe2r0y8syx4e5t');
   });
 
-  it('produces identical testnet addresses for every testnet variant (scure flattens them)', () => {
+  it('produces identical testnet addresses for Testnet3 / Testnet4 / Signet (scure flattens them)', () => {
     const kpT3 = getDummyKeypair(toScureNetwork(Network.Testnet3));
     const kpT4 = getDummyKeypair(toScureNetwork(Network.Testnet4));
     const kpSignet = getDummyKeypair(toScureNetwork(Network.Signet));
-    const kpRegtest = getDummyKeypair(toScureNetwork(Network.Regtest));
     expect(kpT4.addressP2WPKH).toBe(kpT3.addressP2WPKH);
     expect(kpSignet.addressP2WPKH).toBe(kpT3.addressP2WPKH);
-    expect(kpRegtest.addressP2WPKH).toBe(kpT3.addressP2WPKH);
-    // and confirm they're actually testnet, not mainnet
     expect(kpT3.addressP2WPKH).toBe('tb1q0xcqpzrky6eff2g52qdye53xkk9jxkvraulyla');
+  });
+
+  it('produces a bcrt-prefixed P2WPKH address for Regtest (NOT tb-prefixed)', () => {
+    const kpRegtest = getDummyKeypair(toScureNetwork(Network.Regtest));
+    expect(kpRegtest.addressP2WPKH).toMatch(/^bcrt1q/);
+    expect(kpRegtest.addressP2TR).toMatch(/^bcrt1p/);
   });
 
   // The mint flow itself goes through createTransaction(..., network)

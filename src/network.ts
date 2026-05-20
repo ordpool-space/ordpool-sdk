@@ -19,11 +19,29 @@ export enum Network {
 }
 
 /**
- * Convert to @scure/btc-signer's network object. @scure doesn't
- * distinguish testnet variants — all map to TEST_NETWORK.
+ * Regtest uses the same key/script prefixes as testnet but a
+ * different bech32 HRP (`bcrt` not `tb`). @scure/btc-signer doesn't
+ * ship a regtest constant — we provide one so `Network.Regtest`
+ * actually round-trips through the signer without yielding `tb1q…`
+ * addresses that bitcoind in regtest mode then rejects.
+ */
+const REGTEST_NETWORK: typeof btc.NETWORK = {
+  bech32: 'bcrt',
+  pubKeyHash: 0x6f,
+  scriptHash: 0xc4,
+  wif: 0xef,
+};
+
+/**
+ * Convert to @scure/btc-signer's network object. Mainnet -> NETWORK,
+ * Regtest -> a hand-rolled `bcrt`-prefixed network object, all
+ * remaining testnet variants -> TEST_NETWORK (scure doesn't
+ * distinguish testnet3 / testnet4 / signet at this layer).
  */
 export function toScureNetwork(network: Network): typeof btc.NETWORK {
-  return network === Network.Mainnet ? btc.NETWORK : btc.TEST_NETWORK;
+  if (network === Network.Mainnet) return btc.NETWORK;
+  if (network === Network.Regtest) return REGTEST_NETWORK;
+  return btc.TEST_NETWORK;
 }
 
 /**

@@ -5,6 +5,7 @@ module.exports = {
   ...createCjsPreset(),
   testEnvironment: 'jsdom',
   setupFilesAfterEnv: ['<rootDir>/jest.config.browser.setup.ts'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
 
   // avoids "Do not know how to serialize a BigInt" instead of showing the actual assertion error message
