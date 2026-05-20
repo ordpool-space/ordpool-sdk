@@ -3,6 +3,7 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import { base58, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { execSync } from 'node:child_process';
+import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import {
   createTransaction,
@@ -15,6 +16,7 @@ import {
   ElectrsUtxo,
   FundedAccount,
   getFundedAccount,
+  getTx,
   getTxHex,
   getTxStatus,
   getUtxos,
@@ -203,5 +205,46 @@ describe('cat21 mint roundtrip on regtest', () => {
     const onChainWitness = onChainInput0.finalScriptWitness;
     expect(onChainWitness).toBeDefined();
     expect(onChainWitness![0][onChainWitness![0].length - 1]).toBe(SIGHASH_ALL);
+
+    // ─── Phase 11: roundtrip through ordpool-parser, the library cat21-indexer uses ───
+    // The chain has accepted our tx. Now we ask the same parser the
+    // ordpool/cat21-indexer ingest pipeline uses ("is this a CAT-21
+    // mint?") and verify it says yes — closing the loop SDK ↔ Parser.
+    const esploraTx = await getTx(broadcastedTxid);
+
+    // Echo for human debugging — if this test ever fails on CI, the
+    // logs give you the txid + block_hash to inspect directly:
+    //   bitcoin-cli -regtest getrawtransaction <txid> 2
+    //   bitcoin-cli -regtest getblock <block_hash>
+    // eslint-disable-next-line no-console
+    console.log(`[e2e] txid       = ${esploraTx.txid}`);
+    // eslint-disable-next-line no-console
+    console.log(`[e2e] block_hash = ${esploraTx.status.block_hash}`);
+
+    expect(esploraTx.locktime).toBe(CAT21_LOCKTIME);
+    expect(esploraTx.status.block_hash).toBeTruthy();
+
+    const parsed = Cat21ParserService.parse(esploraTx);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
+    expect(parsed!.transactionId).toBe(broadcastedTxid);
+    expect(parsed!.blockId).toBe(esploraTx.status.block_hash);
+    expect(parsed!.uniqueId).toBe(
+      `${DigitalArtifactType.Cat21}-${broadcastedTxid}-${esploraTx.status.block_hash}`
+    );
+
+    // The parser produces a deterministic SVG + traits from
+    // SHA256(txid + blockId) — fee-rate gates the color palette.
+    // We don't pin the exact byte output (regtest txid/blockId are
+    // random), but we do prove the parser produces a non-empty image
+    // and a populated trait record. If either is null on a confirmed
+    // tx, the indexer would silently store a broken cat.
+    const svg = parsed!.getImage();
+    expect(svg).toMatch(/^<svg/);
+    expect(svg.length).toBeGreaterThan(500);
+
+    const traits = parsed!.getTraits();
+    expect(traits).not.toBeNull();
+    expect(typeof traits!.genesis).toBe('boolean');
   });
 });

@@ -76,8 +76,31 @@ export async function postTx(hexPayload: string): Promise<string> {
   return body;
 }
 
-export async function getTxStatus(txid: string): Promise<{ confirmed: boolean; block_height?: number }> {
+export async function getTxStatus(txid: string): Promise<{ confirmed: boolean; block_height?: number; block_hash?: string }> {
   const res = await fetch(`${ELECTRS_URL}/tx/${txid}/status`);
   if (!res.ok) throw new Error(`tx status fetch failed: ${res.status}`);
-  return res.json() as Promise<{ confirmed: boolean; block_height?: number }>;
+  return res.json() as Promise<{ confirmed: boolean; block_height?: number; block_hash?: string }>;
+}
+
+/**
+ * Full Esplora-format transaction record. Includes the fields the
+ * `ordpool-parser` Cat21ParserService consumes: `locktime`, `weight`,
+ * `fee`, and `status.block_hash`.
+ */
+export interface EsploraTx {
+  txid: string;
+  version: number;
+  locktime: number;
+  vin: unknown[];
+  vout: unknown[];
+  size: number;
+  weight: number;
+  fee: number;
+  status: { confirmed: boolean; block_height?: number; block_hash?: string; block_time?: number };
+}
+
+export async function getTx(txid: string): Promise<EsploraTx> {
+  const res = await fetch(`${ELECTRS_URL}/tx/${txid}`);
+  if (!res.ok) throw new Error(`tx fetch failed: ${res.status} ${await res.text()}`);
+  return res.json() as Promise<EsploraTx>;
 }
