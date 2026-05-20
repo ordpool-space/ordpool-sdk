@@ -175,6 +175,13 @@ describe('cat21 mint roundtrip on regtest', () => {
     recipientTaprootAddress = p2tr.address!;
     expectedRecipientScript = p2tr.script;
 
+    // Mature more coinbases. Bootstrap mines exactly 101 blocks, so
+    // only the block-1 coinbase is mature. We need two separate
+    // mature 50-BTC inputs (one for the dust send, one for the main
+    // funding tx). Mining 10 extra blocks gives us 11 mature.
+    let tip = mineBlocks(10);
+    await waitForElectrsSync(tip);
+
     // EXPERT MODE: pick the inputs ourselves. The legacy wallet
     // auto-derives P2PKH / P2WPKH / P2SH-P2WPKH addresses from any
     // key it holds, so all four case payment addresses look
@@ -229,7 +236,7 @@ describe('cat21 mint roundtrip on regtest', () => {
       funding[c.label].fundingTxid = sendResult.txid;
     }
 
-    const tip = mineBlocks(1);
+    tip = mineBlocks(1);
     await waitForElectrsSync(tip);
 
     // Legacy P2PKH input needs the full funding-tx hex (nonWitnessUtxo).
