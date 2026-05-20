@@ -10,7 +10,7 @@
 
 services:
   bitcoind:
-    image: ruimarinho/bitcoin-core:25
+    image: ruimarinho/bitcoin-core:24-alpine
     container_name: ordpool-e2e-bitcoind
     command:
       - -regtest
