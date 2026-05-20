@@ -218,6 +218,8 @@ describe('cat21 mint roundtrip on regtest', () => {
       // address, Leather also holds a dust UTXO for the dust-absorb
       // test. Source-txid is unambiguous.
       const utxos: ElectrsUtxo[] = await getUtxos(paymentAddress);
+      // eslint-disable-next-line no-console
+      console.log(`[e2e:${testCase.label}] addr=${paymentAddress} fundingTxid=${fundingTxid} utxos=${JSON.stringify(utxos.map(u => ({ txid: u.txid, vout: u.vout, value: u.value })))}`);
       const utxo = utxos.find(u => u.txid === fundingTxid && u.value === 100_000_000)!;
       expect(utxo).toBeDefined();
       const inputValue = BigInt(utxo.value);
