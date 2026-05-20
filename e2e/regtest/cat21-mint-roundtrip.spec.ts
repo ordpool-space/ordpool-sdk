@@ -175,19 +175,42 @@ describe('cat21 mint roundtrip on regtest', () => {
     recipientTaprootAddress = p2tr.address!;
     expectedRecipientScript = p2tr.script;
 
-    // Fund all cases in a single sendmany tx. Earlier we used 4
-    // sequential sendtoaddress calls, and CI was silently dropping
-    // one of them (Leather, the first) — diagnostic logs showed
-    // bitcoin-cli returned a txid but the tx never landed in a block.
-    // Root cause not fully isolated; sendmany sidesteps it entirely
-    // because all four outputs live in ONE tx drawn from ONE input.
+    // FUNDING ORDER MATTERS. The legacy wallet auto-derives ALL
+    // standard address types (P2PKH, P2WPKH, P2SH-P2WPKH) from any
+    // key it holds, and treats outputs at those addresses as
+    // wallet-owned and spendable. The funder pubkey is the wallet's
+    // — so once sendmany funds Leather's P2WPKH (= funder's P2WPKH
+    // derivation), the wallet sees that 1-BTC UTXO as "mine." Any
+    // subsequent send is then free to pick it as input. The previous
+    // run did exactly that: dust send picked Leather's freshly-funded
+    // 1-BTC UTXO, spent it, change went back to wallet. Leather lost
+    // its funding silently.
+    //
+    // Two avoidances:
+    //   - Dust UTXO goes to a FRESH keypair (dustPrivateKey) so the
+    //     wallet doesn't recognise the destination.
+    //   - Dust send happens BEFORE the sendmany so the wallet has no
+    //     wallet-owned UTXOs at the case payment addresses yet — it
+    //     pulls from a coinbase input.
+
+    dustPrivateKey = secp256k1.utils.randomPrivateKey();
+    dustPublicKey  = secp256k1.getPublicKey(dustPrivateKey, true);
+    const dustPaymentScure = btc.p2wpkh(dustPublicKey, regtestNetwork);
+    dustPaymentAddress = dustPaymentScure.address!;
+    dustPaymentScript  = dustPaymentScure.script;
+    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', dustPaymentAddress, '0.00001');
+
+    // Now fund the 4 case addresses via sendmany — one input, one
+    // tx, four outputs. We make no further sends after this, so the
+    // newly-created wallet-recognised outputs at Leather / Xverse /
+    // Unisat-Legacy / Unisat-Taproot remain untouched.
     const recipients: Record<string, number> = {};
     for (const c of cases) {
       const payment = c.buildPayment(funderPublicKey, regtestNetwork);
       funding[c.label] = {
         paymentAddress: payment.address,
         paymentScript: payment.script,
-        fundingTxid: '',  // filled in after sendmany returns
+        fundingTxid: '',
       };
       recipients[payment.address] = 1.0;
     }
@@ -197,16 +220,6 @@ describe('cat21 mint roundtrip on regtest', () => {
     for (const c of cases) {
       funding[c.label].fundingTxid = sendmanyTxid;
     }
-
-    // Plus a tiny UTXO for the dust-absorb test — at a fresh keypair
-    // the wallet doesn't recognise. See the comment on dustPrivateKey
-    // above for why we can't reuse the funder key here.
-    dustPrivateKey = secp256k1.utils.randomPrivateKey();
-    dustPublicKey  = secp256k1.getPublicKey(dustPrivateKey, true);
-    const dustPaymentScure = btc.p2wpkh(dustPublicKey, regtestNetwork);
-    dustPaymentAddress = dustPaymentScure.address!;
-    dustPaymentScript  = dustPaymentScure.script;
-    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', dustPaymentAddress, '0.00001');
 
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
