@@ -26,17 +26,106 @@ import {
 } from './regtest-helpers';
 
 
+// ─── shared CAT-21 invariants ────────────────────────────────────────
+const CAT21_LOCKTIME      = 21;
+const RECIPIENT_AMOUNT    = BigInt(546);   // canonical first-output value
+const SIGHASH_ALL         = 0x01;
+const SEQUENCE_CAT_KILLER = 0xfffffffd;    // do NOT match this — see cat21.service.helper.ts
+
+
 /**
- * Decode a regtest WIF (Wallet Import Format) into the raw 32-byte
- * private key. Regtest WIFs use version byte 0xef (same as testnet —
- * bitcoind treats regtest as a flavour of testnet for address/key
- * encoding).
+ * Decode a regtest WIF into the raw 32-byte private key. Regtest WIFs
+ * use version byte 0xef (same as testnet — bitcoind treats regtest as
+ * a flavour of testnet for address/key encoding).
  */
 function wifToPrivateKey(wif: string): Uint8Array {
   const decoded = base58.decode(wif);
   // [version (1)] [privkey (32)] [compressed flag (1, optional)] [checksum (4)]
   return decoded.slice(1, 33);
 }
+
+/** Pipe a `bitcoin-cli` command into the regtest container. */
+function rpc(...args: string[]): string {
+  return execSync(
+    ['docker', 'exec', 'ordpool-e2e-bitcoind', 'bitcoin-cli',
+      '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args].join(' '),
+    { encoding: 'utf8' },
+  ).trim();
+}
+
+
+/**
+ * One mint scenario — a wallet path the SDK supports plus the
+ * address-shape that wallet uses for payment inputs.
+ *
+ * The recipient address is always a Taproot output (CAT-21 ownership
+ * lives at the first sat of the first output, single-key-controlled).
+ * The varying axis here is the *input* shape: what kind of UTXO the
+ * funder is spending.
+ */
+interface MintCase {
+  label: string;
+  walletType: KnownOrdinalWalletType;
+  buildPayment: (pubkey: Uint8Array, network: typeof btc.NETWORK) => {
+    address: string;
+    script: Uint8Array;
+  };
+  /** Returns the payment pubkey shape the helper expects. */
+  paymentPubkey: (compressedPubkey: Uint8Array) => Uint8Array;
+  /** Legacy P2PKH inputs need the full funding tx hex (nonWitnessUtxo). */
+  needsTransactionHex: boolean;
+  /** Expected witness-blob count after finalize (for the SIGHASH_ALL probe). */
+  expectedWitnessShape:
+    | { kind: 'segwit_p2wpkh' }      // witness=[sig, pubkey], sighash is last byte of witness[0]
+    | { kind: 'segwit_p2sh_p2wpkh' } // same witness shape; scriptSig holds the redeem-script push
+    | { kind: 'segwit_p2tr' }        // witness=[schnorr_sig], 64 bytes = SIGHASH_DEFAULT
+    | { kind: 'legacy_p2pkh' };      // no witness; scriptSig is [sig, pubkey], sighash is last byte of sig
+}
+
+
+const cases: MintCase[] = [
+  {
+    label: 'Leather (Native SegWit / P2WPKH)',
+    walletType: KnownOrdinalWalletType.leather,
+    buildPayment: (pk, net) => btc.p2wpkh(pk, net) as { address: string; script: Uint8Array },
+    paymentPubkey: (pk) => pk,
+    needsTransactionHex: false,
+    expectedWitnessShape: { kind: 'segwit_p2wpkh' },
+  },
+  {
+    label: 'Xverse (Nested SegWit / P2SH-P2WPKH)',
+    walletType: KnownOrdinalWalletType.xverse,
+    buildPayment: (pk, net) => {
+      const sh = btc.p2sh(btc.p2wpkh(pk, net), net);
+      return { address: sh.address!, script: sh.script };
+    },
+    paymentPubkey: (pk) => pk,
+    needsTransactionHex: false,
+    expectedWitnessShape: { kind: 'segwit_p2sh_p2wpkh' },
+  },
+  {
+    label: 'Unisat (Taproot / P2TR)',
+    walletType: KnownOrdinalWalletType.unisat,
+    buildPayment: (pk, net) => {
+      const tr = btc.p2tr(pk.subarray(1, 33), undefined, net, true);
+      return { address: tr.address!, script: tr.script };
+    },
+    paymentPubkey: (pk) => pk,   // helper toXOnly's internally for unisat-taproot
+    needsTransactionHex: false,
+    expectedWitnessShape: { kind: 'segwit_p2tr' },
+  },
+  {
+    label: 'Unisat (Legacy / P2PKH)',
+    walletType: KnownOrdinalWalletType.unisat,
+    buildPayment: (pk, net) => {
+      const pkh = btc.p2pkh(pk, net);
+      return { address: pkh.address!, script: pkh.script };
+    },
+    paymentPubkey: (pk) => pk,
+    needsTransactionHex: true,
+    expectedWitnessShape: { kind: 'legacy_p2pkh' },
+  },
+];
 
 
 describe('cat21 mint roundtrip on regtest', () => {
@@ -46,205 +135,317 @@ describe('cat21 mint roundtrip on regtest', () => {
   let funded: FundedAccount;
   let funderPrivateKey: Uint8Array;
   let funderPublicKey: Uint8Array;
-  let funderWpkhAddress: string;
   let recipientTaprootAddress: string;
   let expectedRecipientScript: Uint8Array;
-  let expectedChangeScript: Uint8Array;
+
+  /** Per-case funding info, keyed by label. */
+  const funding: Record<string, {
+    paymentAddress: string;
+    paymentScript: Uint8Array;
+    transactionHex?: string;
+  }> = {};
+  /** Address used for the dust-absorb branch (P2WPKH, separate from the change-branch case). */
+  const DUST_AMOUNT_SATS = 1000;
 
   beforeAll(async () => {
     funded = getFundedAccount();
     funderPrivateKey = wifToPrivateKey(funded.wif);
-    funderPublicKey = secp256k1.getPublicKey(funderPrivateKey, true);
+    funderPublicKey  = secp256k1.getPublicKey(funderPrivateKey, true);
 
-    // Mint a CAT-21 from a SegWit input — derive a P2WPKH address
-    // from the funder's key, fund it from the bootstrap's legacy
-    // coinbase wallet.
-    const wpkh = btc.p2wpkh(funderPublicKey, regtestNetwork);
-    funderWpkhAddress = wpkh.address!;
-    expectedChangeScript = wpkh.script;
-
-    // Recipient = same funder, on a Taproot address. CAT-21 ownership
-    // attaches to the first sat of the first output, which has to be
-    // a single, address-keyed UTXO — taproot is the canonical choice.
+    // Recipient is fixed across all cases — Taproot.
     const p2tr = btc.p2tr(funderPublicKey.subarray(1, 33), undefined, regtestNetwork, true);
     recipientTaprootAddress = p2tr.address!;
     expectedRecipientScript = p2tr.script;
 
-    const sendCmd = `docker exec ordpool-e2e-bitcoind bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool -rpcwallet=ordpool-e2e sendtoaddress ${funderWpkhAddress} 1.0`;
-    execSync(sendCmd, { encoding: 'utf8' });
+    // Fund each case's payment address with 1 BTC.
+    for (const c of cases) {
+      const payment = c.buildPayment(funderPublicKey, regtestNetwork);
+      funding[c.label] = { paymentAddress: payment.address, paymentScript: payment.script };
+      rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', payment.address, '1.0');
+    }
+    // Plus a tiny UTXO at the Leather address for the dust-absorb test.
+    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', funding[cases[0].label].paymentAddress, '0.00001');
+
     const tipAfterMine = mineBlocks(1);
     await waitForElectrsSync(tipAfterMine);
+
+    // Legacy P2PKH input needs the full funding-tx hex (nonWitnessUtxo).
+    for (const c of cases.filter(c => c.needsTransactionHex)) {
+      const utxos = await getUtxos(funding[c.label].paymentAddress);
+      // there's exactly one — we sent one 1-BTC tx to a fresh address
+      funding[c.label].transactionHex = await getTxHex(utxos[0].txid);
+    }
   });
 
-  it('builds a real CAT-21 mint, broadcasts it, and pins every on-chain invariant', async () => {
 
-    const FEE                       = BigInt(2_000);
-    const EXPECTED_RECIPIENT_AMOUNT = BigInt(546);   // CAT-21 canonical first-output value
-    const CAT21_LOCKTIME            = 21;
-    const SIGHASH_ALL               = 0x01;
-    const SEQUENCE_CAT_KILLER       = 0xfffffffd;    // do NOT match this — see cat21.service.helper.ts
+  // ───────────────────────────────────────────────────────────────────
+  // Change-branch happy path, one variant per supported wallet/input shape.
+  // The full 11-phase assertion suite runs for every case.
+  // ───────────────────────────────────────────────────────────────────
+  describe.each(cases)('change-branch via $label', (testCase) => {
 
-    // ─── Phase 1: real UTXO via electrs (the API surface our SDK actually hits) ───
-    const utxos: ElectrsUtxo[] = await getUtxos(funderWpkhAddress);
-    expect(utxos.length).toBeGreaterThan(0);
-    const utxo = utxos[0];
-    const inputValue = BigInt(utxo.value);
-    expect(inputValue).toBe(BigInt(100_000_000)); // we funded with exactly 1 BTC
+    it('builds + signs + broadcasts a CAT-21 mint and pins every on-chain invariant', async () => {
 
-    const paymentOutput: TxnOutput = {
-      txid: utxo.txid,
-      vout: utxo.vout,
-      value: utxo.value,
-      status: utxo.status,
-    };
-    const expectedChangeAmount = inputValue - EXPECTED_RECIPIENT_AMOUNT - FEE;
+      const FEE = BigInt(2_000);
+      const { paymentAddress, paymentScript: expectedChangeScript, transactionHex } = funding[testCase.label];
 
-    // ─── Phase 2: build the mint via the SDK helper, verify the return values ───
-    const result = createTransaction(
-      KnownOrdinalWalletType.leather, // P2WPKH input path
-      recipientTaprootAddress,
-      paymentOutput,
-      funderPublicKey,
-      funderWpkhAddress,
-      FEE,
-      false,                          // not a simulation
-      Network.Regtest,
-    );
-    expect(result.amountToRecipient).toBe(EXPECTED_RECIPIENT_AMOUNT);
-    expect(result.singleInputAmount).toBe(inputValue);
-    expect(result.changeAmount).toBe(expectedChangeAmount);
-    expect(result.finalTransactionFee).toBe(FEE);
+      // ─── Phase 1: real UTXO via electrs ───
+      const utxos: ElectrsUtxo[] = await getUtxos(paymentAddress);
+      // The Leather (P2WPKH) address also holds a 1000-sat dust UTXO
+      // for the dust-absorb test. Pick the 1-BTC one explicitly.
+      const utxo = utxos.find(u => u.value === 100_000_000)!;
+      expect(utxo).toBeDefined();
+      const inputValue = BigInt(utxo.value);
 
-    const { tx } = result;
+      const paymentOutput: TxnOutput = {
+        txid: utxo.txid,
+        vout: utxo.vout,
+        value: utxo.value,
+        status: utxo.status,
+        transactionHex,
+      };
+      const expectedChangeAmount = inputValue - RECIPIENT_AMOUNT - FEE;
+      const paymentPubkey = testCase.paymentPubkey(funderPublicKey);
 
-    // ─── Phase 3: pre-broadcast invariants on the unsigned tx ───
-    expect(tx.lockTime).toBe(CAT21_LOCKTIME);
-    expect(tx.outputsLength).toBe(2);
+      // ─── Phase 2: build via helper ───
+      const result = createTransaction(
+        testCase.walletType,
+        recipientTaprootAddress,
+        paymentOutput,
+        paymentPubkey,
+        paymentAddress,
+        FEE,
+        false,
+        Network.Regtest,
+      );
+      expect(result.amountToRecipient).toBe(RECIPIENT_AMOUNT);
+      expect(result.singleInputAmount).toBe(inputValue);
+      expect(result.changeAmount).toBe(expectedChangeAmount);
+      expect(result.finalTransactionFee).toBe(FEE);
 
-    // Output ordering matters: CAT-21 ownership = first sat of first
-    // output. output[0] MUST be the recipient, output[1] MUST be change.
-    // Swap these by accident and the cat goes to the wrong address.
-    const out0 = tx.getOutput(0);
-    const out1 = tx.getOutput(1);
-    expect(out0.amount).toBe(EXPECTED_RECIPIENT_AMOUNT);
-    expect(out0.script).toEqual(expectedRecipientScript);
-    expect(out1.amount).toBe(expectedChangeAmount);
-    expect(out1.script).toEqual(expectedChangeScript);
+      const { tx } = result;
 
-    // ─── Phase 4: simulate vsize, compare against the real signed tx ───
-    // The simulation uses a dummy keypair so the fee-estimator UI can
-    // compute vsize without prompting the user. The dummy-signed and
-    // really-signed txs have the same script layout — vsize must match.
-    const sim = createTransaction(
-      KnownOrdinalWalletType.leather,
-      recipientTaprootAddress,
-      paymentOutput,
-      funderPublicKey,
-      funderWpkhAddress,
-      FEE,
-      true,                           // simulation
-      Network.Regtest,
-    );
-    const { dummyPrivateKey } = getDummyKeypair(regtestNetwork);
-    sim.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.ALL]);
-    sim.tx.finalize();
-    const simulatedVsize = sim.tx.vsize;
+      // ─── Phase 3: pre-broadcast structure ───
+      expect(tx.lockTime).toBe(CAT21_LOCKTIME);
+      expect(tx.outputsLength).toBe(2);
 
-    // ─── Phase 5: sign + finalize the real tx ───
-    tx.signIdx(funderPrivateKey, 0, [btc.SigHash.ALL]);
-    tx.finalize();
-    expect(tx.vsize).toBe(simulatedVsize);
+      // Output ordering — CAT-21 ownership lives at first sat of first output.
+      const out0 = tx.getOutput(0);
+      const out1 = tx.getOutput(1);
+      expect(out0.amount).toBe(RECIPIENT_AMOUNT);
+      expect(out0.script).toEqual(expectedRecipientScript);
+      expect(out1.amount).toBe(expectedChangeAmount);
+      expect(out1.script).toEqual(expectedChangeScript);
 
-    // ─── Phase 6: introspect the witness — SIGHASH_ALL on every signature ───
-    // P2WPKH witness layout: [signature_der_with_sighash_byte, pubkey].
-    // The last byte of the signature blob is the sighash type.
-    const finalized = btc.Transaction.fromRaw(hex.decode(tx.hex));
-    const input0Final = finalized.getInput(0);
-    const witness = input0Final.finalScriptWitness;
-    expect(witness).toBeDefined();
-    expect(witness!).toHaveLength(2);
-    const signatureBytes = witness![0];
-    expect(signatureBytes[signatureBytes.length - 1]).toBe(SIGHASH_ALL);
+      // ─── Phase 4: simulation vsize matches the real-signed vsize ───
+      const sim = createTransaction(
+        testCase.walletType,
+        recipientTaprootAddress,
+        paymentOutput,
+        paymentPubkey,
+        paymentAddress,
+        FEE,
+        true,                         // simulation
+        Network.Regtest,
+      );
+      const { dummyPrivateKey } = getDummyKeypair(regtestNetwork);
+      sim.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.ALL]);
+      sim.tx.finalize();
 
-    // Sequence: do NOT match the "cat killer" value. Comment in
-    // cat21.service.helper.ts:373 calls out 0xfffffffd specifically.
-    expect(input0Final.sequence).not.toBe(SEQUENCE_CAT_KILLER);
+      // ─── Phase 5: sign + finalize the real tx ───
+      tx.signIdx(funderPrivateKey, 0, [btc.SigHash.ALL]);
+      tx.finalize();
+      expect(tx.vsize).toBe(sim.tx.vsize);
 
-    // ─── Phase 7: broadcast — bitcoind must accept the bytes ───
-    const broadcastedTxid = await postTx(tx.hex);
-    expect(broadcastedTxid).toBe(tx.id);
+      // ─── Phase 6: SIGHASH_ALL + non-cat-killer sequence ───
+      const finalized = btc.Transaction.fromRaw(hex.decode(tx.hex));
+      const input0 = finalized.getInput(0);
+      assertSighashAll(input0, testCase.expectedWitnessShape);
+      expect(input0.sequence).not.toBe(SEQUENCE_CAT_KILLER);
 
-    // ─── Phase 8: mine + wait for electrs to index ───
-    const tipAfterMine = mineBlocks(1);
-    await waitForElectrsSync(tipAfterMine);
+      // ─── Phase 7: broadcast ───
+      const broadcastedTxid = await postTx(tx.hex);
+      expect(broadcastedTxid).toBe(tx.id);
 
-    // ─── Phase 9: confirmation status + bytes survive the round-trip ───
-    const status = await getTxStatus(broadcastedTxid);
-    expect(status.confirmed).toBe(true);
-    expect(status.block_height).toBe(tipAfterMine);
+      // ─── Phase 8: mine + wait for electrs ───
+      const tipAfterMine = mineBlocks(1);
+      await waitForElectrsSync(tipAfterMine);
 
-    const retrievedHex = await getTxHex(broadcastedTxid);
-    expect(retrievedHex).toBe(tx.hex);
+      // ─── Phase 9: confirmation + bytes round-trip ───
+      const status = await getTxStatus(broadcastedTxid);
+      expect(status.confirmed).toBe(true);
+      expect(status.block_height).toBe(tipAfterMine);
 
-    // ─── Phase 10: re-parse the on-chain bytes, re-assert every invariant ───
-    // Everything we set must survive scure-serialize → POST /tx →
-    // bitcoind acceptance → block inclusion → electrs reindex → GET /tx.
-    const onChain = btc.Transaction.fromRaw(hex.decode(retrievedHex));
-    expect(onChain.lockTime).toBe(CAT21_LOCKTIME);
-    expect(onChain.outputsLength).toBe(2);
+      const retrievedHex = await getTxHex(broadcastedTxid);
+      expect(retrievedHex).toBe(tx.hex);
 
-    const onChainOut0 = onChain.getOutput(0);
-    const onChainOut1 = onChain.getOutput(1);
-    expect(onChainOut0.amount).toBe(EXPECTED_RECIPIENT_AMOUNT);
-    expect(onChainOut0.script).toEqual(expectedRecipientScript);
-    expect(onChainOut1.amount).toBe(expectedChangeAmount);
-    expect(onChainOut1.script).toEqual(expectedChangeScript);
+      // ─── Phase 10: re-parse the on-chain bytes, re-assert ───
+      const onChain = btc.Transaction.fromRaw(hex.decode(retrievedHex));
+      expect(onChain.lockTime).toBe(CAT21_LOCKTIME);
+      expect(onChain.outputsLength).toBe(2);
+      expect(onChain.getOutput(0).amount).toBe(RECIPIENT_AMOUNT);
+      expect(onChain.getOutput(0).script).toEqual(expectedRecipientScript);
+      expect(onChain.getOutput(1).amount).toBe(expectedChangeAmount);
+      expect(onChain.getOutput(1).script).toEqual(expectedChangeScript);
 
-    const onChainInput0 = onChain.getInput(0);
-    expect(onChainInput0.sequence).not.toBe(SEQUENCE_CAT_KILLER);
-    const onChainWitness = onChainInput0.finalScriptWitness;
-    expect(onChainWitness).toBeDefined();
-    expect(onChainWitness![0][onChainWitness![0].length - 1]).toBe(SIGHASH_ALL);
+      const onChainInput0 = onChain.getInput(0);
+      expect(onChainInput0.sequence).not.toBe(SEQUENCE_CAT_KILLER);
+      assertSighashAll(onChainInput0, testCase.expectedWitnessShape);
 
-    // ─── Phase 11: roundtrip through ordpool-parser, the library cat21-indexer uses ───
-    // The chain has accepted our tx. Now we ask the same parser the
-    // ordpool/cat21-indexer ingest pipeline uses ("is this a CAT-21
-    // mint?") and verify it says yes — closing the loop SDK ↔ Parser.
-    const esploraTx = await getTx(broadcastedTxid);
+      // ─── Phase 11: ordpool-parser identifies the on-chain tx as a CAT-21 ───
+      const esploraTx = await getTx(broadcastedTxid);
+      // eslint-disable-next-line no-console
+      console.log(`[e2e:${testCase.label}] txid       = ${esploraTx.txid}`);
+      // eslint-disable-next-line no-console
+      console.log(`[e2e:${testCase.label}] block_hash = ${esploraTx.status.block_hash}`);
 
-    // Echo for human debugging — if this test ever fails on CI, the
-    // logs give you the txid + block_hash to inspect directly:
-    //   bitcoin-cli -regtest getrawtransaction <txid> 2
-    //   bitcoin-cli -regtest getblock <block_hash>
-    // eslint-disable-next-line no-console
-    console.log(`[e2e] txid       = ${esploraTx.txid}`);
-    // eslint-disable-next-line no-console
-    console.log(`[e2e] block_hash = ${esploraTx.status.block_hash}`);
+      expect(esploraTx.locktime).toBe(CAT21_LOCKTIME);
+      expect(esploraTx.status.block_hash).toBeTruthy();
 
-    expect(esploraTx.locktime).toBe(CAT21_LOCKTIME);
-    expect(esploraTx.status.block_hash).toBeTruthy();
+      const parsed = Cat21ParserService.parse(esploraTx);
+      expect(parsed).not.toBeNull();
+      expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
+      expect(parsed!.transactionId).toBe(broadcastedTxid);
+      expect(parsed!.blockId).toBe(esploraTx.status.block_hash);
+      expect(parsed!.uniqueId).toBe(
+        `${DigitalArtifactType.Cat21}-${broadcastedTxid}-${esploraTx.status.block_hash}`
+      );
+      expect(parsed!.getImage()).toMatch(/^<svg/);
+      expect(parsed!.getTraits()).not.toBeNull();
+    });
+  });
 
-    const parsed = Cat21ParserService.parse(esploraTx);
-    expect(parsed).not.toBeNull();
-    expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
-    expect(parsed!.transactionId).toBe(broadcastedTxid);
-    expect(parsed!.blockId).toBe(esploraTx.status.block_hash);
-    expect(parsed!.uniqueId).toBe(
-      `${DigitalArtifactType.Cat21}-${broadcastedTxid}-${esploraTx.status.block_hash}`
-    );
 
-    // The parser produces a deterministic SVG + traits from
-    // SHA256(txid + blockId) — fee-rate gates the color palette.
-    // We don't pin the exact byte output (regtest txid/blockId are
-    // random), but we do prove the parser produces a non-empty image
-    // and a populated trait record. If either is null on a confirmed
-    // tx, the indexer would silently store a broken cat.
-    const svg = parsed!.getImage();
-    expect(svg).toMatch(/^<svg/);
-    expect(svg.length).toBeGreaterThan(500);
+  // ───────────────────────────────────────────────────────────────────
+  // Dust-absorb branch: when change would land below the dust limit,
+  // it folds into the miner fee. CAT-21 *feature* (rarer color via
+  // higher feeRate, faster confirmation) — don't "fix" it.
+  // ───────────────────────────────────────────────────────────────────
+  describe('dust-absorb branch (sub-dust change folds into the miner fee)', () => {
 
-    const traits = parsed!.getTraits();
-    expect(traits).not.toBeNull();
-    expect(typeof traits!.genesis).toBe('boolean');
+    it('emits a single 546-sat recipient output and zero change', async () => {
+
+      const { paymentAddress, paymentScript } = funding[cases[0].label]; // Leather/P2WPKH path
+      const utxos = await getUtxos(paymentAddress);
+      const dustUtxo = utxos.find(u => u.value === DUST_AMOUNT_SATS)!;
+      expect(dustUtxo).toBeDefined();
+
+      const inputValue = BigInt(dustUtxo.value);   // 1000 sats
+      const FEE_INPUT  = BigInt(300);
+      // 1000 - 546 - 300 = 154 < dust limit 294 (for P2WPKH) → absorb branch.
+      // After absorb: change folds into fee → finalFee = 300 + 154 = 454, output count = 1.
+      const EXPECTED_FOLDED_CHANGE = BigInt(154);
+      const EXPECTED_FINAL_FEE     = FEE_INPUT + EXPECTED_FOLDED_CHANGE;
+
+      const paymentOutput: TxnOutput = {
+        txid: dustUtxo.txid,
+        vout: dustUtxo.vout,
+        value: dustUtxo.value,
+        status: dustUtxo.status,
+      };
+
+      const result = createTransaction(
+        KnownOrdinalWalletType.leather,
+        recipientTaprootAddress,
+        paymentOutput,
+        funderPublicKey,
+        paymentAddress,
+        FEE_INPUT,
+        false,
+        Network.Regtest,
+      );
+
+      // helper return values reflect the absorbed branch
+      expect(result.amountToRecipient).toBe(RECIPIENT_AMOUNT);
+      expect(result.singleInputAmount).toBe(inputValue);
+      expect(result.changeAmount).toBe(BigInt(0));
+      expect(result.finalTransactionFee).toBe(EXPECTED_FINAL_FEE);
+
+      const { tx } = result;
+      expect(tx.lockTime).toBe(CAT21_LOCKTIME);
+
+      // Critical: ONE output. The recipient still gets exactly 546 sats —
+      // the dust gain is entirely the miner's. Any future refactor that
+      // pads the recipient with the dust would silently break holders'
+      // expectation that every Cat lives on a 546-sat UTXO.
+      expect(tx.outputsLength).toBe(1);
+      const onlyOutput = tx.getOutput(0);
+      expect(onlyOutput.amount).toBe(RECIPIENT_AMOUNT);
+      expect(onlyOutput.script).toEqual(expectedRecipientScript);
+      // payment-address script never appears as an output in this branch
+      expect(onlyOutput.script).not.toEqual(paymentScript);
+
+      // ─── sign + broadcast + mine ───
+      tx.signIdx(funderPrivateKey, 0, [btc.SigHash.ALL]);
+      tx.finalize();
+      const broadcastedTxid = await postTx(tx.hex);
+      expect(broadcastedTxid).toBe(tx.id);
+      const tipAfterMine = mineBlocks(1);
+      await waitForElectrsSync(tipAfterMine);
+
+      // ─── electrs sees one output worth 546, fee 454 ───
+      const esploraTx = await getTx(broadcastedTxid);
+      // eslint-disable-next-line no-console
+      console.log(`[e2e:dust-absorb] txid       = ${esploraTx.txid}`);
+      // eslint-disable-next-line no-console
+      console.log(`[e2e:dust-absorb] block_hash = ${esploraTx.status.block_hash}`);
+
+      expect(esploraTx.locktime).toBe(CAT21_LOCKTIME);
+      expect(esploraTx.vout).toHaveLength(1);
+      expect(esploraTx.fee).toBe(Number(EXPECTED_FINAL_FEE));
+
+      // Parser still recognises it as a CAT-21 (1-output mints are valid).
+      const parsed = Cat21ParserService.parse(esploraTx);
+      expect(parsed).not.toBeNull();
+      expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
+    });
   });
 });
+
+
+/**
+ * SIGHASH_ALL check that adapts to whichever input-script shape the
+ * tx uses.
+ *
+ * - P2WPKH / P2SH-P2WPKH: witness = [signature_der_with_sighash_byte, pubkey],
+ *   the last byte of `witness[0]` is the sighash type.
+ * - P2TR (keypath): witness = [schnorr_signature], 64 bytes for the
+ *   default sighash (BIP-341 says SIGHASH_DEFAULT == SIGHASH_ALL),
+ *   65 bytes if explicit. We accept either: 64-byte → DEFAULT,
+ *   65-byte → last byte must be 0x01.
+ * - Legacy P2PKH: scriptSig holds [push <signature>, push <pubkey>].
+ *   The signature is the first pushdata; its final byte is the sighash.
+ */
+function assertSighashAll(
+  input: { finalScriptWitness?: Uint8Array[]; finalScriptSig?: Uint8Array },
+  shape: MintCase['expectedWitnessShape'],
+): void {
+  if (shape.kind === 'segwit_p2wpkh' || shape.kind === 'segwit_p2sh_p2wpkh') {
+    const witness = input.finalScriptWitness;
+    expect(witness).toBeDefined();
+    expect(witness!).toHaveLength(2);
+    const sig = witness![0];
+    expect(sig[sig.length - 1]).toBe(SIGHASH_ALL);
+    return;
+  }
+  if (shape.kind === 'segwit_p2tr') {
+    const witness = input.finalScriptWitness;
+    expect(witness).toBeDefined();
+    expect(witness!).toHaveLength(1);
+    const sig = witness![0];
+    // 64 bytes → SIGHASH_DEFAULT (== SIGHASH_ALL implicit, BIP-341).
+    // 65 bytes → explicit sighash byte at the end, must be 0x01.
+    if (sig.length === 64) return;
+    expect(sig).toHaveLength(65);
+    expect(sig[64]).toBe(SIGHASH_ALL);
+    return;
+  }
+  // legacy_p2pkh: scriptSig is two pushdata items: <signature> <pubkey>.
+  // The first item is a single-byte length prefix followed by the
+  // signature; the sighash byte is the last byte of that signature.
+  const scriptSig = input.finalScriptSig;
+  expect(scriptSig).toBeDefined();
+  const sigLen = scriptSig![0];
+  const sig = scriptSig!.subarray(1, 1 + sigLen);
+  expect(sig[sig.length - 1]).toBe(SIGHASH_ALL);
+}
