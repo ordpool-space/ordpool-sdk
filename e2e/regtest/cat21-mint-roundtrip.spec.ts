@@ -30,7 +30,11 @@ import {
 const CAT21_LOCKTIME      = 21;
 const RECIPIENT_AMOUNT    = BigInt(546);   // canonical first-output value
 const SIGHASH_ALL         = 0x01;
-const SEQUENCE_CAT_KILLER = 0xfffffffd;    // do NOT match this — see cat21.service.helper.ts
+// Non-RBF-signaling sequence (BIP-125). Xverse only offers its
+// "accelerate" replace-by-fee button when the input opts in
+// (sequence < 0xfffffffe), and the replacement tx drops
+// nLockTime=21 — killing the cat. Stay at or above this.
+const MIN_NON_RBF_SEQUENCE = 0xfffffffe;
 
 
 /**
@@ -319,11 +323,11 @@ describe('cat21 mint roundtrip on regtest', () => {
       tx.finalize();
       expect(tx.vsize).toBe(sim.tx.vsize);
 
-      // ─── Phase 6: SIGHASH_ALL + non-cat-killer sequence ───
+      // ─── Phase 6: SIGHASH_ALL + non-RBF sequence ───
       const finalized = btc.Transaction.fromRaw(hex.decode(tx.hex));
       const input0 = finalized.getInput(0);
       assertSighashAll(input0, testCase.expectedWitnessShape);
-      expect(input0.sequence).not.toBe(SEQUENCE_CAT_KILLER);
+      expect(input0.sequence).toBeGreaterThanOrEqual(MIN_NON_RBF_SEQUENCE);
 
       // ─── Phase 7: broadcast ───
       const broadcastedTxid = await postTx(tx.hex);
@@ -351,7 +355,7 @@ describe('cat21 mint roundtrip on regtest', () => {
       expect(onChain.getOutput(1).script).toEqual(expectedChangeScript);
 
       const onChainInput0 = onChain.getInput(0);
-      expect(onChainInput0.sequence).not.toBe(SEQUENCE_CAT_KILLER);
+      expect(onChainInput0.sequence).toBeGreaterThanOrEqual(MIN_NON_RBF_SEQUENCE);
       assertSighashAll(onChainInput0, testCase.expectedWitnessShape);
 
       // ─── Phase 11: ordpool-parser identifies the on-chain tx as a CAT-21 ───
