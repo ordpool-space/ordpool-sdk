@@ -1,0 +1,57 @@
+# Regtest backend for ordpool-sdk E2E tests.
+#
+# bitcoind serves the actual Bitcoin protocol in regtest mode — a
+# private chain we control. The test bootstrapper mines blocks at
+# will via `bitcoin-cli generatetoaddress`, no faucet, no waiting.
+#
+# mempool/electrs serves the Esplora-compatible API the SDK actually
+# hits (`/api/address/{addr}/utxo`, `/api/tx/{txid}/hex`, `POST /api/tx`).
+# Connects to bitcoind over RPC, indexes the chain on the fly.
+
+services:
+  bitcoind:
+    image: ruimarinho/bitcoin-core:25
+    container_name: ordpool-e2e-bitcoind
+    command:
+      - -regtest
+      - -server=1
+      - -txindex=1
+      - -fallbackfee=0.0002
+      - -rpcuser=ordpool
+      - -rpcpassword=ordpool
+      - -rpcallowip=0.0.0.0/0
+      - -rpcbind=0.0.0.0
+      - -listen=1
+      - -zmqpubrawblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtx=tcp://0.0.0.0:28333
+    ports:
+      - "18443:18443"   # RPC (regtest)
+      - "18444:18444"   # P2P (regtest)
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=ordpool", "-rpcpassword=ordpool", "getblockchaininfo"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  electrs:
+    image: mempool/electrs:latest
+    container_name: ordpool-e2e-electrs
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    command:
+      - --network=regtest
+      - --daemon-rpc-addr=bitcoind:18443
+      - --cookie=ordpool:ordpool
+      - --http-addr=0.0.0.0:3000
+      - --electrum-rpc-addr=0.0.0.0:50001
+      - --jsonrpc-import
+      - -vvvv
+    ports:
+      - "3000:3000"     # Esplora HTTP API
+      - "50001:50001"   # Electrum protocol
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000/blocks/tip/height"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

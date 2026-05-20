@@ -1,0 +1,57 @@
+name: E2E (regtest)
+
+# Real chain end-to-end: bitcoind + electrs in Docker, our
+# createTransaction / signIdx / postTx round-trip against the actual
+# Esplora API a user would hit.
+#
+# Without this we have no way of knowing that our signed bytes mine,
+# that electrs accepts them, or that an scure version bump silently
+# broke the wire format. Mock-based specs cover the call shape; this
+# covers the call landing.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  regtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build SDK (so the helpers compile cleanly before the test imports them)
+        run: npm run build
+
+      - name: Start bitcoind + electrs (regtest)
+        run: docker compose -f e2e/docker-compose.regtest.yml up -d
+
+      - name: Bootstrap regtest funds (101 blocks, dump WIF)
+        id: bootstrap
+        run: |
+          chmod +x e2e/regtest-bootstrap.sh
+          BOOT=$(./e2e/regtest-bootstrap.sh)
+          echo "$BOOT"
+          echo "REGTEST_FUNDED_ADDR=$(echo "$BOOT" | jq -r .address)" >> "$GITHUB_ENV"
+          echo "REGTEST_FUNDED_WIF=$(echo "$BOOT" | jq -r .wif)"     >> "$GITHUB_ENV"
+
+      - name: Run E2E specs
+        run: npm run test:e2e:regtest
+
+      - name: Container logs on failure
+        if: failure()
+        run: |
+          echo "=== bitcoind ==="
+          docker logs ordpool-e2e-bitcoind || true
+          echo "=== electrs ==="
+          docker logs ordpool-e2e-electrs || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f e2e/docker-compose.regtest.yml down -v

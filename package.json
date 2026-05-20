@@ -21,6 +21,9 @@
     "test:node:watch": "jest --config jest.config.node.js --watch ",
     "test:browser": "jest --config jest.config.browser.js",
     "test:browser:watch": "jest --config jest.config.browser.js --watch ",
+    "test:e2e:regtest:up": "docker compose -f e2e/docker-compose.regtest.yml up -d",
+    "test:e2e:regtest:down": "docker compose -f e2e/docker-compose.regtest.yml down -v",
+    "test:e2e:regtest": "jest --config e2e/jest.config.regtest.js",
     "prepare": "npm run build",
     "create-link": "npm run build && cd dist && npm link"
   },
