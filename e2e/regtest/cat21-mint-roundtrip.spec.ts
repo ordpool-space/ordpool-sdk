@@ -191,6 +191,10 @@ describe('cat21 mint roundtrip on regtest', () => {
 
       // ─── Phase 1: real UTXO via electrs ───
       const utxos: ElectrsUtxo[] = await getUtxos(paymentAddress);
+      // eslint-disable-next-line no-console
+      console.log(`[e2e:${testCase.label}] paymentAddress = ${paymentAddress}`);
+      // eslint-disable-next-line no-console
+      console.log(`[e2e:${testCase.label}] utxos = ${JSON.stringify(utxos)}`);
       // The Leather (P2WPKH) address also holds a 1000-sat dust UTXO
       // for the dust-absorb test. Pick the 1-BTC one explicitly.
       const utxo = utxos.find(u => u.value === 100_000_000)!;
