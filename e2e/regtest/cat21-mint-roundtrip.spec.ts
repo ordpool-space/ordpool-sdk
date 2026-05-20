@@ -150,7 +150,19 @@ describe('cat21 mint roundtrip on regtest', () => {
     fundingTxid: string;
     transactionHex?: string;
   }> = {};
-  /** Address used for the dust-absorb branch (P2WPKH, separate from the change-branch case). */
+  /**
+   * Dust-absorb branch uses its OWN keypair, separate from the
+   * funder. The legacy wallet auto-derives P2WPKH addresses for any
+   * key it holds and treats outputs at them as wallet change. If we
+   * sent the dust UTXO to the funder's P2WPKH (= Leather's address),
+   * the wallet would happily spend the freshly-funded 1-BTC UTXO at
+   * that address to pay for the dust send, vapourising it. Different
+   * key, different unrecognised address, no collision.
+   */
+  let dustPrivateKey: Uint8Array;
+  let dustPublicKey: Uint8Array;
+  let dustPaymentAddress: string;
+  let dustPaymentScript: Uint8Array;
   const DUST_AMOUNT_SATS = 1000;
 
   beforeAll(async () => {
@@ -186,9 +198,15 @@ describe('cat21 mint roundtrip on regtest', () => {
       funding[c.label].fundingTxid = sendmanyTxid;
     }
 
-    // Plus a tiny UTXO at the Leather address for the dust-absorb
-    // test (separate tx, this one's structurally independent).
-    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', funding[cases[0].label].paymentAddress, '0.00001');
+    // Plus a tiny UTXO for the dust-absorb test — at a fresh keypair
+    // the wallet doesn't recognise. See the comment on dustPrivateKey
+    // above for why we can't reuse the funder key here.
+    dustPrivateKey = secp256k1.utils.randomPrivateKey();
+    dustPublicKey  = secp256k1.getPublicKey(dustPrivateKey, true);
+    const dustPaymentScure = btc.p2wpkh(dustPublicKey, regtestNetwork);
+    dustPaymentAddress = dustPaymentScure.address!;
+    dustPaymentScript  = dustPaymentScure.script;
+    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', dustPaymentAddress, '0.00001');
 
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
@@ -220,8 +238,6 @@ describe('cat21 mint roundtrip on regtest', () => {
       // address, Leather also holds a dust UTXO for the dust-absorb
       // test. Source-txid is unambiguous.
       const utxos: ElectrsUtxo[] = await getUtxos(paymentAddress);
-      // eslint-disable-next-line no-console
-      console.log(`[e2e:${testCase.label}] addr=${paymentAddress} fundingTxid=${fundingTxid} utxos=${JSON.stringify(utxos.map(u => ({ txid: u.txid, vout: u.vout, value: u.value })))}`);
       const utxo = utxos.find(u => u.txid === fundingTxid && u.value === 100_000_000)!;
       expect(utxo).toBeDefined();
       const inputValue = BigInt(utxo.value);
@@ -354,8 +370,7 @@ describe('cat21 mint roundtrip on regtest', () => {
 
     it('emits a single 546-sat recipient output and zero change', async () => {
 
-      const { paymentAddress, paymentScript } = funding[cases[0].label]; // Leather/P2WPKH path
-      const utxos = await getUtxos(paymentAddress);
+      const utxos = await getUtxos(dustPaymentAddress);
       const dustUtxo = utxos.find(u => u.value === DUST_AMOUNT_SATS)!;
       expect(dustUtxo).toBeDefined();
 
@@ -377,8 +392,8 @@ describe('cat21 mint roundtrip on regtest', () => {
         KnownOrdinalWalletType.leather,
         recipientTaprootAddress,
         paymentOutput,
-        funderPublicKey,
-        paymentAddress,
+        dustPublicKey,
+        dustPaymentAddress,
         FEE_INPUT,
         false,
         Network.Regtest,
@@ -402,10 +417,10 @@ describe('cat21 mint roundtrip on regtest', () => {
       expect(onlyOutput.amount).toBe(RECIPIENT_AMOUNT);
       expect(onlyOutput.script).toEqual(expectedRecipientScript);
       // payment-address script never appears as an output in this branch
-      expect(onlyOutput.script).not.toEqual(paymentScript);
+      expect(onlyOutput.script).not.toEqual(dustPaymentScript);
 
       // ─── sign + broadcast + mine ───
-      tx.signIdx(funderPrivateKey, 0, [btc.SigHash.ALL]);
+      tx.signIdx(dustPrivateKey, 0, [btc.SigHash.ALL]);
       tx.finalize();
       const broadcastedTxid = await postTx(tx.hex);
       expect(broadcastedTxid).toBe(tx.id);
