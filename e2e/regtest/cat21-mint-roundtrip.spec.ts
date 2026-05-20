@@ -175,36 +175,42 @@ describe('cat21 mint roundtrip on regtest', () => {
     recipientTaprootAddress = p2tr.address!;
     expectedRecipientScript = p2tr.script;
 
-    // FUNDING ORDER MATTERS. The legacy wallet auto-derives ALL
-    // standard address types (P2PKH, P2WPKH, P2SH-P2WPKH) from any
-    // key it holds, and treats outputs at those addresses as
-    // wallet-owned and spendable. The funder pubkey is the wallet's
-    // — so once sendmany funds Leather's P2WPKH (= funder's P2WPKH
-    // derivation), the wallet sees that 1-BTC UTXO as "mine." Any
-    // subsequent send is then free to pick it as input. The previous
-    // run did exactly that: dust send picked Leather's freshly-funded
-    // 1-BTC UTXO, spent it, change went back to wallet. Leather lost
-    // its funding silently.
+    // EXPERT MODE: pick the inputs ourselves. The legacy wallet
+    // auto-derives P2PKH / P2WPKH / P2SH-P2WPKH addresses from any
+    // key it holds, so all four case payment addresses look
+    // "wallet-owned" once funded. Default coin-selection would then
+    // happily spend those fresh case UTXOs to fund subsequent sends
+    // — which was eating Leather's funding silently. By pinning
+    // `inputs` on every `send`, we leave coin selection no room to
+    // surprise us.
     //
-    // Two avoidances:
-    //   - Dust UTXO goes to a FRESH keypair (dustPrivateKey) so the
-    //     wallet doesn't recognise the destination.
-    //   - Dust send happens BEFORE the sendmany so the wallet has no
-    //     wallet-owned UTXOs at the case payment addresses yet — it
-    //     pulls from a coinbase input.
+    // listunspent yields every wallet UTXO; we pick two mature
+    // 50-BTC coinbases as funding sources (one for the dust send,
+    // one for the sendmany).
+    type Unspent = { txid: string; vout: number; amount: number; spendable: boolean; confirmations: number };
+    const unspent: Unspent[] = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent'));
+    const matureCoinbases = unspent
+      .filter(u => u.spendable && u.confirmations >= 100 && u.amount === 50)
+      .sort((a, b) => b.confirmations - a.confirmations); // deepest first
+    if (matureCoinbases.length < 2) {
+      throw new Error(`need >=2 mature 50-BTC coinbases, got ${matureCoinbases.length}`);
+    }
+    const [dustInput, sendmanyInput] = matureCoinbases;
 
+    // Dust UTXO: separate keypair so the wallet doesn't claim it.
     dustPrivateKey = secp256k1.utils.randomPrivateKey();
     dustPublicKey  = secp256k1.getPublicKey(dustPrivateKey, true);
     const dustPaymentScure = btc.p2wpkh(dustPublicKey, regtestNetwork);
     dustPaymentAddress = dustPaymentScure.address!;
     dustPaymentScript  = dustPaymentScure.script;
-    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', dustPaymentAddress, '0.00001');
+    rpc(
+      '-named', '-rpcwallet=ordpool-e2e', 'send',
+      `outputs=${JSON.stringify([{ [dustPaymentAddress]: 0.00001 }])}`,
+      `options=${JSON.stringify({ inputs: [{ txid: dustInput.txid, vout: dustInput.vout }] })}`,
+    );
 
-    // Now fund the 4 case addresses via sendmany — one input, one
-    // tx, four outputs. We make no further sends after this, so the
-    // newly-created wallet-recognised outputs at Leather / Xverse /
-    // Unisat-Legacy / Unisat-Taproot remain untouched.
-    const recipients: Record<string, number> = {};
+    // Fund the 4 case addresses in one tx, also with a pinned input.
+    const recipientList: Array<Record<string, number>> = [];
     for (const c of cases) {
       const payment = c.buildPayment(funderPublicKey, regtestNetwork);
       funding[c.label] = {
@@ -212,13 +218,15 @@ describe('cat21 mint roundtrip on regtest', () => {
         paymentScript: payment.script,
         fundingTxid: '',
       };
-      recipients[payment.address] = 1.0;
+      recipientList.push({ [payment.address]: 1.0 });
     }
-    const sendmanyTxid = rpc(
-      '-rpcwallet=ordpool-e2e', 'sendmany', '', JSON.stringify(recipients),
-    );
+    const sendResult = JSON.parse(rpc(
+      '-named', '-rpcwallet=ordpool-e2e', 'send',
+      `outputs=${JSON.stringify(recipientList)}`,
+      `options=${JSON.stringify({ inputs: [{ txid: sendmanyInput.txid, vout: sendmanyInput.vout }] })}`,
+    ));
     for (const c of cases) {
-      funding[c.label].fundingTxid = sendmanyTxid;
+      funding[c.label].fundingTxid = sendResult.txid;
     }
 
     const tip = mineBlocks(1);
