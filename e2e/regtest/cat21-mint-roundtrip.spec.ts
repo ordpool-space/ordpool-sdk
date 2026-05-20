@@ -142,6 +142,7 @@ describe('cat21 mint roundtrip on regtest', () => {
   const funding: Record<string, {
     paymentAddress: string;
     paymentScript: Uint8Array;
+    fundingTxid: string;
     transactionHex?: string;
   }> = {};
   /** Address used for the dust-absorb branch (P2WPKH, separate from the change-branch case). */
@@ -157,23 +158,44 @@ describe('cat21 mint roundtrip on regtest', () => {
     recipientTaprootAddress = p2tr.address!;
     expectedRecipientScript = p2tr.script;
 
-    // Fund each case's payment address with 1 BTC.
+    // Mature additional coinbases so each sendtoaddress below pulls a
+    // fresh confirmed input. Without this we'd have exactly one mature
+    // 50-BTC coinbase from the bootstrap, then build a 5-deep
+    // unconfirmed-mempool chain via change-spending — which we saw
+    // silently drop a tx on CI. Mining 10 extra blocks gives us ~10
+    // mature coinbases, each send picks its own.
+    let tip = mineBlocks(10);
+    await waitForElectrsSync(tip);
+
+    // Fund each case's payment address with 1 BTC. Capture the txid
+    // returned by `bitcoin-cli sendtoaddress` so the test body can
+    // pick the right UTXO by source-tx (Unisat-Legacy reuses the
+    // bootstrap's coinbase address — its utxo list also contains
+    // 100 coinbase outputs of 50 BTC each).
     for (const c of cases) {
       const payment = c.buildPayment(funderPublicKey, regtestNetwork);
-      funding[c.label] = { paymentAddress: payment.address, paymentScript: payment.script };
-      rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', payment.address, '1.0');
+      const fundingTxid = rpc(
+        '-rpcwallet=ordpool-e2e', 'sendtoaddress', payment.address, '1.0',
+      );
+      funding[c.label] = {
+        paymentAddress: payment.address,
+        paymentScript: payment.script,
+        fundingTxid,
+      };
     }
     // Plus a tiny UTXO at the Leather address for the dust-absorb test.
     rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', funding[cases[0].label].paymentAddress, '0.00001');
 
-    const tipAfterMine = mineBlocks(1);
-    await waitForElectrsSync(tipAfterMine);
+    tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
 
     // Legacy P2PKH input needs the full funding-tx hex (nonWitnessUtxo).
+    // Fetch the hex of the specific funding tx we just sent — NOT
+    // `utxos[0]`, which for the Unisat-Legacy address is a random
+    // bootstrap coinbase (we'd hand scure a transactionHex whose txid
+    // doesn't match the UTXO we're trying to spend).
     for (const c of cases.filter(c => c.needsTransactionHex)) {
-      const utxos = await getUtxos(funding[c.label].paymentAddress);
-      // there's exactly one — we sent one 1-BTC tx to a fresh address
-      funding[c.label].transactionHex = await getTxHex(utxos[0].txid);
+      funding[c.label].transactionHex = await getTxHex(funding[c.label].fundingTxid);
     }
   });
 
@@ -187,17 +209,16 @@ describe('cat21 mint roundtrip on regtest', () => {
     it('builds + signs + broadcasts a CAT-21 mint and pins every on-chain invariant', async () => {
 
       const FEE = BigInt(2_000);
-      const { paymentAddress, paymentScript: expectedChangeScript, transactionHex } = funding[testCase.label];
+      const { paymentAddress, paymentScript: expectedChangeScript, transactionHex, fundingTxid } = funding[testCase.label];
 
       // ─── Phase 1: real UTXO via electrs ───
+      // Pick by source-tx (txid we sent in beforeAll). Picking by
+      // value alone goes wrong if the address has other UTXOs of the
+      // same value — Unisat-Legacy reuses the bootstrap coinbase
+      // address, Leather also holds a dust UTXO for the dust-absorb
+      // test. Source-txid is unambiguous.
       const utxos: ElectrsUtxo[] = await getUtxos(paymentAddress);
-      // eslint-disable-next-line no-console
-      console.log(`[e2e:${testCase.label}] paymentAddress = ${paymentAddress}`);
-      // eslint-disable-next-line no-console
-      console.log(`[e2e:${testCase.label}] utxos = ${JSON.stringify(utxos)}`);
-      // The Leather (P2WPKH) address also holds a 1000-sat dust UTXO
-      // for the dust-absorb test. Pick the 1-BTC one explicitly.
-      const utxo = utxos.find(u => u.value === 100_000_000)!;
+      const utxo = utxos.find(u => u.txid === fundingTxid && u.value === 100_000_000)!;
       expect(utxo).toBeDefined();
       const inputValue = BigInt(utxo.value);
 
