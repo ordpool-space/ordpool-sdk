@@ -100,53 +100,44 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   });
 
   // ─── Phase 1: wait past the Lottie splash ───
-  // The first navigation lands on a splash with an animated logo
-  // that needs ~3-5s to settle. Polling for visible body text
-  // beyond the loader is the most reliable signal.
+  // First nav lands on a splash with an animated logo that needs
+  // ~3-5s to settle. Wait until the welcome screen's text shows
+  // ("Your key to a Bitcoin future" + Create / Restore buttons).
   await page.waitForFunction(
     () => {
       const text = (document.body.innerText || '').toLowerCase();
-      // The post-splash welcome screen contains one of these strings
-      // across versions; if none appear, we're still on splash.
-      return text.includes('restore')
-          || text.includes('create')
-          || text.includes('get started')
-          || text.includes('continue')
-          || text.includes('terms');
+      return text.includes('restore') && text.includes('create');
     },
     { timeout: 30_000 },
   );
-  await shot(page, '01-after-splash');
-  await dumpHtml(page, '01-after-splash');
+  await shot(page, '01-welcome');
+  await dumpHtml(page, '01-welcome');
 
-  // ─── Phase 2: get past any Terms / Welcome wall ───
-  // Xverse may show a ToS gate or a "Get Started" splash before
-  // the Create/Restore choice. Click whichever Continue-style
-  // button is visible, up to twice (handles 2-screen welcomes).
-  for (const pass of [1, 2]) {
-    const candidate = page.getByRole('button', {
-      name: /^(continue|get started|i agree|accept|next)$/i,
-    }).first();
-    if (await candidate.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await candidate.click();
-      await shot(page, `02-pass${pass}-after-welcome-button`);
-    } else {
-      break;
-    }
+  // ─── Phase 2: click "Restore an existing wallet" ───
+  const restoreButton = page.getByText(/restore an existing wallet|restore.*wallet/i).first();
+  await expect(restoreButton).toBeVisible({ timeout: 10_000 });
+  await restoreButton.click();
+  await shot(page, '02-after-restore-click');
+
+  // ─── Phase 3: Legal screen ───
+  // Renders ToS + Privacy Policy links plus an "Authorize data
+  // collection" toggle that defaults ON (Mixpanel-bound — flagged
+  // by the v2.3.2 audit). Toggle it off, then Accept.
+  await expect(page.getByText(/legal/i).first()).toBeVisible({ timeout: 15_000 });
+
+  // The data-collection toggle is a custom-styled switch; click
+  // the parent label to flip it. Best-effort: find the row whose
+  // text contains "Authorize data collection" and click it.
+  const dataCollectionRow = page.getByText(/authorize data collection/i).first();
+  if (await dataCollectionRow.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    await dataCollectionRow.click();
+    await shot(page, '03a-data-collection-off');
   }
 
-  // ─── Phase 3: click "Restore Wallet" ───
-  const restoreButton = page.getByRole('button', { name: /restore|i have a wallet|already have/i }).first();
-  // Fallback: some Xverse versions render the choice as a clickable
-  // text link / card rather than a button role.
-  if (!(await restoreButton.isVisible({ timeout: 3_000 }).catch(() => false))) {
-    const restoreText = page.getByText(/restore wallet|i already have a wallet/i).first();
-    await expect(restoreText).toBeVisible({ timeout: 15_000 });
-    await restoreText.click();
-  } else {
-    await restoreButton.click();
-  }
-  await shot(page, '03-after-restore-click');
+  const acceptButton = page.getByRole('button', { name: /^accept$/i }).first();
+  await expect(acceptButton).toBeVisible({ timeout: 10_000 });
+  await acceptButton.click();
+  await shot(page, '03b-after-accept');
 
   // ─── Phase 4: enter the 12-word mnemonic ───
   // Xverse's seed entry has historically been either:
