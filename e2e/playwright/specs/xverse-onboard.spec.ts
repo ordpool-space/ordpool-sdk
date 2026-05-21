@@ -208,7 +208,29 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await continueAfterMnemonic.click();
   await shot(page, '07-after-mnemonic-submit');
 
-  // ─── Phase 7: reach the dashboard ───
+  // ─── Phase 7: "Select a wallet to restore" sub-picker ───
+  // The abandon × 11 + about test seed has been used so widely that
+  // Xverse's chain scan finds multiple wallet derivations with
+  // historical activity. The picker shows e.g. "Wallet 1 / 3 accounts
+  // found" and "Wallet 2 / 11 accounts found". Click "See accounts"
+  // on the first one to drill in, then look for a confirm-style
+  // button on the next screen.
+  const restorePicker = page.getByText(/select a wallet to restore|we found funds in/i).first();
+  if (await restorePicker.isVisible({ timeout: 20_000 }).catch(() => false)) {
+    await shot(page, '07a-wallet-picker');
+    const seeAccounts = page.getByRole('button', { name: /see accounts/i }).first();
+    await seeAccounts.click();
+    await shot(page, '07b-see-accounts-clicked');
+
+    // After drilling in, find a Confirm / Continue / Use button to
+    // commit to this wallet variant.
+    const commit = page.getByRole('button', { name: /^(confirm|continue|use|restore|done|select)$/i }).first();
+    await expect(commit).toBeEnabled({ timeout: 15_000 });
+    await commit.click();
+    await shot(page, '07c-after-wallet-confirm');
+  }
+
+  // ─── Phase 8: reach the dashboard ───
   // The dashboard typically shows the user's address(es) in a copyable
   // format. Wait for either the expected payment or ordinals address
   // to appear in the visible text.
@@ -224,7 +246,7 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');
 
-  // ─── Phase 8: assert at least one expected address renders ───
+  // ─── Phase 9: assert at least one expected address renders ───
   // Even if only one is visible on the first dashboard view, the
   // other should appear after a UI toggle (Payment / Ordinals tabs)
   // OR be retrievable via sats-connect's getAddress in iteration 3.
