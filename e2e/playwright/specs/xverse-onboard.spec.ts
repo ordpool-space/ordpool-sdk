@@ -176,12 +176,14 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await page.waitForTimeout(800);
 
   // "Enter seed phrase" page: 12 numbered boxes, each is an
-  // input[type=password] with an eye-toggle for reveal. Not
-  // text-type, not textarea. The "Have a 24 word seed phrase?"
-  // link at the bottom switches to 24 boxes; we stay at 12.
+  // input[type=password] with an eye-toggle for reveal. The form's
+  // copy says "Enter or paste your 12 or 24 word seed phrase" —
+  // pasting the whole space-separated phrase into the first box
+  // makes Xverse split into all 12 boxes via its paste handler.
+  // Sequential .fill() per box doesn't trigger that handler and
+  // leaves the last box disabled.
   await expect(page.getByText(/enter seed phrase/i).first()).toBeVisible({ timeout: 15_000 });
 
-  const words = TEST_MNEMONIC.split(' ');
   const inputs = page.locator('input[type="password"]');
   await expect(inputs.first()).toBeVisible({ timeout: 10_000 });
   const count = await inputs.count();
@@ -190,10 +192,36 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     await dumpHtml(page, '06b-mnemonic-input-mismatch');
     throw new Error(`expected >=12 word inputs, got ${count}`);
   }
-  for (let i = 0; i < 12; i++) {
-    await inputs.nth(i).fill(words[i]);
-  }
-  await shot(page, '06b-mnemonic-words-typed');
+
+  // Focus the first input and paste the whole phrase. Playwright's
+  // .fill() on an input triggers React's onChange; the onPaste
+  // handler that splits into 12 boxes typically fires on a real
+  // clipboard paste, which we simulate by setting the input value
+  // and dispatching a paste event with the seed in the dataTransfer.
+  await inputs.first().click();
+  await inputs.first().evaluate((el, mnemonic) => {
+    const input = el as HTMLInputElement;
+    const data = new DataTransfer();
+    data.setData('text/plain', mnemonic);
+    const evt = new ClipboardEvent('paste', {
+      clipboardData: data,
+      bubbles: true,
+      cancelable: true,
+    });
+    input.dispatchEvent(evt);
+  }, TEST_MNEMONIC);
+
+  // Sanity wait: after a successful paste-split, every input should
+  // have a non-empty value.
+  await page.waitForFunction(
+    () => {
+      const inputs = document.querySelectorAll('input[type="password"]');
+      return Array.from(inputs).length >= 12
+        && Array.from(inputs).slice(0, 12).every(i => (i as HTMLInputElement).value !== '');
+    },
+    { timeout: 10_000 },
+  );
+  await shot(page, '06b-mnemonic-pasted');
 
   const continueAfterMnemonic = page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first();
   await expect(continueAfterMnemonic).toBeEnabled({ timeout: 15_000 });
