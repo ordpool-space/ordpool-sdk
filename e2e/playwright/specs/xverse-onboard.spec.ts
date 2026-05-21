@@ -257,6 +257,21 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     await shot(page, '07c-after-wallet-confirm');
   }
 
+  // ─── Phase 7d: preferred address-type picker ───
+  // After wallet-confirm, Xverse asks for the default payment
+  // address type (Native SegWit / Nested SegWit / etc). Native
+  // SegWit (BIP-84) is what our expected address derivation uses
+  // and is selected by default — just click Continue.
+  const addressTypePicker = page.getByText(/preferred address type/i).first();
+  if (await addressTypePicker.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await shot(page, '07d-address-type-picker');
+    const continueBtn = page.getByText('Continue', { exact: true }).first();
+    await expect(continueBtn).toBeVisible({ timeout: 10_000 });
+    await continueBtn.click();
+    await page.waitForTimeout(1_000);
+    await shot(page, '07e-after-address-type-continue');
+  }
+
   // ─── Phase 8: reach the dashboard ───
   // Once committed, the dashboard shows one of our expected addresses.
   // After the picker confirm, Xverse may show a "Setting up your
