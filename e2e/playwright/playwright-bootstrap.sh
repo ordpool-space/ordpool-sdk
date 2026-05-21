@@ -15,10 +15,11 @@
 set -euo pipefail
 
 XVERSE_ID="idnnbhkphhpkkjpiopdliebdejnmdmco"
-# prodversion must be a recent Chrome version or the update endpoint
-# returns 404 (it filters by what the client claims to be running).
+# The Chrome update endpoint expects the same query string a real
+# Chrome install would send. Stripping the OS / arch / prod fields
+# yields 404. The full set below is the public-documented format.
 PRODVERSION="131.0.6778.86"
-CRX_URL="https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${PRODVERSION}&acceptformat=crx2,crx3&x=id%3D${XVERSE_ID}%26installsource%3Dondemand%26uc"
+CRX_URL="https://clients2.google.com/service/update2/crx?response=redirect&os=linux&arch=x64&os_arch=x86_64&nacl_arch=x86-64&prod=chromecrx&prodchannel=stable&prodversion=${PRODVERSION}&lang=en-US&acceptformat=crx2,crx3&x=id%3D${XVERSE_ID}%26installsource%3Dondemand%26uc"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXT_DIR="${SCRIPT_DIR}/../extensions/xverse"
