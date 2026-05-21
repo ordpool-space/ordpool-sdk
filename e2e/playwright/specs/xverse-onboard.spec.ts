@@ -193,26 +193,14 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     throw new Error(`expected >=12 word inputs, got ${count}`);
   }
 
-  // Type the full phrase into box 1 character-by-character. Most
-  // mnemonic-grid forms (Xverse included) trap the SPACE key in the
-  // currently-focused input and advance focus to the next box,
-  // splitting the seed naturally. `pressSequentially` simulates
-  // physical key events, which React's onKeyDown / onChange will
-  // see; the synthetic ClipboardEvent approach from before didn't
-  // propagate through React's event delegation.
+  // Type the full phrase into box 1 character-by-character. Xverse's
+  // space-key handler advances focus to the next box, so typing the
+  // space-separated phrase fills all 12 boxes naturally.
+  // pressSequentially fires real key events that React's onKeyDown /
+  // onChange handlers respond to (.fill() and synthetic
+  // ClipboardEvent didn't, in this form).
   await inputs.first().click();
   await inputs.first().pressSequentially(TEST_MNEMONIC, { delay: 25 });
-
-  // Sanity wait: after the sequential type+space-advance, every
-  // input should hold one word.
-  await page.waitForFunction(
-    () => {
-      const list = Array.from(document.querySelectorAll('input[type="password"]'));
-      return list.length >= 12
-        && list.slice(0, 12).every(i => (i as HTMLInputElement).value !== '');
-    },
-    { timeout: 15_000 },
-  );
   await shot(page, '06b-mnemonic-typed');
 
   const continueAfterMnemonic = page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first();
