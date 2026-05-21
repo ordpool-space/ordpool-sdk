@@ -75,10 +75,11 @@ test('Xverse loads in Chromium, exposes a service worker, and renders its onboar
     }
   }
 
-  // Navigate to the extension's index.html (Xverse's main entry).
-  // If it's an SPA the URL may rewrite on first load.
+  // Xverse's manifest exposes options.html / popup.html / panel.html.
+  // options.html is the most likely full-page entry point for an
+  // onboarding flow; popup.html is the toolbar dropdown.
   const page = await context.newPage();
-  await page.goto(`chrome-extension://${extensionId}/index.html`, {
+  await page.goto(`chrome-extension://${extensionId}/options.html`, {
     waitUntil: 'domcontentloaded',
   });
 
