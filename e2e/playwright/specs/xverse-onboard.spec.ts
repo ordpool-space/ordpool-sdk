@@ -156,7 +156,19 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await continueAfterPassword.click();
   await shot(page, '05-after-password-submit');
 
-  // ─── Phase 5: enter the 12-word mnemonic ───
+  // ─── Phase 5: disambiguate which wallet we're importing FROM ───
+  // After password, Xverse asks "What wallet are you importing into
+  // Xverse?" with tiles for Xverse / Magic Eden / Unisat / Phantom /
+  // Leather / OKX / Other. The choice tells Xverse which derivation
+  // paths to scan (different wallets use different defaults for the
+  // same BIP-39 seed). We pick "Xverse" so the derived addresses
+  // come out as the standard BIP-84 (payment) and BIP-86 (ordinals)
+  // we assert against below.
+  await expect(page.getByText(/restore your wallet|what wallet are you importing/i).first()).toBeVisible({ timeout: 15_000 });
+  await page.getByText(/^xverse$/i).first().click();
+  await shot(page, '06-after-source-wallet-pick');
+
+  // ─── Phase 6: enter the 12-word mnemonic ───
   // Xverse's seed entry is either:
   //   (a) one textarea — paste the whole phrase
   //   (b) 12 separate <input> boxes — type/paste per word
@@ -190,7 +202,7 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await continueAfterMnemonic.click();
   await shot(page, '07-after-mnemonic-submit');
 
-  // ─── Phase 6: reach the dashboard ───
+  // ─── Phase 7: reach the dashboard ───
   // The dashboard typically shows the user's address(es) in a copyable
   // format. Wait for either the expected payment or ordinals address
   // to appear in the visible text.
@@ -206,7 +218,7 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');
 
-  // ─── Phase 7: assert both addresses are derivable ───
+  // ─── Phase 8: assert at least one expected address renders ───
   // Even if only one is visible on the first dashboard view, the
   // other should appear after a UI toggle (Payment / Ordinals tabs)
   // OR be retrievable via sats-connect's getAddress in iteration 3.
