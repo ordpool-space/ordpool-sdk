@@ -59,7 +59,10 @@ fi
 
 rm -rf "$EXT_DIR"
 mkdir -p "$EXT_DIR"
-unzip -o -q "$CRX_FILE" -d "$EXT_DIR"
+# unzip exits 1 on warnings (here: the CRX header is "extra bytes
+# at beginning of zipfile") even though all files extract correctly.
+# Tolerate the warning; we verify the manifest is present afterwards.
+unzip -o -q "$CRX_FILE" -d "$EXT_DIR" || true
 
 if [ ! -f "$EXT_DIR/manifest.json" ]; then
   echo "ERROR: unpack produced no manifest.json" >&2
