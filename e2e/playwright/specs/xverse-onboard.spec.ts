@@ -235,21 +235,39 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     await seeAccounts.click();
     await shot(page, '07b-see-accounts-clicked');
 
-    const commit = page.getByRole('button', { name: /^(confirm|continue|use|restore|done|select)$/i }).first();
-    await expect(commit).toBeEnabled({ timeout: 15_000 });
+    // Confirm button: target by visible text, exact match.
+    // getByRole with a regex sometimes targets a stale or off-screen
+    // element; getByText('Confirm', exact) is unambiguous here.
+    const commit = page.getByText('Confirm', { exact: true }).first();
+    await expect(commit).toBeVisible({ timeout: 15_000 });
+    // Wait for the button to actually be enabled, not just visible.
+    // Xverse uses `pointer-events: none` + opacity for the disabled
+    // look, which Playwright's isEnabled() may not catch.
+    await page.waitForFunction(
+      () => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const c = buttons.find(b => b.textContent?.trim() === 'Confirm');
+        if (!c) return false;
+        return !c.hasAttribute('disabled') && getComputedStyle(c).pointerEvents !== 'none';
+      },
+      { timeout: 10_000 },
+    );
     await commit.click();
+    await page.waitForTimeout(1_000);
     await shot(page, '07c-after-wallet-confirm');
   }
 
   // ─── Phase 8: reach the dashboard ───
   // Once committed, the dashboard shows one of our expected addresses.
+  // After the picker confirm, Xverse may show a "Setting up your
+  // wallet" progress screen for several seconds — give it 60s.
   await page.waitForFunction(
     (expected: string[]) => {
       const text = document.body.innerText || '';
       return expected.some(addr => text.includes(addr));
     },
     [EXPECTED_BIP84_ADDRESS, EXPECTED_BIP86_ADDRESS],
-    { timeout: 30_000 },
+    { timeout: 60_000 },
   );
 
   await shot(page, '08-dashboard');
