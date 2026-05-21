@@ -323,7 +323,9 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     .locator('xpath=ancestor::*[self::button or @role="button" or self::a][1]')
     .first();
   await expect(receive).toBeVisible({ timeout: 10_000 });
-  await receive.click();
+  // force: true bypasses the on-top hit-test, in case a portal /
+  // banner overlay still covers the click point invisibly.
+  await receive.click({ force: true });
   await popup.waitForTimeout(1_500);
   await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09d-receive-view.png'), fullPage: true });
 
