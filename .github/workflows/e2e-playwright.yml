@@ -24,6 +24,9 @@ on:
       - 'package*.json'
   workflow_dispatch:
 
+permissions:
+  contents: read    # gh release download needs read access to the same repo's releases
+
 jobs:
   playwright:
     runs-on: ubuntu-latest
@@ -41,19 +44,21 @@ jobs:
       - name: Install Playwright browsers + system deps
         run: npx playwright install --with-deps chromium
 
-      # Cache the built Xverse extension dir keyed by the version
-      # we pin in playwright-bootstrap.sh. First run on a new
-      # version: ~5 minutes (clone + npm install + webpack build).
-      # Subsequent runs: cache hit, skip rebuild.
-      - name: Cache built Xverse extension
+      # Cache the unpacked Xverse extension keyed by the version
+      # pinned in playwright-bootstrap.sh. First run on a new
+      # version: download the .crx from this repo's release asset
+      # and unzip (~5s). Subsequent runs: cache hit, no download.
+      - name: Cache unpacked Xverse extension
         id: xverse-cache
         uses: actions/cache@v4
         with:
           path: e2e/extensions/xverse
-          key: xverse-extension-v0.54.2
+          key: xverse-extension-v2.3.2
 
-      - name: Build Xverse from source
+      - name: Download + unpack Xverse from internal release mirror
         if: steps.xverse-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash e2e/playwright/playwright-bootstrap.sh
 
       - name: Run Playwright tests under xvfb
