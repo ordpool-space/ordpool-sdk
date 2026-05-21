@@ -315,14 +315,16 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09c-modals-dismissed.png'), fullPage: true });
 
   // Click Receive. Xverse renders the label as a <span> inside a
-  // clickable parent, so plain getByText resolves to the span which
-  // Playwright doesn't treat as actionable. force: true bypasses
-  // the actionability check and dispatches the click on the
-  // element's position (which the parent's hit-test will receive).
-  const receive = popup.getByText('Receive', { exact: true }).first();
+  // clickable card (<button> or <div role="button">). A direct
+  // click on the span doesn't always propagate the click handler;
+  // walk up to the closest clickable ancestor and click that.
+  const receive = popup
+    .getByText('Receive', { exact: true })
+    .locator('xpath=ancestor::*[self::button or @role="button" or self::a][1]')
+    .first();
   await expect(receive).toBeVisible({ timeout: 10_000 });
-  await receive.click({ force: true });
-  await popup.waitForTimeout(1_000);
+  await receive.click();
+  await popup.waitForTimeout(1_500);
   await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09d-receive-view.png'), fullPage: true });
 
   // The receive view shows our addresses as copyable text. Wait
