@@ -280,25 +280,58 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await expect(page.getByText(/wallet restored/i).first()).toBeVisible({ timeout: 30_000 });
   await shot(page, '08-wallet-restored');
 
-  // ─── Phase 9: open popup.html, look for the expected address ───
-  // popup.html is Xverse's main dashboard view. It picks up the
-  // wallet state we just committed (Chrome extension storage is
-  // shared across the extension's own pages). It's a tiny window
-  // by default, so set a viewport that gives the address room.
+  // ─── Phase 9: open popup.html, dismiss marketing modals, read address ───
+  // popup.html is Xverse's main dashboard view. Chrome extension
+  // storage is shared across the extension's pages, so popup.html
+  // picks up the wallet state options.html just committed. The
+  // dashboard initially overlays a marketing modal (e.g. "From Your
+  // Bank to Earning Yield") and a banner ("$ZEST is now live") that
+  // hide the address; dismiss both, then click Receive to reveal
+  // the payment address.
   const popup = await context.newPage();
   await popup.setViewportSize({ width: 400, height: 800 });
   await popup.goto(`chrome-extension://${extensionId}/popup.html`, {
     waitUntil: 'domcontentloaded',
   });
+  await popup.waitForLoadState('domcontentloaded');
+  await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09a-popup-initial.png'), fullPage: true });
+
+  // Dismiss marketing modal ("Not now" button) if present.
+  const notNow = popup.getByText('Not now', { exact: true }).first();
+  if (await notNow.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await notNow.click();
+    await popup.waitForTimeout(500);
+    await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09b-after-not-now.png'), fullPage: true });
+  }
+
+  // Dismiss any remaining close-icon modals/banners (e.g. $ZEST).
+  // We loop a few times since Xverse may stack multiple announcements.
+  for (let i = 0; i < 4; i++) {
+    const close = popup.getByRole('button', { name: /close/i }).first();
+    if (!(await close.isVisible({ timeout: 1_000 }).catch(() => false))) break;
+    await close.click();
+    await popup.waitForTimeout(300);
+  }
+  await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09c-modals-dismissed.png'), fullPage: true });
+
+  // Click Receive to bring up the address.
+  const receive = popup.getByText(/^receive$/i).first();
+  await expect(receive).toBeVisible({ timeout: 10_000 });
+  await receive.click();
+  await popup.waitForTimeout(1_000);
+  await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09d-receive-view.png'), fullPage: true });
+
+  // The receive view shows our addresses as copyable text. Wait
+  // until at least one expected address is in the rendered body.
   await popup.waitForFunction(
     (expected: string[]) => {
       const text = document.body.innerText || '';
       return expected.some(addr => text.includes(addr));
     },
     [EXPECTED_BIP84_ADDRESS, EXPECTED_BIP86_ADDRESS],
-    { timeout: 30_000 },
+    { timeout: 15_000 },
   );
-  await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09-popup-dashboard.png'), fullPage: true });
+  await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09e-address-visible.png'), fullPage: true });
 
   const popupText = await popup.locator('body').innerText();
   const sawPayment = popupText.includes(EXPECTED_BIP84_ADDRESS);
