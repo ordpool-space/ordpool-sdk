@@ -308,7 +308,13 @@ describe('cat21 mint roundtrip on regtest', () => {
       // ─── Phase 5: sign + finalize the real tx ───
       tx.signIdx(funderPrivateKey, 0, [btc.SigHash.ALL]);
       tx.finalize();
-      expect(tx.vsize).toBe(sim.tx.vsize);
+      // ECDSA DER signatures vary by 0-2 bytes depending on whether
+      // r/s components hit a high bit and need a leading zero. For
+      // legacy P2PKH inputs that variance lands 1:1 in vsize; for
+      // SegWit it usually rounds away but can still drift by 1.
+      // The simulation's fee estimate is "within a couple of sats"
+      // accurate, not byte-exact.
+      expect(Math.abs(tx.vsize - sim.tx.vsize)).toBeLessThanOrEqual(2);
 
       // ─── Phase 6: SIGHASH_ALL + non-RBF sequence ───
       const finalized = btc.Transaction.fromRaw(hex.decode(tx.hex));
