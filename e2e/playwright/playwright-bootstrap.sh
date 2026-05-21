@@ -18,7 +18,7 @@ set -euo pipefail
 
 XVERSE_VERSION="2.3.2"
 RELEASE_TAG="xverse-extension-v${XVERSE_VERSION}"
-ASSET_NAME="xverse-v${XVERSE_VERSION}.crx"
+ASSET_NAME="Xverse-Bitcoin-Crypto-Wallet-Chrome-Web-Store.crx"
 REPO="ordpool-space/ordpool-sdk"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
