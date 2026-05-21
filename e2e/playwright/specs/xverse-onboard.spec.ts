@@ -208,22 +208,33 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await continueAfterMnemonic.click();
   await shot(page, '07-after-mnemonic-submit');
 
-  // ─── Phase 7: "Select a wallet to restore" sub-picker ───
-  // The abandon × 11 + about test seed has been used so widely that
-  // Xverse's chain scan finds multiple wallet derivations with
-  // historical activity. The picker shows e.g. "Wallet 1 / 3 accounts
-  // found" and "Wallet 2 / 11 accounts found". Click "See accounts"
-  // on the first one to drill in, then look for a confirm-style
-  // button on the next screen.
-  const restorePicker = page.getByText(/select a wallet to restore|we found funds in/i).first();
-  if (await restorePicker.isVisible({ timeout: 20_000 }).catch(() => false)) {
+  // ─── Phase 7: post-submit, wait for either the wallet-picker or the dashboard ───
+  // Xverse scans the chain after a restore. The abandon × 11 + about
+  // test seed has been used so widely that the scan finds multiple
+  // wallet derivations with historical activity and shows a picker
+  // (Wallet 1 / 3 accounts, Wallet 2 / 11 accounts). For seeds with
+  // no history, the scan goes straight to the dashboard. The scan
+  // can take >20s on a cold backend, so we poll up to 90s for either
+  // outcome and branch on what shows up.
+  await page.waitForFunction(
+    () => {
+      const text = (document.body.innerText || '').toLowerCase();
+      return text.includes('select a wallet to restore')
+          || text.includes('we found funds')
+          || /bc1[qp][a-z0-9]{20,}/.test(document.body.innerText || '');
+    },
+    { timeout: 90_000 },
+  );
+  await shot(page, '07-after-scan');
+
+  // If the picker is up, drill into Wallet 1 and Confirm.
+  const restorePicker = page.getByText(/select a wallet to restore|we found funds/i).first();
+  if (await restorePicker.isVisible({ timeout: 1_000 }).catch(() => false)) {
     await shot(page, '07a-wallet-picker');
     const seeAccounts = page.getByRole('button', { name: /see accounts/i }).first();
     await seeAccounts.click();
     await shot(page, '07b-see-accounts-clicked');
 
-    // After drilling in, find a Confirm / Continue / Use button to
-    // commit to this wallet variant.
     const commit = page.getByRole('button', { name: /^(confirm|continue|use|restore|done|select)$/i }).first();
     await expect(commit).toBeEnabled({ timeout: 15_000 });
     await commit.click();
@@ -231,9 +242,7 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   }
 
   // ─── Phase 8: reach the dashboard ───
-  // The dashboard typically shows the user's address(es) in a copyable
-  // format. Wait for either the expected payment or ordinals address
-  // to appear in the visible text.
+  // Once committed, the dashboard shows one of our expected addresses.
   await page.waitForFunction(
     (expected: string[]) => {
       const text = document.body.innerText || '';
