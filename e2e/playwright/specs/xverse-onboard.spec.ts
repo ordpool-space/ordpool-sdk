@@ -304,20 +304,24 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09b-after-not-now.png'), fullPage: true });
   }
 
-  // Dismiss any remaining close-icon modals/banners (e.g. $ZEST).
-  // We loop a few times since Xverse may stack multiple announcements.
+  // Dismiss any remaining banner-style close icons by clicking
+  // every visible SVG close icon by its accessible name.
   for (let i = 0; i < 4; i++) {
     const close = popup.getByRole('button', { name: /close/i }).first();
     if (!(await close.isVisible({ timeout: 1_000 }).catch(() => false))) break;
-    await close.click();
+    await close.click({ force: true });
     await popup.waitForTimeout(300);
   }
   await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09c-modals-dismissed.png'), fullPage: true });
 
-  // Click Receive to bring up the address.
-  const receive = popup.getByText(/^receive$/i).first();
+  // Click Receive. Xverse renders the label as a <span> inside a
+  // clickable parent, so plain getByText resolves to the span which
+  // Playwright doesn't treat as actionable. force: true bypasses
+  // the actionability check and dispatches the click on the
+  // element's position (which the parent's hit-test will receive).
+  const receive = popup.getByText('Receive', { exact: true }).first();
   await expect(receive).toBeVisible({ timeout: 10_000 });
-  await receive.click();
+  await receive.click({ force: true });
   await popup.waitForTimeout(1_000);
   await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09d-receive-view.png'), fullPage: true });
 
