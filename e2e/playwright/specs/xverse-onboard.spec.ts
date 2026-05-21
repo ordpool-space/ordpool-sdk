@@ -175,27 +175,25 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   // Try (a) first; fall back to (b) word-by-word.
   await page.waitForTimeout(800);
 
-  const textarea = page.locator('textarea').first();
-  const usedTextarea = await textarea.isVisible({ timeout: 5_000 }).catch(() => false);
+  // "Enter seed phrase" page: 12 numbered boxes, each is an
+  // input[type=password] with an eye-toggle for reveal. Not
+  // text-type, not textarea. The "Have a 24 word seed phrase?"
+  // link at the bottom switches to 24 boxes; we stay at 12.
+  await expect(page.getByText(/enter seed phrase/i).first()).toBeVisible({ timeout: 15_000 });
 
-  if (usedTextarea) {
-    await textarea.fill(TEST_MNEMONIC);
-    await shot(page, '06a-mnemonic-textarea');
-  } else {
-    const words = TEST_MNEMONIC.split(' ');
-    const inputs = page.locator('input[type="text"], input:not([type])');
-    await expect(inputs.first()).toBeVisible({ timeout: 10_000 });
-    const count = await inputs.count();
-    if (count < 12) {
-      await shot(page, '06b-mnemonic-input-mismatch');
-      await dumpHtml(page, '06b-mnemonic-input-mismatch');
-      throw new Error(`expected >=12 word inputs, got ${count}`);
-    }
-    for (let i = 0; i < 12; i++) {
-      await inputs.nth(i).fill(words[i]);
-    }
-    await shot(page, '06b-mnemonic-words-typed');
+  const words = TEST_MNEMONIC.split(' ');
+  const inputs = page.locator('input[type="password"]');
+  await expect(inputs.first()).toBeVisible({ timeout: 10_000 });
+  const count = await inputs.count();
+  if (count < 12) {
+    await shot(page, '06b-mnemonic-input-mismatch');
+    await dumpHtml(page, '06b-mnemonic-input-mismatch');
+    throw new Error(`expected >=12 word inputs, got ${count}`);
   }
+  for (let i = 0; i < 12; i++) {
+    await inputs.nth(i).fill(words[i]);
+  }
+  await shot(page, '06b-mnemonic-words-typed');
 
   const continueAfterMnemonic = page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first();
   await expect(continueAfterMnemonic).toBeEnabled({ timeout: 15_000 });
