@@ -1,0 +1,60 @@
+name: E2E (playwright + xverse)
+
+# Iteration 1: prove we can load the published Xverse .crx in
+# headed Chromium under xvfb in CI. Onboarding flow + mint
+# roundtrip land in follow-up iterations once we have CI
+# screenshots confirming the entry point.
+#
+# This workflow does NOT run on dev machines. The Xverse .crx is
+# unverified-binary code; we keep it off contributor laptops.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'e2e/playwright/**'
+      - '.github/workflows/e2e-playwright.yml'
+      - 'src/**'
+      - 'package*.json'
+  pull_request:
+    paths:
+      - 'e2e/playwright/**'
+      - '.github/workflows/e2e-playwright.yml'
+      - 'src/**'
+      - 'package*.json'
+  workflow_dispatch:
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Install Playwright browsers + system deps
+        run: npx playwright install --with-deps chromium
+
+      - name: Download + unpack Xverse extension
+        run: bash e2e/playwright/playwright-bootstrap.sh
+
+      - name: Run Playwright tests under xvfb
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e:playwright
+
+      - name: Upload artifacts (screenshots, traces, DOM dumps, manifest)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            test-results/
+            playwright-report/
+            e2e/extensions/xverse/manifest.json
+          retention-days: 7
+          if-no-files-found: warn

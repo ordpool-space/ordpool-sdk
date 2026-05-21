@@ -2,6 +2,11 @@
 /dist
 /dist-commonjs
 
+# Playwright + Xverse: fetched fresh in CI, never committed
+/e2e/extensions/
+/playwright-report/
+/test-results/
+
 # System Files
 .DS_Store
 Thumbs.db
