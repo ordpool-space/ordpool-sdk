@@ -140,9 +140,13 @@ describe('cat21 mint roundtrip on regtest', () => {
     transactionHex?: string;
   }> = {};
   /**
-   * Dust-absorb branch uses its own keypair so the wallet's
-   * coin-selection treats the destination as external, see the
-   * funding block in `beforeAll` for why that matters.
+   * Dust-absorb branch uses its own keypair, separate from the
+   * funder. The legacy wallet auto-derives P2WPKH for any key it
+   * holds and treats outputs at those addresses as wallet change.
+   * If the dust UTXO landed at the funder's P2WPKH (Leather's
+   * address), default coin-selection would spend the freshly-funded
+   * 1-BTC UTXO at that address to pay for the dust send, consuming
+   * it. Different key, different unrecognised address, no collision.
    */
   let dustPrivateKey: Uint8Array;
   let dustPublicKey: Uint8Array;
@@ -166,11 +170,17 @@ describe('cat21 mint roundtrip on regtest', () => {
     let tip = mineBlocks(2);
     await waitForElectrsSync(tip);
 
-    // Pin inputs explicitly. Legacy wallets auto-derive P2PKH /
-    // P2WPKH / P2SH-P2WPKH for any key they hold, so default coin
-    // selection treats the freshly-funded case addresses as
-    // spendable and may pick them as inputs for subsequent sends.
-    // `send` with `inputs` removes that choice.
+    // Pin inputs explicitly. The legacy wallet auto-derives P2PKH /
+    // P2WPKH / P2SH-P2WPKH addresses from any key it holds, so all
+    // four case payment addresses look wallet-owned once funded.
+    // Default coin-selection would then spend those fresh case
+    // UTXOs to fund subsequent sends, which previously consumed
+    // Leather's funding before the mint tx ran. Pinning `inputs` on
+    // every `send` leaves coin selection no room to surprise us.
+    //
+    // listunspent yields every wallet UTXO; we pick two mature
+    // 50-BTC coinbases as funding sources (one for the dust send,
+    // one for the sendmany).
     type Unspent = { txid: string; vout: number; amount: number; spendable: boolean; confirmations: number };
     // minconf=100 filters server-side to mature outputs; we still
     // check `spendable` + value because the wallet may hold non-coinbase

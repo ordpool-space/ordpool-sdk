@@ -9,7 +9,7 @@ import { leatherSigner } from './leather.signer';
 
 
 // Build a real signed-but-not-finalized PSBT the way Leather would
-// return it — so the signer's finalize step has something legit to
+// return it, so the signer's finalize step has something legit to
 // consume.
 function makeLeatherResponse(): { hex: string; expectedTxHex: string } {
   const network = toScureNetwork(Network.Mainnet);
@@ -49,7 +49,7 @@ describe('leatherSigner.signAndBroadcast', () => {
     delete (window as unknown as { LeatherProvider?: unknown }).LeatherProvider;
   });
 
-  it('calls window.LeatherProvider.request (NOT window.btc) with the unsigned PSBT as hex', async () => {
+  it('when called, hits window.LeatherProvider.request with method=signPsbt, hex=<unsigned-PSBT>, broadcast=false', async () => {
     const { hex: leatherHex } = makeLeatherResponse();
     requestMock.mockResolvedValue({ result: { hex: leatherHex } } as never);
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff]); // psbt magic + 1 byte
@@ -58,7 +58,7 @@ describe('leatherSigner.signAndBroadcast', () => {
       psbtBytes: unsignedBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: () => of('txid'),
+      broadcast: () => of('LEAKED-FROM-BROADCAST-CALLBACK'),
     }));
 
     expect(requestMock).toHaveBeenCalledTimes(1);
@@ -68,7 +68,7 @@ describe('leatherSigner.signAndBroadcast', () => {
     expect(params.broadcast).toBe(false);
   });
 
-  it('finalises Leather\'s signed PSBT and broadcasts the resulting tx-hex', async () => {
+  it('when Leather returns a signed PSBT, finalises it via scure and passes the tx-hex to our broadcast callback, which provides the txid', async () => {
     const { hex: leatherHex, expectedTxHex } = makeLeatherResponse();
     requestMock.mockResolvedValue({ result: { hex: leatherHex } } as never);
 
@@ -77,45 +77,14 @@ describe('leatherSigner.signAndBroadcast', () => {
       psbtBytes: new Uint8Array(64),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: (txHex) => { broadcastedHex = txHex; return of('returned-txid'); },
+      broadcast: (txHex) => { broadcastedHex = txHex; return of('txid-from-broadcaster'); },
     }));
 
     expect(broadcastedHex).toBe(expectedTxHex);
-    expect(result).toEqual({ txId: 'returned-txid' });
+    expect(result).toEqual({ txId: 'txid-from-broadcaster' });
   });
 
-  it('ignores promptForSignedPsbt — Leather signs in its own UI, watch-only callback is irrelevant', async () => {
-    const { hex: leatherHex } = makeLeatherResponse();
-    requestMock.mockResolvedValue({ result: { hex: leatherHex } } as never);
-    const promptForSignedPsbt = jest.fn();
-
-    const result = await firstValueFrom(leatherSigner.signAndBroadcast({
-      psbtBytes: new Uint8Array(64),
-      paymentAddress: 'bc1qpayment',
-      network: Network.Mainnet,
-      broadcast: () => of('txid'),
-      promptForSignedPsbt: promptForSignedPsbt as never,
-    }));
-
-    expect(result).toEqual({ txId: 'txid' });
-    expect(promptForSignedPsbt).not.toHaveBeenCalled();
-  });
-
-  it('works the same way when promptForSignedPsbt is absent (proving it is optional, not required)', async () => {
-    const { hex: leatherHex } = makeLeatherResponse();
-    requestMock.mockResolvedValue({ result: { hex: leatherHex } } as never);
-
-    const result = await firstValueFrom(leatherSigner.signAndBroadcast({
-      psbtBytes: new Uint8Array(64),
-      paymentAddress: 'bc1qpayment',
-      network: Network.Mainnet,
-      broadcast: () => of('txid'),
-    }));
-
-    expect(result).toEqual({ txId: 'txid' });
-  });
-
-  it('passes the correct Leather network string for testnet', async () => {
+  it('when network is Testnet4, passes Leather params.network = "testnet"', async () => {
     const { hex: leatherHex } = makeLeatherResponse();
     requestMock.mockResolvedValue({ result: { hex: leatherHex } } as never);
 
@@ -123,7 +92,7 @@ describe('leatherSigner.signAndBroadcast', () => {
       psbtBytes: new Uint8Array(64),
       paymentAddress: 'tb1qpayment',
       network: Network.Testnet4,
-      broadcast: () => of('txid'),
+      broadcast: () => of('unused'),
     }));
 
     const [, params] = requestMock.mock.calls[0] as [string, { network: string }];

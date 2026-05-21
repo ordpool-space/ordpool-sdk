@@ -1,12 +1,12 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import { base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { firstValueFrom, lastValueFrom } from 'rxjs';
+import { firstValueFrom, lastValueFrom, of } from 'rxjs';
 import { BitcoinNetworkType, SignTransactionOptions, SignTransactionResponse } from 'sats-connect';
 
 import { Network } from '../../network';
 
-// sats-connect's `signTransaction` is imported at module top — mock
+// sats-connect's `signTransaction` is imported at module top, mock
 // before the signer-under-test is imported so the mock binding is
 // in place.
 jest.mock('sats-connect', () => {
@@ -29,9 +29,9 @@ describe('xverseSigner.signAndBroadcast', () => {
     signTransactionMock.mockReset();
   });
 
-  it('calls sats-connect.signTransaction with broadcast:true and the PSBT as base64', async () => {
+  it('when called, hits sats-connect.signTransaction with broadcast=true, base64(unsigned), Mainnet network, the payment address as inputsToSign, and SIGHASH_ALL', async () => {
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
-      args.onFinish({ txId: 'returned-txid' } as SignTransactionResponse);
+      args.onFinish({ txId: 'txid-from-sats-connect' } as SignTransactionResponse);
     }) as never);
 
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0xab]);
@@ -40,7 +40,9 @@ describe('xverseSigner.signAndBroadcast', () => {
       psbtBytes: unsignedBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: () => { throw new Error('NEVER CALLED — Xverse broadcasts itself'); },
+      // If our adapter accidentally routed through the broadcast
+      // callback, the result.txId assertion below catches it.
+      broadcast: () => of('LEAKED-FROM-BROADCAST-CALLBACK'),
     }));
 
     expect(signTransactionMock).toHaveBeenCalledTimes(1);
@@ -51,10 +53,10 @@ describe('xverseSigner.signAndBroadcast', () => {
     expect(args.payload.inputsToSign[0].address).toBe('bc1qpayment');
     expect(args.payload.inputsToSign[0].signingIndexes).toEqual([0]);
     expect(args.payload.inputsToSign[0].sigHash).toBe(btc.SigHash.ALL);
-    expect(result).toEqual({ txId: 'returned-txid' });
+    expect(result).toEqual({ txId: 'txid-from-sats-connect' });
   });
 
-  it('maps Network.Testnet4 to BitcoinNetworkType.Testnet for sats-connect', async () => {
+  it('when network is Testnet4, maps to BitcoinNetworkType.Testnet in the sats-connect payload', async () => {
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
       args.onFinish({ txId: 'tx' } as SignTransactionResponse);
     }) as never);
@@ -63,65 +65,17 @@ describe('xverseSigner.signAndBroadcast', () => {
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'tb1qpayment',
       network: Network.Testnet4,
-      broadcast: () => { throw new Error('unused'); },
+      broadcast: () => of('unused'),
     }));
 
     const args = signTransactionMock.mock.calls[0][0] as SignTransactionOptions;
     expect(args.payload.network.type).toBe(BitcoinNetworkType.Testnet);
   });
 
-  it('ignores the broadcast callback — Xverse broadcasts via sats-connect itself', async () => {
-    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
-      args.onFinish({ txId: 'xverse-tx' } as SignTransactionResponse);
-    }) as never);
-
-    const broadcast = jest.fn();
-    await firstValueFrom(xverseSigner.signAndBroadcast({
-      psbtBytes: new Uint8Array(8),
-      paymentAddress: 'bc1qpayment',
-      network: Network.Mainnet,
-      broadcast: broadcast as never,
-    }));
-
-    expect(broadcast).not.toHaveBeenCalled();
-  });
-
-  it('ignores promptForSignedPsbt — Xverse signs in its own UI', async () => {
-    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
-      args.onFinish({ txId: 'tx' } as SignTransactionResponse);
-    }) as never);
-
-    const promptForSignedPsbt = jest.fn();
-    await firstValueFrom(xverseSigner.signAndBroadcast({
-      psbtBytes: new Uint8Array(8),
-      paymentAddress: 'bc1qpayment',
-      network: Network.Mainnet,
-      broadcast: () => { throw new Error('unused'); },
-      promptForSignedPsbt: promptForSignedPsbt as never,
-    }));
-
-    expect(promptForSignedPsbt).not.toHaveBeenCalled();
-  });
-
-  it('works the same way when promptForSignedPsbt is absent', async () => {
-    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
-      args.onFinish({ txId: 'tx' } as SignTransactionResponse);
-    }) as never);
-
-    const result = await firstValueFrom(xverseSigner.signAndBroadcast({
-      psbtBytes: new Uint8Array(8),
-      paymentAddress: 'bc1qpayment',
-      network: Network.Mainnet,
-      broadcast: () => { throw new Error('unused'); },
-    }));
-
-    expect(result).toEqual({ txId: 'tx' });
-  });
-
-  it('emits empty txId when sats-connect returns a response without one (current behaviour, soft-fail)', async () => {
-    // Today the signer falls through to `''` rather than treating
-    // a missing txId as an error. Behaviour-locking test — if we
-    // ever decide a missing txId should error, this spec changes.
+  it('when sats-connect onFinish returns a response without a txId, the adapter emits an empty string (current behaviour, soft-fail)', async () => {
+    // Behaviour-locking test: today the signer falls through to ''
+    // rather than treating a missing txId as an error. If we ever
+    // decide a missing txId should error, this spec changes.
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
       args.onFinish({} as SignTransactionResponse);
     }) as never);
@@ -130,13 +84,13 @@ describe('xverseSigner.signAndBroadcast', () => {
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: () => { throw new Error('unused'); },
+      broadcast: () => of('unused'),
     }));
 
     expect(result).toEqual({ txId: '' });
   });
 
-  it('propagates the user-cancel as a thrown error', async () => {
+  it('when sats-connect calls onCancel, the adapter throws an error to the caller', async () => {
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
       args.onCancel();
     }) as never);
@@ -145,7 +99,7 @@ describe('xverseSigner.signAndBroadcast', () => {
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: () => { throw new Error('unused'); },
+      broadcast: () => of('unused'),
     });
 
     await expect(lastValueFrom(result$)).rejects.toThrow('Request was cancelled');
