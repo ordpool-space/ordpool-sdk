@@ -272,31 +272,37 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     await shot(page, '07e-after-address-type-continue');
   }
 
-  // ─── Phase 8: reach the dashboard ───
-  // Once committed, the dashboard shows one of our expected addresses.
-  // After the picker confirm, Xverse may show a "Setting up your
-  // wallet" progress screen for several seconds — give it 60s.
-  await page.waitForFunction(
+  // ─── Phase 8: "Wallet Restored" confirmation ───
+  // options.html's onboarding finishes on a "Wallet Restored" screen
+  // with a "Close this tab" button. The actual dashboard with the
+  // derived addresses lives in popup.html (the toolbar dropdown),
+  // not in this page.
+  await expect(page.getByText(/wallet restored/i).first()).toBeVisible({ timeout: 30_000 });
+  await shot(page, '08-wallet-restored');
+
+  // ─── Phase 9: open popup.html, look for the expected address ───
+  // popup.html is Xverse's main dashboard view. It picks up the
+  // wallet state we just committed (Chrome extension storage is
+  // shared across the extension's own pages). It's a tiny window
+  // by default, so set a viewport that gives the address room.
+  const popup = await context.newPage();
+  await popup.setViewportSize({ width: 400, height: 800 });
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`, {
+    waitUntil: 'domcontentloaded',
+  });
+  await popup.waitForFunction(
     (expected: string[]) => {
       const text = document.body.innerText || '';
       return expected.some(addr => text.includes(addr));
     },
     [EXPECTED_BIP84_ADDRESS, EXPECTED_BIP86_ADDRESS],
-    { timeout: 60_000 },
+    { timeout: 30_000 },
   );
+  await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09-popup-dashboard.png'), fullPage: true });
 
-  await shot(page, '08-dashboard');
-  await dumpHtml(page, '08-dashboard');
-
-  // ─── Phase 9: assert at least one expected address renders ───
-  // Even if only one is visible on the first dashboard view, the
-  // other should appear after a UI toggle (Payment / Ordinals tabs)
-  // OR be retrievable via sats-connect's getAddress in iteration 3.
-  // For this iteration we accept "at least one expected address is
-  // rendered" as proof that Xverse really used our test seed.
-  const visibleText = await page.locator('body').innerText();
-  const sawPayment = visibleText.includes(EXPECTED_BIP84_ADDRESS);
-  const sawOrdinals = visibleText.includes(EXPECTED_BIP86_ADDRESS);
+  const popupText = await popup.locator('body').innerText();
+  const sawPayment = popupText.includes(EXPECTED_BIP84_ADDRESS);
+  const sawOrdinals = popupText.includes(EXPECTED_BIP86_ADDRESS);
   // eslint-disable-next-line no-console
   console.log(`[xverse:onboard] saw payment address (${EXPECTED_BIP84_ADDRESS}): ${sawPayment}`);
   // eslint-disable-next-line no-console
