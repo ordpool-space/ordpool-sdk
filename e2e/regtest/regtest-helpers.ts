@@ -4,7 +4,7 @@
 // Expects the regtest stack to be up via `e2e/regtest-bootstrap.sh`
 // and `REGTEST_FUNDED_ADDR` / `REGTEST_FUNDED_WIF` set in env.
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ?? 'http://localhost:3000';
 
@@ -23,10 +23,18 @@ export function getFundedAccount(): FundedAccount {
 }
 
 /** Run a bitcoin-cli command inside the bitcoind container. */
+/**
+ * Pipe a `bitcoin-cli` command into the regtest container. Args go
+ * through execFileSync (no shell), so JSON payloads with braces and
+ * colons don't need extra escaping.
+ */
 export function rpc(...args: string[]): string {
-  const cmd = ['docker', 'exec', 'ordpool-e2e-bitcoind',
-    'bitcoin-cli', '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args];
-  return execSync(cmd.map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' '), { encoding: 'utf8' }).trim();
+  return execFileSync(
+    'docker',
+    ['exec', 'ordpool-e2e-bitcoind', 'bitcoin-cli',
+     '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args],
+    { encoding: 'utf8' },
+  ).trim();
 }
 
 /** Mine N blocks to a throwaway address. Returns the new tip height. */

@@ -2,7 +2,6 @@ import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { base58, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { execFileSync } from 'node:child_process';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import {
@@ -22,6 +21,7 @@ import {
   getUtxos,
   mineBlocks,
   postTx,
+  rpc,
   waitForElectrsSync,
 } from './regtest-helpers';
 
@@ -33,13 +33,13 @@ const SIGHASH_ALL         = 0x01;
 // Non-RBF-signaling sequence (BIP-125). Xverse only offers its
 // "accelerate" replace-by-fee button when the input opts in
 // (sequence < 0xfffffffe), and the replacement tx drops
-// nLockTime=21 — killing the cat. Stay at or above this.
+// nLockTime=21, killing the cat. Stay at or above this.
 const MIN_NON_RBF_SEQUENCE = 0xfffffffe;
 
 
 /**
  * Decode a regtest WIF into the raw 32-byte private key. Regtest WIFs
- * use version byte 0xef (same as testnet — bitcoind treats regtest as
+ * use version byte 0xef (same as testnet, bitcoind treats regtest as
  * a flavour of testnet for address/key encoding).
  */
 function wifToPrivateKey(wif: string): Uint8Array {
@@ -49,22 +49,7 @@ function wifToPrivateKey(wif: string): Uint8Array {
 }
 
 /**
- * Pipe a `bitcoin-cli` command into the regtest container.
- * Args go through execFileSync directly (no shell), so JSON payloads
- * with braces and colons don't need extra escaping.
- */
-function rpc(...args: string[]): string {
-  return execFileSync(
-    'docker',
-    ['exec', 'ordpool-e2e-bitcoind', 'bitcoin-cli',
-     '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args],
-    { encoding: 'utf8' },
-  ).trim();
-}
-
-
-/**
- * One mint scenario — a wallet path the SDK supports plus the
+ * One mint scenario, a wallet path the SDK supports plus the
  * address-shape that wallet uses for payment inputs.
  *
  * The recipient address is always a Taproot output (CAT-21 ownership
@@ -156,7 +141,7 @@ describe('cat21 mint roundtrip on regtest', () => {
   }> = {};
   /**
    * Dust-absorb branch uses its own keypair so the wallet's
-   * coin-selection treats the destination as external — see the
+   * coin-selection treats the destination as external, see the
    * funding block in `beforeAll` for why that matters.
    */
   let dustPrivateKey: Uint8Array;
@@ -170,16 +155,15 @@ describe('cat21 mint roundtrip on regtest', () => {
     funderPrivateKey = wifToPrivateKey(funded.wif);
     funderPublicKey  = secp256k1.getPublicKey(funderPrivateKey, true);
 
-    // Recipient is fixed across all cases — Taproot.
+    // Recipient is fixed across all cases, Taproot.
     const p2tr = btc.p2tr(funderPublicKey.subarray(1, 33), undefined, regtestNetwork, true);
     recipientTaprootAddress = p2tr.address!;
     expectedRecipientScript = p2tr.script;
 
-    // Mature more coinbases. Bootstrap mines exactly 101 blocks, so
-    // only the block-1 coinbase is mature. We need two separate
-    // mature 50-BTC inputs (one for the dust send, one for the main
-    // funding tx). Mining 10 extra blocks gives us 11 mature.
-    let tip = mineBlocks(10);
+    // Bootstrap mines exactly 101 blocks, so only the block-1
+    // coinbase is mature. We need two separate mature 50-BTC inputs
+    // (one for dust, one for the main funding tx). Mine 2 more.
+    let tip = mineBlocks(2);
     await waitForElectrsSync(tip);
 
     // Pin inputs explicitly. Legacy wallets auto-derive P2PKH /
@@ -188,9 +172,12 @@ describe('cat21 mint roundtrip on regtest', () => {
     // spendable and may pick them as inputs for subsequent sends.
     // `send` with `inputs` removes that choice.
     type Unspent = { txid: string; vout: number; amount: number; spendable: boolean; confirmations: number };
-    const unspent: Unspent[] = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent'));
+    // minconf=100 filters server-side to mature outputs; we still
+    // check `spendable` + value because the wallet may hold non-coinbase
+    // entries after later sends (it doesn't here, but keep the guard).
+    const unspent: Unspent[] = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent', '100'));
     const matureCoinbases = unspent
-      .filter(u => u.spendable && u.confirmations >= 100 && u.amount === 50)
+      .filter(u => u.spendable && u.amount === 50)
       .sort((a, b) => b.confirmations - a.confirmations); // deepest first
     if (matureCoinbases.length < 2) {
       throw new Error(`need >=2 mature 50-BTC coinbases, got ${matureCoinbases.length}`);
@@ -233,7 +220,7 @@ describe('cat21 mint roundtrip on regtest', () => {
     await waitForElectrsSync(tip);
 
     // Legacy P2PKH input needs the full funding-tx hex (nonWitnessUtxo).
-    // The sendmany tx hex is the same for every case — its vout index
+    // The sendmany tx hex is the same for every case, its vout index
     // is what differs per case (each case looks itself up by address).
     for (const c of cases.filter(c => c.needsTransactionHex)) {
       funding[c.label].transactionHex = await getTxHex(funding[c.label].fundingTxid);
@@ -255,7 +242,7 @@ describe('cat21 mint roundtrip on regtest', () => {
       // ─── Phase 1: real UTXO via electrs ───
       // Pick by source-tx (txid we sent in beforeAll). Picking by
       // value alone goes wrong if the address has other UTXOs of the
-      // same value — Unisat-Legacy reuses the bootstrap coinbase
+      // same value, Unisat-Legacy reuses the bootstrap coinbase
       // address, Leather also holds a dust UTXO for the dust-absorb
       // test. Source-txid is unambiguous.
       const utxos: ElectrsUtxo[] = await getUtxos(paymentAddress);
@@ -295,7 +282,7 @@ describe('cat21 mint roundtrip on regtest', () => {
       expect(tx.lockTime).toBe(CAT21_LOCKTIME);
       expect(tx.outputsLength).toBe(2);
 
-      // Output ordering — CAT-21 ownership lives at first sat of first output.
+      // Output ordering, CAT-21 ownership lives at first sat of first output.
       const out0 = tx.getOutput(0);
       const out1 = tx.getOutput(1);
       expect(out0.amount).toBe(RECIPIENT_AMOUNT);
@@ -385,7 +372,7 @@ describe('cat21 mint roundtrip on regtest', () => {
   // ───────────────────────────────────────────────────────────────────
   // Dust-absorb branch: when change would land below the dust limit,
   // it folds into the miner fee. CAT-21 *feature* (rarer color via
-  // higher feeRate, faster confirmation) — don't "fix" it.
+  // higher feeRate, faster confirmation), don't "fix" it.
   // ───────────────────────────────────────────────────────────────────
   describe('dust-absorb branch (sub-dust change folds into the miner fee)', () => {
 
@@ -429,8 +416,8 @@ describe('cat21 mint roundtrip on regtest', () => {
       const { tx } = result;
       expect(tx.lockTime).toBe(CAT21_LOCKTIME);
 
-      // Critical: ONE output. The recipient still gets exactly 546 sats —
-      // the dust gain is entirely the miner's. Any future refactor that
+      // Critical: ONE output. The recipient still gets exactly 546
+      // sats, the dust goes to the miner. Any future refactor that
       // pads the recipient with the dust would silently break holders'
       // expectation that every Cat lives on a 546-sat UTXO.
       expect(tx.outputsLength).toBe(1);

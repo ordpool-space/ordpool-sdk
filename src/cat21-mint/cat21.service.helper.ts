@@ -100,7 +100,7 @@ export function getAddressFormat(address: string): 'P2WPKH' | 'P2SH???' | 'P2TR'
     return 'P2SH???';
   }
 
-  // Native Seqwit — bcrt1q comes before tb1q because every bcrt1q
+  // Native Seqwit, bcrt1q comes before tb1q because every bcrt1q
   // also starts with `b`; with the ordering inverted, mainnet `bc1q`
   // would match first and regtest addresses would be mis-categorized
   // as mainnet. `bcrt1q` is the only regtest-segwit prefix.
@@ -108,7 +108,7 @@ export function getAddressFormat(address: string): 'P2WPKH' | 'P2SH???' | 'P2TR'
     return 'P2WPKH';
   }
 
-  // Taproot — same ordering reason as P2WPKH.
+  // Taproot, same ordering reason as P2WPKH.
   if (address.startsWith('bcrt1p') || address.startsWith('bc1p') || address.startsWith('tb1p')) {
     return 'P2TR';
   }

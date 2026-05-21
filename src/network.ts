@@ -3,7 +3,7 @@ import { BitcoinNetworkType } from 'sats-connect';
 
 /**
  * Bitcoin network the SDK is operating on. Matches the bitcoinjs /
- * noble convention: explicit enum, not a boolean — `isMainnet` flattens
+ * noble convention: explicit enum, not a boolean, `isMainnet` flattens
  * four distinct testnets into one, which has bitten us before.
  *
  * Today only `Mainnet` is exercised in production (ordpool no longer
@@ -21,7 +21,7 @@ export enum Network {
 /**
  * Regtest uses the same key/script prefixes as testnet but a
  * different bech32 HRP (`bcrt` not `tb`). @scure/btc-signer doesn't
- * ship a regtest constant — we provide one so `Network.Regtest`
+ * ship a regtest constant, we provide one so `Network.Regtest`
  * actually round-trips through the signer without yielding `tb1q…`
  * addresses that bitcoind in regtest mode then rejects.
  */
