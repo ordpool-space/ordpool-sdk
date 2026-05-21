@@ -139,55 +139,56 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await acceptButton.click();
   await shot(page, '03b-after-accept');
 
-  // ─── Phase 4: enter the 12-word mnemonic ───
-  // Xverse's seed entry has historically been either:
-  //   (a) one textarea — paste the whole phrase
-  //   (b) 12 separate <input> boxes — type/paste per word
-  // Try (a) first; fall back to (b) word-by-word.
-  await page.waitForTimeout(800); // small settle wait for transition
-
-  const textarea = page.locator('textarea').first();
-  const usedTextarea = await textarea.isVisible({ timeout: 3_000 }).catch(() => false);
-
-  if (usedTextarea) {
-    await textarea.fill(TEST_MNEMONIC);
-    await shot(page, '04a-mnemonic-textarea');
-  } else {
-    const words = TEST_MNEMONIC.split(' ');
-    const inputs = page.locator('input[type="text"], input:not([type])');
-    await expect(inputs.first()).toBeVisible({ timeout: 10_000 });
-    const count = await inputs.count();
-    if (count < 12) {
-      await shot(page, '04b-mnemonic-input-mismatch');
-      await dumpHtml(page, '04b-mnemonic-input-mismatch');
-      throw new Error(`expected >=12 word inputs, got ${count}`);
-    }
-    for (let i = 0; i < 12; i++) {
-      await inputs.nth(i).fill(words[i]);
-    }
-    await shot(page, '04b-mnemonic-words-typed');
-  }
-
-  // Submit the mnemonic.
-  const continueAfterMnemonic = page.getByRole('button', { name: /continue|next|restore|confirm/i }).first();
-  await expect(continueAfterMnemonic).toBeEnabled({ timeout: 15_000 });
-  await continueAfterMnemonic.click();
-  await shot(page, '05-after-mnemonic-submit');
-
-  // ─── Phase 5: set a password ───
-  // Two password fields are standard (password + confirm). Some
-  // versions show a "Skip" option; we don't want it for this test.
+  // ─── Phase 4: set a password ───
+  // Xverse asks for the wallet password BEFORE the seed in both
+  // Create and Restore flows. Two fields: "Create password" + "Confirm
+  // password". Continue button is disabled until both match.
   const passwordInputs = page.locator('input[type="password"]');
   await expect(passwordInputs.first()).toBeVisible({ timeout: 15_000 });
   const pwCount = await passwordInputs.count();
   for (let i = 0; i < pwCount; i++) {
     await passwordInputs.nth(i).fill(TEST_PASSWORD);
   }
-  await shot(page, '06-password-typed');
+  await shot(page, '04-password-typed');
 
   const continueAfterPassword = page.getByRole('button', { name: /continue|next|confirm|done|create/i }).first();
+  await expect(continueAfterPassword).toBeEnabled({ timeout: 10_000 });
   await continueAfterPassword.click();
-  await shot(page, '07-after-password-submit');
+  await shot(page, '05-after-password-submit');
+
+  // ─── Phase 5: enter the 12-word mnemonic ───
+  // Xverse's seed entry is either:
+  //   (a) one textarea — paste the whole phrase
+  //   (b) 12 separate <input> boxes — type/paste per word
+  // Try (a) first; fall back to (b) word-by-word.
+  await page.waitForTimeout(800);
+
+  const textarea = page.locator('textarea').first();
+  const usedTextarea = await textarea.isVisible({ timeout: 5_000 }).catch(() => false);
+
+  if (usedTextarea) {
+    await textarea.fill(TEST_MNEMONIC);
+    await shot(page, '06a-mnemonic-textarea');
+  } else {
+    const words = TEST_MNEMONIC.split(' ');
+    const inputs = page.locator('input[type="text"], input:not([type])');
+    await expect(inputs.first()).toBeVisible({ timeout: 10_000 });
+    const count = await inputs.count();
+    if (count < 12) {
+      await shot(page, '06b-mnemonic-input-mismatch');
+      await dumpHtml(page, '06b-mnemonic-input-mismatch');
+      throw new Error(`expected >=12 word inputs, got ${count}`);
+    }
+    for (let i = 0; i < 12; i++) {
+      await inputs.nth(i).fill(words[i]);
+    }
+    await shot(page, '06b-mnemonic-words-typed');
+  }
+
+  const continueAfterMnemonic = page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first();
+  await expect(continueAfterMnemonic).toBeEnabled({ timeout: 15_000 });
+  await continueAfterMnemonic.click();
+  await shot(page, '07-after-mnemonic-submit');
 
   // ─── Phase 6: reach the dashboard ───
   // The dashboard typically shows the user's address(es) in a copyable
