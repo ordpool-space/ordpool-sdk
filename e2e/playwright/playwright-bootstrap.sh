@@ -15,7 +15,10 @@
 set -euo pipefail
 
 XVERSE_ID="idnnbhkphhpkkjpiopdliebdejnmdmco"
-CRX_URL="https://clients2.google.com/service/update2/crx?response=redirect&prodversion=98.0&acceptformat=crx2,crx3&x=id%3D${XVERSE_ID}%26installsource%3Dondemand%26uc"
+# prodversion must be a recent Chrome version or the update endpoint
+# returns 404 (it filters by what the client claims to be running).
+PRODVERSION="131.0.6778.86"
+CRX_URL="https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${PRODVERSION}&acceptformat=crx2,crx3&x=id%3D${XVERSE_ID}%26installsource%3Dondemand%26uc"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXT_DIR="${SCRIPT_DIR}/../extensions/xverse"
@@ -24,8 +27,22 @@ CRX_FILE="$(mktemp /tmp/xverse.XXXXXX.crx)"
 trap 'rm -f "$CRX_FILE"' EXIT
 
 echo "Downloading Xverse .crx from Chrome Web Store update endpoint..."
-curl -fsSL --retry 3 --retry-delay 2 -o "$CRX_FILE" "$CRX_URL"
+echo "URL: ${CRX_URL}"
+
+# -L follows the 302 redirect from the update XML endpoint to the
+# actual .crx blob. -w prints the final HTTP code + URL so we can
+# diagnose 404 / 403 / blob-empty failures.
+HTTP_CODE="$(curl -sSL --retry 3 --retry-delay 2 \
+  -o "$CRX_FILE" \
+  -w '%{http_code} %{url_effective}\n' \
+  "$CRX_URL" || true)"
+echo "Final response: ${HTTP_CODE}"
 echo "Downloaded $(wc -c < "$CRX_FILE") bytes."
+
+if [ ! -s "$CRX_FILE" ]; then
+  echo "ERROR: downloaded 0 bytes" >&2
+  exit 1
+fi
 
 # Verify the CRX magic so we don't try to unzip an HTML error page.
 MAGIC="$(head -c 4 "$CRX_FILE")"
