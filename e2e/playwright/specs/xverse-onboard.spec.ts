@@ -193,35 +193,27 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     throw new Error(`expected >=12 word inputs, got ${count}`);
   }
 
-  // Focus the first input and paste the whole phrase. Playwright's
-  // .fill() on an input triggers React's onChange; the onPaste
-  // handler that splits into 12 boxes typically fires on a real
-  // clipboard paste, which we simulate by setting the input value
-  // and dispatching a paste event with the seed in the dataTransfer.
+  // Type the full phrase into box 1 character-by-character. Most
+  // mnemonic-grid forms (Xverse included) trap the SPACE key in the
+  // currently-focused input and advance focus to the next box,
+  // splitting the seed naturally. `pressSequentially` simulates
+  // physical key events, which React's onKeyDown / onChange will
+  // see; the synthetic ClipboardEvent approach from before didn't
+  // propagate through React's event delegation.
   await inputs.first().click();
-  await inputs.first().evaluate((el, mnemonic) => {
-    const input = el as HTMLInputElement;
-    const data = new DataTransfer();
-    data.setData('text/plain', mnemonic);
-    const evt = new ClipboardEvent('paste', {
-      clipboardData: data,
-      bubbles: true,
-      cancelable: true,
-    });
-    input.dispatchEvent(evt);
-  }, TEST_MNEMONIC);
+  await inputs.first().pressSequentially(TEST_MNEMONIC, { delay: 25 });
 
-  // Sanity wait: after a successful paste-split, every input should
-  // have a non-empty value.
+  // Sanity wait: after the sequential type+space-advance, every
+  // input should hold one word.
   await page.waitForFunction(
     () => {
-      const inputs = document.querySelectorAll('input[type="password"]');
-      return Array.from(inputs).length >= 12
-        && Array.from(inputs).slice(0, 12).every(i => (i as HTMLInputElement).value !== '');
+      const list = Array.from(document.querySelectorAll('input[type="password"]'));
+      return list.length >= 12
+        && list.slice(0, 12).every(i => (i as HTMLInputElement).value !== '');
     },
-    { timeout: 10_000 },
+    { timeout: 15_000 },
   );
-  await shot(page, '06b-mnemonic-pasted');
+  await shot(page, '06b-mnemonic-typed');
 
   const continueAfterMnemonic = page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first();
   await expect(continueAfterMnemonic).toBeEnabled({ timeout: 15_000 });
