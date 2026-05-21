@@ -41,7 +41,19 @@ jobs:
       - name: Install Playwright browsers + system deps
         run: npx playwright install --with-deps chromium
 
-      - name: Download + unpack Xverse extension
+      # Cache the built Xverse extension dir keyed by the version
+      # we pin in playwright-bootstrap.sh. First run on a new
+      # version: ~5 minutes (clone + npm install + webpack build).
+      # Subsequent runs: cache hit, skip rebuild.
+      - name: Cache built Xverse extension
+        id: xverse-cache
+        uses: actions/cache@v4
+        with:
+          path: e2e/extensions/xverse
+          key: xverse-extension-v0.54.2
+
+      - name: Build Xverse from source
+        if: steps.xverse-cache.outputs.cache-hit != 'true'
         run: bash e2e/playwright/playwright-bootstrap.sh
 
       - name: Run Playwright tests under xvfb

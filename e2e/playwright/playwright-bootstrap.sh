@@ -1,69 +1,55 @@
 #!/usr/bin/env bash
-# Downloads + unpacks the published Xverse Chrome extension from the
-# Chrome Web Store update endpoint. Runs only in CI; do not execute
-# locally (we don't run unverified browser-extension binaries on
-# dev machines). The repo never commits the .crx itself.
+# Build the Xverse extension from source and stage it at
+# e2e/extensions/xverse/ so Playwright can load it via
+# --load-extension. Runs only in CI; do not execute locally
+# (we don't run unverified browser-extension code on dev
+# machines). The repo never commits the build output.
 #
-# The Chrome Web Store doesn't expose direct .crx URLs, so we hit
-# the same update XML endpoint that the browser uses on install.
-# The endpoint returns a 302 redirect to the actual .crx blob.
+# The Chrome Web Store update endpoint stopped serving .crx
+# blobs to arbitrary callers (404 on every variant of the
+# query string), and Xverse's GitHub releases tag versions
+# but ship no build artifacts. Building from source is the
+# only path that yields a reproducible extension.
 #
-# CRX file format: [magic "Cr24"][u32 version][u32 header_len]
-# [header bytes][zip payload]. `unzip` finds the central directory
-# at the end of the file and ignores the CRX prefix, so we can
-# unzip the .crx directly to the target dir.
+# License: Xverse's repo is source-available under a
+# non-commercial license. CI tests for our SDK fall within
+# the "research / hobby / <1000 MAU" non-commercial use
+# grant. We do not redistribute the build.
 set -euo pipefail
 
-XVERSE_ID="idnnbhkphhpkkjpiopdliebdejnmdmco"
-# The Chrome update endpoint expects the same query string a real
-# Chrome install would send. Stripping the OS / arch / prod fields
-# yields 404. The full set below is the public-documented format.
-PRODVERSION="131.0.6778.86"
-CRX_URL="https://clients2.google.com/service/update2/crx?response=redirect&os=linux&arch=x64&os_arch=x86_64&nacl_arch=x86-64&prod=chromecrx&prodchannel=stable&prodversion=${PRODVERSION}&lang=en-US&acceptformat=crx2,crx3&x=id%3D${XVERSE_ID}%26installsource%3Dondemand%26uc"
+XVERSE_REPO="https://github.com/secretkeylabs/xverse-web-extension.git"
+XVERSE_REF="v0.54.2"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXT_DIR="${SCRIPT_DIR}/../extensions/xverse"
-CRX_FILE="$(mktemp /tmp/xverse.XXXXXX.crx)"
+SRC_DIR="${SCRIPT_DIR}/../extensions/.xverse-src"
 
-trap 'rm -f "$CRX_FILE"' EXIT
+if [ -d "$EXT_DIR" ] && [ -f "$EXT_DIR/manifest.json" ]; then
+  CACHED_VERSION="$(node -p "require('$EXT_DIR/manifest.json').version" 2>/dev/null || echo unknown)"
+  echo "Xverse already built at ${EXT_DIR} (v${CACHED_VERSION}). Skipping rebuild."
+  exit 0
+fi
 
-echo "Downloading Xverse .crx from Chrome Web Store update endpoint..."
-echo "URL: ${CRX_URL}"
+mkdir -p "$(dirname "$SRC_DIR")"
+rm -rf "$SRC_DIR" "$EXT_DIR"
 
-# -L follows the 302 redirect from the update XML endpoint to the
-# actual .crx blob. -w prints the final HTTP code + URL so we can
-# diagnose 404 / 403 / blob-empty failures.
-HTTP_CODE="$(curl -sSL --retry 3 --retry-delay 2 \
-  -o "$CRX_FILE" \
-  -w '%{http_code} %{url_effective}\n' \
-  "$CRX_URL" || true)"
-echo "Final response: ${HTTP_CODE}"
-echo "Downloaded $(wc -c < "$CRX_FILE") bytes."
+echo "Cloning ${XVERSE_REPO} @ ${XVERSE_REF}"
+git clone --depth=1 --branch "$XVERSE_REF" "$XVERSE_REPO" "$SRC_DIR"
 
-if [ ! -s "$CRX_FILE" ]; then
-  echo "ERROR: downloaded 0 bytes" >&2
+echo "Installing Xverse dependencies (this is slow)..."
+( cd "$SRC_DIR" && npm ci --no-audit --no-fund --legacy-peer-deps )
+
+echo "Building Xverse extension..."
+( cd "$SRC_DIR" && npm run build )
+
+if [ ! -d "$SRC_DIR/build" ] || [ ! -f "$SRC_DIR/build/manifest.json" ]; then
+  echo "ERROR: Xverse build produced no usable output" >&2
+  ls -la "$SRC_DIR" >&2
   exit 1
 fi
 
-# Verify the CRX magic so we don't try to unzip an HTML error page.
-MAGIC="$(head -c 4 "$CRX_FILE")"
-if [ "$MAGIC" != "Cr24" ]; then
-  echo "ERROR: downloaded file is not a CRX (got magic '$MAGIC')" >&2
-  hexdump -C -n 32 "$CRX_FILE" >&2 || true
-  exit 1
-fi
-
-rm -rf "$EXT_DIR"
 mkdir -p "$EXT_DIR"
-# `unzip` scans for the central directory at the end of the file
-# and tolerates the non-zip CRX prefix.
-unzip -o -q "$CRX_FILE" -d "$EXT_DIR"
-
-if [ ! -f "$EXT_DIR/manifest.json" ]; then
-  echo "ERROR: unpack produced no manifest.json" >&2
-  ls -la "$EXT_DIR" >&2
-  exit 1
-fi
+cp -R "$SRC_DIR/build/." "$EXT_DIR/"
 
 EXT_VERSION="$(node -p "require('$EXT_DIR/manifest.json').version")"
-echo "Unpacked Xverse v${EXT_VERSION} to ${EXT_DIR}"
+echo "Built Xverse v${EXT_VERSION}, staged to ${EXT_DIR}"
