@@ -168,7 +168,7 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   //     broadcast via local electrs from this Node side. We avoid
   //     Xverse's own broadcast because the mempool/electrs HTTP
   //     server rejects axios's JSON content-type with HTTP 400.
-  const signPagePromise = context.waitForEvent('page', { timeout: 60_000 });
+  const knownPagesAtStart = new Set(context.pages());
   const signedHexPromise = harness.evaluate((args) => window.ordpoolSdkHarness.buildAndSignMintViaXverse(args), {
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
     paymentAddress: wallet.paymentAddress,
@@ -176,12 +176,26 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
     recipientAddress: wallet.ordinalsAddress,
     feeSats: 1500,
   });
-  const approvalSign = await signPagePromise;
-  await approvalSign.waitForLoadState('domcontentloaded');
-  await approvalSign.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return ['confirm', 'sign', 'approve', 'send'].some(s => t.includes(s));
-  }, undefined, { timeout: 60_000, polling: 500 });
+  // Poll for the sign-popup page: any new page on chrome-
+  // extension:// that renders "Review transaction" + Confirm.
+  // Plain waitForEvent('page') sometimes grabs an unrelated tab.
+  let approvalSign: Page | undefined;
+  const popupDeadline = Date.now() + 60_000;
+  while (Date.now() < popupDeadline) {
+    for (const p of context.pages()) {
+      if (knownPagesAtStart.has(p)) continue;
+      const url = p.url();
+      if (!url.startsWith('chrome-extension://')) continue;
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/review transaction|confirm/i.test(text)) {
+        approvalSign = p;
+        break;
+      }
+    }
+    if (approvalSign) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (!approvalSign) throw new Error('Xverse sign popup never showed Review transaction within 60s');
   await shot(approvalSign, '02-sign-approval');
   // Wait until Confirm is enabled (Xverse renders the button
   // immediately but its React onClick is hooked up only after
