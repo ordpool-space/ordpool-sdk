@@ -332,62 +332,6 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   }
   await shot(primer, '00c-primer-dashboard');
 
-  // Switch to a Bitcoin test network via Settings → Networks.
-  // The page shows a "Testnet mode" master toggle that flips
-  // every chain from Mainnet to its testnet variant. coin_type=1
-  // is shared between Bitcoin testnet and regtest, so a Testnet-
-  // mode wallet derives the same private keys our regtest will
-  // use — just with the tb1q bech32 HRP rather than bcrt1q. For
-  // this iteration we ask Xverse for testnet addresses and assert
-  // their shape. Iteration 3c will translate the pubkey to bcrt1
-  // for the actual regtest mint, OR (if we go the chrome.storage
-  // pre-seed route) configure a built-in Regtest network directly.
-  await primer.goto(`chrome-extension://${extensionId}/popup.html#/settings/change-network`, { waitUntil: 'domcontentloaded' });
-  await primer.waitForFunction(() => {
-    return /testnet mode/i.test(document.body.innerText || '');
-  }, undefined, { timeout: 15_000, polling: 250 });
-  await shot(primer, '00b-change-network');
-
-  // The toggle pill renders as a clickable element to the right of
-  // the "Testnet mode" label. Try role=switch / role=checkbox first
-  // (proper a11y), then fall back to clicking the visible pill at
-  // the row's right edge (computed via bounding box).
-  const switchEl = primer.locator('[role="switch"], [role="checkbox"], input[type="checkbox"]').first();
-  if (await switchEl.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await switchEl.click({ force: true });
-  } else {
-    // Fall back: click the visible row at its rightmost area where
-    // the pill sits.
-    const rowBox = await primer.getByText('Testnet mode', { exact: true }).first().boundingBox();
-    if (!rowBox) throw new Error('Could not locate "Testnet mode" row');
-    await primer.mouse.click(rowBox.x + 320, rowBox.y + rowBox.height / 2);
-  }
-  // Positive evidence that the toggle flipped: at least one chain
-  // line should now read something other than "Mainnet" (e.g.
-  // "Testnet4" for Bitcoin, "Testnet" for Stacks).
-  await primer.waitForFunction(() => {
-    const txt = document.body.innerText || '';
-    return /testnet/i.test(txt) && /(BITCOIN[\s\S]{0,80}testnet|STACKS[\s\S]{0,80}testnet)/i.test(txt);
-  }, undefined, { timeout: 10_000, polling: 250 });
-  await shot(primer, '00c-after-testnet-toggle');
-
-  // Bitcoin defaults to Testnet4 when Testnet-mode toggles on.
-  // sats-connect@1.1.2's `Testnet` enum maps to plain testnet mode
-  // (not testnet4 — Xverse rejected our earlier handshake against
-  // Testnet4-mode with Mismatched Network). Click the Regtest tile
-  // in the BITCOIN section; this is the network we'll use for
-  // 3b/3c and it shares coin_type=1 keys with testnet.
-  await primer.getByText('Regtest', { exact: true }).first().click({ force: true });
-  // Wait for Regtest to become the active selection (checkmark
-  // moves to Regtest, leaves Testnet4).
-  await primer.waitForFunction(() => {
-    // crude DOM check: in the BITCOIN section, the row containing
-    // "Regtest" should be the one with an active-indicator
-    const txt = document.body.innerText || '';
-    return /BITCOIN[\s\S]{0,40}\bRegtest\b/.test(txt);
-  }, undefined, { timeout: 10_000, polling: 250 }).catch(() => undefined);
-  await shot(primer, '00d-after-regtest-select');
-
   // Open the harness page after priming. Close any leftover tabs
   // EXCEPT the primer (Xverse's state machine seems to rely on
   // popup.html being open) and the harness itself.
