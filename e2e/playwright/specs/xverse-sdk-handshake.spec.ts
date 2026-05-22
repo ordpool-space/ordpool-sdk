@@ -259,8 +259,18 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // The wallet boots already onboarded + on Regtest from the cloned
-  // dir; no chrome.storage manipulation needed.
+  // Diagnostic: dump chrome.storage.local right after launch to
+  // verify the cloned LevelDB actually rehydrated. If the keys
+  // are empty / missing the vault::* family, the clone lost data.
+  const diag = await context.newPage();
+  await diag.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  const seededKeys = await diag.evaluate(() => new Promise<string[]>((resolve) => {
+    const c = (window as unknown as { chrome: { storage: { local: { get: (k: null, cb: (v: Record<string, unknown>) => void) => void } } } }).chrome;
+    c.storage.local.get(null, (v) => resolve(Object.keys(v)));
+  }));
+  // eslint-disable-next-line no-console
+  console.log(`[sdk-handshake.beforeAll] chrome.storage.local keys after clone: ${JSON.stringify(seededKeys)}`);
+  await diag.close();
 });
 
 test.afterAll(async () => {
