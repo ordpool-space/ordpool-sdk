@@ -45,11 +45,21 @@ export function toScureNetwork(network: Network): typeof btc.NETWORK {
 }
 
 /**
- * Convert to sats-connect's BitcoinNetworkType enum (used by Xverse's
- * getAddress / signTransaction). Same testnet-flattening as scure.
+ * Convert to sats-connect's BitcoinNetworkType (used by Xverse's
+ * getAddress / signTransaction).
+ *
+ * sats-connect@1.1.2's enum only declares Mainnet + Testnet, but at
+ * runtime Xverse accepts the literal strings "Signet" and "Regtest"
+ * too — Xverse's mismatch check compares the request type to the
+ * wallet's active chain `mode`, so a Regtest-mode wallet only
+ * matches `type: "Regtest"`. Cast through `as BitcoinNetworkType`
+ * for the variants that aren't in the published enum yet.
  */
 export function toBitcoinNetworkType(network: Network): BitcoinNetworkType {
-  return network === Network.Mainnet ? BitcoinNetworkType.Mainnet : BitcoinNetworkType.Testnet;
+  if (network === Network.Mainnet)  return BitcoinNetworkType.Mainnet;
+  if (network === Network.Regtest)  return 'Regtest' as BitcoinNetworkType;
+  if (network === Network.Signet)   return 'Signet'  as BitcoinNetworkType;
+  return BitcoinNetworkType.Testnet;
 }
 
 /**

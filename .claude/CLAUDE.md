@@ -9,6 +9,16 @@
 - Works in Node.js AND browsers.
 - No external consumers yet — only `ordpool.space` and `cat21.space` will use it. No CHANGELOG, no semver gymnastics.
 
+## HARD RULE: Keep useful comments
+
+**Don't strip JSDoc or "why" inline comments under the banner of
+"simplification".** The text inside a comment can be trimmed (no
+bombast, no LLM-speak, no before-after history); the block itself
+stays. Wallet quirks, coin-selection rationale, and signing-flow
+edge cases are exactly the kind of comment a future reader cannot
+reconstruct from code alone. Full decision tree in the workspace
+`CLAUDE.md` HARD RULE "Keep useful comments (JSDoc AND inline 'why')".
+
 ## What goes here vs. where
 
 | Where it belongs | Pattern |

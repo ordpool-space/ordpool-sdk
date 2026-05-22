@@ -31,11 +31,19 @@ describe('toBitcoinNetworkType', () => {
     expect(toBitcoinNetworkType(Network.Mainnet)).toBe(BitcoinNetworkType.Mainnet);
   });
 
-  it('maps every testnet variant to BitcoinNetworkType.Testnet', () => {
+  it('maps Testnet3 / Testnet4 to BitcoinNetworkType.Testnet', () => {
     expect(toBitcoinNetworkType(Network.Testnet3)).toBe(BitcoinNetworkType.Testnet);
     expect(toBitcoinNetworkType(Network.Testnet4)).toBe(BitcoinNetworkType.Testnet);
-    expect(toBitcoinNetworkType(Network.Signet)).toBe(BitcoinNetworkType.Testnet);
-    expect(toBitcoinNetworkType(Network.Regtest)).toBe(BitcoinNetworkType.Testnet);
+  });
+
+  it('maps Signet and Regtest to their literal string values (cast through BitcoinNetworkType because sats-connect@1.1.2 enum is incomplete)', () => {
+    // Xverse's runtime mismatch-check compares the request type to
+    // the wallet's active chain `mode` — a Regtest-mode wallet only
+    // matches `type: "Regtest"`, not `Testnet`. The sats-connect
+    // enum doesn't expose Signet / Regtest yet, but the strings
+    // ride through the postMessage bridge fine.
+    expect(toBitcoinNetworkType(Network.Signet)).toBe('Signet');
+    expect(toBitcoinNetworkType(Network.Regtest)).toBe('Regtest');
   });
 });
 

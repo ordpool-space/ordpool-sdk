@@ -339,11 +339,12 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   // UI in a separate extension window (chrome-extension:// origin),
   // not the harness page. Listen for the new page; when it appears,
   // click whatever Approve/Connect/Confirm button it renders.
-  // Ask for Testnet — wallet was switched into Testnet mode above
-  // via the primer's Settings → Networks toggle. The expected
-  // addresses come back tb1q (P2WPKH testnet) and tb1p (P2TR testnet).
+  // Wallet was switched into Bitcoin Regtest above via the primer's
+  // Settings → Networks panel. Ask the SDK to connect on Regtest;
+  // our toBitcoinNetworkType maps Network.Regtest to the literal
+  // string "Regtest" which Xverse's mismatch-check accepts.
   const approvalPage: Promise<Page> = context.waitForEvent('page', { timeout: 60_000 });
-  const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('testnet4'));
+  const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
 
   const approval = await approvalPage;
   await approval.waitForLoadState('domcontentloaded');
@@ -385,9 +386,9 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   await shot(page, '03-after-connect');
 
   expect(info.signingSupported).toBe(true);
-  // BIP-84 native SegWit testnet → tb1q...; BIP-86 Taproot testnet → tb1p...
-  expect(info.paymentAddress).toMatch(/^tb1q[ac-hj-np-z02-9]{38,}$/);
-  expect(info.ordinalsAddress).toMatch(/^tb1p[ac-hj-np-z02-9]{56,}$/);
+  // BIP-84 native SegWit regtest → bcrt1q...; BIP-86 Taproot regtest → bcrt1p...
+  expect(info.paymentAddress).toMatch(/^bcrt1q[ac-hj-np-z02-9]{38,}$/);
+  expect(info.ordinalsAddress).toMatch(/^bcrt1p[ac-hj-np-z02-9]{56,}$/);
   // Pubkeys: payment compressed = 33 bytes = 66 hex; ordinals
   // x-only = 32 bytes = 64 hex.
   expect(info.paymentPublicKey).toMatch(/^[0-9a-f]{66}$/);
