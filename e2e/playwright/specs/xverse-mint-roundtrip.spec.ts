@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx } from '../../regtest/regtest-helpers';
+import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -164,9 +164,12 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // eslint-disable-next-line no-console
   console.log(`[mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
-  // ─── Build mint PSBT in SDK, sign + broadcast via Xverse ───────
+  // ─── Build + sign mint PSBT via SDK + Xverse popup, then ──────
+  //     broadcast via local electrs from this Node side. We avoid
+  //     Xverse's own broadcast because the mempool/electrs HTTP
+  //     server rejects axios's JSON content-type with HTTP 400.
   const signPagePromise = context.waitForEvent('page', { timeout: 60_000 });
-  const mintResultPromise = harness.evaluate((args) => window.ordpoolSdkHarness.mintCat21ViaXverse(args), {
+  const signedHexPromise = harness.evaluate((args) => window.ordpoolSdkHarness.buildAndSignMintViaXverse(args), {
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
     paymentAddress: wallet.paymentAddress,
     paymentPublicKey: wallet.paymentPublicKey,
@@ -209,15 +212,19 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
     if (transitioned) { signed = true; break; }
   }
   if (!signed) throw new Error('Xverse stayed on Review transaction screen across 3 Confirm clicks');
-  const mintResult = await mintResultPromise;
+  const signed = await signedHexPromise;
   // eslint-disable-next-line no-console
-  console.log(`[mint] broadcast txid = ${mintResult.txId}`);
-  expect(mintResult.txId).toMatch(/^[0-9a-f]{64}$/);
+  console.log(`[mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
+
+  const broadcastTxid = await postTx(signed.txHex);
+  // eslint-disable-next-line no-console
+  console.log(`[mint] broadcast txid = ${broadcastTxid}`);
+  expect(broadcastTxid).toMatch(/^[0-9a-f]{64}$/);
 
   // ─── Confirm the tx, fetch via Esplora, parse as cat21 ──────────
   const confirmedTip = mineBlocks(1);
   await waitForElectrsSync(confirmedTip);
-  const esploraTx = await getTx(mintResult.txId);
+  const esploraTx = await getTx(broadcastTxid);
   // eslint-disable-next-line no-console
   console.log(`[mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);
@@ -226,6 +233,6 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   const parsed = Cat21ParserService.parse(esploraTx);
   expect(parsed).not.toBeNull();
   expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
-  expect(parsed!.transactionId).toBe(mintResult.txId);
+  expect(parsed!.transactionId).toBe(broadcastTxid);
   expect(parsed!.getImage()).toMatch(/^<svg/);
 });

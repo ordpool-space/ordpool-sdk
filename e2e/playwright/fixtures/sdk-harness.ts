@@ -11,11 +11,14 @@
  */
 
 import { firstValueFrom } from 'rxjs';
+import { signTransaction } from 'sats-connect';
+import { base64 } from '@scure/base';
+import { Transaction as btcTx } from '@scure/btc-signer';
 
 import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector';
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
-import { Network, toScureNetwork } from '../../../src/network';
+import { Network, toBitcoinNetworkType, toScureNetwork } from '../../../src/network';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import type { TxnOutput } from '../../../src/cat21-mint/cat21.service.types';
 
@@ -31,7 +34,7 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
-      mintCat21ViaXverse(input: MintRequest): Promise<{ txId: string }>;
+      buildAndSignMintViaXverse(input: MintRequest): Promise<{ txHex: string }>;
     };
   }
 }
@@ -97,10 +100,10 @@ waitForXverseProvider(1_000).then(detected => {
   statusEl().textContent = `harness ready — Xverse detected: ${detected}`;
 });
 
-window.ordpoolSdkHarness.mintCat21ViaXverse = async (input: MintRequest) => {
+window.ordpoolSdkHarness.buildAndSignMintViaXverse = async (input: MintRequest) => {
   const detected = await waitForXverseProvider();
   if (!detected) throw new Error('Xverse provider not injected on the harness page within 15s');
-  statusEl().textContent = `minting cat21 via xverse…`;
+  statusEl().textContent = `building + signing cat21 mint via xverse…`;
   const paymentPubkey = hexToBytes(input.paymentPublicKey);
   const txnOutput: TxnOutput = {
     txid:  input.utxo.txid,
@@ -119,20 +122,42 @@ window.ordpoolSdkHarness.mintCat21ViaXverse = async (input: MintRequest) => {
   );
   const psbtBytes = result.tx.toPSBT();
   log('mint.psbt-built', { bytes: psbtBytes.length, fee: input.feeSats });
-  const out = await firstValueFrom(
-    xverseSigner.signAndBroadcast({
-      psbtBytes,
-      paymentAddress: input.paymentAddress,
-      network: Network.Regtest,
-      // xverseSigner ignores both broadcast and promptForSignedPsbt
-      // — Xverse signs+broadcasts atomically inside its approval
-      // window — but the WalletSigner contract requires them.
-      broadcast: (() => { throw new Error('not used by xverseSigner'); }) as never,
-      promptForSignedPsbt: (() => { throw new Error('not used by xverseSigner'); }) as never,
-    }),
-  );
-  log('mint.broadcast-result', out);
-  return out;
+
+  // sats-connect signTransaction with `broadcast: false` — Xverse
+  // returns the signed PSBT instead of broadcasting itself. We
+  // broadcast via the local electrs from the spec side (Xverse's
+  // own broadcast hits our regtest electrs with axios's JSON
+  // content-type, which mempool/electrs rejects with HTTP 400).
+  const signedPsbtBase64 = await new Promise<string>((resolve, reject) => {
+    signTransaction({
+      payload: {
+        network: { type: toBitcoinNetworkType(Network.Regtest) },
+        message: 'Sign Transaction (CAT-21 Mint)',
+        psbtBase64: base64.encode(psbtBytes),
+        broadcast: false,
+        inputsToSign: [{
+          address: input.paymentAddress,
+          signingIndexes: [0],
+          sigHash: 0x01, // SigHash.ALL
+        }],
+      },
+      onFinish: (response) => {
+        const psbt = (response as { psbtBase64?: string }).psbtBase64;
+        if (!psbt) reject(new Error('Xverse signTransaction returned without psbtBase64'));
+        else resolve(psbt);
+      },
+      onCancel: () => reject(new Error('user cancelled signTransaction')),
+    });
+  });
+  log('mint.signed-psbt-received', { bytes: base64.decode(signedPsbtBase64).length });
+
+  // Decode signed PSBT, finalize the signed input(s), extract
+  // wire-format tx hex.
+  const signedTx = btcTx.fromPSBT(base64.decode(signedPsbtBase64));
+  signedTx.finalize();
+  const txHex = bytesToHex(signedTx.extract());
+  log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  return { txHex };
 };
 
 function hexToBytes(s: string): Uint8Array {
@@ -141,5 +166,11 @@ function hexToBytes(s: string): Uint8Array {
   for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   return bytes;
 }
+function bytesToHex(b: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < b.length; i++) out += b[i].toString(16).padStart(2, '0');
+  return out;
+}
 
 void toScureNetwork;
+void xverseSigner;
