@@ -219,8 +219,8 @@ async function onboardXverse(): Promise<void> {
   // a separate tab in the same context and shares extension state.
 }
 
-const DUMP_PATH = process.env.XVERSE_STORAGE_DUMP
-  ?? path.resolve(__dirname, '../../../test-results/xverse-storage.json');
+const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
+  ?? path.resolve(__dirname, '../../../test-results/xverse-seed-user-data-dir');
 
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
@@ -229,12 +229,23 @@ test.beforeAll(async () => {
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
-  if (!fs.existsSync(DUMP_PATH)) {
-    throw new Error(`Xverse storage dump missing at ${DUMP_PATH}. globalSetup should have produced it.`);
+  if (!fs.existsSync(path.join(SEED_USER_DATA_DIR, 'Default'))) {
+    throw new Error(`Xverse seed user-data-dir missing at ${SEED_USER_DATA_DIR}. globalSetup should have produced it.`);
   }
-  const dump = JSON.parse(fs.readFileSync(DUMP_PATH, 'utf8')) as Record<string, unknown>;
 
-  context = await chromium.launchPersistentContext('', {
+  // Clone the seeded user-data-dir to a fresh per-spec working
+  // directory. Two contexts cannot share the same dir (chromium's
+  // Singleton lock); copying gives every spec its own onboarded
+  // wallet without re-running the click flow.
+  const workingDir = `${SEED_USER_DATA_DIR}.spec-${process.pid}-${Date.now()}`;
+  fs.cpSync(SEED_USER_DATA_DIR, workingDir, { recursive: true });
+  // Strip the SingletonLock files left over from the previous
+  // launch; chromium would otherwise refuse to start.
+  for (const stale of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    fs.rmSync(path.join(workingDir, stale), { force: true });
+  }
+
+  context = await chromium.launchPersistentContext(workingDir, {
     headless: false,
     args: [
       `--disable-extensions-except=${EXT_PATH}`,
@@ -248,33 +259,8 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // Inject the seeded storage from globalSetup. chrome.storage.local
-  // is only available from extension-origin pages, so open popup.html
-  // first, then write all keys from the dump.
-  const seeder = await context.newPage();
-  await seeder.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  await seeder.evaluate((data) => new Promise<void>((resolve, reject) => {
-    const c = (window as unknown as { chrome: { storage: { local: { set: (d: Record<string, unknown>, cb: () => void) => void } }; runtime: { lastError?: { message: string }; reload: () => void } } }).chrome;
-    c.storage.local.set(data, () => {
-      if (c.runtime.lastError) reject(new Error(c.runtime.lastError.message));
-      else resolve();
-    });
-  }), dump);
-
-  // Reload the extension so its service worker re-reads the seeded
-  // storage. chrome.runtime.reload() tears down the calling page,
-  // so the evaluate promise never resolves — fire-and-forget,
-  // swallow the close error.
-  seeder.evaluate(() => {
-    (window as unknown as { chrome: { runtime: { reload: () => void } } }).chrome.runtime.reload();
-  }).catch(() => undefined);
-
-  // Wait for the new SW to come up. Same extensionId across reloads
-  // because the manifest key doesn't change.
-  const newWorker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
-  extensionId = newWorker.url().split('/')[2];
-  // Brief settle for the wallet's init paths.
-  await new Promise(r => setTimeout(r, 2_000));
+  // The wallet boots already onboarded + on Regtest from the cloned
+  // dir; no chrome.storage manipulation needed.
 });
 
 test.afterAll(async () => {

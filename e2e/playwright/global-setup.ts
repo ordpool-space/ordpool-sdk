@@ -24,6 +24,10 @@ import * as fs from 'node:fs';
 const EXT_PATH = path.resolve(__dirname, '../extensions/xverse');
 const DUMP_PATH = process.env.XVERSE_STORAGE_DUMP
   ?? path.resolve(__dirname, '../../test-results/xverse-storage.json');
+// Seeded chromium user-data-dir — specs clone this per-test so each
+// gets a fresh context but skip the onboarding click flow.
+export const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
+  ?? path.resolve(__dirname, '../../test-results/xverse-seed-user-data-dir');
 
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_PASSWORD = 'TestPassword123!';
@@ -177,17 +181,24 @@ export default async function globalSetup(): Promise<void> {
     throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. Run e2e/playwright/playwright-bootstrap.sh.`);
   }
 
-  // Skip re-onboarding if the dump already exists from a previous
-  // run with the same Xverse version. Saves ~25s on local re-runs.
-  if (fs.existsSync(DUMP_PATH) && !process.env.XVERSE_FORCE_REONBOARD) {
+  // Skip re-onboarding if the seed dir + dump already exist from
+  // a previous run with the same Xverse version. Saves ~25s on
+  // local re-runs.
+  if (
+    fs.existsSync(DUMP_PATH) &&
+    fs.existsSync(path.join(SEED_USER_DATA_DIR, 'Default')) &&
+    !process.env.XVERSE_FORCE_REONBOARD
+  ) {
     // eslint-disable-next-line no-console
-    console.log(`[globalSetup] reusing existing dump at ${DUMP_PATH}`);
+    console.log(`[globalSetup] reusing existing seed user-data-dir at ${SEED_USER_DATA_DIR}`);
     return;
   }
 
   // eslint-disable-next-line no-console
   console.log(`[globalSetup] onboarding Xverse + switching to Regtest…`);
-  const context = await chromium.launchPersistentContext('', {
+  fs.rmSync(SEED_USER_DATA_DIR, { recursive: true, force: true });
+  fs.mkdirSync(SEED_USER_DATA_DIR, { recursive: true });
+  const context = await chromium.launchPersistentContext(SEED_USER_DATA_DIR, {
     headless: false,
     args: [
       `--disable-extensions-except=${EXT_PATH}`,
