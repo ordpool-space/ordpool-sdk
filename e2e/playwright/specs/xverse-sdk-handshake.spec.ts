@@ -282,20 +282,27 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   }, undefined, { timeout: 15_000, polling: 250 });
   await shot(primer, '00b-change-network');
 
-  // The toggle's accessible name is "Testnet mode" per the visible
-  // label. Click the toggle row to flip it on.
-  const testnetToggleRow = primer.getByText('Testnet mode', { exact: true }).first();
-  const testnetToggle = testnetToggleRow.locator('xpath=ancestor::*[self::label or @role="switch" or @role="button"][1]').first();
-  // Fallback: click the visible row container if no clickable
-  // ancestor matched.
-  if (await testnetToggle.isVisible({ timeout: 1_500 }).catch(() => false)) {
-    await testnetToggle.click({ force: true });
+  // The toggle pill renders as a clickable element to the right of
+  // the "Testnet mode" label. Try role=switch / role=checkbox first
+  // (proper a11y), then fall back to clicking the visible pill at
+  // the row's right edge (computed via bounding box).
+  const switchEl = primer.locator('[role="switch"], [role="checkbox"], input[type="checkbox"]').first();
+  if (await switchEl.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await switchEl.click({ force: true });
   } else {
-    await testnetToggleRow.click({ force: true });
+    // Fall back: click the visible row at its rightmost area where
+    // the pill sits.
+    const rowBox = await primer.getByText('Testnet mode', { exact: true }).first().boundingBox();
+    if (!rowBox) throw new Error('Could not locate "Testnet mode" row');
+    await primer.mouse.click(rowBox.x + 320, rowBox.y + rowBox.height / 2);
   }
+  // Positive evidence that the toggle flipped: at least one chain
+  // line should now read something other than "Mainnet" (e.g.
+  // "Testnet4" for Bitcoin, "Testnet" for Stacks).
   await primer.waitForFunction(() => {
-    return /testnet/i.test((document.body.innerText || '')) && !/mainnet.{0,15}stacks/i.test(document.body.innerText || '');
-  }, undefined, { timeout: 10_000, polling: 250 }).catch(() => undefined);
+    const txt = document.body.innerText || '';
+    return /testnet/i.test(txt) && /(BITCOIN[\s\S]{0,80}testnet|STACKS[\s\S]{0,80}testnet)/i.test(txt);
+  }, undefined, { timeout: 10_000, polling: 250 });
   await shot(primer, '00c-after-testnet-toggle');
 
   // Open the harness page after priming. Close any leftover tabs
