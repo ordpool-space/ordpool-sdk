@@ -79,13 +79,12 @@ async function nextPostMnemonicState(page: Page): Promise<PostMnemonicState> {
   return handle.jsonValue() as Promise<PostMnemonicState>;
 }
 
+/**
+ * Wait until a visible+enabled button with this exact text exists,
+ * then click it. Returns the locator that was clicked so the caller
+ * can verify state transitions.
+ */
 async function clickWhenEnabled(page: Page, text: string): Promise<void> {
-  // Use role+name to disambiguate against hidden buttons with the
-  // same text. Wait until SOME visible button with this label is
-  // enabled (no disabled attr, no pointer-events:none on either
-  // the button or any ancestor wrapper). Then click via the
-  // role-based locator and verify the click was acknowledged via
-  // a screenshot.
   await page.waitForFunction((label: string) => {
     const buttons = Array.from(document.querySelectorAll('button'));
     return buttons.some(el => {
@@ -104,6 +103,35 @@ async function clickWhenEnabled(page: Page, text: string): Promise<void> {
   await btn.click();
 }
 
+/**
+ * Click a button by exact text and positively poll that some
+ * sentinel text DISAPPEARS from the page (= the click caused a
+ * navigation/transition). Retries the click if the page doesn't
+ * transition within 5s, up to `attempts` times.
+ *
+ * Catches the case where Xverse's React onClick fires but the
+ * state update doesn't propagate in time, or where the click is
+ * delivered to a stale button that re-rendered out from under
+ * the click target.
+ */
+async function clickAndAwaitTransition(
+  page: Page,
+  buttonText: string,
+  sentinelGoneRegex: RegExp,
+  attempts = 3,
+): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    await clickWhenEnabled(page, buttonText);
+    const transitioned = await page.waitForFunction(
+      (re: string) => !(new RegExp(re, 'i')).test(document.body.innerText || ''),
+      sentinelGoneRegex.source,
+      { timeout: 5_000, polling: 250 },
+    ).then(() => true).catch(() => false);
+    if (transitioned) return;
+  }
+  throw new Error(`"${buttonText}" did not transition past "${sentinelGoneRegex}" after ${attempts} attempts`);
+}
+
 async function drivePostMnemonicFlow(page: Page): Promise<void> {
   const seen = new Set<PostMnemonicState>();
   for (;;) {
@@ -119,11 +147,11 @@ async function drivePostMnemonicFlow(page: Page): Promise<void> {
     if (state === 'picker') {
       await page.getByRole('button', { name: /see accounts/i }).first().click();
       await shot(page, `onb-picker-after-see-accounts`);
-      await clickWhenEnabled(page, 'Confirm');
+      await clickAndAwaitTransition(page, 'Confirm', /select a wallet to restore|we found funds/i);
       await shot(page, `onb-picker-after-confirm-click`);
     } else if (state === 'address-type') {
       await shot(page, `onb-address-type-screen`);
-      await clickWhenEnabled(page, 'Continue');
+      await clickAndAwaitTransition(page, 'Continue', /preferred address type/i);
       await shot(page, `onb-address-type-after-continue`);
     }
   }
