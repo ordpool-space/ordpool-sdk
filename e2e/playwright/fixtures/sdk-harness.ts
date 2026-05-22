@@ -23,7 +23,7 @@ declare global {
   interface Window {
     ordpoolSdkHarness: {
       detectXverse(): boolean;
-      connectXverse(network: 'mainnet' | 'testnet3' | 'testnet4'): Promise<{
+      connectXverse(network: 'mainnet' | 'testnet3' | 'testnet4' | 'regtest'): Promise<{
         type: KnownOrdinalWalletType;
         ordinalsAddress: string;
         ordinalsPublicKey: string;
@@ -72,7 +72,8 @@ window.ordpoolSdkHarness = {
     const networkEnum =
       network === 'mainnet'  ? Network.Mainnet  :
       network === 'testnet3' ? Network.Testnet3 :
-                                Network.Testnet4;
+      network === 'testnet4' ? Network.Testnet4 :
+                                Network.Regtest;
     const info = await firstValueFrom(xverseConnector.connect(networkEnum));
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectXverse.result', info);

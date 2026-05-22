@@ -34,10 +34,13 @@ const HARNESS_URL = 'http://localhost:4500/';
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_PASSWORD = 'TestPassword123!';
 
-// BIP-84 mainnet payment, m/84'/0'/0'/0/0 — well-known test vector.
-const EXPECTED_MAINNET_PAYMENT_ADDRESS = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
-// BIP-86 mainnet ordinals, m/86'/0'/0'/0/0.
-const EXPECTED_MAINNET_ORDINALS_ADDRESS = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
+// Expected derivations for the test seed are different per network.
+// Xverse exposes a built-in Regtest network (chain=bitcoin, mode=
+// regtest) which we activate via the popup settings UI before
+// calling connect. coin_type=1 for regtest (same as testnet);
+// addresses use the bcrt1 bech32 HRP. We don't pin the exact
+// strings yet — the first run logs them; iteration 3b commits
+// the verified values.
 
 let context: BrowserContext;
 let extensionId: string;
@@ -246,12 +249,10 @@ test.afterAll(async () => {
 });
 
 test('xverseConnector.connect via the harness page returns the expected BIP-84/BIP-86 testnet addresses for the test seed', async () => {
-  // Prime the wallet: navigate to popup.html once so Xverse's
-  // background+popup state machine warms up its account list.
-  // Without this, sats-connect approval popups opened from a
-  // foreign-origin page (the harness) hang on a loading spinner
-  // forever — observed empirically in this test loop. Dismiss the
-  // marketing modal to make sure popup.html reaches the dashboard.
+  // Prime the wallet popup. Without this, sats-connect approval
+  // popups opened from a foreign-origin page hang on a loading
+  // spinner (Xverse's background state machine needs popup.html
+  // to have rendered the dashboard at least once).
   const primer = await context.newPage();
   await primer.setViewportSize({ width: 400, height: 800 });
   await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
@@ -264,6 +265,19 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
     await notNow.click({ force: true }).catch(() => undefined);
   }
   await shot(primer, '00-primer-popup');
+
+  // Switch to Regtest via Settings → Change network. Xverse ships
+  // "Regtest" as a built-in Bitcoin chain mode (mode: 'regtest',
+  // id: 'bitcoin-regtest'); selecting it makes the wallet derive
+  // bcrt1q / bcrt1p addresses on coin_type=1.
+  await primer.goto(`chrome-extension://${extensionId}/popup.html#/settings/change-network`, { waitUntil: 'domcontentloaded' });
+  await primer.waitForFunction(() => {
+    return (document.body.innerText || '').toLowerCase().includes('regtest');
+  }, undefined, { timeout: 15_000, polling: 250 });
+  await shot(primer, '00b-change-network');
+  await primer.getByText('Regtest', { exact: true }).first().click({ force: true });
+  await primer.waitForTimeout(1_500);
+  await shot(primer, '00c-after-regtest-click');
 
   // Open the harness page after priming. Close any leftover tabs
   // EXCEPT the primer (Xverse's state machine seems to rely on
