@@ -1,0 +1,206 @@
+import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+
+import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
+
+import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx } from '../../regtest/regtest-helpers';
+
+/**
+ * Iteration 3c — full cat21 mint roundtrip with the real Xverse
+ * extension. Combines Pipeline B's wallet (Playwright + Xverse) with
+ * Pipeline A's regtest stack (bitcoind + electrs on localhost).
+ *
+ * Flow:
+ *   1. Clone the seeded user-data-dir, launch Chromium, unlock the
+ *      wallet (already onboarded on Bitcoin Regtest by globalSetup
+ *      with electrsApiUrl pointing at our local electrs).
+ *   2. Get the wallet's bcrt1q payment + bcrt1p ordinals addresses
+ *      via the SDK harness (xverseConnector.connect on Regtest).
+ *   3. Fund the payment address via bitcoind RPC, mine a block,
+ *      wait for electrs to index, fetch the resulting UTXO.
+ *   4. Hand the UTXO + addresses + fee to the harness — it builds
+ *      the cat21 mint PSBT via cat21.service.helper.createTransaction
+ *      and calls xverseSigner.signAndBroadcast. Xverse asks the
+ *      user for sign approval in its popup window; the spec
+ *      auto-confirms.
+ *   5. Mine 1 block. Wait for electrs to confirm. Verify the
+ *      resulting tx parses as a cat21 via ordpool-parser.
+ */
+
+const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
+const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
+const HARNESS_URL = 'http://localhost:4500/';
+const TEST_PASSWORD = 'TestPassword123!';
+const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
+  ?? path.resolve(__dirname, '../../../test-results/xverse-seed-user-data-dir');
+
+// In regtest 1 BTC = 100M sats; fund the wallet with 0.001 BTC so
+// the mint has plenty of headroom plus a meaningful change output.
+const FUND_AMOUNT_BTC = 0.001;
+
+let context: BrowserContext;
+let extensionId: string;
+
+async function shot(p: Page, name: string): Promise<void> {
+  await p.screenshot({
+    path: path.resolve(RESULTS_DIR, `mint-${name}.png`),
+    fullPage: true,
+  }).catch(() => undefined);
+}
+
+test.beforeAll(async () => {
+  if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
+    throw new Error(`Xverse extension not unpacked at ${EXT_PATH}.`);
+  }
+  if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
+    throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
+  }
+  if (!fs.existsSync(path.join(SEED_USER_DATA_DIR, 'Default'))) {
+    throw new Error(`Xverse seed user-data-dir missing at ${SEED_USER_DATA_DIR}. globalSetup should have produced it.`);
+  }
+
+  // bitcoind health check + ensure 101 blocks mined (coinbase
+  // maturity). e2e/regtest-bootstrap.sh would do this too, but
+  // we can't shell out from a Playwright spec without making the
+  // workflow run it explicitly, so duplicate the minimal check
+  // inline.
+  try {
+    execFileSync('docker', ['exec', 'ordpool-e2e-bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', 'getblockchaininfo'], { stdio: 'ignore' });
+  } catch (e) {
+    throw new Error(`bitcoind regtest container not reachable: ${(e as Error).message}`);
+  }
+  const tip = Number(rpc('getblockcount').trim());
+  if (tip < 101) {
+    throw new Error(`regtest tip is ${tip} (<101). Run e2e/regtest-bootstrap.sh before this spec.`);
+  }
+
+  const workingDir = `${SEED_USER_DATA_DIR}.mintspec-${process.pid}-${Date.now()}`;
+  fs.cpSync(SEED_USER_DATA_DIR, workingDir, { recursive: true });
+  for (const stale of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+    fs.rmSync(path.join(workingDir, stale), { force: true });
+  }
+
+  context = await chromium.launchPersistentContext(workingDir, {
+    headless: false,
+    args: [
+      `--disable-extensions-except=${EXT_PATH}`,
+      `--load-extension=${EXT_PATH}`,
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+    ],
+  });
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  extensionId = worker.url().split('/')[2];
+});
+
+test.afterAll(async () => {
+  await context?.close();
+});
+
+test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popup, broadcast via local electrs, verify via parser', async () => {
+  // ─── Unlock + dashboard ready ───────────────────────────────────
+  const primer = await context.newPage();
+  await primer.setViewportSize({ width: 400, height: 800 });
+  await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  await primer.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('unlock') || t.includes('account 1');
+  }, undefined, { timeout: 30_000, polling: 250 });
+  if (/unlock/i.test(await primer.locator('body').innerText())) {
+    await primer.locator('input[type="password"]').first().fill(TEST_PASSWORD);
+    await primer.getByRole('button', { name: /^unlock$/i }).first().click();
+    await primer.waitForFunction(() => {
+      const t = (document.body.innerText || '').toLowerCase();
+      return t.includes('account 1') || t.includes('not now') || t.includes('zest') || t.includes('send');
+    }, undefined, { timeout: 30_000, polling: 250 });
+  }
+  const notNow = primer.getByText('Not now', { exact: true }).first();
+  if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    await notNow.click({ force: true }).catch(() => undefined);
+  }
+  await shot(primer, '01-dashboard-ready');
+
+  // ─── Get the wallet's bcrt1 addresses via the SDK harness ──────
+  const harness = await context.newPage();
+  await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
+  await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, { timeout: 15_000 });
+
+  const connectPagePromise = context.waitForEvent('page', { timeout: 60_000 });
+  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
+  const approvalConnect = await connectPagePromise;
+  await approvalConnect.waitForLoadState('domcontentloaded');
+  await approvalConnect.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
+  }, undefined, { timeout: 60_000, polling: 500 });
+  await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
+  const wallet = await connectResultPromise;
+  // eslint-disable-next-line no-console
+  console.log(`[mint] payment = ${wallet.paymentAddress}  ordinals = ${wallet.ordinalsAddress}`);
+  expect(wallet.paymentAddress).toMatch(/^bcrt1q/);
+  expect(wallet.ordinalsAddress).toMatch(/^bcrt1p/);
+
+  // ─── Fund the payment address from bitcoind ────────────────────
+  // sendtoaddress charges fees from the wallet automatically;
+  // returns the funding txid.
+  const fundTxid = rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', wallet.paymentAddress, String(FUND_AMOUNT_BTC)).trim();
+  // eslint-disable-next-line no-console
+  console.log(`[mint] funded ${wallet.paymentAddress} with ${FUND_AMOUNT_BTC} BTC in tx ${fundTxid}`);
+  const newTip = mineBlocks(1);
+  await waitForElectrsSync(newTip);
+
+  const utxos = await getUtxos(wallet.paymentAddress);
+  expect(utxos.length).toBeGreaterThan(0);
+  const utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
+  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${wallet.paymentAddress}; got ${JSON.stringify(utxos)}`);
+  // eslint-disable-next-line no-console
+  console.log(`[mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
+
+  // ─── Build mint PSBT in SDK, sign + broadcast via Xverse ───────
+  const signPagePromise = context.waitForEvent('page', { timeout: 60_000 });
+  const mintResultPromise = harness.evaluate((args) => window.ordpoolSdkHarness.mintCat21ViaXverse(args), {
+    utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
+    paymentAddress: wallet.paymentAddress,
+    paymentPublicKey: wallet.paymentPublicKey,
+    recipientAddress: wallet.ordinalsAddress,
+    feeSats: 1500,
+  });
+  const approvalSign = await signPagePromise;
+  await approvalSign.waitForLoadState('domcontentloaded');
+  await approvalSign.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return ['confirm', 'sign', 'approve', 'send'].some(s => t.includes(s));
+  }, undefined, { timeout: 60_000, polling: 500 });
+  await shot(approvalSign, '02-sign-approval');
+  // Xverse's sign-tx popup uses different button text per UI
+  // version. Try the common labels in order.
+  for (const label of ['Confirm', 'Sign', 'Approve', 'Send']) {
+    const btn = approvalSign.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }).first();
+    if (await btn.isVisible({ timeout: 1_500 }).catch(() => false)) {
+      await btn.click({ force: true });
+      break;
+    }
+  }
+  const mintResult = await mintResultPromise;
+  // eslint-disable-next-line no-console
+  console.log(`[mint] broadcast txid = ${mintResult.txId}`);
+  expect(mintResult.txId).toMatch(/^[0-9a-f]{64}$/);
+
+  // ─── Confirm the tx, fetch via Esplora, parse as cat21 ──────────
+  const confirmedTip = mineBlocks(1);
+  await waitForElectrsSync(confirmedTip);
+  const esploraTx = await getTx(mintResult.txId);
+  // eslint-disable-next-line no-console
+  console.log(`[mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
+  expect(esploraTx.locktime).toBe(21);
+  expect(esploraTx.status.block_hash).toBeTruthy();
+
+  const parsed = Cat21ParserService.parse(esploraTx);
+  expect(parsed).not.toBeNull();
+  expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
+  expect(parsed!.transactionId).toBe(mintResult.txId);
+  expect(parsed!.getImage()).toMatch(/^<svg/);
+});

@@ -160,6 +160,37 @@ async function primeAndSwitchToRegtest(context: BrowserContext, extensionId: str
   }, undefined, { timeout: 10_000, polling: 250 }).catch(() => undefined);
 }
 
+/**
+ * Override the built-in Regtest network's electrsApiUrl so Xverse
+ * talks to our locally-spawned electrs (docker on :3000) instead
+ * of the default sBTC mempool. With this in place, xverseSigner's
+ * `broadcast: true` flag pushes signed mint txs straight onto our
+ * regtest chain — no extra plumbing.
+ *
+ * Xverse keeps the network config in chrome.storage.local under
+ * `persistentStore::networks` as plain JSON. We read, patch the
+ * `bitcoin-regtest` entry's electrsApiUrl, write back.
+ */
+async function overrideRegtestElectrsUrl(context: BrowserContext, extensionId: string, electrsUrl: string): Promise<void> {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  await page.evaluate(async ([key, url]) => {
+    const c = (window as unknown as { chrome: { storage: { local: {
+      get: (k: string, cb: (v: Record<string, unknown>) => void) => void;
+      set: (d: Record<string, unknown>, cb: () => void) => void;
+    } } } }).chrome;
+    const current = await new Promise<Record<string, unknown>>(r => c.storage.local.get(key, r));
+    const raw = current[key] as string | undefined;
+    if (!raw) throw new Error(`${key} not in chrome.storage.local`);
+    const parsed = JSON.parse(raw) as { value: { configurations: { id: string; electrsApiUrl?: string }[] }; version: number };
+    const target = parsed.value.configurations.find(c => c.id === 'bitcoin-regtest');
+    if (!target) throw new Error('bitcoin-regtest not in configurations');
+    target.electrsApiUrl = url;
+    await new Promise<void>(r => c.storage.local.set({ [key]: JSON.stringify(parsed) }, r));
+  }, ['persistentStore::networks', electrsUrl]);
+  await page.close();
+}
+
 async function dumpStorage(context: BrowserContext, extensionId: string): Promise<Record<string, unknown>> {
   // chrome.storage.local is only available from extension-origin
   // pages. Open a fresh extension page, evaluate get(null) to grab
@@ -215,6 +246,15 @@ export default async function globalSetup(): Promise<void> {
   try {
     await onboardXverse(context, extensionId);
     await primeAndSwitchToRegtest(context, extensionId);
+    // Point Xverse's Regtest network at the local electrs the
+    // mint-roundtrip spec hits. Without this override Xverse would
+    // try to broadcast against sBTC mempool. The override is
+    // ignored by the address-handshake spec (it only does
+    // getAddress, no API calls) but matters for signTransaction.
+    const electrsUrl = process.env.XVERSE_REGTEST_ELECTRS_URL ?? 'http://localhost:3000';
+    await overrideRegtestElectrsUrl(context, extensionId, electrsUrl);
+    // eslint-disable-next-line no-console
+    console.log(`[globalSetup] overrode bitcoin-regtest.electrsApiUrl = ${electrsUrl}`);
     const dump = await dumpStorage(context, extensionId);
 
     fs.mkdirSync(path.dirname(DUMP_PATH), { recursive: true });

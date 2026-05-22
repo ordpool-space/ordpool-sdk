@@ -64,8 +64,35 @@ jobs:
       - name: Build SDK harness bundle for the fixtures server
         run: npm run e2e:harness:build
 
+      # Pipeline B's mint roundtrip spec funds, broadcasts and
+      # mines against this regtest stack. bitcoind + mempool/electrs
+      # come up on localhost:18443 / :3000 respectively.
+      - name: Start regtest stack (bitcoind + electrs)
+        run: docker compose -f e2e/docker-compose.regtest.yml up -d --wait
+
+      - name: Mine 101 blocks (coinbase maturity) + verify electrs is indexing
+        env:
+          REGTEST_ELECTRS_URL: http://localhost:3000
+        run: |
+          bash e2e/regtest-bootstrap.sh > /tmp/regtest-bootstrap.json
+          cat /tmp/regtest-bootstrap.json
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3000/blocks/tip/height >/dev/null; then
+              echo "electrs ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "electrs never came up"
+          docker compose -f e2e/docker-compose.regtest.yml logs --tail 80
+          exit 1
+
       - name: Run Playwright tests under xvfb
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e:playwright
+
+      - name: Stop regtest stack
+        if: always()
+        run: docker compose -f e2e/docker-compose.regtest.yml down -v
 
       - name: Upload artifacts (screenshots, traces, DOM dumps, manifest)
         if: always()

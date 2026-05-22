@@ -31,8 +31,17 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
+      mintCat21ViaXverse(input: MintRequest): Promise<{ txId: string }>;
     };
   }
+}
+
+export interface MintRequest {
+  utxo: { txid: string; vout: number; value: number };
+  paymentAddress: string;
+  paymentPublicKey: string;     // hex
+  recipientAddress: string;
+  feeSats: number;
 }
 
 const statusEl = () => document.getElementById('status')!;
@@ -88,10 +97,49 @@ waitForXverseProvider(1_000).then(detected => {
   statusEl().textContent = `harness ready — Xverse detected: ${detected}`;
 });
 
-// Suppress unused-import warnings; these are exposed for later
-// iterations (3b: build mint via createTransaction; 3c: sign via
-// xverseSigner, broadcast to regtest).
-void xverseSigner;
-void createTransaction;
+window.ordpoolSdkHarness.mintCat21ViaXverse = async (input: MintRequest) => {
+  const detected = await waitForXverseProvider();
+  if (!detected) throw new Error('Xverse provider not injected on the harness page within 15s');
+  statusEl().textContent = `minting cat21 via xverse…`;
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  const result = createTransaction(
+    KnownOrdinalWalletType.xverse,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    /* isSimulation = */ false,
+    Network.Regtest,
+  );
+  const psbtBytes = result.tx.toPSBT();
+  log('mint.psbt-built', { bytes: psbtBytes.length, fee: input.feeSats });
+  const out = await firstValueFrom(
+    xverseSigner.signAndBroadcast({
+      psbtBytes,
+      paymentAddress: input.paymentAddress,
+      network: Network.Regtest,
+      // xverseSigner ignores both broadcast and promptForSignedPsbt
+      // — Xverse signs+broadcasts atomically inside its approval
+      // window — but the WalletSigner contract requires them.
+      broadcast: (() => { throw new Error('not used by xverseSigner'); }) as never,
+      promptForSignedPsbt: (() => { throw new Error('not used by xverseSigner'); }) as never,
+    }),
+  );
+  log('mint.broadcast-result', out);
+  return out;
+};
+
+function hexToBytes(s: string): Uint8Array {
+  const clean = s.startsWith('0x') ? s.slice(2) : s;
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  return bytes;
+}
+
 void toScureNetwork;
-void ({} as TxnOutput);
