@@ -180,15 +180,35 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
     return ['confirm', 'sign', 'approve', 'send'].some(s => t.includes(s));
   }, undefined, { timeout: 60_000, polling: 500 });
   await shot(approvalSign, '02-sign-approval');
-  // Xverse's sign-tx popup uses different button text per UI
-  // version. Try the common labels in order.
-  for (const label of ['Confirm', 'Sign', 'Approve', 'Send']) {
-    const btn = approvalSign.getByRole('button', { name: new RegExp(`^${label}$`, 'i') }).first();
-    if (await btn.isVisible({ timeout: 1_500 }).catch(() => false)) {
-      await btn.click({ force: true });
-      break;
-    }
+  // Wait until Confirm is enabled (Xverse renders the button
+  // immediately but its React onClick is hooked up only after
+  // the fee/details async-resolve).
+  await approvalSign.waitForFunction(() => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    return buttons.some(b => {
+      if (!/^confirm$/i.test(b.textContent?.trim() ?? '')) return false;
+      if (b.hasAttribute('disabled')) return false;
+      const style = getComputedStyle(b);
+      return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
+    });
+  }, undefined, { timeout: 30_000, polling: 250 });
+
+  // Click Confirm and positively poll the page text for transition
+  // out of the review screen (Xverse swaps to a tx-status spinner
+  // or "Transaction sent" after signing). Retry up to 3 times if
+  // the click is delivered but the React onClick swallows it.
+  let signed = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await approvalSign.getByRole('button', { name: /^confirm$/i }).first().click({ force: true });
+    await shot(approvalSign, `02-after-confirm-${attempt}`);
+    const transitioned = await approvalSign.waitForFunction(
+      () => !/review transaction/i.test(document.body.innerText || ''),
+      undefined,
+      { timeout: 10_000, polling: 250 },
+    ).then(() => true).catch(() => false);
+    if (transitioned) { signed = true; break; }
   }
+  if (!signed) throw new Error('Xverse stayed on Review transaction screen across 3 Confirm clicks');
   const mintResult = await mintResultPromise;
   // eslint-disable-next-line no-console
   console.log(`[mint] broadcast txid = ${mintResult.txId}`);
