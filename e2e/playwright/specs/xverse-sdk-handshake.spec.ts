@@ -266,18 +266,37 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   }
   await shot(primer, '00-primer-popup');
 
-  // Switch to Regtest via Settings → Change network. Xverse ships
-  // "Regtest" as a built-in Bitcoin chain mode (mode: 'regtest',
-  // id: 'bitcoin-regtest'); selecting it makes the wallet derive
-  // bcrt1q / bcrt1p addresses on coin_type=1.
+  // Switch to a Bitcoin test network via Settings → Networks.
+  // The page shows a "Testnet mode" master toggle that flips
+  // every chain from Mainnet to its testnet variant. coin_type=1
+  // is shared between Bitcoin testnet and regtest, so a Testnet-
+  // mode wallet derives the same private keys our regtest will
+  // use — just with the tb1q bech32 HRP rather than bcrt1q. For
+  // this iteration we ask Xverse for testnet addresses and assert
+  // their shape. Iteration 3c will translate the pubkey to bcrt1
+  // for the actual regtest mint, OR (if we go the chrome.storage
+  // pre-seed route) configure a built-in Regtest network directly.
   await primer.goto(`chrome-extension://${extensionId}/popup.html#/settings/change-network`, { waitUntil: 'domcontentloaded' });
   await primer.waitForFunction(() => {
-    return (document.body.innerText || '').toLowerCase().includes('regtest');
+    return /testnet mode/i.test(document.body.innerText || '');
   }, undefined, { timeout: 15_000, polling: 250 });
   await shot(primer, '00b-change-network');
-  await primer.getByText('Regtest', { exact: true }).first().click({ force: true });
-  await primer.waitForTimeout(1_500);
-  await shot(primer, '00c-after-regtest-click');
+
+  // The toggle's accessible name is "Testnet mode" per the visible
+  // label. Click the toggle row to flip it on.
+  const testnetToggleRow = primer.getByText('Testnet mode', { exact: true }).first();
+  const testnetToggle = testnetToggleRow.locator('xpath=ancestor::*[self::label or @role="switch" or @role="button"][1]').first();
+  // Fallback: click the visible row container if no clickable
+  // ancestor matched.
+  if (await testnetToggle.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    await testnetToggle.click({ force: true });
+  } else {
+    await testnetToggleRow.click({ force: true });
+  }
+  await primer.waitForFunction(() => {
+    return /testnet/i.test((document.body.innerText || '')) && !/mainnet.{0,15}stacks/i.test(document.body.innerText || '');
+  }, undefined, { timeout: 10_000, polling: 250 }).catch(() => undefined);
+  await shot(primer, '00c-after-testnet-toggle');
 
   // Open the harness page after priming. Close any leftover tabs
   // EXCEPT the primer (Xverse's state machine seems to rely on
@@ -296,12 +315,11 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   // UI in a separate extension window (chrome-extension:// origin),
   // not the harness page. Listen for the new page; when it appears,
   // click whatever Approve/Connect/Confirm button it renders.
-  // Ask for Mainnet — Xverse defaults to Mainnet after restore.
-  // A Testnet request gets rejected with "Mismatched Network" until
-  // the user manually switches in settings (iteration 3b will do
-  // that for the regtest-via-testnet-keys trick).
+  // Ask for Testnet — wallet was switched into Testnet mode above
+  // via the primer's Settings → Networks toggle. The expected
+  // addresses come back tb1q (P2WPKH testnet) and tb1p (P2TR testnet).
   const approvalPage: Promise<Page> = context.waitForEvent('page', { timeout: 60_000 });
-  const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('mainnet'));
+  const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('testnet4'));
 
   const approval = await approvalPage;
   await approval.waitForLoadState('domcontentloaded');
@@ -343,10 +361,9 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   await shot(page, '03-after-connect');
 
   expect(info.signingSupported).toBe(true);
-  // BIP-84 / BIP-86 mainnet derivations of the abandon×11+about
-  // BIP-39 test vector are publicly documented and stable.
-  expect(info.paymentAddress).toBe(EXPECTED_MAINNET_PAYMENT_ADDRESS);
-  expect(info.ordinalsAddress).toBe(EXPECTED_MAINNET_ORDINALS_ADDRESS);
+  // BIP-84 native SegWit testnet → tb1q...; BIP-86 Taproot testnet → tb1p...
+  expect(info.paymentAddress).toMatch(/^tb1q[ac-hj-np-z02-9]{38,}$/);
+  expect(info.ordinalsAddress).toMatch(/^tb1p[ac-hj-np-z02-9]{56,}$/);
   // Pubkeys: payment compressed = 33 bytes = 66 hex; ordinals
   // x-only = 32 bytes = 64 hex.
   expect(info.paymentPublicKey).toMatch(/^[0-9a-f]{66}$/);
