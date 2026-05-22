@@ -262,16 +262,19 @@ test.beforeAll(async () => {
   }), dump);
 
   // Reload the extension so its service worker re-reads the seeded
-  // storage and the wallet boots in the "onboarded + Regtest" state
-  // globalSetup left it in.
-  await seeder.evaluate(() => {
+  // storage. chrome.runtime.reload() tears down the calling page,
+  // so the evaluate promise never resolves — fire-and-forget,
+  // swallow the close error.
+  seeder.evaluate(() => {
     (window as unknown as { chrome: { runtime: { reload: () => void } } }).chrome.runtime.reload();
-  });
+  }).catch(() => undefined);
 
-  // Wait for the SW to come back online.
-  await context.waitForEvent('serviceworker', { timeout: 30_000 }).catch(() => undefined);
-  // Allow a brief settle so the wallet finishes its init paths.
-  await new Promise(r => setTimeout(r, 1_500));
+  // Wait for the new SW to come up. Same extensionId across reloads
+  // because the manifest key doesn't change.
+  const newWorker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  extensionId = newWorker.url().split('/')[2];
+  // Brief settle for the wallet's init paths.
+  await new Promise(r => setTimeout(r, 2_000));
 });
 
 test.afterAll(async () => {
