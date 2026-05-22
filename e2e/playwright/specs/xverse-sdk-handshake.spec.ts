@@ -127,7 +127,11 @@ async function onboardXverse(): Promise<void> {
   }
 
   const addressTypePicker = page.getByText(/preferred address type/i).first();
-  if (await addressTypePicker.isVisible({ timeout: 10_000 }).catch(() => false)) {
+  const sawPicker = await addressTypePicker.isVisible({ timeout: 10_000 }).catch(() => false);
+  // eslint-disable-next-line no-console
+  console.log(`[onboardXverse] preferred-address-type picker visible: ${sawPicker}`);
+  await shot(page, 'onb-pre-address-type');
+  if (sawPicker) {
     const continueBtn = page.getByText('Continue', { exact: true }).first();
     await expect(continueBtn).toBeVisible({ timeout: 10_000 });
     await page.waitForFunction(
@@ -139,9 +143,11 @@ async function onboardXverse(): Promise<void> {
       { timeout: 10_000 },
     );
     await continueBtn.click();
-    await page.waitForTimeout(1_000);
+    await page.waitForTimeout(1_500);
+    await shot(page, 'onb-post-address-type-continue');
   }
 
+  await shot(page, 'onb-before-wallet-restored-wait');
   await expect(page.getByText(/wallet restored/i).first()).toBeVisible({ timeout: 30_000 });
   // Don't close the options.html tab; the harness page lives in
   // a separate tab in the same context and shares extension state.
