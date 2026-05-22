@@ -279,6 +279,19 @@ test.beforeAll(async () => {
     const match = o === s ? 'MATCH' : 'DIFF ';
     // eslint-disable-next-line no-console
     console.log(`[diag] ${match} ${k}  original=${o.length}  cloned=${s.length}`);
+    if (match !== 'MATCH') {
+      // eslint-disable-next-line no-console
+      console.log(`[diag]   original keys: ${Object.keys(JSON.parse(original[k] as string ?? '{}')).slice(0,40).join(',')}`);
+      // eslint-disable-next-line no-console
+      console.log(`[diag]   cloned   keys: ${Object.keys(JSON.parse(seededDump[k] as string ?? '{}')).slice(0,40).join(',')}`);
+    }
+  }
+  if (typeof seededDump['persist:walletState'] === 'string') {
+    const parsed = JSON.parse(seededDump['persist:walletState'] as string) as Record<string, unknown>;
+    const swKey = 'softwareWallets';
+    const sw = parsed[swKey] as string | undefined;
+    // eslint-disable-next-line no-console
+    console.log(`[diag] cloned softwareWallets is ${typeof sw} length=${sw?.length ?? 'n/a'}, first 80: ${String(sw).slice(0,80)}`);
   }
   await diag.close();
 });
