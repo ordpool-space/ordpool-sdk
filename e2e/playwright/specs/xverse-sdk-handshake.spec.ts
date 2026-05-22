@@ -288,15 +288,26 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
 
   const approval = await approvalPage;
   await approval.waitForLoadState('domcontentloaded');
-  // The approval window starts on a loading spinner (no consent
-  // text yet). Poll for the actual consent UI to render. Generous
-  // 60s budget — Xverse's UI loads slowly in xvfb CI; positive
-  // poll on a concrete text signal, not blind timeout.
-  await approval.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { timeout: 60_000, polling: 500 });
-  await shot(approval, '02a-approval-page');
+  await shot(approval, '02a-approval-initial');
+  // eslint-disable-next-line no-console
+  console.log(`[xverse:sdk-handshake] approval URL = ${approval.url()}`);
+
+  // Snapshot the approval body periodically while waiting for
+  // consent UI — gives us visual evidence of what Xverse renders
+  // during the wait.
+  const snapshots = [5, 15, 30, 45].map(seconds =>
+    setTimeout(() => { void approval.screenshot({ path: path.resolve(RESULTS_DIR, `handshake-02a-approval-${seconds}s.png`), fullPage: true }).catch(() => undefined); }, seconds * 1000)
+  );
+
+  try {
+    await approval.waitForFunction(() => {
+      const t = (document.body.innerText || '').toLowerCase();
+      return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
+    }, undefined, { timeout: 60_000, polling: 500 });
+  } finally {
+    snapshots.forEach(clearTimeout);
+  }
+  await shot(approval, '02b-approval-with-consent');
 
   const consentBtn = approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first();
   await expect(consentBtn).toBeVisible({ timeout: 5_000 });
