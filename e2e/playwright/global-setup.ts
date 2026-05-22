@@ -104,6 +104,7 @@ export default async function globalSetup(): Promise<void> {
 
   try {
     const seeder = await context.newPage();
+    await seeder.setViewportSize({ width: 400, height: 800 });
     await seeder.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
     await seeder.evaluate((data) => new Promise<void>((resolve, reject) => {
       const c = (window as unknown as { chrome: { storage: { local: { set: (d: Record<string, unknown>, cb: () => void) => void } }; runtime: { lastError?: { message: string } } } }).chrome;
@@ -114,9 +115,31 @@ export default async function globalSetup(): Promise<void> {
     }), seededStorage);
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] injected ${Object.keys(seededStorage).length} storage keys`);
-    // LevelDB write-buffer flush: chrome doesn't sync to disk
-    // until close, and our short-lived context could miss writes
-    // without this wait.
+
+    // Force Xverse to actually rehydrate from disk so it writes
+    // back the additional state it derives on first unlock
+    // (account list, auth tokens, redux-persist defaults). Without
+    // this, specs cloning the dir see the loading spinner forever
+    // post-unlock because the bootstrap state isn't persisted yet.
+    await seeder.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+    await seeder.waitForFunction(() => {
+      const t = (document.body.innerText || '').toLowerCase();
+      return t.includes('unlock') || t.includes('account 1') || t.includes('create') || t.includes('restore');
+    }, undefined, { timeout: 30_000, polling: 250 });
+    if (/unlock/i.test(await seeder.locator('body').innerText())) {
+      await seeder.locator('input[type="password"]').first().fill(TEST_PASSWORD);
+      await seeder.getByRole('button', { name: /^unlock$/i }).first().click();
+      // Wait for the dashboard signals; tolerate slow network init.
+      await seeder.waitForFunction(() => {
+        const t = (document.body.innerText || '').toLowerCase();
+        return t.includes('account 1') || t.includes('not now') || t.includes('zest') || t.includes('send');
+      }, undefined, { timeout: 60_000, polling: 250 }).catch(() => {
+        // eslint-disable-next-line no-console
+        console.log('[globalSetup] post-unlock dashboard text not seen within 60s; continuing anyway');
+      });
+    }
+    // Give chromium / extension a beat to finish writing any
+    // post-unlock state, then flush to leveldb on close.
     await new Promise(r => setTimeout(r, 5_000));
     await seeder.close().catch(() => undefined);
   } finally {
