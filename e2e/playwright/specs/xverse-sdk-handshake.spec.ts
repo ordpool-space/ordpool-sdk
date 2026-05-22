@@ -123,11 +123,23 @@ async function onboardXverse(): Promise<void> {
       { timeout: 10_000 },
     );
     await commit.click();
+    await page.waitForTimeout(1_000);
   }
 
   const addressTypePicker = page.getByText(/preferred address type/i).first();
   if (await addressTypePicker.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await page.getByText('Continue', { exact: true }).first().click();
+    const continueBtn = page.getByText('Continue', { exact: true }).first();
+    await expect(continueBtn).toBeVisible({ timeout: 10_000 });
+    await page.waitForFunction(
+      () => {
+        const buttons = Array.from(document.querySelectorAll('button'));
+        const c = buttons.find(b => b.textContent?.trim() === 'Continue');
+        return c ? !c.hasAttribute('disabled') && getComputedStyle(c).pointerEvents !== 'none' : false;
+      },
+      { timeout: 10_000 },
+    );
+    await continueBtn.click();
+    await page.waitForTimeout(1_000);
   }
 
   await expect(page.getByText(/wallet restored/i).first()).toBeVisible({ timeout: 30_000 });
