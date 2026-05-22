@@ -247,6 +247,13 @@ test.afterAll(async () => {
 });
 
 test('xverseConnector.connect via the harness page returns the expected BIP-84/BIP-86 testnet addresses for the test seed', async () => {
+  // Close all tabs left open from onboardXverse (Wallet Restored
+  // confirmation, etc.) so Xverse's approval popup doesn't compete
+  // with them for focus / extension state.
+  for (const p of context.pages()) {
+    await p.close().catch(() => undefined);
+  }
+
   const page = await context.newPage();
   await page.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
 
@@ -258,21 +265,21 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   // UI in a separate extension window (chrome-extension:// origin),
   // not the harness page. Listen for the new page; when it appears,
   // click whatever Approve/Connect/Confirm button it renders.
-  const approvalPage: Promise<Page> = context.waitForEvent('page', { timeout: 30_000 });
+  const approvalPage: Promise<Page> = context.waitForEvent('page', { timeout: 60_000 });
   const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('testnet4'));
 
   const approval = await approvalPage;
   await approval.waitForLoadState('domcontentloaded');
-  await shot(approval, '02a-approval-page');
-  // Approve via state-machine: wait for one of the known consent
-  // labels to appear, then click. Like the onboarding flow, this
-  // is positive-poll, not blind-timeout.
+  // The approval window starts on a loading spinner (no consent
+  // text yet). Poll for the actual consent UI to render. Generous
+  // 60s budget — Xverse's UI loads slowly in xvfb CI; positive
+  // poll on a concrete text signal, not blind timeout.
   await approval.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { timeout: 30_000, polling: 250 });
-  // Find the first visible, enabled button matching one of the
-  // consent labels.
+  }, undefined, { timeout: 60_000, polling: 500 });
+  await shot(approval, '02a-approval-page');
+
   const consentBtn = approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first();
   await expect(consentBtn).toBeVisible({ timeout: 5_000 });
   await consentBtn.click();
