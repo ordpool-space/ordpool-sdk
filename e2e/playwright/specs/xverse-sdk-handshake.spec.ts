@@ -219,6 +219,9 @@ async function onboardXverse(): Promise<void> {
   // a separate tab in the same context and shares extension state.
 }
 
+const DUMP_PATH = process.env.XVERSE_STORAGE_DUMP
+  ?? path.resolve(__dirname, '../../../test-results/xverse-storage.json');
+
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
     throw new Error(`Xverse extension not unpacked at ${EXT_PATH}.`);
@@ -226,6 +229,10 @@ test.beforeAll(async () => {
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
+  if (!fs.existsSync(DUMP_PATH)) {
+    throw new Error(`Xverse storage dump missing at ${DUMP_PATH}. globalSetup should have produced it.`);
+  }
+  const dump = JSON.parse(fs.readFileSync(DUMP_PATH, 'utf8')) as Record<string, unknown>;
 
   context = await chromium.launchPersistentContext('', {
     headless: false,
@@ -241,7 +248,30 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  await onboardXverse();
+  // Inject the seeded storage from globalSetup. chrome.storage.local
+  // is only available from extension-origin pages, so open popup.html
+  // first, then write all keys from the dump.
+  const seeder = await context.newPage();
+  await seeder.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  await seeder.evaluate((data) => new Promise<void>((resolve, reject) => {
+    const c = (window as unknown as { chrome: { storage: { local: { set: (d: Record<string, unknown>, cb: () => void) => void } }; runtime: { lastError?: { message: string }; reload: () => void } } }).chrome;
+    c.storage.local.set(data, () => {
+      if (c.runtime.lastError) reject(new Error(c.runtime.lastError.message));
+      else resolve();
+    });
+  }), dump);
+
+  // Reload the extension so its service worker re-reads the seeded
+  // storage and the wallet boots in the "onboarded + Regtest" state
+  // globalSetup left it in.
+  await seeder.evaluate(() => {
+    (window as unknown as { chrome: { runtime: { reload: () => void } } }).chrome.runtime.reload();
+  });
+
+  // Wait for the SW to come back online.
+  await context.waitForEvent('serviceworker', { timeout: 30_000 }).catch(() => undefined);
+  // Allow a brief settle so the wallet finishes its init paths.
+  await new Promise(r => setTimeout(r, 1_500));
 });
 
 test.afterAll(async () => {

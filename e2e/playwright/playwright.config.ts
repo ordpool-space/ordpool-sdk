@@ -11,6 +11,7 @@ import * as path from 'node:path';
  */
 export default defineConfig({
   testDir: path.resolve(__dirname, 'specs'),
+  globalSetup: path.resolve(__dirname, 'global-setup.ts'),
   fullyParallel: false,           // extension state is shared across specs
   workers: 1,
   retries: 0,
