@@ -68,7 +68,10 @@ jobs:
       # mines against this regtest stack. bitcoind + mempool/electrs
       # come up on localhost:18443 / :3000 respectively.
       - name: Start regtest stack (bitcoind + electrs)
-        run: docker compose -f e2e/docker-compose.regtest.yml up -d --wait
+        # --wait would block on electrs's wget healthcheck which the
+        # mempool/electrs image lacks; the curl poll below handles
+        # the actual readiness check.
+        run: docker compose -f e2e/docker-compose.regtest.yml up -d
 
       - name: Mine 101 blocks (coinbase maturity) + verify electrs is indexing
         env:
