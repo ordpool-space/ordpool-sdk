@@ -34,11 +34,10 @@ const HARNESS_URL = 'http://localhost:4500/';
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_PASSWORD = 'TestPassword123!';
 
-// Iteration 3a doesn't pin the exact testnet addresses yet — different
-// wallet implementations use different BIP-44/49/84/86 coin_type
-// conventions (some use 1 for testnet, some reuse 0 for portable
-// seeds). The first CI run logs the actual values; iteration 3b's
-// commit hardcodes the verified strings.
+// BIP-84 mainnet payment, m/84'/0'/0'/0/0 — well-known test vector.
+const EXPECTED_MAINNET_PAYMENT_ADDRESS = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
+// BIP-86 mainnet ordinals, m/86'/0'/0'/0/0.
+const EXPECTED_MAINNET_ORDINALS_ADDRESS = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
 
 let context: BrowserContext;
 let extensionId: string;
@@ -283,8 +282,12 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   // UI in a separate extension window (chrome-extension:// origin),
   // not the harness page. Listen for the new page; when it appears,
   // click whatever Approve/Connect/Confirm button it renders.
+  // Ask for Mainnet — Xverse defaults to Mainnet after restore.
+  // A Testnet request gets rejected with "Mismatched Network" until
+  // the user manually switches in settings (iteration 3b will do
+  // that for the regtest-via-testnet-keys trick).
   const approvalPage: Promise<Page> = context.waitForEvent('page', { timeout: 60_000 });
-  const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('testnet4'));
+  const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('mainnet'));
 
   const approval = await approvalPage;
   await approval.waitForLoadState('domcontentloaded');
@@ -326,11 +329,12 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   await shot(page, '03-after-connect');
 
   expect(info.signingSupported).toBe(true);
-  // Payment address is BIP-84 native SegWit on testnet → tb1q...
-  expect(info.paymentAddress).toMatch(/^tb1q[ac-hj-np-z02-9]{39,}$/);
-  // Ordinals address is BIP-86 Taproot on testnet → tb1p...
-  expect(info.ordinalsAddress).toMatch(/^tb1p[ac-hj-np-z02-9]{58,}$/);
-  // Pubkeys are hex; payment compressed = 66 chars, ordinals x-only = 64.
+  // BIP-84 / BIP-86 mainnet derivations of the abandon×11+about
+  // BIP-39 test vector are publicly documented and stable.
+  expect(info.paymentAddress).toBe(EXPECTED_MAINNET_PAYMENT_ADDRESS);
+  expect(info.ordinalsAddress).toBe(EXPECTED_MAINNET_ORDINALS_ADDRESS);
+  // Pubkeys: payment compressed = 33 bytes = 66 hex; ordinals
+  // x-only = 32 bytes = 64 hex.
   expect(info.paymentPublicKey).toMatch(/^[0-9a-f]{66}$/);
   expect(info.ordinalsPublicKey).toMatch(/^[0-9a-f]{64}$/);
 });
