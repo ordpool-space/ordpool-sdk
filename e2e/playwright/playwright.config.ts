@@ -34,4 +34,14 @@ export default defineConfig({
       outputFolder: path.resolve(__dirname, '../../playwright-report'),
     }],
   ],
+  // Serves the SDK harness page (HTML + bundled connector/signer/
+  // helper code) over http://localhost:4500. Xverse's content
+  // script only injects on http(s) origins, so file:// won't work.
+  webServer: {
+    command: 'node fixtures-server.js',
+    cwd: __dirname,
+    port: 4500,
+    reuseExistingServer: !process.env.CI,
+    timeout: 15_000,
+  },
 });

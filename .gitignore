@@ -4,6 +4,7 @@
 
 # Playwright + Xverse: fetched fresh in CI, never committed
 /e2e/extensions/
+/e2e/playwright/fixtures/sdk-harness.js
 /playwright-report/
 /test-results/
 
