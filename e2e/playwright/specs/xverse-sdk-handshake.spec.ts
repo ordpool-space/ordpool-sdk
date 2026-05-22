@@ -259,17 +259,27 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // Diagnostic: dump chrome.storage.local right after launch to
-  // verify the cloned LevelDB actually rehydrated. If the keys
-  // are empty / missing the vault::* family, the clone lost data.
+  // Diagnostic: compare cloned-context storage against the dump
+  // from globalSetup. Equal length + same keys means the clone
+  // is byte-faithful; differences imply LevelDB flush race.
   const diag = await context.newPage();
   await diag.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  const seededKeys = await diag.evaluate(() => new Promise<string[]>((resolve) => {
+  const seededDump = await diag.evaluate(() => new Promise<Record<string, unknown>>((resolve) => {
     const c = (window as unknown as { chrome: { storage: { local: { get: (k: null, cb: (v: Record<string, unknown>) => void) => void } } } }).chrome;
-    c.storage.local.get(null, (v) => resolve(Object.keys(v)));
+    c.storage.local.get(null, (v) => resolve(v));
   }));
-  // eslint-disable-next-line no-console
-  console.log(`[sdk-handshake.beforeAll] chrome.storage.local keys after clone: ${JSON.stringify(seededKeys)}`);
+  const dumpPath = process.env.XVERSE_STORAGE_DUMP
+    ?? path.resolve(__dirname, '../../../test-results/xverse-storage.json');
+  const original = fs.existsSync(dumpPath)
+    ? JSON.parse(fs.readFileSync(dumpPath, 'utf8')) as Record<string, unknown>
+    : {};
+  for (const k of new Set([...Object.keys(original), ...Object.keys(seededDump)])) {
+    const o = JSON.stringify(original[k] ?? null);
+    const s = JSON.stringify(seededDump[k] ?? null);
+    const match = o === s ? 'MATCH' : 'DIFF ';
+    // eslint-disable-next-line no-console
+    console.log(`[diag] ${match} ${k}  original=${o.length}  cloned=${s.length}`);
+  }
   await diag.close();
 });
 

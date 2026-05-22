@@ -221,7 +221,15 @@ export default async function globalSetup(): Promise<void> {
     fs.writeFileSync(DUMP_PATH, JSON.stringify(dump, null, 2));
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] dumped ${Object.keys(dump).length} keys to ${DUMP_PATH}`);
+    // Give Chrome's LevelDB ~5s to flush all writes before we
+    // close the context. Without this, the cloned user-data-dir
+    // ends up missing the last few writes — the wallet appears
+    // un-onboarded to specs that launch from the clone.
+    await new Promise(r => setTimeout(r, 5_000));
   } finally {
     await context.close();
   }
+  // After close, give Chrome a moment to finish its on-exit
+  // flush + index-flush dance.
+  await new Promise(r => setTimeout(r, 2_000));
 }
