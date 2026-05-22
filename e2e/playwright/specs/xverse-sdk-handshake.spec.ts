@@ -80,12 +80,28 @@ async function nextPostMnemonicState(page: Page): Promise<PostMnemonicState> {
 }
 
 async function clickWhenEnabled(page: Page, text: string): Promise<void> {
+  // Use role+name to disambiguate against hidden buttons with the
+  // same text. Wait until SOME visible button with this label is
+  // enabled (no disabled attr, no pointer-events:none on either
+  // the button or any ancestor wrapper). Then click via the
+  // role-based locator and verify the click was acknowledged via
+  // a screenshot.
   await page.waitForFunction((label: string) => {
     const buttons = Array.from(document.querySelectorAll('button'));
-    const b = buttons.find(el => el.textContent?.trim() === label);
-    return b ? !b.hasAttribute('disabled') && getComputedStyle(b).pointerEvents !== 'none' : false;
+    return buttons.some(el => {
+      if (el.textContent?.trim() !== label) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) return false;
+      const style = getComputedStyle(el);
+      if (style.visibility === 'hidden' || style.display === 'none') return false;
+      if (el.hasAttribute('disabled')) return false;
+      if (style.pointerEvents === 'none') return false;
+      return true;
+    });
   }, text, { timeout: 30_000, polling: 250 });
-  await page.getByText(text, { exact: true }).first().click();
+  const btn = page.getByRole('button', { name: text, exact: true }).first();
+  await expect(btn).toBeVisible({ timeout: 5_000 });
+  await btn.click();
 }
 
 async function drivePostMnemonicFlow(page: Page): Promise<void> {
@@ -102,9 +118,13 @@ async function drivePostMnemonicFlow(page: Page): Promise<void> {
 
     if (state === 'picker') {
       await page.getByRole('button', { name: /see accounts/i }).first().click();
+      await shot(page, `onb-picker-after-see-accounts`);
       await clickWhenEnabled(page, 'Confirm');
+      await shot(page, `onb-picker-after-confirm-click`);
     } else if (state === 'address-type') {
+      await shot(page, `onb-address-type-screen`);
       await clickWhenEnabled(page, 'Continue');
+      await shot(page, `onb-address-type-after-continue`);
     }
   }
 }
