@@ -259,40 +259,25 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // Diagnostic: compare cloned-context storage against the dump
-  // from globalSetup. Equal length + same keys means the clone
-  // is byte-faithful; differences imply LevelDB flush race.
+  // Confirm the cloned context boots with our seeded vault keys
+  // visible to the extension. If this assertion ever fails the
+  // clone has a flush race — buildXverseVault's output didn't
+  // make it through chromium's leveldb on disk.
   const diag = await context.newPage();
   await diag.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  const seededDump = await diag.evaluate(() => new Promise<Record<string, unknown>>((resolve) => {
+  const seededKeys = await diag.evaluate(() => new Promise<string[]>((resolve) => {
     const c = (window as unknown as { chrome: { storage: { local: { get: (k: null, cb: (v: Record<string, unknown>) => void) => void } } } }).chrome;
-    c.storage.local.get(null, (v) => resolve(v));
+    c.storage.local.get(null, (v) => resolve(Object.keys(v)));
   }));
-  const dumpPath = process.env.XVERSE_STORAGE_DUMP
-    ?? path.resolve(__dirname, '../../../test-results/xverse-storage.json');
-  const original = fs.existsSync(dumpPath)
-    ? JSON.parse(fs.readFileSync(dumpPath, 'utf8')) as Record<string, unknown>
-    : {};
-  for (const k of new Set([...Object.keys(original), ...Object.keys(seededDump)])) {
-    const o = JSON.stringify(original[k] ?? null);
-    const s = JSON.stringify(seededDump[k] ?? null);
-    const match = o === s ? 'MATCH' : 'DIFF ';
-    // eslint-disable-next-line no-console
-    console.log(`[diag] ${match} ${k}  original=${o.length}  cloned=${s.length}`);
-    if (match !== 'MATCH') {
-      // eslint-disable-next-line no-console
-      console.log(`[diag]   original keys: ${Object.keys(JSON.parse(original[k] as string ?? '{}')).slice(0,40).join(',')}`);
-      // eslint-disable-next-line no-console
-      console.log(`[diag]   cloned   keys: ${Object.keys(JSON.parse(seededDump[k] as string ?? '{}')).slice(0,40).join(',')}`);
-    }
-  }
-  if (typeof seededDump['persist:walletState'] === 'string') {
-    const parsed = JSON.parse(seededDump['persist:walletState'] as string) as Record<string, unknown>;
-    const swKey = 'softwareWallets';
-    const sw = parsed[swKey] as string | undefined;
-    // eslint-disable-next-line no-console
-    console.log(`[diag] cloned softwareWallets is ${typeof sw} length=${sw?.length ?? 'n/a'}, first 80: ${String(sw).slice(0,80)}`);
-  }
+  // eslint-disable-next-line no-console
+  console.log(`[sdk-handshake.beforeAll] cloned storage has ${seededKeys.length} keys`);
+  expect(seededKeys).toEqual(expect.arrayContaining([
+    'vault::version',
+    'vault::passwordSalt',
+    'vault::encryptionVault',
+    'vault::seedVault',
+    'persistentStore::networks',
+  ]));
   await diag.close();
 });
 
