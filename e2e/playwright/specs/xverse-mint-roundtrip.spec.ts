@@ -101,6 +101,11 @@ test.afterAll(async () => {
 });
 
 test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popup, broadcast via local electrs, verify via parser', async () => {
+  // The full roundtrip walks several Xverse popups (connect-
+  // approval + sign-approval) plus bitcoind RPC + electrs polling.
+  // Bump beyond the suite-default 60s.
+  test.setTimeout(300_000);
+
   // ─── Unlock + dashboard ready ───────────────────────────────────
   const primer = await context.newPage();
   await primer.setViewportSize({ width: 400, height: 800 });
