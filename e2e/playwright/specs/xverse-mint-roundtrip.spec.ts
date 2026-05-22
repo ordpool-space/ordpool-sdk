@@ -200,7 +200,7 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // out of the review screen (Xverse swaps to a tx-status spinner
   // or "Transaction sent" after signing). Retry up to 3 times if
   // the click is delivered but the React onClick swallows it.
-  let signed = false;
+  let confirmed = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     await approvalSign.getByRole('button', { name: /^confirm$/i }).first().click({ force: true });
     await shot(approvalSign, `02-after-confirm-${attempt}`);
@@ -209,9 +209,9 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
       undefined,
       { timeout: 10_000, polling: 250 },
     ).then(() => true).catch(() => false);
-    if (transitioned) { signed = true; break; }
+    if (transitioned) { confirmed = true; break; }
   }
-  if (!signed) throw new Error('Xverse stayed on Review transaction screen across 3 Confirm clicks');
+  if (!confirmed) throw new Error('Xverse stayed on Review transaction screen across 3 Confirm clicks');
   const signed = await signedHexPromise;
   // eslint-disable-next-line no-console
   console.log(`[mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
