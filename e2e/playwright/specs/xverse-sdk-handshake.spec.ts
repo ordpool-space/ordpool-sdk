@@ -247,15 +247,14 @@ test.afterAll(async () => {
 });
 
 test('xverseConnector.connect via the harness page returns the expected BIP-84/BIP-86 testnet addresses for the test seed', async () => {
-  // Close all tabs left open from onboardXverse (Wallet Restored
-  // confirmation, etc.) so Xverse's approval popup doesn't compete
-  // with them for focus / extension state.
-  for (const p of context.pages()) {
-    await p.close().catch(() => undefined);
-  }
-
+  // Open the harness page first, THEN close any tabs left over
+  // from onboardXverse. Closing the last page in a BrowserContext
+  // tears the context down, which kills the test.
   const page = await context.newPage();
   await page.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
+  for (const p of context.pages()) {
+    if (p !== page) await p.close().catch(() => undefined);
+  }
 
   // Wait for the SDK harness bundle to run + set its ready flag.
   await page.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, { timeout: 15_000 });
