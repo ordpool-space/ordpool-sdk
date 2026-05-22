@@ -247,13 +247,32 @@ test.afterAll(async () => {
 });
 
 test('xverseConnector.connect via the harness page returns the expected BIP-84/BIP-86 testnet addresses for the test seed', async () => {
-  // Open the harness page first, THEN close any tabs left over
-  // from onboardXverse. Closing the last page in a BrowserContext
-  // tears the context down, which kills the test.
+  // Prime the wallet: navigate to popup.html once so Xverse's
+  // background+popup state machine warms up its account list.
+  // Without this, sats-connect approval popups opened from a
+  // foreign-origin page (the harness) hang on a loading spinner
+  // forever — observed empirically in this test loop. Dismiss the
+  // marketing modal to make sure popup.html reaches the dashboard.
+  const primer = await context.newPage();
+  await primer.setViewportSize({ width: 400, height: 800 });
+  await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  await primer.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('account 1') || t.includes('not now') || t.includes('zest');
+  }, undefined, { timeout: 30_000, polling: 250 });
+  const notNow = primer.getByText('Not now', { exact: true }).first();
+  if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    await notNow.click({ force: true }).catch(() => undefined);
+  }
+  await shot(primer, '00-primer-popup');
+
+  // Open the harness page after priming. Close any leftover tabs
+  // EXCEPT the primer (Xverse's state machine seems to rely on
+  // popup.html being open) and the harness itself.
   const page = await context.newPage();
   await page.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   for (const p of context.pages()) {
-    if (p !== page) await p.close().catch(() => undefined);
+    if (p !== page && p !== primer) await p.close().catch(() => undefined);
   }
 
   // Wait for the SDK harness bundle to run + set its ready flag.
