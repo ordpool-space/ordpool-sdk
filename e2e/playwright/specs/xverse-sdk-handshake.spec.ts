@@ -55,9 +55,64 @@ async function shot(page: Page, name: string): Promise<void> {
 }
 
 /**
- * Walks the Xverse onboarding flow (cloned from xverse-onboard.spec.ts
- * Phases 1-8). Kept inline so this spec doesn't take a dependency on
- * Playwright's between-spec state.
+ * The variable post-mnemonic phase: poll for whichever screen Xverse
+ * lands on, react to it, repeat until "Wallet Restored" is visible.
+ *
+ * Why state-machine instead of sequential waits: the wallet picker
+ * and address-type picker each appear in some runs but not others
+ * (the widely-used BIP-39 test seed exposes different paths). Hard
+ * `isVisible({timeout: 10000})` checks raced against rendering
+ * timing and falsely returned `false` when the picker was about to
+ * appear ~100ms later. Polling for any of the three concrete next
+ * states is positive-assertion.
+ */
+type PostMnemonicState = 'picker' | 'address-type' | 'restored';
+
+async function nextPostMnemonicState(page: Page): Promise<PostMnemonicState> {
+  const handle = await page.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    if (t.includes('wallet restored')) return 'restored';
+    if (t.includes('preferred address type')) return 'address-type';
+    if (t.includes('select a wallet to restore') || t.includes('we found funds')) return 'picker';
+    return false;
+  }, undefined, { timeout: 120_000, polling: 250 });
+  return handle.jsonValue() as Promise<PostMnemonicState>;
+}
+
+async function clickWhenEnabled(page: Page, text: string): Promise<void> {
+  await page.waitForFunction((label: string) => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const b = buttons.find(el => el.textContent?.trim() === label);
+    return b ? !b.hasAttribute('disabled') && getComputedStyle(b).pointerEvents !== 'none' : false;
+  }, text, { timeout: 30_000, polling: 250 });
+  await page.getByText(text, { exact: true }).first().click();
+}
+
+async function drivePostMnemonicFlow(page: Page): Promise<void> {
+  const seen = new Set<PostMnemonicState>();
+  for (;;) {
+    const state = await nextPostMnemonicState(page);
+    // eslint-disable-next-line no-console
+    console.log(`[onboardXverse] post-mnemonic state: ${state}`);
+    if (state === 'restored') return;
+    if (seen.has(state)) {
+      throw new Error(`onboardXverse stuck looping on state: ${state}`);
+    }
+    seen.add(state);
+
+    if (state === 'picker') {
+      await page.getByRole('button', { name: /see accounts/i }).first().click();
+      await clickWhenEnabled(page, 'Confirm');
+    } else if (state === 'address-type') {
+      await clickWhenEnabled(page, 'Continue');
+    }
+  }
+}
+
+/**
+ * Walks the Xverse onboarding flow (mirrors xverse-onboard.spec.ts
+ * Phases 1-8). Kept inline so this spec doesn't take a dependency
+ * on Playwright's between-spec state.
  */
 async function onboardXverse(): Promise<void> {
   const page = await context.newPage();
@@ -99,56 +154,17 @@ async function onboardXverse(): Promise<void> {
 
   await page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first().click();
 
-  // Picker → See accounts → Confirm
-  await page.waitForFunction(
-    () => {
-      const t = (document.body.innerText || '').toLowerCase();
-      return t.includes('select a wallet to restore')
-          || t.includes('we found funds')
-          || /bc1[qp][a-z0-9]{20,}/.test(document.body.innerText || '');
-    },
-    { timeout: 90_000 },
-  );
-  const picker = page.getByText(/select a wallet to restore|we found funds/i).first();
-  if (await picker.isVisible({ timeout: 1_000 }).catch(() => false)) {
-    await page.getByRole('button', { name: /see accounts/i }).first().click();
-    const commit = page.getByText('Confirm', { exact: true }).first();
-    await expect(commit).toBeVisible({ timeout: 15_000 });
-    await page.waitForFunction(
-      () => {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const c = buttons.find(b => b.textContent?.trim() === 'Confirm');
-        return c ? !c.hasAttribute('disabled') && getComputedStyle(c).pointerEvents !== 'none' : false;
-      },
-      { timeout: 10_000 },
-    );
-    await commit.click();
-    await page.waitForTimeout(1_000);
-  }
-
-  const addressTypePicker = page.getByText(/preferred address type/i).first();
-  const sawPicker = await addressTypePicker.isVisible({ timeout: 10_000 }).catch(() => false);
-  // eslint-disable-next-line no-console
-  console.log(`[onboardXverse] preferred-address-type picker visible: ${sawPicker}`);
-  await shot(page, 'onb-pre-address-type');
-  if (sawPicker) {
-    const continueBtn = page.getByText('Continue', { exact: true }).first();
-    await expect(continueBtn).toBeVisible({ timeout: 10_000 });
-    await page.waitForFunction(
-      () => {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const c = buttons.find(b => b.textContent?.trim() === 'Continue');
-        return c ? !c.hasAttribute('disabled') && getComputedStyle(c).pointerEvents !== 'none' : false;
-      },
-      { timeout: 10_000 },
-    );
-    await continueBtn.click();
-    await page.waitForTimeout(1_500);
-    await shot(page, 'onb-post-address-type-continue');
-  }
-
-  await shot(page, 'onb-before-wallet-restored-wait');
-  await expect(page.getByText(/wallet restored/i).first()).toBeVisible({ timeout: 30_000 });
+  // State-machine for the variable phase between mnemonic-submit and
+  // "Wallet Restored". After the chain scan, Xverse may show:
+  //   - the wallet picker ("Select a wallet to restore") if the seed
+  //     has multiple derivation histories
+  //   - the address-type picker ("Preferred address type") if the
+  //     wallet picker was skipped
+  //   - "Wallet Restored" directly if both are skipped
+  // We poll for the first concrete next-state signal, react, and
+  // poll again until we land on "restored". No fixed timeouts on
+  // intermediate "is this visible yet" checks.
+  await drivePostMnemonicFlow(page);
   // Don't close the options.html tab; the harness page lives in
   // a separate tab in the same context and shares extension state.
 }
