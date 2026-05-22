@@ -301,22 +301,36 @@ test.afterAll(async () => {
 });
 
 test('xverseConnector.connect via the harness page returns the expected BIP-84/BIP-86 testnet addresses for the test seed', async () => {
-  // Prime the wallet popup. Without this, sats-connect approval
-  // popups opened from a foreign-origin page hang on a loading
-  // spinner (Xverse's background state machine needs popup.html
-  // to have rendered the dashboard at least once).
+  // Prime the wallet popup. Wallet boots from the cloned
+  // user-data-dir into an UNLOCK screen (vault is encrypted at
+  // rest, in-memory key is wiped on context restart). Type the
+  // known test password to unlock, then proceed.
   const primer = await context.newPage();
   await primer.setViewportSize({ width: 400, height: 800 });
   await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
   await primer.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('account 1') || t.includes('not now') || t.includes('zest');
+    return t.includes('unlock') || t.includes('account 1');
   }, undefined, { timeout: 30_000, polling: 250 });
+  await shot(primer, '00a-primer-locked');
+
+  if (/unlock/i.test(await primer.locator('body').innerText())) {
+    const pwInput = primer.locator('input[type="password"]').first();
+    await expect(pwInput).toBeVisible({ timeout: 5_000 });
+    await pwInput.fill('TestPassword123!');
+    await primer.getByRole('button', { name: /^unlock$/i }).first().click();
+    await primer.waitForFunction(() => {
+      const t = (document.body.innerText || '').toLowerCase();
+      return t.includes('account 1') || t.includes('not now') || t.includes('zest');
+    }, undefined, { timeout: 30_000, polling: 250 });
+  }
+  await shot(primer, '00b-primer-unlocked');
+
   const notNow = primer.getByText('Not now', { exact: true }).first();
   if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
     await notNow.click({ force: true }).catch(() => undefined);
   }
-  await shot(primer, '00-primer-popup');
+  await shot(primer, '00c-primer-dashboard');
 
   // Switch to a Bitcoin test network via Settings → Networks.
   // The page shows a "Testnet mode" master toggle that flips
