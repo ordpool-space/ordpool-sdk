@@ -305,6 +305,23 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   }, undefined, { timeout: 10_000, polling: 250 });
   await shot(primer, '00c-after-testnet-toggle');
 
+  // Bitcoin defaults to Testnet4 when Testnet-mode toggles on.
+  // sats-connect@1.1.2's `Testnet` enum maps to plain testnet mode
+  // (not testnet4 — Xverse rejected our earlier handshake against
+  // Testnet4-mode with Mismatched Network). Click the Regtest tile
+  // in the BITCOIN section; this is the network we'll use for
+  // 3b/3c and it shares coin_type=1 keys with testnet.
+  await primer.getByText('Regtest', { exact: true }).first().click({ force: true });
+  // Wait for Regtest to become the active selection (checkmark
+  // moves to Regtest, leaves Testnet4).
+  await primer.waitForFunction(() => {
+    // crude DOM check: in the BITCOIN section, the row containing
+    // "Regtest" should be the one with an active-indicator
+    const txt = document.body.innerText || '';
+    return /BITCOIN[\s\S]{0,40}\bRegtest\b/.test(txt);
+  }, undefined, { timeout: 10_000, polling: 250 }).catch(() => undefined);
+  await shot(primer, '00d-after-regtest-select');
+
   // Open the harness page after priming. Close any leftover tabs
   // EXCEPT the primer (Xverse's state machine seems to rely on
   // popup.html being open) and the harness itself.
