@@ -43,12 +43,31 @@ function log(label: string, payload: unknown): void {
   outputEl().textContent = `${outputEl().textContent}\n${line}`;
 }
 
+/**
+ * Xverse's content script injects `window.XverseProviders`
+ * asynchronously after page load. Poll until it's there before
+ * any sats-connect call; otherwise getAddress hangs and the page
+ * never resolves.
+ */
+async function waitForXverseProvider(timeoutMs = 15_000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (xverseConnector.detect(window)) return true;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
+}
+
 window.ordpoolSdkHarness = {
   detectXverse(): boolean {
     return xverseConnector.detect(window);
   },
 
   async connectXverse(network) {
+    const detected = await waitForXverseProvider();
+    if (!detected) {
+      throw new Error('Xverse provider not injected on the harness page within 15s');
+    }
     statusEl().textContent = `connecting to xverse on ${network}…`;
     const networkEnum =
       network === 'mainnet'  ? Network.Mainnet  :
@@ -63,7 +82,10 @@ window.ordpoolSdkHarness = {
 
 // Tiny sanity tag for the spec to confirm the bundle loaded.
 (window as unknown as { ordpoolSdkHarnessReady: true }).ordpoolSdkHarnessReady = true;
-statusEl().textContent = `harness ready — Xverse detected: ${xverseConnector.detect(window)}`;
+// Poll once for diagnostic status, but don't block module load.
+waitForXverseProvider(1_000).then(detected => {
+  statusEl().textContent = `harness ready — Xverse detected: ${detected}`;
+});
 
 // Suppress unused-import warnings; these are exposed for later
 // iterations (3b: build mint via createTransaction; 3c: sign via
