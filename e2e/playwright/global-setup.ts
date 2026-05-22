@@ -1,66 +1,179 @@
-import { chromium } from '@playwright/test';
+import { chromium, BrowserContext, Page, expect } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-
-import { buildXverseVault } from './xverse-vault';
 
 /**
  * Playwright globalSetup — runs ONCE before any spec.
  *
- * Produces a chromium user-data-dir seeded with an already-
- * onboarded Xverse wallet on Bitcoin Regtest. Specs clone the
- * dir, launch with it, enter the password to unlock, and skip
- * the entire ~25s onboarding click-flow.
+ * Drives the full Xverse onboarding (BIP-39 test seed + password)
+ * and switches the wallet to Bitcoin Regtest mode, then dumps the
+ * extension's `chrome.storage.local` to a JSON file. Specs read
+ * that file in their beforeAll and restore it into a fresh
+ * Chromium context, skipping the 25s click flow per spec.
  *
- * The wallet state is constructed deterministically from
- * (TEST_MNEMONIC, TEST_PASSWORD) by `buildXverseVault` — see
- * that module's header for the reversed encryption pipeline.
- * No browser-driven onboarding step needed.
+ * Dump path:
+ *   process.env.XVERSE_STORAGE_DUMP
+ *   ?? path.resolve(__dirname, '../../test-results/xverse-storage.json')
  *
- * The onboarding click-flow is still exercised by
- * `specs/xverse-onboard.spec.ts` as an end-to-end smoke test.
+ * The test seed is the well-known BIP-39 abandon×11 + about
+ * vector and the password is publicly checked into this file.
+ * Both are deliberately unsuited for production use — the
+ * resulting wallet is observable by anyone with the dump.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../extensions/xverse');
+const DUMP_PATH = process.env.XVERSE_STORAGE_DUMP
+  ?? path.resolve(__dirname, '../../test-results/xverse-storage.json');
+// Seeded chromium user-data-dir — specs clone this per-test so each
+// gets a fresh context but skip the onboarding click flow.
 export const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
   ?? path.resolve(__dirname, '../../test-results/xverse-seed-user-data-dir');
 
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_PASSWORD = 'TestPassword123!';
 
-/**
- * Pre-build the `persistentStore::networks` JSON that selects
- * Bitcoin Regtest as the active chain. Configurations mirror the
- * built-ins shipped with Xverse v2.3.2; the SDK doesn't write any
- * custom networks here, so the wallet boots on the bundled
- * Regtest config (electrsApiUrl points at sBTC mempool by
- * default; we override at runtime via chrome.storage in spec3 if
- * we need to point at a local electrs).
- */
-function buildNetworksJson(): string {
-  return JSON.stringify({
-    value: {
-      active: {
-        bitcoin: 'bitcoin-regtest',
-        spark:   'spark-regtest',
-        stacks:  'stacks-testnet',
-        starknet:'starknet-sepolia',
-      },
-      configurations: [
-        { id: 'bitcoin-mainnet',  source: 'builtin', chain: 'bitcoin',  mode: 'mainnet',  name: 'Mainnet',  xverseApiUrl: 'https://api-3.xverse.app',         electrsApiUrl: 'https://btc-1.xverse.app' },
-        { id: 'bitcoin-testnet4', source: 'builtin', chain: 'bitcoin',  mode: 'testnet4', name: 'Testnet4', xverseApiUrl: 'https://api-testnet4.xverse.app',  electrsApiUrl: 'https://btc-testnet4.xverse.app' },
-        { id: 'bitcoin-signet',   source: 'builtin', chain: 'bitcoin',  mode: 'signet',   name: 'Signet',   xverseApiUrl: 'https://api-signet.xverse.app',    electrsApiUrl: 'https://btc-signet.xverse.app' },
-        { id: 'bitcoin-regtest',  source: 'builtin', chain: 'bitcoin',  mode: 'regtest',  name: 'Regtest',  xverseApiUrl: 'https://api-signet.xverse.app',    electrsApiUrl: 'https://beta.sbtc-mempool.tech/api/proxy' },
-        { id: 'spark-mainnet',    source: 'builtin', chain: 'spark',    mode: 'mainnet',  name: 'Mainnet',                                                    electrsApiUrl: 'https://btc-1.xverse.app' },
-        { id: 'spark-regtest',    source: 'builtin', chain: 'spark',    mode: 'regtest',  name: 'Regtest',                                                    electrsApiUrl: 'https://beta.sbtc-mempool.tech/api/proxy' },
-        { id: 'stacks-mainnet',   source: 'builtin', chain: 'stacks',   mode: 'mainnet',  name: 'Mainnet',  stacksApiUrl: 'https://api.hiro.so',              xverseApiUrl: 'https://api-3.xverse.app' },
-        { id: 'stacks-testnet',   source: 'builtin', chain: 'stacks',   mode: 'testnet',  name: 'Testnet',  stacksApiUrl: 'https://api.testnet.hiro.so',      xverseApiUrl: 'https://api-testnet4.xverse.app' },
-        { id: 'starknet',         source: 'builtin', chain: 'starknet', mode: 'mainnet',  name: 'Mainnet',  rpcApiUrl: 'https://api-3.xverse.app/starknet/v2/rpc',        xverseApiUrl: 'https://api-3.xverse.app' },
-        { id: 'starknet-sepolia', source: 'builtin', chain: 'starknet', mode: 'sepolia',  name: 'Sepolia',  rpcApiUrl: 'https://api-testnet4.xverse.app/starknet/v2/rpc', xverseApiUrl: 'https://api-testnet4.xverse.app' },
-      ],
-    },
-    version: 1,
-  });
+
+type PostMnemonicState = 'picker' | 'address-type' | 'restored';
+
+async function nextPostMnemonicState(page: Page): Promise<PostMnemonicState> {
+  const handle = await page.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    if (t.includes('wallet restored')) return 'restored';
+    if (t.includes('preferred address type')) return 'address-type';
+    if (t.includes('select a wallet to restore') || t.includes('we found funds')) return 'picker';
+    return false;
+  }, undefined, { timeout: 120_000, polling: 250 });
+  return handle.jsonValue() as Promise<PostMnemonicState>;
+}
+
+async function clickAndAwaitTransition(
+  page: Page,
+  buttonText: string,
+  sentinelGoneRegex: RegExp,
+  attempts = 3,
+): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    await page.waitForFunction((label: string) => {
+      const buttons = Array.from(document.querySelectorAll('button'));
+      return buttons.some(el => {
+        if (el.textContent?.trim() !== label) return false;
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = getComputedStyle(el);
+        if (style.visibility === 'hidden' || style.display === 'none') return false;
+        if (el.hasAttribute('disabled')) return false;
+        if (style.pointerEvents === 'none') return false;
+        return true;
+      });
+    }, buttonText, { timeout: 30_000, polling: 250 });
+    const btn = page.getByRole('button', { name: buttonText, exact: true }).first();
+    await expect(btn).toBeVisible({ timeout: 5_000 });
+    await btn.click();
+    const transitioned = await page.waitForFunction(
+      (re: string) => !(new RegExp(re, 'i')).test(document.body.innerText || ''),
+      sentinelGoneRegex.source,
+      { timeout: 5_000, polling: 250 },
+    ).then(() => true).catch(() => false);
+    if (transitioned) return;
+  }
+  throw new Error(`"${buttonText}" did not transition past "${sentinelGoneRegex}" after ${attempts} attempts`);
+}
+
+async function onboardXverse(context: BrowserContext, extensionId: string): Promise<void> {
+  const page = await context.newPage();
+  await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
+
+  await page.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('restore') && t.includes('create');
+  }, undefined, { timeout: 30_000 });
+
+  await page.getByText(/restore an existing wallet|restore.*wallet/i).first().click();
+  await expect(page.getByText(/legal/i).first()).toBeVisible({ timeout: 15_000 });
+  const dc = page.getByText(/authorize data collection/i).first();
+  if (await dc.isVisible({ timeout: 3_000 }).catch(() => false)) await dc.click();
+  await page.getByRole('button', { name: /^accept$/i }).first().click();
+
+  const pws = page.locator('input[type="password"]');
+  await expect(pws.first()).toBeVisible({ timeout: 15_000 });
+  const pwCount = await pws.count();
+  for (let i = 0; i < pwCount; i++) await pws.nth(i).fill(TEST_PASSWORD);
+  await page.getByRole('button', { name: /continue|next|confirm|done|create/i }).first().click();
+
+  await expect(page.getByText(/restore your wallet|what wallet are you importing/i).first()).toBeVisible({ timeout: 15_000 });
+  await page.getByText(/^xverse$/i).first().click();
+
+  await expect(page.getByText(/enter seed phrase/i).first()).toBeVisible({ timeout: 15_000 });
+  const seedInputs = page.locator('input[type="password"]');
+  await expect(seedInputs.first()).toBeVisible({ timeout: 10_000 });
+  await seedInputs.first().click();
+  await seedInputs.first().pressSequentially(TEST_MNEMONIC, { delay: 25 });
+  await page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first().click();
+
+  const seen = new Set<PostMnemonicState>();
+  for (;;) {
+    const state = await nextPostMnemonicState(page);
+    if (state === 'restored') break;
+    if (seen.has(state)) throw new Error(`stuck in post-mnemonic state: ${state}`);
+    seen.add(state);
+    if (state === 'picker') {
+      await page.getByRole('button', { name: /see accounts/i }).first().click();
+      await clickAndAwaitTransition(page, 'Confirm', /select a wallet to restore|we found funds/i);
+    } else if (state === 'address-type') {
+      await clickAndAwaitTransition(page, 'Continue', /preferred address type/i);
+    }
+  }
+}
+
+async function primeAndSwitchToRegtest(context: BrowserContext, extensionId: string): Promise<void> {
+  const primer = await context.newPage();
+  await primer.setViewportSize({ width: 400, height: 800 });
+  await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  await primer.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('account 1') || t.includes('not now') || t.includes('zest');
+  }, undefined, { timeout: 30_000, polling: 250 });
+  const notNow = primer.getByText('Not now', { exact: true }).first();
+  if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    await notNow.click({ force: true }).catch(() => undefined);
+  }
+
+  await primer.goto(`chrome-extension://${extensionId}/popup.html#/settings/change-network`, { waitUntil: 'domcontentloaded' });
+  await primer.waitForFunction(() => /testnet mode/i.test(document.body.innerText || ''), undefined, { timeout: 15_000 });
+  // Flip Testnet-mode toggle
+  const switchEl = primer.locator('[role="switch"], [role="checkbox"], input[type="checkbox"]').first();
+  if (await switchEl.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await switchEl.click({ force: true });
+  } else {
+    const rowBox = await primer.getByText('Testnet mode', { exact: true }).first().boundingBox();
+    if (!rowBox) throw new Error('Could not locate "Testnet mode" row');
+    await primer.mouse.click(rowBox.x + 320, rowBox.y + rowBox.height / 2);
+  }
+  await primer.waitForFunction(() => {
+    const txt = document.body.innerText || '';
+    return /testnet/i.test(txt) && /BITCOIN[\s\S]{0,80}testnet/i.test(txt);
+  }, undefined, { timeout: 10_000, polling: 250 });
+  // Pick Regtest for the Bitcoin row
+  await primer.getByText('Regtest', { exact: true }).first().click({ force: true });
+  await primer.waitForFunction(() => {
+    return /BITCOIN[\s\S]{0,40}\bRegtest\b/.test(document.body.innerText || '');
+  }, undefined, { timeout: 10_000, polling: 250 }).catch(() => undefined);
+}
+
+async function dumpStorage(context: BrowserContext, extensionId: string): Promise<Record<string, unknown>> {
+  // chrome.storage.local is only available from extension-origin
+  // pages. Open a fresh extension page, evaluate get(null) to grab
+  // every key.
+  const dumper = await context.newPage();
+  await dumper.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  // Wait briefly so any async post-restore writes settle.
+  await dumper.waitForTimeout(2_000);
+  const data = await dumper.evaluate(() => new Promise<Record<string, unknown>>((resolve) => {
+    (window as unknown as { chrome: { storage: { local: { get: (k: null, cb: (v: Record<string, unknown>) => void) => void } } } })
+      .chrome.storage.local.get(null, (v) => resolve(v));
+  }));
+  await dumper.close();
+  return data;
 }
 
 export default async function globalSetup(): Promise<void> {
@@ -68,7 +181,11 @@ export default async function globalSetup(): Promise<void> {
     throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. Run e2e/playwright/playwright-bootstrap.sh.`);
   }
 
+  // Skip re-onboarding if the seed dir + dump already exist from
+  // a previous run with the same Xverse version. Saves ~25s on
+  // local re-runs.
   if (
+    fs.existsSync(DUMP_PATH) &&
     fs.existsSync(path.join(SEED_USER_DATA_DIR, 'Default')) &&
     !process.env.XVERSE_FORCE_REONBOARD
   ) {
@@ -78,16 +195,9 @@ export default async function globalSetup(): Promise<void> {
   }
 
   // eslint-disable-next-line no-console
-  console.log(`[globalSetup] generating Xverse vault deterministically from test mnemonic…`);
-  const vaultBlob = buildXverseVault(TEST_MNEMONIC, TEST_PASSWORD);
-  const seededStorage = {
-    ...vaultBlob,
-    'persistentStore::networks': buildNetworksJson(),
-  };
-
+  console.log(`[globalSetup] onboarding Xverse + switching to Regtest…`);
   fs.rmSync(SEED_USER_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(SEED_USER_DATA_DIR, { recursive: true });
-
   const context = await chromium.launchPersistentContext(SEED_USER_DATA_DIR, {
     headless: false,
     args: [
@@ -103,49 +213,23 @@ export default async function globalSetup(): Promise<void> {
   const extensionId = worker.url().split('/')[2];
 
   try {
-    const seeder = await context.newPage();
-    await seeder.setViewportSize({ width: 400, height: 800 });
-    await seeder.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-    await seeder.evaluate((data) => new Promise<void>((resolve, reject) => {
-      const c = (window as unknown as { chrome: { storage: { local: { set: (d: Record<string, unknown>, cb: () => void) => void } }; runtime: { lastError?: { message: string } } } }).chrome;
-      c.storage.local.set(data, () => {
-        if (c.runtime.lastError) reject(new Error(c.runtime.lastError.message));
-        else resolve();
-      });
-    }), seededStorage);
-    // eslint-disable-next-line no-console
-    console.log(`[globalSetup] injected ${Object.keys(seededStorage).length} storage keys`);
+    await onboardXverse(context, extensionId);
+    await primeAndSwitchToRegtest(context, extensionId);
+    const dump = await dumpStorage(context, extensionId);
 
-    // Force Xverse to actually rehydrate from disk so it writes
-    // back the additional state it derives on first unlock
-    // (account list, auth tokens, redux-persist defaults). Without
-    // this, specs cloning the dir see the loading spinner forever
-    // post-unlock because the bootstrap state isn't persisted yet.
-    await seeder.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-    await seeder.waitForFunction(() => {
-      const t = (document.body.innerText || '').toLowerCase();
-      return t.includes('unlock') || t.includes('account 1') || t.includes('create') || t.includes('restore');
-    }, undefined, { timeout: 30_000, polling: 250 });
-    if (/unlock/i.test(await seeder.locator('body').innerText())) {
-      await seeder.locator('input[type="password"]').first().fill(TEST_PASSWORD);
-      await seeder.getByRole('button', { name: /^unlock$/i }).first().click();
-      // Wait for the dashboard signals; tolerate slow network init.
-      await seeder.waitForFunction(() => {
-        const t = (document.body.innerText || '').toLowerCase();
-        return t.includes('account 1') || t.includes('not now') || t.includes('zest') || t.includes('send');
-      }, undefined, { timeout: 60_000, polling: 250 }).catch(() => {
-        // eslint-disable-next-line no-console
-        console.log('[globalSetup] post-unlock dashboard text not seen within 60s; continuing anyway');
-      });
-    }
-    // Give chromium / extension a beat to finish writing any
-    // post-unlock state, then flush to leveldb on close.
+    fs.mkdirSync(path.dirname(DUMP_PATH), { recursive: true });
+    fs.writeFileSync(DUMP_PATH, JSON.stringify(dump, null, 2));
+    // eslint-disable-next-line no-console
+    console.log(`[globalSetup] dumped ${Object.keys(dump).length} keys to ${DUMP_PATH}`);
+    // Give Chrome's LevelDB ~5s to flush all writes before we
+    // close the context. Without this, the cloned user-data-dir
+    // ends up missing the last few writes — the wallet appears
+    // un-onboarded to specs that launch from the clone.
     await new Promise(r => setTimeout(r, 5_000));
-    await seeder.close().catch(() => undefined);
   } finally {
     await context.close();
   }
+  // After close, give Chrome a moment to finish its on-exit
+  // flush + index-flush dance.
   await new Promise(r => setTimeout(r, 2_000));
-  // eslint-disable-next-line no-console
-  console.log(`[globalSetup] seed user-data-dir ready at ${SEED_USER_DATA_DIR}`);
 }
