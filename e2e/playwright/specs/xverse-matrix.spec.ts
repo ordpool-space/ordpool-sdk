@@ -154,6 +154,7 @@ for (const variant of VARIANTS) {
       await page.goto(`chrome-extension://${xid}/popup.html`, { waitUntil: 'domcontentloaded' });
       await unlockWallet(page);
       await applyXverseVariant(page, variant);
+      await page.screenshot({ path: path.resolve(RESULTS_DIR, `matrix-${variant.network}-${variant.paymentType}-after-apply.png`), fullPage: true }).catch(() => undefined);
       // Give chromium 5s to flush the leveldb writes before close.
       await new Promise(r => setTimeout(r, 5_000));
       await mutator.close();

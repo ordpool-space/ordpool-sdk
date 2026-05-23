@@ -248,8 +248,19 @@ export async function applyXverseVariant(
     return /Native SegWit/i.test(t) && /Nested SegWit/i.test(t);
   }, undefined, { timeout: 15_000, polling: 250 });
 
+  // Substring match — the label may be wrapped in extra text nodes
+  // (icon + description). exact:true missed the click silently.
   const targetLabel = variant.paymentType === 'native' ? 'Native SegWit' : 'Nested SegWit';
-  await pageOnExtensionOrigin.getByText(targetLabel, { exact: true }).first().click({ force: true });
+  await pageOnExtensionOrigin.getByText(targetLabel).first().click({ force: true });
+
+  // After click, Xverse normally renders a confirmation modal
+  // ("Are you sure?" / "Change") before persisting. If present,
+  // click through.
+  await pageOnExtensionOrigin.waitForTimeout(800);
+  const confirmRow = pageOnExtensionOrigin.getByText('Change');
+  if (await confirmRow.first().isVisible({ timeout: 1_500 }).catch(() => false)) {
+    await confirmRow.first().click({ force: true });
+  }
 
   // Give redux-persist its debounce window to write the new
   // walletState.btcPaymentAddressType to chrome.storage.local
