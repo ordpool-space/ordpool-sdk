@@ -215,16 +215,33 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // out of the review screen (Xverse swaps to a tx-status spinner
   // or "Transaction sent" after signing). Retry up to 3 times if
   // the click is delivered but the React onClick swallows it.
-  // Click Confirm. Xverse closes its own popup as soon as it
-  // signs, so swallow any "page closed" error — that's success,
-  // not failure. The actual success signal is the harness's
-  // signedHexPromise resolving below.
-  await approvalSign.getByRole('button', { name: /^confirm$/i }).first()
-    .click({ force: true })
-    .catch((e) => {
-      // eslint-disable-next-line no-console
-      console.log(`[mint] confirm-click closed the popup: ${(e as Error).message}`);
-    });
+  // Wait briefly for Xverse's React onClick to bind before we
+  // click. Without this the click sometimes lands in the
+  // pre-binding window and is silently swallowed; the harness
+  // promise then never resolves.
+  await approvalSign.waitForTimeout(2_000);
+
+  // Click Confirm with a retry loop. Either the click lands and
+  // Xverse closes the popup itself (success), or Xverse signs and
+  // the harness's signedHexPromise resolves (also success), so
+  // both page-close-error AND signedHexPromise-completion count as
+  // wins. Retry the click up to 3 times if neither happens within
+  // 10s of an attempt.
+  let signResolved = false;
+  signedHexPromise.then(() => { signResolved = true; }).catch(() => undefined);
+  for (let attempt = 0; attempt < 3 && !signResolved; attempt++) {
+    if (approvalSign.isClosed()) break;
+    await approvalSign.getByRole('button', { name: /^confirm$/i }).first()
+      .click({ force: true })
+      .catch((e) => {
+        // eslint-disable-next-line no-console
+        console.log(`[mint] confirm-click attempt ${attempt} closed the popup: ${(e as Error).message}`);
+      });
+    // Race: either signedHexPromise resolves, popup closes, or 10s passes.
+    for (let i = 0; i < 40 && !signResolved && !approvalSign.isClosed(); i++) {
+      await new Promise(r => setTimeout(r, 250));
+    }
+  }
   const signed = await signedHexPromise;
   // eslint-disable-next-line no-console
   console.log(`[mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
