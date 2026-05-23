@@ -249,15 +249,27 @@ export function getDummyLegacyTransaction(txnOutput: TxnOutput, network: typeof 
 }
 
 /**
- * Creates an input script for the Xverse wallet
- * The payment address for Xverse is always a P2SH-P2WPKH / Nested SegWit (3...).
+ * Creates an input script for the Xverse wallet.
  *
- * see https://docs.xverse.app/sats-connect/methods/signmessage
- * > "ECDSA signatures over the secp256k1 curve when signing with the BTC payment (p2sh(p2wpkh)) address"
+ * Xverse v1 used P2SH-wrapped SegWit (Nested SegWit, `3…` /
+ * `2…` testnet) as the only payment format. Xverse v2+ defaults
+ * to native SegWit P2WPKH (`bc1q…` / `bcrt1q…`) and exposes
+ * nested-SegWit as a secondary option. Dispatch on the actual
+ * address format so both flavours work — Unisat already does
+ * the same.
  */
-export function createInputScriptForXverse(paymentPublicKey: Uint8Array, network: typeof btc.NETWORK): btc.P2Ret {
-  const p2wpkhForP2sh = btc.p2wpkh(paymentPublicKey, network);
-  return btc.p2sh(p2wpkhForP2sh, network);
+export function createInputScriptForXverse(paymentAddress: string, paymentPublicKey: Uint8Array, network: typeof btc.NETWORK): btc.P2Ret {
+  const addressFormat = getAddressFormat(paymentAddress);
+  switch (addressFormat) {
+    case 'P2WPKH':
+      return btc.p2wpkh(paymentPublicKey, network);
+    case 'P2SH???': {
+      const p2wpkhForP2sh = btc.p2wpkh(paymentPublicKey, network);
+      return btc.p2sh(p2wpkhForP2sh, network);
+    }
+    default:
+      throw new Error(`Xverse: unsupported payment address format ${addressFormat} for ${paymentAddress}`);
+  }
 }
 
 /**
@@ -342,7 +354,7 @@ export function createInput(walletType: KnownOrdinalWalletType,
       break;
     }
     case KnownOrdinalWalletType.xverse: {
-      scriptData = createInputScriptForXverse(paymentPublicKeyToUse, network);
+      scriptData = createInputScriptForXverse(paymentAddress, paymentPublicKeyToUse, network);
       break;
     }
     case KnownOrdinalWalletType.unisat: {
