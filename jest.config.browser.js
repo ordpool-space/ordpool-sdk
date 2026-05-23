@@ -7,21 +7,15 @@ module.exports = {
   setupFilesAfterEnv: ['<rootDir>/jest.config.browser.setup.ts'],
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
-  // sats-connect v4+ is ESM-only; let babel-jest transform its
-  // .mjs files to CJS for Jest.
-  transformIgnorePatterns: [
-    // Transform everything in node_modules — many sats-connect
-    // transitive deps ship ESM-only.
-    'node_modules/.*\\.snap$',
-  ],
-  // Merge the Angular preset's transforms with babel-jest for .mjs.
+  // Transform every node_modules file except snapshots — sats-connect
+  // v4 ships ESM-only. Same rationale as jest.config.node.js.
+  transformIgnorePatterns: ['node_modules/.*\\.snap$'],
   transform: {
     ...createCjsPreset().transform,
     '^.+\\.(js|jsx|mjs|cjs)$': 'babel-jest',
   },
-  // Same as the node config — modern ESM packages with only an
-  // `import` condition need this for Jest's resolver.
   testEnvironmentOptions: {
+    // See jest.config.node.js for why `import` is omitted.
     customExportConditions: ['browser', 'require', 'default'],
   },
   moduleNameMapper: {

@@ -9,42 +9,26 @@ module.exports = {
   // where jest-preset-angular handles the @angular/* ESM transforms.
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '\\.angular\\.spec\\.ts$'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
-  // sats-connect v4+ ships ESM-only; whitelist it (and its core
-  // sub-deps) for the transform stage. Without this Jest hits
-  // SyntaxError on the `import` statement in node_modules.
-  transformIgnorePatterns: [
-    // Match nothing — many sats-connect transitive deps ship ESM-
-    // only (synckit, bitcoin-address-validation, base58-js, etc.).
-    // Transform everything; ts-jest + babel-jest's caches keep
-    // this affordable.
-    'node_modules/.*\\.snap$',
-  ],
-  // ts-jest handles .ts/.tsx; babel-jest handles the .mjs files
-  // sats-connect ships under node_modules (via babel.config.cjs).
+  // Transform every node_modules file except snapshots — sats-connect
+  // v4 and several of its transitive deps (synckit, base58-js,
+  // bitcoin-address-validation, valibot) ship ESM-only.
+  transformIgnorePatterns: ['node_modules/.*\\.snap$'],
   transform: {
     '^.+\\.tsx?$': 'ts-jest',
     '^.+\\.(js|jsx|mjs|cjs)$': 'babel-jest',
   },
-  // Several sats-connect transitive deps (base58-js etc.) ship
-  // exports maps with only an `import` condition; others (synckit
-  // etc.) have both `import` and `require`. Order matters here:
-  // prefer the CJS `require` form when available — Jest's CJS
-  // loader can execute it directly. Fall back to `import` for
-  // ESM-only packages (babel-jest will transform).
   testEnvironmentOptions: {
-    // No `import` here — packages whose exports map has BOTH
-    // `import` and `require` branches (synckit etc.) match the
-    // FIRST condition key listed in their map, not the order
-    // we list here, so adding `import` makes Jest resolve the
-    // ESM file and bomb. Use Jest's CJS-style resolution and
-    // let babel-jest handle the import-only-exports packages
-    // (base58-js etc.) via moduleNameMapper.
+    // `import` is deliberately omitted: packages whose exports map
+    // has BOTH `import` and `require` branches (synckit etc.)
+    // resolve to the FIRST key declared in their map, not the
+    // order listed here, so adding `import` makes Jest pick the
+    // ESM file and bomb. Let babel-jest handle import-only
+    // packages (base58-js etc.) via moduleNameMapper below.
     customExportConditions: ['node', 'require', 'default'],
   },
   moduleNameMapper: {
-    // Packages with `exports` maps that only declare an `import`
-    // condition (no `require`) — Jest's resolver bails. Map them
-    // by name to their actual .js file.
+    // base58-js's exports map only declares an `import` condition;
+    // map it directly to the file so Jest's resolver doesn't bail.
     '^base58-js$': '<rootDir>/node_modules/base58-js/index.js',
   },
 
