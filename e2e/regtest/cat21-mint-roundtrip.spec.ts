@@ -98,6 +98,18 @@ const cases: MintCase[] = [
     expectedWitnessShape: { kind: 'segwit_p2sh_p2wpkh' },
   },
   {
+    // Xverse v2 (2024+) onboards users into Native SegWit by default
+    // and exposes Nested SegWit only as a secondary preference. Both
+    // branches must mint cleanly. createInputScriptForXverse dispatches
+    // on getAddressFormat(paymentAddress) to pick the right shape.
+    label: 'Xverse (Native SegWit / P2WPKH — v2 default)',
+    walletType: KnownOrdinalWalletType.xverse,
+    buildPayment: (pk, net) => btc.p2wpkh(pk, net) as { address: string; script: Uint8Array },
+    paymentPubkey: (pk) => pk,
+    needsTransactionHex: false,
+    expectedWitnessShape: { kind: 'segwit_p2wpkh' },
+  },
+  {
     label: 'Unisat (Taproot / P2TR)',
     walletType: KnownOrdinalWalletType.unisat,
     buildPayment: (pk, net) => {
