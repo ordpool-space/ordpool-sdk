@@ -45,22 +45,22 @@ export function toScureNetwork(network: Network): typeof btc.NETWORK {
 }
 
 /**
- * Convert to sats-connect's BitcoinNetworkType (used by Xverse's
- * getAddress / signTransaction).
+ * Convert to sats-connect's BitcoinNetworkType. v4+ declares all
+ * five variants natively (Mainnet, Testnet, Testnet4, Signet,
+ * Regtest), so the v1-era `as BitcoinNetworkType` casts can go.
  *
- * sats-connect@1.1.2's enum only declares Mainnet + Testnet, but at
- * runtime Xverse accepts the literal strings "Signet" and "Regtest"
- * too — Xverse's mismatch check compares the request type to the
- * wallet's active chain `mode`, so a Regtest-mode wallet only
- * matches `type: "Regtest"`. Cast through `as BitcoinNetworkType`
- * for the variants that aren't in the published enum yet.
+ * Xverse's mismatch-check is string-equality between the request
+ * `network.type` and the wallet's active chain `mode`; v4's enum
+ * values match Xverse's mode strings exactly (one of the reasons
+ * upgrading was worth doing).
  */
 export function toBitcoinNetworkType(network: Network): BitcoinNetworkType {
   if (network === Network.Mainnet)   return BitcoinNetworkType.Mainnet;
-  if (network === Network.Regtest)   return 'Regtest'  as BitcoinNetworkType;
-  if (network === Network.Signet)    return 'Signet'   as BitcoinNetworkType;
-  if (network === Network.Testnet4)  return 'Testnet4' as BitcoinNetworkType;
-  return BitcoinNetworkType.Testnet;
+  if (network === Network.Testnet3)  return BitcoinNetworkType.Testnet;
+  if (network === Network.Testnet4)  return BitcoinNetworkType.Testnet4;
+  if (network === Network.Signet)    return BitcoinNetworkType.Signet;
+  if (network === Network.Regtest)   return BitcoinNetworkType.Regtest;
+  throw new Error(`Unsupported Bitcoin network: ${network}`);
 }
 
 /**

@@ -50,9 +50,13 @@ describe('xverseSigner.signAndBroadcast', () => {
     expect(args.payload.psbtBase64).toBe(base64.encode(unsignedBytes));
     expect(args.payload.broadcast).toBe(true);
     expect(args.payload.network.type).toBe(BitcoinNetworkType.Mainnet);
-    expect(args.payload.inputsToSign[0].address).toBe('bc1qpayment');
-    expect(args.payload.inputsToSign[0].signingIndexes).toEqual([0]);
-    expect(args.payload.inputsToSign[0].sigHash).toBe(btc.SigHash.ALL);
+    // sats-connect v4 typed inputsToSign as optional; assert
+    // it's defined first so the per-element accesses don't trip
+    // strict-null-checks.
+    expect(args.payload.inputsToSign).toBeDefined();
+    expect(args.payload.inputsToSign![0].address).toBe('bc1qpayment');
+    expect(args.payload.inputsToSign![0].signingIndexes).toEqual([0]);
+    expect(args.payload.inputsToSign![0].sigHash).toBe(btc.SigHash.ALL);
     expect(result).toEqual({ txId: 'txid-from-sats-connect' });
   });
 
