@@ -56,7 +56,7 @@ describe('xverseSigner.signAndBroadcast', () => {
     expect(result).toEqual({ txId: 'txid-from-sats-connect' });
   });
 
-  it('when network is Testnet4, maps to BitcoinNetworkType.Testnet in the sats-connect payload', async () => {
+  it('when network is Testnet4, maps to the literal "Testnet4" string (Xverse v2 mode-equality check rejects bare "Testnet")', async () => {
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
       args.onFinish({ txId: 'tx' } as SignTransactionResponse);
     }) as never);
@@ -69,7 +69,7 @@ describe('xverseSigner.signAndBroadcast', () => {
     }));
 
     const args = signTransactionMock.mock.calls[0][0] as SignTransactionOptions;
-    expect(args.payload.network.type).toBe(BitcoinNetworkType.Testnet);
+    expect(args.payload.network.type).toBe('Testnet4');
   });
 
   it('when sats-connect onFinish returns a response without a txId, the adapter emits an empty string (current behaviour, soft-fail)', async () => {

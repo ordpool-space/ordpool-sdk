@@ -56,9 +56,10 @@ export function toScureNetwork(network: Network): typeof btc.NETWORK {
  * for the variants that aren't in the published enum yet.
  */
 export function toBitcoinNetworkType(network: Network): BitcoinNetworkType {
-  if (network === Network.Mainnet)  return BitcoinNetworkType.Mainnet;
-  if (network === Network.Regtest)  return 'Regtest' as BitcoinNetworkType;
-  if (network === Network.Signet)   return 'Signet'  as BitcoinNetworkType;
+  if (network === Network.Mainnet)   return BitcoinNetworkType.Mainnet;
+  if (network === Network.Regtest)   return 'Regtest'  as BitcoinNetworkType;
+  if (network === Network.Signet)    return 'Signet'   as BitcoinNetworkType;
+  if (network === Network.Testnet4)  return 'Testnet4' as BitcoinNetworkType;
   return BitcoinNetworkType.Testnet;
 }
 
