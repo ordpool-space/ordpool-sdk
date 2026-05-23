@@ -186,7 +186,7 @@ export async function applyXverseVariant(
     chrome: {
       storage: {
         local: {
-          get: (k: string, cb: (v: Record<string, string | undefined>) => void) => void;
+          get: (k: string[] | string, cb: (v: Record<string, string | undefined>) => void) => void;
           set: (d: Record<string, string>, cb: () => void) => void;
         };
       };
@@ -196,32 +196,68 @@ export async function applyXverseVariant(
 
   await pageOnExtensionOrigin.evaluate(async (input: XverseVariant) => {
     const c = (window as unknown as ChromeBridge).chrome;
-    const current = await new Promise<Record<string, string | undefined>>((resolve) =>
-      c.storage.local.get('persistentStore::networks', resolve),
+
+    // ─── 1. persistentStore::networks: switch active Bitcoin network ───
+    const cur = await new Promise<Record<string, string | undefined>>((resolve) =>
+      c.storage.local.get(['persistentStore::networks', 'persistentStore::activeAccount', 'persist:walletState'], resolve),
     );
-    const networksRaw = current['persistentStore::networks'];
+    const networksRaw = cur['persistentStore::networks'];
     if (!networksRaw) throw new Error('persistentStore::networks missing from chrome.storage.local');
     const networks = JSON.parse(networksRaw) as {
       value: { active: { bitcoin: string;[k: string]: string } };
       version: number;
     };
     networks.value.active.bitcoin = input.network;
-    await new Promise<void>((r, j) =>
-      c.storage.local.set({ 'persistentStore::networks': JSON.stringify(networks) }, () => {
-        if (c.runtime.lastError) j(new Error(c.runtime.lastError.message));
-        else r();
-      }),
-    );
 
-    const stateCurrent = await new Promise<Record<string, string | undefined>>((resolve) =>
-      c.storage.local.get('persist:walletState', resolve),
-    );
-    const stateRaw = stateCurrent['persist:walletState'];
-    if (!stateRaw) throw new Error('persist:walletState missing from chrome.storage.local');
-    const state = JSON.parse(stateRaw) as Record<string, string>;
-    state.btcPaymentAddressType = JSON.stringify(input.paymentType);
+    // ─── 2. persistentStore::activeAccount: the new Zustand-style ───
+    //   store Xverse reads `btcPaymentAddressType` from. The legacy
+    //   `persist:walletState.btcPaymentAddressType` is no longer the
+    //   source of truth — Xverse migrated to this store, default
+    //   "native". The key may not exist for our test wallet because
+    //   the user never explicitly changed Preferred Address Type;
+    //   in that case build a fresh value from the in-code default.
+    const activeRaw = cur['persistentStore::activeAccount'];
+    let active: { value: { selectedAccountIndex: number; selectedAccountType: string; selectedWalletId?: string; btcPaymentAddressType: string }; version: number };
+    if (activeRaw) {
+      active = JSON.parse(activeRaw);
+    } else {
+      // Reuse the selectedWalletId from persist:walletState so the
+      // activeAccount record points at the actual onboarded wallet.
+      const stateRaw0 = cur['persist:walletState'];
+      let selectedWalletId: string | undefined;
+      if (stateRaw0) {
+        const state0 = JSON.parse(stateRaw0) as Record<string, string>;
+        const swRaw = state0.selectedWalletId;
+        if (swRaw) selectedWalletId = JSON.parse(swRaw) as string;
+      }
+      active = {
+        value: {
+          selectedAccountIndex: 0,
+          selectedAccountType: 'software',
+          selectedWalletId,
+          btcPaymentAddressType: 'native',
+        },
+        version: 0,
+      };
+    }
+    active.value.btcPaymentAddressType = input.paymentType;
+
+    // ─── 3. legacy persist:walletState.btcPaymentAddressType ───
+    //   Set it too — some older code paths still read it. Doesn't
+    //   hurt to keep both stores consistent.
+    const stateRaw = cur['persist:walletState'];
+    const writes: Record<string, string> = {
+      'persistentStore::networks': JSON.stringify(networks),
+      'persistentStore::activeAccount': JSON.stringify(active),
+    };
+    if (stateRaw) {
+      const state = JSON.parse(stateRaw) as Record<string, string>;
+      state.btcPaymentAddressType = JSON.stringify(input.paymentType);
+      writes['persist:walletState'] = JSON.stringify(state);
+    }
+
     await new Promise<void>((r, j) =>
-      c.storage.local.set({ 'persist:walletState': JSON.stringify(state) }, () => {
+      c.storage.local.set(writes, () => {
         if (c.runtime.lastError) j(new Error(c.runtime.lastError.message));
         else r();
       }),

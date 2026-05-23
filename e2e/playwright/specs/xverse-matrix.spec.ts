@@ -41,18 +41,18 @@ const EXPECTED: Record<string, Record<string, string>> = {
   'bitcoin-regtest':  { native: 'bcrt1q6rz28mcfaxtmd6v789l9rrlrusdprr9pz3cppk', nested: '2Mww8dCYPUpKHofjgcXcBCEGmniw9CoaiD2' },
 };
 
-// Only the native-segwit variants run today. Nested-segwit variants
-// require figuring out why Xverse's boot logic resets
-// btcPaymentAddressType back to "native" on every fresh launch even
-// though we wrote "nested" to persist:walletState before launch.
-// The mutator-context's chrome.storage.set lands on disk (verified),
-// then the test-context's first read after launch returns "native"
-// — Xverse's redux-persist migration overrides it. Re-add the
-// nested rows once we've located + neutralised that migration.
+// Full matrix: Xverse v2 reads btcPaymentAddressType from the new
+// persistentStore::activeAccount Zustand-style store (default
+// "native"). The legacy persist:walletState.btcPaymentAddressType
+// is still written for backward compat but no longer the source
+// of truth. applyXverseVariant writes BOTH stores.
 const VARIANTS: ReadonlyArray<XverseVariant> = [
   { network: 'bitcoin-mainnet',  paymentType: 'native' },
+  { network: 'bitcoin-mainnet',  paymentType: 'nested' },
   { network: 'bitcoin-testnet4', paymentType: 'native' },
+  { network: 'bitcoin-testnet4', paymentType: 'nested' },
   { network: 'bitcoin-regtest',  paymentType: 'native' },
+  { network: 'bitcoin-regtest',  paymentType: 'nested' },
 ];
 
 
@@ -151,17 +151,22 @@ for (const variant of VARIANTS) {
       await applyXverseVariant(page, variant);
       // Verify the mutation took inside the mutator context BEFORE
       // close, so we know any later "wrong address" failure is
-      // about Xverse reading vs our writing.
-      const verify = await page.evaluate(() => new Promise<{ active: string; type: string }>((resolve) => {
+      // about Xverse reading vs our writing. Read from BOTH stores.
+      const verify = await page.evaluate(() => new Promise<{ active: string; activeAccountType: string; legacyType: string }>((resolve) => {
         const c = (window as unknown as { chrome: { storage: { local: { get: (k: string[], cb: (v: Record<string, string>) => void) => void } } } }).chrome;
-        c.storage.local.get(['persistentStore::networks', 'persist:walletState'], (v) => {
+        c.storage.local.get(['persistentStore::networks', 'persistentStore::activeAccount', 'persist:walletState'], (v) => {
           const net = JSON.parse(v['persistentStore::networks']);
+          const acc = JSON.parse(v['persistentStore::activeAccount']);
           const state = JSON.parse(v['persist:walletState']);
-          resolve({ active: net.value.active.bitcoin, type: JSON.parse(state.btcPaymentAddressType) });
+          resolve({
+            active: net.value.active.bitcoin,
+            activeAccountType: acc.value.btcPaymentAddressType,
+            legacyType: JSON.parse(state.btcPaymentAddressType),
+          });
         });
       }));
       // eslint-disable-next-line no-console
-      console.log(`[matrix:${variant.network}:${variant.paymentType}] mutator wrote → active=${verify.active} type=${verify.type}`);
+      console.log(`[matrix:${variant.network}:${variant.paymentType}] mutator wrote → active=${verify.active} activeAccount=${verify.activeAccountType} legacy=${verify.legacyType}`);
       // Give chromium 8s to flush the leveldb write before close.
       await new Promise(r => setTimeout(r, 8_000));
       await mutator.close();
@@ -192,17 +197,22 @@ for (const variant of VARIANTS) {
       const primer = await context.newPage();
       await primer.setViewportSize({ width: 400, height: 800 });
       await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-      // Verify storage survived the close+relaunch.
-      const verify2 = await primer.evaluate(() => new Promise<{ active: string; type: string }>((resolve) => {
+      // Verify storage survived the close+relaunch. Check both stores.
+      const verify2 = await primer.evaluate(() => new Promise<{ active: string; activeAccountType: string; legacyType: string }>((resolve) => {
         const c = (window as unknown as { chrome: { storage: { local: { get: (k: string[], cb: (v: Record<string, string>) => void) => void } } } }).chrome;
-        c.storage.local.get(['persistentStore::networks', 'persist:walletState'], (v) => {
+        c.storage.local.get(['persistentStore::networks', 'persistentStore::activeAccount', 'persist:walletState'], (v) => {
           const net = JSON.parse(v['persistentStore::networks']);
+          const acc = v['persistentStore::activeAccount'] ? JSON.parse(v['persistentStore::activeAccount']) : { value: { btcPaymentAddressType: '<missing>' } };
           const state = JSON.parse(v['persist:walletState']);
-          resolve({ active: net.value.active.bitcoin, type: JSON.parse(state.btcPaymentAddressType) });
+          resolve({
+            active: net.value.active.bitcoin,
+            activeAccountType: acc.value.btcPaymentAddressType,
+            legacyType: JSON.parse(state.btcPaymentAddressType),
+          });
         });
       }));
       // eslint-disable-next-line no-console
-      console.log(`[matrix:${variant.network}:${variant.paymentType}] test-context reads → active=${verify2.active} type=${verify2.type}`);
+      console.log(`[matrix:${variant.network}:${variant.paymentType}] test-context reads → active=${verify2.active} activeAccount=${verify2.activeAccountType} legacy=${verify2.legacyType}`);
       await unlockWallet(primer);
       await shot(primer, `${variant.network}-${variant.paymentType}-dashboard`);
 
