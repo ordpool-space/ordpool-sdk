@@ -124,6 +124,39 @@ for (const variant of VARIANTS) {
       fs.rmSync(path.join(workingDir, stale), { force: true });
     }
 
+    // Phase 1 — apply the variant. Short-lived chromium launch,
+    // mutate chrome.storage on an extension-origin page, close.
+    // Avoids the chrome.runtime.reload dance that races with the
+    // page.goto-after-reload (ERR_BLOCKED_BY_CLIENT in CI).
+    {
+      const mutator = await chromium.launchPersistentContext(workingDir, {
+        headless: false,
+        args: [
+          `--disable-extensions-except=${EXT_PATH}`,
+          `--load-extension=${EXT_PATH}`,
+          '--no-sandbox',
+          '--disable-dev-shm-usage',
+        ],
+      });
+      let [w] = mutator.serviceWorkers();
+      if (!w) w = await mutator.waitForEvent('serviceworker', { timeout: 30_000 });
+      const xid = w.url().split('/')[2];
+      const page = await mutator.newPage();
+      await page.goto(`chrome-extension://${xid}/popup.html`, { waitUntil: 'domcontentloaded' });
+      await applyXverseVariant(page, variant);
+      // Give chromium 5s to flush the leveldb write before close.
+      await new Promise(r => setTimeout(r, 5_000));
+      await mutator.close();
+      await new Promise(r => setTimeout(r, 2_000));
+      // Strip SingletonLock left over from the mutator launch so
+      // the test context can pick the dir up.
+      for (const stale of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
+        fs.rmSync(path.join(workingDir, stale), { force: true });
+      }
+    }
+
+    // Phase 2 — the actual test context, launched against the dir
+    // with the variant baked in.
     const context = await chromium.launchPersistentContext(workingDir, {
       headless: false,
       args: [
@@ -136,25 +169,7 @@ for (const variant of VARIANTS) {
     try {
       let [worker] = context.serviceWorkers();
       if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
-      let extensionId = worker.url().split('/')[2];
-
-      // Apply the variant BEFORE the wallet ever opens — mutate
-      // chrome.storage on a fresh extension page, then reload the
-      // extension. The next page that boots reads the mutated state
-      // as ground truth.
-      const seeder = await context.newPage();
-      await seeder.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-      await applyXverseVariant(seeder, variant);
-      // Fire-and-forget reload; the seeder page dies as the extension
-      // re-registers its service worker.
-      seeder.evaluate(() => {
-        (window as unknown as { chrome: { runtime: { reload: () => void } } }).chrome.runtime.reload();
-      }).catch(() => undefined);
-      // Wait for the new SW to come back up (Xverse re-registers at
-      // boot, same extension ID since the manifest key is stable).
-      const newWorker = await context.waitForEvent('serviceworker', { timeout: 30_000 }).catch(() => worker);
-      extensionId = newWorker.url().split('/')[2];
-      await new Promise(r => setTimeout(r, 2_000));
+      const extensionId = worker.url().split('/')[2];
 
       const primer = await context.newPage();
       await primer.setViewportSize({ width: 400, height: 800 });
