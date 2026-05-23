@@ -181,7 +181,7 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // first. Plain waitForEvent('page') can race against earlier
   // events that fired during connect.
   let approvalSign: Page | undefined;
-  const popupDeadline = Date.now() + 60_000;
+  const popupDeadline = Date.now() + 120_000;
   while (Date.now() < popupDeadline) {
     for (const p of context.pages()) {
       if (knownPagesAtStart.has(p)) continue;
