@@ -165,21 +165,40 @@ export interface XverseVariant {
 }
 
 /**
- * Given a Playwright BrowserContext launched against an already-
- * onboarded Xverse seed dir, mutate `persistentStore::networks`
- * and `persist:walletState` to make the wallet boot on a specific
- * (network, paymentType) combination. The context's leveldb gets
- * the change; the caller should close the context and relaunch
- * for the wallet to pick up the new values.
+ * Apply a variant to an UNLOCKED Xverse extension context.
  *
- * Pass a chrome-extension://-origin page so chrome.storage.local
- * is reachable. If `page` is omitted, the caller's responsibility
- * is to make sure the active page is on an extension origin.
+ * Composition:
+ *  1. `persistentStore::networks` — mutate the active Bitcoin
+ *     network via chrome.storage.local. Plain JSON, no Xverse
+ *     boot-race.
+ *  2. `btcPaymentAddressType` — drive the Settings UI. The
+ *     redux-persist `walletState.btcPaymentAddressType` is the
+ *     source of truth sats-connect reads from, but Xverse
+ *     rehydrates on boot then debounce-saves over any chrome.
+ *     storage mutation we write directly. The supported way to
+ *     change it is the same one a user uses: navigate to
+ *     /settings/preferred-address and click the option. After
+ *     the click, redux-persist saves the new value to leveldb;
+ *     then we can close the context and the new variant survives.
+ *
+ * Caller responsibilities:
+ *  - The supplied `page` must already be on the popup.html origin
+ *    and the wallet must be unlocked (password entered).
+ *  - After this call, the page is sitting on
+ *    /settings/preferred-address. Caller can navigate elsewhere
+ *    or close.
  */
+interface PlaywrightPageLike {
+  evaluate: <T, A>(fn: (a: A) => Promise<T> | T, arg: A) => Promise<T>;
+  goto: (url: string, opts?: { waitUntil?: 'load' | 'domcontentloaded' | 'networkidle' | 'commit' }) => Promise<unknown>;
+  waitForFunction: (fn: (...args: unknown[]) => unknown, arg?: unknown, opts?: { timeout?: number; polling?: number }) => Promise<unknown>;
+  waitForTimeout: (ms: number) => Promise<void>;
+  url: () => string;
+  getByText: (text: string, opts?: { exact?: boolean }) => { first: () => { click: (opts?: { force?: boolean }) => Promise<void>; isVisible: (opts?: { timeout?: number }) => Promise<boolean> } };
+}
+
 export async function applyXverseVariant(
-  pageOnExtensionOrigin: {
-    evaluate: <T, A>(fn: (a: A) => Promise<T> | T, arg: A) => Promise<T>;
-  },
+  pageOnExtensionOrigin: PlaywrightPageLike,
   variant: XverseVariant,
 ): Promise<void> {
   type ChromeBridge = {
@@ -194,75 +213,48 @@ export async function applyXverseVariant(
     };
   };
 
-  await pageOnExtensionOrigin.evaluate(async (input: XverseVariant) => {
+  // 1. Network mutation via chrome.storage — boot-race-free
+  //    because persistentStore::networks isn't touched by redux-
+  //    persist's debounced rewriter.
+  await pageOnExtensionOrigin.evaluate(async (network: string) => {
     const c = (window as unknown as ChromeBridge).chrome;
-
-    // ─── 1. persistentStore::networks: switch active Bitcoin network ───
     const cur = await new Promise<Record<string, string | undefined>>((resolve) =>
-      c.storage.local.get(['persistentStore::networks', 'persistentStore::activeAccount', 'persist:walletState'], resolve),
+      c.storage.local.get('persistentStore::networks', resolve),
     );
-    const networksRaw = cur['persistentStore::networks'];
-    if (!networksRaw) throw new Error('persistentStore::networks missing from chrome.storage.local');
-    const networks = JSON.parse(networksRaw) as {
+    const raw = cur['persistentStore::networks'];
+    if (!raw) throw new Error('persistentStore::networks missing from chrome.storage.local');
+    const networks = JSON.parse(raw) as {
       value: { active: { bitcoin: string;[k: string]: string } };
       version: number;
     };
-    networks.value.active.bitcoin = input.network;
-
-    // ─── 2. persistentStore::activeAccount: the new Zustand-style ───
-    //   store Xverse reads `btcPaymentAddressType` from. The legacy
-    //   `persist:walletState.btcPaymentAddressType` is no longer the
-    //   source of truth — Xverse migrated to this store, default
-    //   "native". The key may not exist for our test wallet because
-    //   the user never explicitly changed Preferred Address Type;
-    //   in that case build a fresh value from the in-code default.
-    const activeRaw = cur['persistentStore::activeAccount'];
-    let active: { value: { selectedAccountIndex: number; selectedAccountType: string; selectedWalletId?: string; btcPaymentAddressType: string }; version: number };
-    if (activeRaw) {
-      active = JSON.parse(activeRaw);
-    } else {
-      // Reuse the selectedWalletId from persist:walletState so the
-      // activeAccount record points at the actual onboarded wallet.
-      const stateRaw0 = cur['persist:walletState'];
-      let selectedWalletId: string | undefined;
-      if (stateRaw0) {
-        const state0 = JSON.parse(stateRaw0) as Record<string, string>;
-        const swRaw = state0.selectedWalletId;
-        if (swRaw) selectedWalletId = JSON.parse(swRaw) as string;
-      }
-      active = {
-        value: {
-          selectedAccountIndex: 0,
-          selectedAccountType: 'software',
-          selectedWalletId,
-          btcPaymentAddressType: 'native',
-        },
-        version: 0,
-      };
-    }
-    active.value.btcPaymentAddressType = input.paymentType;
-
-    // ─── 3. legacy persist:walletState.btcPaymentAddressType ───
-    //   Set it too — some older code paths still read it. Doesn't
-    //   hurt to keep both stores consistent.
-    const stateRaw = cur['persist:walletState'];
-    const writes: Record<string, string> = {
-      'persistentStore::networks': JSON.stringify(networks),
-      'persistentStore::activeAccount': JSON.stringify(active),
-    };
-    if (stateRaw) {
-      const state = JSON.parse(stateRaw) as Record<string, string>;
-      state.btcPaymentAddressType = JSON.stringify(input.paymentType);
-      writes['persist:walletState'] = JSON.stringify(state);
-    }
-
+    networks.value.active.bitcoin = network;
     await new Promise<void>((r, j) =>
-      c.storage.local.set(writes, () => {
+      c.storage.local.set({ 'persistentStore::networks': JSON.stringify(networks) }, () => {
         if (c.runtime.lastError) j(new Error(c.runtime.lastError.message));
         else r();
       }),
     );
-  }, variant);
+  }, variant.network);
+
+  // 2. Preferred Address Type via the Settings UI. Direct
+  //    chrome.storage mutation of walletState.btcPaymentAddressType
+  //    loses to Xverse's boot-debounce-save; only the user-facing
+  //    flow reliably persists.
+  const baseUrl = new URL(pageOnExtensionOrigin.url());
+  const settingsUrl = `${baseUrl.protocol}//${baseUrl.host}${baseUrl.pathname}#/settings/preferred-address`;
+  await pageOnExtensionOrigin.goto(settingsUrl, { waitUntil: 'domcontentloaded' });
+  await pageOnExtensionOrigin.waitForFunction(() => {
+    const t = (document.body.innerText || '');
+    return /Native SegWit/i.test(t) && /Nested SegWit/i.test(t);
+  }, undefined, { timeout: 15_000, polling: 250 });
+
+  const targetLabel = variant.paymentType === 'native' ? 'Native SegWit' : 'Nested SegWit';
+  await pageOnExtensionOrigin.getByText(targetLabel, { exact: true }).first().click({ force: true });
+
+  // Give redux-persist its debounce window to write the new
+  // walletState.btcPaymentAddressType to chrome.storage.local
+  // before the caller closes the context.
+  await pageOnExtensionOrigin.waitForTimeout(3_000);
 }
 
 /**

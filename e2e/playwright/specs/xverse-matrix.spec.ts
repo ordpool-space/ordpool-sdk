@@ -129,10 +129,13 @@ for (const variant of VARIANTS) {
       fs.rmSync(path.join(workingDir, stale), { force: true });
     }
 
-    // Phase 1 — apply the variant. Short-lived chromium launch,
-    // mutate chrome.storage on an extension-origin page, close.
-    // Avoids the chrome.runtime.reload dance that races with the
-    // page.goto-after-reload (ERR_BLOCKED_BY_CLIENT in CI).
+    // Phase 1 — variant setup. Launch chromium, unlock the wallet,
+    // navigate to Settings → Preferred Address Type, click the
+    // target type (UI-driven because Xverse's redux-persist boot
+    // overwrites direct chrome.storage mutations of
+    // walletState.btcPaymentAddressType). Network mutation is
+    // still direct chrome.storage — persistentStore::networks is
+    // boot-race-free.
     {
       const mutator = await chromium.launchPersistentContext(workingDir, {
         headless: false,
@@ -147,32 +150,14 @@ for (const variant of VARIANTS) {
       if (!w) w = await mutator.waitForEvent('serviceworker', { timeout: 30_000 });
       const xid = w.url().split('/')[2];
       const page = await mutator.newPage();
+      await page.setViewportSize({ width: 400, height: 800 });
       await page.goto(`chrome-extension://${xid}/popup.html`, { waitUntil: 'domcontentloaded' });
+      await unlockWallet(page);
       await applyXverseVariant(page, variant);
-      // Verify the mutation took inside the mutator context BEFORE
-      // close, so we know any later "wrong address" failure is
-      // about Xverse reading vs our writing. Read from BOTH stores.
-      const verify = await page.evaluate(() => new Promise<{ active: string; activeAccountType: string; legacyType: string }>((resolve) => {
-        const c = (window as unknown as { chrome: { storage: { local: { get: (k: string[], cb: (v: Record<string, string>) => void) => void } } } }).chrome;
-        c.storage.local.get(['persistentStore::networks', 'persistentStore::activeAccount', 'persist:walletState'], (v) => {
-          const net = JSON.parse(v['persistentStore::networks']);
-          const acc = JSON.parse(v['persistentStore::activeAccount']);
-          const state = JSON.parse(v['persist:walletState']);
-          resolve({
-            active: net.value.active.bitcoin,
-            activeAccountType: acc.value.btcPaymentAddressType,
-            legacyType: JSON.parse(state.btcPaymentAddressType),
-          });
-        });
-      }));
-      // eslint-disable-next-line no-console
-      console.log(`[matrix:${variant.network}:${variant.paymentType}] mutator wrote → active=${verify.active} activeAccount=${verify.activeAccountType} legacy=${verify.legacyType}`);
-      // Give chromium 8s to flush the leveldb write before close.
-      await new Promise(r => setTimeout(r, 8_000));
+      // Give chromium 5s to flush the leveldb writes before close.
+      await new Promise(r => setTimeout(r, 5_000));
       await mutator.close();
       await new Promise(r => setTimeout(r, 2_000));
-      // Strip SingletonLock left over from the mutator launch so
-      // the test context can pick the dir up.
       for (const stale of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
         fs.rmSync(path.join(workingDir, stale), { force: true });
       }
