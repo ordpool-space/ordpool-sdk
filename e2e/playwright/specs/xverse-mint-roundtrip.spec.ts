@@ -176,9 +176,10 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
     recipientAddress: wallet.ordinalsAddress,
     feeSats: 1500,
   });
-  // Poll for the sign-popup page: any new page on chrome-
-  // extension:// that renders "Review transaction" + Confirm.
-  // Plain waitForEvent('page') sometimes grabs an unrelated tab.
+  // Find the sign popup specifically by looking for "Review
+  // transaction" text — the loading-spinner state must finish
+  // first. Plain waitForEvent('page') can race against earlier
+  // events that fired during connect.
   let approvalSign: Page | undefined;
   const popupDeadline = Date.now() + 60_000;
   while (Date.now() < popupDeadline) {
@@ -187,7 +188,7 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
       const url = p.url();
       if (!url.startsWith('chrome-extension://')) continue;
       const text = await p.locator('body').innerText().catch(() => '');
-      if (/review transaction|confirm/i.test(text)) {
+      if (/review transaction/i.test(text)) {
         approvalSign = p;
         break;
       }
@@ -195,7 +196,7 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
     if (approvalSign) break;
     await new Promise(r => setTimeout(r, 500));
   }
-  if (!approvalSign) throw new Error('Xverse sign popup never showed Review transaction within 60s');
+  if (!approvalSign) throw new Error('Xverse sign popup never rendered Review transaction within 60s');
   await shot(approvalSign, '02-sign-approval');
   // Wait until Confirm is enabled (Xverse renders the button
   // immediately but its React onClick is hooked up only after
@@ -214,18 +215,16 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // out of the review screen (Xverse swaps to a tx-status spinner
   // or "Transaction sent" after signing). Retry up to 3 times if
   // the click is delivered but the React onClick swallows it.
-  let confirmed = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await approvalSign.getByRole('button', { name: /^confirm$/i }).first().click({ force: true });
-    await shot(approvalSign, `02-after-confirm-${attempt}`);
-    const transitioned = await approvalSign.waitForFunction(
-      () => !/review transaction/i.test(document.body.innerText || ''),
-      undefined,
-      { timeout: 10_000, polling: 250 },
-    ).then(() => true).catch(() => false);
-    if (transitioned) { confirmed = true; break; }
-  }
-  if (!confirmed) throw new Error('Xverse stayed on Review transaction screen across 3 Confirm clicks');
+  // Click Confirm. Xverse closes its own popup as soon as it
+  // signs, so swallow any "page closed" error — that's success,
+  // not failure. The actual success signal is the harness's
+  // signedHexPromise resolving below.
+  await approvalSign.getByRole('button', { name: /^confirm$/i }).first()
+    .click({ force: true })
+    .catch((e) => {
+      // eslint-disable-next-line no-console
+      console.log(`[mint] confirm-click closed the popup: ${(e as Error).message}`);
+    });
   const signed = await signedHexPromise;
   // eslint-disable-next-line no-console
   console.log(`[mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
