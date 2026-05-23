@@ -110,8 +110,16 @@ window.ordpoolSdkHarness.buildAndSignMintViaXverse = async (input: MintRequest) 
     vout:  input.utxo.vout,
     value: input.utxo.value,
   };
+  // walletType picks the input script shape inside createTransaction.
+  // Xverse v2 uses native SegWit P2WPKH for the payment address
+  // (bcrt1q…), but our SDK's `KnownOrdinalWalletType.xverse` branch
+  // still builds the legacy P2SH-wrapped variant from older Xverse
+  // versions — bitcoind rejects that against a P2WPKH UTXO with
+  // "non-mandatory-script-verify-flag (Witness requires empty
+  // scriptSig)". Use the leather branch in the meantime; it
+  // unconditionally builds P2WPKH which matches the actual UTXO.
   const result = createTransaction(
-    KnownOrdinalWalletType.xverse,
+    KnownOrdinalWalletType.leather,
     input.recipientAddress,
     txnOutput,
     paymentPubkey,
