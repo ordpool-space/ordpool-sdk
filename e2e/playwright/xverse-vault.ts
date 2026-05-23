@@ -1,4 +1,24 @@
 /**
+ * Two responsibilities here:
+ *
+ * 1. `buildXverseVault(mnemonic, password)` — generate the four
+ *    vault::* chrome.storage.local entries deterministically from a
+ *    seed. Reverse-engineered crypto; verified via the roundtrip in
+ *    scripts/xverse-vault-roundtrip.mjs. Produces vault::* keys
+ *    that Xverse recognizes (Unlock screen renders with the
+ *    password) but post-unlock state (account list, redux state,
+ *    per-network auth tokens) isn't pre-populated, so the dashboard
+ *    hangs on a loading spinner. Snapshot+replay (clone an already-
+ *    onboarded chromium user-data-dir) remains the working path.
+ *
+ * 2. `applyXverseVariant(context, extensionId, variant)` — given a
+ *    Playwright BrowserContext launched against an already-onboarded
+ *    seed dir, mutate `persistentStore::networks.value.active.bitcoin`
+ *    and `persist:walletState.btcPaymentAddressType` to pick a
+ *    specific Network × Payment-Address-Type combination. Used by
+ *    the matrix specs to exercise every Xverse combo against the
+ *    same baseline wallet without re-onboarding.
+ *
  * Build a complete chrome.storage.local snapshot for the Xverse
  * extension from just (mnemonic, password). The snapshot can be
  * injected with chrome.storage.local.set(...) in a Playwright spec
@@ -116,3 +136,112 @@ export function buildXverseVault(mnemonic: string, password: string): XverseVaul
     'vault::seedVault': seedVault,
   };
 }
+
+
+// ─────────────────────────────────────────────────────────────────
+// Variant mutators for the matrix specs
+// ─────────────────────────────────────────────────────────────────
+
+/** Xverse's built-in Bitcoin network IDs (see persistentStore::networks). */
+export type XverseBitcoinNetworkId =
+  | 'bitcoin-mainnet'
+  | 'bitcoin-testnet4'
+  | 'bitcoin-signet'
+  | 'bitcoin-regtest';
+
+/**
+ * Which of the three btcAddresses the wallet exposes as the
+ * Payment purpose via sats-connect. Xverse v2 default is `native`;
+ * `nested` was v1's default and is selectable in Preferred Address
+ * Type. `taproot` exists in the storage but Xverse never exposes
+ * it as payment — only ordinals — so we don't expose it as a
+ * variant option.
+ */
+export type XverseBtcPaymentAddressType = 'native' | 'nested';
+
+export interface XverseVariant {
+  network: XverseBitcoinNetworkId;
+  paymentType: XverseBtcPaymentAddressType;
+}
+
+/**
+ * Given a Playwright BrowserContext launched against an already-
+ * onboarded Xverse seed dir, mutate `persistentStore::networks`
+ * and `persist:walletState` to make the wallet boot on a specific
+ * (network, paymentType) combination. The context's leveldb gets
+ * the change; the caller should close the context and relaunch
+ * for the wallet to pick up the new values.
+ *
+ * Pass a chrome-extension://-origin page so chrome.storage.local
+ * is reachable. If `page` is omitted, the caller's responsibility
+ * is to make sure the active page is on an extension origin.
+ */
+export async function applyXverseVariant(
+  pageOnExtensionOrigin: {
+    evaluate: <T, A>(fn: (a: A) => Promise<T> | T, arg: A) => Promise<T>;
+  },
+  variant: XverseVariant,
+): Promise<void> {
+  type ChromeBridge = {
+    chrome: {
+      storage: {
+        local: {
+          get: (k: string, cb: (v: Record<string, string | undefined>) => void) => void;
+          set: (d: Record<string, string>, cb: () => void) => void;
+        };
+      };
+      runtime: { lastError?: { message: string } };
+    };
+  };
+
+  await pageOnExtensionOrigin.evaluate(async (input: XverseVariant) => {
+    const c = (window as unknown as ChromeBridge).chrome;
+    const current = await new Promise<Record<string, string | undefined>>((resolve) =>
+      c.storage.local.get('persistentStore::networks', resolve),
+    );
+    const networksRaw = current['persistentStore::networks'];
+    if (!networksRaw) throw new Error('persistentStore::networks missing from chrome.storage.local');
+    const networks = JSON.parse(networksRaw) as {
+      value: { active: { bitcoin: string;[k: string]: string } };
+      version: number;
+    };
+    networks.value.active.bitcoin = input.network;
+    await new Promise<void>((r, j) =>
+      c.storage.local.set({ 'persistentStore::networks': JSON.stringify(networks) }, () => {
+        if (c.runtime.lastError) j(new Error(c.runtime.lastError.message));
+        else r();
+      }),
+    );
+
+    const stateCurrent = await new Promise<Record<string, string | undefined>>((resolve) =>
+      c.storage.local.get('persist:walletState', resolve),
+    );
+    const stateRaw = stateCurrent['persist:walletState'];
+    if (!stateRaw) throw new Error('persist:walletState missing from chrome.storage.local');
+    const state = JSON.parse(stateRaw) as Record<string, string>;
+    state.btcPaymentAddressType = JSON.stringify(input.paymentType);
+    await new Promise<void>((r, j) =>
+      c.storage.local.set({ 'persist:walletState': JSON.stringify(state) }, () => {
+        if (c.runtime.lastError) j(new Error(c.runtime.lastError.message));
+        else r();
+      }),
+    );
+  }, variant);
+}
+
+/**
+ * Convenience: every combination of (4 networks × 2 payment types)
+ * the matrix specs exercise. The mainnet+nested combo is exactly
+ * the Xverse v1 default that worked before this session's bug
+ * fix; including it confirms backward compatibility wasn't broken.
+ */
+export const XVERSE_MATRIX: ReadonlyArray<XverseVariant> = Object.freeze([
+  { network: 'bitcoin-mainnet',  paymentType: 'native' },
+  { network: 'bitcoin-mainnet',  paymentType: 'nested' },
+  { network: 'bitcoin-testnet4', paymentType: 'native' },
+  { network: 'bitcoin-testnet4', paymentType: 'nested' },
+  { network: 'bitcoin-signet',   paymentType: 'native' },
+  { network: 'bitcoin-signet',   paymentType: 'nested' },
+  { network: 'bitcoin-regtest',  paymentType: 'native' },
+  { network: 'bitcoin-regtest',  paymentType: 'nested' },
+]);
