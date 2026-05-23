@@ -144,8 +144,21 @@ for (const variant of VARIANTS) {
       const page = await mutator.newPage();
       await page.goto(`chrome-extension://${xid}/popup.html`, { waitUntil: 'domcontentloaded' });
       await applyXverseVariant(page, variant);
-      // Give chromium 5s to flush the leveldb write before close.
-      await new Promise(r => setTimeout(r, 5_000));
+      // Verify the mutation took inside the mutator context BEFORE
+      // close, so we know any later "wrong address" failure is
+      // about Xverse reading vs our writing.
+      const verify = await page.evaluate(() => new Promise<{ active: string; type: string }>((resolve) => {
+        const c = (window as unknown as { chrome: { storage: { local: { get: (k: string[], cb: (v: Record<string, string>) => void) => void } } } }).chrome;
+        c.storage.local.get(['persistentStore::networks', 'persist:walletState'], (v) => {
+          const net = JSON.parse(v['persistentStore::networks']);
+          const state = JSON.parse(v['persist:walletState']);
+          resolve({ active: net.value.active.bitcoin, type: JSON.parse(state.btcPaymentAddressType) });
+        });
+      }));
+      // eslint-disable-next-line no-console
+      console.log(`[matrix:${variant.network}:${variant.paymentType}] mutator wrote → active=${verify.active} type=${verify.type}`);
+      // Give chromium 8s to flush the leveldb write before close.
+      await new Promise(r => setTimeout(r, 8_000));
       await mutator.close();
       await new Promise(r => setTimeout(r, 2_000));
       // Strip SingletonLock left over from the mutator launch so
@@ -174,6 +187,17 @@ for (const variant of VARIANTS) {
       const primer = await context.newPage();
       await primer.setViewportSize({ width: 400, height: 800 });
       await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+      // Verify storage survived the close+relaunch.
+      const verify2 = await primer.evaluate(() => new Promise<{ active: string; type: string }>((resolve) => {
+        const c = (window as unknown as { chrome: { storage: { local: { get: (k: string[], cb: (v: Record<string, string>) => void) => void } } } }).chrome;
+        c.storage.local.get(['persistentStore::networks', 'persist:walletState'], (v) => {
+          const net = JSON.parse(v['persistentStore::networks']);
+          const state = JSON.parse(v['persist:walletState']);
+          resolve({ active: net.value.active.bitcoin, type: JSON.parse(state.btcPaymentAddressType) });
+        });
+      }));
+      // eslint-disable-next-line no-console
+      console.log(`[matrix:${variant.network}:${variant.paymentType}] test-context reads → active=${verify2.active} type=${verify2.type}`);
       await unlockWallet(primer);
       await shot(primer, `${variant.network}-${variant.paymentType}-dashboard`);
 
