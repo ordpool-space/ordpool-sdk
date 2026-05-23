@@ -188,13 +188,20 @@ export interface XverseVariant {
  *    /settings/preferred-address. Caller can navigate elsewhere
  *    or close.
  */
+interface PlaywrightLocatorLike {
+  click: (opts?: { force?: boolean }) => Promise<void>;
+  isVisible: (opts?: { timeout?: number }) => Promise<boolean>;
+  boundingBox: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
+}
 interface PlaywrightPageLike {
   evaluate: <T, A>(fn: (a: A) => Promise<T> | T, arg: A) => Promise<T>;
   goto: (url: string, opts?: { waitUntil?: 'load' | 'domcontentloaded' | 'networkidle' | 'commit' }) => Promise<unknown>;
   waitForFunction: (fn: (...args: unknown[]) => unknown, arg?: unknown, opts?: { timeout?: number; polling?: number }) => Promise<unknown>;
   waitForTimeout: (ms: number) => Promise<void>;
   url: () => string;
-  getByText: (text: string, opts?: { exact?: boolean }) => { first: () => { click: (opts?: { force?: boolean }) => Promise<void>; isVisible: (opts?: { timeout?: number }) => Promise<boolean> } };
+  getByText: (text: string, opts?: { exact?: boolean }) => { first: () => PlaywrightLocatorLike };
+  getByRole: (role: string, opts?: { name?: RegExp | string; exact?: boolean }) => { first: () => PlaywrightLocatorLike };
+  mouse: { click: (x: number, y: number) => Promise<void> };
 }
 
 export async function applyXverseVariant(
@@ -248,19 +255,32 @@ export async function applyXverseVariant(
     return /Native SegWit/i.test(t) && /Nested SegWit/i.test(t);
   }, undefined, { timeout: 15_000, polling: 250 });
 
-  // Substring match — the label may be wrapped in extra text nodes
-  // (icon + description). exact:true missed the click silently.
+  // Each option is a tile, not a button. The text "Native SegWit"
+  // / "Nested SegWit" sits inside a non-button clickable wrapper.
+  // `getByText().click()` clicks the text span — React's onClick
+  // is bound to an ancestor and the synthetic event doesn't always
+  // bubble cleanly. Compute the tile's center via boundingBox and
+  // click via the mouse layer.
   const targetLabel = variant.paymentType === 'native' ? 'Native SegWit' : 'Nested SegWit';
-  await pageOnExtensionOrigin.getByText(targetLabel).first().click({ force: true });
+  const box = await pageOnExtensionOrigin.getByText(targetLabel).first().boundingBox();
+  if (!box) throw new Error(`could not locate "${targetLabel}" tile`);
+  // Click ~80px to the right of the label so we hit the tile body
+  // not the icon column. Stays inside the row at the typical
+  // 360px tile width.
+  await pageOnExtensionOrigin.mouse.click(box.x + box.width + 80, box.y + box.height / 2);
+  await pageOnExtensionOrigin.waitForTimeout(500);
 
-  // After click, Xverse normally renders a confirmation modal
-  // ("Are you sure?" / "Change") before persisting. If present,
-  // click through.
-  await pageOnExtensionOrigin.waitForTimeout(800);
-  const confirmRow = pageOnExtensionOrigin.getByText('Change');
-  if (await confirmRow.first().isVisible({ timeout: 1_500 }).catch(() => false)) {
-    await confirmRow.first().click({ force: true });
-  }
+  // Save button at the bottom. Disabled until the selection
+  // actually moved. Wait for it to become clickable, then click.
+  await pageOnExtensionOrigin.waitForFunction(() => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    return buttons.some(b => {
+      if (b.textContent?.trim() !== 'Save') return false;
+      if (b.hasAttribute('disabled')) return false;
+      return getComputedStyle(b).pointerEvents !== 'none';
+    });
+  }, undefined, { timeout: 10_000, polling: 250 });
+  await pageOnExtensionOrigin.getByRole('button', { name: /^save$/i }).first().click({ force: true });
 
   // Give redux-persist its debounce window to write the new
   // walletState.btcPaymentAddressType to chrome.storage.local
