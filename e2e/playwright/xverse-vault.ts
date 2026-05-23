@@ -255,37 +255,25 @@ export async function applyXverseVariant(
     return /Native SegWit/i.test(t) && /Nested SegWit/i.test(t);
   }, undefined, { timeout: 15_000, polling: 250 });
 
-  // Each option is a tile, not a button. The text "Native SegWit"
-  // / "Nested SegWit" sits inside a non-button clickable wrapper.
-  // `getByText().click()` clicks the text span — React's onClick
-  // is bound to an ancestor and the synthetic event doesn't always
-  // bubble cleanly. Compute the tile's center via boundingBox and
-  // click via the mouse layer.
-  const targetLabel = variant.paymentType === 'native' ? 'Native SegWit' : 'Nested SegWit';
-  const box = await pageOnExtensionOrigin.getByText(targetLabel).first().boundingBox();
-  if (!box) throw new Error(`could not locate "${targetLabel}" tile`);
-  // Click ~80px to the right of the label so we hit the tile body
-  // not the icon column. Stays inside the row at the typical
-  // 360px tile width.
-  await pageOnExtensionOrigin.mouse.click(box.x + box.width + 80, box.y + box.height / 2);
-  await pageOnExtensionOrigin.waitForTimeout(500);
-
-  // Save button at the bottom. Disabled until the selection
-  // actually moved. Wait for it to become clickable, then click.
-  await pageOnExtensionOrigin.waitForFunction(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.some(b => {
-      if (b.textContent?.trim() !== 'Save') return false;
-      if (b.hasAttribute('disabled')) return false;
-      return getComputedStyle(b).pointerEvents !== 'none';
-    });
-  }, undefined, { timeout: 10_000, polling: 250 });
-  await pageOnExtensionOrigin.getByRole('button', { name: /^save$/i }).first().click({ force: true });
-
-  // Give redux-persist its debounce window to write the new
-  // walletState.btcPaymentAddressType to chrome.storage.local
-  // before the caller closes the context.
-  await pageOnExtensionOrigin.waitForTimeout(3_000);
+  // No-op for native (the default). For nested, throw — UI
+  // automation for the tile click is fragile in xvfb and we
+  // haven't located a reliable selector yet. Settings →
+  // Preferred Address Type renders two non-button tiles with a
+  // checkmark indicator; clicking the visible "Nested SegWit"
+  // text or the tile center via mouse.click both leave Save
+  // disabled in CI. Likely a React-onClick-on-an-ancestor case
+  // that requires a more specific DOM probe.
+  //
+  // Documented constraint: 6-variant matrix runs the 3 native
+  // variants. Re-enable nested variants once the tile click is
+  // figured out; xverse-matrix.spec.ts comments point here.
+  if (variant.paymentType !== 'native') {
+    throw new Error(
+      `applyXverseVariant: ${variant.paymentType} not implemented. ` +
+      'Settings → Preferred Address Type renders non-button tiles; ' +
+      'tile click reliability under xvfb still TBD.',
+    );
+  }
 }
 
 /**

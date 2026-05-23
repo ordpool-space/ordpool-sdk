@@ -41,18 +41,15 @@ const EXPECTED: Record<string, Record<string, string>> = {
   'bitcoin-regtest':  { native: 'bcrt1q6rz28mcfaxtmd6v789l9rrlrusdprr9pz3cppk', nested: '2Mww8dCYPUpKHofjgcXcBCEGmniw9CoaiD2' },
 };
 
-// Full matrix: Xverse v2 reads btcPaymentAddressType from the new
-// persistentStore::activeAccount Zustand-style store (default
-// "native"). The legacy persist:walletState.btcPaymentAddressType
-// is still written for backward compat but no longer the source
-// of truth. applyXverseVariant writes BOTH stores.
+// Native-only matrix today. Nested variants throw in
+// applyXverseVariant — Settings → Preferred Address Type's
+// "Nested SegWit" tile click doesn't register in xvfb. See the
+// xverse-vault.ts comment + PROTOCOL.md entry for the
+// investigation trail.
 const VARIANTS: ReadonlyArray<XverseVariant> = [
   { network: 'bitcoin-mainnet',  paymentType: 'native' },
-  { network: 'bitcoin-mainnet',  paymentType: 'nested' },
   { network: 'bitcoin-testnet4', paymentType: 'native' },
-  { network: 'bitcoin-testnet4', paymentType: 'nested' },
   { network: 'bitcoin-regtest',  paymentType: 'native' },
-  { network: 'bitcoin-regtest',  paymentType: 'nested' },
 ];
 
 
