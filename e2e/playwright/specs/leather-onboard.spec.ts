@@ -119,13 +119,15 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '04-after-mnemonic-submit');
   await dumpHtml(page, '04-after-mnemonic-submit');
 
-  // ─── Phase 3: password ───
-  const passwordInputs = page.locator('input[type="password"]');
-  await expect(passwordInputs.first()).toBeVisible({ timeout: 15_000 });
-  const pwCount = await passwordInputs.count();
-  for (let i = 0; i < pwCount; i++) {
-    await passwordInputs.nth(i).fill(TEST_PASSWORD);
-  }
+  // ─── Phase 3: "Set a Password" screen — single input + Continue ───
+  // Leather only asks for the password once (no confirm field). The
+  // input's React handler ignores synthetic `.fill()` value-set —
+  // strength-meter and Continue-button-enable both watch the
+  // keydown/input event stream. pressSequentially fires real keys.
+  const pwInput = page.locator('input[type="password"]').first();
+  await expect(pwInput).toBeVisible({ timeout: 15_000 });
+  await pwInput.click();
+  await pwInput.pressSequentially(TEST_PASSWORD, { delay: 15 });
   await shot(page, '05-password-typed');
 
   const confirmBtn = page.getByRole('button', { name: /continue|done|confirm|create/i }).first();
