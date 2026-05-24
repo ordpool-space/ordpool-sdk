@@ -102,41 +102,43 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await page.getByTestId('import-wallet-button').click();
   await shot(page, '02-after-import-click');
 
-  // ─── Phase 3: pick "Restore from mnemonic" ───
+  // ─── Phase 3: create password (twice) ───
+  // Unisat asks for the wallet password BEFORE the mnemonic in the
+  // import flow (CI screenshot 26366884942 / 02-after-import-click).
+  await expect(page.getByTestId('create-password-input')).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId('create-password-input').fill(TEST_PASSWORD);
+  await page.getByTestId('create-password-confirm-input').fill(TEST_PASSWORD);
+  await shot(page, '03-password-typed');
+
+  await page.getByTestId('create-password-continue-button').click();
+  await shot(page, '04-after-password-submit');
+
+  // ─── Phase 4: pick "Restore from mnemonic" ───
   await expect(page.getByTestId('restore-from-mnemonics-option')).toBeVisible({ timeout: 10_000 });
   await page.getByTestId('restore-from-mnemonics-option').click();
-  await shot(page, '03-restore-method-picked');
+  await shot(page, '05-restore-method-picked');
 
-  // ─── Phase 4: fill the 12 mnemonic-word inputs ───
+  // ─── Phase 5: fill the 12 mnemonic-word inputs ───
   // data-testid="mnemonic-import-word-0" through "...-11".
   await expect(page.getByTestId('mnemonic-import-word-0')).toBeVisible({ timeout: 15_000 });
   for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
     await page.getByTestId(`mnemonic-import-word-${i}`).fill(TEST_MNEMONIC_WORDS[i]);
   }
-  await shot(page, '04-mnemonic-filled');
+  await shot(page, '06-mnemonic-filled');
 
   await page.getByTestId('mnemonic-import-continue-button').click();
-  await shot(page, '05-after-mnemonic-continue');
+  await shot(page, '07-after-mnemonic-continue');
 
-  // ─── Phase 5: address-type picker (optional / version-dependent) ───
+  // ─── Phase 6: address-type picker (optional / version-dependent) ───
   // Unisat v1.7.15 shows the address-type screen after mnemonic.
   // Native SegWit (BIP-84) is the default and the only path we
   // verify in iteration 3, so accept whatever's selected.
   const addressTypeContinue = page.getByTestId('address-type-continue-button');
   if (await addressTypeContinue.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await shot(page, '06-address-type-picker');
+    await shot(page, '08-address-type-picker');
     await addressTypeContinue.click();
-    await shot(page, '07-after-address-type-continue');
+    await shot(page, '09-after-address-type-continue');
   }
-
-  // ─── Phase 6: create password (twice) ───
-  await expect(page.getByTestId('create-password-input')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('create-password-input').fill(TEST_PASSWORD);
-  await page.getByTestId('create-password-confirm-input').fill(TEST_PASSWORD);
-  await shot(page, '08-password-typed');
-
-  await page.getByTestId('create-password-continue-button').click();
-  await shot(page, '09-after-password-submit');
 
   // ─── Phase 7: dismiss any post-restore notice ───
   // notice-popover has a checkbox + OK button on first dashboard
