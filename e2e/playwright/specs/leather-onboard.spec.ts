@@ -120,17 +120,20 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await dumpHtml(page, '04-after-mnemonic-submit');
 
   // ─── Phase 3: "Set a Password" screen — single input + Continue ───
-  // Leather only asks for the password once (no confirm field). The
-  // input's React handler ignores synthetic `.fill()` value-set —
-  // strength-meter and Continue-button-enable both watch the
-  // keydown/input event stream. pressSequentially fires real keys.
-  const pwInput = page.locator('input[type="password"]').first();
+  // Use the bundle's known testids (`password-input`, `set-password-btn`)
+  // rather than `input[type="password"]`. The latter also matches
+  // the mnemonic-input-N boxes from the previous screen that linger
+  // in the DOM during React's route transition, and pressSequentially
+  // ends up typing into a hidden/detached one (CI run 26374826897:
+  // screenshot 05-password-typed.png showed the visible field still
+  // empty after our typing call).
+  const pwInput = page.getByTestId('password-input');
   await expect(pwInput).toBeVisible({ timeout: 15_000 });
   await pwInput.click();
   await pwInput.pressSequentially(TEST_PASSWORD, { delay: 15 });
   await shot(page, '05-password-typed');
 
-  const confirmBtn = page.getByRole('button', { name: /continue|done|confirm|create/i }).first();
+  const confirmBtn = page.getByTestId('set-password-btn');
   await expect(confirmBtn).toBeEnabled({ timeout: 10_000 });
   await confirmBtn.click();
   await shot(page, '06-after-password-submit');
