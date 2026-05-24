@@ -259,8 +259,10 @@ export async function applyXverseVariant(
     const reloadFn = (globalThis as unknown as { chrome: { runtime: { reload: () => void } } }).chrome.runtime.reload;
     reloadFn();
   }, variant);
-  // Wait for the SW to come back after reload before returning.
-  await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  // Playwright doesn't re-emit `serviceworker` for the same
+  // extension after reload, so a fixed wait. 4s lets chromium
+  // restart the SW and rehydrate before the caller closes.
+  await new Promise(r => setTimeout(r, 4_000));
 }
 
 /**
