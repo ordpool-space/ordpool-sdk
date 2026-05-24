@@ -127,7 +127,10 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // ends up typing into a hidden/detached one (CI run 26374826897:
   // screenshot 05-password-typed.png showed the visible field still
   // empty after our typing call).
-  const pwInput = page.getByTestId('password-input');
+  // The actual testid is `set-or-enter-password-input` per the
+  // OnboardingSelectors enum in the bundle (used by both the
+  // create-new-wallet and use-existing-key flows).
+  const pwInput = page.getByTestId('set-or-enter-password-input');
   await expect(pwInput).toBeVisible({ timeout: 15_000 });
   await pwInput.click();
   await pwInput.pressSequentially(TEST_PASSWORD, { delay: 15 });
