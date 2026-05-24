@@ -74,6 +74,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash e2e/playwright/playwright-bootstrap.sh unisat
 
+      - name: Cache unpacked Leather extension
+        id: leather-cache
+        uses: actions/cache@v4
+        with:
+          path: e2e/extensions/leather
+          key: leather-extension-v6.102.0
+
+      - name: Download + unpack Leather from internal release mirror
+        if: steps.leather-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash e2e/playwright/playwright-bootstrap.sh leather
+
       - name: Build SDK harness bundle for the fixtures server
         run: npm run e2e:harness:build
 
@@ -120,5 +133,6 @@ jobs:
             playwright-report/
             e2e/extensions/xverse/manifest.json
             e2e/extensions/unisat/manifest.json
+            e2e/extensions/leather/manifest.json
           retention-days: 7
           if-no-files-found: warn
