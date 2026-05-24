@@ -192,11 +192,7 @@ window.ordpoolSdkHarness.buildAndSignMintViaXverse = async (input: MintRequest) 
   });
   log('mint.signed-psbt-received', { bytes: base64.decode(signedPsbtBase64).length });
 
-  // Decode signed PSBT, finalize the signed input(s), extract
-  // wire-format tx hex.
-  const signedTx = btcTx.fromPSBT(base64.decode(signedPsbtBase64));
-  signedTx.finalize();
-  const txHex = bytesToHex(signedTx.extract());
+  const txHex = extractWireTxFromPsbt(base64.decode(signedPsbtBase64));
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
 };
@@ -211,6 +207,21 @@ function bytesToHex(b: Uint8Array): string {
   let out = '';
   for (let i = 0; i < b.length; i++) out += b[i].toString(16).padStart(2, '0');
   return out;
+}
+
+/**
+ * Convention (see /Work/ordpool/WALLETS.md → "Signing convention in
+ * the Pipeline B harness: WE finalize"): every wallet's
+ * `buildAndSignMintVia<Wallet>` asks the wallet for a partial-sig
+ * PSBT, then funnels through this single helper to finalize +
+ * extract the wire-format raw tx. One finalize implementation
+ * across all wallets — no per-wallet "did this one auto-finalize?"
+ * branching.
+ */
+function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
+  const tx = btcTx.fromPSBT(signedPsbtBytes);
+  tx.finalize();
+  return bytesToHex(tx.extract());
 }
 
 void toScureNetwork;
@@ -279,22 +290,18 @@ window.ordpoolSdkHarness.buildAndSignMintViaUnisat = async (input: MintRequest) 
   const psbtHex = bytesToHex(result.tx.toPSBT());
   log('mint.psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
 
-  // window.unisat.signPsbt(hex, {autoFinalized:true}) returns the
-  // FINALIZED PSBT hex — not the raw tx hex (despite the option name).
-  // We have to extract the wire-format tx from the PSBT ourselves
-  // before handing to postTx.
+  // autoFinalized:false matches the convention used across all
+  // wallets in the harness (see WALLETS.md → "Signing convention in
+  // the Pipeline B harness: WE finalize"). The wallet returns a
+  // partial-sig PSBT; @scure/btc-signer.finalize() is the single
+  // finalize implementation, called via extractWireTxFromPsbt below.
   const unisat = (window as unknown as {
     unisat: { signPsbt: (h: string, o?: { autoFinalized?: boolean }) => Promise<string> };
   }).unisat;
-  const signedPsbtHex = await unisat.signPsbt(psbtHex, { autoFinalized: true });
+  const signedPsbtHex = await unisat.signPsbt(psbtHex, { autoFinalized: false });
   log('mint.signed-psbt', { length: signedPsbtHex.length });
 
-  const signedTx = btcTx.fromPSBT(hexToBytes(signedPsbtHex));
-  // Unisat already finalized each input (autoFinalized:true populates
-  // finalScriptWitness). @scure/btc-signer's finalize() errors with
-  // "Not enough partial sign" when there's nothing left to finalize,
-  // so we skip it and go straight to extract().
-  const txHex = bytesToHex(signedTx.extract());
+  const txHex = extractWireTxFromPsbt(hexToBytes(signedPsbtHex));
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
 };
