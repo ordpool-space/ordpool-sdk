@@ -91,3 +91,24 @@ npm run create-link         # build + npm link (for local dev consumers)
 ## Public API
 
 `src/index.ts` is the single export point. Every module that consumers should use re-exports through `src/index.ts`. Anything not in `src/index.ts` is treated as internal.
+
+## Wallet integration: Adapter Pipeline (A) vs Wallet Pipeline (B)
+
+Every wallet (Xverse, Unisat, Leather, …) has two parallel test
+pipelines, with different blast radii and different questions:
+
+- **Adapter Pipeline (A)** — pins *our* adapter code against a
+  mocked wallet API. Lives in `src/wallet/signers/*.signer.ts` +
+  `*.signer.angular.spec.ts` and `src/wallet/connectors/`. Runs via
+  `npm test`, no binaries, fast. Done when every adapter call path
+  (happy + every distinct failure mode) is pinned by a positive-
+  equality unit test.
+- **Wallet Pipeline (B)** — pins *the real wallet's contract*
+  using the published .crx running headed in xvfb. Lives in
+  `e2e/playwright/specs/<wallet>-*.spec.ts`. CI-only — never run
+  unverified extension binaries on a dev machine. Iteration ladder:
+  loads → onboard → SDK-handshake → matrix → mint roundtrip.
+
+Full definitions, iteration ladder, and bootstrap/caching procedure
+in `/Work/ordpool/WALLETS.md` (the workspace HQ). Read it before
+starting work on a new wallet.
