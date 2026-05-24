@@ -168,7 +168,10 @@ test('unisatConnector.connect via the harness page returns the BIP-84 mainnet ad
   // eslint-disable-next-line no-console
   console.log(`[unisat:sdk-handshake] approval URL = ${approval.url()}`);
 
-  const consentBtn = approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first();
+  // Unisat's connect-approval renders "Connect" as a styled <div>
+  // (with a clickable wrapper), not a <button>, so getByRole('button')
+  // doesn't see it. Match by exact text instead.
+  const consentBtn = approval.getByText(/^Connect$/).first();
   await expect(consentBtn).toBeVisible({ timeout: 10_000 });
   await consentBtn.click();
   await shot(approval, '02b-after-approve');
