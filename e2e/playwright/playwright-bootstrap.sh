@@ -1,39 +1,68 @@
 #!/usr/bin/env bash
-# Stage the Xverse Chrome extension at e2e/extensions/xverse/ for
-# Playwright to load via --load-extension. Runs only in CI; do not
-# execute locally (we don't run unverified browser-extension code
-# on dev machines). The repo never commits the build output.
+# Stage a Chrome extension at e2e/extensions/<wallet>/ for Playwright
+# to load via --load-extension. Runs only in CI; do not execute
+# locally (we don't run unverified browser-extension code on dev
+# machines). The repo never commits the build output.
 #
-# Source-of-truth: a private GitHub release in this same repo
-# (ordpool-space/ordpool-sdk) holds the published .crx as an
-# asset. We mirror it ourselves because:
+# Source-of-truth: private GitHub releases on ordpool-space/ordpool-sdk
+# hold the published .crx files as assets. We mirror them ourselves
+# because:
 #   - Chrome Web Store update endpoint returns 404 for non-Chrome
 #     callers; can't scrape it from CI.
-#   - Xverse GH releases tag versions but ship no build artifacts.
-#   - Building from source needs @secretkeylabs/xverse-core, which
-#     is published only to a private GH Package Registry (401).
+#   - Vendor GH releases tag versions but ship no build artifacts.
+#   - Building from source is gated (Xverse needs a private GH
+#     Package Registry; others vary).
 #
-# To bump the version: see the release notes on the tag below.
+# Usage: bash playwright-bootstrap.sh <wallet>
+#
+# Supported wallets: xverse, unisat, leather.
+# To bump a version: edit the per-wallet block below, then create a
+# new release tagged <wallet>-extension-v<version> with the .crx
+# attached on ordpool-space/ordpool-sdk.
 set -euo pipefail
 
-XVERSE_VERSION="2.3.2"
-RELEASE_TAG="xverse-extension-v${XVERSE_VERSION}"
-ASSET_NAME="xverse-v${XVERSE_VERSION}.crx"
+WALLET="${1:-}"
+if [ -z "$WALLET" ]; then
+  echo "ERROR: usage: $0 <wallet>" >&2
+  echo "       supported: xverse, unisat, leather" >&2
+  exit 2
+fi
+
+case "$WALLET" in
+  xverse)
+    VERSION="2.3.2"
+    ASSET_NAME="xverse-v${VERSION}.crx"
+    ;;
+  unisat)
+    VERSION="1.7.15"
+    ASSET_NAME="unisat-v${VERSION}.crx"
+    ;;
+  leather)
+    VERSION="6.102.0"
+    ASSET_NAME="leather-v${VERSION}.crx"
+    ;;
+  *)
+    echo "ERROR: unknown wallet '$WALLET'. Supported: xverse, unisat, leather." >&2
+    exit 2
+    ;;
+esac
+
+RELEASE_TAG="${WALLET}-extension-v${VERSION}"
 REPO="ordpool-space/ordpool-sdk"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-EXT_DIR="${SCRIPT_DIR}/../extensions/xverse"
-CRX_FILE="$(mktemp /tmp/xverse.XXXXXX.crx)"
+EXT_DIR="${SCRIPT_DIR}/../extensions/${WALLET}"
+CRX_FILE="$(mktemp "/tmp/${WALLET}.XXXXXX.crx")"
 
 trap 'rm -f "$CRX_FILE"' EXIT
 
 if [ -d "$EXT_DIR" ] && [ -f "$EXT_DIR/manifest.json" ]; then
   CACHED_VERSION="$(node -p "require('$EXT_DIR/manifest.json').version" 2>/dev/null || echo unknown)"
-  if [ "$CACHED_VERSION" = "$XVERSE_VERSION" ]; then
-    echo "Xverse v${XVERSE_VERSION} already unpacked at ${EXT_DIR}. Skipping."
+  if [ "$CACHED_VERSION" = "$VERSION" ]; then
+    echo "${WALLET} v${VERSION} already unpacked at ${EXT_DIR}. Skipping."
     exit 0
   fi
-  echo "Cached extension is v${CACHED_VERSION}, want v${XVERSE_VERSION}. Re-downloading."
+  echo "Cached extension is v${CACHED_VERSION}, want v${VERSION}. Re-downloading."
 fi
 
 if [ -z "${GH_TOKEN:-}" ]; then
@@ -71,8 +100,8 @@ if [ ! -f "$EXT_DIR/manifest.json" ]; then
 fi
 
 EXT_VERSION="$(node -p "require('$EXT_DIR/manifest.json').version")"
-echo "Unpacked Xverse v${EXT_VERSION} to ${EXT_DIR}"
+echo "Unpacked ${WALLET} v${EXT_VERSION} to ${EXT_DIR}"
 
-if [ "$EXT_VERSION" != "$XVERSE_VERSION" ]; then
-  echo "WARNING: manifest version ($EXT_VERSION) differs from pinned ($XVERSE_VERSION)" >&2
+if [ "$EXT_VERSION" != "$VERSION" ]; then
+  echo "WARNING: manifest version ($EXT_VERSION) differs from pinned ($VERSION)" >&2
 fi

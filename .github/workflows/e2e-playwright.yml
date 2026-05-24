@@ -44,10 +44,10 @@ jobs:
       - name: Install Playwright browsers + system deps
         run: npx playwright install --with-deps chromium
 
-      # Cache the unpacked Xverse extension keyed by the version
-      # pinned in playwright-bootstrap.sh. First run on a new
-      # version: download the .crx from this repo's release asset
-      # and unzip (~5s). Subsequent runs: cache hit, no download.
+      # Cache unpacked extensions keyed by the version pinned in
+      # playwright-bootstrap.sh. First run on a new version:
+      # download .crx from this repo's release asset and unzip (~5s).
+      # Subsequent runs: cache hit, no download.
       - name: Cache unpacked Xverse extension
         id: xverse-cache
         uses: actions/cache@v4
@@ -59,7 +59,20 @@ jobs:
         if: steps.xverse-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash e2e/playwright/playwright-bootstrap.sh
+        run: bash e2e/playwright/playwright-bootstrap.sh xverse
+
+      - name: Cache unpacked Unisat extension
+        id: unisat-cache
+        uses: actions/cache@v4
+        with:
+          path: e2e/extensions/unisat
+          key: unisat-extension-v1.7.15
+
+      - name: Download + unpack Unisat from internal release mirror
+        if: steps.unisat-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash e2e/playwright/playwright-bootstrap.sh unisat
 
       - name: Build SDK harness bundle for the fixtures server
         run: npm run e2e:harness:build
@@ -106,5 +119,6 @@ jobs:
             test-results/
             playwright-report/
             e2e/extensions/xverse/manifest.json
+            e2e/extensions/unisat/manifest.json
           retention-days: 7
           if-no-files-found: warn

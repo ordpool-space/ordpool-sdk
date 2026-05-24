@@ -58,4 +58,22 @@ describe('unisatSigner.signAndBroadcast', () => {
 
     await expect(firstValueFrom(result$)).rejects.toThrow('user rejected');
   });
+
+  it('when pushPsbt rejects after signPsbt succeeds, re-throws pushPsbt\'s error (signing OK, broadcast failed)', async () => {
+    signPsbtMock.mockResolvedValue('SIGNED_PSBT_HEX' as never);
+    pushPsbtMock.mockRejectedValue(new Error('broadcast failed: txn-mempool-conflict') as never);
+
+    const result$ = unisatSigner.signAndBroadcast({
+      psbtBytes: new Uint8Array(8),
+      paymentAddress: 'bc1qpayment',
+      network: Network.Mainnet,
+      broadcast: () => of('unused'),
+    });
+
+    await expect(firstValueFrom(result$)).rejects.toThrow('broadcast failed: txn-mempool-conflict');
+    // Positive assertions: signPsbt did its job, pushPsbt was the failure point.
+    expect(signPsbtMock).toHaveBeenCalledTimes(1);
+    expect(pushPsbtMock).toHaveBeenCalledTimes(1);
+    expect(pushPsbtMock).toHaveBeenCalledWith('SIGNED_PSBT_HEX');
+  });
 });
