@@ -249,7 +249,18 @@ export async function applyXverseVariant(
     const state = JSON.parse(stateRaw) as Record<string, string>;
     state.btcPaymentAddressType = JSON.stringify(paymentType);
     await set({ 'persist:walletState': JSON.stringify(state) });
+
+    // Force the SW to restart so its in-memory redux store can't
+    // flush stale defaults over our leveldb writes during shutdown.
+    // chrome.runtime.reload() unloads and reloads the extension;
+    // on reload, the new SW rehydrates from leveldb (our values)
+    // rather than continuing with whatever in-memory state was
+    // there at our write time.
+    const reloadFn = (globalThis as unknown as { chrome: { runtime: { reload: () => void } } }).chrome.runtime.reload;
+    reloadFn();
   }, variant);
+  // Wait for the SW to come back after reload before returning.
+  await context.waitForEvent('serviceworker', { timeout: 30_000 });
 }
 
 /**
