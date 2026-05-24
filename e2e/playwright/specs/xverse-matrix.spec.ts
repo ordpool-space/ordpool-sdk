@@ -41,15 +41,15 @@ const EXPECTED: Record<string, Record<string, string>> = {
   'bitcoin-regtest':  { native: 'bcrt1q6rz28mcfaxtmd6v789l9rrlrusdprr9pz3cppk', nested: '2Mww8dCYPUpKHofjgcXcBCEGmniw9CoaiD2' },
 };
 
-// Native-only matrix today. Nested variants throw in
-// applyXverseVariant — Settings → Preferred Address Type's
-// "Nested SegWit" tile click doesn't register in xvfb. See the
-// xverse-vault.ts comment + PROTOCOL.md entry for the
-// investigation trail.
+// Matrix that maps to user-pickable Xverse combinations we care
+// about. Mainnet and Regtest are the only networks exercised
+// (testnet3/4 + signet are explicitly out of scope per WALLETS.md).
+// Both payment-address types are exercised on both networks.
 const VARIANTS: ReadonlyArray<XverseVariant> = [
   { network: 'bitcoin-mainnet',  paymentType: 'native' },
-  { network: 'bitcoin-testnet4', paymentType: 'native' },
+  { network: 'bitcoin-mainnet',  paymentType: 'nested' },
   { network: 'bitcoin-regtest',  paymentType: 'native' },
+  { network: 'bitcoin-regtest',  paymentType: 'nested' },
 ];
 
 
@@ -126,13 +126,9 @@ for (const variant of VARIANTS) {
       fs.rmSync(path.join(workingDir, stale), { force: true });
     }
 
-    // Phase 1 — variant setup. Launch chromium, unlock the wallet,
-    // navigate to Settings → Preferred Address Type, click the
-    // target type (UI-driven because Xverse's redux-persist boot
-    // overwrites direct chrome.storage mutations of
-    // walletState.btcPaymentAddressType). Network mutation is
-    // still direct chrome.storage — persistentStore::networks is
-    // boot-race-free.
+    // Phase 1 — variant setup via direct chrome.storage writes from
+    // the MV3 service worker. No popup, no unlock, no UI click —
+    // popup never boots, so redux-persist can't overwrite our values.
     {
       const mutator = await chromium.launchPersistentContext(workingDir, {
         headless: false,
@@ -143,17 +139,9 @@ for (const variant of VARIANTS) {
           '--disable-dev-shm-usage',
         ],
       });
-      let [w] = mutator.serviceWorkers();
-      if (!w) w = await mutator.waitForEvent('serviceworker', { timeout: 30_000 });
-      const xid = w.url().split('/')[2];
-      const page = await mutator.newPage();
-      await page.setViewportSize({ width: 400, height: 800 });
-      await page.goto(`chrome-extension://${xid}/popup.html`, { waitUntil: 'domcontentloaded' });
-      await unlockWallet(page);
-      await applyXverseVariant(page, variant);
-      await page.screenshot({ path: path.resolve(RESULTS_DIR, `matrix-${variant.network}-${variant.paymentType}-after-apply.png`), fullPage: true }).catch(() => undefined);
-      // Give chromium 5s to flush the leveldb writes before close.
-      await new Promise(r => setTimeout(r, 5_000));
+      await applyXverseVariant(mutator, variant);
+      // Give chromium time to flush the leveldb writes before close.
+      await new Promise(r => setTimeout(r, 3_000));
       await mutator.close();
       await new Promise(r => setTimeout(r, 2_000));
       for (const stale of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
