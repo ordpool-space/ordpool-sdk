@@ -113,10 +113,16 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await page.getByTestId('create-password-continue-button').click();
   await shot(page, '04-after-password-submit');
 
-  // ─── Phase 4: pick "Restore from mnemonic" ───
-  await expect(page.getByTestId('restore-from-mnemonics-option')).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('restore-from-mnemonics-option').click();
-  await shot(page, '05-restore-method-picked');
+  // ─── Phase 4: pick "UniSat Wallet" as the source wallet to restore from ───
+  // After password, Unisat asks "Choose a wallet you want to restore
+  // from" (UniSat / Magic Eden / Xverse / Sparrow / Ordinals / Other).
+  // The choice drives the BIP-44/49/84/86 derivation set Unisat scans.
+  // value=0 is the UniSat Wallet entry, which gives BIP-84 native
+  // segwit by default — matches our address assertion in iter 3.
+  // (Source: ui.js T0=[{value:0,name:"UniSat Wallet",...}, ...].)
+  await expect(page.getByTestId('restore-wallet-type-option-0')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('restore-wallet-type-option-0').click();
+  await shot(page, '05-source-wallet-picked');
 
   // ─── Phase 5: fill the 12 mnemonic-word inputs ───
   // data-testid="mnemonic-import-word-0" through "...-11".
