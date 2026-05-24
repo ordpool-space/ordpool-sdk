@@ -25,7 +25,12 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/leather');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_PASSWORD = 'TestPassword123!';
+// Leather's password-strength meter (likely zxcvbn) rates the
+// shared `TestPassword123!` as "Poor" and refuses to enable
+// Continue. CI 26375584175 / 05-password-typed.png shows the rule
+// at work. Use a longer high-entropy passphrase for Leather only;
+// Xverse and Unisat keep `TestPassword123!`.
+const TEST_PASSWORD = 'correct-horse-battery-staple-Tr0ub4dor-9876';
 
 let context: BrowserContext;
 let extensionId: string;
