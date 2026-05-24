@@ -127,8 +127,11 @@ for (const variant of VARIANTS) {
     }
 
     // Phase 1 — variant setup via direct chrome.storage writes from
-    // the MV3 service worker. No popup, no unlock, no UI click —
-    // popup never boots, so redux-persist can't overwrite our values.
+    // the MV3 service worker. No unlock, no settings UI, no tile
+    // click — but we DO open the popup briefly so Xverse's SW boot
+    // init runs to completion before we write. Without this, Xverse's
+    // own startup writes default walletState AFTER ours, clobbering
+    // the variant.
     {
       const mutator = await chromium.launchPersistentContext(workingDir, {
         headless: false,
@@ -139,8 +142,37 @@ for (const variant of VARIANTS) {
           '--disable-dev-shm-usage',
         ],
       });
+      let [w] = mutator.serviceWorkers();
+      if (!w) w = await mutator.waitForEvent('serviceworker', { timeout: 30_000 });
+      const xid = w.url().split('/')[2];
+      // Open popup; wait for the unlock screen to render (proves
+      // Xverse's React app + redux-persist have fully booted).
+      // Don't unlock — we want redux-persist's debounce-save queue
+      // to be empty when we close.
+      const primer = await mutator.newPage();
+      await primer.setViewportSize({ width: 400, height: 800 });
+      await primer.goto(`chrome-extension://${xid}/popup.html`, { waitUntil: 'domcontentloaded' });
+      await primer.waitForFunction(() => {
+        const t = (document.body.innerText || '').toLowerCase();
+        return t.includes('unlock') || t.includes('account 1');
+      }, undefined, { timeout: 30_000, polling: 250 });
+      await primer.close();
+      // Small settle window for redux-persist's debounced save to flush.
+      await new Promise(r => setTimeout(r, 1_500));
+      // Now write the variant from the SW context.
       await applyXverseVariant(mutator, variant);
-      // Give chromium time to flush the leveldb writes before close.
+      // Verify the write took (within Phase 1, SW context).
+      const [verifyW] = mutator.serviceWorkers();
+      const phase1Read = await verifyW.evaluate(async () => {
+        const c = (globalThis as unknown as { chrome: { storage: { local: { get: (k: string, cb: (v: Record<string, string | undefined>) => void) => void } } } }).chrome;
+        const raw = await new Promise<string | undefined>((r) => c.storage.local.get('persist:walletState', (v) => r(v['persist:walletState'])));
+        if (!raw) return '<no walletState>';
+        const state = JSON.parse(raw) as Record<string, string>;
+        return state.btcPaymentAddressType ? JSON.parse(state.btcPaymentAddressType) : '<no btcPaymentAddressType>';
+      });
+      // eslint-disable-next-line no-console
+      console.log(`[matrix:${variant.network}:${variant.paymentType}] Phase-1 SW read after write → legacy=${phase1Read}`);
+      // Flush before close.
       await new Promise(r => setTimeout(r, 3_000));
       await mutator.close();
       await new Promise(r => setTimeout(r, 2_000));
