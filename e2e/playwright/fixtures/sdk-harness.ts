@@ -17,6 +17,7 @@ import { Transaction as btcTx } from '@scure/btc-signer';
 
 import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector';
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
+import { unisatConnector } from '../../../src/wallet/connectors/unisat.connector';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
 import { Network, toBitcoinNetworkType, toScureNetwork } from '../../../src/network';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
@@ -35,6 +36,15 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaXverse(input: MintRequest): Promise<{ txHex: string }>;
+      detectUnisat(): boolean;
+      connectUnisat(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
     };
   }
 }
@@ -89,6 +99,31 @@ window.ordpoolSdkHarness = {
     const info = await firstValueFrom(xverseConnector.connect(networkEnum));
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectXverse.result', info);
+    return info;
+  },
+
+  detectUnisat(): boolean {
+    return unisatConnector.detect(window);
+  },
+
+  async connectUnisat() {
+    // Unisat injects window.unisat via its content script. Poll for
+    // it the same way the Xverse path does.
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (unisatConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!unisatConnector.detect(window)) {
+      throw new Error('Unisat provider not injected on the harness page within 15s');
+    }
+    statusEl().textContent = `connecting to unisat…`;
+    // unisatConnector.connect ignores the network arg (Unisat's
+    // network is selected internally via the wallet UI), so pass
+    // Mainnet for symmetry.
+    const info = await firstValueFrom(unisatConnector.connect(Network.Mainnet));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectUnisat.result', info);
     return info;
   },
 };
