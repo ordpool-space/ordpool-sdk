@@ -228,16 +228,17 @@ export async function applyXverseVariant(
     networks.value.active.bitcoin = network;
     await set({ 'persistentStore::networks': JSON.stringify(networks) });
 
+    // v2 active-account store. Only present once Xverse has booted
+    // its account screen at least once; the seed onboarding flow
+    // doesn't always populate it. If absent, skip — the legacy
+    // walletState write below is the load-bearing one for
+    // sats-connect's read path.
     const accRaw = await get('persistentStore::activeAccount');
-    if (!accRaw) {
-      throw new Error(
-        'persistentStore::activeAccount missing — seed dump must include the v2 active-account key; ' +
-        're-run global-setup against a current Xverse build.',
-      );
+    if (accRaw) {
+      const acc = JSON.parse(accRaw) as { value: { btcPaymentAddressType: string; [k: string]: unknown } };
+      acc.value.btcPaymentAddressType = paymentType;
+      await set({ 'persistentStore::activeAccount': JSON.stringify(acc) });
     }
-    const acc = JSON.parse(accRaw) as { value: { btcPaymentAddressType: string; [k: string]: unknown } };
-    acc.value.btcPaymentAddressType = paymentType;
-    await set({ 'persistentStore::activeAccount': JSON.stringify(acc) });
 
     const stateRaw = await get('persist:walletState');
     if (!stateRaw) throw new Error('persist:walletState missing from chrome.storage.local');
