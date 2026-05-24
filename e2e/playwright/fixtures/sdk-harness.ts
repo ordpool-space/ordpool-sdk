@@ -290,7 +290,10 @@ window.ordpoolSdkHarness.buildAndSignMintViaUnisat = async (input: MintRequest) 
   log('mint.signed-psbt', { length: signedPsbtHex.length });
 
   const signedTx = btcTx.fromPSBT(hexToBytes(signedPsbtHex));
-  signedTx.finalize();
+  // Unisat already finalized each input (autoFinalized:true populates
+  // finalScriptWitness). @scure/btc-signer's finalize() errors with
+  // "Not enough partial sign" when there's nothing left to finalize,
+  // so we skip it and go straight to extract().
   const txHex = bytesToHex(signedTx.extract());
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
