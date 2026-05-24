@@ -13,7 +13,7 @@
 import { firstValueFrom } from 'rxjs';
 import { signTransaction } from 'sats-connect';
 import { base64 } from '@scure/base';
-import { Transaction as btcTx } from '@scure/btc-signer';
+import { Transaction as btcTx, p2wpkh, p2tr } from '@scure/btc-signer';
 
 import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector';
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
@@ -45,6 +45,12 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
+      /** Derive the bcrt1q + bcrt1p addresses from a mainnet pubkey. */
+      deriveRegtestAddresses(paymentPublicKeyHex: string): {
+        paymentAddress: string;
+        ordinalsAddress: string;
+      };
+      buildAndSignMintViaUnisat(input: MintRequest): Promise<{ txHex: string }>;
     };
   }
 }
@@ -209,3 +215,77 @@ function bytesToHex(b: Uint8Array): string {
 
 void toScureNetwork;
 void xverseSigner;
+
+/**
+ * Derive the bcrt1q (BIP-84) + bcrt1p (BIP-86) addresses from the
+ * compressed pubkey Unisat exposes via connectUnisat. Used by the
+ * mint-roundtrip spec: Unisat itself only ships mainnet/signet/
+ * testnet, but BIP-84/86 keys are network-agnostic — the underlying
+ * script hash is identical, only the bech32 HRP differs. By feeding
+ * Unisat's signPsbt a regtest-encoded PSBT (whose input script
+ * bytes are byte-for-byte equal to the mainnet equivalent), the
+ * wallet's `formatOptionsToSignInputs` matches the script-derived
+ * address against `this.address` AS DECODED WITH ITS OWN
+ * networkType (mainnet) — and they match, because the hash is
+ * the same. Wallet signs. We broadcast via local electrs.
+ */
+window.ordpoolSdkHarness.deriveRegtestAddresses = (paymentPublicKeyHex: string) => {
+  const pubkey = hexToBytes(paymentPublicKeyHex);
+  const regtest = toScureNetwork(Network.Regtest);
+  const payment = p2wpkh(pubkey, regtest);
+  // Taproot ordinals address from the same compressed pubkey:
+  // x-only is the 32 bytes after the parity prefix.
+  const xonly = pubkey.slice(1, 33);
+  const ordinals = p2tr(xonly, undefined, regtest);
+  return {
+    paymentAddress: payment.address!,
+    ordinalsAddress: ordinals.address!,
+  };
+};
+
+/**
+ * Build a CAT-21 mint PSBT via the SDK and have Unisat sign it
+ * with `autoFinalized: true` so we get a broadcast-ready raw tx
+ * hex back. The spec broadcasts via local electrs (same reason as
+ * Xverse: Unisat's pushPsbt hits the wallet's vendor backend, not
+ * our regtest electrs).
+ *
+ * Unisat itself runs on mainnet; the cross-network trick works
+ * because P2WPKH script bytes are HRP-independent. See
+ * deriveRegtestAddresses comment for the full reasoning.
+ */
+window.ordpoolSdkHarness.buildAndSignMintViaUnisat = async (input: MintRequest) => {
+  if (!unisatConnector.detect(window)) {
+    throw new Error('Unisat provider not injected on the harness page');
+  }
+  statusEl().textContent = `building + signing cat21 mint via unisat…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  const result = createTransaction(
+    KnownOrdinalWalletType.unisat,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    /* isSimulation = */ false,
+    Network.Regtest,
+  );
+  const psbtHex = bytesToHex(result.tx.toPSBT());
+  log('mint.psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
+
+  // window.unisat.signPsbt(hex, {autoFinalized:true}) returns the
+  // finalized raw tx hex — exactly what postTx wants. No broadcast
+  // happens (that's pushPsbt's job, and we're skipping it).
+  const unisat = (window as unknown as {
+    unisat: { signPsbt: (h: string, o?: { autoFinalized?: boolean }) => Promise<string> };
+  }).unisat;
+  const txHex = await unisat.signPsbt(psbtHex, { autoFinalized: true });
+  log('mint.signed', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  return { txHex };
+};
