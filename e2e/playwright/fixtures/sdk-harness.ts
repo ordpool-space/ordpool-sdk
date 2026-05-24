@@ -18,6 +18,7 @@ import { Transaction as btcTx, p2wpkh, p2tr } from '@scure/btc-signer';
 import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector';
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
 import { unisatConnector } from '../../../src/wallet/connectors/unisat.connector';
+import { leatherConnector } from '../../../src/wallet/connectors/leather.connector';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
 import { Network, toBitcoinNetworkType, toScureNetwork } from '../../../src/network';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
@@ -51,6 +52,15 @@ declare global {
         ordinalsAddress: string;
       };
       buildAndSignMintViaUnisat(input: MintRequest): Promise<{ txHex: string }>;
+      detectLeather(): boolean;
+      connectLeather(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
     };
   }
 }
@@ -130,6 +140,29 @@ window.ordpoolSdkHarness = {
     const info = await firstValueFrom(unisatConnector.connect(Network.Mainnet));
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectUnisat.result', info);
+    return info;
+  },
+
+  detectLeather(): boolean {
+    return leatherConnector.detect(window);
+  },
+
+  async connectLeather() {
+    // Leather injects window.LeatherProvider via its content script.
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (leatherConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!leatherConnector.detect(window)) {
+      throw new Error('Leather provider not injected on the harness page within 15s');
+    }
+    statusEl().textContent = `connecting to leather…`;
+    // leatherConnector.connect ignores the network arg (Leather
+    // doesn't accept one on the getAddresses RPC).
+    const info = await firstValueFrom(leatherConnector.connect(Network.Mainnet));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectLeather.result', info);
     return info;
   },
 };
