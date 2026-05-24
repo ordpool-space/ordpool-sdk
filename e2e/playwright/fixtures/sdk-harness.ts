@@ -280,12 +280,18 @@ window.ordpoolSdkHarness.buildAndSignMintViaUnisat = async (input: MintRequest) 
   log('mint.psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
 
   // window.unisat.signPsbt(hex, {autoFinalized:true}) returns the
-  // finalized raw tx hex — exactly what postTx wants. No broadcast
-  // happens (that's pushPsbt's job, and we're skipping it).
+  // FINALIZED PSBT hex — not the raw tx hex (despite the option name).
+  // We have to extract the wire-format tx from the PSBT ourselves
+  // before handing to postTx.
   const unisat = (window as unknown as {
     unisat: { signPsbt: (h: string, o?: { autoFinalized?: boolean }) => Promise<string> };
   }).unisat;
-  const txHex = await unisat.signPsbt(psbtHex, { autoFinalized: true });
-  log('mint.signed', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  const signedPsbtHex = await unisat.signPsbt(psbtHex, { autoFinalized: true });
+  log('mint.signed-psbt', { length: signedPsbtHex.length });
+
+  const signedTx = btcTx.fromPSBT(hexToBytes(signedPsbtHex));
+  signedTx.finalize();
+  const txHex = bytesToHex(signedTx.extract());
+  log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
 };
