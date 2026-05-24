@@ -228,17 +228,21 @@ export async function applyXverseVariant(
     networks.value.active.bitcoin = network;
     await set({ 'persistentStore::networks': JSON.stringify(networks) });
 
-    // v2 active-account store. Only present once Xverse has booted
-    // its account screen at least once; the seed onboarding flow
-    // doesn't always populate it. If absent, skip — the legacy
-    // walletState write below is the load-bearing one for
-    // sats-connect's read path.
+    // v2 zustand active-account store. This is the SOT — Xverse's
+    // boot init reads it; if missing it falls back to its hard-coded
+    // defaultValue (btcPaymentAddressType: 'native') and syncs that
+    // into walletState, clobbering anything we write to walletState
+    // alone. So we UPSERT — create the key with the bundle's exact
+    // default schema (verified by reverse-engineering popup.js v2.3.2:
+    // {selectedAccountIndex:0, selectedAccountType:"software",
+    // selectedWalletId: undefined, btcPaymentAddressType:"native"})
+    // — with our override applied.
     const accRaw = await get('persistentStore::activeAccount');
-    if (accRaw) {
-      const acc = JSON.parse(accRaw) as { value: { btcPaymentAddressType: string; [k: string]: unknown } };
-      acc.value.btcPaymentAddressType = paymentType;
-      await set({ 'persistentStore::activeAccount': JSON.stringify(acc) });
-    }
+    const acc = accRaw
+      ? JSON.parse(accRaw) as { value: { btcPaymentAddressType: string; [k: string]: unknown }; version?: number }
+      : { value: { selectedAccountIndex: 0, selectedAccountType: 'software', btcPaymentAddressType: 'native' as string }, version: 0 };
+    acc.value.btcPaymentAddressType = paymentType;
+    await set({ 'persistentStore::activeAccount': JSON.stringify(acc) });
 
     const stateRaw = await get('persist:walletState');
     if (!stateRaw) throw new Error('persist:walletState missing from chrome.storage.local');
