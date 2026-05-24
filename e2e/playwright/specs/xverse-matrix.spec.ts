@@ -221,6 +221,16 @@ for (const variant of VARIANTS) {
       }));
       // eslint-disable-next-line no-console
       console.log(`[matrix:${variant.network}:${variant.paymentType}] test-context reads → active=${verify2.active} activeAccount=${verify2.activeAccountType} legacy=${verify2.legacyType}`);
+
+      // Regression assertions on Xverse's storage schema. If Xverse
+      // changes the key names, the SOT key (zustand activeAccount vs
+      // redux walletState), or the value encoding, these fail with
+      // a sharper signal than the final paymentAddress mismatch.
+      // Reasoning + recovery procedure in /Work/ordpool/WALLETS.md.
+      expect(verify2.active, 'persistentStore::networks.value.active.bitcoin schema changed (see WALLETS.md)').toBe(variant.network);
+      expect(verify2.activeAccountType, 'persistentStore::activeAccount.value.btcPaymentAddressType schema changed; the zustand SOT may have moved (see WALLETS.md)').toBe(variant.paymentType);
+      expect(verify2.legacyType, 'persist:walletState.btcPaymentAddressType did not retain our write; the SW shutdown-flush race may have changed (see WALLETS.md)').toBe(variant.paymentType);
+
       await unlockWallet(primer);
       await shot(primer, `${variant.network}-${variant.paymentType}-dashboard`);
 
