@@ -159,26 +159,11 @@ for (const variant of VARIANTS) {
       await primer.close();
       // Small settle window for redux-persist's debounced save to flush.
       await new Promise(r => setTimeout(r, 1_500));
-      // Now write the variant from the SW context.
-      await applyXverseVariant(mutator, variant);
-      // Verify the write took + dump key list to find the real source-of-truth.
-      const [verifyW] = mutator.serviceWorkers();
-      const phase1Diag = await verifyW.evaluate(async () => {
-        const c = (globalThis as unknown as { chrome: { storage: { local: {
-          get: (k: null | string, cb: (v: Record<string, unknown>) => void) => void;
-        } } } }).chrome;
-        const all = await new Promise<Record<string, unknown>>((r) => c.storage.local.get(null, r));
-        const interesting = Object.keys(all).filter(k => /account|wallet|address|persist/i.test(k));
-        const walletStateRaw = all['persist:walletState'] as string | undefined;
-        let legacy = '<no walletState>';
-        if (walletStateRaw) {
-          const state = JSON.parse(walletStateRaw) as Record<string, string>;
-          legacy = state.btcPaymentAddressType ? JSON.parse(state.btcPaymentAddressType) : '<no btcPaymentAddressType>';
-        }
-        return { legacy, interestingKeys: interesting.sort() };
-      });
+      // Write the variant from the SW context. applyXverseVariant
+      // returns a Phase-1 read-back so we can log it post-reload.
+      const phase1Diag = await applyXverseVariant(mutator, variant);
       // eslint-disable-next-line no-console
-      console.log(`[matrix:${variant.network}:${variant.paymentType}] Phase-1 read-back → legacy=${phase1Diag.legacy} keys=${JSON.stringify(phase1Diag.interestingKeys)}`);
+      console.log(`[matrix:${variant.network}:${variant.paymentType}] Phase-1 read-back → legacy=${phase1Diag.phase1Legacy} keys=${JSON.stringify(phase1Diag.storageKeys)}`);
       // Flush before close.
       await new Promise(r => setTimeout(r, 3_000));
       await mutator.close();

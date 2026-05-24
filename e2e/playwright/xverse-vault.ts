@@ -197,11 +197,11 @@ interface PlaywrightContextLike {
 export async function applyXverseVariant(
   context: PlaywrightContextLike,
   variant: XverseVariant,
-): Promise<void> {
+): Promise<{ phase1Legacy: string; storageKeys: string[] }> {
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
 
-  await worker.evaluate(async ({ network, paymentType }) => {
+  const diag = await worker.evaluate(async ({ network, paymentType }) => {
     type ChromeBridge = {
       chrome: {
         storage: { local: {
@@ -250,6 +250,19 @@ export async function applyXverseVariant(
     state.btcPaymentAddressType = JSON.stringify(paymentType);
     await set({ 'persist:walletState': JSON.stringify(state) });
 
+    // Read-back diagnostic + key list — must happen before the
+    // reload below, otherwise the SW handle goes invalid.
+    const allKeys = await new Promise<string[]>((r) =>
+      (globalThis as unknown as { chrome: { storage: { local: { get: (k: null, cb: (v: Record<string, unknown>) => void) => void } } } })
+        .chrome.storage.local.get(null, (v) => r(Object.keys(v))),
+    );
+    const verifyRaw = await get('persist:walletState');
+    let phase1Legacy = '<no walletState>';
+    if (verifyRaw) {
+      const s = JSON.parse(verifyRaw) as Record<string, string>;
+      phase1Legacy = s.btcPaymentAddressType ? JSON.parse(s.btcPaymentAddressType) : '<no btcPaymentAddressType>';
+    }
+
     // Force the SW to restart so its in-memory redux store can't
     // flush stale defaults over our leveldb writes during shutdown.
     // chrome.runtime.reload() unloads and reloads the extension;
@@ -258,11 +271,13 @@ export async function applyXverseVariant(
     // there at our write time.
     const reloadFn = (globalThis as unknown as { chrome: { runtime: { reload: () => void } } }).chrome.runtime.reload;
     reloadFn();
+    return { phase1Legacy, storageKeys: allKeys.filter(k => /account|wallet|address|persist/i.test(k)).sort() };
   }, variant);
   // Playwright doesn't re-emit `serviceworker` for the same
   // extension after reload, so a fixed wait. 4s lets chromium
   // restart the SW and rehydrate before the caller closes.
   await new Promise(r => setTimeout(r, 4_000));
+  return diag;
 }
 
 /**
