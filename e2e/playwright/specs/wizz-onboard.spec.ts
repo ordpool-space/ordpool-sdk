@@ -100,13 +100,14 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await dumpHtml(page, '04-after-password-submit');
 
   // ─── Phase 4: source-wallet picker ───
-  // Unisat-style "Choose a wallet to restore from" with Wizz/Atom
-  // at the top of the list. The list is rendered as tappable rows
-  // that include the wallet name as text; click the row whose
-  // text starts with "Wizz" (most likely first option).
-  const sourceWizz = page.getByText(/wizz wallet/i).first();
+  // Unisat-style "Choose a wallet you want to restore from" with
+  // Wizz Wallet at the top. The labels are non-interactive
+  // <div class="relative"> children of a tappable row container —
+  // the text node isn't the click target. Use force:true to let
+  // the click bubble to whichever ancestor has the onClick handler.
+  const sourceWizz = page.getByText('Wizz Wallet', { exact: true }).first();
   await expect(sourceWizz).toBeVisible({ timeout: 10_000 });
-  await sourceWizz.click();
+  await sourceWizz.click({ force: true });
   await shot(page, '05-source-wallet-picked');
   await dumpHtml(page, '05-source-wallet-picked');
 
