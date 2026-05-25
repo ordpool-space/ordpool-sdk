@@ -111,10 +111,17 @@ test('Unisat loads in Chromium, exposes a service worker, and renders its index 
     bodyHtml,
   );
 
-  // Body should at least exist and contain SOMETHING. We'll
-  // tighten this to "contains 'Restore' or 'Create' text" once
-  // we've seen the first CI screenshot.
+  // Body should at least exist and contain SOMETHING. Poll for
+  // non-empty text — Unisat's React mount can race against an
+  // immediate innerText read (`networkidle` doesn't gate React
+  // hydration). Iteration 1 caught this once on CI 26379589137
+  // where the body was empty at read time.
   await expect(page.locator('body')).toBeVisible();
+  await page.waitForFunction(
+    () => (document.body.innerText || '').trim().length > 0,
+    undefined,
+    { timeout: 10_000 },
+  );
   const visibleText = await page.locator('body').innerText().catch(() => '');
   console.log(`[unisat] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);
   expect(visibleText.length).toBeGreaterThan(0);
