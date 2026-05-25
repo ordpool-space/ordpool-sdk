@@ -15,10 +15,10 @@ jest.mock('sats-connect', () => {
   };
 });
 jest.mock('../psbt-extract', () => ({
-  extractWireTxFromPsbt: jest.fn(() => 'EXTRACTED_RAW_TX_HEX'),
+  broadcastSignedPsbt: jest.fn(() => of({ txId: 'TXID-FROM-BROADCAST' })),
 }));
 import { signTransaction } from 'sats-connect';
-import { extractWireTxFromPsbt } from '../psbt-extract';
+import { broadcastSignedPsbt } from '../psbt-extract';
 
 import { xverseSigner } from './xverse.signer';
 
@@ -26,12 +26,12 @@ import { xverseSigner } from './xverse.signer';
 describe('xverseSigner.signAndBroadcast', () => {
 
   const signTransactionMock = signTransaction as unknown as jest.Mock;
-  const extractMock = extractWireTxFromPsbt as unknown as jest.Mock;
+  const broadcastSignedPsbtMock = broadcastSignedPsbt as unknown as jest.Mock;
 
   beforeEach(() => {
     signTransactionMock.mockReset();
-    extractMock.mockReset();
-    extractMock.mockReturnValue('EXTRACTED_RAW_TX_HEX');
+    broadcastSignedPsbtMock.mockReset();
+    broadcastSignedPsbtMock.mockReturnValue(of({ txId: 'TXID-FROM-BROADCAST' }));
   });
 
   it('asks sats-connect to sign WITHOUT broadcasting, extracts the wire tx, and hands it to the caller\'s broadcast callback', async () => {
@@ -42,14 +42,15 @@ describe('xverseSigner.signAndBroadcast', () => {
     }) as never);
 
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0xab]);
-    const broadcastMock = jest.fn((_rawTxHex: string) => of('TXID-FROM-BROADCAST-CALLBACK'));
+    const broadcastCallback = jest.fn((_rawTxHex: string) => of('UNUSED'));
 
-    const result = await firstValueFrom(xverseSigner.signAndBroadcast({
+    const input = {
       psbtBytes: unsignedBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: broadcastMock as never,
-    }));
+      broadcast: broadcastCallback as never,
+    };
+    const result = await firstValueFrom(xverseSigner.signAndBroadcast(input));
 
     expect(signTransactionMock).toHaveBeenCalledTimes(1);
     const args = signTransactionMock.mock.calls[0][0] as SignTransactionOptions;
@@ -62,15 +63,12 @@ describe('xverseSigner.signAndBroadcast', () => {
     expect(args.payload.inputsToSign![0].signingIndexes).toEqual([0]);
     expect(args.payload.inputsToSign![0].sigHash).toBe(btc.SigHash.ALL);
 
-    // Signer decodes the returned PSBT, extracts wire tx, and
-    // hands it to the broadcast callback.
-    expect(extractMock).toHaveBeenCalledTimes(1);
-    expect(extractMock).toHaveBeenCalledWith(base64.decode('cHNidP8B'));
-    expect(broadcastMock).toHaveBeenCalledTimes(1);
-    expect(broadcastMock).toHaveBeenCalledWith('EXTRACTED_RAW_TX_HEX');
+    // Signer hands the decoded PSBT to the shared broadcast helper.
+    expect(broadcastSignedPsbtMock).toHaveBeenCalledTimes(1);
+    expect(broadcastSignedPsbtMock).toHaveBeenCalledWith(input, base64.decode('cHNidP8B'));
 
-    // Result.txId is whatever broadcast returned.
-    expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST-CALLBACK' });
+    // Result.txId is what the broadcast helper returned.
+    expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST' });
   });
 
   it('when network is Testnet4, maps to the literal "Testnet4" string (Xverse v2 mode-equality check rejects bare "Testnet")', async () => {
@@ -119,16 +117,19 @@ describe('xverseSigner.signAndBroadcast', () => {
     await expect(lastValueFrom(result$)).rejects.toThrow('Request was cancelled');
   });
 
-  it('when the broadcast callback errors, the adapter propagates the error', async () => {
+  it('when broadcastSignedPsbt errors (e.g. mempool rejected), the adapter propagates the error', async () => {
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
       args.onFinish({ psbtBase64: 'cHNidP8B' } as SignTransactionResponse);
     }) as never);
+    broadcastSignedPsbtMock.mockImplementation(() => {
+      throw new Error('mempool full');
+    });
 
     const result$ = xverseSigner.signAndBroadcast({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: () => { throw new Error('mempool full'); },
+      broadcast: () => of('UNUSED'),
     });
 
     await expect(lastValueFrom(result$)).rejects.toThrow('mempool full');

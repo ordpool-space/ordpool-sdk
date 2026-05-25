@@ -13,7 +13,7 @@
 import { firstValueFrom } from 'rxjs';
 import { signTransaction } from 'sats-connect';
 import { base64 } from '@scure/base';
-import { Transaction as btcTx, p2wpkh, p2tr } from '@scure/btc-signer';
+import { p2wpkh, p2tr } from '@scure/btc-signer';
 
 import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector';
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
@@ -243,11 +243,6 @@ function bytesToHex(b: Uint8Array): string {
   for (let i = 0; i < b.length; i++) out += b[i].toString(16).padStart(2, '0');
   return out;
 }
-
-// extractWireTxFromPsbt is the single PSBT → wire-tx-hex helper
-// shared by every wallet signer + the Pipeline B harness paths.
-// Imported from src/wallet/psbt-extract.ts (production code).
-// Full reasoning in /Work/ordpool/WALLETS.md.
 
 void toScureNetwork;
 void xverseSigner;

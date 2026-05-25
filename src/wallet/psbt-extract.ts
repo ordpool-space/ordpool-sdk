@@ -1,4 +1,7 @@
 import * as btc from '@scure/btc-signer';
+import { map, Observable } from 'rxjs';
+
+import { SignAndBroadcastInput } from './wallet.service.types';
 
 /**
  * Finalize a signed PSBT (if needed) and extract the wire-format
@@ -17,11 +20,7 @@ import * as btc from '@scure/btc-signer';
  *     — finalize() throws "Not enough partial sign" in that case;
  *     safe to ignore because the wallet's pre-populated witness is
  *     already in place. Re-throw anything else.
- *  3. `extract()` produces the wire-format bytes; we serialise to hex
- *     for `POST /tx` broadcast.
- *
- * Returns a raw tx hex string suitable for handing to electrs /
- * mempool.space / api.ordpool.space / any custom broadcast endpoint.
+ *  3. `extract()` produces the wire-format bytes; we serialise to hex.
  */
 export function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
   const tx = btc.Transaction.fromPSBT(signedPsbtBytes);
@@ -31,4 +30,22 @@ export function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
     if (!/Not enough partial sign/i.test((e as Error).message)) throw e;
   }
   return tx.hex;
+}
+
+/**
+ * Final 3 steps of every wallet signer's `signAndBroadcast`:
+ * extract wire-tx hex from the wallet's signed PSBT, hand it to
+ * the caller-supplied broadcast callback, wrap the resulting
+ * txid in the `{ txId }` shape.
+ *
+ * Pins the "WE broadcast" convention: the broadcast endpoint is
+ * the SDK's call, not the wallet's vendor backend. All three
+ * production signers + the Pipeline B harness route through here.
+ */
+export function broadcastSignedPsbt(
+  input: SignAndBroadcastInput,
+  signedPsbtBytes: Uint8Array,
+): Observable<{ txId: string }> {
+  const txHex = extractWireTxFromPsbt(signedPsbtBytes);
+  return input.broadcast(txHex).pipe(map(txId => ({ txId })));
 }

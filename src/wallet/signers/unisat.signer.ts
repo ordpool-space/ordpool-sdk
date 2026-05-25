@@ -1,7 +1,7 @@
 import { hex } from '@scure/base';
-import { from, map, Observable, switchMap } from 'rxjs';
+import { from, Observable, switchMap } from 'rxjs';
 
-import { extractWireTxFromPsbt } from '../psbt-extract';
+import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -38,10 +38,7 @@ export const unisatSigner: WalletSigner = {
     const unisat = (window as unknown as { unisat: UnisatRpc }).unisat;
 
     return from(unisat.signPsbt(psbtHex, { autoFinalized: false })).pipe(
-      switchMap(signedPsbtHex => {
-        const txHex = extractWireTxFromPsbt(hex.decode(signedPsbtHex));
-        return input.broadcast(txHex).pipe(map(txId => ({ txId })));
-      }),
+      switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
     );
   },
 };

@@ -105,7 +105,15 @@ test('Leather loads in Chromium, exposes a service worker, and renders its index
     bodyHtml,
   );
 
+  // Poll for non-empty text — React mount races against an
+  // immediate innerText read after networkidle. Same flake-prone
+  // pattern as the original unisat-loads (fixed in c5c65d2).
   await expect(page.locator('body')).toBeVisible();
+  await page.waitForFunction(
+    () => (document.body.innerText || '').trim().length > 0,
+    undefined,
+    { timeout: 10_000 },
+  );
   const visibleText = await page.locator('body').innerText().catch(() => '');
   console.log(`[leather] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);
   expect(visibleText.length).toBeGreaterThan(0);

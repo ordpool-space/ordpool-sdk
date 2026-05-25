@@ -1,10 +1,10 @@
 import { base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { map, Observable, switchMap } from 'rxjs';
+import { Observable, switchMap } from 'rxjs';
 import { signTransaction } from 'sats-connect';
 
 import { toBitcoinNetworkType } from '../../network';
-import { extractWireTxFromPsbt } from '../psbt-extract';
+import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -64,10 +64,7 @@ export const xverseSigner: WalletSigner = {
     });
 
     return signedPsbt$.pipe(
-      switchMap(signedPsbtBase64 => {
-        const txHex = extractWireTxFromPsbt(base64.decode(signedPsbtBase64));
-        return input.broadcast(txHex).pipe(map(txId => ({ txId })));
-      }),
+      switchMap(signedPsbtBase64 => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))),
     );
   },
 };
