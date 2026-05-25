@@ -87,6 +87,71 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash e2e/playwright/playwright-bootstrap.sh leather
 
+      - name: Cache unpacked OKX extension
+        id: okx-cache
+        uses: actions/cache@v4
+        with:
+          path: e2e/extensions/okx
+          key: okx-extension-v4.1.0
+
+      - name: Download + unpack OKX from internal release mirror
+        if: steps.okx-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash e2e/playwright/playwright-bootstrap.sh okx
+
+      - name: Cache unpacked Phantom extension
+        id: phantom-cache
+        uses: actions/cache@v4
+        with:
+          path: e2e/extensions/phantom
+          key: phantom-extension-v26.14.0
+
+      - name: Download + unpack Phantom from internal release mirror
+        if: steps.phantom-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash e2e/playwright/playwright-bootstrap.sh phantom
+
+      - name: Cache unpacked Wizz extension
+        id: wizz-cache
+        uses: actions/cache@v4
+        with:
+          path: e2e/extensions/wizz
+          key: wizz-extension-v2.13.4
+
+      - name: Download + unpack Wizz from internal release mirror
+        if: steps.wizz-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash e2e/playwright/playwright-bootstrap.sh wizz
+
+      - name: Cache unpacked Oyl extension
+        id: oyl-cache
+        uses: actions/cache@v4
+        with:
+          path: e2e/extensions/oyl
+          key: oyl-extension-v1.17.1
+
+      - name: Download + unpack Oyl from internal release mirror
+        if: steps.oyl-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash e2e/playwright/playwright-bootstrap.sh oyl
+
+      - name: Cache unpacked Alby extension
+        id: alby-cache
+        uses: actions/cache@v4
+        with:
+          path: e2e/extensions/alby
+          key: alby-extension-v3.14.2
+
+      - name: Download + unpack Alby from internal release mirror
+        if: steps.alby-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash e2e/playwright/playwright-bootstrap.sh alby
+
       - name: Build SDK harness bundle for the fixtures server
         run: npm run e2e:harness:build
 
@@ -134,5 +199,10 @@ jobs:
             e2e/extensions/xverse/manifest.json
             e2e/extensions/unisat/manifest.json
             e2e/extensions/leather/manifest.json
+            e2e/extensions/okx/manifest.json
+            e2e/extensions/phantom/manifest.json
+            e2e/extensions/wizz/manifest.json
+            e2e/extensions/oyl/manifest.json
+            e2e/extensions/alby/manifest.json
           retention-days: 7
           if-no-files-found: warn
