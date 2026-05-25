@@ -137,13 +137,25 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '07-after-mnemonic-continue');
   await dumpHtml(page, '07-after-mnemonic-continue');
 
-  // ─── Phase 6: address-type screen (optional) ───
-  // Wizz may show the same "Native SegWit" / "Taproot" picker as
-  // Unisat. Click Continue if present; otherwise skip.
-  const addressTypeContinue = page.getByRole('button', { name: /^continue$/i }).first();
+  // ─── Phase 6: address-type screen (Step 3 — Wizz shows this
+  //              after mnemonic; default selection is the wonky
+  //              "Legacy & Taproot (P2TR)" m/44/0/0/0/0. Actively
+  //              pick "Native Segwit (P2WPKH)" so the wallet ends
+  //              up on the standard BIP-84 derivation that matches
+  //              our test vectors.) ───
+  await dumpHtml(page, '08a-address-type-screen');
+  const nativeSegwitRow = page.getByText('Native Segwit (P2WPKH)', { exact: true }).first();
+  if (await nativeSegwitRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await nativeSegwitRow.click({ force: true });
+    await shot(page, '08b-native-segwit-picked');
+  }
+
+  // Continue button is rendered as a styled element; use force:true
+  // for the same reason as the source-wallet row click.
+  const addressTypeContinue = page.getByText('Continue', { exact: true }).first();
   if (await addressTypeContinue.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await addressTypeContinue.click().catch(() => undefined);
-    await shot(page, '08-after-address-type');
+    await addressTypeContinue.click({ force: true });
+    await shot(page, '08c-after-address-type-continue');
   }
 
   // ─── Phase 7: dashboard ───
