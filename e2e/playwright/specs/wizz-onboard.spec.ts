@@ -172,10 +172,17 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await dumpHtml(page, '08d-after-continue-html');
 
   // ─── Phase 7: dashboard ───
+  // CI 26416783057 / 08c-after-address-type-continue.png confirmed
+  // that the Continue click DID land — button transitioned to a
+  // spinner state ("⟳ Continue") with derived addresses populated
+  // on each row (bc1qc...06fyu for Native SegWit, matches our
+  // BIP-84 test vector). Wizz then runs an address-scan that can
+  // take significant time on CI (no internet → falls back to
+  // bundled scanners). Bump the dashboard wait to 60s.
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('receive') || t.includes('send') || t.includes('balance') || t.includes('account');
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { timeout: 60_000, polling: 500 });
   await shot(page, '09-dashboard');
 
   // eslint-disable-next-line no-console
