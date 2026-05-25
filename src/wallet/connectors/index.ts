@@ -3,6 +3,7 @@ import {
   WalletConnector,
   WindowLike,
 } from '../wallet.service.types';
+import { albyConnector } from './alby.connector';
 import { leatherConnector } from './leather.connector';
 import { okxConnector } from './okx.connector';
 import { oylConnector } from './oyl.connector';
@@ -27,6 +28,7 @@ export const walletConnectors: readonly WalletConnector[] = [
   okxConnector,
   phantomConnector,
   oylConnector,
+  albyConnector,
 ];
 
 /**
@@ -53,6 +55,7 @@ export function detectInstalledWallets(
   return { installedWallets, notInstalledWallets };
 }
 
+export { albyConnector } from './alby.connector';
 export { leatherConnector } from './leather.connector';
 export { okxConnector } from './okx.connector';
 export { oylConnector } from './oyl.connector';

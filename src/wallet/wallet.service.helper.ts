@@ -71,6 +71,15 @@ export function isOylInstalled(win: WindowLike | undefined): boolean {
 }
 
 /**
+ * Alby exposes a top-level `window.alby` provider (Lightning + Nostr
+ * focus). Also injects `window.webln` per the WebLN standard.
+ * Detect either.
+ */
+export function isAlbyInstalled(win: WindowLike | undefined): boolean {
+  return !!(win?.alby ?? win?.webln);
+}
+
+/**
  * Narrow a raw sats-connect `getAddress` response into the SDK's
  * `WalletInfo` shape. Throws if either the Ordinals or Payment
  * address is absent — both are required for a CAT-21 mint flow,

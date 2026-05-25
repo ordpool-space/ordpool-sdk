@@ -6,19 +6,22 @@ import { detectInstalledWallets, walletConnectors } from './index';
 
 describe('walletConnectors registry', () => {
 
-  it('lists Xverse, Leather, Unisat, Wizz, OKX, Phantom, Oyl in detection order', () => {
-    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl']);
+  it('lists Xverse, Leather, Unisat, Wizz, OKX, Phantom, Oyl, Alby in detection order', () => {
+    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby']);
   });
 
-  it('marks all seven as signing-supported (matching signer exists today)', () => {
-    expect(walletConnectors.every(c => c.signingSupported)).toBe(true);
+  it('marks all wallets EXCEPT Alby as signing-supported — Alby is sign-in-only (Lightning, no on-chain PSBT)', () => {
+    expect(walletConnectors.filter(c => c.signingSupported).map(c => c.providerId)).toEqual(
+      ['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl']
+    );
+    expect(walletConnectors.filter(c => !c.signingSupported).map(c => c.providerId)).toEqual(['alby']);
   });
 });
 
 
 describe('detectInstalledWallets', () => {
 
-  it('returns all seven as not-installed when window is undefined', () => {
+  it('returns all eight as not-installed when window is undefined', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
     expect(installedWallets).toEqual([]);
     expect(notInstalledWallets).toEqual([
@@ -29,11 +32,12 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
+      KnownOrdinalWallets.alby,
     ]);
   });
 
-  it('returns all seven as installed when every extension is present', () => {
-    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {} };
+  it('returns all eight as installed when every extension is present', () => {
+    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {} };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([
       KnownOrdinalWallets.xverse,
@@ -43,6 +47,7 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
+      KnownOrdinalWallets.alby,
     ]);
     expect(notInstalledWallets).toEqual([]);
   });
@@ -57,11 +62,12 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
+      KnownOrdinalWallets.alby,
     ]);
   });
 
   it('keeps a stable detection order matching walletConnectors', () => {
-    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {} });
+    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {} });
     expect(installedWallets.map(w => w.label)).toEqual([
       KnownOrdinalWallets.xverse.label,
       KnownOrdinalWallets.leather.label,
@@ -70,7 +76,13 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.okx.label,
       KnownOrdinalWallets.phantom.label,
       KnownOrdinalWallets.oyl.label,
+      KnownOrdinalWallets.alby.label,
     ]);
+  });
+
+  it('detects Alby via the standard window.webln binding (used by other Lightning wallets too)', () => {
+    const { installedWallets } = detectInstalledWallets({ webln: {} });
+    expect(installedWallets).toEqual([KnownOrdinalWallets.alby]);
   });
 
   it('requires window.phantom.bitcoin (BTC sub-provider) — bare phantom without it is NOT considered installed', () => {
