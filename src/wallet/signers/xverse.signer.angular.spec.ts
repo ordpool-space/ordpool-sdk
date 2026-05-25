@@ -6,9 +6,7 @@ import { BitcoinNetworkType, SignTransactionOptions, SignTransactionResponse } f
 
 import { Network } from '../../network';
 
-// sats-connect's `signTransaction` is imported at module top, mock
-// before the signer-under-test is imported so the mock binding is
-// in place.
+// Mocks must be in place BEFORE the signer-under-test is imported.
 jest.mock('sats-connect', () => {
   const actual = jest.requireActual('sats-connect') as Record<string, unknown>;
   return {
@@ -16,7 +14,11 @@ jest.mock('sats-connect', () => {
     signTransaction: jest.fn(),
   };
 });
+jest.mock('../psbt-extract', () => ({
+  extractWireTxFromPsbt: jest.fn(() => 'EXTRACTED_RAW_TX_HEX'),
+}));
 import { signTransaction } from 'sats-connect';
+import { extractWireTxFromPsbt } from '../psbt-extract';
 
 import { xverseSigner } from './xverse.signer';
 
@@ -24,74 +26,82 @@ import { xverseSigner } from './xverse.signer';
 describe('xverseSigner.signAndBroadcast', () => {
 
   const signTransactionMock = signTransaction as unknown as jest.Mock;
+  const extractMock = extractWireTxFromPsbt as unknown as jest.Mock;
 
   beforeEach(() => {
     signTransactionMock.mockReset();
+    extractMock.mockReset();
+    extractMock.mockReturnValue('EXTRACTED_RAW_TX_HEX');
   });
 
-  it('when called, hits sats-connect.signTransaction with broadcast=true, base64(unsigned), Mainnet network, the payment address as inputsToSign, and SIGHASH_ALL', async () => {
+  it('asks sats-connect to sign WITHOUT broadcasting, extracts the wire tx, and hands it to the caller\'s broadcast callback', async () => {
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
-      args.onFinish({ txId: 'txid-from-sats-connect' } as SignTransactionResponse);
+      // With broadcast:false Xverse returns the signed PSBT in
+      // base64 instead of a txId.
+      args.onFinish({ psbtBase64: 'cHNidP8B' } as SignTransactionResponse);
     }) as never);
 
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0xab]);
+    const broadcastMock = jest.fn((_rawTxHex: string) => of('TXID-FROM-BROADCAST-CALLBACK'));
 
     const result = await firstValueFrom(xverseSigner.signAndBroadcast({
       psbtBytes: unsignedBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      // If our adapter accidentally routed through the broadcast
-      // callback, the result.txId assertion below catches it.
-      broadcast: () => of('LEAKED-FROM-BROADCAST-CALLBACK'),
+      broadcast: broadcastMock as never,
     }));
 
     expect(signTransactionMock).toHaveBeenCalledTimes(1);
     const args = signTransactionMock.mock.calls[0][0] as SignTransactionOptions;
     expect(args.payload.psbtBase64).toBe(base64.encode(unsignedBytes));
-    expect(args.payload.broadcast).toBe(true);
+    // WE-broadcast convention: ask for sign-only.
+    expect(args.payload.broadcast).toBe(false);
     expect(args.payload.network.type).toBe(BitcoinNetworkType.Mainnet);
-    // sats-connect v4 typed inputsToSign as optional; assert
-    // it's defined first so the per-element accesses don't trip
-    // strict-null-checks.
     expect(args.payload.inputsToSign).toBeDefined();
     expect(args.payload.inputsToSign![0].address).toBe('bc1qpayment');
     expect(args.payload.inputsToSign![0].signingIndexes).toEqual([0]);
     expect(args.payload.inputsToSign![0].sigHash).toBe(btc.SigHash.ALL);
-    expect(result).toEqual({ txId: 'txid-from-sats-connect' });
+
+    // Signer decodes the returned PSBT, extracts wire tx, and
+    // hands it to the broadcast callback.
+    expect(extractMock).toHaveBeenCalledTimes(1);
+    expect(extractMock).toHaveBeenCalledWith(base64.decode('cHNidP8B'));
+    expect(broadcastMock).toHaveBeenCalledTimes(1);
+    expect(broadcastMock).toHaveBeenCalledWith('EXTRACTED_RAW_TX_HEX');
+
+    // Result.txId is whatever broadcast returned.
+    expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST-CALLBACK' });
   });
 
   it('when network is Testnet4, maps to the literal "Testnet4" string (Xverse v2 mode-equality check rejects bare "Testnet")', async () => {
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
-      args.onFinish({ txId: 'tx' } as SignTransactionResponse);
+      args.onFinish({ psbtBase64: 'cHNidP8B' } as SignTransactionResponse);
     }) as never);
 
     await firstValueFrom(xverseSigner.signAndBroadcast({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'tb1qpayment',
       network: Network.Testnet4,
-      broadcast: () => of('unused'),
+      broadcast: () => of('tx'),
     }));
 
     const args = signTransactionMock.mock.calls[0][0] as SignTransactionOptions;
     expect(args.payload.network.type).toBe('Testnet4');
   });
 
-  it('when sats-connect onFinish returns a response without a txId, the adapter emits an empty string (current behaviour, soft-fail)', async () => {
-    // Behaviour-locking test: today the signer falls through to ''
-    // rather than treating a missing txId as an error. If we ever
-    // decide a missing txId should error, this spec changes.
+  it('when sats-connect onFinish returns a response without psbtBase64, the adapter errors (PSBT missing means signing failed)', async () => {
     signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
       args.onFinish({} as SignTransactionResponse);
     }) as never);
 
-    const result = await firstValueFrom(xverseSigner.signAndBroadcast({
+    const result$ = xverseSigner.signAndBroadcast({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
       broadcast: () => of('unused'),
-    }));
+    });
 
-    expect(result).toEqual({ txId: '' });
+    await expect(lastValueFrom(result$)).rejects.toThrow('Xverse signTransaction returned without psbtBase64');
   });
 
   it('when sats-connect calls onCancel, the adapter throws an error to the caller', async () => {
@@ -107,5 +117,20 @@ describe('xverseSigner.signAndBroadcast', () => {
     });
 
     await expect(lastValueFrom(result$)).rejects.toThrow('Request was cancelled');
+  });
+
+  it('when the broadcast callback errors, the adapter propagates the error', async () => {
+    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
+      args.onFinish({ psbtBase64: 'cHNidP8B' } as SignTransactionResponse);
+    }) as never);
+
+    const result$ = xverseSigner.signAndBroadcast({
+      psbtBytes: new Uint8Array(8),
+      paymentAddress: 'bc1qpayment',
+      network: Network.Mainnet,
+      broadcast: () => { throw new Error('mempool full'); },
+    });
+
+    await expect(lastValueFrom(result$)).rejects.toThrow('mempool full');
   });
 });

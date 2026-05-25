@@ -19,6 +19,7 @@ import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
 import { unisatConnector } from '../../../src/wallet/connectors/unisat.connector';
 import { leatherConnector } from '../../../src/wallet/connectors/leather.connector';
+import { extractWireTxFromPsbt } from '../../../src/wallet/psbt-extract';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
 import { Network, toBitcoinNetworkType, toScureNetwork } from '../../../src/network';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
@@ -243,29 +244,10 @@ function bytesToHex(b: Uint8Array): string {
   return out;
 }
 
-/**
- * Convention (see /Work/ordpool/WALLETS.md → "Signing convention in
- * the Pipeline B harness: WE finalize"): every wallet's
- * `buildAndSignMintVia<Wallet>` asks the wallet for a partial-sig
- * PSBT (when the API exposes the option), then funnels through this
- * single helper to finalize + extract the wire-format raw tx.
- *
- * Some wallets (Leather, Unisat with autoFinalized:true) ALWAYS
- * finalize before returning — no opt-out. For those, finalize()
- * throws "Not enough partial sign" because there are no partial
- * sigs left to combine. Swallow that specific error; extract()
- * reads the wallet's pre-populated finalScriptWitness directly.
- * Re-throw anything else.
- */
-function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
-  const tx = btcTx.fromPSBT(signedPsbtBytes);
-  try {
-    tx.finalize();
-  } catch (e) {
-    if (!/Not enough partial sign/i.test((e as Error).message)) throw e;
-  }
-  return bytesToHex(tx.extract());
-}
+// extractWireTxFromPsbt is the single PSBT → wire-tx-hex helper
+// shared by every wallet signer + the Pipeline B harness paths.
+// Imported from src/wallet/psbt-extract.ts (production code).
+// Full reasoning in /Work/ordpool/WALLETS.md.
 
 void toScureNetwork;
 void xverseSigner;

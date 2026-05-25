@@ -1,6 +1,7 @@
 import { hex } from '@scure/base';
-import { from, map, Observable } from 'rxjs';
+import { from, map, Observable, switchMap } from 'rxjs';
 
+import { extractWireTxFromPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -9,26 +10,25 @@ import {
 
 
 interface UnisatRpc {
-  signPsbt(psbtHex: string): Promise<string>;
-  pushPsbt(psbtHex: string): Promise<string>;
+  signPsbt(psbtHex: string, options?: { autoFinalized?: boolean }): Promise<string>;
 }
 
 
 /**
- * Unisat — `window.unisat.signPsbt(hex)` + `window.unisat.pushPsbt(hex)`.
+ * Unisat — `window.unisat.signPsbt(hex, {autoFinalized: false})`.
  *
- * Unisat returns the signed PSBT to us, then we hand it back for the
- * broadcast in a second call. Both happen inside the wallet, so the
- * input's `broadcast` callback is unused. From the caller's
- * perspective the operation is atomic.
+ * Per the SDK-wide "WE broadcast" convention (see
+ * `/Work/ordpool/WALLETS.md`): the wallet signs and hands back a
+ * partial-sig PSBT; the SDK finalises and broadcasts via the
+ * caller-supplied `input.broadcast` callback. We deliberately
+ * SKIP `window.unisat.pushPsbt` — that would route to Unisat's
+ * vendor backend (api.unisat.io), which takes broadcast-endpoint
+ * choice away from the SDK and breaks regtest / Mara / accelerator
+ * scenarios.
  *
  * Caveat (CLAUDE.md): Unisat uses one address for both payments and
  * ordinals — easy to spend cat sats by accident. Mint flow surfaces
  * this in UI text. The signer itself can't help that.
- *
- * See:
- *  - https://github.com/unisat-wallet/unisat-web3-demo/blob/1109c79b/src/App.tsx#L208
- *  - https://github.com/unisat-wallet/unisat-web3-demo/blob/1109c79b/src/App.tsx#L313
  */
 export const unisatSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.unisat,
@@ -37,9 +37,11 @@ export const unisatSigner: WalletSigner = {
     const psbtHex: string = hex.encode(input.psbtBytes);
     const unisat = (window as unknown as { unisat: UnisatRpc }).unisat;
 
-    const promise = unisat.signPsbt(psbtHex)
-      .then(signed => unisat.pushPsbt(signed));
-
-    return from(promise).pipe(map(txId => ({ txId })));
+    return from(unisat.signPsbt(psbtHex, { autoFinalized: false })).pipe(
+      switchMap(signedPsbtHex => {
+        const txHex = extractWireTxFromPsbt(hex.decode(signedPsbtHex));
+        return input.broadcast(txHex).pipe(map(txId => ({ txId })));
+      }),
+    );
   },
 };

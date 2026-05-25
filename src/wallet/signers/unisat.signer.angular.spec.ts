@@ -1,79 +1,88 @@
 import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals';
 import { hex } from '@scure/base';
-import { firstValueFrom, of } from 'rxjs';
+import { firstValueFrom, of, throwError } from 'rxjs';
 
 import { Network } from '../../network';
+
+jest.mock('../psbt-extract', () => ({
+  extractWireTxFromPsbt: jest.fn(() => 'EXTRACTED_RAW_TX_HEX'),
+}));
+import { extractWireTxFromPsbt } from '../psbt-extract';
+
 import { unisatSigner } from './unisat.signer';
 
 
 describe('unisatSigner.signAndBroadcast', () => {
 
   let signPsbtMock: jest.Mock;
-  let pushPsbtMock: jest.Mock;
+  const extractMock = extractWireTxFromPsbt as unknown as jest.Mock;
 
   beforeEach(() => {
     signPsbtMock = jest.fn();
-    pushPsbtMock = jest.fn();
-    (window as unknown as { unisat: { signPsbt: jest.Mock; pushPsbt: jest.Mock } }).unisat = {
+    (window as unknown as { unisat: { signPsbt: jest.Mock } }).unisat = {
       signPsbt: signPsbtMock,
-      pushPsbt: pushPsbtMock,
     };
+    extractMock.mockReset();
+    extractMock.mockReturnValue('EXTRACTED_RAW_TX_HEX');
   });
 
   afterEach(() => {
     delete (window as unknown as { unisat?: unknown }).unisat;
   });
 
-  it('when called, hits window.unisat.signPsbt with hex(unsigned), then pushPsbt with the signed PSBT, and returns pushPsbt\'s txid', async () => {
+  it('asks unisat.signPsbt with autoFinalized:false, extracts the wire tx, and hands it to the caller\'s broadcast callback', async () => {
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
-    signPsbtMock.mockResolvedValue('SIGNED_PSBT_HEX' as never);
-    pushPsbtMock.mockResolvedValue('txid-from-pushPsbt' as never);
+    signPsbtMock.mockResolvedValue('70736274ff01' as never);
+    const broadcastMock = jest.fn((_rawTxHex: string) => of('TXID-FROM-BROADCAST-CALLBACK'));
 
     const result = await firstValueFrom(unisatSigner.signAndBroadcast({
       psbtBytes: unsignedBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      // Distinct sentinel: if our adapter accidentally routes through the
-      // broadcast callback instead of unisat.pushPsbt, the result.txId
-      // assertion below catches it.
-      broadcast: () => of('LEAKED-FROM-BROADCAST-CALLBACK'),
+      broadcast: broadcastMock as never,
     }));
 
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
-    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes));
-    expect(pushPsbtMock).toHaveBeenCalledTimes(1);
-    expect(pushPsbtMock).toHaveBeenCalledWith('SIGNED_PSBT_HEX');
-    expect(result).toEqual({ txId: 'txid-from-pushPsbt' });
+    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), { autoFinalized: false });
+
+    // Signer decodes the returned PSBT, extracts wire tx, and
+    // hands it to the broadcast callback.
+    expect(extractMock).toHaveBeenCalledTimes(1);
+    expect(extractMock).toHaveBeenCalledWith(hex.decode('70736274ff01'));
+    expect(broadcastMock).toHaveBeenCalledTimes(1);
+    expect(broadcastMock).toHaveBeenCalledWith('EXTRACTED_RAW_TX_HEX');
+
+    expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST-CALLBACK' });
   });
 
-  it('when signPsbt rejects, re-throws the same error to the caller', async () => {
+  it('when signPsbt rejects, re-throws the same error to the caller (and never calls broadcast)', async () => {
     signPsbtMock.mockRejectedValue(new Error('user rejected') as never);
+    const broadcastMock = jest.fn(() => of('would-leak'));
 
     const result$ = unisatSigner.signAndBroadcast({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: () => of('unused'),
+      broadcast: broadcastMock as never,
     });
 
     await expect(firstValueFrom(result$)).rejects.toThrow('user rejected');
+    // Positive sentinel-based proof that the broadcast callback was
+    // not invoked: it returns a distinct string we'd see in result.txId
+    // if the adapter routed through it.
+    expect(broadcastMock).toHaveBeenCalledTimes(0);
   });
 
-  it('when pushPsbt rejects after signPsbt succeeds, re-throws pushPsbt\'s error (signing OK, broadcast failed)', async () => {
-    signPsbtMock.mockResolvedValue('SIGNED_PSBT_HEX' as never);
-    pushPsbtMock.mockRejectedValue(new Error('broadcast failed: txn-mempool-conflict') as never);
+  it('when the broadcast callback errors (e.g. mempool rejected), the adapter propagates the error', async () => {
+    signPsbtMock.mockResolvedValue('70736274ff01' as never);
 
     const result$ = unisatSigner.signAndBroadcast({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: () => of('unused'),
+      broadcast: () => throwError(() => new Error('txn-mempool-conflict')),
     });
 
-    await expect(firstValueFrom(result$)).rejects.toThrow('broadcast failed: txn-mempool-conflict');
-    // Positive assertions: signPsbt did its job, pushPsbt was the failure point.
-    expect(signPsbtMock).toHaveBeenCalledTimes(1);
-    expect(pushPsbtMock).toHaveBeenCalledTimes(1);
-    expect(pushPsbtMock).toHaveBeenCalledWith('SIGNED_PSBT_HEX');
+    await expect(firstValueFrom(result$)).rejects.toThrow('txn-mempool-conflict');
   });
 });

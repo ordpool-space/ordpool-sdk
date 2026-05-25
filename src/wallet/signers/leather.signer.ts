@@ -3,6 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { from, map, Observable, switchMap } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network';
+import { extractWireTxFromPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -64,10 +65,8 @@ export const leatherSigner: WalletSigner = {
 
     return from(signPromise).pipe(
       switchMap(resp => {
-        const signedPsbtBytes = hex.decode(resp.result.hex);
-        const tx = btc.Transaction.fromPSBT(signedPsbtBytes);
-        tx.finalize();
-        return input.broadcast(tx.hex).pipe(map(txId => ({ txId })));
+        const txHex = extractWireTxFromPsbt(hex.decode(resp.result.hex));
+        return input.broadcast(txHex).pipe(map(txId => ({ txId })));
       })
     );
   },
