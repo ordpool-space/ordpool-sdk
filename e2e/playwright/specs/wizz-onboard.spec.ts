@@ -150,13 +150,26 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
     await shot(page, '08b-native-segwit-picked');
   }
 
-  // Continue button is rendered as a styled element; use force:true
-  // for the same reason as the source-wallet row click.
-  const addressTypeContinue = page.getByText('Continue', { exact: true }).first();
+  // Continue button is rendered as a styled element; previous
+  // attempts with getByText+force:true didn't advance. Try the
+  // button-with-text selector (more specific — only matches an
+  // actual <button> ancestor) and small settle before click.
+  await page.waitForTimeout(500);
+  const addressTypeContinue = page.locator('button:has-text("Continue")').first();
   if (await addressTypeContinue.isVisible({ timeout: 5_000 }).catch(() => false)) {
     await addressTypeContinue.click({ force: true });
     await shot(page, '08c-after-address-type-continue');
+  } else {
+    // Fallback: try the styled-div Continue.
+    const fallback = page.getByText('Continue', { exact: true }).first();
+    if (await fallback.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await fallback.click({ force: true });
+      await shot(page, '08c-after-fallback-continue');
+    }
   }
+  // Settle for the route transition.
+  await page.waitForTimeout(1_500);
+  await dumpHtml(page, '08d-after-continue-html');
 
   // ─── Phase 7: dashboard ───
   await page.waitForFunction(() => {
