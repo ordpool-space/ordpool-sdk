@@ -10,11 +10,8 @@ describe('walletConnectors registry', () => {
     expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby']);
   });
 
-  it('marks all wallets EXCEPT Alby as signing-supported — Alby is sign-in-only (Lightning, no on-chain PSBT)', () => {
-    expect(walletConnectors.filter(c => c.signingSupported).map(c => c.providerId)).toEqual(
-      ['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl']
-    );
-    expect(walletConnectors.filter(c => !c.signingSupported).map(c => c.providerId)).toEqual(['alby']);
+  it('marks all eight wallets as signing-supported at the SDK level (Alby may fail at runtime if the user has no on-chain backend wired)', () => {
+    expect(walletConnectors.every(c => c.signingSupported)).toBe(true);
   });
 });
 
