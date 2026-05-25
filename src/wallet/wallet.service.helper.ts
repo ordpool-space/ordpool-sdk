@@ -31,6 +31,17 @@ export function isUnisatInstalled(win: WindowLike | undefined): boolean {
 }
 
 /**
+ * Wizz exposes `window.wizz` AND the legacy `window.atom`
+ * (formerly Atom Wallet). Detect either — both reference the same
+ * provider via Proxy. Don't conflate with `window.atom` from
+ * unrelated extensions because Wizz's binding sets the property
+ * non-writable.
+ */
+export function isWizzInstalled(win: WindowLike | undefined): boolean {
+  return !!(win?.wizz ?? win?.atom);
+}
+
+/**
  * Narrow a raw sats-connect `getAddress` response into the SDK's
  * `WalletInfo` shape. Throws if either the Ordinals or Payment
  * address is absent — both are required for a CAT-21 mint flow,
@@ -112,6 +123,21 @@ export function parseLeatherAddressResponse(response: LeatherAddressResponse): W
 export function unisatBasicInfoToWalletInfo(address: string, publicKey: string): WalletInfo {
   return {
     type: KnownOrdinalWalletType.unisat,
+    ordinalsAddress:   address,
+    ordinalsPublicKey: publicKey,
+    paymentAddress:    address,
+    paymentPublicKey:  publicKey,
+    signingSupported:  true,
+  };
+}
+
+/**
+ * Wizz inherits Unisat's single-address contract — same `{ address,
+ * publicKey }` shape, populated into both ordinals + payment lanes.
+ */
+export function wizzBasicInfoToWalletInfo(address: string, publicKey: string): WalletInfo {
+  return {
+    type: KnownOrdinalWalletType.wizz,
     ordinalsAddress:   address,
     ordinalsPublicKey: publicKey,
     paymentAddress:    address,

@@ -6,11 +6,11 @@ import { detectInstalledWallets, walletConnectors } from './index';
 
 describe('walletConnectors registry', () => {
 
-  it('lists Xverse, Leather, Unisat in detection order', () => {
-    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat']);
+  it('lists Xverse, Leather, Unisat, Wizz in detection order', () => {
+    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz']);
   });
 
-  it('marks all three as signing-supported (matching signer exists today)', () => {
+  it('marks all four as signing-supported (matching signer exists today)', () => {
     expect(walletConnectors.every(c => c.signingSupported)).toBe(true);
   });
 });
@@ -18,41 +18,49 @@ describe('walletConnectors registry', () => {
 
 describe('detectInstalledWallets', () => {
 
-  it('returns all three as not-installed when window is undefined', () => {
+  it('returns all four as not-installed when window is undefined', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
     expect(installedWallets).toEqual([]);
     expect(notInstalledWallets).toEqual([
       KnownOrdinalWallets.xverse,
       KnownOrdinalWallets.leather,
       KnownOrdinalWallets.unisat,
+      KnownOrdinalWallets.wizz,
     ]);
   });
 
-  it('returns all three as installed when every extension is present', () => {
-    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {} };
+  it('returns all four as installed when every extension is present', () => {
+    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {} };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([
       KnownOrdinalWallets.xverse,
       KnownOrdinalWallets.leather,
       KnownOrdinalWallets.unisat,
+      KnownOrdinalWallets.wizz,
     ]);
     expect(notInstalledWallets).toEqual([]);
   });
 
   it('partitions correctly when only some are installed', () => {
-    const win = { XverseProviders: {}, unisat: {} }; // Leather missing
+    const win = { XverseProviders: {}, unisat: {} }; // Leather + Wizz missing
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([KnownOrdinalWallets.xverse, KnownOrdinalWallets.unisat]);
-    expect(notInstalledWallets).toEqual([KnownOrdinalWallets.leather]);
+    expect(notInstalledWallets).toEqual([KnownOrdinalWallets.leather, KnownOrdinalWallets.wizz]);
   });
 
   it('keeps a stable detection order matching walletConnectors', () => {
-    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {} });
+    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {} });
     expect(installedWallets.map(w => w.label)).toEqual([
       KnownOrdinalWallets.xverse.label,
       KnownOrdinalWallets.leather.label,
       KnownOrdinalWallets.unisat.label,
+      KnownOrdinalWallets.wizz.label,
     ]);
+  });
+
+  it('detects Wizz via the legacy window.atom binding (formerly Atom Wallet)', () => {
+    const { installedWallets } = detectInstalledWallets({ atom: {} });
+    expect(installedWallets).toEqual([KnownOrdinalWallets.wizz]);
   });
 
   it('accepts the legacy HiroWalletProvider global for Leather detection', () => {

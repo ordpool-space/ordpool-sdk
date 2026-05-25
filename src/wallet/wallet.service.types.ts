@@ -14,6 +14,13 @@ export interface WindowLike {
   LeatherProvider?: unknown;
   HiroWalletProvider?: unknown;
   unisat?: unknown;
+  wizz?: unknown;
+  atom?: unknown;            // wizz's legacy namespace (formerly Atom Wallet)
+  okxwallet?: unknown;
+  phantom?: unknown;
+  oyl?: unknown;
+  alby?: unknown;
+  webln?: unknown;           // alby's standard Lightning provider name
 }
 
 
@@ -96,6 +103,11 @@ export enum KnownOrdinalWalletType {
   xverse = 'xverse',
   leather = 'leather',
   unisat = 'unisat',
+  wizz = 'wizz',
+  okx = 'okx',
+  phantom = 'phantom',
+  oyl = 'oyl',
+  alby = 'alby',
   /**
    * Watch-only via BIP-32 xpub paste. Covers Sparrow, Electrum,
    * Coldcard, Ledger, Trezor, Specter, Bitcoin Core — every desktop
@@ -132,6 +144,37 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     // subLabel: '(not fully supported)',
     logo: '/resources/ordinal-wallets/btc-unisat-logo.svg',
     downloadLink: 'https://unisat.io/download'
+  },
+  [KnownOrdinalWalletType.wizz]: {
+    type: KnownOrdinalWalletType.wizz,
+    label: 'Wizz',
+    logo: '/resources/ordinal-wallets/btc-wizz-logo.svg',
+    downloadLink: 'https://wizzwallet.io/',
+  },
+  [KnownOrdinalWalletType.okx]: {
+    type: KnownOrdinalWalletType.okx,
+    label: 'OKX',
+    logo: '/resources/ordinal-wallets/btc-okx-logo.svg',
+    downloadLink: 'https://web3.okx.com/download',
+  },
+  [KnownOrdinalWalletType.phantom]: {
+    type: KnownOrdinalWalletType.phantom,
+    label: 'Phantom',
+    logo: '/resources/ordinal-wallets/btc-phantom-logo.svg',
+    downloadLink: 'https://phantom.com/download',
+  },
+  [KnownOrdinalWalletType.oyl]: {
+    type: KnownOrdinalWalletType.oyl,
+    label: 'Oyl',
+    logo: '/resources/ordinal-wallets/btc-oyl-logo.svg',
+    downloadLink: 'https://oyl.io/',
+  },
+  [KnownOrdinalWalletType.alby]: {
+    type: KnownOrdinalWalletType.alby,
+    label: 'Alby',
+    subLabel: 'Lightning + Nostr (not on-chain ordinals)',
+    logo: '/resources/ordinal-wallets/btc-alby-logo.svg',
+    downloadLink: 'https://getalby.com/',
   },
   [KnownOrdinalWalletType.xpub]: {
     type: KnownOrdinalWalletType.xpub,
