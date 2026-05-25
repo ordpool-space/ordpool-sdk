@@ -19,6 +19,9 @@ import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
 import { unisatConnector } from '../../../src/wallet/connectors/unisat.connector';
 import { leatherConnector } from '../../../src/wallet/connectors/leather.connector';
+// Shared PSBT→wire-tx-hex helper used by both production signers
+// and the harness. Full "WE finalize, WE broadcast" reasoning in
+// /Work/ordpool/WALLETS.md.
 import { extractWireTxFromPsbt } from '../../../src/wallet/psbt-extract';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
 import { Network, toBitcoinNetworkType, toScureNetwork } from '../../../src/network';
