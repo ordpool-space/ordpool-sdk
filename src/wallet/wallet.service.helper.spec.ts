@@ -177,6 +177,37 @@ describe('parseLeatherAddressResponse', () => {
     };
     expect(() => parseLeatherAddressResponse(response)).toThrow('Required address not found?!');
   });
+
+  it('normalises a compressed taproot ordinalsPublicKey (66 hex) to x-only (64 hex)', () => {
+    // Leather v6.x's getAddresses returns the taproot pubkey in
+    // compressed form (1 parity byte + 32 x-coord bytes). The
+    // SDK contract on WalletInfo.ordinalsPublicKey is x-only —
+    // strip the leading parity byte so consumers don't have to
+    // re-derive depending on wallet vendor.
+    const response = makeResponse({
+      ordinalsAddress: 'bc1pordinals',
+      ordinalsPublicKey: '03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115',
+      paymentAddress: 'bc1qpayment',
+      paymentPublicKey: '0212345678901234567890123456789012345678901234567890123456789012ab',
+    });
+    const info = parseLeatherAddressResponse(response);
+    // Parity byte (03) is stripped; the remaining 32 bytes are the x-only key.
+    expect(info.ordinalsPublicKey).toBe('cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115');
+    // paymentPublicKey is sec256k1-compressed by spec; passes through unchanged.
+    expect(info.paymentPublicKey).toBe('0212345678901234567890123456789012345678901234567890123456789012ab');
+  });
+
+  it('passes an already-x-only taproot ordinalsPublicKey (64 hex) through unchanged', () => {
+    const response = makeResponse({
+      ordinalsAddress: 'bc1pordinals',
+      ordinalsPublicKey: 'cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115',
+      paymentAddress: 'bc1qpayment',
+      paymentPublicKey: 'pay-pub',
+    });
+    expect(parseLeatherAddressResponse(response).ordinalsPublicKey).toBe(
+      'cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115',
+    );
+  });
 });
 
 

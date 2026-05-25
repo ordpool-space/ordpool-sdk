@@ -57,9 +57,32 @@ export function parseXverseAddressResponse(response: XverseAddressResponse): Wal
 }
 
 /**
+ * For BIP-86 taproot keys the SDK contract on
+ * `WalletInfo.ordinalsPublicKey` is **x-only** (32 bytes, 64 hex
+ * chars) — that's what's in the witness and what consumers want
+ * for downstream signing/verification.
+ *
+ * Different wallets return the same key in different forms:
+ *  - Xverse / sats-connect → x-only (64 hex)
+ *  - Leather v6.x          → compressed (66 hex, leading 02 or 03)
+ *  - Unisat                → reuses paymentPublicKey (single-address)
+ *
+ * Normalise here so the contract is consistent: if the input is the
+ * compressed form, strip the parity byte; if it's already x-only,
+ * pass through; otherwise (undefined / malformed) return as-is.
+ */
+function toXOnlyPubkeyHex(pubkey: string): string {
+  // Compressed sec256k1 pubkey = 1 parity byte + 32 x-coord bytes
+  // = 33 bytes = 66 hex. Strip the leading 2 hex (1 byte) → 64 hex.
+  if (/^0[23][0-9a-f]{64}$/i.test(pubkey)) return pubkey.slice(2);
+  return pubkey;
+}
+
+/**
  * Same idea for Leather: pluck the taproot (ordinals) and native-segwit
  * (payment) entries from the raw Leather response. Throws if either is
- * missing.
+ * missing. The taproot pubkey is normalised to x-only via
+ * toXOnlyPubkeyHex (Leather v6 returns it compressed).
  */
 export function parseLeatherAddressResponse(response: LeatherAddressResponse): WalletInfo {
 
@@ -74,7 +97,7 @@ export function parseLeatherAddressResponse(response: LeatherAddressResponse): W
   return {
     type: KnownOrdinalWalletType.leather,
     ordinalsAddress:   ordinalsAddress.address,
-    ordinalsPublicKey: ordinalsAddress.publicKey,
+    ordinalsPublicKey: toXOnlyPubkeyHex(ordinalsAddress.publicKey),
     paymentAddress:    paymentAddress.address,
     paymentPublicKey:  paymentAddress.publicKey,
     signingSupported:  true,
