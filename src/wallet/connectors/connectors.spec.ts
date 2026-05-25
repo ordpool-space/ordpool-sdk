@@ -6,11 +6,11 @@ import { detectInstalledWallets, walletConnectors } from './index';
 
 describe('walletConnectors registry', () => {
 
-  it('lists Xverse, Leather, Unisat, Wizz, OKX, Phantom in detection order', () => {
-    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom']);
+  it('lists Xverse, Leather, Unisat, Wizz, OKX, Phantom, Oyl in detection order', () => {
+    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl']);
   });
 
-  it('marks all six as signing-supported (matching signer exists today)', () => {
+  it('marks all seven as signing-supported (matching signer exists today)', () => {
     expect(walletConnectors.every(c => c.signingSupported)).toBe(true);
   });
 });
@@ -18,7 +18,7 @@ describe('walletConnectors registry', () => {
 
 describe('detectInstalledWallets', () => {
 
-  it('returns all six as not-installed when window is undefined', () => {
+  it('returns all seven as not-installed when window is undefined', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
     expect(installedWallets).toEqual([]);
     expect(notInstalledWallets).toEqual([
@@ -28,11 +28,12 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.wizz,
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
+      KnownOrdinalWallets.oyl,
     ]);
   });
 
-  it('returns all six as installed when every extension is present', () => {
-    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} } };
+  it('returns all seven as installed when every extension is present', () => {
+    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {} };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([
       KnownOrdinalWallets.xverse,
@@ -41,12 +42,13 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.wizz,
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
+      KnownOrdinalWallets.oyl,
     ]);
     expect(notInstalledWallets).toEqual([]);
   });
 
   it('partitions correctly when only some are installed', () => {
-    const win = { XverseProviders: {}, unisat: {} }; // Leather + Wizz + OKX + Phantom missing
+    const win = { XverseProviders: {}, unisat: {} };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([KnownOrdinalWallets.xverse, KnownOrdinalWallets.unisat]);
     expect(notInstalledWallets).toEqual([
@@ -54,11 +56,12 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.wizz,
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
+      KnownOrdinalWallets.oyl,
     ]);
   });
 
   it('keeps a stable detection order matching walletConnectors', () => {
-    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} } });
+    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {} });
     expect(installedWallets.map(w => w.label)).toEqual([
       KnownOrdinalWallets.xverse.label,
       KnownOrdinalWallets.leather.label,
@@ -66,6 +69,7 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.wizz.label,
       KnownOrdinalWallets.okx.label,
       KnownOrdinalWallets.phantom.label,
+      KnownOrdinalWallets.oyl.label,
     ]);
   });
 
