@@ -247,14 +247,23 @@ function bytesToHex(b: Uint8Array): string {
  * Convention (see /Work/ordpool/WALLETS.md → "Signing convention in
  * the Pipeline B harness: WE finalize"): every wallet's
  * `buildAndSignMintVia<Wallet>` asks the wallet for a partial-sig
- * PSBT, then funnels through this single helper to finalize +
- * extract the wire-format raw tx. One finalize implementation
- * across all wallets — no per-wallet "did this one auto-finalize?"
- * branching.
+ * PSBT (when the API exposes the option), then funnels through this
+ * single helper to finalize + extract the wire-format raw tx.
+ *
+ * Some wallets (Leather, Unisat with autoFinalized:true) ALWAYS
+ * finalize before returning — no opt-out. For those, finalize()
+ * throws "Not enough partial sign" because there are no partial
+ * sigs left to combine. Swallow that specific error; extract()
+ * reads the wallet's pre-populated finalScriptWitness directly.
+ * Re-throw anything else.
  */
 function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
   const tx = btcTx.fromPSBT(signedPsbtBytes);
-  tx.finalize();
+  try {
+    tx.finalize();
+  } catch (e) {
+    if (!/Not enough partial sign/i.test((e as Error).message)) throw e;
+  }
   return bytesToHex(tx.extract());
 }
 
