@@ -53,6 +53,16 @@ export function isOkxInstalled(win: WindowLike | undefined): boolean {
 }
 
 /**
+ * Phantom is multi-chain — require the `bitcoin` sub-provider
+ * specifically (users without BTC enabled in Phantom shouldn't be
+ * listed as "Phantom installed for BTC").
+ */
+export function isPhantomInstalled(win: WindowLike | undefined): boolean {
+  const p = win?.phantom as { bitcoin?: unknown } | undefined;
+  return !!p?.bitcoin;
+}
+
+/**
  * Narrow a raw sats-connect `getAddress` response into the SDK's
  * `WalletInfo` shape. Throws if either the Ordinals or Payment
  * address is absent — both are required for a CAT-21 mint flow,
@@ -171,6 +181,43 @@ export function okxBasicInfoToWalletInfo(address: string, publicKey: string): Wa
     ordinalsPublicKey: publicKey,
     paymentAddress:    address,
     paymentPublicKey:  publicKey,
+    signingSupported:  true,
+  };
+}
+
+/** One entry in Phantom's `btc_requestAccounts` response. */
+export interface PhantomBtcAddress {
+  address: string;
+  publicKey: string;
+  addressType: 'bip122_p2tr' | 'bip122_p2wpkh' | 'bip122_p2sh' | 'bip122_p2pkh';
+}
+
+/**
+ * Phantom's `btc_requestAccounts` returns an array of addresses,
+ * each tagged with `addressType` (the CAIP-122 BTC variant). Split
+ * into the SDK's ordinals vs payment lanes:
+ *   - bip122_p2tr (Taproot) → ordinalsAddress
+ *   - bip122_p2wpkh / p2sh / p2pkh → paymentAddress
+ *
+ * Throws if either lane is absent. Phantom v26 returns both lanes
+ * by default; older versions accepted a `purposes` filter on the
+ * request — kept defaulted so we always get both.
+ */
+export function parsePhantomAddressResponse(addresses: PhantomBtcAddress[]): WalletInfo {
+  const ordinals = addresses.find(a => a.addressType === 'bip122_p2tr');
+  const payment = addresses.find(a => a.addressType !== 'bip122_p2tr');
+  if (!ordinals || !payment) {
+    throw new Error('Required address not found?!');
+  }
+  return {
+    type: KnownOrdinalWalletType.phantom,
+    ordinalsAddress:   ordinals.address,
+    // Taproot pubkey from Phantom may come as full sec256k1
+    // compressed (66 hex). Reuse the same normalisation as Leather
+    // so SDK consumers see x-only (64 hex) consistently.
+    ordinalsPublicKey: toXOnlyPubkeyHex(ordinals.publicKey),
+    paymentAddress:    payment.address,
+    paymentPublicKey:  payment.publicKey,
     signingSupported:  true,
   };
 }

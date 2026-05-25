@@ -6,11 +6,11 @@ import { detectInstalledWallets, walletConnectors } from './index';
 
 describe('walletConnectors registry', () => {
 
-  it('lists Xverse, Leather, Unisat, Wizz, OKX in detection order', () => {
-    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx']);
+  it('lists Xverse, Leather, Unisat, Wizz, OKX, Phantom in detection order', () => {
+    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom']);
   });
 
-  it('marks all five as signing-supported (matching signer exists today)', () => {
+  it('marks all six as signing-supported (matching signer exists today)', () => {
     expect(walletConnectors.every(c => c.signingSupported)).toBe(true);
   });
 });
@@ -18,7 +18,7 @@ describe('walletConnectors registry', () => {
 
 describe('detectInstalledWallets', () => {
 
-  it('returns all five as not-installed when window is undefined', () => {
+  it('returns all six as not-installed when window is undefined', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
     expect(installedWallets).toEqual([]);
     expect(notInstalledWallets).toEqual([
@@ -27,11 +27,12 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.unisat,
       KnownOrdinalWallets.wizz,
       KnownOrdinalWallets.okx,
+      KnownOrdinalWallets.phantom,
     ]);
   });
 
-  it('returns all five as installed when every extension is present', () => {
-    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} } };
+  it('returns all six as installed when every extension is present', () => {
+    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} } };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([
       KnownOrdinalWallets.xverse,
@@ -39,30 +40,40 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.unisat,
       KnownOrdinalWallets.wizz,
       KnownOrdinalWallets.okx,
+      KnownOrdinalWallets.phantom,
     ]);
     expect(notInstalledWallets).toEqual([]);
   });
 
   it('partitions correctly when only some are installed', () => {
-    const win = { XverseProviders: {}, unisat: {} }; // Leather + Wizz + OKX missing
+    const win = { XverseProviders: {}, unisat: {} }; // Leather + Wizz + OKX + Phantom missing
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([KnownOrdinalWallets.xverse, KnownOrdinalWallets.unisat]);
     expect(notInstalledWallets).toEqual([
       KnownOrdinalWallets.leather,
       KnownOrdinalWallets.wizz,
       KnownOrdinalWallets.okx,
+      KnownOrdinalWallets.phantom,
     ]);
   });
 
   it('keeps a stable detection order matching walletConnectors', () => {
-    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} } });
+    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} } });
     expect(installedWallets.map(w => w.label)).toEqual([
       KnownOrdinalWallets.xverse.label,
       KnownOrdinalWallets.leather.label,
       KnownOrdinalWallets.unisat.label,
       KnownOrdinalWallets.wizz.label,
       KnownOrdinalWallets.okx.label,
+      KnownOrdinalWallets.phantom.label,
     ]);
+  });
+
+  it('requires window.phantom.bitcoin (BTC sub-provider) — bare phantom without it is NOT considered installed', () => {
+    const { installedWallets: notForBtc } = detectInstalledWallets({ phantom: {} });
+    expect(notForBtc).toEqual([]);
+    const { installedWallets: forBtc } = detectInstalledWallets({ phantom: { bitcoin: {} } });
+    expect(forBtc).toEqual([KnownOrdinalWallets.phantom]);
   });
 
   it('detects Wizz via the legacy window.atom binding (formerly Atom Wallet)', () => {
