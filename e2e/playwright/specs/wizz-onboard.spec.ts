@@ -80,62 +80,77 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
-  // ─── Phase 3: mnemonic entry ───
-  // Wizz's fork inherits Unisat's 12-input mnemonic grid OR
-  // a single textarea. First attempt: try per-word inputs by
-  // typing each word into the next available text/password
-  // input. Falls back to a textarea if only one is present.
-  await page.waitForTimeout(800);
-  await dumpHtml(page, '03-mnemonic-screen');
-
-  const inputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(inputs.first()).toBeVisible({ timeout: 15_000 });
-  const count = await inputs.count();
-  if (count >= 12) {
-    for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-      await inputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
-    }
-  } else {
-    // Single textarea — paste the whole phrase.
-    const textarea = page.locator('textarea').first();
-    if (await textarea.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await textarea.fill(TEST_MNEMONIC);
-    } else {
-      throw new Error(`Mnemonic input shape not recognized — got ${count} input(s), no textarea`);
-    }
-  }
-  await shot(page, '04-mnemonic-filled');
-
-  // Continue — try common labels.
-  const mnemonicContinue = page.getByRole('button', { name: /continue|next|import|restore/i }).first();
-  await expect(mnemonicContinue).toBeVisible({ timeout: 10_000 });
-  await mnemonicContinue.click();
-  await shot(page, '05-after-mnemonic-continue');
-  await dumpHtml(page, '05-after-mnemonic-continue');
-
-  // ─── Phase 4: password screen ───
-  // Probably two input[type=password] fields.
+  // ─── Phase 3: "Create a password" (Wizz inherits Unisat's
+  //              password-before-mnemonic order; verified via CI
+  //              26413717806 screenshot 02-after-import-click.png) ───
   const pwInputs = page.locator('input[type="password"]');
   await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
+  // Two fields: Password + Confirm Password. Fill both with the
+  // same value so the Continue button enables.
   const pwCount = await pwInputs.count();
   for (let i = 0; i < pwCount; i++) {
     await pwInputs.nth(i).fill(TEST_PASSWORD);
   }
-  await shot(page, '06-password-typed');
+  await shot(page, '03-password-typed');
 
-  const pwContinue = page.getByRole('button', { name: /continue|next|create|confirm/i }).first();
+  const pwContinue = page.getByRole('button', { name: /^continue$/i }).first();
   await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
   await pwContinue.click();
-  await shot(page, '07-after-password-submit');
-  await dumpHtml(page, '07-after-password-submit');
+  await shot(page, '04-after-password-submit');
+  await dumpHtml(page, '04-after-password-submit');
 
-  // ─── Phase 5: dashboard ───
-  // Best-effort match: standard wallet dashboard verbs.
+  // ─── Phase 4: source-wallet picker ───
+  // Unisat-style "Choose a wallet to restore from" with Wizz/Atom
+  // at the top of the list. The list is rendered as tappable rows
+  // that include the wallet name as text; click the row whose
+  // text starts with "Wizz" (most likely first option).
+  const sourceWizz = page.getByText(/wizz wallet/i).first();
+  await expect(sourceWizz).toBeVisible({ timeout: 10_000 });
+  await sourceWizz.click();
+  await shot(page, '05-source-wallet-picked');
+  await dumpHtml(page, '05-source-wallet-picked');
+
+  // ─── Phase 5: mnemonic entry ───
+  // Probably 12 per-word inputs (Unisat-style grid).
+  await page.waitForTimeout(500);
+  const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
+  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
+  const mnemonicCount = await mnemonicInputs.count();
+  if (mnemonicCount >= 12) {
+    for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
+      await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
+    }
+  } else {
+    const textarea = page.locator('textarea').first();
+    if (await textarea.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await textarea.fill(TEST_MNEMONIC);
+    } else {
+      throw new Error(`Mnemonic input shape not recognized — got ${mnemonicCount} input(s), no textarea`);
+    }
+  }
+  await shot(page, '06-mnemonic-filled');
+
+  const mnemonicContinue = page.getByRole('button', { name: /^continue$/i }).first();
+  await expect(mnemonicContinue).toBeEnabled({ timeout: 10_000 });
+  await mnemonicContinue.click();
+  await shot(page, '07-after-mnemonic-continue');
+  await dumpHtml(page, '07-after-mnemonic-continue');
+
+  // ─── Phase 6: address-type screen (optional) ───
+  // Wizz may show the same "Native SegWit" / "Taproot" picker as
+  // Unisat. Click Continue if present; otherwise skip.
+  const addressTypeContinue = page.getByRole('button', { name: /^continue$/i }).first();
+  if (await addressTypeContinue.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await addressTypeContinue.click().catch(() => undefined);
+    await shot(page, '08-after-address-type');
+  }
+
+  // ─── Phase 7: dashboard ───
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('receive') || t.includes('send') || t.includes('balance') || t.includes('account');
   }, undefined, { timeout: 30_000, polling: 250 });
-  await shot(page, '08-dashboard');
+  await shot(page, '09-dashboard');
 
   // eslint-disable-next-line no-console
   console.log(`[wizz:onboard] dashboard rendered — wallet committed.`);
