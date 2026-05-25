@@ -154,7 +154,15 @@ test('leatherConnector.connect via the harness page returns the BIP-84 / BIP-86 
   expect(info.signingSupported).toBe(true);
   expect(info.paymentAddress).toBe(EXPECTED_PAYMENT_ADDRESS);
   expect(info.ordinalsAddress).toBe(EXPECTED_ORDINALS_ADDRESS);
-  // Compressed payment pubkey = 33 bytes = 66 hex; taproot x-only = 32 bytes = 64 hex.
+  // Compressed payment pubkey = 33 bytes = 66 hex.
   expect(info.paymentPublicKey).toMatch(/^[0-9a-f]{66}$/);
-  expect(info.ordinalsPublicKey).toMatch(/^[0-9a-f]{64}$/);
+  // Leather v6.102.0's getAddresses returns the ordinals address
+  // but omits its publicKey (only the payment address has one in
+  // the response). parseLeatherAddressResponse propagates the
+  // missing field as undefined; SDK consumers that need the
+  // taproot pubkey have to derive it elsewhere. Assert presence
+  // is optional here — what matters is the address.
+  if (info.ordinalsPublicKey !== undefined) {
+    expect(info.ordinalsPublicKey).toMatch(/^[0-9a-f]{64}$/);
+  }
 });
