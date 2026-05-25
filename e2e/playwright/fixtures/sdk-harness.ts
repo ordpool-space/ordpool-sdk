@@ -61,6 +61,7 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
+      buildAndSignMintViaLeather(input: MintRequest): Promise<{ txHex: string }>;
     };
   }
 }
@@ -335,6 +336,67 @@ window.ordpoolSdkHarness.buildAndSignMintViaUnisat = async (input: MintRequest) 
   log('mint.signed-psbt', { length: signedPsbtHex.length });
 
   const txHex = extractWireTxFromPsbt(hexToBytes(signedPsbtHex));
+  log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  return { txHex };
+};
+
+/**
+ * Build a CAT-21 mint PSBT via the SDK and have Leather sign it
+ * with `broadcast: false` (Leather's only sign-only option — it
+ * returns the signed PSBT hex). The spec broadcasts via local
+ * electrs from the postTx call (per the "WE broadcast" convention).
+ *
+ * Leather's getAddresses returns the BIP-84 / BIP-86 derivations
+ * directly on mainnet — no cross-network trick needed; we just
+ * pass `network: 'devnet'` (Leather's equivalent of regtest) to
+ * keep its UI from rejecting our bcrt1 addresses.
+ */
+window.ordpoolSdkHarness.buildAndSignMintViaLeather = async (input: MintRequest) => {
+  if (!leatherConnector.detect(window)) {
+    throw new Error('Leather provider not injected on the harness page');
+  }
+  statusEl().textContent = `building + signing cat21 mint via leather…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  const result = createTransaction(
+    KnownOrdinalWalletType.leather,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    /* isSimulation = */ false,
+    Network.Regtest,
+  );
+  const psbtHex = bytesToHex(result.tx.toPSBT());
+  log('mint.psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
+
+  const leather = (window as unknown as {
+    LeatherProvider: {
+      request: (m: 'signPsbt', p: {
+        hex: string;
+        allowedSighash: number[];
+        signAtIndex: number;
+        network: string;
+        broadcast: boolean;
+      }) => Promise<{ result: { hex: string } }>;
+    };
+  }).LeatherProvider;
+  const response = await leather.request('signPsbt', {
+    hex: psbtHex,
+    allowedSighash: [0x01], // SIGHASH_ALL
+    signAtIndex: 0,
+    network: 'devnet', // Leather's equivalent of regtest
+    broadcast: false,  // we broadcast via postTx (WE broadcast convention)
+  });
+  log('mint.signed-psbt', { length: response.result.hex.length });
+
+  const txHex = extractWireTxFromPsbt(hexToBytes(response.result.hex));
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
 };

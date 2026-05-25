@@ -1,0 +1,233 @@
+import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+
+import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
+
+import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
+
+/**
+ * Iteration 4 — full cat21 mint roundtrip with the real Leather
+ * extension. Combines Pipeline B's wallet (Playwright + Leather)
+ * with the regtest stack (bitcoind + electrs on localhost).
+ *
+ * Leather supports a `devnet` network mode which is the wallet's
+ * equivalent of bitcoind regtest (both use the `bcrt` HRP). No
+ * cross-network trick needed — getAddresses already returns the
+ * BIP-84 / BIP-86 mainnet derivations (we hard-derive the regtest
+ * variants from the same pubkey via @scure/btc-signer), and signPsbt
+ * accepts `network: 'devnet'` directly.
+ *
+ * Flow:
+ *  1. Onboard Leather with the BIP-39 test seed.
+ *  2. Open the harness; call connectLeather → mainnet bc1q / bc1p.
+ *  3. Derive the regtest equivalents (deriveRegtestAddresses, same
+ *     helper Unisat uses).
+ *  4. Fund the bcrt1q via local bitcoind.
+ *  5. Build CAT-21 PSBT; sign via LeatherProvider.request('signPsbt',
+ *     {broadcast: false, network: 'devnet'}); extract wire-format
+ *     tx via the shared extractWireTxFromPsbt helper.
+ *  6. Approve the sign popup (testid: bitcoin-sign-psbt-confirm-button,
+ *     discovered via the bundle's OnboardingSelectors).
+ *  7. Broadcast via local electrs; mine; parse the result.
+ */
+
+const EXT_PATH = path.resolve(__dirname, '../../extensions/leather');
+const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
+const HARNESS_URL = 'http://localhost:4500/';
+
+const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+const TEST_PASSWORD = 'correct-horse-battery-staple-Tr0ub4dor-9876';
+
+const FUND_AMOUNT_BTC = 0.001;
+
+let context: BrowserContext;
+let extensionId: string;
+
+async function shot(p: Page, name: string): Promise<void> {
+  await p.screenshot({
+    path: path.resolve(RESULTS_DIR, `leather-mint-${name}.png`),
+    fullPage: true,
+  }).catch(() => undefined);
+}
+
+async function onboardLeather(page: Page): Promise<void> {
+  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('sign-in-link')).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId('sign-in-link').click();
+
+  const inputs = page.locator('input[type="text"], input[type="password"]');
+  await expect(inputs.first()).toBeVisible({ timeout: 15_000 });
+  const words = TEST_MNEMONIC.split(' ');
+  for (let i = 0; i < 12; i++) {
+    await inputs.nth(i).fill(words[i]);
+  }
+  await page.getByRole('button', { name: /continue|sign in|restore|confirm/i }).first().click();
+
+  const pwInput = page.getByTestId('set-or-enter-password-input');
+  await expect(pwInput).toBeVisible({ timeout: 15_000 });
+  await pwInput.click();
+  await pwInput.pressSequentially(TEST_PASSWORD, { delay: 15 });
+  await page.getByTestId('set-password-btn').click();
+
+  await page.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('bitcoin');
+  }, undefined, { timeout: 30_000, polling: 250 });
+}
+
+async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  let approval: Page | undefined;
+  while (Date.now() < deadline) {
+    for (const p of ctx.pages()) {
+      if (knownPages.has(p)) continue;
+      if (!p.url().startsWith('chrome-extension://')) continue;
+      if (await p.getByTestId('get-addresses-approve-button').isVisible({ timeout: 200 }).catch(() => false)) {
+        approval = p;
+        break;
+      }
+    }
+    if (approval) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  if (!approval) throw new Error('leather get-addresses approval popup never appeared');
+  await approval.getByTestId('get-addresses-approve-button').click();
+}
+
+async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
+  const deadline = Date.now() + 90_000;
+  let approval: Page | undefined;
+  while (Date.now() < deadline) {
+    for (const p of ctx.pages()) {
+      if (knownPages.has(p)) continue;
+      if (!p.url().startsWith('chrome-extension://')) continue;
+      const txt = await p.locator('body').innerText().catch(() => '');
+      if (/sign|confirm|approve/i.test(txt)) {
+        approval = p;
+        break;
+      }
+    }
+    if (approval) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  if (!approval) throw new Error('leather sign-PSBT popup never appeared');
+  await shot(approval, '03a-sign-approval');
+  // Best-effort selector: text "Confirm" or a primary action button.
+  // Will tighten once we see the actual sign-popup DOM in CI.
+  const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
+  await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
+  await confirmBtn.click();
+}
+
+test.beforeAll(async () => {
+  if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
+    throw new Error(`Leather extension not unpacked at ${EXT_PATH}.`);
+  }
+  if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
+    throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
+  }
+
+  context = await chromium.launchPersistentContext('', {
+    headless: false,
+    args: [
+      `--disable-extensions-except=${EXT_PATH}`,
+      `--load-extension=${EXT_PATH}`,
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+    ],
+  });
+
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  extensionId = worker.url().split('/')[2];
+
+  const onboardPage = await context.newPage();
+  await onboardLeather(onboardPage);
+  await shot(onboardPage, '00-onboarded');
+});
+
+test.afterAll(async () => {
+  await context?.close();
+});
+
+test('mint a cat21 on regtest via Leather: build PSBT in SDK, sign in popup (network=devnet), broadcast via local electrs', async () => {
+  test.setTimeout(300_000);
+
+  const harness = await context.newPage();
+  await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
+  await harness.waitForFunction(
+    () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
+    undefined,
+    { timeout: 15_000 },
+  );
+  await shot(harness, '01-harness-loaded');
+
+  const connectKnownPages = new Set(context.pages());
+  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectLeather());
+  await approveConnectPopup(context, connectKnownPages);
+  const wallet = await connectResultPromise;
+  // eslint-disable-next-line no-console
+  console.log(`[leather-mint] mainnet payment = ${wallet.paymentAddress}`);
+  expect(wallet.paymentAddress).toMatch(/^bc1q/);
+
+  // Same network-agnostic-keys trick we use for Unisat: derive
+  // bcrt1q + bcrt1p from the same compressed pubkey.
+  const regtest = await harness.evaluate(
+    (pk: string) => window.ordpoolSdkHarness.deriveRegtestAddresses(pk),
+    wallet.paymentPublicKey,
+  );
+  // eslint-disable-next-line no-console
+  console.log(`[leather-mint] regtest payment = ${regtest.paymentAddress}`);
+  // eslint-disable-next-line no-console
+  console.log(`[leather-mint] regtest ordinals = ${regtest.ordinalsAddress}`);
+  expect(regtest.paymentAddress).toMatch(/^bcrt1q/);
+  expect(regtest.ordinalsAddress).toMatch(/^bcrt1p/);
+
+  const fundTxid = rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', regtest.paymentAddress, String(FUND_AMOUNT_BTC)).trim();
+  // eslint-disable-next-line no-console
+  console.log(`[leather-mint] funded ${regtest.paymentAddress} with ${FUND_AMOUNT_BTC} BTC in tx ${fundTxid}`);
+  const newTip = mineBlocks(1);
+  await waitForElectrsSync(newTip);
+
+  const utxos = await getUtxos(regtest.paymentAddress);
+  const utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
+  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${regtest.paymentAddress}; got ${JSON.stringify(utxos)}`);
+  // eslint-disable-next-line no-console
+  console.log(`[leather-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
+
+  const signKnownPages = new Set(context.pages());
+  const signedHexPromise = harness.evaluate(
+    (args) => window.ordpoolSdkHarness.buildAndSignMintViaLeather(args),
+    {
+      utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
+      paymentAddress: regtest.paymentAddress,
+      paymentPublicKey: wallet.paymentPublicKey,
+      recipientAddress: regtest.ordinalsAddress,
+      feeSats: 1500,
+    },
+  );
+  await approveSignPopup(context, signKnownPages);
+  const signed = await signedHexPromise;
+  // eslint-disable-next-line no-console
+  console.log(`[leather-mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
+
+  const broadcastTxid = await postTx(signed.txHex);
+  // eslint-disable-next-line no-console
+  console.log(`[leather-mint] broadcast txid = ${broadcastTxid}`);
+  expect(broadcastTxid).toMatch(/^[0-9a-f]{64}$/);
+
+  const confirmedTip = mineBlocks(1);
+  await waitForElectrsSync(confirmedTip);
+  const esploraTx = await getTx(broadcastTxid);
+  // eslint-disable-next-line no-console
+  console.log(`[leather-mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
+  expect(esploraTx.locktime).toBe(21);
+  expect(esploraTx.status.block_hash).toBeTruthy();
+
+  const parsed = Cat21ParserService.parse(esploraTx);
+  expect(parsed).not.toBeNull();
+  expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
+  expect(parsed!.transactionId).toBe(broadcastTxid);
+  expect(parsed!.getImage()).toMatch(/^<svg/);
+});
