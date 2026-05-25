@@ -400,7 +400,16 @@ window.ordpoolSdkHarness.buildAndSignMintViaLeather = async (input: MintRequest)
     hex: psbtHex,
     allowedSighash: [0x01], // SIGHASH_ALL
     signAtIndex: 0,
-    network: 'devnet', // Leather's equivalent of regtest
+    // Leather v6.x's bundle only checks for 'mainnet' | 'signet' |
+    // 'testnet' on its Bitcoin signing path — there is no regtest
+    // option. Fall back to the same cross-network-keys trick we
+    // use for Unisat: tell Leather it's signing for mainnet, and
+    // because the P2WPKH script bytes are network-agnostic (the
+    // hash is identical whether you encode it as bc1q or bcrt1q),
+    // Leather's "is this my address?" check matches against its
+    // own mainnet bc1q address and the signing succeeds. We then
+    // broadcast the resulting tx to local regtest electrs.
+    network: 'mainnet',
     broadcast: false,  // we broadcast via postTx (WE broadcast convention)
   });
   log('mint.signed-psbt', { length: response.result.hex.length });
