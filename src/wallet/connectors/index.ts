@@ -4,6 +4,7 @@ import {
   WindowLike,
 } from '../wallet.service.types';
 import { leatherConnector } from './leather.connector';
+import { okxConnector } from './okx.connector';
 import { unisatConnector } from './unisat.connector';
 import { wizzConnector } from './wizz.connector';
 import { xverseConnector } from './xverse.connector';
@@ -21,6 +22,7 @@ export const walletConnectors: readonly WalletConnector[] = [
   leatherConnector,
   unisatConnector,
   wizzConnector,
+  okxConnector,
 ];
 
 /**
@@ -48,6 +50,7 @@ export function detectInstalledWallets(
 }
 
 export { leatherConnector } from './leather.connector';
+export { okxConnector } from './okx.connector';
 export { unisatConnector } from './unisat.connector';
 export { wizzConnector } from './wizz.connector';
 export { xverseConnector } from './xverse.connector';

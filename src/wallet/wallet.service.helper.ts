@@ -42,6 +42,17 @@ export function isWizzInstalled(win: WindowLike | undefined): boolean {
 }
 
 /**
+ * OKX is a multi-chain wallet — its BTC sub-provider lives at
+ * `window.okxwallet.bitcoin`. We require the bitcoin sub-namespace
+ * specifically; users with an OKX install but no BTC plugin
+ * enabled won't get falsely listed as "OKX installed".
+ */
+export function isOkxInstalled(win: WindowLike | undefined): boolean {
+  const w = win?.okxwallet as { bitcoin?: unknown } | undefined;
+  return !!w?.bitcoin;
+}
+
+/**
  * Narrow a raw sats-connect `getAddress` response into the SDK's
  * `WalletInfo` shape. Throws if either the Ordinals or Payment
  * address is absent — both are required for a CAT-21 mint flow,
@@ -138,6 +149,24 @@ export function unisatBasicInfoToWalletInfo(address: string, publicKey: string):
 export function wizzBasicInfoToWalletInfo(address: string, publicKey: string): WalletInfo {
   return {
     type: KnownOrdinalWalletType.wizz,
+    ordinalsAddress:   address,
+    ordinalsPublicKey: publicKey,
+    paymentAddress:    address,
+    paymentPublicKey:  publicKey,
+    signingSupported:  true,
+  };
+}
+
+/**
+ * OKX's BTC sub-provider returns one address at a time (whichever
+ * type the user has active in their settings — Native SegWit /
+ * Nested SegWit / Taproot / Legacy). Single-address contract,
+ * same shape as Unisat / Wizz; both ordinals and payment lanes
+ * populated from the one address.
+ */
+export function okxBasicInfoToWalletInfo(address: string, publicKey: string): WalletInfo {
+  return {
+    type: KnownOrdinalWalletType.okx,
     ordinalsAddress:   address,
     ordinalsPublicKey: publicKey,
     paymentAddress:    address,
