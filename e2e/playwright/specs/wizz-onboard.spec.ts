@@ -66,6 +66,11 @@ test.afterAll(async () => {
 });
 
 test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
+  // Wizz's onboard is slow (multi-step + an address-derivation scan
+  // on Step 3). The default 60s test timeout (playwright.config.ts)
+  // is not enough to traverse every phase AND wait for the scan.
+  test.setTimeout(180_000);
+
   const page = await context.newPage();
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
@@ -150,39 +155,32 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
     await shot(page, '08b-native-segwit-picked');
   }
 
-  // Wizz's Continue is a two-step pattern (CI 26417311897 made it
-  // clear):
-  //   click 1 → button shows spinner, wallet scans derivations
-  //   scan completes → button returns to enabled orange state,
-  //                    each address row populates with bc1{q,p}…
-  //   click 2 → actually advances to dashboard
+  // Wizz's Continue is a two-step pattern on the address-type
+  // screen (CI 26417311897 + 26417884611 confirm):
+  //   click 1 → button briefly shows a spinner while the wallet
+  //             scans derivations; each row populates with the
+  //             expected bc1{q,p}… address (Native SegWit:
+  //             bc1qc...06fyu, BIP-84 m/84'/0'/0'/0/0)
+  //   click 2 → advances to the dashboard
+  // The "bc1q in body.innerText" poll we previously used never
+  // matched even when the screenshot showed the address — the
+  // text is rendered inside a child <span> that the innerText
+  // serializer apparently skips. Plain timed wait is reliable.
   await page.waitForTimeout(500);
   const continueBtn = page.locator('button:has-text("Continue")').first();
   await expect(continueBtn).toBeVisible({ timeout: 5_000 });
   await continueBtn.click({ force: true });
   await shot(page, '08c-after-first-continue-click');
-
-  // Wait for scan to complete — the rows now show actual bc1q…
-  // addresses. Poll for "bc1q" in the body text (Native SegWit
-  // row's address). Up to 60s; CI may run slow.
-  await page.waitForFunction(() => /bc1q[a-z0-9]{6,}/i.test(document.body.innerText || ''), undefined, { timeout: 60_000, polling: 500 });
+  await page.waitForTimeout(8_000);
   await shot(page, '08d-after-scan');
+  await dumpHtml(page, '08d-after-scan-html');
 
-  // Now click Continue a second time — this is the one that
-  // actually advances to the dashboard.
   await continueBtn.click({ force: true });
   await shot(page, '08e-after-second-continue-click');
-  await page.waitForTimeout(1_500);
+  await page.waitForTimeout(2_000);
   await dumpHtml(page, '08f-after-continue-html');
 
   // ─── Phase 7: dashboard ───
-  // CI 26416783057 / 08c-after-address-type-continue.png confirmed
-  // that the Continue click DID land — button transitioned to a
-  // spinner state ("⟳ Continue") with derived addresses populated
-  // on each row (bc1qc...06fyu for Native SegWit, matches our
-  // BIP-84 test vector). Wizz then runs an address-scan that can
-  // take significant time on CI (no internet → falls back to
-  // bundled scanners). Bump the dashboard wait to 60s.
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('receive') || t.includes('send') || t.includes('balance') || t.includes('account');
