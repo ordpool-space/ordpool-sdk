@@ -150,26 +150,30 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
     await shot(page, '08b-native-segwit-picked');
   }
 
-  // Continue button is rendered as a styled element; previous
-  // attempts with getByText+force:true didn't advance. Try the
-  // button-with-text selector (more specific — only matches an
-  // actual <button> ancestor) and small settle before click.
+  // Wizz's Continue is a two-step pattern (CI 26417311897 made it
+  // clear):
+  //   click 1 → button shows spinner, wallet scans derivations
+  //   scan completes → button returns to enabled orange state,
+  //                    each address row populates with bc1{q,p}…
+  //   click 2 → actually advances to dashboard
   await page.waitForTimeout(500);
-  const addressTypeContinue = page.locator('button:has-text("Continue")').first();
-  if (await addressTypeContinue.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await addressTypeContinue.click({ force: true });
-    await shot(page, '08c-after-address-type-continue');
-  } else {
-    // Fallback: try the styled-div Continue.
-    const fallback = page.getByText('Continue', { exact: true }).first();
-    if (await fallback.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await fallback.click({ force: true });
-      await shot(page, '08c-after-fallback-continue');
-    }
-  }
-  // Settle for the route transition.
+  const continueBtn = page.locator('button:has-text("Continue")').first();
+  await expect(continueBtn).toBeVisible({ timeout: 5_000 });
+  await continueBtn.click({ force: true });
+  await shot(page, '08c-after-first-continue-click');
+
+  // Wait for scan to complete — the rows now show actual bc1q…
+  // addresses. Poll for "bc1q" in the body text (Native SegWit
+  // row's address). Up to 60s; CI may run slow.
+  await page.waitForFunction(() => /bc1q[a-z0-9]{6,}/i.test(document.body.innerText || ''), undefined, { timeout: 60_000, polling: 500 });
+  await shot(page, '08d-after-scan');
+
+  // Now click Continue a second time — this is the one that
+  // actually advances to the dashboard.
+  await continueBtn.click({ force: true });
+  await shot(page, '08e-after-second-continue-click');
   await page.waitForTimeout(1_500);
-  await dumpHtml(page, '08d-after-continue-html');
+  await dumpHtml(page, '08f-after-continue-html');
 
   // ─── Phase 7: dashboard ───
   // CI 26416783057 / 08c-after-address-type-continue.png confirmed
