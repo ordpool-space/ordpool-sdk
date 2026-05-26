@@ -34,7 +34,7 @@ async function shot(page: Page, name: string): Promise<void> {
 
 async function dumpHtml(page: Page, name: string): Promise<void> {
   try {
-    const html = await page.evaluate(() => document.body.innerHTML.slice(0, 8000));
+    const html = await page.evaluate(() => document.body.innerHTML.slice(0, 40_000));
     fs.writeFileSync(path.resolve(RESULTS_DIR, `wizz-onboard-${name}.html`), html);
   } catch {
     // ignore
@@ -155,30 +155,29 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
     await shot(page, '08b-native-segwit-picked');
   }
 
-  // Wizz's Continue is a two-step pattern on the address-type
-  // screen (CI 26417311897 + 26417884611 confirm):
-  //   click 1 → button briefly shows a spinner while the wallet
-  //             scans derivations; each row populates with the
-  //             expected bc1{q,p}… address (Native SegWit:
-  //             bc1qc...06fyu, BIP-84 m/84'/0'/0'/0/0)
-  //   click 2 → advances to the dashboard
-  // The "bc1q in body.innerText" poll we previously used never
-  // matched even when the screenshot showed the address — the
-  // text is rendered inside a child <span> that the innerText
-  // serializer apparently skips. Plain timed wait is reliable.
+  // CI 26418861365 showed both 08c (post-click 1) and 08e (post-click 2)
+  // still on the address-type screen with Native SegWit checked + an
+  // active orange Continue button. The previous theory was a
+  // two-click scan-then-advance dance; the actual evidence says the
+  // click is landing on the wrong target. Likely cause: `force:true`
+  // bypasses Playwright's actionability checks and dispatches at the
+  // geometric centre, which on Wizz's Continue lands on a child span
+  // or icon whose onClick handler is a no-op.
+  //
+  // Switch to `getByRole('button', { name: /^continue$/i }).last()`
+  // (the row-action button is the LAST button in tab-order, after
+  // "Back to Home" at the top), drop force:true, and scroll into
+  // view before clicking. One click should be enough; the wallet
+  // populates addresses synchronously after the mnemonic step.
   await page.waitForTimeout(500);
-  const continueBtn = page.locator('button:has-text("Continue")').first();
-  await expect(continueBtn).toBeVisible({ timeout: 5_000 });
-  await continueBtn.click({ force: true });
-  await shot(page, '08c-after-first-continue-click');
-  await page.waitForTimeout(8_000);
-  await shot(page, '08d-after-scan');
-  await dumpHtml(page, '08d-after-scan-html');
-
-  await continueBtn.click({ force: true });
-  await shot(page, '08e-after-second-continue-click');
+  const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
+  await expect(continueBtn).toBeVisible({ timeout: 10_000 });
+  await continueBtn.scrollIntoViewIfNeeded();
+  await shot(page, '08c-before-continue-click');
+  await continueBtn.click();
+  await shot(page, '08d-after-continue-click');
   await page.waitForTimeout(2_000);
-  await dumpHtml(page, '08f-after-continue-html');
+  await dumpHtml(page, '08e-after-continue-html');
 
   // ─── Phase 7: dashboard ───
   await page.waitForFunction(() => {
