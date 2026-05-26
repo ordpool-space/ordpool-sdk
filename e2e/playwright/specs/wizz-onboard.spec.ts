@@ -118,7 +118,6 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
 
   // ─── Phase 5: mnemonic entry ───
   // Probably 12 per-word inputs (Unisat-style grid).
-  await page.waitForTimeout(500);
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   const mnemonicCount = await mnemonicInputs.count();
@@ -169,7 +168,6 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // "Back to Home" at the top), drop force:true, and scroll into
   // view before clicking. One click should be enough; the wallet
   // populates addresses synchronously after the mnemonic step.
-  await page.waitForTimeout(500);
   const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
   await expect(continueBtn).toBeVisible({ timeout: 10_000 });
   await continueBtn.scrollIntoViewIfNeeded();
@@ -201,7 +199,8 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await expect(okBtn).toBeEnabled({ timeout: 5_000 });
   await okBtn.click();
   await shot(page, '08g-after-ok-click');
-  await page.waitForTimeout(2_000);
+  // Wait for the modal to actually unmount before the dashboard wait.
+  await expect(page.getByText('Security Tips', { exact: true })).toBeHidden({ timeout: 10_000 });
   await dumpHtml(page, '08h-after-ok-html');
 
   // ─── Phase 7: dashboard ───

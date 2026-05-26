@@ -88,7 +88,6 @@ async function onboardWizzWithAddressType(
   await expect(sourceWizz).toBeVisible({ timeout: 10_000 });
   await sourceWizz.click({ force: true });
 
-  await page.waitForTimeout(500);
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
@@ -103,7 +102,6 @@ async function onboardWizzWithAddressType(
   await expect(row).toBeVisible({ timeout: 10_000 });
   await row.click({ force: true });
 
-  await page.waitForTimeout(500);
   const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
   await expect(continueBtn).toBeVisible({ timeout: 10_000 });
   await continueBtn.scrollIntoViewIfNeeded();
@@ -111,8 +109,8 @@ async function onboardWizzWithAddressType(
 
   // Security Tips modal: three checkboxes gate OK.
   await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.waitForTimeout(500);
   const checkboxWrappers = page.locator('label.ant-checkbox-wrapper');
+  await expect(checkboxWrappers).toHaveCount(3, { timeout: 10_000 });
   await expect(checkboxWrappers.first()).toBeVisible({ timeout: 5_000 });
   const cbCount = await checkboxWrappers.count();
   for (let i = 0; i < cbCount; i++) {
@@ -122,41 +120,49 @@ async function onboardWizzWithAddressType(
   await expect(okBtn).toBeEnabled({ timeout: 5_000 });
   await okBtn.click();
 
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('receive') || t.includes('send') || t.includes('balance') || t.includes('account');
-  }, undefined, { timeout: 60_000, polling: 500 });
-  // Wizz keeps doing background work for a beat after the dashboard
-  // text renders (key derivation, address scan, notification badge
-  // hydration). Connecting too soon makes wizz.requestAccounts
-  // reject with an Object on a fresh wallet — observed on P2WPKH
-  // in CI 26449710610. Settle before closing the page.
-  await page.waitForTimeout(3_000);
+  await expect(page.getByText('Receive', { exact: true })).toBeVisible({ timeout: 60_000 });
+  // Wizz keeps doing background work for a beat after the Receive
+  // button renders (key derivation, address scan, asset-list hydration).
+  // The hydration completes when the asset-class badges appear under
+  // the Token tab — `ARC20 (0) RUNE (0) BRC20 (0) RGB++ (0)`. Waiting
+  // for "ARC20 (" anchored on the open-paren confirms the asset list
+  // mounted (vs. a transient page that just contains the word "ARC20").
+  // Without this gate, wizz.requestAccounts on a fresh wallet rejects
+  // with an Object — observed on P2WPKH in CI 26449710610.
+  await expect(page.getByText(/ARC20 \(\d+\)/).first()).toBeVisible({ timeout: 30_000 });
   await page.close();
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, variantTag: string): Promise<void> {
-  const deadline = Date.now() + 60_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (knownPages.has(p)) continue;
-      // The Wizz connection-approval surface is the notification
-      // page with hash `/approval` (confirmed by the working
-      // wizz-sdk-handshake spec, which logs the approval URL
-      // pattern `chrome-extension://<id>/notification.html#/approval`).
-      // The wallet may transiently render OTHER chrome-extension
-      // pages during onboarding/setup (welcome dialog, scan progress,
-      // notification badge). URL-anchor the match so we never
-      // mistake one of those for the approval surface.
-      if (!p.url().includes('notification.html#/approval')) continue;
-      approval = p;
-      break;
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
+  // The Wizz connection-approval surface is the notification page
+  // with hash `/approval` (confirmed by the wizz-sdk-handshake spec,
+  // which logs `chrome-extension://<id>/notification.html#/approval`).
+  // The wallet may transiently render OTHER chrome-extension pages
+  // (welcome dialog, scan progress, notification badge); URL-anchor
+  // the match so we never mistake one of those for the approval.
+  const isApprovalUrl = (p: Page) => p.url().includes('notification.html#/approval');
+
+  // First check: did the popup already open between knownPages snapshot
+  // and the call to this function?
+  let approval: Page | undefined = ctx.pages().find(p => !knownPages.has(p) && isApprovalUrl(p));
+
+  if (!approval) {
+    // Otherwise, wait for a new page that either opens already on the
+    // approval URL or navigates to it after open.
+    approval = await ctx.waitForEvent('page', {
+      timeout: 60_000,
+      predicate: async (p) => {
+        if (knownPages.has(p)) return false;
+        if (isApprovalUrl(p)) return true;
+        try {
+          await p.waitForURL(/notification\.html#\/approval/, { timeout: 30_000 });
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
   }
-  if (!approval) throw new Error('wizz connection-request popup never appeared');
   // eslint-disable-next-line no-console
   console.log(`[wizz-matrix:${variantTag}] approval URL = ${approval.url()}`);
   await approval.screenshot({ path: path.resolve(RESULTS_DIR, `wizz-matrix-${variantTag}-approval-rendered.png`), fullPage: true }).catch(() => undefined);

@@ -67,7 +67,6 @@ async function onboardWizz(page: Page): Promise<void> {
   await expect(sourceWizz).toBeVisible({ timeout: 10_000 });
   await sourceWizz.click({ force: true });
 
-  await page.waitForTimeout(500);
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
@@ -83,20 +82,17 @@ async function onboardWizz(page: Page): Promise<void> {
     await nativeSegwitRow.click({ force: true });
   }
 
-  await page.waitForTimeout(500);
   const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
   await expect(continueBtn).toBeVisible({ timeout: 10_000 });
   await continueBtn.scrollIntoViewIfNeeded();
   await continueBtn.click();
 
-  // Security Tips modal: three checkboxes gate OK. Wait for the
-  // modal's enter-animation to settle (Ant Design fades + slides
-  // in over ~200ms; clicking mid-animation can land on a state
-  // the React handler ignores). Then click the visible wrapper
-  // `.ant-checkbox-wrapper` rather than the hidden input.
+  // Security Tips modal: three checkboxes gate OK. Click the visible
+  // `.ant-checkbox-wrapper` (Ant Design's canonical click target,
+  // wraps an opacity:0 input) — not the hidden input itself.
   await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
-  await page.waitForTimeout(500);
   const checkboxWrappers = page.locator('label.ant-checkbox-wrapper');
+  await expect(checkboxWrappers).toHaveCount(3, { timeout: 10_000 });
   await expect(checkboxWrappers.first()).toBeVisible({ timeout: 5_000 });
   const cbCount = await checkboxWrappers.count();
   for (let i = 0; i < cbCount; i++) {
@@ -165,25 +161,30 @@ test('wizzConnector.connect via the harness page returns the BIP-84 mainnet addr
   const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
 
-  const deadline = Date.now() + 60_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of context.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const txt = await p.locator('body').innerText().catch(() => '');
-      if (/connect|approve|confirm|allow/i.test(txt)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
-  }
-
+  // The Wizz approval surface is reliably `notification.html#/approval`
+  // (URL-anchored match — text-based "connect|approve|confirm|allow"
+  // probes can mistake a transient welcome dialog for the approval).
+  const isApprovalUrl = (p: Page) => p.url().includes('notification.html#/approval');
+  let approval: Page | undefined = context.pages().find(p => !knownPages.has(p) && isApprovalUrl(p));
   if (!approval) {
-    await shot(harness, '02a-no-approval');
-    throw new Error('wizz connection-request popup never appeared');
+    try {
+      approval = await context.waitForEvent('page', {
+        timeout: 60_000,
+        predicate: async (p) => {
+          if (knownPages.has(p)) return false;
+          if (isApprovalUrl(p)) return true;
+          try {
+            await p.waitForURL(/notification\.html#\/approval/, { timeout: 30_000 });
+            return true;
+          } catch {
+            return false;
+          }
+        },
+      });
+    } catch {
+      await shot(harness, '02a-no-approval');
+      throw new Error('wizz connection-request popup never appeared');
+    }
   }
   await shot(approval, '02a-approval-rendered');
   // eslint-disable-next-line no-console
