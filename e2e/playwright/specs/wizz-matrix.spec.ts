@@ -126,6 +126,12 @@ async function onboardWizzWithAddressType(
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('receive') || t.includes('send') || t.includes('balance') || t.includes('account');
   }, undefined, { timeout: 60_000, polling: 500 });
+  // Wizz keeps doing background work for a beat after the dashboard
+  // text renders (key derivation, address scan, notification badge
+  // hydration). Connecting too soon makes wizz.requestAccounts
+  // reject with an Object on a fresh wallet — observed on P2WPKH
+  // in CI 26449710610. Settle before closing the page.
+  await page.waitForTimeout(3_000);
   await page.close();
 }
 
@@ -137,13 +143,7 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, v
       if (knownPages.has(p)) continue;
       if (!p.url().startsWith('chrome-extension://')) continue;
       const txt = await p.locator('body').innerText().catch(() => '');
-      // Tighter regex than the loose connect|approve|confirm|allow
-      // probe — we want the connection-approval surface ONLY, not
-      // the post-approval dashboard (which can contain "Send" /
-      // "History" / similar transient strings) or a Wizz info modal.
-      // The connect-request popup reliably says "Connect" as the
-      // primary action text.
-      if (/\bconnect\b/i.test(txt) && /\bcancel|reject|deny\b/i.test(txt)) {
+      if (/connect|approve|confirm|allow/i.test(txt)) {
         approval = p;
         break;
       }
