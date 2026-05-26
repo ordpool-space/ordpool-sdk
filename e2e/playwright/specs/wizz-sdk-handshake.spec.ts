@@ -1,0 +1,207 @@
+import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+
+/**
+ * Iteration 3 of the Wizz E2E pipeline: SDK ↔ Wizz handshake.
+ *
+ * Wizz is a Unisat fork; the same single-address-for-both-lanes
+ * model applies (one BIP-84 derivation answers `paymentAddress`
+ * and `ordinalsAddress`). What's different from Unisat:
+ *   - Wizz strips data-testid attributes, so onboarding uses
+ *     text selectors (see wizz-onboard.spec.ts).
+ *   - After picking the address type, Wizz shows a "Security Tips"
+ *     modal with three acknowledgement checkboxes that gate OK
+ *     before the dashboard renders.
+ *   - The connection-request approval popup likely renders
+ *     "Connect" as a styled <div> (same as Unisat); we match on
+ *     text rather than role.
+ */
+
+const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
+const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
+const HARNESS_URL = 'http://localhost:4500/';
+
+const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
+const TEST_PASSWORD = 'TestPassword123!';
+
+// BIP-84 native segwit derivation of TEST_MNEMONIC on mainnet:
+//   m/84'/0'/0'/0/0
+// Same address Unisat returns for the same seed (Wizz inherits
+// Unisat's default derivation path).
+const EXPECTED_PAYMENT_ADDRESS = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
+
+let context: BrowserContext;
+let extensionId: string;
+
+async function shot(page: Page, name: string): Promise<void> {
+  try {
+    await page.screenshot({
+      path: path.resolve(RESULTS_DIR, `wizz-handshake-${name}.png`),
+      fullPage: true,
+    });
+  } catch {
+    // diagnostic, never fatal
+  }
+}
+
+async function onboardWizz(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 400, height: 800 });
+  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
+
+  await expect(page.getByText('I already have a wallet', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await page.getByText('I already have a wallet', { exact: true }).click();
+
+  const pwInputs = page.locator('input[type="password"]');
+  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
+  const pwCount = await pwInputs.count();
+  for (let i = 0; i < pwCount; i++) {
+    await pwInputs.nth(i).fill(TEST_PASSWORD);
+  }
+  const pwContinue = page.getByRole('button', { name: /^continue$/i }).first();
+  await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  await pwContinue.click();
+
+  const sourceWizz = page.getByText('Wizz Wallet', { exact: true }).first();
+  await expect(sourceWizz).toBeVisible({ timeout: 10_000 });
+  await sourceWizz.click({ force: true });
+
+  await page.waitForTimeout(500);
+  const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
+  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
+  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
+    await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
+  }
+  const mnemonicContinue = page.getByRole('button', { name: /^continue$/i }).first();
+  await expect(mnemonicContinue).toBeEnabled({ timeout: 10_000 });
+  await mnemonicContinue.click();
+
+  // Pick Native SegWit (BIP-84) so the address matches our test vector.
+  const nativeSegwitRow = page.getByText('Native Segwit (P2WPKH)', { exact: true }).first();
+  if (await nativeSegwitRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await nativeSegwitRow.click({ force: true });
+  }
+
+  await page.waitForTimeout(500);
+  const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
+  await expect(continueBtn).toBeVisible({ timeout: 10_000 });
+  await continueBtn.scrollIntoViewIfNeeded();
+  await continueBtn.click();
+
+  // Security Tips modal: three checkboxes gate OK.
+  await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
+  const checkboxes = page.locator('input.ant-checkbox-input');
+  await expect(checkboxes.first()).toBeVisible({ timeout: 5_000 });
+  const cbCount = await checkboxes.count();
+  for (let i = 0; i < cbCount; i++) {
+    await checkboxes.nth(i).check({ force: true });
+  }
+  const okBtn = page.getByRole('button', { name: /^ok$/i });
+  await expect(okBtn).toBeEnabled({ timeout: 5_000 });
+  await okBtn.click();
+
+  await page.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('receive') || t.includes('send') || t.includes('balance') || t.includes('account');
+  }, undefined, { timeout: 60_000, polling: 500 });
+}
+
+test.beforeAll(async () => {
+  if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
+    throw new Error(`Wizz extension not unpacked at ${EXT_PATH}.`);
+  }
+  if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
+    throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
+  }
+
+  context = await chromium.launchPersistentContext('', {
+    headless: false,
+    args: [
+      `--disable-extensions-except=${EXT_PATH}`,
+      `--load-extension=${EXT_PATH}`,
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+    ],
+  });
+
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  extensionId = worker.url().split('/')[2];
+
+  const onboardPage = await context.newPage();
+  // The onboard helper runs the same flow as wizz-onboard.spec.ts;
+  // override the test timeout because of the multi-step traversal.
+  test.setTimeout(180_000);
+  await onboardWizz(onboardPage);
+  await shot(onboardPage, '00-onboarded');
+});
+
+test.afterAll(async () => {
+  await context?.close();
+});
+
+test('wizzConnector.connect via the harness page returns the BIP-84 mainnet address for the test seed', async () => {
+  test.setTimeout(180_000);
+
+  const harness = await context.newPage();
+  await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
+
+  await harness.waitForFunction(
+    () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
+    undefined,
+    { timeout: 15_000 },
+  );
+  await shot(harness, '01-harness-loaded');
+
+  // wizz.requestAccounts() triggers an approval popup on a new
+  // chrome-extension:// page. Listen for the new page event, then
+  // click whatever Connect/Approve button it renders.
+  const knownPages = new Set(context.pages());
+  const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
+
+  const deadline = Date.now() + 60_000;
+  let approval: Page | undefined;
+  while (Date.now() < deadline) {
+    for (const p of context.pages()) {
+      if (knownPages.has(p)) continue;
+      if (!p.url().startsWith('chrome-extension://')) continue;
+      const txt = await p.locator('body').innerText().catch(() => '');
+      if (/connect|approve|confirm|allow/i.test(txt)) {
+        approval = p;
+        break;
+      }
+    }
+    if (approval) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+
+  if (!approval) {
+    await shot(harness, '02a-no-approval');
+    throw new Error('wizz connection-request popup never appeared');
+  }
+  await shot(approval, '02a-approval-rendered');
+  // eslint-disable-next-line no-console
+  console.log(`[wizz:sdk-handshake] approval URL = ${approval.url()}`);
+
+  // Wizz inherits Unisat's connect-approval shape — "Connect" is
+  // a styled <div> rather than a <button>. Match by exact text.
+  const consentBtn = approval.getByText(/^Connect$/).first();
+  await expect(consentBtn).toBeVisible({ timeout: 10_000 });
+  await consentBtn.click();
+  await shot(approval, '02b-after-approve');
+
+  const info = await resultPromise;
+  // eslint-disable-next-line no-console
+  console.log(`[wizz:sdk-handshake] paymentAddress = ${info.paymentAddress}`);
+  // eslint-disable-next-line no-console
+  console.log(`[wizz:sdk-handshake] paymentPublicKey = ${info.paymentPublicKey}`);
+  await shot(harness, '03-after-connect');
+
+  expect(info.signingSupported).toBe(true);
+  expect(info.paymentAddress).toBe(EXPECTED_PAYMENT_ADDRESS);
+  // Wizz, like Unisat, reuses one address for both lanes.
+  expect(info.ordinalsAddress).toBe(EXPECTED_PAYMENT_ADDRESS);
+  // Compressed pubkey = 33 bytes = 66 hex chars.
+  expect(info.paymentPublicKey).toMatch(/^[0-9a-f]{66}$/);
+});

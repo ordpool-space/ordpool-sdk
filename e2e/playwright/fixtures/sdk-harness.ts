@@ -19,6 +19,7 @@ import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
 import { unisatConnector } from '../../../src/wallet/connectors/unisat.connector';
 import { leatherConnector } from '../../../src/wallet/connectors/leather.connector';
+import { wizzConnector } from '../../../src/wallet/connectors/wizz.connector';
 // Shared PSBT→wire-tx-hex helper used by both production signers
 // and the harness. Full "WE finalize, WE broadcast" reasoning in
 // /Work/ordpool/WALLETS.md.
@@ -66,6 +67,15 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaLeather(input: MintRequest): Promise<{ txHex: string }>;
+      detectWizz(): boolean;
+      connectWizz(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
     };
   }
 }
@@ -168,6 +178,29 @@ window.ordpoolSdkHarness = {
     const info = await firstValueFrom(leatherConnector.connect(Network.Mainnet));
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectLeather.result', info);
+    return info;
+  },
+
+  detectWizz(): boolean {
+    return wizzConnector.detect(window);
+  },
+
+  async connectWizz() {
+    // Wizz is a Unisat fork; its content script injects window.wizz.
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (wizzConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!wizzConnector.detect(window)) {
+      throw new Error('Wizz provider not injected on the harness page within 15s');
+    }
+    statusEl().textContent = `connecting to wizz…`;
+    // wizzConnector.connect ignores the network arg (network is
+    // selected via the wallet UI, like Unisat).
+    const info = await firstValueFrom(wizzConnector.connect(Network.Mainnet));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectWizz.result', info);
     return info;
   },
 };
