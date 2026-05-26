@@ -176,8 +176,33 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '08c-before-continue-click');
   await continueBtn.click();
   await shot(page, '08d-after-continue-click');
+
+  // ─── Phase 6b: Security Tips modal ───
+  // Continue opens an Ant-Design modal with three acknowledgement
+  // checkboxes ("Use different addresses…", "Rare sats are not
+  // supported…", "RGB assets are limited to m/84'/827166…"). All
+  // three must be ticked before the modal's OK button enables.
+  // CI 26435485136 confirmed via screenshot test-failed-2.png +
+  // DOM dump 08e-after-continue-html (3 .ant-checkbox-input + OK).
+  await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await shot(page, '08e-security-tips-modal');
+  const checkboxes = page.locator('input.ant-checkbox-input');
+  await expect(checkboxes.first()).toBeVisible({ timeout: 5_000 });
+  const cbCount = await checkboxes.count();
+  for (let i = 0; i < cbCount; i++) {
+    // Ant-Design hides the real input behind a styled wrapper; the
+    // input itself isn't clickable via pointer events. .check()
+    // uses dispatchEvent under the hood, which works on hidden inputs.
+    await checkboxes.nth(i).check({ force: true });
+  }
+  await shot(page, '08f-checkboxes-checked');
+
+  const okBtn = page.getByRole('button', { name: /^ok$/i });
+  await expect(okBtn).toBeEnabled({ timeout: 5_000 });
+  await okBtn.click();
+  await shot(page, '08g-after-ok-click');
   await page.waitForTimeout(2_000);
-  await dumpHtml(page, '08e-after-continue-html');
+  await dumpHtml(page, '08h-after-ok-html');
 
   // ─── Phase 7: dashboard ───
   await page.waitForFunction(() => {
