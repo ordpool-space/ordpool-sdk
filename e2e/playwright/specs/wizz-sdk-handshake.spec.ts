@@ -89,13 +89,18 @@ async function onboardWizz(page: Page): Promise<void> {
   await continueBtn.scrollIntoViewIfNeeded();
   await continueBtn.click();
 
-  // Security Tips modal: three checkboxes gate OK.
+  // Security Tips modal: three checkboxes gate OK. Wait for the
+  // modal's enter-animation to settle (Ant Design fades + slides
+  // in over ~200ms; clicking mid-animation can land on a state
+  // the React handler ignores). Then click the visible wrapper
+  // `.ant-checkbox-wrapper` rather than the hidden input.
   await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
-  const checkboxes = page.locator('input.ant-checkbox-input');
-  await expect(checkboxes.first()).toBeVisible({ timeout: 5_000 });
-  const cbCount = await checkboxes.count();
+  await page.waitForTimeout(500);
+  const checkboxWrappers = page.locator('label.ant-checkbox-wrapper');
+  await expect(checkboxWrappers.first()).toBeVisible({ timeout: 5_000 });
+  const cbCount = await checkboxWrappers.count();
   for (let i = 0; i < cbCount; i++) {
-    await checkboxes.nth(i).check({ force: true });
+    await checkboxWrappers.nth(i).click();
   }
   const okBtn = page.getByRole('button', { name: /^ok$/i });
   await expect(okBtn).toBeEnabled({ timeout: 5_000 });
