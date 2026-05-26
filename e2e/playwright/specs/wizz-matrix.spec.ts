@@ -141,12 +141,17 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, v
   while (Date.now() < deadline) {
     for (const p of ctx.pages()) {
       if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const txt = await p.locator('body').innerText().catch(() => '');
-      if (/connect|approve|confirm|allow/i.test(txt)) {
-        approval = p;
-        break;
-      }
+      // The Wizz connection-approval surface is the notification
+      // page with hash `/approval` (confirmed by the working
+      // wizz-sdk-handshake spec, which logs the approval URL
+      // pattern `chrome-extension://<id>/notification.html#/approval`).
+      // The wallet may transiently render OTHER chrome-extension
+      // pages during onboarding/setup (welcome dialog, scan progress,
+      // notification badge). URL-anchor the match so we never
+      // mistake one of those for the approval surface.
+      if (!p.url().includes('notification.html#/approval')) continue;
+      approval = p;
+      break;
     }
     if (approval) break;
     await new Promise(r => setTimeout(r, 250));
