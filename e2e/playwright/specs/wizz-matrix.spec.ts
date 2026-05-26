@@ -129,7 +129,7 @@ async function onboardWizzWithAddressType(
   await page.close();
 }
 
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
+async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, variantTag: string): Promise<void> {
   const deadline = Date.now() + 60_000;
   let approval: Page | undefined;
   while (Date.now() < deadline) {
@@ -137,7 +137,13 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       if (knownPages.has(p)) continue;
       if (!p.url().startsWith('chrome-extension://')) continue;
       const txt = await p.locator('body').innerText().catch(() => '');
-      if (/connect|approve|confirm|allow/i.test(txt)) {
+      // Tighter regex than the loose connect|approve|confirm|allow
+      // probe — we want the connection-approval surface ONLY, not
+      // the post-approval dashboard (which can contain "Send" /
+      // "History" / similar transient strings) or a Wizz info modal.
+      // The connect-request popup reliably says "Connect" as the
+      // primary action text.
+      if (/\bconnect\b/i.test(txt) && /\bcancel|reject|deny\b/i.test(txt)) {
         approval = p;
         break;
       }
@@ -146,7 +152,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     await new Promise(r => setTimeout(r, 250));
   }
   if (!approval) throw new Error('wizz connection-request popup never appeared');
+  // eslint-disable-next-line no-console
+  console.log(`[wizz-matrix:${variantTag}] approval URL = ${approval.url()}`);
+  await approval.screenshot({ path: path.resolve(RESULTS_DIR, `wizz-matrix-${variantTag}-approval-rendered.png`), fullPage: true }).catch(() => undefined);
   await approval.getByText(/^Connect$/).first().click();
+  await approval.screenshot({ path: path.resolve(RESULTS_DIR, `wizz-matrix-${variantTag}-after-approve.png`), fullPage: true }).catch(() => undefined);
 }
 
 test.beforeAll(async () => {
@@ -187,9 +197,10 @@ for (const variant of VARIANTS) {
         { timeout: 15_000 },
       );
 
+      const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
       const knownPages = new Set(context.pages());
       const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
-      await approveConnectPopup(context, knownPages);
+      await approveConnectPopup(context, knownPages, variantTag);
       const info = await resultPromise;
 
       // eslint-disable-next-line no-console
