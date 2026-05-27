@@ -152,7 +152,10 @@ test('unisatConnector.connect via the harness page returns the BIP-84 mainnet ad
     approval = await waitForApprovalPopup({
       context,
       knownPages,
-      isApproval: p => p.url().includes('notification.html#/approval'),
+      isApproval: async (p) => {
+        await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
+        return true;
+      },
     });
   } catch {
     await shot(harness, '02a-no-approval');

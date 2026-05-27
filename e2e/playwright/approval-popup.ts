@@ -4,26 +4,36 @@ import type { BrowserContext, Page } from '@playwright/test';
  * Wait for a wallet-extension approval popup to open in the given
  * browser context, identified by a caller-supplied predicate.
  *
- * Event-driven, no polling sleeps. Three observable surfaces:
- *   1. Pages that already exist at call time → predicate-checked
- *      immediately.
- *   2. Pages that open later via `context.on('page')`.
- *   3. URL/framework navigations on any of the above via
- *      `page.on('framenavigated')` — needed because some wallets open
- *      a chrome-extension page at a transient URL (popup.html bare
- *      route) and only navigate to the approval surface (e.g.
- *      `#/approval`) once their React app finishes mounting.
+ * Event-driven, no polling sleeps. Strategy:
+ *   - For every chrome-extension page (existing + new via
+ *     `context.on('page')`), kick off `isApproval(page)`.
+ *   - Each `isApproval` blocks until it observes the approval surface
+ *     on that page (via `page.waitForURL` for URL-anchored matches
+ *     or `locator.waitFor({state:'visible'})` for testid/role
+ *     matches). When ANY page's `isApproval` resolves truthy, that
+ *     page wins and the outer promise resolves with it.
  *
  * Caller patterns:
  *   - URL-anchored (Unisat / Wizz):
- *       isApproval: p => p.url().includes('notification.html#/approval')
- *   - Element-anchored (Leather — stable testid; Xverse — visible
- *     button by role+name):
- *       isApproval: async p => await p.getByTestId('…approve-button')
- *                                    .isVisible({ timeout: 1_000 })
- *                                    .catch(() => false)
+ *       isApproval: async p => {
+ *         await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
+ *         return true;
+ *       }
+ *   - Element-anchored (Leather testid, Xverse role+name):
+ *       isApproval: async p => {
+ *         await p.getByTestId('…approve-button')
+ *                .waitFor({ state: 'visible', timeout: 60_000 });
+ *         return true;
+ *       }
  *
- * Throws if no matching page appears within `timeoutMs` (default 60s).
+ * `isApproval` may throw (e.g. its internal timeout fires) — the
+ * helper swallows the throw and keeps waiting on the OTHER pages,
+ * which is the right behaviour: one page failing the match shouldn't
+ * abort the search.
+ *
+ * The outer `timeoutMs` is the deadline beyond which we reject. It
+ * is NOT a poll interval — it's a hard rejection timer enforced via
+ * a single setTimeout.
  */
 export async function waitForApprovalPopup(opts: {
   context: BrowserContext;
@@ -50,21 +60,18 @@ export async function waitForApprovalPopup(opts: {
       reject(err);
     };
 
-    const tryMatch = async (p: Page) => {
-      if (settled) return;
+    const tryPage = async (p: Page) => {
+      if (settled || knownPages.has(p)) return;
       try {
-        if (await isApproval(p)) finishOk(p);
-      } catch { /* keep waiting */ }
+        const res = await isApproval(p);
+        if (res === true) finishOk(p);
+      } catch {
+        // isApproval rejected (e.g. internal timeout). Don't abort
+        // the search — another page may still match.
+      }
     };
 
-    const onPage = (p: Page) => {
-      if (knownPages.has(p)) return;
-      void tryMatch(p);
-      // Re-check whenever this page navigates — the wallet may open
-      // on a transient URL and only land on the approval surface after
-      // a couple of redirects / React-router transitions.
-      p.on('framenavigated', () => void tryMatch(p));
-    };
+    const onPage = (p: Page) => void tryPage(p);
 
     const timer = setTimeout(
       () => finishErr(new Error(`approval popup did not appear within ${timeoutMs}ms`)),
@@ -76,8 +83,7 @@ export async function waitForApprovalPopup(opts: {
       context.off('page', onPage);
     };
 
-    // Initial pass: existing pages + listener for new ones.
-    for (const p of context.pages()) onPage(p);
     context.on('page', onPage);
+    for (const p of context.pages()) void tryPage(p);
   });
 }

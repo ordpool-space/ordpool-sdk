@@ -137,7 +137,9 @@ test('leatherConnector.connect via the harness page returns the BIP-84 / BIP-86 
       knownPages,
       isApproval: async (p) => {
         if (!p.url().startsWith('chrome-extension://')) return false;
-        return await p.getByTestId('get-addresses-approve-button').isVisible({ timeout: 1_000 }).catch(() => false);
+        await p.getByTestId('get-addresses-approve-button')
+          .waitFor({ state: 'visible', timeout: 60_000 });
+        return true;
       },
     });
   } catch {

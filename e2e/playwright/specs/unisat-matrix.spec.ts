@@ -129,7 +129,10 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     approval = await waitForApprovalPopup({
       context: ctx,
       knownPages,
-      isApproval: p => p.url().includes('notification.html#/approval'),
+      isApproval: async (p) => {
+        await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
+        return true;
+      },
     });
   } catch {
     throw new Error('unisat connection-request popup never appeared');

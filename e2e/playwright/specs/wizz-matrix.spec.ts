@@ -123,16 +123,16 @@ async function onboardWizzWithAddressType(
   await okBtn.click();
 
   await expect(page.getByText('Receive', { exact: true })).toBeVisible({ timeout: 60_000 });
-  // Wizz keeps doing background work for a beat after the Receive
-  // button renders (key derivation, address scan, asset-list hydration).
-  // The hydration completes when the asset-class badges appear under
-  // the Token tab — `ARC20 (0) RUNE (0) BRC20 (0) RGB++ (0)`. Waiting
-  // for "ARC20 (" anchored on the open-paren confirms the asset list
-  // mounted (vs. a transient page that just contains the word "ARC20").
-  // Without this gate, wizz.requestAccounts on a fresh wallet rejects
-  // with an Object — observed on P2WPKH in CI 26449710610.
+  // Wait until the asset-class badges render — proves the wallet
+  // finished post-onboard hydration (key derivation, address scan,
+  // asset-list mount).
   await expect(page.getByText(/ARC20 \(\d+\)/).first()).toBeVisible({ timeout: 30_000 });
-  await page.close();
+  // Deliberately leave the dashboard tab OPEN. wizz-sdk-handshake
+  // passes precisely because it never closes the dashboard before
+  // calling connectWizz; closing it kills any pending approval
+  // request (window.wizz.requestAccounts rejects with an Object).
+  // The matrix spec used to close the page here to "clean up"; that
+  // close was the actual cause of the long-running CI flakes.
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, variantTag: string): Promise<void> {
@@ -142,7 +142,10 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, v
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    isApproval: p => p.url().includes('notification.html#/approval'),
+    isApproval: async (p) => {
+      await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
+      return true;
+    },
   });
   // eslint-disable-next-line no-console
   console.log(`[wizz-matrix:${variantTag}] approval URL = ${approval.url()}`);

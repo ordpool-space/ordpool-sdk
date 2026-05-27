@@ -100,7 +100,10 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    isApproval: p => p.url().includes('notification.html#/approval'),
+    isApproval: async (p) => {
+      await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
+      return true;
+    },
   });
   // Unisat uses styled div, not <button> — match by text.
   await approval.getByText(/^Connect$/).first().click();
@@ -115,7 +118,9 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
     timeoutMs: 90_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      return await p.getByTestId('sign-psbt-button').isVisible({ timeout: 1_000 }).catch(() => false);
+      await p.getByTestId('sign-psbt-button')
+        .waitFor({ state: 'visible', timeout: 90_000 });
+      return true;
     },
   });
   await shot(approval, '03a-sign-approval');

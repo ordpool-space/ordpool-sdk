@@ -57,18 +57,36 @@ export async function waitForServiceWorkerReady(
   context: BrowserContext,
   timeoutMs: number = 30_000,
 ): Promise<Worker> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const [w] = context.serviceWorkers();
-    if (w) {
-      try {
-        await w.evaluate(() => chrome.storage.local.get('__sw_health_check__'));
-        return w;
-      } catch { /* worker stale; loop */ }
-    }
-    await new Promise<void>(resolve => setImmediate(resolve));
-  }
-  throw new Error('Service worker not ready within timeout');
+  // Two parallel observation paths converge on the same outcome:
+  //
+  //   (a) Playwright's `serviceworker` event fires when a new SW
+  //       registers. chrome.runtime.reload() unregisters the old SW
+  //       then re-registers, so this fires for the restarted SW.
+  //   (b) Probe loop against context.serviceWorkers()[0] — for the
+  //       case where Chromium re-registers the SW silently from
+  //       Playwright's CDP perspective (observed on some
+  //       chromium-headed-extension builds: the SW exists in the
+  //       browser but no fresh `serviceworker` event surfaces).
+  //
+  // Promise.any returns the first fulfilled value; AggregateError
+  // only if BOTH paths exhaust their independent timeouts.
+  return Promise.any([
+    context.waitForEvent('serviceworker', { timeout: timeoutMs }),
+    (async () => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const [w] = context.serviceWorkers();
+        if (w) {
+          try {
+            await w.evaluate(() => chrome.storage.local.get('__sw_health_check__'));
+            return w;
+          } catch { /* worker stale; loop */ }
+        }
+        await new Promise<void>(resolve => setImmediate(resolve));
+      }
+      throw new Error('probe path exhausted');
+    })(),
+  ]);
 }
 
 /**

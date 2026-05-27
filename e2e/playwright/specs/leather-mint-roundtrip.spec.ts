@@ -83,7 +83,9 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     knownPages,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      return await p.getByTestId('get-addresses-approve-button').isVisible({ timeout: 1_000 }).catch(() => false);
+      await p.getByTestId('get-addresses-approve-button')
+        .waitFor({ state: 'visible', timeout: 60_000 });
+      return true;
     },
   });
   await approval.getByTestId('get-addresses-approve-button').click();
@@ -98,8 +100,9 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
     timeoutMs: 90_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      return await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first()
-        .isVisible({ timeout: 1_000 }).catch(() => false);
+      await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first()
+        .waitFor({ state: 'visible', timeout: 90_000 });
+      return true;
     },
   });
   await shot(approval, '03a-sign-approval');

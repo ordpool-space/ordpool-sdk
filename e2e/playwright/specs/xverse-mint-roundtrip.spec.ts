@@ -189,7 +189,9 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
       timeoutMs: 120_000,
       isApproval: async (p) => {
         if (!p.url().startsWith('chrome-extension://')) return false;
-        return await p.getByText(/review transaction/i).first().isVisible({ timeout: 1_000 }).catch(() => false);
+        await p.getByText(/review transaction/i).first()
+          .waitFor({ state: 'visible', timeout: 120_000 });
+        return true;
       },
     });
   } catch {
