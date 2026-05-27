@@ -235,14 +235,18 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
         // eslint-disable-next-line no-console
         console.log(`[mint] confirm-click attempt ${attempt} closed the popup: ${(e as Error).message}`);
       });
-    // Race signedHexPromise against the popup's close event; first
-    // event wins. We re-enter the loop only if the popup is still
-    // open AND we haven't resolved (i.e. click was swallowed).
+    // Race three observables: signedHexPromise resolves (sign
+    // succeeded), the popup's `close` event fires (Xverse closed it
+    // post-sign), OR the Confirm button disappears (screen
+    // transitioned away). Whichever wins, exit the attempt loop or
+    // retry. expect.toBeHidden carries its own deadline so the race
+    // can't hang indefinitely if the click was silently swallowed.
     const closePromise = new Promise<void>((res) => approvalSign.once('close', () => res()));
     await Promise.race([
       signedHexPromise.then(() => undefined).catch(() => undefined),
       closePromise,
-    ]);
+      expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeHidden({ timeout: 30_000 }),
+    ]).catch(() => undefined);
   }
   const signed = await signedHexPromise;
   // eslint-disable-next-line no-console

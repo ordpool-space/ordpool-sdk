@@ -55,8 +55,11 @@ export async function waitForSingletonLockGone(
  */
 export async function waitForServiceWorkerReady(
   context: BrowserContext,
-  timeoutMs: number = 30_000,
+  options: { ignoreWorker?: Worker; timeoutMs?: number } | number = {},
 ): Promise<Worker> {
+  const opts = typeof options === 'number' ? { timeoutMs: options } : options;
+  const ignoreWorker = opts.ignoreWorker;
+  const timeoutMs = opts.timeoutMs ?? 30_000;
   // Two parallel observation paths converge on the same outcome:
   //
   //   (a) Playwright's `serviceworker` event fires when a new SW
@@ -69,13 +72,19 @@ export async function waitForServiceWorkerReady(
   //       browser but no fresh `serviceworker` event surfaces).
   //
   // Promise.any returns the first fulfilled value; AggregateError
-  // only if BOTH paths exhaust their independent timeouts.
+  // only if BOTH paths exhaust their independent timeouts. The
+  // `ignoreWorker` option lets callers pin out a known-dead reference
+  // — e.g. the SW that hosted chrome.runtime.reload() and is gone.
+  const isFresh = (w: Worker) => !ignoreWorker || w !== ignoreWorker;
   return Promise.any([
-    context.waitForEvent('serviceworker', { timeout: timeoutMs }),
+    context.waitForEvent('serviceworker', {
+      timeout: timeoutMs,
+      predicate: isFresh,
+    }),
     (async () => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
-        const [w] = context.serviceWorkers();
+        const w = context.serviceWorkers().find(isFresh);
         if (w) {
           try {
             await w.evaluate(() => chrome.storage.local.get('__sw_health_check__'));

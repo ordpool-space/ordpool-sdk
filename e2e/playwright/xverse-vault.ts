@@ -275,9 +275,10 @@ export async function applyXverseVariant(
     reloadFn();
     return { phase1Legacy, storageKeys: allKeys.filter(k => /account|wallet|address|persist/i.test(k)).sort() };
   }, variant);
-  // Probe the SW with a benign chrome.storage.local.get until it
-  // responds — confirms the new worker has booted and rehydrated.
-  await waitForServiceWorkerReady(context, 30_000);
+  // The worker that ran the reload() is gone. Wait for a DIFFERENT
+  // worker to come up; pass the dead reference to ignoreWorker so the
+  // probe doesn't mis-detect the stale entry as ready.
+  await waitForServiceWorkerReady(context, { ignoreWorker: worker, timeoutMs: 30_000 });
   return diag;
 }
 
