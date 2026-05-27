@@ -198,7 +198,20 @@ window.ordpoolSdkHarness = {
     statusEl().textContent = `connecting to wizz…`;
     // wizzConnector.connect ignores the network arg (network is
     // selected via the wallet UI, like Unisat).
-    const info = await firstValueFrom(wizzConnector.connect(Network.Mainnet));
+    let info;
+    try {
+      info = await firstValueFrom(wizzConnector.connect(Network.Mainnet));
+    } catch (e) {
+      // Surface the wallet's actual error shape — Wizz's
+      // requestAccounts rejects with an Object (e.g. {code, message})
+      // that Playwright stringifies to "Object" if we propagate it
+      // unchanged. Rewrap as a real Error so the upstream stack
+      // includes a readable message.
+      const err = e as { code?: number; message?: string; toString?: () => string };
+      const msg = err?.message ?? err?.toString?.() ?? JSON.stringify(err);
+      const code = err?.code !== undefined ? ` (code=${err.code})` : '';
+      throw new Error(`wizzConnector.connect rejected${code}: ${msg}`);
+    }
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectWizz.result', info);
     return info;

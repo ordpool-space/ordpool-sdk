@@ -194,7 +194,12 @@ for (const variant of VARIANTS) {
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
       const knownPages = new Set(context.pages());
+      // Bind the rejection handler immediately so a fast reject from
+      // window.wizz.requestAccounts doesn't become an unhandled
+      // rejection that kills the test before approveConnectPopup
+      // gets a chance to run.
       const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
+      resultPromise.catch(() => undefined);
       await approveConnectPopup(context, knownPages, variantTag);
       const info = await resultPromise;
 
