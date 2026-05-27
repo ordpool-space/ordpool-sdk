@@ -2,6 +2,8 @@ import { chromium, BrowserContext, Page, expect } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { waitForChromeStorageKey, waitForSingletonLockGone } from './wait-helpers';
+
 /**
  * Playwright globalSetup — runs ONCE before any spec.
  *
@@ -197,8 +199,14 @@ async function dumpStorage(context: BrowserContext, extensionId: string): Promis
   // every key.
   const dumper = await context.newPage();
   await dumper.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  // Wait briefly so any async post-restore writes settle.
-  await dumper.waitForTimeout(2_000);
+  // Settle on a Xverse boot marker (unlock screen text or the
+  // already-unlocked account heading) rather than a fixed sleep —
+  // chrome.storage.local writes flush deterministically by the time
+  // the UI has finished hydrating from them.
+  await dumper.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('unlock') || t.includes('account 1') || t.includes('zest');
+  }, undefined, { timeout: 30_000, polling: 250 });
   const data = await dumper.evaluate(() => new Promise<Record<string, unknown>>((resolve) => {
     (window as unknown as { chrome: { storage: { local: { get: (k: null, cb: (v: Record<string, unknown>) => void) => void } } } })
       .chrome.storage.local.get(null, (v) => resolve(v));
@@ -261,15 +269,16 @@ export default async function globalSetup(): Promise<void> {
     fs.writeFileSync(DUMP_PATH, JSON.stringify(dump, null, 2));
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] dumped ${Object.keys(dump).length} keys to ${DUMP_PATH}`);
-    // Give Chrome's LevelDB ~5s to flush all writes before we
-    // close the context. Without this, the cloned user-data-dir
-    // ends up missing the last few writes — the wallet appears
-    // un-onboarded to specs that launch from the clone.
-    await new Promise(r => setTimeout(r, 5_000));
+    // Gate the close on the dumped state having actually materialised
+    // in chrome.storage.local — confirms LevelDB flushed the final
+    // writes from primeAndSwitchToRegtest. Without this gate, the
+    // cloned user-data-dir misses the last few writes and the wallet
+    // appears un-onboarded to specs launched from the clone.
+    await waitForChromeStorageKey({ context, keyContains: 'walletState', timeoutMs: 30_000 });
   } finally {
     await context.close();
   }
-  // After close, give Chrome a moment to finish its on-exit
-  // flush + index-flush dance.
-  await new Promise(r => setTimeout(r, 2_000));
+  // After close, wait for Chrome to release its singleton lock so
+  // downstream tests can safely clone the user-data-dir.
+  await waitForSingletonLockGone(SEED_USER_DATA_DIR).catch(() => undefined);
 }

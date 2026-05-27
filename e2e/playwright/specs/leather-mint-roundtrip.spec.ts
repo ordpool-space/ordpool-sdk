@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
+import { waitForApprovalPopup } from '../approval-popup';
 
 /**
  * Iteration 4 — full cat21 mint roundtrip with the real Leather
@@ -77,41 +78,30 @@ async function onboardLeather(page: Page): Promise<void> {
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const deadline = Date.now() + 60_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      if (await p.getByTestId('get-addresses-approve-button').isVisible({ timeout: 200 }).catch(() => false)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
-  }
-  if (!approval) throw new Error('leather get-addresses approval popup never appeared');
+  const approval = await waitForApprovalPopup({
+    context: ctx,
+    knownPages,
+    isApproval: async (p) => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      return await p.getByTestId('get-addresses-approve-button').isVisible({ timeout: 1_000 }).catch(() => false);
+    },
+  });
   await approval.getByTestId('get-addresses-approve-button').click();
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const deadline = Date.now() + 90_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const txt = await p.locator('body').innerText().catch(() => '');
-      if (/sign|confirm|approve/i.test(txt)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
-  }
-  if (!approval) throw new Error('leather sign-PSBT popup never appeared');
+  // Leather's sign-PSBT surface doesn't ship a stable testid yet;
+  // match by the visible Confirm/Sign/Approve button's role + name.
+  const approval = await waitForApprovalPopup({
+    context: ctx,
+    knownPages,
+    timeoutMs: 90_000,
+    isApproval: async (p) => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      return await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first()
+        .isVisible({ timeout: 1_000 }).catch(() => false);
+    },
+  });
   await shot(approval, '03a-sign-approval');
   // Best-effort selector: text "Confirm" or a primary action button.
   // Will tighten once we see the actual sign-popup DOM in CI.

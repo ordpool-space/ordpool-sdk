@@ -2,6 +2,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { waitForApprovalPopup } from '../approval-popup';
+
 /**
  * Iteration 4 of the Wizz E2E pipeline: matrix spec across the
  * address types that have public BIP test vectors.
@@ -134,35 +136,14 @@ async function onboardWizzWithAddressType(
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, variantTag: string): Promise<void> {
-  // The Wizz connection-approval surface is the notification page
-  // with hash `/approval` (confirmed by the wizz-sdk-handshake spec,
-  // which logs `chrome-extension://<id>/notification.html#/approval`).
-  // The wallet may transiently render OTHER chrome-extension pages
-  // (welcome dialog, scan progress, notification badge); URL-anchor
-  // the match so we never mistake one of those for the approval.
-  const isApprovalUrl = (p: Page) => p.url().includes('notification.html#/approval');
-
-  // First check: did the popup already open between knownPages snapshot
-  // and the call to this function?
-  let approval: Page | undefined = ctx.pages().find(p => !knownPages.has(p) && isApprovalUrl(p));
-
-  if (!approval) {
-    // Otherwise, wait for a new page that either opens already on the
-    // approval URL or navigates to it after open.
-    approval = await ctx.waitForEvent('page', {
-      timeout: 60_000,
-      predicate: async (p) => {
-        if (knownPages.has(p)) return false;
-        if (isApprovalUrl(p)) return true;
-        try {
-          await p.waitForURL(/notification\.html#\/approval/, { timeout: 30_000 });
-          return true;
-        } catch {
-          return false;
-        }
-      },
-    });
-  }
+  // URL-anchor the match on Wizz's notification#/approval surface so
+  // we never mistake a transient welcome/scan-progress page for the
+  // approval (confirmed by the wizz-sdk-handshake CI log line).
+  const approval = await waitForApprovalPopup({
+    context: ctx,
+    knownPages,
+    isApproval: p => p.url().includes('notification.html#/approval'),
+  });
   // eslint-disable-next-line no-console
   console.log(`[wizz-matrix:${variantTag}] approval URL = ${approval.url()}`);
   await approval.screenshot({ path: path.resolve(RESULTS_DIR, `wizz-matrix-${variantTag}-approval-rendered.png`), fullPage: true }).catch(() => undefined);

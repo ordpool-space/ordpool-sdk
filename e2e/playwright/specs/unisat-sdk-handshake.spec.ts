@@ -2,6 +2,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { waitForApprovalPopup } from '../approval-popup';
+
 /**
  * Iteration 3 of the Unisat E2E pipeline: SDK ↔ Unisat handshake.
  *
@@ -141,26 +143,18 @@ test('unisatConnector.connect via the harness page returns the BIP-84 mainnet ad
   const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectUnisat());
 
-  // Poll for the approval popup. Unisat's connect-request UI doesn't
-  // expose a documented testid for the Connect button, so we match
-  // on visible text after the popup renders.
-  const deadline = Date.now() + 60_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of context.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const txt = await p.locator('body').innerText().catch(() => '');
-      if (/connect|approve|confirm|allow/i.test(txt)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
-  }
-
-  if (!approval) {
+  // Unisat's connection-approval surface is `notification.html#/approval`
+  // (confirmed in CI logs). URL-anchored event-driven wait — no polling
+  // sleeps; predicate handles both the already-open and opens-later
+  // races.
+  let approval: Page;
+  try {
+    approval = await waitForApprovalPopup({
+      context,
+      knownPages,
+      isApproval: p => p.url().includes('notification.html#/approval'),
+    });
+  } catch {
     await shot(harness, '02a-no-approval');
     throw new Error('unisat connection-request popup never appeared');
   }

@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
+import { waitForApprovalPopup } from '../approval-popup';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -180,23 +181,20 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // transaction" text — the loading-spinner state must finish
   // first. Plain waitForEvent('page') can race against earlier
   // events that fired during connect.
-  let approvalSign: Page | undefined;
-  const popupDeadline = Date.now() + 120_000;
-  while (Date.now() < popupDeadline) {
-    for (const p of context.pages()) {
-      if (knownPagesAtStart.has(p)) continue;
-      const url = p.url();
-      if (!url.startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/review transaction/i.test(text)) {
-        approvalSign = p;
-        break;
-      }
-    }
-    if (approvalSign) break;
-    await new Promise(r => setTimeout(r, 500));
+  let approvalSign: Page;
+  try {
+    approvalSign = await waitForApprovalPopup({
+      context,
+      knownPages: knownPagesAtStart,
+      timeoutMs: 120_000,
+      isApproval: async (p) => {
+        if (!p.url().startsWith('chrome-extension://')) return false;
+        return await p.getByText(/review transaction/i).first().isVisible({ timeout: 1_000 }).catch(() => false);
+      },
+    });
+  } catch {
+    throw new Error('Xverse sign popup never rendered Review transaction within 120s');
   }
-  if (!approvalSign) throw new Error('Xverse sign popup never rendered Review transaction within 60s');
   await shot(approvalSign, '02-sign-approval');
   // Wait until Confirm is enabled (Xverse renders the button
   // immediately but its React onClick is hooked up only after
@@ -211,22 +209,20 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
     });
   }, undefined, { timeout: 30_000, polling: 250 });
 
-  // Click Confirm and positively poll the page text for transition
-  // out of the review screen (Xverse swaps to a tx-status spinner
-  // or "Transaction sent" after signing). Retry up to 3 times if
-  // the click is delivered but the React onClick swallows it.
-  // Wait briefly for Xverse's React onClick to bind before we
-  // click. Without this the click sometimes lands in the
-  // pre-binding window and is silently swallowed; the harness
-  // promise then never resolves.
-  await approvalSign.waitForTimeout(2_000);
+  // Confirm-binding gate: wait for the React onClick to be attached
+  // by checking that the button is interactive (no `disabled` attr,
+  // pointer-events not 'none', no in-flight spinner overlay). The
+  // waitForFunction above already gates `disabled` + pointer-events;
+  // pin the visibility of "Confirm" once more as an explicit barrier
+  // so the next click can't land in the pre-binding window.
+  await expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeEnabled({ timeout: 30_000 });
 
   // Click Confirm with a retry loop. Either the click lands and
   // Xverse closes the popup itself (success), or Xverse signs and
   // the harness's signedHexPromise resolves (also success), so
   // both page-close-error AND signedHexPromise-completion count as
-  // wins. Retry the click up to 3 times if neither happens within
-  // 10s of an attempt.
+  // wins. Each attempt awaits a Promise.race(signed, page-close)
+  // so we never sleep blindly.
   let signResolved = false;
   signedHexPromise.then(() => { signResolved = true; }).catch(() => undefined);
   for (let attempt = 0; attempt < 3 && !signResolved; attempt++) {
@@ -237,10 +233,14 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
         // eslint-disable-next-line no-console
         console.log(`[mint] confirm-click attempt ${attempt} closed the popup: ${(e as Error).message}`);
       });
-    // Race: either signedHexPromise resolves, popup closes, or 10s passes.
-    for (let i = 0; i < 40 && !signResolved && !approvalSign.isClosed(); i++) {
-      await new Promise(r => setTimeout(r, 250));
-    }
+    // Race signedHexPromise against the popup's close event; first
+    // event wins. We re-enter the loop only if the popup is still
+    // open AND we haven't resolved (i.e. click was swallowed).
+    const closePromise = new Promise<void>((res) => approvalSign.once('close', () => res()));
+    await Promise.race([
+      signedHexPromise.then(() => undefined).catch(() => undefined),
+      closePromise,
+    ]);
   }
   const signed = await signedHexPromise;
   // eslint-disable-next-line no-console

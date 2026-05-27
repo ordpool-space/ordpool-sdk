@@ -169,12 +169,6 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   await shot(page, '06-after-source-wallet-pick');
 
   // ─── Phase 6: enter the 12-word mnemonic ───
-  // Xverse's seed entry is either:
-  //   (a) one textarea — paste the whole phrase
-  //   (b) 12 separate <input> boxes — type/paste per word
-  // Try (a) first; fall back to (b) word-by-word.
-  await page.waitForTimeout(800);
-
   // "Enter seed phrase" page: 12 numbered boxes, each is an
   // input[type=password] with an eye-toggle for reveal. The form's
   // copy says "Enter or paste your 12 or 24 word seed phrase" —
@@ -253,7 +247,10 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
       { timeout: 10_000 },
     );
     await commit.click();
-    await page.waitForTimeout(1_000);
+    // Wait for the picker text to be gone before screenshotting
+    // (confirms the click advanced the screen).
+    await expect(page.getByText(/select a wallet to restore|we found funds/i).first())
+      .toBeHidden({ timeout: 15_000 });
     await shot(page, '07c-after-wallet-confirm');
   }
 
@@ -268,7 +265,9 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
     const continueBtn = page.getByText('Continue', { exact: true }).first();
     await expect(continueBtn).toBeVisible({ timeout: 10_000 });
     await continueBtn.click();
-    await page.waitForTimeout(1_000);
+    // Wait for the picker to unmount before screenshotting.
+    await expect(page.getByText(/preferred address type/i).first())
+      .toBeHidden({ timeout: 15_000 });
     await shot(page, '07e-after-address-type-continue');
   }
 
@@ -309,7 +308,8 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard wit
   const notNow = popup.getByText('Not now', { exact: true }).first();
   if (await notNow.isVisible({ timeout: 5_000 }).catch(() => false)) {
     await notNow.click();
-    await popup.waitForTimeout(500);
+    // Wait for the modal to unmount.
+    await expect(notNow).toBeHidden({ timeout: 10_000 });
   }
 
   await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09-popup-dashboard.png'), fullPage: true });

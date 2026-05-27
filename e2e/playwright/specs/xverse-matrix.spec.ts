@@ -3,6 +3,8 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { applyXverseVariant, XverseVariant } from '../xverse-vault';
+import { waitForApprovalPopup } from '../approval-popup';
+import { waitForChromeStorageKey, waitForSingletonLockGone } from '../wait-helpers';
 
 /**
  * Matrix coverage for every Xverse Network × Payment-Address-Type
@@ -81,24 +83,18 @@ async function unlockWallet(page: Page): Promise<void> {
 
 async function approveSatsConnectInline(context: BrowserContext, knownPages: Set<Page>): Promise<void> {
   // sats-connect getAddress opens an approval popup on a new
-  // chrome-extension:// page. Wait, find the "Connect"/"Approve"
-  // button, click. Same pattern xverse-sdk-handshake uses.
-  const deadline = Date.now() + 60_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of context.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/^(connect|approve|confirm|allow)$/im.test(text)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
-  }
-  if (!approval) throw new Error('sats-connect approval popup never showed Connect button');
+  // chrome-extension:// page. Match by the visible Connect/Approve
+  // button's role+name on the popup itself — no URL anchor (the
+  // sats-connect surface URL has varied across Xverse builds).
+  const approval = await waitForApprovalPopup({
+    context,
+    knownPages,
+    isApproval: async (p) => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      return await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
+        .isVisible({ timeout: 1_000 }).catch(() => false);
+    },
+  });
   await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click({ force: true });
 }
 
@@ -157,17 +153,31 @@ for (const variant of VARIANTS) {
         return t.includes('unlock') || t.includes('account 1');
       }, undefined, { timeout: 30_000, polling: 250 });
       await primer.close();
-      // Small settle window for redux-persist's debounced save to flush.
-      await new Promise(r => setTimeout(r, 1_500));
+      // Gate on Xverse's redux-persist debounced save reaching
+      // chrome.storage.local (walletState becomes a present key)
+      // before we write the variant on top of it. Without the gate
+      // the wallet boot-time save races ours and clobbers the variant.
+      await waitForChromeStorageKey({ context: mutator, keyContains: 'walletState', timeoutMs: 30_000 });
       // Write the variant from the SW context. applyXverseVariant
       // returns a Phase-1 read-back so we can log it post-reload.
       const phase1Diag = await applyXverseVariant(mutator, variant);
       // eslint-disable-next-line no-console
       console.log(`[matrix:${variant.network}:${variant.paymentType}] Phase-1 read-back → legacy=${phase1Diag.phase1Legacy} keys=${JSON.stringify(phase1Diag.storageKeys)}`);
-      // Flush before close.
-      await new Promise(r => setTimeout(r, 3_000));
+      // Gate the close on the variant write having materialised in
+      // chrome.storage.local — applyXverseVariant resolves once the
+      // SW evaluate returns, but redux-persist may still flush IDB
+      // for a beat. Re-read by predicate to confirm.
+      await waitForChromeStorageKey({
+        context: mutator,
+        keyContains: 'walletState',
+        matchValue: v => typeof v === 'string' && v.includes(variant.network),
+        timeoutMs: 30_000,
+      });
       await mutator.close();
-      await new Promise(r => setTimeout(r, 2_000));
+      // Wait for Chromium to release the user-data-dir before we
+      // delete its lock files; rmSync against a still-locked dir
+      // races on macOS / Linux.
+      await waitForSingletonLockGone(workingDir).catch(() => undefined);
       for (const stale of ['SingletonLock', 'SingletonCookie', 'SingletonSocket']) {
         fs.rmSync(path.join(workingDir, stale), { force: true });
       }

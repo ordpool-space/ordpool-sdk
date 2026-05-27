@@ -2,6 +2,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { waitForApprovalPopup } from '../approval-popup';
+
 /**
  * Iteration 3 of the Wizz E2E pipeline: SDK ↔ Wizz handshake.
  *
@@ -161,30 +163,17 @@ test('wizzConnector.connect via the harness page returns the BIP-84 mainnet addr
   const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
 
-  // The Wizz approval surface is reliably `notification.html#/approval`
-  // (URL-anchored match — text-based "connect|approve|confirm|allow"
-  // probes can mistake a transient welcome dialog for the approval).
-  const isApprovalUrl = (p: Page) => p.url().includes('notification.html#/approval');
-  let approval: Page | undefined = context.pages().find(p => !knownPages.has(p) && isApprovalUrl(p));
-  if (!approval) {
-    try {
-      approval = await context.waitForEvent('page', {
-        timeout: 60_000,
-        predicate: async (p) => {
-          if (knownPages.has(p)) return false;
-          if (isApprovalUrl(p)) return true;
-          try {
-            await p.waitForURL(/notification\.html#\/approval/, { timeout: 30_000 });
-            return true;
-          } catch {
-            return false;
-          }
-        },
-      });
-    } catch {
-      await shot(harness, '02a-no-approval');
-      throw new Error('wizz connection-request popup never appeared');
-    }
+  // URL-anchor the match on Wizz's notification#/approval surface.
+  let approval: Page;
+  try {
+    approval = await waitForApprovalPopup({
+      context,
+      knownPages,
+      isApproval: p => p.url().includes('notification.html#/approval'),
+    });
+  } catch {
+    await shot(harness, '02a-no-approval');
+    throw new Error('wizz connection-request popup never appeared');
   }
   await shot(approval, '02a-approval-rendered');
   // eslint-disable-next-line no-console

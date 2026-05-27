@@ -2,6 +2,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { waitForApprovalPopup } from '../approval-popup';
+
 /**
  * Iteration 5 of the Unisat E2E pipeline: matrix spec across every
  * standard user-pickable address type Unisat exposes.
@@ -122,22 +124,16 @@ async function onboardUnisatWithAddressType(
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const deadline = Date.now() + 60_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const txt = await p.locator('body').innerText().catch(() => '');
-      if (/connect|approve|confirm|allow/i.test(txt)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
+  let approval: Page;
+  try {
+    approval = await waitForApprovalPopup({
+      context: ctx,
+      knownPages,
+      isApproval: p => p.url().includes('notification.html#/approval'),
+    });
+  } catch {
+    throw new Error('unisat connection-request popup never appeared');
   }
-  if (!approval) throw new Error('unisat connection-request popup never appeared');
   await approval.getByText(/^Connect$/).first().click();
 }
 

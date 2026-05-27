@@ -2,6 +2,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { waitForApprovalPopup } from '../approval-popup';
+
 /**
  * Iteration 3 of the Leather E2E pipeline: SDK ↔ Leather handshake.
  *
@@ -125,21 +127,22 @@ test('leatherConnector.connect via the harness page returns the BIP-84 / BIP-86 
   const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectLeather());
 
-  const deadline = Date.now() + 60_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of context.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      if (await p.getByTestId('get-addresses-approve-button').isVisible({ timeout: 200 }).catch(() => false)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
+  // Leather's approval surface is identified by the stable testid
+  // `get-addresses-approve-button` on whichever chrome-extension://
+  // page renders it.
+  let approval: Page;
+  try {
+    approval = await waitForApprovalPopup({
+      context,
+      knownPages,
+      isApproval: async (p) => {
+        if (!p.url().startsWith('chrome-extension://')) return false;
+        return await p.getByTestId('get-addresses-approve-button').isVisible({ timeout: 1_000 }).catch(() => false);
+      },
+    });
+  } catch {
+    throw new Error('leather get-addresses approval popup never appeared');
   }
-  if (!approval) throw new Error('leather get-addresses approval popup never appeared');
   await shot(approval, '02a-approval');
   await approval.getByTestId('get-addresses-approve-button').click();
   await shot(approval, '02b-after-approve');

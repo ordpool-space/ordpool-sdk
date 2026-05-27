@@ -48,6 +48,8 @@
 import { argon2id } from '@noble/hashes/argon2';
 import * as crypto from 'node:crypto';
 
+import { waitForServiceWorkerReady } from './wait-helpers';
+
 const ARGON2_PARAMS = { t: 3, m: 65536, p: 4, dkLen: 16 } as const;
 
 const enc = new TextEncoder();
@@ -273,10 +275,9 @@ export async function applyXverseVariant(
     reloadFn();
     return { phase1Legacy, storageKeys: allKeys.filter(k => /account|wallet|address|persist/i.test(k)).sort() };
   }, variant);
-  // Playwright doesn't re-emit `serviceworker` for the same
-  // extension after reload, so a fixed wait. 4s lets chromium
-  // restart the SW and rehydrate before the caller closes.
-  await new Promise(r => setTimeout(r, 4_000));
+  // Probe the SW with a benign chrome.storage.local.get until it
+  // responds — confirms the new worker has booted and rehydrated.
+  await waitForServiceWorkerReady(context, 30_000);
   return diag;
 }
 

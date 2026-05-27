@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
+import { waitForApprovalPopup } from '../approval-popup';
 
 /**
  * Iteration 4 — full cat21 mint roundtrip with the real Unisat
@@ -96,43 +97,27 @@ async function onboardUnisat(page: Page): Promise<void> {
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const deadline = Date.now() + 60_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const txt = await p.locator('body').innerText().catch(() => '');
-      if (/connect|approve|confirm|allow/i.test(txt)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
-  }
-  if (!approval) throw new Error('unisat connection-request popup never appeared');
+  const approval = await waitForApprovalPopup({
+    context: ctx,
+    knownPages,
+    isApproval: p => p.url().includes('notification.html#/approval'),
+  });
   // Unisat uses styled div, not <button> — match by text.
   await approval.getByText(/^Connect$/).first().click();
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const deadline = Date.now() + 90_000;
-  let approval: Page | undefined;
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (knownPages.has(p)) continue;
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      // Sign approval has the sign-psbt-button testid per the bundle.
-      if (await p.getByTestId('sign-psbt-button').isVisible({ timeout: 200 }).catch(() => false)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 250));
-  }
-  if (!approval) throw new Error('unisat sign-PSBT popup never appeared');
+  // The sign-PSBT approval surface is identified by the stable testid
+  // `sign-psbt-button` on whichever chrome-extension page renders it.
+  const approval = await waitForApprovalPopup({
+    context: ctx,
+    knownPages,
+    timeoutMs: 90_000,
+    isApproval: async (p) => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      return await p.getByTestId('sign-psbt-button').isVisible({ timeout: 1_000 }).catch(() => false);
+    },
+  });
   await shot(approval, '03a-sign-approval');
   await approval.getByTestId('sign-psbt-button').click();
 }
