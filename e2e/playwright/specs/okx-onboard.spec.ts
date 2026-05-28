@@ -19,6 +19,7 @@ const TEST_PASSWORD = 'TestPassword123!';
 
 let context: BrowserContext;
 let extensionId: string;
+let onboardPage: Page | null = null;
 
 async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({
@@ -50,6 +51,18 @@ test.beforeAll(async () => {
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
+
+  // OKX auto-opens its onboarding in a separate tab on install
+  // (CI 26597193687 confirmed: page reference closed mid-test;
+  // sibling marketing tab was open at https://www.okx.com/...).
+  // The chrome-extension://<id>/* tab is the real onboarding; ignore
+  // the marketing tab via the URL filter.
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch { /* fall back to manual newPage in test body */ }
 });
 
 test.afterAll(async () => {
@@ -59,9 +72,14 @@ test.afterAll(async () => {
 test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
   test.setTimeout(180_000);
 
-  const page = await context.newPage();
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
+  let page: Page;
+  if (onboardPage) {
+    page = onboardPage;
+  } else {
+    page = await context.newPage();
+    await page.setViewportSize({ width: 400, height: 800 });
+    await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
+  }
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 

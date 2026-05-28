@@ -60,9 +60,11 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
-  const termsCheckbox = page.locator('input[type="checkbox"]').first();
-  await expect(termsCheckbox).toBeVisible({ timeout: 10_000 });
-  await termsCheckbox.check({ force: true });
+  // The visible click target is the label, not the aria-hidden
+  // input (confirmed by oyl-onboard CI 26597193687).
+  const termsLabel = page.locator('label').filter({ hasText: /Terms.*Privacy Policy/i }).first();
+  await expect(termsLabel).toBeVisible({ timeout: 10_000 });
+  await termsLabel.click();
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
   await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
   await pwContinue.click();

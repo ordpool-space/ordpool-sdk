@@ -34,11 +34,12 @@ async function shot(p: Page, name: string): Promise<void> {
   }).catch(() => undefined);
 }
 
-async function onboardOkx(page: Page): Promise<void> {
-  await page.setViewportSize({ width: 400, height: 800 });
-  // Alby's manifest has `options_ui: {page: "options.html", open_in_tab: true}`.
-  // popup.html shows a placeholder; options.html is the actual onboard surface.
-  await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
+async function onboardAlby(page: Page): Promise<void> {
+  // page may already be the auto-opened onboarding tab from beforeAll.
+  if (page.url() === 'about:blank') {
+    await page.setViewportSize({ width: 400, height: 800 });
+    await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
+  }
 
   // Alby: passcode-first flow.
   await expect(page.getByText('Set extension unlock passcode', { exact: false })).toBeVisible({ timeout: 30_000 });
@@ -96,9 +97,21 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  const onboardPage = await context.newPage();
+  // Alby auto-opens its onboarding (options.html) in a new tab on
+  // first install. Prefer that page; fall back to a manual newPage
+  // if no auto-open happens.
+  let onboardPage: Page;
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch {
+    onboardPage = await context.newPage();
+  }
+
   test.setTimeout(180_000);
-  await onboardOkx(onboardPage);
+  await onboardAlby(onboardPage);
   await shot(onboardPage, '00-onboarded');
 });
 

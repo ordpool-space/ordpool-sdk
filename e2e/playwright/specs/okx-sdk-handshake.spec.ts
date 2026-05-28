@@ -35,8 +35,11 @@ async function shot(p: Page, name: string): Promise<void> {
 }
 
 async function onboardOkx(page: Page): Promise<void> {
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
+  // page may already be the auto-opened onboarding tab.
+  if (page.url() === 'about:blank') {
+    await page.setViewportSize({ width: 400, height: 800 });
+    await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
+  }
 
   const importBtn = page.getByText('Import wallet', { exact: true }).first();
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
@@ -100,7 +103,17 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  const onboardPage = await context.newPage();
+  // Prefer the auto-opened chrome-extension onboarding tab; fall back
+  // to manual newPage if OKX didn't auto-open one.
+  let onboardPage: Page;
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch {
+    onboardPage = await context.newPage();
+  }
   test.setTimeout(180_000);
   await onboardOkx(onboardPage);
   await shot(onboardPage, '00-onboarded');

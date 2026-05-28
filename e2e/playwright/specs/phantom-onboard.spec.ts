@@ -19,6 +19,7 @@ const TEST_PASSWORD = 'TestPassword123!';
 
 let context: BrowserContext;
 let extensionId: string;
+let onboardPage: Page | null = null;
 
 async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({
@@ -50,6 +51,17 @@ test.beforeAll(async () => {
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
+
+  // Phantom may auto-open its onboarding in a new tab — wait briefly
+  // for any chrome-extension page (CI 26597193687 showed popup.html
+  // doesn't render the Help link / actual CTA at all on the first
+  // visit; the real onboarding likely lives in an auto-opened tab).
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch { /* fall back to manual newPage in test body */ }
 });
 
 test.afterAll(async () => {
@@ -59,13 +71,14 @@ test.afterAll(async () => {
 test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
   test.setTimeout(180_000);
 
-  const page = await context.newPage();
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
-  // Phantom popup opens with a Lottie animation (black rounded box on
-  // light purple) — interactive buttons appear only after the
-  // animation finishes. Wait for the Help link as a "hydrated" proxy.
-  await expect(page.getByText('Help', { exact: true })).toBeVisible({ timeout: 30_000 });
+  let page: Page;
+  if (onboardPage) {
+    page = onboardPage;
+  } else {
+    page = await context.newPage();
+    await page.setViewportSize({ width: 400, height: 800 });
+    await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
+  }
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 

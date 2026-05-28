@@ -35,11 +35,10 @@ async function shot(p: Page, name: string): Promise<void> {
 }
 
 async function onboardPhantom(page: Page): Promise<void> {
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
-  // Phantom popup opens with a Lottie animation; wait for Help link
-  // as a "hydrated" proxy before looking for the import path.
-  await expect(page.getByText('Help', { exact: true })).toBeVisible({ timeout: 30_000 });
+  if (page.url() === 'about:blank') {
+    await page.setViewportSize({ width: 400, height: 800 });
+    await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
+  }
 
   const importBtn = page.getByText(/already have a wallet|use seed phrase|recovery phrase|import/i).first();
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
@@ -99,7 +98,15 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  const onboardPage = await context.newPage();
+  let onboardPage: Page;
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch {
+    onboardPage = await context.newPage();
+  }
   test.setTimeout(180_000);
   await onboardPhantom(onboardPage);
   await shot(onboardPage, '00-onboarded');

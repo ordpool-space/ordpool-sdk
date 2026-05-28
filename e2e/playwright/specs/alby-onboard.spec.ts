@@ -19,6 +19,7 @@ const TEST_PASSWORD = 'TestPassword123!';
 
 let context: BrowserContext;
 let extensionId: string;
+let onboardPage: Page | null = null;
 
 async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({
@@ -36,7 +37,7 @@ async function dumpHtml(page: Page, name: string): Promise<void> {
 
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
-    throw new Error(`OKX extension not unpacked at ${EXT_PATH}.`);
+    throw new Error(`Alby extension not unpacked at ${EXT_PATH}.`);
   }
   context = await chromium.launchPersistentContext('', {
     headless: false,
@@ -50,6 +51,19 @@ test.beforeAll(async () => {
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
+
+  // Alby auto-opens its onboarding (options.html with the
+  // "Set extension unlock passcode" screen) in a separate tab on
+  // first install. CI 26597193687 confirmed via failure screenshot
+  // (full-width 1280px viewport rather than our 400×800) — the page
+  // we navigated to was a different one that auto-closed when Alby
+  // took over. Capture the auto-opened page here.
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch { /* if not auto-opened, the test body will open one */ }
 });
 
 test.afterAll(async () => {
@@ -59,11 +73,17 @@ test.afterAll(async () => {
 test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
   test.setTimeout(180_000);
 
-  const page = await context.newPage();
-  await page.setViewportSize({ width: 400, height: 800 });
-  // Alby's manifest has `options_ui: {page: "options.html", open_in_tab: true}`.
-  // popup.html shows a placeholder; options.html is the actual onboard surface.
-  await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
+  // Prefer the auto-opened onboarding tab captured in beforeAll; fall
+  // back to a manual navigation if Alby didn't auto-open one (e.g.
+  // cached extension state).
+  let page: Page;
+  if (onboardPage) {
+    page = onboardPage;
+  } else {
+    page = await context.newPage();
+    await page.setViewportSize({ width: 400, height: 800 });
+    await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
+  }
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 

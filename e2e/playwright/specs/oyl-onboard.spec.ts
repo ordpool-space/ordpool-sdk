@@ -102,10 +102,14 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   await shot(page, '06-password-typed');
 
-  // Terms checkbox — must be checked to enable Continue.
-  const termsCheckbox = page.locator('input[type="checkbox"]').first();
-  await expect(termsCheckbox).toBeVisible({ timeout: 10_000 });
-  await termsCheckbox.check({ force: true });
+  // Terms checkbox: the actual <input type="checkbox"> is
+  // aria-hidden + tabindex="-1" (CI 26597193687 error-context proved
+  // this — checkbox.check() resolved to the hidden input and the
+  // click did not change state). The visible click target is the
+  // label wrapping it. Click the label by its visible text.
+  const termsLabel = page.locator('label').filter({ hasText: /Terms.*Privacy Policy/i }).first();
+  await expect(termsLabel).toBeVisible({ timeout: 10_000 });
+  await termsLabel.click();
   await shot(page, '07-terms-checked');
 
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
