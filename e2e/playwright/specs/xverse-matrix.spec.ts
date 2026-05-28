@@ -114,27 +114,7 @@ test.beforeAll(async () => {
 
 
 for (const variant of VARIANTS) {
-  // Xverse matrix is currently skipped: the variant-switch flow relies
-  // on chrome.runtime.reload() to make the SW rehydrate fresh state
-  // from leveldb after a chrome.storage.local write. Chromium restarts
-  // the SW in-place — Playwright keeps the same Worker reference but
-  // every evaluate() throws "target closed" for the restart window.
-  // The next chrome.storage.local probe inside waitForChromeStorageKey
-  // either rides out the restart (variant 1 hit this) or hits the 30s
-  // timeout when redux-persist hasn't flushed yet (variants 2-4).
-  // Even when phase 1 succeeds, the post-close singleton-lock cleanup
-  // + phase-2 launchPersistentContext combination occasionally hangs
-  // for the full 120s test budget.
-  //
-  // Xverse coverage is provided by:
-  //   - xverse-onboard (BIP-84 + BIP-86 round-trip via UI)
-  //   - xverse-sdk-handshake (SDK → sats-connect getAddress on the
-  //     default mainnet+native variant)
-  //   - xverse-mint-roundtrip (regtest, full sign+broadcast)
-  // Matrix coverage across all 4 network/payment-type combos is
-  // nice-to-have, not critical. Revisit when Playwright surfaces a
-  // chrome.runtime.reload-friendly SW lifecycle event.
-  test.skip(`SDK returns the right paymentAddress for ${variant.network} + ${variant.paymentType}`, async () => {
+  test(`SDK returns the right paymentAddress for ${variant.network} + ${variant.paymentType}`, async () => {
     test.setTimeout(120_000);
 
     const workingDir = `${SEED_USER_DATA_DIR}.matrix-${variant.network}-${variant.paymentType}-${process.pid}-${Date.now()}`;
@@ -184,16 +164,14 @@ for (const variant of VARIANTS) {
       const phase1Diag = await applyXverseVariant(mutator, variant);
       // eslint-disable-next-line no-console
       console.log(`[matrix:${variant.network}:${variant.paymentType}] Phase-1 read-back → legacy=${phase1Diag.phase1Legacy} keys=${JSON.stringify(phase1Diag.storageKeys)}`);
-      // Gate the close on the variant write having materialised in
-      // chrome.storage.local — applyXverseVariant resolves once the
-      // SW evaluate returns, but redux-persist may still flush IDB
-      // for a beat. Re-read by predicate to confirm.
-      await waitForChromeStorageKey({
-        context: mutator,
-        keyContains: 'walletState',
-        matchValue: v => typeof v === 'string' && v.includes(variant.network),
-        timeoutMs: 30_000,
-      });
+      // Skip the post-reload verify-matchValue probe. After
+      // chrome.runtime.reload(), Chromium restarts the SW in-place;
+      // Playwright keeps the same Worker reference but every
+      // evaluate() throws "target closed" for an unbounded restart
+      // window. Trying to verify the write here just timed out.
+      // Trust the reload + leveldb flush — if the variant doesn't
+      // survive into phase 2, the address assertion at the end of
+      // the test will catch it with a concrete diff.
       await mutator.close();
       // Wait for Chromium to release the user-data-dir before we
       // delete its lock files; rmSync against a still-locked dir

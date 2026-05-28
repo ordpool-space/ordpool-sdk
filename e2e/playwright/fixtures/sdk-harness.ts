@@ -20,6 +20,10 @@ import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
 import { unisatConnector } from '../../../src/wallet/connectors/unisat.connector';
 import { leatherConnector } from '../../../src/wallet/connectors/leather.connector';
 import { wizzConnector } from '../../../src/wallet/connectors/wizz.connector';
+import { okxConnector } from '../../../src/wallet/connectors/okx.connector';
+import { phantomConnector } from '../../../src/wallet/connectors/phantom.connector';
+import { oylConnector } from '../../../src/wallet/connectors/oyl.connector';
+import { albyConnector } from '../../../src/wallet/connectors/alby.connector';
 // Shared PSBT→wire-tx-hex helper used by both production signers
 // and the harness. Full "WE finalize, WE broadcast" reasoning in
 // /Work/ordpool/WALLETS.md.
@@ -69,6 +73,42 @@ declare global {
       buildAndSignMintViaLeather(input: MintRequest): Promise<{ txHex: string }>;
       detectWizz(): boolean;
       connectWizz(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
+      detectOkx(): boolean;
+      connectOkx(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
+      detectPhantom(): boolean;
+      connectPhantom(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
+      detectOyl(): boolean;
+      connectOyl(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
+      detectAlby(): boolean;
+      connectAlby(): Promise<{
         type: KnownOrdinalWalletType;
         ordinalsAddress: string;
         ordinalsPublicKey: string;
@@ -214,6 +254,66 @@ window.ordpoolSdkHarness = {
     }
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectWizz.result', info);
+    return info;
+  },
+
+  detectOkx(): boolean { return okxConnector.detect(window); },
+  async connectOkx() {
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (okxConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!okxConnector.detect(window)) throw new Error('OKX provider not injected within 15s');
+    statusEl().textContent = `connecting to okx…`;
+    const info = await firstValueFrom(okxConnector.connect(Network.Mainnet));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectOkx.result', info);
+    return info;
+  },
+
+  detectPhantom(): boolean { return phantomConnector.detect(window); },
+  async connectPhantom() {
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (phantomConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!phantomConnector.detect(window)) throw new Error('Phantom provider not injected within 15s');
+    statusEl().textContent = `connecting to phantom…`;
+    const info = await firstValueFrom(phantomConnector.connect(Network.Mainnet));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectPhantom.result', info);
+    return info;
+  },
+
+  detectOyl(): boolean { return oylConnector.detect(window); },
+  async connectOyl() {
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (oylConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!oylConnector.detect(window)) throw new Error('Oyl provider not injected within 15s');
+    statusEl().textContent = `connecting to oyl…`;
+    const info = await firstValueFrom(oylConnector.connect(Network.Mainnet));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectOyl.result', info);
+    return info;
+  },
+
+  detectAlby(): boolean { return albyConnector.detect(window); },
+  async connectAlby() {
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (albyConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!albyConnector.detect(window)) throw new Error('Alby provider not injected within 15s');
+    statusEl().textContent = `connecting to alby…`;
+    const info = await firstValueFrom(albyConnector.connect(Network.Mainnet));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectAlby.result', info);
     return info;
   },
 };

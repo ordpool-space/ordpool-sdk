@@ -68,7 +68,7 @@ async function onboardWizzWithAddressType(
   context: BrowserContext,
   extensionId: string,
   variant: WizzAddressTypeVariant,
-): Promise<void> {
+): Promise<Page> {
   const page = await context.newPage();
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
@@ -127,12 +127,11 @@ async function onboardWizzWithAddressType(
   // finished post-onboard hydration (key derivation, address scan,
   // asset-list mount).
   await expect(page.getByText(/ARC20 \(\d+\)/).first()).toBeVisible({ timeout: 30_000 });
-  // Deliberately leave the dashboard tab OPEN. wizz-sdk-handshake
-  // passes precisely because it never closes the dashboard before
-  // calling connectWizz; closing it kills any pending approval
-  // request (window.wizz.requestAccounts rejects with an Object).
-  // The matrix spec used to close the page here to "clean up"; that
-  // close was the actual cause of the long-running CI flakes.
+  // Return the dashboard page so the caller can keep a reference
+  // AND bringToFront it before the harness's connectWizz call —
+  // Wizz seems to require its dashboard tab to be the active surface
+  // for window.wizz.requestAccounts to dispatch its approval popup.
+  return page;
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, variantTag: string): Promise<void> {
@@ -164,20 +163,7 @@ test.beforeAll(async () => {
 });
 
 for (const variant of VARIANTS) {
-  // Wizz matrix is currently skipped: in a fresh-context per-variant
-  // flow, window.wizz.requestAccounts() hangs and never opens the
-  // approval popup, even though the dashboard tab stays open and the
-  // wallet is fully hydrated (ARC20/RUNE/BRC20/RGB++ asset-class
-  // badges visible). The same connectWizz code path works in
-  // wizz-sdk-handshake (single context across beforeAll + one test).
-  // The matrix-only failure mode looks like Wizz dropping the
-  // connect request when the wallet is in a transient post-onboard
-  // state — but there's no observable signal that the state has
-  // cleared (the badges that should mark it are already present at
-  // the failure point). Single-variant Wizz coverage is provided by
-  // wizz-sdk-handshake (BIP-84 / P2WPKH); other address types aren't
-  // exercised against the SDK.
-  test.skip(`SDK returns the right address for Wizz ${variant.label}`, async () => {
+  test(`SDK returns the right address for Wizz ${variant.label}`, async () => {
     test.setTimeout(180_000);
 
     const context = await chromium.launchPersistentContext('', {
@@ -195,7 +181,7 @@ for (const variant of VARIANTS) {
       if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
       const extensionId = worker.url().split('/')[2];
 
-      await onboardWizzWithAddressType(context, extensionId, variant);
+      const dashboardPage = await onboardWizzWithAddressType(context, extensionId, variant);
 
       const harness = await context.newPage();
       await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
@@ -204,6 +190,14 @@ for (const variant of VARIANTS) {
         undefined,
         { timeout: 15_000 },
       );
+
+      // Bring the dashboard to front before connectWizz fires.
+      // The matrix-vs-handshake observation: handshake's beforeAll
+      // ends with the dashboard tab "in front" (it was the last tab
+      // touched); matrix's connectWizz fires while harness is in
+      // front. Try focusing the dashboard so Wizz's content script
+      // sees the wallet as the active surface.
+      await dashboardPage.bringToFront();
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
       const knownPages = new Set(context.pages());
