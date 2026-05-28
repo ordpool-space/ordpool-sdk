@@ -128,6 +128,12 @@ test.beforeAll(async () => {
     ],
   });
 
+  // Wizz's dashboard fires GET https://configs.wizz.cash/extension/<v>
+  // on mount; CI has no outbound internet so the fetch hangs and blocks
+  // Wizz's requestAccounts handler. Abort the request at the browser
+  // layer so Wizz falls back to its default config immediately.
+  await context.route('**/configs.wizz.cash/**', route => route.abort());
+
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];

@@ -56,6 +56,10 @@ test.beforeAll(async () => {
     ],
   });
 
+  // Abort Wizz's outbound config fetch — CI has no internet and the
+  // request hangs.
+  await context.route('**/configs.wizz.cash/**', route => route.abort());
+
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];

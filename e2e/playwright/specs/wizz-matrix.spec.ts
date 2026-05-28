@@ -176,6 +176,14 @@ for (const variant of VARIANTS) {
       ],
     });
 
+    // Wizz's dashboard fires GET https://configs.wizz.cash/extension/<v>
+    // on mount. CI has no outbound internet so this request hangs and
+    // Wizz's requestAccounts handler blocks on the in-flight fetch.
+    // Abort the request at the browser layer so Wizz falls back to its
+    // default config immediately. Network-trace confirmed this is the
+    // only external request the dashboard issues.
+    await context.route('**/configs.wizz.cash/**', route => route.abort());
+
     try {
       let [worker] = context.serviceWorkers();
       if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
@@ -191,15 +199,9 @@ for (const variant of VARIANTS) {
         { timeout: 15_000 },
       );
 
-      // Trace from earlier failures showed Wizz fetches
-      // https://configs.wizz.cash/extension/2.13.4 on dashboard mount.
-      // CI has no outbound internet — this request hangs and Wizz's
-      // requestAccounts handler appears to block on it. The handshake
-      // spec passes because beforeAll/test transitions accumulate
-      // enough elapsed time for the fetch to time out; matrix runs
-      // too fast. Wait for network idle on the dashboard so the
-      // config fetch has resolved (success or fail) before connectWizz.
-      await dashboardPage.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => undefined);
+      // configs.wizz.cash request was aborted at context launch (see
+      // route handler above); networkidle would have been an indirect
+      // way to wait it out, but the abort is immediate.
       await dashboardPage.bringToFront();
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
