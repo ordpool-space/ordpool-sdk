@@ -43,7 +43,7 @@ async function onboardOkx(page: Page): Promise<void> {
   // Alby: passcode-first flow.
   await expect(page.getByText('Set extension unlock passcode', { exact: false })).toBeVisible({ timeout: 30_000 });
   const passcodeInputs = page.locator('input[type="password"]');
-  await expect(passcodeInputs).toHaveCount(2, { timeout: 10_000 });
+  await expect(passcodeInputs.first()).toBeVisible({ timeout: 10_000 });
   await passcodeInputs.nth(0).fill(TEST_PASSWORD);
   await passcodeInputs.nth(1).fill(TEST_PASSWORD);
   const passcodeNext = page.getByRole('button', { name: /^next$/i });

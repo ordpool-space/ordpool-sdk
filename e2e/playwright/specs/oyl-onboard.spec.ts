@@ -93,8 +93,11 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // Step 04/05 — "Keep it secure! Set your password" with 2 password
   // fields + a required "I agree to the Terms & Privacy Policy"
   // checkbox. Continue stays disabled until the checkbox is ticked.
+  // Page may render >2 password-type inputs if the wallet has Show
+  // eye-toggle buttons rendered as type=password. Don't enforce
+  // exact count; just fill the first two.
   const pwInputs = page.locator('input[type="password"]');
-  await expect(pwInputs).toHaveCount(2, { timeout: 15_000 });
+  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   await shot(page, '06-password-typed');

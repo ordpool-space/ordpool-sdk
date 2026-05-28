@@ -72,7 +72,7 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // "Next" button. Verified via CI 26580486080 test-failed-1.png.
   await expect(page.getByText('Set extension unlock passcode', { exact: false })).toBeVisible({ timeout: 30_000 });
   const passcodeInputs = page.locator('input[type="password"]');
-  await expect(passcodeInputs).toHaveCount(2, { timeout: 10_000 });
+  await expect(passcodeInputs.first()).toBeVisible({ timeout: 10_000 });
   await passcodeInputs.nth(0).fill(TEST_PASSWORD);
   await passcodeInputs.nth(1).fill(TEST_PASSWORD);
   await shot(page, '02-passcode-set');

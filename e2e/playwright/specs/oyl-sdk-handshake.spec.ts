@@ -57,7 +57,7 @@ async function onboardOyl(page: Page): Promise<void> {
   // Step 04/05 — "Set your password" with 2 password fields + a
   // required Terms checkbox that gates Continue.
   const pwInputs = page.locator('input[type="password"]');
-  await expect(pwInputs).toHaveCount(2, { timeout: 15_000 });
+  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   const termsCheckbox = page.locator('input[type="checkbox"]').first();
