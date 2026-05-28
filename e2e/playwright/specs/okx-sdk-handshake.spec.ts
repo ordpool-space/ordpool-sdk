@@ -38,14 +38,13 @@ async function onboardOkx(page: Page): Promise<void> {
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
 
-  const importBtn = page.getByText(/import.*wallet|already have|restore/i).first();
+  const importBtn = page.getByText('Import wallet', { exact: true }).first();
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
 
-  const seedOption = page.getByText(/seed phrase|mnemonic|recovery phrase/i).first();
-  if (await seedOption.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await seedOption.click();
-  }
+  const seedOption = page.getByText('Seed phrase or private key', { exact: true });
+  await expect(seedOption).toBeVisible({ timeout: 15_000 });
+  await seedOption.click();
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });

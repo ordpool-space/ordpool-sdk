@@ -36,7 +36,9 @@ async function shot(p: Page, name: string): Promise<void> {
 
 async function onboardOkx(page: Page): Promise<void> {
   await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  // Alby's manifest has `options_ui: {page: "options.html", open_in_tab: true}`.
+  // popup.html shows a placeholder; options.html is the actual onboard surface.
+  await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
 
   // Alby: passcode-first flow.
   await expect(page.getByText('Set extension unlock passcode', { exact: false })).toBeVisible({ timeout: 30_000 });

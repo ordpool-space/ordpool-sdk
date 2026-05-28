@@ -54,16 +54,18 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 
+  // Step 04/05 — "Set your password" with 2 password fields + a
+  // required Terms checkbox that gates Continue.
   const pwInputs = page.locator('input[type="password"]');
-  if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
-    const pwCount = await pwInputs.count();
-    for (let i = 0; i < pwCount; i++) {
-      await pwInputs.nth(i).fill(TEST_PASSWORD);
-    }
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done|finish)$/i }).first();
-    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-    await pwContinue.click();
-  }
+  await expect(pwInputs).toHaveCount(2, { timeout: 15_000 });
+  await pwInputs.nth(0).fill(TEST_PASSWORD);
+  await pwInputs.nth(1).fill(TEST_PASSWORD);
+  const termsCheckbox = page.locator('input[type="checkbox"]').first();
+  await expect(termsCheckbox).toBeVisible({ timeout: 10_000 });
+  await termsCheckbox.check({ force: true });
+  const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
+  await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  await pwContinue.click();
 
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
@@ -73,7 +75,7 @@ async function onboardOyl(page: Page): Promise<void> {
 
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
-    throw new Error(`Phantom extension not unpacked at ${EXT_PATH}.`);
+    throw new Error(`Oyl extension not unpacked at ${EXT_PATH}.`);
   }
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');

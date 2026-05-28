@@ -36,9 +36,12 @@ async function shot(p: Page, name: string): Promise<void> {
 
 async function onboardPhantom(page: Page): Promise<void> {
   await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
+  // Phantom popup opens with a Lottie animation; wait for Help link
+  // as a "hydrated" proxy before looking for the import path.
+  await expect(page.getByText('Help', { exact: true })).toBeVisible({ timeout: 30_000 });
 
-  const importBtn = page.getByText(/import.*wallet|already have|recovery phrase|use seed/i).first();
+  const importBtn = page.getByText(/already have a wallet|use seed phrase|recovery phrase|import/i).first();
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
 

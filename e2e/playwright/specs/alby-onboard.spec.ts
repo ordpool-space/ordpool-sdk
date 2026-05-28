@@ -61,7 +61,9 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
 
   const page = await context.newPage();
   await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  // Alby's manifest has `options_ui: {page: "options.html", open_in_tab: true}`.
+  // popup.html shows a placeholder; options.html is the actual onboard surface.
+  await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 

@@ -90,19 +90,25 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
-  // Password setup (may be 1 or 2 fields).
+  // Step 04/05 — "Keep it secure! Set your password" with 2 password
+  // fields + a required "I agree to the Terms & Privacy Policy"
+  // checkbox. Continue stays disabled until the checkbox is ticked.
   const pwInputs = page.locator('input[type="password"]');
-  if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
-    const pwCount = await pwInputs.count();
-    for (let i = 0; i < pwCount; i++) {
-      await pwInputs.nth(i).fill(TEST_PASSWORD);
-    }
-    await shot(page, '06-password-typed');
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
-    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-    await pwContinue.click();
-    await shot(page, '07-after-password-submit');
-  }
+  await expect(pwInputs).toHaveCount(2, { timeout: 15_000 });
+  await pwInputs.nth(0).fill(TEST_PASSWORD);
+  await pwInputs.nth(1).fill(TEST_PASSWORD);
+  await shot(page, '06-password-typed');
+
+  // Terms checkbox — must be checked to enable Continue.
+  const termsCheckbox = page.locator('input[type="checkbox"]').first();
+  await expect(termsCheckbox).toBeVisible({ timeout: 10_000 });
+  await termsCheckbox.check({ force: true });
+  await shot(page, '07-terms-checked');
+
+  const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
+  await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  await pwContinue.click();
+  await shot(page, '08-after-password-submit');
 
   // Dashboard: balance / send / receive markers.
   await page.waitForFunction(() => {

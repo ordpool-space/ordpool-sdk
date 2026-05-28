@@ -61,12 +61,17 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
 
   const page = await context.newPage();
   await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
+  // Phantom popup opens with a Lottie animation (black rounded box on
+  // light purple) — interactive buttons appear only after the
+  // animation finishes. Wait for the Help link as a "hydrated" proxy.
+  await expect(page.getByText('Help', { exact: true })).toBeVisible({ timeout: 30_000 });
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
-  // OKX welcome → "Import wallet" / "I already have a wallet" / similar.
-  const importBtn = page.getByText(/import.*wallet|already have|restore/i).first();
+  // Phantom's "I already have a wallet" link (text varies by build —
+  // try the broadest viable match across known surface).
+  const importBtn = page.getByText(/already have a wallet|use seed phrase|recovery phrase|import/i).first();
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
   await shot(page, '02-after-import-click');

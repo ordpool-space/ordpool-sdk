@@ -176,13 +176,21 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    // Wizz's dashboard fires GET https://configs.wizz.cash/extension/<v>
-    // on mount. CI has no outbound internet so this request hangs and
-    // Wizz's requestAccounts handler blocks on the in-flight fetch.
-    // Abort the request at the browser layer so Wizz falls back to its
-    // default config immediately. Network-trace confirmed this is the
-    // only external request the dashboard issues.
-    await context.route('**/configs.wizz.cash/**', route => route.abort());
+    // Wizz issues outbound HTTPS calls on dashboard mount (config
+    // fetch + per-derivation token/balance fetches). CI has no
+    // internet — requests hang and Wizz's requestAccounts handler
+    // blocks on the in-flight fetches. P2TR happens to work with just
+    // configs.wizz.cash aborted; P2WPKH triggers additional calls
+    // (ARC20/BRC20 indexers etc.). Abort ALL non-localhost,
+    // non-chrome-extension traffic from the matrix context so the
+    // wallet falls back to bundled defaults across both variants.
+    await context.route('**/*', route => {
+      const url = route.request().url();
+      if (url.startsWith('chrome-extension://') || url.startsWith('http://localhost:') || url.startsWith('http://127.0.0.1:')) {
+        return route.continue();
+      }
+      return route.abort();
+    });
 
     try {
       let [worker] = context.serviceWorkers();

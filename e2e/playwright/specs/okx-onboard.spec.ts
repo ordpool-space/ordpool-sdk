@@ -65,20 +65,21 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
-  // OKX welcome → "Import wallet" / "I already have a wallet" / similar.
-  const importBtn = page.getByText(/import.*wallet|already have|restore/i).first();
+  // OKX splash → "Import wallet" main menu (two options:
+  // "Seed phrase or private key" / "Hardware wallet"). Confirmed via
+  // CI 26588699034 test-failed-2 screenshot.
+  const importBtn = page.getByText('Import wallet', { exact: true }).first();
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
-  // Import-source picker — likely options like "Seed phrase" /
-  // "Mnemonic" / "Recovery phrase". Pick the seed-phrase option.
-  const seedOption = page.getByText(/seed phrase|mnemonic|recovery phrase/i).first();
-  if (await seedOption.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await seedOption.click();
-    await shot(page, '03-seed-option-picked');
-  }
+  // Pick "Seed phrase or private key" — hard-assert visibility so a
+  // UI change is caught instead of silently skipped.
+  const seedOption = page.getByText('Seed phrase or private key', { exact: true });
+  await expect(seedOption).toBeVisible({ timeout: 15_000 });
+  await seedOption.click();
+  await shot(page, '03-seed-option-picked');
 
   // Mnemonic entry: 12 boxes or one textarea.
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
