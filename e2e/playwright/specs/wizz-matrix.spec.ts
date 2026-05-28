@@ -191,12 +191,15 @@ for (const variant of VARIANTS) {
         { timeout: 15_000 },
       );
 
-      // Bring the dashboard to front before connectWizz fires.
-      // The matrix-vs-handshake observation: handshake's beforeAll
-      // ends with the dashboard tab "in front" (it was the last tab
-      // touched); matrix's connectWizz fires while harness is in
-      // front. Try focusing the dashboard so Wizz's content script
-      // sees the wallet as the active surface.
+      // Trace from earlier failures showed Wizz fetches
+      // https://configs.wizz.cash/extension/2.13.4 on dashboard mount.
+      // CI has no outbound internet — this request hangs and Wizz's
+      // requestAccounts handler appears to block on it. The handshake
+      // spec passes because beforeAll/test transitions accumulate
+      // enough elapsed time for the fetch to time out; matrix runs
+      // too fast. Wait for network idle on the dashboard so the
+      // config fetch has resolved (success or fail) before connectWizz.
+      await dashboardPage.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => undefined);
       await dashboardPage.bringToFront();
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');

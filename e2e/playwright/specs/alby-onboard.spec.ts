@@ -65,22 +65,32 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
-  // OKX welcome → "Import wallet" / "I already have a wallet" / similar.
-  const importBtn = page.getByText(/import.*wallet|already have|restore/i).first();
-  await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await importBtn.click();
-  await shot(page, '02-after-import-click');
-  await dumpHtml(page, '02-after-import-click');
+  // Alby's first onboarding screen is "Set extension unlock passcode"
+  // — two `input[type="password"]` fields (passcode + confirm) and a
+  // "Next" button. Verified via CI 26580486080 test-failed-1.png.
+  await expect(page.getByText('Set extension unlock passcode', { exact: false })).toBeVisible({ timeout: 30_000 });
+  const passcodeInputs = page.locator('input[type="password"]');
+  await expect(passcodeInputs).toHaveCount(2, { timeout: 10_000 });
+  await passcodeInputs.nth(0).fill(TEST_PASSWORD);
+  await passcodeInputs.nth(1).fill(TEST_PASSWORD);
+  await shot(page, '02-passcode-set');
 
-  // Import-source picker — likely options like "Seed phrase" /
-  // "Mnemonic" / "Recovery phrase". Pick the seed-phrase option.
-  const seedOption = page.getByText(/seed phrase|mnemonic|recovery phrase/i).first();
-  if (await seedOption.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await seedOption.click();
-    await shot(page, '03-seed-option-picked');
-  }
+  const passcodeNext = page.getByRole('button', { name: /^next$/i });
+  await expect(passcodeNext).toBeEnabled({ timeout: 10_000 });
+  await passcodeNext.click();
+  await shot(page, '03-after-passcode-next');
+  await dumpHtml(page, '03-after-passcode-next');
 
-  // Mnemonic entry: 12 boxes or one textarea.
+  // Next: Alby asks how to set up — Connect via Hub / Bring your own
+  // wallet / Use seed phrase / etc. Click whichever option says seed
+  // or restore.
+  const seedRoute = page.getByText(/seed phrase|bring your own|advanced/i).first();
+  await expect(seedRoute).toBeVisible({ timeout: 20_000 });
+  await seedRoute.click();
+  await shot(page, '04-seed-route-picked');
+  await dumpHtml(page, '04-seed-route-picked');
+
+  // Mnemonic entry — likely a textarea or 12 boxes.
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   const inputCount = await mnemonicInputs.count();
@@ -91,27 +101,12 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   } else {
     await mnemonicInputs.first().fill(TEST_MNEMONIC);
   }
-  await shot(page, '04-mnemonic-filled');
-  await dumpHtml(page, '04-mnemonic-filled');
+  await shot(page, '05-mnemonic-filled');
 
-  const confirmAfterMnemonic = page.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
-  await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
-  await confirmAfterMnemonic.click();
-  await shot(page, '05-after-mnemonic-submit');
-
-  // Password setup (may be 1 or 2 fields).
-  const pwInputs = page.locator('input[type="password"]');
-  if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
-    const pwCount = await pwInputs.count();
-    for (let i = 0; i < pwCount; i++) {
-      await pwInputs.nth(i).fill(TEST_PASSWORD);
-    }
-    await shot(page, '06-password-typed');
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
-    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-    await pwContinue.click();
-    await shot(page, '07-after-password-submit');
-  }
+  const importBtn = page.getByRole('button', { name: /^(confirm|continue|next|import|restore|finish)$/i }).first();
+  await expect(importBtn).toBeEnabled({ timeout: 15_000 });
+  await importBtn.click();
+  await shot(page, '06-after-mnemonic-submit');
 
   // Dashboard: balance / send / receive markers.
   await page.waitForFunction(() => {

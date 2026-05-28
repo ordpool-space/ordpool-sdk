@@ -38,22 +38,19 @@ async function onboardOyl(page: Page): Promise<void> {
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/tabs/index.html`, { waitUntil: 'domcontentloaded' });
 
-  const importBtn = page.getByText(/import.*wallet|already have|recovery phrase|use seed/i).first();
+  // Oyl: Welcome → "Import wallet" card → mnemonic entry (12 boxes
+  // with stable ids word-0 … word-11).
+  const importBtn = page.getByText('Import wallet', { exact: true });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
 
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
+  const mnemonicInputs = page.locator('#word-0, #word-1, #word-2, #word-3, #word-4, #word-5, #word-6, #word-7, #word-8, #word-9, #word-10, #word-11');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
-  const inputCount = await mnemonicInputs.count();
-  if (inputCount >= 12) {
-    for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-      await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
-    }
-  } else {
-    await mnemonicInputs.first().fill(TEST_MNEMONIC);
+  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
+    await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
   }
 
-  const confirmAfterMnemonic = page.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
+  const confirmAfterMnemonic = page.getByRole('button', { name: /^(import|continue|next|confirm)$/i }).first();
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 

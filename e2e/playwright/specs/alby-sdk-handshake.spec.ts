@@ -38,14 +38,19 @@ async function onboardOkx(page: Page): Promise<void> {
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
 
-  const importBtn = page.getByText(/import.*wallet|already have|restore/i).first();
-  await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await importBtn.click();
+  // Alby: passcode-first flow.
+  await expect(page.getByText('Set extension unlock passcode', { exact: false })).toBeVisible({ timeout: 30_000 });
+  const passcodeInputs = page.locator('input[type="password"]');
+  await expect(passcodeInputs).toHaveCount(2, { timeout: 10_000 });
+  await passcodeInputs.nth(0).fill(TEST_PASSWORD);
+  await passcodeInputs.nth(1).fill(TEST_PASSWORD);
+  const passcodeNext = page.getByRole('button', { name: /^next$/i });
+  await expect(passcodeNext).toBeEnabled({ timeout: 10_000 });
+  await passcodeNext.click();
 
-  const seedOption = page.getByText(/seed phrase|mnemonic|recovery phrase/i).first();
-  if (await seedOption.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await seedOption.click();
-  }
+  const seedRoute = page.getByText(/seed phrase|bring your own|advanced/i).first();
+  await expect(seedRoute).toBeVisible({ timeout: 20_000 });
+  await seedRoute.click();
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
@@ -57,21 +62,9 @@ async function onboardOkx(page: Page): Promise<void> {
   } else {
     await mnemonicInputs.first().fill(TEST_MNEMONIC);
   }
-
-  const confirmAfterMnemonic = page.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
-  await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
-  await confirmAfterMnemonic.click();
-
-  const pwInputs = page.locator('input[type="password"]');
-  if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
-    const pwCount = await pwInputs.count();
-    for (let i = 0; i < pwCount; i++) {
-      await pwInputs.nth(i).fill(TEST_PASSWORD);
-    }
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
-    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-    await pwContinue.click();
-  }
+  const importBtn = page.getByRole('button', { name: /^(confirm|continue|next|import|restore|finish)$/i }).first();
+  await expect(importBtn).toBeEnabled({ timeout: 15_000 });
+  await importBtn.click();
 
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();

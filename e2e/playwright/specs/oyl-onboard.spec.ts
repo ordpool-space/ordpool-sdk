@@ -65,31 +65,22 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
-  // OKX welcome → "Import wallet" / "I already have a wallet" / similar.
-  const importBtn = page.getByText(/import.*wallet|already have|restore/i).first();
+  // Oyl welcome shows "Welcome home! Let's setup your wallet." with
+  // three cards: Create new wallet / Import wallet / Connect hardware
+  // (Coming soon). Click the Import card.
+  const importBtn = page.getByText('Import wallet', { exact: true });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
-  // Import-source picker — likely options like "Seed phrase" /
-  // "Mnemonic" / "Recovery phrase". Pick the seed-phrase option.
-  const seedOption = page.getByText(/seed phrase|mnemonic|recovery phrase/i).first();
-  if (await seedOption.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await seedOption.click();
-    await shot(page, '03-seed-option-picked');
-  }
-
-  // Mnemonic entry: 12 boxes or one textarea.
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
+  // Step 03/05 — "Import your seed. Enter one by one!" — 12
+  // `input[type="password"]` boxes with `id="word-0"` through
+  // `id="word-11"`. Verified via CI 26580486080 dump.
+  const mnemonicInputs = page.locator('#word-0, #word-1, #word-2, #word-3, #word-4, #word-5, #word-6, #word-7, #word-8, #word-9, #word-10, #word-11');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
-  const inputCount = await mnemonicInputs.count();
-  if (inputCount >= 12) {
-    for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-      await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
-    }
-  } else {
-    await mnemonicInputs.first().fill(TEST_MNEMONIC);
+  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
+    await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
   }
   await shot(page, '04-mnemonic-filled');
   await dumpHtml(page, '04-mnemonic-filled');
