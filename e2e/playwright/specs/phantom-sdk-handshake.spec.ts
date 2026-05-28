@@ -40,7 +40,9 @@ async function onboardPhantom(page: Page): Promise<void> {
     await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
   }
 
-  const importBtn = page.getByText(/already have a wallet|use seed phrase|recovery phrase|import/i).first();
+  // Match the actual button, not the help paragraph that contains
+  // "import" + "wallet".
+  const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
 

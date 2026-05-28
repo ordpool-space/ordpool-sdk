@@ -83,10 +83,11 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
-  // OKX splash → "Import wallet" main menu (two options:
-  // "Seed phrase or private key" / "Hardware wallet"). Confirmed via
-  // CI 26588699034 test-failed-2 screenshot.
-  const importBtn = page.getByText('Import wallet', { exact: true }).first();
+  // OKX onboarding (auto-opened tab caught in beforeAll): welcome
+  // is "Your portal to Web3" with "Create wallet" / "Import wallet"
+  // buttons (CI 26602529964 dump). getByText hit a non-actionable
+  // element; switch to the button role.
+  const importBtn = page.getByRole('button', { name: 'Import wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
   await shot(page, '02-after-import-click');

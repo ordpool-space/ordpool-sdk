@@ -103,12 +103,14 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '03-after-passcode-next');
   await dumpHtml(page, '03-after-passcode-next');
 
-  // Next: Alby asks how to set up — Connect via Hub / Bring your own
-  // wallet / Use seed phrase / etc. Click whichever option says seed
-  // or restore.
-  const seedRoute = page.getByText(/seed phrase|bring your own|advanced/i).first();
-  await expect(seedRoute).toBeVisible({ timeout: 20_000 });
-  await seedRoute.click();
+  // "Connect Alby Extension to a wallet" — TWO cards:
+  //   - Alby Account → Continue with Alby Account (requires server)
+  //   - Bring Your Own Wallet → Find Your Wallet (mnemonic flow)
+  // CI 26602529964 dump confirmed exact text. Click the action button
+  // on the BYOW card.
+  const findWalletBtn = page.getByRole('button', { name: 'Find Your Wallet' });
+  await expect(findWalletBtn).toBeVisible({ timeout: 20_000 });
+  await findWalletBtn.click();
   await shot(page, '04-seed-route-picked');
   await dumpHtml(page, '04-seed-route-picked');
 

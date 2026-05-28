@@ -41,7 +41,7 @@ async function onboardOkx(page: Page): Promise<void> {
     await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
   }
 
-  const importBtn = page.getByText('Import wallet', { exact: true }).first();
+  const importBtn = page.getByRole('button', { name: 'Import wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
 

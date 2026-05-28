@@ -51,9 +51,11 @@ async function onboardAlby(page: Page): Promise<void> {
   await expect(passcodeNext).toBeEnabled({ timeout: 10_000 });
   await passcodeNext.click();
 
-  const seedRoute = page.getByText(/seed phrase|bring your own|advanced/i).first();
-  await expect(seedRoute).toBeVisible({ timeout: 20_000 });
-  await seedRoute.click();
+  // "Connect Alby Extension to a wallet" → click "Find Your Wallet"
+  // button on the Bring Your Own Wallet card.
+  const findWalletBtn = page.getByRole('button', { name: 'Find Your Wallet' });
+  await expect(findWalletBtn).toBeVisible({ timeout: 20_000 });
+  await findWalletBtn.click();
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });

@@ -82,9 +82,11 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
-  // Phantom's "I already have a wallet" link (text varies by build —
-  // try the broadest viable match across known surface).
-  const importBtn = page.getByText(/already have a wallet|use seed phrase|recovery phrase|import/i).first();
+  // Phantom welcome (CI 26602529964 dump confirmed): "Create a New
+  // Wallet" + "I Already Have a Wallet" buttons. Match by button role
+  // so we don't hit the help-text paragraph that also contains
+  // "import" / "wallet".
+  const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   await importBtn.click();
   await shot(page, '02-after-import-click');

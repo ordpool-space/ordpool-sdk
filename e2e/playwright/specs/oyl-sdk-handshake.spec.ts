@@ -119,22 +119,33 @@ test('oylConnector.connect via the harness page returns the BIP-84 + BIP-86 main
   );
 
   const knownPages = new Set(context.pages());
-  const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectPhantom());
+  const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOyl());
   resultPromise.catch(() => undefined);
 
-  const approval = await waitForApprovalPopup({
-    context,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
-      return true;
-    },
-  });
-  await shot(approval, '01-approval');
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
+  // Race two outcomes: an approval popup may or may not appear (Oyl
+  // is documented to auto-resolve from the current account; if it
+  // doesn't, resultPromise just resolves directly). If a popup does
+  // appear, click its primary action. Whichever path completes first
+  // wins; never let one block the other.
+  const approvalHandled = (async () => {
+    try {
+      const approval = await waitForApprovalPopup({
+        context,
+        knownPages,
+        timeoutMs: 60_000,
+        isApproval: async (p) => {
+          if (!p.url().startsWith('chrome-extension://')) return false;
+          await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
+            .waitFor({ state: 'visible', timeout: 60_000 });
+          return true;
+        },
+      });
+      await shot(approval, '01-approval');
+      await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
+    } catch { /* no popup — Oyl auto-resolved */ }
+  })();
 
+  await Promise.race([resultPromise, approvalHandled]);
   const info = await resultPromise;
   // eslint-disable-next-line no-console
   console.log(`[oyl:sdk-handshake] payment = ${info.paymentAddress}`);
