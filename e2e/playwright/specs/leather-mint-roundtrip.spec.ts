@@ -162,7 +162,13 @@ test('mint a cat21 on regtest via Leather: build PSBT in SDK, sign in popup (net
   const wallet = await connectResultPromise;
   // eslint-disable-next-line no-console
   console.log(`[leather-mint] mainnet payment = ${wallet.paymentAddress}`);
-  expect(wallet.paymentAddress).toMatch(/^bc1q/);
+  // BIP-84 m/84'/0'/0'/0/0 derivation of `abandon × 11 + about` on
+  // mainnet — pinned because Leather is configured for devnet here
+  // but its connector returns the mainnet payment address from the
+  // same seed. Any drift in the bundled extension's derivation
+  // (e.g. an internal upgrade that bumps the default account index)
+  // surfaces here as a concrete diff rather than passing on /^bc1q/.
+  expect(wallet.paymentAddress).toBe('bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu');
 
   // Same network-agnostic-keys trick we use for Unisat: derive
   // bcrt1q + bcrt1p from the same compressed pubkey.

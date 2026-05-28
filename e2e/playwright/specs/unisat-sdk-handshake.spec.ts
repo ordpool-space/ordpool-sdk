@@ -74,10 +74,11 @@ async function onboardUnisat(page: Page): Promise<void> {
   }
   await page.getByTestId('mnemonic-import-continue-button').click();
 
+  // Address-type picker MUST be advanced — without this the wallet
+  // never reaches the dashboard and the connect handshake hangs.
   const addressTypeContinue = page.getByTestId('address-type-continue-button');
-  if (await addressTypeContinue.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await addressTypeContinue.click();
-  }
+  await expect(addressTypeContinue).toBeVisible({ timeout: 15_000 });
+  await addressTypeContinue.click();
 
   const noticeCheckbox = page.getByTestId('notice-checkbox-1');
   if (await noticeCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {

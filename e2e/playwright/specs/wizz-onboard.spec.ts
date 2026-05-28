@@ -148,11 +148,14 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   //              up on the standard BIP-84 derivation that matches
   //              our test vectors.) ───
   await dumpHtml(page, '08a-address-type-screen');
+  // MUST actively pick Native SegWit — the default selection is Wizz's
+  // non-standard "Legacy & Taproot (P2TR)" on m/44'/0'/0'/0/0. Without
+  // this click the wallet ends up at a different derivation, which
+  // changes every downstream address. Hard-assert visibility.
   const nativeSegwitRow = page.getByText('Native Segwit (P2WPKH)', { exact: true }).first();
-  if (await nativeSegwitRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await nativeSegwitRow.click({ force: true });
-    await shot(page, '08b-native-segwit-picked');
-  }
+  await expect(nativeSegwitRow).toBeVisible({ timeout: 10_000 });
+  await nativeSegwitRow.click({ force: true });
+  await shot(page, '08b-native-segwit-picked');
 
   // CI 26418861365 showed both 08c (post-click 1) and 08e (post-click 2)
   // still on the address-type screen with Native SegWit checked + an

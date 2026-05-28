@@ -135,16 +135,17 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await page.getByTestId('mnemonic-import-continue-button').click();
   await shot(page, '07-after-mnemonic-continue');
 
-  // ─── Phase 6: address-type picker (optional / version-dependent) ───
+  // ─── Phase 6: address-type picker ───
   // Unisat v1.7.15 shows the address-type screen after mnemonic.
-  // Native SegWit (BIP-84) is the default and the only path we
-  // verify in iteration 3, so accept whatever's selected.
+  // Native SegWit (BIP-84) is the default and the only path the
+  // handshake spec verifies. The button MUST be clicked to advance
+  // — if Unisat ever removes this screen, the spec needs an update,
+  // not a silent skip.
   const addressTypeContinue = page.getByTestId('address-type-continue-button');
-  if (await addressTypeContinue.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await shot(page, '08-address-type-picker');
-    await addressTypeContinue.click();
-    await shot(page, '09-after-address-type-continue');
-  }
+  await expect(addressTypeContinue).toBeVisible({ timeout: 15_000 });
+  await shot(page, '08-address-type-picker');
+  await addressTypeContinue.click();
+  await shot(page, '09-after-address-type-continue');
 
   // ─── Phase 7: dismiss any post-restore notice ───
   // notice-popover has a checkbox + OK button on first dashboard

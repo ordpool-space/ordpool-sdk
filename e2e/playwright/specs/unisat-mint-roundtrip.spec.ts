@@ -177,7 +177,11 @@ test('mint a cat21 on regtest via Unisat: build PSBT in SDK, sign in popup (main
   const wallet = await connectResultPromise;
   // eslint-disable-next-line no-console
   console.log(`[unisat-mint] mainnet payment = ${wallet.paymentAddress}`);
-  expect(wallet.paymentAddress).toMatch(/^bc1q/);
+  // BIP-84 m/84'/0'/0'/0/0 derivation of `abandon × 11 + about` on
+  // mainnet. Pinned exactly so an extension upgrade that drifts the
+  // default account/derivation index surfaces as a concrete diff
+  // rather than passing on /^bc1q/.
+  expect(wallet.paymentAddress).toBe('bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu');
 
   // ─── Derive the regtest address from the same pubkey ───────────
   // Unisat doesn't ship regtest; we synthesize the bcrt1q address

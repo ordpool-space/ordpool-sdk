@@ -78,11 +78,11 @@ async function onboardWizz(page: Page): Promise<void> {
   await expect(mnemonicContinue).toBeEnabled({ timeout: 10_000 });
   await mnemonicContinue.click();
 
-  // Pick Native SegWit (BIP-84) so the address matches our test vector.
+  // MUST pick Native SegWit (BIP-84) — the default selection is Wizz's
+  // non-standard "Legacy & Taproot" which would change the address.
   const nativeSegwitRow = page.getByText('Native Segwit (P2WPKH)', { exact: true }).first();
-  if (await nativeSegwitRow.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await nativeSegwitRow.click({ force: true });
-  }
+  await expect(nativeSegwitRow).toBeVisible({ timeout: 10_000 });
+  await nativeSegwitRow.click({ force: true });
 
   const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
   await expect(continueBtn).toBeVisible({ timeout: 10_000 });
