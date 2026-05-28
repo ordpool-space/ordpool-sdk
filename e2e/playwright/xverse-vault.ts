@@ -48,7 +48,6 @@
 import { argon2id } from '@noble/hashes/argon2';
 import * as crypto from 'node:crypto';
 
-import { waitForServiceWorkerReady } from './wait-helpers';
 
 const ARGON2_PARAMS = { t: 3, m: 65536, p: 4, dkLen: 16 } as const;
 
@@ -275,10 +274,11 @@ export async function applyXverseVariant(
     reloadFn();
     return { phase1Legacy, storageKeys: allKeys.filter(k => /account|wallet|address|persist/i.test(k)).sort() };
   }, variant);
-  // The worker that ran the reload() is gone. Wait for a DIFFERENT
-  // worker to come up; pass the dead reference to ignoreWorker so the
-  // probe doesn't mis-detect the stale entry as ready.
-  await waitForServiceWorkerReady(context, { ignoreWorker: worker, timeoutMs: 30_000 });
+  // The worker that ran chrome.runtime.reload() is dead. We don't
+  // explicitly wait for the new SW here — the next consumer's
+  // operation (e.g. waitForChromeStorageKey) re-fetches the worker
+  // each iteration and naturally rides out the restart by retrying
+  // its evaluate() on "target closed".
   return diag;
 }
 

@@ -117,18 +117,27 @@ export async function waitForChromeStorageKey(opts: {
   const { context, keyContains } = opts;
   const matchValue = opts.matchValue;
   const timeoutMs = opts.timeoutMs ?? 30_000;
-  const [worker] = context.serviceWorkers();
-  if (!worker) throw new Error('No service worker found in context');
 
   const deadline = Date.now() + timeoutMs;
+  // Re-fetch the SW reference on every iteration — chrome.runtime.reload()
+  // may have invalidated whichever worker was current at call time.
+  // Each evaluate() throws "target closed" while the SW restarts;
+  // catching and retrying lets the loop ride out the restart without
+  // any hardcoded sleep.
   while (Date.now() < deadline) {
-    const found = await worker.evaluate(async ({ keyContains: kc }) => {
-      const all = await chrome.storage.local.get(null);
-      const key = Object.keys(all).find(k => k.includes(kc));
-      if (!key) return null;
-      return { key, value: all[key] };
-    }, { keyContains });
-    if (found && (!matchValue || matchValue(found.value))) return;
+    const [worker] = context.serviceWorkers();
+    if (worker) {
+      try {
+        const found = await worker.evaluate(async ({ keyContains: kc }) => {
+          const all = await chrome.storage.local.get(null);
+          const key = Object.keys(all).find(k => k.includes(kc));
+          if (!key) return null;
+          return { key, value: all[key] };
+        }, { keyContains });
+        if (found && (!matchValue || matchValue(found.value))) return;
+      } catch { /* SW restarting; retry on next iteration */ }
+    }
+    await new Promise<void>(resolve => setImmediate(resolve));
   }
   throw new Error(`chrome.storage.local never produced a key containing "${keyContains}" within ${timeoutMs}ms`);
 }
