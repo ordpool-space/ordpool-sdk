@@ -89,7 +89,12 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // element; switch to the button role.
   const importBtn = page.getByRole('button', { name: 'Import wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await importBtn.click();
+  // CI 26604643877 showed the screen unchanged after the click —
+  // OKX's React handlers aren't bound yet at the moment of the
+  // actionability check, so the synthetic click is silently dropped.
+  // force:true dispatches the click regardless; the page re-renders
+  // once React finishes hydration.
+  await importBtn.click({ force: true });
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 

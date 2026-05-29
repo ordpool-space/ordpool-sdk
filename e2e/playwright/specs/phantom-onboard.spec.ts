@@ -88,7 +88,10 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // "import" / "wallet".
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await importBtn.click();
+  // Phantom's React handlers aren't bound at the moment of click —
+  // synthetic click gets dropped (CI 26604643877: post-click screenshot
+  // still on welcome). force:true dispatches the event regardless.
+  await importBtn.click({ force: true });
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 

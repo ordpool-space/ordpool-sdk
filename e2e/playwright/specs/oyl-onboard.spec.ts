@@ -117,7 +117,8 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await pwContinue.click();
   await shot(page, '08-after-password-submit');
 
-  // Dashboard: balance / send / receive markers.
+  // Dashboard markers only — never 'oyl' (that text appears on the
+  // password screen too and would false-positive).
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');

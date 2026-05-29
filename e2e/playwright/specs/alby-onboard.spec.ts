@@ -70,7 +70,16 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
+// Alby is skipped: CI 26604643877 confirmed Alby is Lightning-first.
+// After passcode → "Connect Alby Extension to a wallet" → "Find Your
+// Wallet" leads to a Lightning Wallet picker (LND / Core Lightning /
+// Umbrel / NWC / etc.) — there is no BIP-39 mnemonic import path
+// through the UI. Alby's L1 support requires connecting to an Alby
+// Hub or NWC backend which we can't provision on CI. The
+// `albyConnector` in the SDK exists for window.alby detection;
+// end-to-end onboard via UI is out of scope until a hosted backend
+// path is feasible.
+test.skip('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
   test.setTimeout(180_000);
 
   // Prefer the auto-opened onboarding tab captured in beforeAll; fall

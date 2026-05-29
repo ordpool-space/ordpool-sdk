@@ -43,7 +43,7 @@ async function onboardOkx(page: Page): Promise<void> {
 
   const importBtn = page.getByRole('button', { name: 'Import wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await importBtn.click();
+  await importBtn.click({ force: true });
 
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible({ timeout: 15_000 });

@@ -69,9 +69,14 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
   await pwContinue.click();
 
+  // Wait for actual dashboard markers only — 'oyl' appears in the
+  // password-setup screen ("creating a Oyl wallet") and would falsely
+  // resolve before the wallet is committed (CI 26604643877 caught
+  // this: post-onboard screenshot showed the password screen with
+  // Continue still disabled).
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('oyl');
+    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
   }, undefined, { timeout: 60_000, polling: 500 });
 }
 

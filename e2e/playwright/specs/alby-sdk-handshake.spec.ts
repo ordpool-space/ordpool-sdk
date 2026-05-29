@@ -121,7 +121,10 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('albyConnector.connect via the harness page returns the BIP-84 mainnet address for the test seed', async () => {
+// Skipped — Alby's UI has no BIP-39 mnemonic import path (Lightning-
+// first, requires Alby Hub / NWC backend that's not provisionable on CI).
+// See alby-onboard.spec.ts for the full reasoning.
+test.skip('albyConnector.connect via the harness page returns the BIP-84 mainnet address for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();

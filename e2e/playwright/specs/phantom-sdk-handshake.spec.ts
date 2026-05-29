@@ -44,7 +44,7 @@ async function onboardPhantom(page: Page): Promise<void> {
   // "import" + "wallet".
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await importBtn.click();
+  await importBtn.click({ force: true });
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
