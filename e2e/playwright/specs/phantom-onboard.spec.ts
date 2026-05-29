@@ -88,17 +88,19 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // "import" / "wallet".
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  // Phantom's React component ignores synthetic .click() AND
-  // keyboard.press('Enter') (CI 26621231674 + 26631233318 — same
-  // welcome screen captured post-action). Fall through to a direct
-  // DOM-level .click() invoked via evaluate. The native HTMLElement
-  // method runs the actual click handler chain and bypasses
-  // Playwright's synthetic event dispatch.
-  await page.evaluate(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    const btn = buttons.find(b => b.textContent?.includes('Already Have'));
-    if (btn) (btn as HTMLButtonElement).click();
-  });
+  // Phantom's React component ignores synthetic .click(),
+  // keyboard.press('Enter'), AND DOM-level element.click() (CI
+  // 26621231674, 26631233318, 26645369070 — same welcome state
+  // every time). Use page.mouse.click at the button's coordinates;
+  // that simulates real OS-level mouse events through Chromium's
+  // input pipeline, which React's CSP-isolated onClick handlers do
+  // observe.
+  const box = await importBtn.boundingBox();
+  if (box) {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+  }
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 

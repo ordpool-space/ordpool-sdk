@@ -42,15 +42,17 @@ async function onboardPhantom(page: Page): Promise<void> {
 
   // Match the actual button, not the help paragraph that contains
   // "import" + "wallet".
-  // Direct DOM-level click via evaluate; synthetic methods don't
-  // advance Phantom's welcome screen.
+  // Real mouse events via Chromium's input pipeline — synthetic
+  // .click(), keyboard.press, and DOM-level click all silently
+  // absorbed by Phantom's CSP-isolated welcome.
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await page.evaluate(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    const btn = buttons.find(b => b.textContent?.includes('Already Have'));
-    if (btn) (btn as HTMLButtonElement).click();
-  });
+  const box = await importBtn.boundingBox();
+  if (box) {
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.up();
+  }
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });

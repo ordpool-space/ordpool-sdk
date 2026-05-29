@@ -108,6 +108,12 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible({ timeout: 15_000 });
   await seedOption.click();
+  // CI 26645369070 captured an empty body innerHTML at this point —
+  // OKX clears the screen during transition. Wait for actual content
+  // to render before snapshotting.
+  await page.waitForFunction(() => {
+    return (document.body.innerText || '').length > 50;
+  }, undefined, { timeout: 30_000, polling: 250 });
   await shot(page, '03-seed-option-picked');
   await dumpHtml(page, '03-seed-option-picked');
 
