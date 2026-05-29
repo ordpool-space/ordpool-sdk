@@ -41,9 +41,16 @@ async function onboardOkx(page: Page): Promise<void> {
     await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
   }
 
-  const importBtn = page.getByRole('button', { name: 'Import wallet' });
-  await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await importBtn.click({ force: true });
+  // Wait for the OKX welcome's _affix wrapper to fade in (it gates
+  // pointer events until the cover-light.mp4 video finishes). Then
+  // click the stable testid.
+  await page.waitForFunction(() => {
+    const wrapper = document.querySelector('[class*="_affix_"]') as HTMLElement | null;
+    return !!wrapper && getComputedStyle(wrapper).opacity === '1';
+  }, undefined, { timeout: 60_000, polling: 250 });
+  const importBtn = page.getByTestId('onboard-page-import-wallet-button');
+  await expect(importBtn).toBeVisible({ timeout: 10_000 });
+  await importBtn.click();
 
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible({ timeout: 15_000 });

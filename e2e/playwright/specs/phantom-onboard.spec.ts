@@ -88,10 +88,13 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // "import" / "wallet".
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  // Phantom's React handlers aren't bound at the moment of click —
-  // synthetic click gets dropped (CI 26604643877: post-click screenshot
-  // still on welcome). force:true dispatches the event regardless.
-  await importBtn.click({ force: true });
+  // CI 26621231674 confirmed: synthetic click (including force:true)
+  // does not advance Phantom's welcome screen. Phantom appears to
+  // hook its CTAs on real keyboard or pointer-down events, not the
+  // dispatched MouseEvent. Focus the button and press Enter — that
+  // mimics a real activation through React's onKeyDown handler.
+  await importBtn.focus();
+  await page.keyboard.press('Enter');
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 

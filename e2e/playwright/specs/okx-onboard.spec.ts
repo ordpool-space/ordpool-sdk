@@ -87,14 +87,19 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // is "Your portal to Web3" with "Create wallet" / "Import wallet"
   // buttons (CI 26602529964 dump). getByText hit a non-actionable
   // element; switch to the button role.
-  const importBtn = page.getByRole('button', { name: 'Import wallet' });
-  await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  // CI 26604643877 showed the screen unchanged after the click —
-  // OKX's React handlers aren't bound yet at the moment of the
-  // actionability check, so the synthetic click is silently dropped.
-  // force:true dispatches the click regardless; the page re-renders
-  // once React finishes hydration.
-  await importBtn.click({ force: true });
+  // OKX welcome HTML (CI 26621231674 dump) wraps the action buttons in
+  //   <div class="_affix_..." style="z-index:1; opacity:0;">
+  // until an onboarding cover video (static/images/onboard/cover-light.mp4)
+  // finishes. Clicking before opacity transitions to 1 dispatches the
+  // event but the parent intercepts it. Wait for the wrapper to fade
+  // in, then click the stable testid.
+  await page.waitForFunction(() => {
+    const wrapper = document.querySelector('[class*="_affix_"]') as HTMLElement | null;
+    return !!wrapper && getComputedStyle(wrapper).opacity === '1';
+  }, undefined, { timeout: 60_000, polling: 250 });
+  const importBtn = page.getByTestId('onboard-page-import-wallet-button');
+  await expect(importBtn).toBeVisible({ timeout: 10_000 });
+  await importBtn.click();
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
