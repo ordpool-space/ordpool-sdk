@@ -42,12 +42,15 @@ async function onboardPhantom(page: Page): Promise<void> {
 
   // Match the actual button, not the help paragraph that contains
   // "import" + "wallet".
-  // Use keyboard activation; synthetic .click() doesn't advance
-  // Phantom's welcome screen.
+  // Direct DOM-level click via evaluate; synthetic methods don't
+  // advance Phantom's welcome screen.
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  await importBtn.focus();
-  await page.keyboard.press('Enter');
+  await page.evaluate(() => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const btn = buttons.find(b => b.textContent?.includes('Already Have'));
+    if (btn) (btn as HTMLButtonElement).click();
+  });
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });

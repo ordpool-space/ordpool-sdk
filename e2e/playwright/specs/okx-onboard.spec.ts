@@ -109,6 +109,7 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await expect(seedOption).toBeVisible({ timeout: 15_000 });
   await seedOption.click();
   await shot(page, '03-seed-option-picked');
+  await dumpHtml(page, '03-seed-option-picked');
 
   // Mnemonic entry: 12 boxes or one textarea.
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
