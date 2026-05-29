@@ -26,6 +26,7 @@ const EXPECTED_ORDINALS_ADDRESS = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac
 
 let context: BrowserContext;
 let extensionId: string;
+let onboardedDashboard: Page | null = null;
 
 async function shot(p: Page, name: string): Promise<void> {
   await p.screenshot({
@@ -106,21 +107,14 @@ test.beforeAll(async () => {
   test.setTimeout(180_000);
   await onboardOyl(onboardPage);
   await shot(onboardPage, '00-onboarded');
+  onboardedDashboard = onboardPage;
 });
 
 test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — onboard helper completes (oyl-onboard passes), but
-// Oyl's RPC bridge rejects with `InternalError: Wallet not
-// initialized` from oylConnectProvider.baac0163.js when the harness
-// calls connectOyl. The dashboard renders before the wallet's
-// internal state is "initialized" enough for RPC. Likely needs an
-// unlock-via-password step we haven't decoded yet. Onboard coverage
-// (oyl-onboard.spec.ts) verifies the UI flow; handshake-level
-// SDK verification deferred.
-test.skip('oylConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+test('oylConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();
@@ -130,6 +124,13 @@ test.skip('oylConnector.connect via the harness page returns the BIP-84 + BIP-86
     undefined,
     { timeout: 15_000 },
   );
+
+  // Wizz-style fix: bring the dashboard tab to front before the
+  // harness's connect call. Wallets often gate RPC on the wallet's
+  // dashboard being the active surface.
+  if (onboardedDashboard) {
+    await onboardedDashboard.bringToFront();
+  }
 
   const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOyl());

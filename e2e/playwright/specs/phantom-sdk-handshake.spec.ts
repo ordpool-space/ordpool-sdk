@@ -42,16 +42,19 @@ async function onboardPhantom(page: Page): Promise<void> {
 
   // Match the actual button, not the help paragraph that contains
   // "import" + "wallet".
-  // Real mouse events via Chromium's input pipeline — synthetic
-  // .click(), keyboard.press, and DOM-level click all silently
-  // absorbed by Phantom's CSP-isolated welcome.
+  // Raw CDP Input.dispatchMouseEvent — one layer below page.mouse,
+  // which Phantom's onClick handler has ignored across every other
+  // activation strategy.
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
+  const cdp = await page.context().newCDPSession(page);
   const box = await importBtn.boundingBox();
   if (box) {
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.up();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
@@ -126,10 +129,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — depends on Phantom onboarding which is blocked by the
-// wallet's anti-automation event filter. See phantom-onboard.spec.ts
-// for the full investigation.
-test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();

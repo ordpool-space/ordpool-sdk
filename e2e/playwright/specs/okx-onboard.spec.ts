@@ -69,31 +69,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — OKX welcome screen does not advance under Playwright
-// automation. Across 7 CI iterations (26588699034, 26597193687,
-// 26602529964, 26621231674, 26631233318, 26645369070, 26650482318)
-// the same welcome screen ("Your portal to Web3" / Create wallet /
-// Import wallet) was captured POST-click for every tried activation
-// strategy:
-//
-//   - getByText('Import wallet').click()       → no nav
-//   - getByText(...).click({ force: true })    → no nav
-//   - getByRole('button').click()              → no nav
-//   - getByTestId('onboard-page-import-wallet-button').click() → no nav
-//   - mouse.move + mouse.down + mouse.up at button centre → no nav
-//   - after waiting for the _affix wrapper's opacity to be 1 → no nav
-//
-// HTML dumps after each click consistently show the unchanged welcome
-// markup. OKX's React component appears to filter `isTrusted: false`
-// events (the standard wallet anti-automation pattern). Genuine OS
-// input events would advance, but Playwright's CDP-driven dispatch
-// does not satisfy that check.
-//
-// Single-variant SDK coverage is provided by the unit-level signer +
-// connector specs (npm test). End-to-end automation would require
-// either Alby Hub-style external state injection (not viable for OKX)
-// or a CDP extension that forges isTrusted=true.
-test.skip('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
+test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
   test.setTimeout(180_000);
 
   let page: Page;
@@ -111,19 +87,24 @@ test.skip('restores a wallet from the BIP-39 test seed and lands on the dashboar
   // is "Your portal to Web3" with "Create wallet" / "Import wallet"
   // buttons (CI 26602529964 dump). getByText hit a non-actionable
   // element; switch to the button role.
-  // OKX welcome HTML (CI 26621231674 dump) wraps the action buttons in
-  //   <div class="_affix_..." style="z-index:1; opacity:0;">
-  // until an onboarding cover video (static/images/onboard/cover-light.mp4)
-  // finishes. Clicking before opacity transitions to 1 dispatches the
-  // event but the parent intercepts it. Wait for the wrapper to fade
-  // in, then click the stable testid.
+  // Wait for OKX's cover-video opacity gate to release.
   await page.waitForFunction(() => {
     const wrapper = document.querySelector('[class*="_affix_"]') as HTMLElement | null;
     return !!wrapper && getComputedStyle(wrapper).opacity === '1';
   }, undefined, { timeout: 60_000, polling: 250 });
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
   await expect(importBtn).toBeVisible({ timeout: 10_000 });
-  await importBtn.click();
+  // Raw CDP Input.dispatchMouseEvent — Playwright's higher-level APIs
+  // are silently dropped by OKX (CI 26645369070 onwards).
+  const cdp = await page.context().newCDPSession(page);
+  const box = await importBtn.boundingBox();
+  if (box) {
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+  }
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 

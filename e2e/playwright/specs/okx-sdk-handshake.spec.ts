@@ -41,16 +41,22 @@ async function onboardOkx(page: Page): Promise<void> {
     await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
   }
 
-  // Wait for the OKX welcome's _affix wrapper to fade in (it gates
-  // pointer events until the cover-light.mp4 video finishes). Then
-  // click the stable testid.
   await page.waitForFunction(() => {
     const wrapper = document.querySelector('[class*="_affix_"]') as HTMLElement | null;
     return !!wrapper && getComputedStyle(wrapper).opacity === '1';
   }, undefined, { timeout: 60_000, polling: 250 });
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
   await expect(importBtn).toBeVisible({ timeout: 10_000 });
-  await importBtn.click();
+  // Raw CDP Input.dispatchMouseEvent.
+  const cdp = await page.context().newCDPSession(page);
+  const box = await importBtn.boundingBox();
+  if (box) {
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+  }
 
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible({ timeout: 15_000 });
@@ -130,10 +136,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — depends on OKX onboarding which is blocked by the
-// wallet's anti-automation event filter. See okx-onboard.spec.ts
-// for the full investigation.
-test.skip('okxConnector.connect via the harness page returns the BIP-84 mainnet address for the test seed', async () => {
+test('okxConnector.connect via the harness page returns the BIP-84 mainnet address for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();

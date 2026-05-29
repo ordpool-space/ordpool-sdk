@@ -68,25 +68,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — Phantom's welcome screen does not advance under
-// Playwright automation. Across 4 CI iterations (26621231674,
-// 26631233318, 26645369070, 26650482318) the same welcome screen
-// ("Create a New Wallet" / "I Already Have a Wallet") was captured
-// POST-click for every tried activation strategy:
-//
-//   - getByRole('button').click()                        → no nav
-//   - .click({ force: true })                            → no nav
-//   - keyboard.press('Enter') after .focus()             → no nav
-//   - DOM-level HTMLElement.click() via page.evaluate    → no nav
-//   - page.mouse.move + mouse.down + mouse.up at coords  → no nav
-//
-// HTML dumps after each click consistently show the unchanged
-// welcome markup. Phantom's React component appears to filter
-// `isTrusted: false` events — the standard wallet anti-automation
-// pattern. End-to-end automation would require either CDP-level
-// event forging (not portable) or external state injection via
-// chrome.storage.local (Xverse-style — possible follow-up).
-test.skip('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
+test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
   test.setTimeout(180_000);
 
   let page: Page;
@@ -106,18 +88,18 @@ test.skip('restores a wallet from the BIP-39 test seed and lands on the dashboar
   // "import" / "wallet".
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
-  // Phantom's React component ignores synthetic .click(),
-  // keyboard.press('Enter'), AND DOM-level element.click() (CI
-  // 26621231674, 26631233318, 26645369070 — same welcome state
-  // every time). Use page.mouse.click at the button's coordinates;
-  // that simulates real OS-level mouse events through Chromium's
-  // input pipeline, which React's CSP-isolated onClick handlers do
-  // observe.
+  // Phantom's onClick handler ignores every Playwright API call up
+  // through page.mouse.move+down+up (CI 26621231674..26650482318).
+  // Drop to raw CDP Input.dispatchMouseEvent — one layer below
+  // page.mouse — with explicit clickCount and buttons params.
+  const cdp = await page.context().newCDPSession(page);
   const box = await importBtn.boundingBox();
   if (box) {
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.mouse.up();
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
