@@ -57,6 +57,18 @@ async function onboardPhantom(page: Page): Promise<void> {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
+  // Post-welcome: "Import a wallet" picker. Click "Import Recovery Phrase".
+  const recoveryBtn = page.getByRole('button', { name: /Import Recovery Phrase/i });
+  await expect(recoveryBtn).toBeVisible({ timeout: 20_000 });
+  const recoveryBox = await recoveryBtn.boundingBox();
+  if (recoveryBox) {
+    const x = recoveryBox.x + recoveryBox.width / 2;
+    const y = recoveryBox.y + recoveryBox.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+  }
+
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   const inputCount = await mnemonicInputs.count();

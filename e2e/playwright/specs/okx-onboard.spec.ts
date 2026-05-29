@@ -108,11 +108,18 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
-  // Pick "Seed phrase or private key" — hard-assert visibility so a
-  // UI change is caught instead of silently skipped.
+  // Pick "Seed phrase or private key" — also via CDP (OKX absorbs
+  // regular Playwright clicks the same way the welcome button does).
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible({ timeout: 15_000 });
-  await seedOption.click();
+  const seedBox = await seedOption.boundingBox();
+  if (seedBox) {
+    const x = seedBox.x + seedBox.width / 2;
+    const y = seedBox.y + seedBox.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+  }
   // CI 26645369070 captured an empty body innerHTML at this point —
   // OKX clears the screen during transition. Wait for actual content
   // to render before snapshotting.

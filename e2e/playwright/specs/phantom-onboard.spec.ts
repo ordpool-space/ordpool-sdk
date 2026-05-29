@@ -104,13 +104,25 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
-  // Import-source picker — likely options like "Seed phrase" /
-  // "Mnemonic" / "Recovery phrase". Pick the seed-phrase option.
-  const seedOption = page.getByText(/seed phrase|mnemonic|recovery phrase/i).first();
-  if (await seedOption.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await seedOption.click();
-    await shot(page, '03-seed-option-picked');
+  // CI 26659564302 accessibility tree confirmed: post-CDP click the
+  // page is at "Import a wallet" with buttons:
+  //   - Connect Email Wallet
+  //   - Import Recovery Phrase     ← what we want
+  //   - Import Private Key
+  //   - Connect Hardware Wallet
+  // Use the same CDP click for this one.
+  const recoveryBtn = page.getByRole('button', { name: /Import Recovery Phrase/i });
+  await expect(recoveryBtn).toBeVisible({ timeout: 20_000 });
+  const recoveryBox = await recoveryBtn.boundingBox();
+  if (recoveryBox) {
+    const x = recoveryBox.x + recoveryBox.width / 2;
+    const y = recoveryBox.y + recoveryBox.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
+  await shot(page, '03-recovery-phrase-picked');
+  await dumpHtml(page, '03-recovery-phrase-picked');
 
   // Mnemonic entry: 12 boxes or one textarea.
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');

@@ -60,7 +60,14 @@ async function onboardOkx(page: Page): Promise<void> {
 
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible({ timeout: 15_000 });
-  await seedOption.click();
+  const seedBox = await seedOption.boundingBox();
+  if (seedBox) {
+    const x = seedBox.x + seedBox.width / 2;
+    const y = seedBox.y + seedBox.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+  }
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
