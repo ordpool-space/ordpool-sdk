@@ -80,7 +80,7 @@ async function onboardPhantom(page: Page): Promise<void> {
     await mnemonicInputs.first().fill(TEST_MNEMONIC);
   }
 
-  const confirmAfterMnemonic = page.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
+  const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 

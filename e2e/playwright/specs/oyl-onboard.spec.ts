@@ -118,13 +118,12 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '08-after-password-submit');
 
   // Step 05/05 — "Welcome home! Let's setup your account." profile
-  // page (CI 26664331512 caught this: previous keyword set false-
-  // positively matched 'account' in 'setup your account'). Click
-  // Skip to bypass profile setup.
+  // page. Click Skip with force to bypass profile setup. CI
+  // 26675844132 captured the screen still visible after a regular
+  // click, suggesting the regular click was absorbed somehow.
   const skipBtn = page.getByRole('button', { name: /^skip$/i });
-  if (await skipBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    await skipBtn.click();
-  }
+  await expect(skipBtn).toBeVisible({ timeout: 15_000 });
+  await skipBtn.click({ force: true });
 
   // Real dashboard markers only.
   await page.waitForFunction(() => {

@@ -140,7 +140,9 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '04-mnemonic-filled');
   await dumpHtml(page, '04-mnemonic-filled');
 
-  const confirmAfterMnemonic = page.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
+  // Phantom's button is "Import Wallet" (accessibility tree from
+  // CI 26675844132).
+  const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');

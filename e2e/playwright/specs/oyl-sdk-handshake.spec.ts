@@ -70,11 +70,10 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
   await pwContinue.click();
 
-  // Step 05/05 profile-setup page — Skip it.
+  // Step 05/05 profile-setup page — Skip it with force.
   const skipBtn = page.getByRole('button', { name: /^skip$/i });
-  if (await skipBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    await skipBtn.click();
-  }
+  await expect(skipBtn).toBeVisible({ timeout: 15_000 });
+  await skipBtn.click({ force: true });
 
   // Real dashboard markers only (no 'oyl' / 'account' false-positives).
   await page.waitForFunction(() => {
