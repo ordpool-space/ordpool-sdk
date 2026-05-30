@@ -82,26 +82,12 @@ async function onboardPhantom(page: Page): Promise<void> {
 
   const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
-  {
-    const b = await confirmAfterMnemonic.boundingBox();
-    if (b) {
-      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
-  }
+  await confirmAfterMnemonic.click();
 
   // Phantom "Import Accounts" screen — click Continue.
   const importAccountsContinue = page.getByRole('button', { name: /^continue$/i });
   if (await importAccountsContinue.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    const b = await importAccountsContinue.boundingBox();
-    if (b) {
-      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
+    await importAccountsContinue.click();
   }
 
   const pwInputs = page.locator('input[type="password"]');

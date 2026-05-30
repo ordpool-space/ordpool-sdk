@@ -140,32 +140,21 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '04-mnemonic-filled');
   await dumpHtml(page, '04-mnemonic-filled');
 
-  // Phantom's button is "Import Wallet" (accessibility tree from
-  // CI 26675844132). Use CDP click — Phantom absorbs regular clicks.
+  // Phantom's "Import Wallet" button DOES respond to regular Playwright
+  // clicks (iter12 confirmed). Only the welcome screen's
+  // "I Already Have a Wallet" button needs CDP — anti-automation
+  // appears scoped to that specific component.
   const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
-  {
-    const b = await confirmAfterMnemonic.boundingBox();
-    if (b) {
-      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
-  }
+  await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
   // Phantom "Import Accounts — We found N accounts with activity"
-  // intermediate screen (CI 26676526526 caught this). Click Continue.
+  // intermediate screen (CI 26676526526 caught this). Click Continue
+  // with a regular click — same reasoning as Import Wallet above.
   const importAccountsContinue = page.getByRole('button', { name: /^continue$/i });
   if (await importAccountsContinue.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    const b = await importAccountsContinue.boundingBox();
-    if (b) {
-      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
+    await importAccountsContinue.click();
     await shot(page, '05b-after-import-accounts-continue');
   }
 
