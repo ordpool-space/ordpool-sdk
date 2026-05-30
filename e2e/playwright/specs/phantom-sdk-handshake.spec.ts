@@ -82,7 +82,27 @@ async function onboardPhantom(page: Page): Promise<void> {
 
   const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
-  await confirmAfterMnemonic.click();
+  {
+    const b = await confirmAfterMnemonic.boundingBox();
+    if (b) {
+      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+    }
+  }
+
+  // Phantom "Import Accounts" screen — click Continue.
+  const importAccountsContinue = page.getByRole('button', { name: /^continue$/i });
+  if (await importAccountsContinue.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    const b = await importAccountsContinue.boundingBox();
+    if (b) {
+      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+    }
+  }
 
   const pwInputs = page.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
@@ -95,9 +115,10 @@ async function onboardPhantom(page: Page): Promise<void> {
     await pwContinue.click();
   }
 
+  // Dashboard markers — no 'phantom' false-positive (it's on every screen).
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('phantom');
+    return t.includes('send') || t.includes('receive') || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
 }
 

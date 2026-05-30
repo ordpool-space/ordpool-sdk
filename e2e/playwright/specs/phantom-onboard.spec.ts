@@ -141,11 +141,33 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await dumpHtml(page, '04-mnemonic-filled');
 
   // Phantom's button is "Import Wallet" (accessibility tree from
-  // CI 26675844132).
+  // CI 26675844132). Use CDP click — Phantom absorbs regular clicks.
   const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
-  await confirmAfterMnemonic.click();
+  {
+    const b = await confirmAfterMnemonic.boundingBox();
+    if (b) {
+      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+    }
+  }
   await shot(page, '05-after-mnemonic-submit');
+
+  // Phantom "Import Accounts — We found N accounts with activity"
+  // intermediate screen (CI 26676526526 caught this). Click Continue.
+  const importAccountsContinue = page.getByRole('button', { name: /^continue$/i });
+  if (await importAccountsContinue.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    const b = await importAccountsContinue.boundingBox();
+    if (b) {
+      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+    }
+    await shot(page, '05b-after-import-accounts-continue');
+  }
 
   // Password setup (may be 1 or 2 fields).
   const pwInputs = page.locator('input[type="password"]');
@@ -161,10 +183,11 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
     await shot(page, '07-after-password-submit');
   }
 
-  // Dashboard: balance / send / receive markers.
+  // Dashboard markers — never 'phantom' or 'account' (both
+  // false-positive on Phantom's Import Accounts intermediate screen).
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
+    return t.includes('send') || t.includes('receive') || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');

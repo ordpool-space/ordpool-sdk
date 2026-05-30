@@ -104,13 +104,18 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   if (box) {
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
-    // Move through 3 intermediate positions to simulate cursor jitter.
+    // Move through intermediate positions, hover briefly, then click.
+    // OKX's anti-automation may require both pointer-move history AND
+    // a click-after-stable-hover sequence.
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 20, y: y - 20, button: 'none', buttons: 0 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 5, y: y - 5, button: 'none', buttons: 0 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
+  // Fallback: also dispatch a Playwright force-click as a belt-and-
+  // suspenders in case the CDP click was absorbed by an overlay.
+  await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
