@@ -84,6 +84,19 @@ async function onboardPhantom(page: Page): Promise<void> {
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 
+  // Phantom replaces the page after Import Wallet click — switch to
+  // whichever page in the context now shows Import Accounts.
+  const context = page.context();
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    for (const p of context.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/Import Accounts/i.test(text)) { page = p; break; }
+    }
+    if (/Import Accounts/i.test(await page.locator('body').innerText().catch(() => ''))) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+
   // Phantom "Import Accounts" Continue — CDP click required.
   const importAccountsContinue = page.getByRole('button', { name: /^continue$/i });
   if (await importAccountsContinue.isVisible({ timeout: 15_000 }).catch(() => false)) {

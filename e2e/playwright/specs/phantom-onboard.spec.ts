@@ -140,14 +140,35 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '04-mnemonic-filled');
   await dumpHtml(page, '04-mnemonic-filled');
 
-  // Phantom's "Import Wallet" button DOES respond to regular Playwright
-  // clicks (iter12 confirmed). Only the welcome screen's
-  // "I Already Have a Wallet" button needs CDP — anti-automation
-  // appears scoped to that specific component.
+  // Phantom's "Import Wallet" responds to regular Playwright clicks.
   const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
+
+  // CI 26682093574 trace revealed Phantom REPLACES the page after
+  // Import Wallet click — there are TWO Page instances in the trace
+  // (a155... at mnemonic entry → 17ec... at Import Accounts). Our
+  // `page` reference was stale, hiding Continue. Switch to whichever
+  // page in the context now shows "Import Accounts" text.
+  const findPostImportPage = async () => {
+    for (const p of context.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/Import Accounts/i.test(text)) return p;
+    }
+    return null;
+  };
+  // Wait up to 30s for the new page to appear with Import Accounts.
+  const deadline = Date.now() + 30_000;
+  let newPage: Page | null = null;
+  while (Date.now() < deadline) {
+    newPage = await findPostImportPage();
+    if (newPage) break;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  if (newPage) {
+    page = newPage;
+  }
 
   // Phantom "Import Accounts — We found N accounts with activity"
   // intermediate screen. CI 26680115331 trace confirmed regular click
