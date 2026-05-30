@@ -70,14 +70,16 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
   await pwContinue.click();
 
-  // Wait for actual dashboard markers only — 'oyl' appears in the
-  // password-setup screen ("creating a Oyl wallet") and would falsely
-  // resolve before the wallet is committed (CI 26604643877 caught
-  // this: post-onboard screenshot showed the password screen with
-  // Continue still disabled).
+  // Step 05/05 profile-setup page — Skip it.
+  const skipBtn = page.getByRole('button', { name: /^skip$/i });
+  if (await skipBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    await skipBtn.click();
+  }
+
+  // Real dashboard markers only (no 'oyl' / 'account' false-positives).
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
+    return t.includes('send') || t.includes('receive') || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
 }
 

@@ -117,11 +117,19 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await pwContinue.click();
   await shot(page, '08-after-password-submit');
 
-  // Dashboard markers only — never 'oyl' (that text appears on the
-  // password screen too and would false-positive).
+  // Step 05/05 — "Welcome home! Let's setup your account." profile
+  // page (CI 26664331512 caught this: previous keyword set false-
+  // positively matched 'account' in 'setup your account'). Click
+  // Skip to bypass profile setup.
+  const skipBtn = page.getByRole('button', { name: /^skip$/i });
+  if (await skipBtn.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    await skipBtn.click();
+  }
+
+  // Real dashboard markers only.
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
+    return t.includes('send') || t.includes('receive') || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');

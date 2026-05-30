@@ -94,13 +94,19 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   }, undefined, { timeout: 60_000, polling: 250 });
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
   await expect(importBtn).toBeVisible({ timeout: 10_000 });
-  // Raw CDP Input.dispatchMouseEvent — Playwright's higher-level APIs
-  // are silently dropped by OKX (CI 26645369070 onwards).
+  // OKX absorbs every mouse-based click strategy (CI 26645369070..
+  // 26664331512). Try a hover-then-CDP-click sequence with a
+  // micro-movement to mimic real cursor jitter — some anti-bot
+  // checks require the mouse to have moved through multiple
+  // positions before the click registers.
   const cdp = await page.context().newCDPSession(page);
   const box = await importBtn.boundingBox();
   if (box) {
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
+    // Move through 3 intermediate positions to simulate cursor jitter.
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 20, y: y - 20, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 5, y: y - 5, button: 'none', buttons: 0 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });

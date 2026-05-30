@@ -69,7 +69,7 @@ async function onboardPhantom(page: Page): Promise<void> {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
+  const mnemonicInputs = page.locator('input, textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   const inputCount = await mnemonicInputs.count();
   if (inputCount >= 12) {

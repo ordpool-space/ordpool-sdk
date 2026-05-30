@@ -124,8 +124,10 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '03-recovery-phrase-picked');
   await dumpHtml(page, '03-recovery-phrase-picked');
 
-  // Mnemonic entry: 12 boxes or one textarea.
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
+  // Mnemonic entry — Phantom renders 12 textboxes with paragraph
+  // labels 1, 2, 3, ... (accessibility tree from CI 26664331512).
+  // Use any <input> rather than restricting by type attribute.
+  const mnemonicInputs = page.locator('input, textarea');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   const inputCount = await mnemonicInputs.count();
   if (inputCount >= 12) {
