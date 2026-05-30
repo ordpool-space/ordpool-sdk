@@ -171,19 +171,24 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   }
 
   // Phantom "Import Accounts — We found N accounts with activity"
-  // intermediate screen. CI 26680115331 trace confirmed regular click
-  // doesn't navigate — Continue is one of Phantom's anti-automation-
-  // gated buttons. Use CDP.
-  const importAccountsContinue = page.getByRole('button', { name: /^continue$/i });
+  // intermediate screen. Continue may be a styled div, not a <button>.
+  // Match by exact text. Need CDP since the page may belong to a
+  // freshly-opened tab; also recreate the CDP session for the new
+  // page (the previous cdp was bound to the original mnemonic page).
+  await shot(page, '05a-pre-continue-search');
+  await dumpHtml(page, '05a-pre-continue-search');
+  const importAccountsContinue = page.getByText('Continue', { exact: true }).first();
   if (await importAccountsContinue.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    const newCdp = await page.context().newCDPSession(page);
     const b = await importAccountsContinue.boundingBox();
     if (b) {
       const x = b.x + b.width / 2; const y = b.y + b.height / 2;
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+      await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+      await newCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
     }
     await shot(page, '05b-after-import-accounts-continue');
+    await dumpHtml(page, '05b-after-import-accounts-continue');
   }
 
   // Password setup (may be 1 or 2 fields).
