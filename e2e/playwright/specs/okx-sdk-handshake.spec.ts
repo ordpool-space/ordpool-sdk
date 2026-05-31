@@ -22,7 +22,11 @@ const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon a
 const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
 const TEST_PASSWORD = 'TestPassword123!';
 
-const EXPECTED_PAYMENT_ADDRESS = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
+// OKX defaults to BIP-86 Taproot for its active `window.okxwallet.bitcoin`
+// provider (the user picks the type in settings — Taproot is the
+// default for a fresh restore). Our connector mirrors that single
+// address into both paymentAddress and ordinalsAddress.
+const EXPECTED_PAYMENT_ADDRESS = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
 
 let context: BrowserContext;
 let extensionId: string;
