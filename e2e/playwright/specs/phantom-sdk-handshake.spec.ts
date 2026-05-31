@@ -119,15 +119,57 @@ async function onboardPhantom(page: Page): Promise<void> {
     await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
-  const pwInputs = page.locator('input[type="password"]');
-  if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
-    const pwCount = await pwInputs.count();
-    for (let i = 0; i < pwCount; i++) {
-      await pwInputs.nth(i).fill(TEST_PASSWORD);
+  // Phantom opens YET ANOTHER page for "Create a password" after the
+  // Import Accounts Continue (confirmed via CI 26713625161 trace).
+  const ctx2 = page.context();
+  const createPwDeadline = Date.now() + 60_000;
+  let pwPage: Page | null = null;
+  while (Date.now() < createPwDeadline) {
+    for (const p of ctx2.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/Create a password/i.test(text)) { pwPage = p; break; }
     }
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done|finish)$/i }).first();
-    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-    await pwContinue.click();
+    if (pwPage) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (pwPage) {
+    page = pwPage;
+  }
+
+  const pwInputs = page.locator('input[type="password"]');
+  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
+  await pwInputs.nth(0).fill(TEST_PASSWORD);
+  await pwInputs.nth(1).fill(TEST_PASSWORD);
+
+  // Required Terms checkbox gates Continue.
+  const termsCheckbox = page.locator('input[type="checkbox"]').first();
+  if (await termsCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await termsCheckbox.check({ force: true });
+  } else {
+    const termsLabel = page.getByText(/agree.*Terms/i).first();
+    if (await termsLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await termsLabel.click({ force: true });
+    }
+  }
+
+  // Wait for Continue enabled, CDP-click.
+  await page.waitForFunction(() => {
+    const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
+    const candidate = els.find(el => (el.textContent || '').trim() === 'Continue');
+    if (!candidate) return false;
+    if (candidate.getAttribute('aria-disabled') === 'true') return false;
+    if ((candidate as HTMLElement).hasAttribute('disabled')) return false;
+    if (parseFloat(getComputedStyle(candidate).opacity) < 0.7) return false;
+    return true;
+  }, undefined, { timeout: 30_000, polling: 500 });
+  const pwContinue = page.getByText('Continue', { exact: true }).first();
+  const pwCdp = await page.context().newCDPSession(page);
+  const pwBox = await pwContinue.boundingBox();
+  if (pwBox) {
+    const x = pwBox.x + pwBox.width / 2; const y = pwBox.y + pwBox.height / 2;
+    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
   // Dashboard markers — no 'phantom' false-positive (it's on every screen).
