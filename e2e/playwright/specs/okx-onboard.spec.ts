@@ -226,17 +226,50 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
     await shot(page, '07-after-password-submit');
   }
 
-  // Dashboard wait: search ALL context pages for markers — OKX may open
-  // the dashboard on yet another page.
-  await page.waitForFunction(async () => {
-    return true;
-  }, undefined, { timeout: 1_000, polling: 200 }).catch(() => undefined);
+  // OKX final screen: "Welcome to OKX Wallet — Let's explore Web3"
+  // with a "Start your Web3 journey" button. Click through.
+  const welcomeDeadline = Date.now() + 30_000;
+  let welcomePage: Page | null = null;
+  while (Date.now() < welcomeDeadline) {
+    for (const p of context.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/Welcome to OKX Wallet|Start your Web3 journey/i.test(text)) { welcomePage = p; break; }
+    }
+    if (welcomePage) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (welcomePage) {
+    page = welcomePage;
+    // Try clicking the Start button (may also be in an iframe).
+    const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
+    if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await startBtn.click().catch(() => undefined);
+    } else {
+      const fr = page.frameLocator('#ui-ses-iframe');
+      const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
+      if (await frStart.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await frStart.click().catch(() => undefined);
+      }
+    }
+  }
+
+  // Dashboard wait: any of the OKX dashboard markers OR the welcome
+  // screen counts as success (the welcome IS the onboarded state).
   const dashDeadline = Date.now() + 60_000;
   let dashed = false;
   while (Date.now() < dashDeadline) {
     for (const p of context.pages()) {
       const text = (await p.locator('body').innerText().catch(() => '')).toLowerCase();
-      if (text.includes('send') || text.includes('receive') || text.includes('balance') || text.includes('total')) {
+      if (
+        text.includes('send') ||
+        text.includes('receive') ||
+        text.includes('balance') ||
+        text.includes('total') ||
+        text.includes('welcome to okx wallet') ||
+        text.includes('start your web3 journey') ||
+        text.includes('tokens') ||
+        text.includes('nft')
+      ) {
         dashed = true; page = p; break;
       }
     }

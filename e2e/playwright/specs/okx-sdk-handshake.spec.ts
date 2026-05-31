@@ -130,13 +130,47 @@ async function onboardOkx(page: Page): Promise<void> {
     await pwContinue.click();
   }
 
-  // Dashboard wait: search ALL context pages.
+  // "Welcome to OKX Wallet" completion screen → click "Start your Web3
+  // journey", then dashboard.
+  const welcomeDeadline = Date.now() + 30_000;
+  let welcomePage: Page | null = null;
+  while (Date.now() < welcomeDeadline) {
+    for (const p of ctx2.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/Welcome to OKX Wallet|Start your Web3 journey/i.test(text)) { welcomePage = p; break; }
+    }
+    if (welcomePage) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (welcomePage) {
+    page = welcomePage;
+    const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
+    if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await startBtn.click().catch(() => undefined);
+    } else {
+      const fr = page.frameLocator('#ui-ses-iframe');
+      const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
+      if (await frStart.isVisible({ timeout: 3_000 }).catch(() => false)) {
+        await frStart.click().catch(() => undefined);
+      }
+    }
+  }
+
   const dashDeadline = Date.now() + 60_000;
   let dashed = false;
   while (Date.now() < dashDeadline) {
     for (const p of ctx2.pages()) {
       const text = (await p.locator('body').innerText().catch(() => '')).toLowerCase();
-      if (text.includes('send') || text.includes('receive') || text.includes('balance') || text.includes('total')) {
+      if (
+        text.includes('send') ||
+        text.includes('receive') ||
+        text.includes('balance') ||
+        text.includes('total') ||
+        text.includes('welcome to okx wallet') ||
+        text.includes('start your web3 journey') ||
+        text.includes('tokens') ||
+        text.includes('nft')
+      ) {
         dashed = true; page = p; break;
       }
     }

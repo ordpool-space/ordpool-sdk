@@ -245,6 +245,10 @@ test.beforeAll(async () => {
   test.setTimeout(180_000);
   await onboardPhantom(onboardPage);
   await shot(onboardPage, '00-onboarded');
+  // Phantom may be stuck on "You're good to go!" — close the
+  // onboarding tab to signal completion so dApp requests trigger
+  // approval popups instead of being absorbed.
+  await onboardPage.close().catch(() => undefined);
 });
 
 test.afterAll(async () => {
