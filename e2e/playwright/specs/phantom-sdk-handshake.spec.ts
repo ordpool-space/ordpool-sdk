@@ -97,16 +97,26 @@ async function onboardPhantom(page: Page): Promise<void> {
     await new Promise(r => setTimeout(r, 500));
   }
 
+  // Wait for Continue to be ENABLED (the disabled gray-pill state
+  // transitions to the active state after Phantom finishes deriving
+  // account info).
+  await page.waitForFunction(() => {
+    const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
+    const candidate = els.find(el => (el.textContent || '').trim() === 'Continue');
+    if (!candidate) return false;
+    if (candidate.getAttribute('aria-disabled') === 'true') return false;
+    if ((candidate as HTMLElement).hasAttribute('disabled')) return false;
+    if (parseFloat(getComputedStyle(candidate).opacity) < 0.7) return false;
+    return true;
+  }, undefined, { timeout: 45_000, polling: 500 });
   const importAccountsContinue = page.getByText('Continue', { exact: true }).first();
-  if (await importAccountsContinue.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    const newCdp = await page.context().newCDPSession(page);
-    const b = await importAccountsContinue.boundingBox();
-    if (b) {
-      const x = b.x + b.width / 2; const y = b.y + b.height / 2;
-      await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await newCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
+  const newCdp = await page.context().newCDPSession(page);
+  const b = await importAccountsContinue.boundingBox();
+  if (b) {
+    const x = b.x + b.width / 2; const y = b.y + b.height / 2;
+    await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+    await newCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+    await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
   const pwInputs = page.locator('input[type="password"]');
