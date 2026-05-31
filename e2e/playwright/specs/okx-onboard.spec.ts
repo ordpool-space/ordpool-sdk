@@ -180,6 +180,18 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
+  // OKX "Secure your wallet" step: Password option is pre-selected
+  // (with checkmark); Biometric authentication is the other option.
+  // A "Next" button at the bottom advances. Wait for that screen and
+  // click Next.
+  const secureHeader = page.locator('text="Secure your wallet"').first();
+  if (await secureHeader.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    const nextBtn = page.getByRole('button', { name: /^next$/i }).first();
+    await expect(nextBtn).toBeEnabled({ timeout: 10_000 });
+    await nextBtn.click();
+    await shot(page, '05b-after-secure-next');
+  }
+
   // Password setup also inside the iframe.
   const pwInputs = seedFrame.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {

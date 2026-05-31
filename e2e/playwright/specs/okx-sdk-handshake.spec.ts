@@ -99,6 +99,14 @@ async function onboardOkx(page: Page): Promise<void> {
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 
+  // "Secure your wallet" step: Password preselected, click Next.
+  const secureHeader = page.locator('text="Secure your wallet"').first();
+  if (await secureHeader.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    const nextBtn = page.getByRole('button', { name: /^next$/i }).first();
+    await expect(nextBtn).toBeEnabled({ timeout: 10_000 });
+    await nextBtn.click();
+  }
+
   const pwInputs = seedFrame.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
     const pwCount = await pwInputs.count();
