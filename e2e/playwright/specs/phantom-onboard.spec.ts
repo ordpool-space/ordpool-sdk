@@ -265,12 +265,33 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   }
   await shot(page, '07-after-password-submit');
 
-  // Dashboard markers — never 'phantom' or 'account' (both
-  // false-positive on Phantom's Import Accounts intermediate screen).
+  // Phantom's onboarding completes on a "You're good to go!" screen
+  // with a Get Started button — the dashboard proper opens later (via
+  // the toolbar popup). For the purposes of "wallet is onboarded",
+  // detecting the completion screen is sufficient. Also accept the
+  // true dashboard markers (send/receive/balance) in case Phantom
+  // later auto-navigates.
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance');
+    return t.includes("you're good to go")
+      || t.includes('get started')
+      || t.includes('send')
+      || t.includes('receive')
+      || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
+  // If the Get Started CTA is present, click it (best-effort) so the
+  // wallet ends in a usable state for downstream tests.
+  const getStarted = page.getByRole('button', { name: /get started/i }).first();
+  if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await getStarted.click({ force: true }).catch(() => undefined);
+  } else {
+    // Fallback: text-based locator (Phantom sometimes renders the CTA
+    // as a styled div, not a real button).
+    const cta = page.getByText('Get Started', { exact: true }).first();
+    if (await cta.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await cta.click({ force: true }).catch(() => undefined);
+    }
+  }
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');
 

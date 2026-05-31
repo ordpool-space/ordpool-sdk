@@ -79,25 +79,12 @@ async function onboardOkx(page: Page): Promise<void> {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
-  // OKX opens the 12-input seed-phrase form on a NEW page (different
-  // guid) — the old page goes blank. Switch to whichever now shows
-  // "My seed phrase has".
-  const ctx = page.context();
-  const seedDeadline = Date.now() + 30_000;
-  let seedPage: Page | null = null;
-  while (Date.now() < seedDeadline) {
-    for (const p of ctx.pages()) {
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/My seed phrase has/i.test(text)) { seedPage = p; break; }
-    }
-    if (seedPage) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (seedPage) {
-    page = seedPage;
-  }
+  // OKX renders the seed-phrase form inside #ui-ses-iframe-container.
+  const seedFrame = page.frameLocator('#ui-ses-iframe-container');
+  await expect(seedFrame.locator('text="My seed phrase has"').first())
+    .toBeVisible({ timeout: 30_000 });
 
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
+  const mnemonicInputs = seedFrame.locator('input');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   const inputCount = await mnemonicInputs.count();
   if (inputCount >= 12) {
@@ -108,24 +95,27 @@ async function onboardOkx(page: Page): Promise<void> {
     await mnemonicInputs.first().fill(TEST_MNEMONIC);
   }
 
-  const confirmAfterMnemonic = page.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
+  const confirmAfterMnemonic = seedFrame.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 
-  const pwInputs = page.locator('input[type="password"]');
+  const pwInputs = seedFrame.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++) {
       await pwInputs.nth(i).fill(TEST_PASSWORD);
     }
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
+    const pwContinue = seedFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
     await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
     await pwContinue.click();
   }
 
   await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
+    const collect = (root: Document) => (root.body?.innerText || '').toLowerCase();
+    let t = collect(document);
+    const f = document.querySelector('#ui-ses-iframe-container') as HTMLIFrameElement | null;
+    if (f?.contentDocument) t += ' ' + collect(f.contentDocument);
+    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('total');
   }, undefined, { timeout: 60_000, polling: 500 });
 }
 

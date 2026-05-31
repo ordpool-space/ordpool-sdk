@@ -149,29 +149,20 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
-  // CI 26715416910 trace: OKX opens a NEW page (different guid) for
-  // the 12-input seed-phrase form. The OLD page goes blank. Find
-  // whichever page now shows the "Seed phrase" header + numbered
-  // inputs (look for "My seed phrase has" since that text is unique
-  // to the new screen).
-  const seedFormDeadline = Date.now() + 30_000;
-  let seedPage: Page | null = null;
-  while (Date.now() < seedFormDeadline) {
-    for (const p of context.pages()) {
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/My seed phrase has/i.test(text)) { seedPage = p; break; }
-    }
-    if (seedPage) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (seedPage) {
-    page = seedPage;
-  }
+  // OKX renders the 12-input seed-phrase form inside an iframe
+  // (#ui-ses-iframe-container). body.innerText on the page returns
+  // almost nothing — main-container-wrapper is empty in the parent
+  // doc. Wait for the iframe to mount, then drive its contents
+  // directly via frameLocator. Confirmed via CI 26715938855 dump.
+  const seedFrame = page.frameLocator('#ui-ses-iframe-container');
+  await expect(seedFrame.locator('text="My seed phrase has"').first())
+    .toBeVisible({ timeout: 30_000 });
   await shot(page, '03-seed-option-picked');
   await dumpHtml(page, '03-seed-option-picked');
 
-  // Mnemonic entry: 12 boxes or one textarea.
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
+  // 12 numbered inputs inside the iframe. Try plain `input` since
+  // the boxes may be untyped.
+  const mnemonicInputs = seedFrame.locator('input');
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   const inputCount = await mnemonicInputs.count();
   if (inputCount >= 12) {
@@ -184,29 +175,32 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '04-mnemonic-filled');
   await dumpHtml(page, '04-mnemonic-filled');
 
-  const confirmAfterMnemonic = page.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
+  const confirmAfterMnemonic = seedFrame.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
-  // Password setup (may be 1 or 2 fields).
-  const pwInputs = page.locator('input[type="password"]');
+  // Password setup also inside the iframe.
+  const pwInputs = seedFrame.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++) {
       await pwInputs.nth(i).fill(TEST_PASSWORD);
     }
     await shot(page, '06-password-typed');
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
+    const pwContinue = seedFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
     await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
     await pwContinue.click();
     await shot(page, '07-after-password-submit');
   }
 
-  // Dashboard: balance / send / receive markers.
+  // Dashboard: search both the iframe AND the page body for markers.
   await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
+    const collect = (root: Document) => (root.body?.innerText || '').toLowerCase();
+    let t = collect(document);
+    const f = document.querySelector('#ui-ses-iframe-container') as HTMLIFrameElement | null;
+    if (f?.contentDocument) t += ' ' + collect(f.contentDocument);
+    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('total');
   }, undefined, { timeout: 60_000, polling: 500 });
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');

@@ -173,11 +173,24 @@ async function onboardPhantom(page: Page): Promise<void> {
     await pwCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
-  // Dashboard markers — no 'phantom' false-positive (it's on every screen).
+  // Completion screen ("You're good to go!") or real dashboard.
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance');
+    return t.includes("you're good to go")
+      || t.includes('get started')
+      || t.includes('send')
+      || t.includes('receive')
+      || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
+  const getStarted = page.getByRole('button', { name: /get started/i }).first();
+  if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    await getStarted.click({ force: true }).catch(() => undefined);
+  } else {
+    const cta = page.getByText('Get Started', { exact: true }).first();
+    if (await cta.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await cta.click({ force: true }).catch(() => undefined);
+    }
+  }
 }
 
 test.beforeAll(async () => {
