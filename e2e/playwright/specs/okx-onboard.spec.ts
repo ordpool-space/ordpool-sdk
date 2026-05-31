@@ -195,24 +195,32 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   if (securePage) {
     page = securePage;
   }
-  // Password preselected; click Next.
-  const nextBtn = page.getByRole('button', { name: /^next$/i }).first();
+  // The Secure-your-wallet UI also runs inside #ui-ses-iframe — same
+  // pattern as the seed-phrase page.
+  const secureFrame = page.frameLocator('#ui-ses-iframe');
+  const nextBtn = secureFrame.getByRole('button', { name: /^next$/i }).first();
   if (await nextBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await expect(nextBtn).toBeEnabled({ timeout: 10_000 });
     await nextBtn.click();
     await shot(page, '05b-after-secure-next');
+  } else {
+    // Fallback: try the page level in case OKX changed the embed.
+    const pageNext = page.getByRole('button', { name: /^next$/i }).first();
+    if (await pageNext.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      await pageNext.click();
+      await shot(page, '05b-after-secure-next');
+    }
   }
 
-  // Password creation form lives on the (switched) Secure-your-wallet
-  // page. Inputs may be in the page or another iframe — try both.
-  const pwInputs = page.locator('input[type="password"]');
+  // Password form in the secure-frame iframe.
+  const pwInputs = secureFrame.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++) {
       await pwInputs.nth(i).fill(TEST_PASSWORD);
     }
     await shot(page, '06-password-typed');
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
+    const pwContinue = secureFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
     await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
     await pwContinue.click();
     await shot(page, '07-after-password-submit');

@@ -112,19 +112,20 @@ async function onboardOkx(page: Page): Promise<void> {
     await new Promise(r => setTimeout(r, 500));
   }
   if (securePage) page = securePage;
-  const nextBtn = page.getByRole('button', { name: /^next$/i }).first();
+  const secureFrame = page.frameLocator('#ui-ses-iframe');
+  const nextBtn = secureFrame.getByRole('button', { name: /^next$/i }).first();
   if (await nextBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await expect(nextBtn).toBeEnabled({ timeout: 10_000 });
     await nextBtn.click();
   }
 
-  const pwInputs = page.locator('input[type="password"]');
+  const pwInputs = secureFrame.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++) {
       await pwInputs.nth(i).fill(TEST_PASSWORD);
     }
-    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
+    const pwContinue = secureFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
     await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
     await pwContinue.click();
   }

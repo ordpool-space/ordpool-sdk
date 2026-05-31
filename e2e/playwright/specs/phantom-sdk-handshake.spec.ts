@@ -184,23 +184,25 @@ async function onboardPhantom(page: Page): Promise<void> {
   }, undefined, { timeout: 60_000, polling: 500 });
   const gsLocator = page.getByText('Get Started', { exact: true }).first();
   if (await gsLocator.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Tab');
-    await page.keyboard.press('Enter').catch(() => undefined);
-    await page.waitForFunction(
-      () => !/You're good to go/i.test(document.body.innerText || ''),
-      undefined, { timeout: 3_000, polling: 200 },
-    ).catch(() => undefined);
-    const stillThere = /You're good to go/i.test(await page.locator('body').innerText().catch(() => ''));
-    if (stillThere) {
-      const gsBox = await gsLocator.boundingBox();
-      if (gsBox) {
-        const cdp = await page.context().newCDPSession(page);
-        const x = gsBox.x + gsBox.width / 2; const y = gsBox.y + gsBox.height / 2;
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-      }
+    await page.bringToFront();
+    const gsBox = await gsLocator.boundingBox();
+    if (gsBox) {
+      const cdp = await page.context().newCDPSession(page);
+      const x = gsBox.x + gsBox.width / 2; const y = gsBox.y + gsBox.height / 2;
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+      await page.evaluate(({ x, y }) => {
+        const el = document.elementFromPoint(x, y);
+        if (el) {
+          const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, pointerType: 'mouse', pointerId: 1, isPrimary: true } as PointerEventInit;
+          el.dispatchEvent(new PointerEvent('pointerdown', opts));
+          el.dispatchEvent(new PointerEvent('pointerup', opts));
+          el.dispatchEvent(new MouseEvent('mousedown', opts));
+          el.dispatchEvent(new MouseEvent('mouseup', opts));
+          el.dispatchEvent(new MouseEvent('click', opts));
+        }
+      }, { x, y });
     }
   }
   await page.waitForFunction(
