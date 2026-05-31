@@ -46,6 +46,9 @@ test.beforeAll(async () => {
       `--load-extension=${EXT_PATH}`,
       '--no-sandbox',
       '--disable-dev-shm-usage',
+      // OKX anti-automation: hide navigator.webdriver so React onClick
+      // handlers don't filter the click out.
+      '--disable-blink-features=AutomationControlled',
     ],
   });
   let [worker] = context.serviceWorkers();
@@ -116,6 +119,20 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // Fallback: also dispatch a Playwright force-click as a belt-and-
   // suspenders in case the CDP click was absorbed by an overlay.
   await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
+
+  // Belt-and-suspenders #2: if the screen still shows "Your portal
+  // to Web3" after 3s, fire HTMLElement.click() via page.evaluate as
+  // a programmatic native click. React listens for native MouseEvent
+  // and OKX's anti-bot only filters trusted-but-suspicious mouse
+  // events, not direct .click() calls.
+  const stillOnWelcome = await page.locator('text="Your portal to Web3"')
+    .isVisible({ timeout: 3_000 }).catch(() => false);
+  if (stillOnWelcome) {
+    await page.evaluate(() => {
+      const btn = document.querySelector('[data-testid="onboard-page-import-wallet-button"]') as HTMLElement | null;
+      btn?.click();
+    });
+  }
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 

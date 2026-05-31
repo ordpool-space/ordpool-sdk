@@ -47,15 +47,28 @@ async function onboardOkx(page: Page): Promise<void> {
   }, undefined, { timeout: 60_000, polling: 250 });
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
   await expect(importBtn).toBeVisible({ timeout: 10_000 });
-  // Raw CDP Input.dispatchMouseEvent.
+  // Raw CDP Input.dispatchMouseEvent with cursor jitter.
   const cdp = await page.context().newCDPSession(page);
   const box = await importBtn.boundingBox();
   if (box) {
     const x = box.x + box.width / 2;
     const y = box.y + box.height / 2;
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 20, y: y - 20, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 5, y: y - 5, button: 'none', buttons: 0 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+  }
+  await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
+  // Programmatic native click as final fallback (React onClick listens
+  // for native MouseEvent; bypasses anti-bot mouse-event filtering).
+  const stillOnWelcome = await page.locator('text="Your portal to Web3"')
+    .isVisible({ timeout: 3_000 }).catch(() => false);
+  if (stillOnWelcome) {
+    await page.evaluate(() => {
+      const btn = document.querySelector('[data-testid="onboard-page-import-wallet-button"]') as HTMLElement | null;
+      btn?.click();
+    });
   }
 
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
@@ -116,6 +129,8 @@ test.beforeAll(async () => {
       `--load-extension=${EXT_PATH}`,
       '--no-sandbox',
       '--disable-dev-shm-usage',
+      // OKX anti-automation: hide navigator.webdriver.
+      '--disable-blink-features=AutomationControlled',
     ],
   });
 
