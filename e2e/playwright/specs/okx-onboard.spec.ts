@@ -180,40 +180,62 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
-  // OKX "Secure your wallet" step: Password option is pre-selected
-  // (with checkmark); Biometric authentication is the other option.
-  // A "Next" button at the bottom advances. Wait for that screen and
-  // click Next.
-  const secureHeader = page.locator('text="Secure your wallet"').first();
-  if (await secureHeader.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    const nextBtn = page.getByRole('button', { name: /^next$/i }).first();
+  // OKX "Secure your wallet" step opens on a NEW page (CI 26717287969
+  // trace, guid 1cb3b9dd). Switch to whichever page now shows it.
+  const secureDeadline = Date.now() + 30_000;
+  let securePage: Page | null = null;
+  while (Date.now() < secureDeadline) {
+    for (const p of context.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/Secure your wallet/i.test(text)) { securePage = p; break; }
+    }
+    if (securePage) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (securePage) {
+    page = securePage;
+  }
+  // Password preselected; click Next.
+  const nextBtn = page.getByRole('button', { name: /^next$/i }).first();
+  if (await nextBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await expect(nextBtn).toBeEnabled({ timeout: 10_000 });
     await nextBtn.click();
     await shot(page, '05b-after-secure-next');
   }
 
-  // Password setup also inside the iframe.
-  const pwInputs = seedFrame.locator('input[type="password"]');
+  // Password creation form lives on the (switched) Secure-your-wallet
+  // page. Inputs may be in the page or another iframe — try both.
+  const pwInputs = page.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++) {
       await pwInputs.nth(i).fill(TEST_PASSWORD);
     }
     await shot(page, '06-password-typed');
-    const pwContinue = seedFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
+    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
     await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
     await pwContinue.click();
     await shot(page, '07-after-password-submit');
   }
 
-  // Dashboard: search both the iframe AND the page body for markers.
-  await page.waitForFunction(() => {
-    const collect = (root: Document) => (root.body?.innerText || '').toLowerCase();
-    let t = collect(document);
-    const f = document.querySelector('#ui-ses-iframe') as HTMLIFrameElement | null;
-    if (f?.contentDocument) t += ' ' + collect(f.contentDocument);
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('total');
-  }, undefined, { timeout: 60_000, polling: 500 });
+  // Dashboard wait: search ALL context pages for markers — OKX may open
+  // the dashboard on yet another page.
+  await page.waitForFunction(async () => {
+    return true;
+  }, undefined, { timeout: 1_000, polling: 200 }).catch(() => undefined);
+  const dashDeadline = Date.now() + 60_000;
+  let dashed = false;
+  while (Date.now() < dashDeadline) {
+    for (const p of context.pages()) {
+      const text = (await p.locator('body').innerText().catch(() => '')).toLowerCase();
+      if (text.includes('send') || text.includes('receive') || text.includes('balance') || text.includes('total')) {
+        dashed = true; page = p; break;
+      }
+    }
+    if (dashed) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (!dashed) throw new Error('OKX dashboard markers not found on any context page within 60s');
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');
 

@@ -279,26 +279,36 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
       || t.includes('receive')
       || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
-  // Click "Get Started" via every fallback so the wallet exits its
-  // onboarding completion screen and reaches an unlocked state where
-  // dApp requests can trigger an approval popup.
-  await page.evaluate(() => {
-    const findClickable = (text: string): HTMLElement | null => {
-      const all = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], div, span, a'));
-      return all.find(el => (el.textContent || '').trim() === text) || null;
-    };
-    const el = findClickable('Get Started');
-    if (el) {
-      el.click();
-      // Also dispatch a synthetic MouseEvent in case React listens for it.
-      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  // Click "Get Started" — Phantom's onboarding completion gate. Try
+  // every strategy so the wallet exits this screen and reaches an
+  // unlocked state where dApp requests can trigger an approval popup.
+  const gsLocator = page.getByText('Get Started', { exact: true }).first();
+  if (await gsLocator.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    // Strategy 1: Tab to focus, Enter to activate.
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter').catch(() => undefined);
+    await page.waitForFunction(
+      () => !/You're good to go/i.test(document.body.innerText || ''),
+      undefined, { timeout: 3_000, polling: 200 },
+    ).catch(() => undefined);
+    // Strategy 2: CDP click on the bounding box (worked for Continue).
+    const stillThere = /You're good to go/i.test(await page.locator('body').innerText().catch(() => ''));
+    if (stillThere) {
+      const gsBox = await gsLocator.boundingBox();
+      if (gsBox) {
+        const cdp = await page.context().newCDPSession(page);
+        const x = gsBox.x + gsBox.width / 2; const y = gsBox.y + gsBox.height / 2;
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+      }
     }
-  });
-  // After Get Started, the wallet may navigate to a new dashboard page.
-  // Best-effort: wait a beat for the SW + tab transition.
-  await page.waitForFunction(() => {
-    return !/You're good to go/i.test(document.body.innerText || '');
-  }, undefined, { timeout: 10_000, polling: 300 }).catch(() => undefined);
+  }
+  await page.waitForFunction(
+    () => !/You're good to go/i.test(document.body.innerText || ''),
+    undefined, { timeout: 10_000, polling: 300 },
+  ).catch(() => undefined);
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');
 

@@ -182,20 +182,31 @@ async function onboardPhantom(page: Page): Promise<void> {
       || t.includes('receive')
       || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
-  await page.evaluate(() => {
-    const findClickable = (text: string): HTMLElement | null => {
-      const all = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], div, span, a'));
-      return all.find(el => (el.textContent || '').trim() === text) || null;
-    };
-    const el = findClickable('Get Started');
-    if (el) {
-      el.click();
-      el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  const gsLocator = page.getByText('Get Started', { exact: true }).first();
+  if (await gsLocator.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Tab');
+    await page.keyboard.press('Enter').catch(() => undefined);
+    await page.waitForFunction(
+      () => !/You're good to go/i.test(document.body.innerText || ''),
+      undefined, { timeout: 3_000, polling: 200 },
+    ).catch(() => undefined);
+    const stillThere = /You're good to go/i.test(await page.locator('body').innerText().catch(() => ''));
+    if (stillThere) {
+      const gsBox = await gsLocator.boundingBox();
+      if (gsBox) {
+        const cdp = await page.context().newCDPSession(page);
+        const x = gsBox.x + gsBox.width / 2; const y = gsBox.y + gsBox.height / 2;
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+      }
     }
-  });
-  await page.waitForFunction(() => {
-    return !/You're good to go/i.test(document.body.innerText || '');
-  }, undefined, { timeout: 10_000, polling: 300 }).catch(() => undefined);
+  }
+  await page.waitForFunction(
+    () => !/You're good to go/i.test(document.body.innerText || ''),
+    undefined, { timeout: 10_000, polling: 300 },
+  ).catch(() => undefined);
 }
 
 test.beforeAll(async () => {

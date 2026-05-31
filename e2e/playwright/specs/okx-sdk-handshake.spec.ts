@@ -99,32 +99,50 @@ async function onboardOkx(page: Page): Promise<void> {
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 
-  // "Secure your wallet" step: Password preselected, click Next.
-  const secureHeader = page.locator('text="Secure your wallet"').first();
-  if (await secureHeader.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    const nextBtn = page.getByRole('button', { name: /^next$/i }).first();
+  // "Secure your wallet" opens on a NEW page. Switch to it.
+  const ctx2 = page.context();
+  const secureDeadline = Date.now() + 30_000;
+  let securePage: Page | null = null;
+  while (Date.now() < secureDeadline) {
+    for (const p of ctx2.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/Secure your wallet/i.test(text)) { securePage = p; break; }
+    }
+    if (securePage) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (securePage) page = securePage;
+  const nextBtn = page.getByRole('button', { name: /^next$/i }).first();
+  if (await nextBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await expect(nextBtn).toBeEnabled({ timeout: 10_000 });
     await nextBtn.click();
   }
 
-  const pwInputs = seedFrame.locator('input[type="password"]');
+  const pwInputs = page.locator('input[type="password"]');
   if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++) {
       await pwInputs.nth(i).fill(TEST_PASSWORD);
     }
-    const pwContinue = seedFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
+    const pwContinue = page.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
     await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
     await pwContinue.click();
   }
 
-  await page.waitForFunction(() => {
-    const collect = (root: Document) => (root.body?.innerText || '').toLowerCase();
-    let t = collect(document);
-    const f = document.querySelector('#ui-ses-iframe') as HTMLIFrameElement | null;
-    if (f?.contentDocument) t += ' ' + collect(f.contentDocument);
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('total');
-  }, undefined, { timeout: 60_000, polling: 500 });
+  // Dashboard wait: search ALL context pages.
+  const dashDeadline = Date.now() + 60_000;
+  let dashed = false;
+  while (Date.now() < dashDeadline) {
+    for (const p of ctx2.pages()) {
+      const text = (await p.locator('body').innerText().catch(() => '')).toLowerCase();
+      if (text.includes('send') || text.includes('receive') || text.includes('balance') || text.includes('total')) {
+        dashed = true; page = p; break;
+      }
+    }
+    if (dashed) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (!dashed) throw new Error('OKX dashboard markers not found on any context page within 60s');
 }
 
 test.beforeAll(async () => {
