@@ -84,17 +84,17 @@ async function onboardPhantom(page: Page): Promise<void> {
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 
-  // Phantom replaces the page after Import Wallet click — switch to
-  // whichever page in the context now shows Import Accounts.
+  // Wait for the result state (not the loading-spinner state) before
+  // looking for Continue.
   const context = page.context();
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     for (const p of context.pages()) {
       const text = await p.locator('body').innerText().catch(() => '');
-      if (/Import Accounts/i.test(text)) { page = p; break; }
+      if (/We found .* accounts? with activity/i.test(text)) { page = p; break; }
     }
-    if (/Import Accounts/i.test(await page.locator('body').innerText().catch(() => ''))) break;
-    await new Promise(r => setTimeout(r, 250));
+    if (/We found .* accounts? with activity/i.test(await page.locator('body').innerText().catch(() => ''))) break;
+    await new Promise(r => setTimeout(r, 500));
   }
 
   const importAccountsContinue = page.getByText('Continue', { exact: true }).first();

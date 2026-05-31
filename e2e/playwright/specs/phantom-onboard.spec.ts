@@ -146,25 +146,25 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
-  // CI 26682093574 trace revealed Phantom REPLACES the page after
-  // Import Wallet click — there are TWO Page instances in the trace
-  // (a155... at mnemonic entry → 17ec... at Import Accounts). Our
-  // `page` reference was stale, hiding Continue. Switch to whichever
-  // page in the context now shows "Import Accounts" text.
-  const findPostImportPage = async () => {
+  // CI 26693907192 revealed: Phantom shows a LOADING screen first
+  // ("Import Accounts / Finding Accounts with Activity" + spinner)
+  // then transitions to the result ("We found N accounts with
+  // activity" + Continue button). My previous switch fired on
+  // "Import Accounts" alone — that matched the loading state.
+  // Switch only when "We found" appears (the result-state marker).
+  const findResultPage = async () => {
     for (const p of context.pages()) {
       const text = await p.locator('body').innerText().catch(() => '');
-      if (/Import Accounts/i.test(text)) return p;
+      if (/We found .* accounts? with activity/i.test(text)) return p;
     }
     return null;
   };
-  // Wait up to 30s for the new page to appear with Import Accounts.
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 60_000;
   let newPage: Page | null = null;
   while (Date.now() < deadline) {
-    newPage = await findPostImportPage();
+    newPage = await findResultPage();
     if (newPage) break;
-    await new Promise(r => setTimeout(r, 250));
+    await new Promise(r => setTimeout(r, 500));
   }
   if (newPage) {
     page = newPage;
