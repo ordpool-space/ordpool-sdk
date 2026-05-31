@@ -154,7 +154,7 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // almost nothing — main-container-wrapper is empty in the parent
   // doc. Wait for the iframe to mount, then drive its contents
   // directly via frameLocator. Confirmed via CI 26715938855 dump.
-  const seedFrame = page.frameLocator('#ui-ses-iframe-container');
+  const seedFrame = page.frameLocator('#ui-ses-iframe');
   await expect(seedFrame.locator('text="My seed phrase has"').first())
     .toBeVisible({ timeout: 30_000 });
   await shot(page, '03-seed-option-picked');
@@ -198,7 +198,7 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await page.waitForFunction(() => {
     const collect = (root: Document) => (root.body?.innerText || '').toLowerCase();
     let t = collect(document);
-    const f = document.querySelector('#ui-ses-iframe-container') as HTMLIFrameElement | null;
+    const f = document.querySelector('#ui-ses-iframe') as HTMLIFrameElement | null;
     if (f?.contentDocument) t += ' ' + collect(f.contentDocument);
     return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('total');
   }, undefined, { timeout: 60_000, polling: 500 });

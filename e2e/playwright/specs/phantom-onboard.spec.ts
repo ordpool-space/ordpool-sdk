@@ -279,17 +279,18 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
       || t.includes('receive')
       || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
-  // If the Get Started CTA is present, click it (best-effort) so the
-  // wallet ends in a usable state for downstream tests.
-  const getStarted = page.getByRole('button', { name: /get started/i }).first();
-  if (await getStarted.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await getStarted.click({ force: true }).catch(() => undefined);
-  } else {
-    // Fallback: text-based locator (Phantom sometimes renders the CTA
-    // as a styled div, not a real button).
-    const cta = page.getByText('Get Started', { exact: true }).first();
-    if (await cta.isVisible({ timeout: 1_000 }).catch(() => false)) {
-      await cta.click({ force: true }).catch(() => undefined);
+  // Click "Get Started" via CDP — Phantom renders this as a styled
+  // div (same as Continue earlier), so regular clicks may not register.
+  const gsLocator = page.getByText('Get Started', { exact: true }).first();
+  if (await gsLocator.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    const gsBox = await gsLocator.boundingBox();
+    if (gsBox) {
+      const gsCdp = await page.context().newCDPSession(page);
+      const x = gsBox.x + gsBox.width / 2;
+      const y = gsBox.y + gsBox.height / 2;
+      await gsCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+      await gsCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await gsCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
     }
   }
   await shot(page, '08-dashboard');

@@ -80,7 +80,7 @@ async function onboardOkx(page: Page): Promise<void> {
   }
 
   // OKX renders the seed-phrase form inside #ui-ses-iframe-container.
-  const seedFrame = page.frameLocator('#ui-ses-iframe-container');
+  const seedFrame = page.frameLocator('#ui-ses-iframe');
   await expect(seedFrame.locator('text="My seed phrase has"').first())
     .toBeVisible({ timeout: 30_000 });
 
@@ -113,7 +113,7 @@ async function onboardOkx(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const collect = (root: Document) => (root.body?.innerText || '').toLowerCase();
     let t = collect(document);
-    const f = document.querySelector('#ui-ses-iframe-container') as HTMLIFrameElement | null;
+    const f = document.querySelector('#ui-ses-iframe') as HTMLIFrameElement | null;
     if (f?.contentDocument) t += ' ' + collect(f.contentDocument);
     return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('total');
   }, undefined, { timeout: 60_000, polling: 500 });
