@@ -229,17 +229,20 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   await shot(page, '06-password-typed');
 
-  // Terms checkbox — click whichever element has the agreement label.
-  const termsCheckbox = page.locator('input[type="checkbox"]').first();
-  if (await termsCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await termsCheckbox.check({ force: true });
-  } else {
-    // Fallback: click the checkbox label
-    const termsLabel = page.getByText(/agree.*Terms/i).first();
-    if (await termsLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await termsLabel.click({ force: true });
-    }
-  }
+  // Phantom uses Reach UI's `data-reach-custom-checkbox-input` — the
+  // <input> is visually hidden (pointer-events:none, opacity:0). A
+  // mouse click on the input is absorbed and Playwright `check()`
+  // reports "state did not change". Fire a native .click() via JS —
+  // React's onChange picks it up and toggles aria-checked.
+  await page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"]')
+    .first().waitFor({ state: 'attached', timeout: 10_000 });
+  await page.evaluate(() => {
+    const cb = document.querySelector('[data-testid="onboarding-form-terms-of-service-checkbox"]') as HTMLInputElement | null;
+    cb?.click();
+  });
+  await expect(
+    page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"][aria-checked="true"]'),
+  ).toBeAttached({ timeout: 5_000 });
 
   // Wait for Continue to be enabled, then CDP-click.
   await page.waitForFunction(() => {

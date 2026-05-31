@@ -75,6 +75,7 @@ test.afterAll(async () => {
 test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
   test.setTimeout(180_000);
 
+  // eslint-disable-next-line prefer-const
   let page: Page;
   if (onboardPage) {
     page = onboardPage;
@@ -148,12 +149,24 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
-  // CI 26645369070 captured an empty body innerHTML at this point —
-  // OKX clears the screen during transition. Wait for actual content
-  // to render before snapshotting.
-  await page.waitForFunction(() => {
-    return (document.body.innerText || '').length > 50;
-  }, undefined, { timeout: 30_000, polling: 250 });
+  // CI 26715416910 trace: OKX opens a NEW page (different guid) for
+  // the 12-input seed-phrase form. The OLD page goes blank. Find
+  // whichever page now shows the "Seed phrase" header + numbered
+  // inputs (look for "My seed phrase has" since that text is unique
+  // to the new screen).
+  const seedFormDeadline = Date.now() + 30_000;
+  let seedPage: Page | null = null;
+  while (Date.now() < seedFormDeadline) {
+    for (const p of context.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/My seed phrase has/i.test(text)) { seedPage = p; break; }
+    }
+    if (seedPage) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (seedPage) {
+    page = seedPage;
+  }
   await shot(page, '03-seed-option-picked');
   await dumpHtml(page, '03-seed-option-picked');
 

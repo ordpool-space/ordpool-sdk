@@ -141,16 +141,17 @@ async function onboardPhantom(page: Page): Promise<void> {
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
 
-  // Required Terms checkbox gates Continue.
-  const termsCheckbox = page.locator('input[type="checkbox"]').first();
-  if (await termsCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await termsCheckbox.check({ force: true });
-  } else {
-    const termsLabel = page.getByText(/agree.*Terms/i).first();
-    if (await termsLabel.isVisible({ timeout: 3_000 }).catch(() => false)) {
-      await termsLabel.click({ force: true });
-    }
-  }
+  // Reach UI custom-checkbox is visually hidden; fire native .click()
+  // via JS so React's onChange toggles aria-checked.
+  await page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"]')
+    .first().waitFor({ state: 'attached', timeout: 10_000 });
+  await page.evaluate(() => {
+    const cb = document.querySelector('[data-testid="onboarding-form-terms-of-service-checkbox"]') as HTMLInputElement | null;
+    cb?.click();
+  });
+  await expect(
+    page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"][aria-checked="true"]'),
+  ).toBeAttached({ timeout: 5_000 });
 
   // Wait for Continue enabled, CDP-click.
   await page.waitForFunction(() => {

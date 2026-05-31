@@ -47,7 +47,6 @@ async function onboardOkx(page: Page): Promise<void> {
   }, undefined, { timeout: 60_000, polling: 250 });
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
   await expect(importBtn).toBeVisible({ timeout: 10_000 });
-  // Raw CDP Input.dispatchMouseEvent with cursor jitter.
   const cdp = await page.context().newCDPSession(page);
   const box = await importBtn.boundingBox();
   if (box) {
@@ -60,8 +59,6 @@ async function onboardOkx(page: Page): Promise<void> {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
   await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
-  // Programmatic native click as final fallback (React onClick listens
-  // for native MouseEvent; bypasses anti-bot mouse-event filtering).
   const stillOnWelcome = await page.locator('text="Your portal to Web3"')
     .isVisible({ timeout: 3_000 }).catch(() => false);
   if (stillOnWelcome) {
@@ -80,6 +77,24 @@ async function onboardOkx(page: Page): Promise<void> {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+  }
+
+  // OKX opens the 12-input seed-phrase form on a NEW page (different
+  // guid) — the old page goes blank. Switch to whichever now shows
+  // "My seed phrase has".
+  const ctx = page.context();
+  const seedDeadline = Date.now() + 30_000;
+  let seedPage: Page | null = null;
+  while (Date.now() < seedDeadline) {
+    for (const p of ctx.pages()) {
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/My seed phrase has/i.test(text)) { seedPage = p; break; }
+    }
+    if (seedPage) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (seedPage) {
+    page = seedPage;
   }
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
