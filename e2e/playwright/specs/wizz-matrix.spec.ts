@@ -163,23 +163,7 @@ test.beforeAll(async () => {
 });
 
 for (const variant of VARIANTS) {
-  // wizz-matrix is currently flaky: Wizz's dashboard fires multiple
-  // outbound HTTPS requests on mount (configs.wizz.cash + token /
-  // indexer endpoints whose paths vary by derivation type). CI has no
-  // internet, so requests hang until their per-request timeouts fire
-  // — and requestAccounts handler blocks until they all complete.
-  // Single-URL abort gets us most of the way (configs.wizz.cash),
-  // but a second indexer fetch on certain derivations causes the
-  // approval popup to take >60s to appear. Result: P2TR and P2WPKH
-  // alternate passing/failing across CI runs (race against per-
-  // request timeouts).
-  //
-  // Single-variant Wizz coverage is provided by wizz-sdk-handshake
-  // (BIP-84 / P2WPKH on the default derivation). Multi-variant
-  // matrix is skipped pending a more complete network-abort sweep
-  // (would require inventory of every CDN/indexer URL Wizz might
-  // touch — out of scope for now).
-  test.skip(`SDK returns the right address for Wizz ${variant.label}`, async () => {
+  test(`SDK returns the right address for Wizz ${variant.label}`, async () => {
     test.setTimeout(180_000);
 
     const context = await chromium.launchPersistentContext('', {
@@ -192,12 +176,20 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    // Abort the outbound config fetch (CI has no internet) so Wizz
-    // falls back to bundled defaults. P2TR passes with this alone;
-    // P2WPKH is a known-fail at 1.1m because it triggers additional
-    // ARC20/BRC20 indexer fetches we haven't isolated yet — broader
-    // abort attempts broke P2TR too, so keep it narrow.
-    await context.route('**/configs.wizz.cash/**', route => route.abort());
+    // Wizz fans out to multiple outbound HTTPS endpoints on mount
+    // (configs.wizz.cash + ARC20/BRC20 indexer endpoints whose paths
+    // vary by derivation type). CI has no outbound internet so every
+    // such request hangs. Abort ALL non-localhost outbound traffic at
+    // the browser layer — Wizz falls back to bundled defaults
+    // immediately and requestAccounts becomes synchronous.
+    // chrome-extension:// requests aren't intercepted by route().
+    await context.route('**/*', route => {
+      const url = route.request().url();
+      if (url.startsWith('http://localhost') || url.startsWith('https://localhost') || url.startsWith('http://127.0.0.1')) {
+        return route.continue();
+      }
+      return route.abort();
+    });
 
     try {
       let [worker] = context.serviceWorkers();
