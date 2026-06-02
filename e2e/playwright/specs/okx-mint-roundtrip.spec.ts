@@ -1,0 +1,185 @@
+import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+
+import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
+
+import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
+import { waitForApprovalPopup } from '../approval-popup';
+import { onboardOkx } from '../onboard-okx';
+
+/**
+ * Iteration 5 — full cat21 mint roundtrip with the real OKX
+ * extension. OKX is multi-chain but the BTC sub-provider
+ * (`window.okxwallet.bitcoin`) defaults to BIP-86 Taproot for a
+ * fresh restore — single-address-per-active-type contract.
+ *
+ * Cross-network-keys trick (same as Unisat/Wizz/Leather): OKX
+ * itself only ships mainnet/testnet, so we keep the wallet on
+ * mainnet, fund the bcrt1p (regtest P2TR) address derived from
+ * the same x-only pubkey, build a Network.Regtest PSBT, and let
+ * OKX sign it — the P2TR script hash is HRP-independent so OKX's
+ * "is this my address?" check matches against its own mainnet
+ * bc1p address. We broadcast via local electrs.
+ */
+
+const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
+const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
+const HARNESS_URL = 'http://localhost:4500/';
+
+const FUND_AMOUNT_BTC = 0.001;
+
+let context: BrowserContext;
+let extensionId: string;
+let onboardPage: Page | null = null;
+
+async function shot(p: Page, name: string): Promise<void> {
+  await p.screenshot({
+    path: path.resolve(RESULTS_DIR, `okx-mint-${name}.png`),
+    fullPage: true,
+  }).catch(() => undefined);
+}
+
+async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
+  const approval = await waitForApprovalPopup({
+    context: ctx,
+    knownPages,
+    isApproval: async (p) => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
+        .waitFor({ state: 'visible', timeout: 60_000 });
+      return true;
+    },
+  });
+  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
+}
+
+async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
+  const approval = await waitForApprovalPopup({
+    context: ctx,
+    knownPages,
+    timeoutMs: 90_000,
+    isApproval: async (p) => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      await p.getByRole('button', { name: /^(confirm|sign|approve|allow)$/i }).first()
+        .waitFor({ state: 'visible', timeout: 90_000 });
+      return true;
+    },
+  });
+  await shot(approval, '03a-sign-approval');
+  await approval.getByRole('button', { name: /^(confirm|sign|approve|allow)$/i }).first().click();
+}
+
+test.beforeAll(async () => {
+  if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
+    throw new Error(`OKX extension not unpacked at ${EXT_PATH}.`);
+  }
+  if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
+    throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
+  }
+
+  context = await chromium.launchPersistentContext('', {
+    headless: false,
+    args: [
+      `--disable-extensions-except=${EXT_PATH}`,
+      `--load-extension=${EXT_PATH}`,
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
+    ],
+  });
+  let [worker] = context.serviceWorkers();
+  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  extensionId = worker.url().split('/')[2];
+
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch {
+    /* fall back below */
+  }
+  test.setTimeout(240_000);
+  if (!onboardPage) onboardPage = await context.newPage();
+  await onboardOkx(onboardPage, extensionId);
+  await shot(onboardPage, '00-onboarded');
+});
+
+test.afterAll(async () => {
+  await context?.close();
+});
+
+test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
+  test.setTimeout(300_000);
+
+  const harness = await context.newPage();
+  await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
+  await harness.waitForFunction(
+    () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
+    undefined,
+    { timeout: 15_000 },
+  );
+  await shot(harness, '01-harness-loaded');
+
+  const connectKnownPages = new Set(context.pages());
+  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
+  await approveConnectPopup(context, connectKnownPages);
+  const wallet = await connectResultPromise;
+  console.log(`[okx-mint] mainnet payment = ${wallet.paymentAddress}`);
+  // OKX default = BIP-86 Taproot.
+  expect(wallet.paymentAddress).toBe('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr');
+
+  // Both payment and ordinals are the same BIP-86 P2TR derivation
+  // (single-address contract) — on regtest, both become bcrt1p with
+  // identical script hash. Reuse ordinalsAddress for both lanes.
+  const regtest = await harness.evaluate(
+    (pk: string) => window.ordpoolSdkHarness.deriveRegtestAddresses(pk),
+    wallet.paymentPublicKey,
+  );
+  const paymentBcrt1p = regtest.ordinalsAddress;
+  console.log(`[okx-mint] regtest taproot = ${paymentBcrt1p}`);
+  expect(paymentBcrt1p).toMatch(/^bcrt1p/);
+
+  const fundTxid = rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', paymentBcrt1p, String(FUND_AMOUNT_BTC)).trim();
+  console.log(`[okx-mint] funded ${paymentBcrt1p} with ${FUND_AMOUNT_BTC} BTC in tx ${fundTxid}`);
+  const newTip = mineBlocks(1);
+  await waitForElectrsSync(newTip);
+
+  const utxos = await getUtxos(paymentBcrt1p);
+  const utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
+  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${paymentBcrt1p}`);
+  console.log(`[okx-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
+
+  const signKnownPages = new Set(context.pages());
+  const signedHexPromise = harness.evaluate(
+    (args) => window.ordpoolSdkHarness.buildAndSignMintViaOkx(args),
+    {
+      utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
+      paymentAddress: paymentBcrt1p,
+      paymentPublicKey: wallet.paymentPublicKey,
+      recipientAddress: paymentBcrt1p,
+      feeSats: 1500,
+    },
+  );
+  await approveSignPopup(context, signKnownPages);
+  const signed = await signedHexPromise;
+  console.log(`[okx-mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
+
+  const broadcastTxid = await postTx(signed.txHex);
+  console.log(`[okx-mint] broadcast txid = ${broadcastTxid}`);
+  expect(broadcastTxid).toMatch(/^[0-9a-f]{64}$/);
+
+  const confirmedTip = mineBlocks(1);
+  await waitForElectrsSync(confirmedTip);
+  const esploraTx = await getTx(broadcastTxid);
+  console.log(`[okx-mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
+  expect(esploraTx.locktime).toBe(21);
+  expect(esploraTx.status.block_hash).toBeTruthy();
+
+  const parsed = Cat21ParserService.parse(esploraTx);
+  expect(parsed).not.toBeNull();
+  expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
+  expect(parsed!.transactionId).toBe(broadcastTxid);
+  expect(parsed!.getImage()).toMatch(/^<svg/);
+});

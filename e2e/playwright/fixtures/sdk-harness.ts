@@ -80,6 +80,7 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
+      buildAndSignMintViaWizz(input: MintRequest): Promise<{ txHex: string }>;
       detectOkx(): boolean;
       connectOkx(): Promise<{
         type: KnownOrdinalWalletType;
@@ -89,6 +90,7 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
+      buildAndSignMintViaOkx(input: MintRequest): Promise<{ txHex: string }>;
       detectPhantom(): boolean;
       connectPhantom(): Promise<{
         type: KnownOrdinalWalletType;
@@ -107,6 +109,7 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
+      buildAndSignMintViaOyl(input: MintRequest): Promise<{ txHex: string }>;
       detectAlby(): boolean;
       connectAlby(): Promise<{
         type: KnownOrdinalWalletType;
@@ -541,6 +544,159 @@ window.ordpoolSdkHarness.buildAndSignMintViaLeather = async (input: MintRequest)
   log('mint.signed-psbt', { length: response.result.hex.length });
 
   const txHex = extractWireTxFromPsbt(hexToBytes(response.result.hex));
+  log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  return { txHex };
+};
+
+/**
+ * Wizz mint: signPsbt(hex, {autoFinalized:false}) — same shape as
+ * Unisat (Wizz is a Unisat fork). Cross-network-keys trick: Wizz
+ * itself runs on mainnet but its script-hash matching is HRP-
+ * independent, so a regtest-encoded PSBT signs cleanly.
+ */
+window.ordpoolSdkHarness.buildAndSignMintViaWizz = async (input: MintRequest) => {
+  if (!wizzConnector.detect(window)) {
+    throw new Error('Wizz provider not injected on the harness page');
+  }
+  statusEl().textContent = `building + signing cat21 mint via wizz…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  // createTransaction's switch only branches on leather/xverse/unisat
+  // — Wizz is a Unisat fork with the same single-address contract, so
+  // route through the unisat input-script path. The signing layer
+  // still calls window.wizz below; only the PSBT construction reuses
+  // unisat's branch.
+  const result = createTransaction(
+    KnownOrdinalWalletType.unisat,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    false,
+    Network.Regtest,
+  );
+  const psbtHex = bytesToHex(result.tx.toPSBT());
+  log('mint.psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
+
+  const wizz = (window as unknown as {
+    wizz: { signPsbt: (h: string, o?: { autoFinalized?: boolean }) => Promise<string> };
+  }).wizz;
+  const signedPsbtHex = await wizz.signPsbt(psbtHex, { autoFinalized: false });
+  log('mint.signed-psbt', { length: signedPsbtHex.length });
+
+  const txHex = extractWireTxFromPsbt(hexToBytes(signedPsbtHex));
+  log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  return { txHex };
+};
+
+/**
+ * OKX mint: window.okxwallet.bitcoin.signPsbt(hex, {autoFinalized:
+ * false}) — same shape as Unisat. Cross-network-keys trick applies
+ * the same way; OKX's signPsbt matches the script bytes against
+ * the wallet's own (mainnet) address.
+ */
+window.ordpoolSdkHarness.buildAndSignMintViaOkx = async (input: MintRequest) => {
+  if (!okxConnector.detect(window)) {
+    throw new Error('OKX provider not injected on the harness page');
+  }
+  statusEl().textContent = `building + signing cat21 mint via okx…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  // Route PSBT construction through unisat's input-script path —
+  // OKX's signPsbt accepts the same wire shape as Unisat's and is
+  // a single-address-per-active-type wallet.
+  const result = createTransaction(
+    KnownOrdinalWalletType.unisat,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    false,
+    Network.Regtest,
+  );
+  const psbtHex = bytesToHex(result.tx.toPSBT());
+  log('mint.psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
+
+  const okxBtc = (window as unknown as {
+    okxwallet: { bitcoin: { signPsbt: (h: string, o?: { autoFinalized?: boolean; from?: string }) => Promise<string> } };
+  }).okxwallet.bitcoin;
+  const signedPsbtHex = await okxBtc.signPsbt(psbtHex, { autoFinalized: false });
+  log('mint.signed-psbt', { length: signedPsbtHex.length });
+
+  const txHex = extractWireTxFromPsbt(hexToBytes(signedPsbtHex));
+  log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  return { txHex };
+};
+
+/**
+ * Oyl mint: window.oyl.signPsbt({psbtBase64, inputsToSign}) →
+ * {signedPsbt: base64}. Oyl exposes both bcrt1q + bcrt1p natively
+ * when its UI is on regtest, but in headless Pipeline B we stay on
+ * Oyl's default (mainnet) and use the cross-network-keys trick as
+ * with Unisat/Wizz/OKX.
+ */
+window.ordpoolSdkHarness.buildAndSignMintViaOyl = async (input: MintRequest) => {
+  if (!oylConnector.detect(window)) {
+    throw new Error('Oyl provider not injected on the harness page');
+  }
+  statusEl().textContent = `building + signing cat21 mint via oyl…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  // Oyl exposes nativeSegwit + taproot per connect. With the default
+  // nativeSegwit payment address, the input-script needs match
+  // unisat's P2WPKH path. Routing through unisat's case constructs
+  // the right witness script.
+  const result = createTransaction(
+    KnownOrdinalWalletType.unisat,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    false,
+    Network.Regtest,
+  );
+  const psbtBytes = result.tx.toPSBT();
+  const psbtBase64 = base64.encode(psbtBytes);
+  log('mint.psbt-built', { bytes: psbtBytes.length, fee: input.feeSats });
+
+  const oyl = (window as unknown as {
+    oyl: {
+      signPsbt: (a: {
+        psbtBase64: string;
+        inputsToSign: { address: string; signingIndexes: number[]; sigHash: number }[];
+      }) => Promise<{ signedPsbt: string }>;
+    };
+  }).oyl;
+  const response = await oyl.signPsbt({
+    psbtBase64,
+    inputsToSign: [{
+      address: input.paymentAddress,
+      signingIndexes: [0],
+      sigHash: 0x01,
+    }],
+  });
+  log('mint.signed-psbt', { length: response.signedPsbt.length });
+
+  const signedBytes = base64.decode(response.signedPsbt);
+  const txHex = extractWireTxFromPsbt(signedBytes);
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
 };
