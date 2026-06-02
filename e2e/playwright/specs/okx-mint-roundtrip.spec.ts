@@ -54,23 +54,26 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
   await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
 }
 
-async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    timeoutMs: 120_000,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      // Either text marks the OKX sign popup — "Confirm Trade" is the
-      // sign-popup heading; "Asset transfer pending" is the promo modal
-      // that often layers on top of it.
-      await Promise.race([
-        p.getByText('Confirm Trade').first().waitFor({ state: 'visible', timeout: 120_000 }),
-        p.getByText('Asset transfer pending').first().waitFor({ state: 'visible', timeout: 120_000 }),
-      ]);
-      return true;
-    },
-  });
+async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
+  // OKX reuses the connect popup's Page for sign (CI iter 39 trace
+  // confirmed) — waitForApprovalPopup's knownPages filter would skip
+  // it. Poll every chrome-extension page for the sign-popup
+  // "Confirm Trade" heading regardless of when the page was created.
+  const deadline = Date.now() + 120_000;
+  let approval: Page | null = null;
+  while (Date.now() < deadline) {
+    for (const p of ctx.pages()) {
+      if (!p.url().startsWith('chrome-extension://')) continue;
+      const text = await p.locator('body').innerText().catch(() => '');
+      if (/Confirm Trade|Asset transfer pending/i.test(text)) {
+        approval = p;
+        break;
+      }
+    }
+    if (approval) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  if (!approval) throw new Error('OKX sign popup never showed Confirm Trade within 120s');
   await shot(approval, '03a-sign-approval');
 
   // OKX's sign popup may open with an "Asset transfer pending" promo
@@ -175,7 +178,6 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
   if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${paymentBcrt1p}`);
   console.log(`[okx-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
-  const signKnownPages = new Set(context.pages());
   const signedHexPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.buildAndSignMintViaOkx(args),
     {
@@ -186,7 +188,7 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
       feeSats: 1500,
     },
   );
-  await approveSignPopup(context, signKnownPages);
+  await approveSignPopup(context);
   const signed = await signedHexPromise;
   console.log(`[okx-mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
 
