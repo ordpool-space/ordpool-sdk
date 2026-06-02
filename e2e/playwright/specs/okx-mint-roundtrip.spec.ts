@@ -162,7 +162,7 @@ test.afterAll(async () => {
 // runs (likely related to which wallet tab is focused, or whether the
 // previous Connected modal is still open). Until then, mint coverage
 // is provided by Xverse + Unisat + Leather.
-test.skip('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
+test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();

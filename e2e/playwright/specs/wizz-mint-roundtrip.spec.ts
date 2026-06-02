@@ -96,27 +96,22 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
+  // URL-anchor on Wizz's standard approval path (#/approval/SignPsbt)
+  // — same URL pattern as the connect approval that wizz-sdk-handshake
+  // matches. Sourced from background.js APPROVAL annotations:
+  // signPsbt → "SignPsbt" approval route.
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
     timeoutMs: 120_000,
     isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      // Wizz strips testids — match on either the URL hash or the
-      // primary action by visible text. The approval surface is at
-      // notification.html#/approval/SignPsbt for Wizz/Unisat fork.
-      try {
-        await p.waitForURL(/notification\.html#/, { timeout: 120_000 });
-      } catch { /* fall through to text match */ }
-      // Wizz's primary action may be styled <div> with "Sign" or
-      // "Confirm" depending on screen state.
-      await p.getByText(/^(Sign|Confirm|Approve)$/).first()
-        .waitFor({ state: 'visible', timeout: 120_000 });
+      await p.waitForURL(/notification\.html#\/approval/, { timeout: 120_000 });
       return true;
     },
   });
   await shot(approval, '03a-sign-approval');
-  await approval.getByText(/^(Sign|Confirm|Approve)$/).first().click();
+  // Wizz/Unisat sign popups use a "Sign" styled-div primary action.
+  await approval.getByText(/^Sign$/).first().click();
 }
 
 test.beforeAll(async () => {
@@ -155,16 +150,13 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — Wizz's signPsbt does NOT open the approval popup when
-// handed a regtest-encoded PSBT (no error, no popup, just silence).
-// Cross-network keys works for Unisat (Wizz's upstream) but Wizz's
-// fork added stricter validation somewhere on the relay path that
-// gates popup creation. Wire contract is pinned by
-// wizz.signer.angular.spec.ts in Pipeline A. Re-attempt once we
-// either (a) understand which Wizz internal check rejects the
-// regtest PSBT or (b) run Wizz against a mocked mainnet UTXO that
-// passes the trick.
-test.skip('mint a cat21 on regtest via Wizz: build PSBT in SDK, sign in popup (mainnet wallet, regtest PSBT), broadcast via local electrs', async () => {
+// Re-attempting after source-diving the v2.13.4 binary. Wizz's signPsbt
+// has the same P() validator as Unisat (Psbt.fromHex must not throw)
+// — verified at background.js byte 2244000. The approval route is
+// notification.html#/approval/SignPsbt. The iter 35-36 failures were
+// likely matcher misses, not silent wallet rejects. Anchor on the URL
+// (same pattern as wizz-sdk-handshake) and click "Sign".
+test('mint a cat21 on regtest via Wizz: build PSBT in SDK, sign in popup (mainnet wallet, regtest PSBT), broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();
