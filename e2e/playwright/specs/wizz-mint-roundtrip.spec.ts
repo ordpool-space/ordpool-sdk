@@ -99,18 +99,24 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
+    timeoutMs: 120_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      // Wizz's sign-PSBT surface (inherited from Unisat) labels its
-      // primary action "Sign". Pin on the visible text — testids are
-      // stripped in Wizz.
-      await p.getByText(/^Sign$/).first().waitFor({ state: 'visible', timeout: 90_000 });
+      // Wizz strips testids — match on either the URL hash or the
+      // primary action by visible text. The approval surface is at
+      // notification.html#/approval/SignPsbt for Wizz/Unisat fork.
+      try {
+        await p.waitForURL(/notification\.html#/, { timeout: 120_000 });
+      } catch { /* fall through to text match */ }
+      // Wizz's primary action may be styled <div> with "Sign" or
+      // "Confirm" depending on screen state.
+      await p.getByText(/^(Sign|Confirm|Approve)$/).first()
+        .waitFor({ state: 'visible', timeout: 120_000 });
       return true;
     },
   });
   await shot(approval, '03a-sign-approval');
-  await approval.getByText(/^Sign$/).first().click();
+  await approval.getByText(/^(Sign|Confirm|Approve)$/).first().click();
 }
 
 test.beforeAll(async () => {
