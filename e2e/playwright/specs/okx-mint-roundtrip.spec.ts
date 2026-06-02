@@ -61,17 +61,36 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
     timeoutMs: 120_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      // OKX sign popup is "Confirm Trade" with Reject / Confirm buttons.
-      // Confirm renders as a styled <div>, not a <button>, so match on
-      // visible text — heading "Confirm Trade" makes the loose /confirm/
-      // pattern unreliable; pin on exact "Confirm" + the page header.
-      await p.getByText('Confirm Trade').first()
-        .waitFor({ state: 'visible', timeout: 120_000 });
+      // Either text marks the OKX sign popup — "Confirm Trade" is the
+      // sign-popup heading; "Asset transfer pending" is the promo modal
+      // that often layers on top of it.
+      await Promise.race([
+        p.getByText('Confirm Trade').first().waitFor({ state: 'visible', timeout: 120_000 }),
+        p.getByText('Asset transfer pending').first().waitFor({ state: 'visible', timeout: 120_000 }),
+      ]);
       return true;
     },
   });
   await shot(approval, '03a-sign-approval');
-  // The action button is the only element with exact text "Confirm".
+
+  // OKX's sign popup may open with an "Asset transfer pending" promo
+  // modal layered on top that disables the underlying Confirm button.
+  // Dismiss via the modal's X icon (close button) if visible, then
+  // click Confirm. Trace from CI 26830193081 confirmed this is the
+  // blocker on iter 38.
+  const promoModalText = approval.getByText('Asset transfer pending');
+  if (await promoModalText.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    // The X close button has aria-label or is the trailing icon button
+    // inside the modal header. Try a few selectors.
+    const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
+    if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await closeBtn.click({ force: true }).catch(() => undefined);
+    }
+    // Wait for the modal to disappear (Confirm becomes enabled).
+    await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
+  }
+
+  await shot(approval, '03b-post-modal-dismiss');
   await approval.getByText('Confirm', { exact: true }).first().click();
 }
 
