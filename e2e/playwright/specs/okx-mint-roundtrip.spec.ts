@@ -58,16 +58,21 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
+    timeoutMs: 120_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(confirm|sign|approve|allow)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 90_000 });
+      // OKX sign popup is "Confirm Trade" with Reject / Confirm buttons.
+      // Confirm renders as a styled <div>, not a <button>, so match on
+      // visible text — heading "Confirm Trade" makes the loose /confirm/
+      // pattern unreliable; pin on exact "Confirm" + the page header.
+      await p.getByText('Confirm Trade').first()
+        .waitFor({ state: 'visible', timeout: 120_000 });
       return true;
     },
   });
   await shot(approval, '03a-sign-approval');
-  await approval.getByRole('button', { name: /^(confirm|sign|approve|allow)$/i }).first().click();
+  // The action button is the only element with exact text "Confirm".
+  await approval.getByText('Confirm', { exact: true }).first().click();
 }
 
 test.beforeAll(async () => {
