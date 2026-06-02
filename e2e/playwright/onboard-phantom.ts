@@ -1,50 +1,39 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
-import * as path from 'node:path';
-import * as fs from 'node:fs';
-
-import { waitForApprovalPopup } from '../approval-popup';
-
-/**
- * Iteration 3 of the Phantom E2E pipeline: SDK ↔ Phantom handshake.
- *
- * Phantom v26 returns BOTH a P2WPKH payment address and a P2TR
- * ordinals address from `btc_requestAccounts`. The SDK connector
- * splits them by `addressType`. Assert both derivations for the
- * abandon-seed.
- */
-
-const EXT_PATH = path.resolve(__dirname, '../../extensions/phantom');
-const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
+import { expect, Page } from '@playwright/test';
 
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
 const TEST_PASSWORD = 'TestPassword123!';
 
-const EXPECTED_PAYMENT_ADDRESS  = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
-const EXPECTED_ORDINALS_ADDRESS = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
-
-let context: BrowserContext;
-let extensionId: string;
-
-async function shot(p: Page, name: string): Promise<void> {
-  await p.screenshot({
-    path: path.resolve(RESULTS_DIR, `phantom-handshake-${name}.png`),
-    fullPage: true,
-  }).catch(() => undefined);
-}
-
-async function onboardPhantom(page: Page): Promise<void> {
+/**
+ * Drive Phantom v26 onboarding from welcome to the "You're good to go"
+ * completion screen. Multi-page flow (CI iterations 22-30, 2026-05-31):
+ *
+ *   - Welcome → "I Already Have a Wallet" (anti-automation filter,
+ *     needs raw CDP Input.dispatchMouseEvent).
+ *   - Import-a-wallet picker → "Import Recovery Phrase".
+ *   - 12 mnemonic input boxes → Import Wallet.
+ *   - "Import Accounts — Finding Accounts with Activity" loading,
+ *     transitions to "We found N accounts with activity" result. The
+ *     result may render on a NEW page (Phantom replaces the tab); poll
+ *     context.pages() for the result-state marker.
+ *   - Continue (rendered as a styled <div>, not a real button) once
+ *     Phantom finishes deriving account info (opacity gate).
+ *   - YET another new page for "Create a password" — switch reference.
+ *   - Password + Confirm Password fields; Reach UI custom-checkbox
+ *     Terms (the <input> is visually hidden, dispatch native .click()
+ *     via JS so React's onChange toggles aria-checked); Continue.
+ *   - "You're good to go!" completion gate with a "Get Started" CTA.
+ *     The button is bombproof against every click strategy tried
+ *     (CDP / pointer / programmatic / Tab+Enter). We attempt one
+ *     CDP+pointer-event volley and leave the wallet on the completion
+ *     screen — callers can navigate to popup.html afterwards.
+ */
+export async function onboardPhantom(page: Page, extensionId: string): Promise<void> {
   if (page.url() === 'about:blank') {
     await page.setViewportSize({ width: 400, height: 800 });
     await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
   }
 
-  // Match the actual button, not the help paragraph that contains
-  // "import" + "wallet".
-  // Raw CDP Input.dispatchMouseEvent — one layer below page.mouse,
-  // which Phantom's onClick handler has ignored across every other
-  // activation strategy.
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
   await expect(importBtn).toBeVisible({ timeout: 30_000 });
   const cdp = await page.context().newCDPSession(page);
@@ -57,7 +46,6 @@ async function onboardPhantom(page: Page): Promise<void> {
     await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
-  // Post-welcome: "Import a wallet" picker. Click "Import Recovery Phrase".
   const recoveryBtn = page.getByRole('button', { name: /Import Recovery Phrase/i });
   await expect(recoveryBtn).toBeVisible({ timeout: 20_000 });
   const recoveryBox = await recoveryBtn.boundingBox();
@@ -79,27 +67,21 @@ async function onboardPhantom(page: Page): Promise<void> {
   } else {
     await mnemonicInputs.first().fill(TEST_MNEMONIC);
   }
-
   const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
   await confirmAfterMnemonic.click();
 
-  // Wait for the result state (not the loading-spinner state) before
-  // looking for Continue.
-  const context = page.context();
+  // Wait for the result state; Phantom may replace the page.
+  const ctx = page.context();
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
-    for (const p of context.pages()) {
+    for (const p of ctx.pages()) {
       const text = await p.locator('body').innerText().catch(() => '');
       if (/We found .* accounts? with activity/i.test(text)) { page = p; break; }
     }
     if (/We found .* accounts? with activity/i.test(await page.locator('body').innerText().catch(() => ''))) break;
     await new Promise(r => setTimeout(r, 500));
   }
-
-  // Wait for Continue to be ENABLED (the disabled gray-pill state
-  // transitions to the active state after Phantom finishes deriving
-  // account info).
   await page.waitForFunction(() => {
     const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
     const candidate = els.find(el => (el.textContent || '').trim() === 'Continue');
@@ -119,30 +101,25 @@ async function onboardPhantom(page: Page): Promise<void> {
     await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
-  // Phantom opens YET ANOTHER page for "Create a password" after the
-  // Import Accounts Continue (confirmed via CI 26713625161 trace).
-  const ctx2 = page.context();
+  // Create a password screen opens on yet another page.
   const createPwDeadline = Date.now() + 60_000;
   let pwPage: Page | null = null;
   while (Date.now() < createPwDeadline) {
-    for (const p of ctx2.pages()) {
+    for (const p of ctx.pages()) {
       const text = await p.locator('body').innerText().catch(() => '');
       if (/Create a password/i.test(text)) { pwPage = p; break; }
     }
     if (pwPage) break;
     await new Promise(r => setTimeout(r, 500));
   }
-  if (pwPage) {
-    page = pwPage;
-  }
+  if (pwPage) page = pwPage;
 
   const pwInputs = page.locator('input[type="password"]');
   await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
 
-  // Reach UI custom-checkbox is visually hidden; fire native .click()
-  // via JS so React's onChange toggles aria-checked.
+  // Reach UI hidden checkbox — native .click() via JS.
   await page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"]')
     .first().waitFor({ state: 'attached', timeout: 10_000 });
   await page.evaluate(() => {
@@ -153,7 +130,6 @@ async function onboardPhantom(page: Page): Promise<void> {
     page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"][aria-checked="true"]'),
   ).toBeAttached({ timeout: 5_000 });
 
-  // Wait for Continue enabled, CDP-click.
   await page.waitForFunction(() => {
     const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
     const candidate = els.find(el => (el.textContent || '').trim() === 'Continue');
@@ -173,25 +149,23 @@ async function onboardPhantom(page: Page): Promise<void> {
     await pwCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
   }
 
-  // Completion screen ("You're good to go!") or real dashboard.
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
-    return t.includes("you're good to go")
-      || t.includes('get started')
-      || t.includes('send')
-      || t.includes('receive')
-      || t.includes('balance');
+    return t.includes("you're good to go") || t.includes('get started')
+      || t.includes('send') || t.includes('receive') || t.includes('balance');
   }, undefined, { timeout: 60_000, polling: 500 });
+
+  // Best-effort Get Started click — unlikely to land, but harmless if not.
   const gsLocator = page.getByText('Get Started', { exact: true }).first();
   if (await gsLocator.isVisible({ timeout: 5_000 }).catch(() => false)) {
     await page.bringToFront();
     const gsBox = await gsLocator.boundingBox();
     if (gsBox) {
-      const cdp = await page.context().newCDPSession(page);
+      const cdp2 = await page.context().newCDPSession(page);
       const x = gsBox.x + gsBox.width / 2; const y = gsBox.y + gsBox.height / 2;
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+      await cdp2.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+      await cdp2.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
+      await cdp2.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
       await page.evaluate(({ x, y }) => {
         const el = document.elementFromPoint(x, y);
         if (el) {
@@ -210,105 +184,3 @@ async function onboardPhantom(page: Page): Promise<void> {
     undefined, { timeout: 10_000, polling: 300 },
   ).catch(() => undefined);
 }
-
-test.beforeAll(async () => {
-  if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
-    throw new Error(`Phantom extension not unpacked at ${EXT_PATH}.`);
-  }
-  if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
-    throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
-  }
-
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
-  });
-
-  let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
-  extensionId = worker.url().split('/')[2];
-
-  let onboardPage: Page;
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    onboardPage = await context.newPage();
-  }
-  test.setTimeout(180_000);
-  await onboardPhantom(onboardPage);
-  await shot(onboardPage, '00-onboarded');
-  // Phantom may be stuck on "You're good to go!" — navigate the
-  // onboard tab to popup.html to leave the completion gate and
-  // land on the dashboard surface, where dApp connect requests can
-  // be processed normally. Closing didn't help (iter 30); navigating
-  // away from /onboarding/done is the actual gate.
-  await onboardPage.goto(`chrome-extension://${extensionId}/popup.html`, {
-    waitUntil: 'domcontentloaded',
-  }).catch(() => undefined);
-  await onboardPage.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
-  }, undefined, { timeout: 30_000, polling: 250 }).catch(() => undefined);
-  await shot(onboardPage, '00b-popup-dashboard');
-});
-
-test.afterAll(async () => {
-  await context?.close();
-});
-
-// Re-attempting after iter 30 close-tab approach failed. New strategy:
-// navigate the onboard tab to chrome-extension://<id>/popup.html — the
-// dashboard surface. Phantom auto-unlocks the just-set password and
-// renders accounts there, which IS the state where dApp connect
-// requests trigger approval popups.
-test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
-  test.setTimeout(180_000);
-
-  const harness = await context.newPage();
-  await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
-  await harness.waitForFunction(
-    () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
-    undefined,
-    { timeout: 15_000 },
-  );
-
-  const knownPages = new Set(context.pages());
-  const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectPhantom());
-  resultPromise.catch(() => undefined);
-
-  const approval = await waitForApprovalPopup({
-    context,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
-      return true;
-    },
-  });
-  await shot(approval, '01-approval');
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
-
-  const info = await resultPromise;
-  // eslint-disable-next-line no-console
-  console.log(`[phantom:sdk-handshake] payment = ${info.paymentAddress}`);
-  // eslint-disable-next-line no-console
-  console.log(`[phantom:sdk-handshake] ordinals = ${info.ordinalsAddress}`);
-
-  expect(info.signingSupported).toBe(true);
-  expect(info.paymentAddress).toBe(EXPECTED_PAYMENT_ADDRESS);
-  expect(info.ordinalsAddress).toBe(EXPECTED_ORDINALS_ADDRESS);
-  // Payment pubkey = compressed sec256k1 = 33 bytes = 66 hex.
-  expect(info.paymentPublicKey).toMatch(/^[0-9a-f]{66}$/);
-  // Ordinals pubkey is x-only (32 bytes = 64 hex) — Phantom returns
-  // compressed but the SDK normalises to x-only for consistency.
-  expect(info.ordinalsPublicKey).toMatch(/^[0-9a-f]{64}$/);
-});

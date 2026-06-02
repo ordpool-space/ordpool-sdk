@@ -100,6 +100,7 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
+      buildAndSignMintViaPhantom(input: MintRequest): Promise<{ txHex: string }>;
       detectOyl(): boolean;
       connectOyl(): Promise<{
         type: KnownOrdinalWalletType;
@@ -696,6 +697,73 @@ window.ordpoolSdkHarness.buildAndSignMintViaOyl = async (input: MintRequest) => 
   log('mint.signed-psbt', { length: response.signedPsbt.length });
 
   const signedBytes = base64.decode(response.signedPsbt);
+  const txHex = extractWireTxFromPsbt(signedBytes);
+  log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  return { txHex };
+};
+
+/**
+ * Phantom mint: window.phantom.bitcoin.request({method:"btc_signPSBT",
+ * params:[Uint8Array, {inputsToSign, finalize:false}]}) → Uint8Array.
+ * Dual-address contract; we mint with the BIP-84 P2WPKH payment input
+ * to the BIP-86 P2TR recipient. Phantom only ships mainnet so the
+ * cross-network-keys trick applies as with the other single-address
+ * wallets.
+ */
+window.ordpoolSdkHarness.buildAndSignMintViaPhantom = async (input: MintRequest) => {
+  if (!phantomConnector.detect(window)) {
+    throw new Error('Phantom provider not injected on the harness page');
+  }
+  statusEl().textContent = `building + signing cat21 mint via phantom…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  const result = createTransaction(
+    KnownOrdinalWalletType.unisat,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    false,
+    Network.Regtest,
+  );
+  const psbtBytes = result.tx.toPSBT();
+  log('mint.psbt-built', { bytes: psbtBytes.length, fee: input.feeSats });
+
+  const phantomBtc = (window as unknown as {
+    phantom: {
+      bitcoin: {
+        request: (a: {
+          method: 'btc_signPSBT';
+          params: [Uint8Array, {
+            inputsToSign: { address: string; signingIndexes: number[]; sigHash?: number }[];
+            finalize: boolean;
+          }];
+        }) => Promise<Uint8Array>;
+      };
+    };
+  }).phantom.bitcoin;
+  const signedBytes = await phantomBtc.request({
+    method: 'btc_signPSBT',
+    params: [
+      psbtBytes,
+      {
+        inputsToSign: [{
+          address: input.paymentAddress,
+          signingIndexes: [0],
+          sigHash: 0x01,
+        }],
+        finalize: false,
+      },
+    ],
+  });
+  log('mint.signed-psbt', { length: signedBytes.length });
+
   const txHex = extractWireTxFromPsbt(signedBytes);
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
