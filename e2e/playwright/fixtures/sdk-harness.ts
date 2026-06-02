@@ -647,18 +647,21 @@ window.ordpoolSdkHarness.buildAndSignMintViaOkx = async (input: MintRequest) => 
       }) => Promise<string>;
     } };
   }).okxwallet.bitcoin;
-  // OKX requires toSignInputs for Taproot inputs with disableTweakSigner
-  // (the input was signed with a non-tweaked x-only pubkey from our PSBT
-  // construction). Wrap any rejection so the upstream error includes a
-  // readable message — OKX rejects with bare objects that toString to
-  // "Object" otherwise.
+  // OKX validates toSignInputs[i].address against its own wallet
+  // address-set, which is mainnet-only. Our bcrt1p input has the same
+  // script bytes as the wallet's bc1p (HRP swap), so derive the mainnet
+  // equivalent of the same pubkey and pass THAT — OKX sees a known
+  // address, signs the script, and we use the resulting signature on
+  // the regtest tx (script hash is identical).
+  const mainnetXonly = paymentPubkey.slice(1, 33);
+  const mainnetTaproot = p2tr(mainnetXonly, undefined, toScureNetwork(Network.Mainnet));
   let signedPsbtHex: string;
   try {
     signedPsbtHex = await okxBtc.signPsbt(psbtHex, {
       autoFinalized: false,
       toSignInputs: [{
         index: 0,
-        address: input.paymentAddress,
+        address: mainnetTaproot.address!,
         sighashTypes: [0x01],
         disableTweakSigner: false,
       }],
