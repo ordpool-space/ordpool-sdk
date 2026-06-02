@@ -631,9 +631,25 @@ window.ordpoolSdkHarness.buildAndSignMintViaOkx = async (input: MintRequest) => 
   log('mint.psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
 
   const okxBtc = (window as unknown as {
-    okxwallet: { bitcoin: { signPsbt: (h: string, o?: { autoFinalized?: boolean; from?: string }) => Promise<string> } };
+    okxwallet: { bitcoin: {
+      signPsbt: (h: string, o?: {
+        autoFinalized?: boolean;
+        from?: string;
+        toSignInputs?: { index: number; address: string; sighashTypes?: number[]; disableTweakSigner?: boolean }[];
+      }) => Promise<string>;
+    } };
   }).okxwallet.bitcoin;
-  const signedPsbtHex = await okxBtc.signPsbt(psbtHex, { autoFinalized: false });
+  // OKX requires toSignInputs for non-default address types (Taproot
+  // is OKX's default but the wallet still validates the input is in
+  // its address-set). Pass the index + address explicitly.
+  const signedPsbtHex = await okxBtc.signPsbt(psbtHex, {
+    autoFinalized: false,
+    toSignInputs: [{
+      index: 0,
+      address: input.paymentAddress,
+      sighashTypes: [0x01],
+    }],
+  });
   log('mint.signed-psbt', { length: signedPsbtHex.length });
 
   const txHex = extractWireTxFromPsbt(hexToBytes(signedPsbtHex));
@@ -675,18 +691,24 @@ window.ordpoolSdkHarness.buildAndSignMintViaOyl = async (input: MintRequest) => 
     Network.Regtest,
   );
   const psbtBytes = result.tx.toPSBT();
+  const psbtHex = bytesToHex(psbtBytes);
   const psbtBase64 = base64.encode(psbtBytes);
   log('mint.psbt-built', { bytes: psbtBytes.length, fee: input.feeSats });
 
+  // Oyl's connectProvider (oylConnectProvider.baac0163.js) rejects with
+  // "A psbt hex is required" when given only psbtBase64 — newer Oyl
+  // builds (>= v1.17.1) require psbtHex. Pass both for forward compat.
   const oyl = (window as unknown as {
     oyl: {
       signPsbt: (a: {
-        psbtBase64: string;
+        psbtHex?: string;
+        psbtBase64?: string;
         inputsToSign: { address: string; signingIndexes: number[]; sigHash: number }[];
-      }) => Promise<{ signedPsbt: string }>;
+      }) => Promise<{ signedPsbt: string; signedPsbtHex?: string }>;
     };
   }).oyl;
   const response = await oyl.signPsbt({
+    psbtHex,
     psbtBase64,
     inputsToSign: [{
       address: input.paymentAddress,
@@ -694,9 +716,12 @@ window.ordpoolSdkHarness.buildAndSignMintViaOyl = async (input: MintRequest) => 
       sigHash: 0x01,
     }],
   });
-  log('mint.signed-psbt', { length: response.signedPsbt.length });
+  log('mint.signed-psbt', { length: (response.signedPsbt || response.signedPsbtHex || '').length });
 
-  const signedBytes = base64.decode(response.signedPsbt);
+  // Accept either field; signedPsbt is base64, signedPsbtHex is hex.
+  const signedBytes = response.signedPsbtHex
+    ? hexToBytes(response.signedPsbtHex)
+    : base64.decode(response.signedPsbt);
   const txHex = extractWireTxFromPsbt(signedBytes);
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
