@@ -716,27 +716,31 @@ window.ordpoolSdkHarness.buildAndSignMintViaOyl = async (input: MintRequest) => 
   const psbtHex = bytesToHex(psbtBytes);
   log('mint.psbt-built', { bytes: psbtBytes.length, fee: input.feeSats });
 
-  // Oyl v1.17.1+ uses psbtHex (NOT psbtBase64) — its validation rejects
-  // with "A psbt hex is required" if you pass only psbtBase64. Send
-  // psbtHex only; if the wallet returns a base64 signedPsbt, decode
-  // that; if it returns signedPsbtHex, parse that.
+  // Verified by inspecting v1.17.1's static/background/index.js (the
+  // signPsbt handler at byte 4708500). The validator expects
+  // `body.psbt` (string, hex) — the "A psbt hex is required" error
+  // message refers to the *type* of value, not the field name.
   const oyl = (window as unknown as {
     oyl: {
       signPsbt: (a: {
-        psbtHex: string;
-        inputsToSign: { address: string; signingIndexes: number[]; sigHash: number }[];
-      }) => Promise<{ signedPsbt?: string; signedPsbtHex?: string }>;
+        psbt: string;
+        inputsToSign?: { address: string; signingIndexes: number[]; sigHash: number }[];
+        broadcast?: boolean;
+        finalize?: boolean;
+      }) => Promise<{ signedPsbt?: string; signedPsbtHex?: string; psbt?: string }>;
     };
   }).oyl;
-  let response: { signedPsbt?: string; signedPsbtHex?: string };
+  let response: { signedPsbt?: string; signedPsbtHex?: string; psbt?: string };
   try {
     response = await oyl.signPsbt({
-      psbtHex,
+      psbt: psbtHex,
       inputsToSign: [{
         address: input.paymentAddress,
         signingIndexes: [0],
         sigHash: 0x01,
       }],
+      broadcast: false,
+      finalize: false,
     });
   } catch (e) {
     const err = e as { code?: number; message?: string; toString?: () => string };
@@ -744,11 +748,16 @@ window.ordpoolSdkHarness.buildAndSignMintViaOyl = async (input: MintRequest) => 
     const code = err?.code !== undefined ? ` (code=${err.code})` : '';
     throw new Error(`oyl.signPsbt rejected${code}: ${msg}`);
   }
-  log('mint.signed-psbt', { length: (response.signedPsbt || response.signedPsbtHex || '').length });
+  log('mint.signed-psbt', {
+    length: (response.signedPsbt || response.signedPsbtHex || response.psbt || '').length,
+    fields: Object.keys(response),
+  });
 
-  const signedBytes = response.signedPsbtHex
-    ? hexToBytes(response.signedPsbtHex)
-    : base64.decode(response.signedPsbt ?? '');
+  // Response may use signedPsbtHex (hex) or signedPsbt/psbt (base64 or hex).
+  const signedHex = response.signedPsbtHex || (response.psbt && /^[0-9a-f]+$/i.test(response.psbt) ? response.psbt : undefined);
+  const signedBytes = signedHex
+    ? hexToBytes(signedHex)
+    : base64.decode(response.signedPsbt ?? response.psbt ?? '');
   const txHex = extractWireTxFromPsbt(signedBytes);
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };

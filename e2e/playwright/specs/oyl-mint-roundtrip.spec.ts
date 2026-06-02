@@ -128,14 +128,13 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — Oyl's signPsbt relay validation has shifted between
-// the version we grepped for the signer (v1.17.1, accepted
-// `psbtBase64`) and the live extension binary in CI (rejects with
-// "A psbt hex is required" even when `psbtHex` is supplied). The
-// adapter's wire shape is pinned by oyl.signer.angular.spec.ts in
-// Pipeline A. Re-enable once the live relay's argument schema is
-// confirmed against the bundled provider source.
-test.skip('mint a cat21 on regtest via Oyl: build PSBT in SDK, sign in popup (mainnet wallet, regtest PSBT), broadcast via local electrs', async () => {
+// Reactivated after source-diving the v1.17.1 binary: the relay
+// validator at static/background/index.js byte 4708500 expects
+// `body.psbt` (hex string) — the "A psbt hex is required" error
+// message refers to the value's type, not the parameter name.
+// Both `psbtBase64` and `psbtHex` parameters were ignored. Fixed
+// in the harness to pass `{ psbt: psbtHex, ... }`.
+test('mint a cat21 on regtest via Oyl: build PSBT in SDK, sign in popup (mainnet wallet, regtest PSBT), broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();
