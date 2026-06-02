@@ -110,8 +110,18 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
     },
   });
   await shot(approval, '03a-sign-approval');
-  // Wizz/Unisat sign popups use a "Sign" styled-div primary action.
+  // Sign button is initially disabled (Wizz analyses the PSBT first).
+  // Wait for it to be enabled before clicking. The button is a styled
+  // div whose disabled state shows pointer-events:none + reduced opacity.
+  await approval.waitForFunction(() => {
+    const els = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], div'));
+    const candidate = els.find(el => (el.textContent || '').trim() === 'Sign');
+    if (!candidate) return false;
+    const style = getComputedStyle(candidate);
+    return style.pointerEvents !== 'none' && parseFloat(style.opacity) > 0.7;
+  }, undefined, { timeout: 60_000, polling: 250 });
   await approval.getByText(/^Sign$/).first().click();
+  await shot(approval, '03b-after-sign-click');
 }
 
 test.beforeAll(async () => {
