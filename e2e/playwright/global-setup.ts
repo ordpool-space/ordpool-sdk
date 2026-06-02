@@ -7,6 +7,19 @@ import { waitForChromeStorageKey, waitForSingletonLockGone } from './wait-helper
 /**
  * Playwright globalSetup — runs ONCE before any spec.
  *
+ * SPEED OPTIMIZATION LAYER of the Xverse gold-standard pattern.
+ * See `/Work/ordpool/WALLETS.md` → "HARD RULE: The Xverse pattern is
+ * the gold standard" for the full mental model. The TL;DR: this file
+ * runs the FULL onboarding click-through once and caches the result;
+ * downstream specs (matrix × 4, mint-roundtrip) clone the seed dir
+ * for fresh contexts in <2s instead of repeating 25s of UI clicks.
+ *
+ * The companion *source-of-truth* layer is `specs/xverse-onboard.spec.ts`,
+ * which runs the same click-through against every CI push so wallet
+ * version bumps that break selectors fail loudly. DO NOT delete the
+ * onboard spec thinking this globalSetup covers it — the seed cache
+ * regenerates silently and would mask broken onboarding.
+ *
  * Drives the full Xverse onboarding (BIP-39 test seed + password)
  * and switches the wallet to Bitcoin Regtest mode, then dumps the
  * extension's `chrome.storage.local` to a JSON file. Specs read

@@ -3,6 +3,16 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 /**
+ * GOLD-STANDARD ONBOARD SPEC. Don't delete this file thinking the
+ * `global-setup.ts` seed snapshot covers it — read
+ * `/Work/ordpool/WALLETS.md` → "HARD RULE: The Xverse pattern is the
+ * gold standard". The TL;DR: this spec is the *source of truth* that
+ * Xverse onboarding still works on every CI run; the seeded user-
+ * data-dir produced by globalSetup is a *speed optimization* for
+ * downstream matrix + mint-roundtrip specs. Both layers exist on
+ * purpose. The seed cache regenerates silently; this spec is the
+ * tripwire that catches breakage loudly.
+ *
  * Iteration 2 of the Xverse E2E pipeline: drive the actual
  * onboarding flow end-to-end.
  *

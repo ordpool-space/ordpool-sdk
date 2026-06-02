@@ -1,3 +1,9 @@
+// Don't skip-or-delete — see the Xverse gold-standard pattern in
+// /Work/ordpool/WALLETS.md. The full click-through is the source of
+// truth that wallet onboarding still works; downstream specs may
+// optionally cache a seeded user-data-dir for speed, but this file
+// MUST stay green-or-loudly-failing on every CI run.
+
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
