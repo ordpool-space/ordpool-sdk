@@ -243,36 +243,33 @@ test.beforeAll(async () => {
     onboardPage = await context.newPage();
   }
   test.setTimeout(180_000);
-  await onboardPhantom(onboardPage);
+  await onboardPhantom(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
-  // Phantom may be stuck on "You're good to go!" — navigate the
-  // onboard tab to popup.html to leave the completion gate and
-  // land on the dashboard surface, where dApp connect requests can
-  // be processed normally. Closing didn't help (iter 30); navigating
-  // away from /onboarding/done is the actual gate.
-  await onboardPage.goto(`chrome-extension://${extensionId}/popup.html`, {
-    waitUntil: 'domcontentloaded',
-  }).catch(() => undefined);
-  await onboardPage.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
-  }, undefined, { timeout: 30_000, polling: 250 }).catch(() => undefined);
-  await shot(onboardPage, '00b-popup-dashboard');
+  // Phantom's "You're good to go!" gate refused every click strategy.
+  // Bypass it by writing chrome.storage.local.firstTimeOnboarding =
+  // {isFirstTimeOnboarding: false} from the SW. Source-dive of v26.14.0
+  // chunk-7KMSH7LT.js + chunk-E27WR7DD.js confirmed this is the key
+  // Phantom reads to decide whether to gate dApp requests.
+  let sw = context.serviceWorkers()[0];
+  if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  await sw.evaluate(() => {
+    return new Promise<void>((resolve) => {
+      const c = (globalThis as unknown as { chrome: { storage: { local: { set: (d: Record<string, unknown>, cb: () => void) => void } } } }).chrome;
+      c.storage.local.set({ firstTimeOnboarding: { isFirstTimeOnboarding: false } }, () => resolve());
+    });
+  });
+  await shot(onboardPage, '00b-after-storage-bypass');
 });
 
 test.afterAll(async () => {
   await context?.close();
 });
 
-// Re-skipped after iter 34: every strategy tried for the Phantom v26
-// "You're good to go!" completion gate fails. Closing the onboard tab
-// (iter 30), navigating it to popup.html (iter 34), CDP / pointer /
-// keyboard / programmatic clicks on "Get Started" — none result in
-// the wallet processing dApp connect requests. Phantom never opens
-// an approval popup; harness.connectPhantom either hangs or resolves
-// without an address. Pipeline A (phantom.signer.angular.spec.ts) is
-// the active coverage layer for the connector's wire contract.
-test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+// Reactivated after source-diving v26.14.0: the "Get Started" gate
+// is purely a UI check against chrome.storage.local.firstTimeOnboarding.
+// We write that key directly from the SW after onboardPhantom returns,
+// bypassing the unclickable button.
+test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();

@@ -91,28 +91,24 @@ test.beforeAll(async () => {
   test.setTimeout(240_000);
   await onboardPhantom(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
-  // Leave the "You're good to go!" gate — navigate to dashboard.
-  await onboardPage.goto(`chrome-extension://${extensionId}/popup.html`, {
-    waitUntil: 'domcontentloaded',
-  }).catch(() => undefined);
-  await onboardPage.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
-  }, undefined, { timeout: 30_000, polling: 250 }).catch(() => undefined);
-  await shot(onboardPage, '00b-popup-dashboard');
+  // Bypass "You're good to go!" by writing the storage key Phantom
+  // reads to decide first-time-onboarding state.
+  await worker.evaluate(() => {
+    return new Promise<void>((resolve) => {
+      const c = (globalThis as unknown as { chrome: { storage: { local: { set: (d: Record<string, unknown>, cb: () => void) => void } } } }).chrome;
+      c.storage.local.set({ firstTimeOnboarding: { isFirstTimeOnboarding: false } }, () => resolve());
+    });
+  });
+  await shot(onboardPage, '00b-after-storage-bypass');
 });
 
 test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — Phantom v26's onboarding-completion gate is hostile to
-// automation (see phantom-sdk-handshake skip rationale). Without a
-// working handshake, the mint roundtrip can't start. Pipeline A's
-// phantom.signer.angular.spec.ts pins the connector + signer wire
-// contract against a mocked window.phantom.bitcoin; the unfixable
-// gap is purely the live wallet's UI gate, not the SDK.
-test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
+// Reactivated alongside phantom-sdk-handshake: the storage-bypass for
+// firstTimeOnboarding unblocks dApp connect requests.
+test('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();
