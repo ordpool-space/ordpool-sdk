@@ -136,7 +136,10 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     type: KnownOrdinalWalletType.leather,
     label: 'Leather',
     logo: '/resources/ordinal-wallets/btc-leather-logo.png',
-    downloadLink: 'https://leather.io/install-extension'
+    // Was /install-extension, but that path now 404s — Leather archived it
+    // (leather.io/install redirects to /old-page/install-extension).
+    // Homepage is the stable CTA.
+    downloadLink: 'https://leather.io/'
   },
   [KnownOrdinalWalletType.unisat]: {
     type: KnownOrdinalWalletType.unisat,
