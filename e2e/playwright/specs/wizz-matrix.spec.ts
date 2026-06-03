@@ -163,15 +163,15 @@ test.beforeAll(async () => {
 });
 
 for (const variant of VARIANTS) {
-  // Re-skipped after iter 53. fulfill(200, {}) on the indexer hosts
-  // (the iter 50 follow-up plan) still hangs the approval-popup
-  // creation at 60s for both variants. Wizz's hidden state machine
-  // seems to need a SPECIFIC response shape per endpoint, not just
-  // any 200. Single-variant Wizz coverage via wizz-sdk-handshake
-  // stays green; multi-variant matrix is parked pending a per-route
-  // fulfill-with-real-shape pass (would require mapping out every
-  // ARC20/atomical endpoint the dashboard polls).
-  test.skip(`SDK returns the right address for Wizz ${variant.label}`, async () => {
+  // Try again with the EXACT same abort pattern as wizz-sdk-handshake
+  // (which passes consistently): just configs.wizz.cash. Source-dive
+  // of background.js byte 2258300 shows the approval popup is opened
+  // directly by chrome.windows.create via openNotification — it does
+  // NOT depend on any indexer fetch. So the iter 35-50 popup-no-show
+  // failures must be CAUSED by the broader abort patterns themselves
+  // (which break Wizz's SW startup), not by indexer state. Narrow
+  // the abort to match sdk-handshake exactly.
+  test(`SDK returns the right address for Wizz ${variant.label}`, async () => {
     test.setTimeout(180_000);
 
     const context = await chromium.launchPersistentContext('', {
@@ -184,13 +184,11 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    // Fulfill (don't abort) the indexer hosts with an empty JSON 200.
-    // Aborts close the TCP connection cleanly, but Wizz's fetch
-    // wrapper treats that as a 60s timeout situation rather than a
-    // fast fail. An empty 200 lets Wizz fall through with no data.
-    await context.route(/https?:\/\/([a-z]+\.)?(wizz\.cash|atomicalmarket\.com)/, route => {
-      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
-    });
+    // Narrow abort matches wizz-sdk-handshake exactly. The approval
+    // popup creation pathway is independent of indexer fetches per
+    // source-dive — broader aborts must have been breaking something
+    // else in Wizz's startup.
+    await context.route('**/configs.wizz.cash/**', route => route.abort());
 
     try {
       let [worker] = context.serviceWorkers();
