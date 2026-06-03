@@ -41,17 +41,22 @@ async function shot(p: Page, name: string): Promise<void> {
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
+  // CRITICAL: anchor on "Connect account" page header (not just any
+  // button named Connect/Confirm/Approve) — OKX opens a "Confirm
+  // Trade" sign popup pre-emptively during connect (iter 39 trace).
+  // Loose button matching would accept that wrong popup and our
+  // signPsbt would land later with no popup to approve.
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
+      await p.getByText('Connect account').first()
         .waitFor({ state: 'visible', timeout: 60_000 });
       return true;
     },
   });
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
+  await approval.getByRole('button', { name: /^connect$/i }).first().click();
 }
 
 async function approveSignPopup(ctx: BrowserContext): Promise<Page> {

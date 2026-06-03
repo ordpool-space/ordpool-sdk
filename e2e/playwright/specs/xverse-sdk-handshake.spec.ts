@@ -259,10 +259,10 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // Confirm the cloned context boots with our seeded vault keys
+  // Confirm the cloned context boots with the seeded vault keys
   // visible to the extension. If this assertion ever fails the
-  // clone has a flush race — buildXverseVault's output didn't
-  // make it through chromium's leveldb on disk.
+  // clone has a flush race — global-setup's chrome.storage.local
+  // writes didn't make it through chromium's leveldb on disk.
   const diag = await context.newPage();
   await diag.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
   const seededKeys = await diag.evaluate(() => new Promise<string[]>((resolve) => {

@@ -111,16 +111,30 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
   });
   await shot(approval, '03a-sign-approval');
   // Sign button is initially disabled (Wizz analyses the PSBT first).
-  // Wait for it to be enabled before clicking. The button is a styled
-  // div whose disabled state shows pointer-events:none + reduced opacity.
-  await approval.waitForFunction(() => {
+  // The disabled state covers it with a spinner overlay; textContent
+  // can include whitespace + spinner chars so we can't pin on
+  // exact-text. Wait for the button's pointer-events to enable AND
+  // for the click to actually land — do both inside page.evaluate to
+  // avoid the textContent-matching race in the outer Playwright
+  // locator.
+  const clicked = await approval.waitForFunction(() => {
+    const isSignButton = (el: Element) => {
+      const text = (el.textContent || '').trim();
+      // Loose match — accept "Sign" optionally surrounded by spinner
+      // chars or whitespace, but reject elsewhere texts like "Signed".
+      return /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test(text);
+    };
     const els = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], div'));
-    const candidate = els.find(el => (el.textContent || '').trim() === 'Sign');
-    if (!candidate) return false;
+    const candidate = els.find(isSignButton);
+    if (!candidate) return null;
     const style = getComputedStyle(candidate);
-    return style.pointerEvents !== 'none' && parseFloat(style.opacity) > 0.7;
+    if (style.pointerEvents === 'none') return null;
+    if (parseFloat(style.opacity) < 0.7) return null;
+    candidate.click();
+    return { text: candidate.textContent };
   }, undefined, { timeout: 60_000, polling: 250 });
-  await approval.getByText(/^Sign$/).first().click();
+  // eslint-disable-next-line no-console
+  console.log(`[wizz-mint] clicked sign-button: ${JSON.stringify(await clicked.jsonValue())}`);
   await shot(approval, '03b-after-sign-click');
 }
 
