@@ -163,20 +163,12 @@ test.beforeAll(async () => {
 });
 
 for (const variant of VARIANTS) {
-  // Re-skipped after iters 48-49. Wizz's CDN-dependent dashboard mount
-  // races against per-request timeouts on offline CI even with various
-  // host abort patterns:
-  //   - configs.wizz.cash only: P2TR sometimes passes, P2WPKH races on
-  //     ARC20 indexer fetches.
-  //   - + wizz.cash + atomicalmarket.com: breaks Wizz's approval-popup
-  //     creation pathway (no popup at all in 60s).
-  //   - + mempool.space + blockstream.info: breaks welcome render
-  //     entirely.
-  // Single-variant Wizz coverage via wizz-sdk-handshake passes
-  // consistently. Multi-variant matrix needs a sequenced fulfill
-  // (return empty JSON for indexer paths, let mempool/blockstream
-  // through) which is the next attempt.
-  test.skip(`SDK returns the right address for Wizz ${variant.label}`, async () => {
+  // Reattempt with fulfill-empty-JSON instead of abort: aborts close
+  // the connection at the TCP layer which Wizz's fetch wrapper treats
+  // as "still pending" (the per-fetch timeout fires after 60s). A 200
+  // with `{}` body resolves the fetch instantly, letting Wizz fall
+  // through with empty data and continue mounting.
+  test(`SDK returns the right address for Wizz ${variant.label}`, async () => {
     test.setTimeout(180_000);
 
     const context = await chromium.launchPersistentContext('', {
@@ -189,12 +181,13 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    // Abort only the indexer hosts Wizz polls on mount — keep
-    // mempool.space / blockstream.info reachable since the popup
-    // creation pathway may depend on them. configs.wizz.cash +
-    // ep.wizz.cash + atomicalmarket /proxy are the hang-prone
-    // endpoints (verified by source-dive of v2.13.4 background.js).
-    await context.route(/https?:\/\/([a-z]+\.)?(wizz\.cash|atomicalmarket\.com)/, route => route.abort());
+    // Fulfill (don't abort) the indexer hosts with an empty JSON 200.
+    // Aborts close the TCP connection cleanly, but Wizz's fetch
+    // wrapper treats that as a 60s timeout situation rather than a
+    // fast fail. An empty 200 lets Wizz fall through with no data.
+    await context.route(/https?:\/\/([a-z]+\.)?(wizz\.cash|atomicalmarket\.com)/, route => {
+      route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
 
     try {
       let [worker] = context.serviceWorkers();
