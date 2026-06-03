@@ -218,7 +218,20 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
       feeSats: 1500,
     },
   );
-  await approveSignPopup(context);
+  // Race the popup-search against the harness promise so an early
+  // signPsbt rejection (OKX validator throws, no popup ever opens)
+  // surfaces its actual error instead of the misleading "popup never
+  // showed Confirm Trade within 120s".
+  let signPsbtError: Error | null = null;
+  signedHexPromise.catch((e) => { signPsbtError = e as Error; });
+  try {
+    await approveSignPopup(context);
+  } catch (popupErr) {
+    if (signPsbtError) {
+      throw new Error(`okx signPsbt rejected before popup opened: ${(signPsbtError as Error).message}`);
+    }
+    throw popupErr;
+  }
   const signed = await signedHexPromise;
   console.log(`[okx-mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
 
