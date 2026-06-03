@@ -246,19 +246,25 @@ test.beforeAll(async () => {
   await onboardPhantom(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
   // Phantom's "You're good to go!" gate refused every click strategy.
-  // Bypass it by writing chrome.storage.local.firstTimeOnboarding =
-  // {isFirstTimeOnboarding: false} from the SW. Source-dive of v26.14.0
-  // chunk-7KMSH7LT.js + chunk-E27WR7DD.js confirmed this is the key
-  // Phantom reads to decide whether to gate dApp requests.
-  let sw = context.serviceWorkers()[0];
-  if (!sw) sw = await context.waitForEvent('serviceworker', { timeout: 30_000 });
-  await sw.evaluate(() => {
-    return new Promise<void>((resolve) => {
-      const c = (globalThis as unknown as { chrome: { storage: { local: { set: (d: Record<string, unknown>, cb: () => void) => void } } } }).chrome;
-      c.storage.local.set({ firstTimeOnboarding: { isFirstTimeOnboarding: false } }, () => resolve());
+  // Source-dive of v26.14.0 serviceWorker.js byte 97870 found _unlockExtension:
+  // it accepts { method:'unlockExtension', params: <password-string> }
+  // via chrome.runtime.sendMessage and flips the wallet to unlocked.
+  // The dApp-request gate (IsWalletUnlocked audit) then passes and
+  // approval popups open normally. Send it from the onboard page so
+  // the message lands on the SW's runtime.onMessage listener.
+  await onboardPage.evaluate(async (pwd: string) => {
+    return new Promise<unknown>((resolve, reject) => {
+      const c = (globalThis as unknown as { chrome: { runtime: {
+        sendMessage: (msg: unknown, cb: (r: unknown) => void) => void;
+        lastError?: { message: string };
+      } } }).chrome;
+      c.runtime.sendMessage({ method: 'unlockExtension', params: pwd, id: 1 }, (r) => {
+        if (c.runtime.lastError) reject(new Error(c.runtime.lastError.message));
+        else resolve(r);
+      });
     });
-  });
-  await shot(onboardPage, '00b-after-storage-bypass');
+  }, 'TestPassword123!');
+  await shot(onboardPage, '00b-after-unlock');
 });
 
 test.afterAll(async () => {
@@ -280,7 +286,7 @@ test.afterAll(async () => {
 // Wire contract remains pinned by phantom.signer.angular.spec.ts in
 // Pipeline A. Phantom-onboard (the gold-standard click-through) is
 // passing.
-test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();

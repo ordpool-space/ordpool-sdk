@@ -91,15 +91,23 @@ test.beforeAll(async () => {
   test.setTimeout(240_000);
   await onboardPhantom(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
-  // Bypass "You're good to go!" by writing the storage key Phantom
-  // reads to decide first-time-onboarding state.
-  await worker.evaluate(() => {
-    return new Promise<void>((resolve) => {
-      const c = (globalThis as unknown as { chrome: { storage: { local: { set: (d: Record<string, unknown>, cb: () => void) => void } } } }).chrome;
-      c.storage.local.set({ firstTimeOnboarding: { isFirstTimeOnboarding: false } }, () => resolve());
+  // Unlock the wallet via runtime.sendMessage({method:'unlockExtension',
+  // params: password}) — source-dive of v26.14.0 serviceWorker.js byte
+  // 97870 confirmed this is the SW handler that flips the wallet to
+  // unlocked. Bypasses the unclickable "Get Started" UI gate.
+  await onboardPage.evaluate(async (pwd: string) => {
+    return new Promise<unknown>((resolve, reject) => {
+      const c = (globalThis as unknown as { chrome: { runtime: {
+        sendMessage: (msg: unknown, cb: (r: unknown) => void) => void;
+        lastError?: { message: string };
+      } } }).chrome;
+      c.runtime.sendMessage({ method: 'unlockExtension', params: pwd, id: 1 }, (r) => {
+        if (c.runtime.lastError) reject(new Error(c.runtime.lastError.message));
+        else resolve(r);
+      });
     });
-  });
-  await shot(onboardPage, '00b-after-storage-bypass');
+  }, 'TestPassword123!');
+  await shot(onboardPage, '00b-after-unlock');
 });
 
 test.afterAll(async () => {
@@ -111,7 +119,7 @@ test.afterAll(async () => {
 // doesn't actually unblock dApp connect — Phantom must hold a
 // parallel runtime state that the SW doesn't re-derive from storage
 // on each request. See phantom-sdk-handshake skip rationale.
-test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
+test('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();
