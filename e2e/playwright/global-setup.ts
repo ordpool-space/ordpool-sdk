@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 
 import { waitForChromeStorageKey, waitForSingletonLockGone } from './wait-helpers';
 
+// iter 52: no-op edit to re-trigger Playwright workflow (path-filtered).
 /**
  * Playwright globalSetup — runs ONCE before any spec.
  *
