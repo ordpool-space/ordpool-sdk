@@ -197,14 +197,16 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   // DOM dump 08e-after-continue-html (3 .ant-checkbox-input + OK).
   await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
   await shot(page, '08e-security-tips-modal');
-  const checkboxes = page.locator('input.ant-checkbox-input');
+  // Click the LABEL not the hidden input — Ant-Design's input has
+  // pointer-events suppressed and `.check()` no longer flips state in
+  // recent Wizz builds (iter 49 regression). The .ant-checkbox-wrapper
+  // <label> is the visible click target.
+  const checkboxes = page.locator('label.ant-checkbox-wrapper');
+  await expect(checkboxes).toHaveCount(3, { timeout: 5_000 });
   await expect(checkboxes.first()).toBeVisible({ timeout: 5_000 });
   const cbCount = await checkboxes.count();
   for (let i = 0; i < cbCount; i++) {
-    // Ant-Design hides the real input behind a styled wrapper; the
-    // input itself isn't clickable via pointer events. .check()
-    // uses dispatchEvent under the hood, which works on hidden inputs.
-    await checkboxes.nth(i).check({ force: true });
+    await checkboxes.nth(i).click();
   }
   await shot(page, '08f-checkboxes-checked');
 

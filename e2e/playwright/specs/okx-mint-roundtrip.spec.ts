@@ -241,7 +241,14 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
 
   const confirmedTip = mineBlocks(1);
   await waitForElectrsSync(confirmedTip);
-  const esploraTx = await getTx(broadcastTxid);
+  // electrs indexes the block one polling cycle after the tip moves;
+  // retry the per-tx fetch until status.block_hash materialises.
+  let esploraTx = await getTx(broadcastTxid);
+  const blockDeadline = Date.now() + 15_000;
+  while (!esploraTx.status?.block_hash && Date.now() < blockDeadline) {
+    await new Promise(r => setTimeout(r, 500));
+    esploraTx = await getTx(broadcastTxid);
+  }
   console.log(`[okx-mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);
   expect(esploraTx.status.block_hash).toBeTruthy();
