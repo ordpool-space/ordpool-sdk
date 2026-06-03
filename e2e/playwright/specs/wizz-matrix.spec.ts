@@ -181,11 +181,12 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    // Wizz's outbound endpoints discovered via source-dive:
-    //   *.wizz.cash, *.atomicalmarket.com, mempool.space, blockstream.info
-    // Abort each so the wallet falls back to bundled defaults instead
-    // of hanging on a never-returning fetch.
-    await context.route(/https?:\/\/(.*\.)?(wizz\.cash|atomicalmarket\.com|mempool\.space|blockstream\.info)/, route => route.abort());
+    // Abort only the indexer hosts Wizz polls on mount — keep
+    // mempool.space / blockstream.info reachable since the popup
+    // creation pathway may depend on them. configs.wizz.cash +
+    // ep.wizz.cash + atomicalmarket /proxy are the hang-prone
+    // endpoints (verified by source-dive of v2.13.4 background.js).
+    await context.route(/https?:\/\/([a-z]+\.)?(wizz\.cash|atomicalmarket\.com)/, route => route.abort());
 
     try {
       let [worker] = context.serviceWorkers();
