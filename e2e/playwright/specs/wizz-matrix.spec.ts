@@ -163,15 +163,12 @@ test.beforeAll(async () => {
 });
 
 for (const variant of VARIANTS) {
-  // Wizz matrix re-skipped after iter 34: blanket non-localhost abort
-  // broke Wizz's UI render entirely ("I already have a wallet" never
-  // appears within 30s — Wizz fetches some asset from a CDN whose
-  // failure blocks the welcome screen). Narrow configs.wizz.cash-only
-  // abort allows P2TR but races against per-request timeouts on
-  // P2WPKH's additional indexer fetches. Until we can inventory every
-  // host Wizz touches (and either pre-stub them or selectively allow),
-  // matrix coverage stays at single-variant via wizz-sdk-handshake.
-  test.skip(`SDK returns the right address for Wizz ${variant.label}`, async () => {
+  // Re-attempt after source-diving the v2.13.4 binary (background.js
+  // outbound-URL inventory): abort every wizz.cash / atomicalmarket
+  // proxy host as well as mempool.space / blockstream.info that the
+  // dashboard fetches mid-mount. Keep localhost + chrome-extension
+  // alive so the UI itself renders.
+  test(`SDK returns the right address for Wizz ${variant.label}`, async () => {
     test.setTimeout(180_000);
 
     const context = await chromium.launchPersistentContext('', {
@@ -184,7 +181,11 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    await context.route('**/configs.wizz.cash/**', route => route.abort());
+    // Wizz's outbound endpoints discovered via source-dive:
+    //   *.wizz.cash, *.atomicalmarket.com, mempool.space, blockstream.info
+    // Abort each so the wallet falls back to bundled defaults instead
+    // of hanging on a never-returning fetch.
+    await context.route(/https?:\/\/(.*\.)?(wizz\.cash|atomicalmarket\.com|mempool\.space|blockstream\.info)/, route => route.abort());
 
     try {
       let [worker] = context.serviceWorkers();

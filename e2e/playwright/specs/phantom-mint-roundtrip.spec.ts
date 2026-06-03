@@ -106,9 +106,12 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Reactivated alongside phantom-sdk-handshake: the storage-bypass for
-// firstTimeOnboarding unblocks dApp connect requests.
-test('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
+// Re-skipped alongside phantom-sdk-handshake (iter 47): the storage-
+// bypass for firstTimeOnboarding lands in chrome.storage.local but
+// doesn't actually unblock dApp connect — Phantom must hold a
+// parallel runtime state that the SW doesn't re-derive from storage
+// on each request. See phantom-sdk-handshake skip rationale.
+test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();
