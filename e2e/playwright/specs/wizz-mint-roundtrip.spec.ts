@@ -133,9 +133,12 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
     candidate.click();
     return { text: candidate.textContent };
   }, undefined, { timeout: 60_000, polling: 250 });
+  // The popup auto-closes after Wizz processes the click; jsonValue
+  // would race against the page-closed condition. Wrap defensively.
   // eslint-disable-next-line no-console
-  console.log(`[wizz-mint] clicked sign-button: ${JSON.stringify(await clicked.jsonValue())}`);
-  await shot(approval, '03b-after-sign-click');
+  console.log('[wizz-mint] clicked sign-button (popup may have closed)');
+  void clicked;
+  await shot(approval, '03b-after-sign-click').catch(() => undefined);
 }
 
 test.beforeAll(async () => {
