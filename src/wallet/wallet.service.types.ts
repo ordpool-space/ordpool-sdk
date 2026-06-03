@@ -123,6 +123,17 @@ export interface KnownOrdinalWallet {
   subLabel?: string;
   logo: string;
   downloadLink: string;
+  /**
+   * Whether this wallet can hold on-chain ordinal artifacts
+   * (inscriptions, CAT-21 sats, runes, etc.) at all. Defaults to
+   * `true` when omitted; `false` for Lightning-/Nostr-only wallets
+   * whose detection succeeds but whose addresses can't carry sats
+   * the consumer cares about. Consumers building strictly ordinals-
+   * focused pickers (cat21.space) filter these out; consumers with
+   * Lightning surfaces (future ordpool Lightning support, Alby for
+   * webln) leave them in.
+   */
+  onChainOrdinals?: boolean;
 }
 
 export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalWallet } = {
@@ -178,6 +189,7 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     subLabel: 'Lightning + Nostr (not on-chain ordinals)',
     logo: '/resources/ordinal-wallets/btc-alby-logo.svg',
     downloadLink: 'https://getalby.com/',
+    onChainOrdinals: false,
   },
   [KnownOrdinalWalletType.xpub]: {
     type: KnownOrdinalWalletType.xpub,
