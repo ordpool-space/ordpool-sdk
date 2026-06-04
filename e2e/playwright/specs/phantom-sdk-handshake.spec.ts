@@ -283,14 +283,18 @@ test.beforeAll(async () => {
   }).catch(err => ({ available: false, src: null, err: String(err) }));
   console.log(`[phantom:unlock-page] sendMessage info = ${JSON.stringify(smInfo).slice(0, 300)}`);
   if (smInfo.available) {
+    // Iter 60 confirmed the captured sendMessage is the native Chrome
+    // API (no Phantom wrapper). So the SyntaxError originates from
+    // Phantom's SW-side onMessage listener doing JSON.parse(msg) and
+    // expecting a JSON-stringified payload. Send our payload as a
+    // JSON string instead of a raw object.
     const unlockOutcome = await unlockPage.evaluate(async (pwd: string) => {
       try {
         const c = (globalThis as unknown as { chrome: { runtime: {
           sendMessage: (msg: unknown) => Promise<unknown>;
-          lastError?: { message: string };
         } } }).chrome;
-        // Promise-style sendMessage (MV3) — single-arg, no callback.
-        const r = await c.runtime.sendMessage({ method: 'unlockExtension', params: pwd, id: 1 });
+        const payload = JSON.stringify({ method: 'unlockExtension', params: pwd, id: 1 });
+        const r = await c.runtime.sendMessage(payload);
         return { ok: true, response: JSON.stringify(r).slice(0, 200) };
       } catch (e) {
         return { ok: false, err: String(e).slice(0, 300) };
@@ -298,7 +302,7 @@ test.beforeAll(async () => {
     }, 'TestPassword123!');
     console.log(`[phantom:unlock-page] unlock outcome = ${JSON.stringify(unlockOutcome)}`);
   } else {
-    console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available on the 404 page; unlock skipped.');
+    console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');
   }
   await shot(unlockPage, '00b-after-unlock').catch(() => undefined);
   await unlockPage.close().catch(() => undefined);
