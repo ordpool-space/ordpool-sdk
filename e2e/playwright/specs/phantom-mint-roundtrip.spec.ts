@@ -65,6 +65,13 @@ test.beforeAll(async () => {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
 
+  // Write a minimal HTML file into the Phantom extension dir for
+  // the unlock bypass. See phantom-sdk-handshake for full rationale.
+  fs.writeFileSync(
+    path.join(EXT_PATH, '__ordpool_unlock__.html'),
+    '<!DOCTYPE html><html><head><title>ordpool-e2e-unlock</title></head><body>ordpool-e2e</body></html>',
+  );
+
   context = await chromium.launchPersistentContext('', {
     headless: false,
     args: [
@@ -99,15 +106,14 @@ test.beforeAll(async () => {
   // onboardPhantom navigates through several pages internally and the
   // outer `onboardPage` reference is stale (closed) by the time we get
   // here. Open a fresh popup.html for the unlock call.
-  // Path 2: bypass Phantom's popup wrapper by navigating to a non-
-  // existent extension URL. The "File not found" page runs in the
-  // extension origin (with chrome.runtime API) but doesn't execute
-  // Phantom's bundle. See phantom-sdk-handshake for full rationale.
+  // Navigate to our injected extension-origin page that has zero
+  // Phantom JS — chrome.runtime.sendMessage here is the raw Chrome
+  // API, not Phantom's wrapper.
   const unlockPage = await context.newPage();
   await unlockPage.goto(
-    `chrome-extension://${extensionId}/__ordpool_e2e_unlock_not_a_real_page__.html`,
+    `chrome-extension://${extensionId}/__ordpool_unlock__.html`,
     { waitUntil: 'domcontentloaded' },
-  ).catch(() => undefined);
+  );
   const smInfo = await unlockPage.evaluate(() => {
     const c = (globalThis as unknown as { chrome?: { runtime?: { sendMessage?: unknown } } }).chrome;
     const sm = c?.runtime?.sendMessage;

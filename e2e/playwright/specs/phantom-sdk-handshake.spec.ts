@@ -219,6 +219,18 @@ test.beforeAll(async () => {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
 
+  // Write a minimal HTML file INTO the Phantom extension's unpacked
+  // directory before Chrome loads it. This file gets the
+  // chrome-extension://[id]/ origin (so chrome.runtime.* is exposed)
+  // but contains zero Phantom JS — bypasses the popup-side sendMessage
+  // wrapper. Iter 59 confirmed Chrome's "File not found" page does
+  // NOT expose chrome.runtime, so a real file in the extension dir
+  // is the bypass that works.
+  fs.writeFileSync(
+    path.join(EXT_PATH, '__ordpool_unlock__.html'),
+    '<!DOCTYPE html><html><head><title>ordpool-e2e-unlock</title></head><body>ordpool-e2e</body></html>',
+  );
+
   context = await chromium.launchPersistentContext('', {
     headless: false,
     args: [
@@ -255,20 +267,14 @@ test.beforeAll(async () => {
   // here. Open a fresh popup.html and dispatch the unlock from there —
   // any chrome-extension:// page can call runtime.sendMessage on its
   // own SW.
-  // Iter 58 confirmed: addInitScript capture of sendMessage in main
-  // world still yields a wrapped function that JSON.parse(String(msg))
-  // on the payload. Path 2: bypass Phantom's popup wrapper entirely
-  // by hitting an extension URL that does NOT load Phantom's bundle.
-  //
-  // Chrome's extension origin serves any path inside the extension
-  // root, returning Chrome's "File not found" page for unmapped paths.
-  // That page runs in the extension origin (chrome-extension://[id])
-  // and has chrome.runtime API, but doesn't execute Phantom's JS.
+  // Navigate to our injected extension-origin page that has zero
+  // Phantom JS — chrome.runtime.sendMessage here is the raw Chrome
+  // API, not Phantom's wrapper.
   const unlockPage = await context.newPage();
   await unlockPage.goto(
-    `chrome-extension://${extensionId}/__ordpool_e2e_unlock_not_a_real_page__.html`,
+    `chrome-extension://${extensionId}/__ordpool_unlock__.html`,
     { waitUntil: 'domcontentloaded' },
-  ).catch(() => undefined);
+  );
   // Diagnostic: log what chrome.runtime.sendMessage looks like here.
   const smInfo = await unlockPage.evaluate(() => {
     const c = (globalThis as unknown as { chrome?: { runtime?: { sendMessage?: unknown } } }).chrome;
