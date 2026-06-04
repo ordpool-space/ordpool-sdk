@@ -297,30 +297,48 @@ test.beforeAll(async () => {
     }, 'TestPassword123!');
     console.log(`[phantom:unlock-page] unlock outcome = ${JSON.stringify(unlockOutcome)}`);
 
-    // Iter 62 finding: harness sees window.phantom but NOT
-    // window.phantom.bitcoin. Phantom is multi-chain; BTC sub-provider
-    // may be off by default. Dump chrome.storage.local keys to find
-    // the flag that controls BTC injection.
-    const storageDump = await unlockPage.evaluate(async () => {
+    // Iter 63 confirmed: enabledChainsOverrideSettings has
+    // bitcoin:true and userPropsCache has bitcoinAddress —
+    // Phantom KNOWS we want BTC. But window.phantom.bitcoin still
+    // isn't injected on the harness. The content-script-side gate
+    // is something else.
+    //
+    // New hypothesis: try dispatching the BTC-specific JSON-RPC
+    // method to the SW directly. If the SW handles btc_requestAccounts,
+    // we can build window.phantom.bitcoin ourselves from the test side.
+    const btcProbe = await unlockPage.evaluate(async () => {
+      try {
+        const c = (globalThis as unknown as { chrome: { runtime: {
+          sendMessage: (msg: unknown) => Promise<unknown>;
+        } } }).chrome;
+        const payload = JSON.stringify({ method: 'btc_requestAccounts', params: [], id: 2 });
+        const r = await c.runtime.sendMessage(payload);
+        return { ok: true, response: typeof r === 'string' ? r.slice(0, 400) : JSON.stringify(r).slice(0, 400) };
+      } catch (e) {
+        return { ok: false, err: String(e).slice(0, 400) };
+      }
+    });
+    console.log(`[phantom:btc-probe] btc_requestAccounts → ${JSON.stringify(btcProbe)}`);
+
+    // Dump mmkv flags / state keys (feature gates) raw — these may
+    // hold the per-content-script chain-injection feature flag.
+    const mmkvDump = await unlockPage.evaluate(async () => {
       const c = (globalThis as unknown as { chrome: { storage: { local: {
         get: (k: null, cb: (v: Record<string, unknown>) => void) => void;
       } } } }).chrome;
       const all = await new Promise<Record<string, unknown>>(r => c.storage.local.get(null, r));
-      const summary: Record<string, string> = {};
+      const out: Record<string, string> = {};
       for (const k of Object.keys(all)) {
-        const v = all[k];
-        const s = typeof v === 'string' ? v : JSON.stringify(v);
-        summary[k] = s.length > 200 ? s.slice(0, 200) + '…' : s;
+        if (/^mmkv:|^EXTENSION_|^firstTime|^HAS_|providers/i.test(k)) {
+          const v = all[k];
+          const s = typeof v === 'string' ? v : JSON.stringify(v);
+          out[k] = s.length > 400 ? s.slice(0, 400) + '…' : s;
+        }
       }
-      return { keys: Object.keys(all), summary };
-    }).catch(err => ({ keys: [], summary: {}, err: String(err) }));
-    console.log(`[phantom:storage] keys = ${JSON.stringify(storageDump.keys)}`);
-    // Log keys whose name or value hints at chain/bitcoin/enabled state.
-    const interesting = storageDump.keys.filter(k =>
-      /chain|btc|bitcoin|network|enabled|active|provider/i.test(k) ||
-      /chain|btc|bitcoin|enabled|active/i.test(storageDump.summary[k] || ''));
-    for (const k of interesting) {
-      console.log(`[phantom:storage] ${k} = ${storageDump.summary[k]}`);
+      return out;
+    }).catch(err => ({ err: String(err) }));
+    for (const [k, v] of Object.entries(mmkvDump)) {
+      console.log(`[phantom:storage:flag] ${k} = ${v}`);
     }
   } else {
     console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');
