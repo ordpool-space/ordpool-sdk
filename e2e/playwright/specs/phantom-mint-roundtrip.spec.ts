@@ -100,16 +100,33 @@ test.beforeAll(async () => {
   // outer `onboardPage` reference is stale (closed) by the time we get
   // here. Open a fresh popup.html for the unlock call.
   const unlockPage = await context.newPage();
+  // Bypass Phantom's popup.html sendMessage wrapper by stashing the
+  // raw chrome.runtime.sendMessage reference before page scripts run.
+  // See phantom-sdk-handshake for the full rationale (iter 57 "[object
+  // Object]" SyntaxError from the wrapper's JSON.parse).
+  await unlockPage.addInitScript(() => {
+    const w = globalThis as unknown as {
+      __ordpoolRawSendMessage?: unknown;
+      chrome?: { runtime?: { sendMessage?: unknown } };
+    };
+    const rt = w.chrome?.runtime;
+    const sm = rt?.sendMessage;
+    if (rt && typeof sm === 'function') {
+      w.__ordpoolRawSendMessage = (sm as (...a: unknown[]) => unknown).bind(rt);
+    }
+  });
   await unlockPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
   await unlockPage.evaluate(async (pwd: string) => {
-    return new Promise<unknown>((resolve, reject) => {
-      const c = (globalThis as unknown as { chrome: { runtime: {
-        sendMessage: (msg: unknown, cb: (r: unknown) => void) => void;
-        lastError?: { message: string };
-      } } }).chrome;
-      c.runtime.sendMessage({ method: 'unlockExtension', params: pwd, id: 1 }, (r) => {
-        if (c.runtime.lastError) reject(new Error(c.runtime.lastError.message));
-        else resolve(r);
+    return new Promise<void>((resolve, reject) => {
+      const w = globalThis as unknown as {
+        __ordpoolRawSendMessage?: (msg: unknown, cb: (r: unknown) => void) => void;
+        chrome: { runtime: { lastError?: { message: string } } };
+      };
+      const send = w.__ordpoolRawSendMessage;
+      if (!send) { reject(new Error('raw sendMessage was not captured before page scripts ran')); return; }
+      send({ method: 'unlockExtension', params: pwd, id: 1 }, () => {
+        if (w.chrome.runtime.lastError) reject(new Error(w.chrome.runtime.lastError.message));
+        else resolve();
       });
     });
   }, 'TestPassword123!');

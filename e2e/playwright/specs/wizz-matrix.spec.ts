@@ -206,10 +206,15 @@ for (const variant of VARIANTS) {
         { timeout: 15_000 },
       );
 
-      // configs.wizz.cash request was aborted at context launch (see
-      // route handler above); networkidle would have been an indirect
-      // way to wait it out, but the abort is immediate.
-      await dashboardPage.bringToFront();
+      // Mirror wizz-mint-roundtrip exactly: NO bringToFront on the
+      // dashboard before connect. wizz-mint is the canonical passing
+      // pattern; the earlier theory that Wizz needs its dashboard tab
+      // active for requestAccounts to fire its popup isn't supported
+      // by the mint spec (which has no bringToFront and works
+      // consistently). Iter 50→57 the popup-no-show kept reproducing
+      // — try this knob since it's the last remaining mint-vs-matrix
+      // divergence.
+      void dashboardPage;
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
       const knownPages = new Set(context.pages());
