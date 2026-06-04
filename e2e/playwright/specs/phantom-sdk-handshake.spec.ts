@@ -283,11 +283,6 @@ test.beforeAll(async () => {
   }).catch(err => ({ available: false, src: null, err: String(err) }));
   console.log(`[phantom:unlock-page] sendMessage info = ${JSON.stringify(smInfo).slice(0, 300)}`);
   if (smInfo.available) {
-    // Iter 60 confirmed the captured sendMessage is the native Chrome
-    // API (no Phantom wrapper). So the SyntaxError originates from
-    // Phantom's SW-side onMessage listener doing JSON.parse(msg) and
-    // expecting a JSON-stringified payload. Send our payload as a
-    // JSON string instead of a raw object.
     const unlockOutcome = await unlockPage.evaluate(async (pwd: string) => {
       try {
         const c = (globalThis as unknown as { chrome: { runtime: {
@@ -301,6 +296,32 @@ test.beforeAll(async () => {
       }
     }, 'TestPassword123!');
     console.log(`[phantom:unlock-page] unlock outcome = ${JSON.stringify(unlockOutcome)}`);
+
+    // Iter 62 finding: harness sees window.phantom but NOT
+    // window.phantom.bitcoin. Phantom is multi-chain; BTC sub-provider
+    // may be off by default. Dump chrome.storage.local keys to find
+    // the flag that controls BTC injection.
+    const storageDump = await unlockPage.evaluate(async () => {
+      const c = (globalThis as unknown as { chrome: { storage: { local: {
+        get: (k: null, cb: (v: Record<string, unknown>) => void) => void;
+      } } } }).chrome;
+      const all = await new Promise<Record<string, unknown>>(r => c.storage.local.get(null, r));
+      const summary: Record<string, string> = {};
+      for (const k of Object.keys(all)) {
+        const v = all[k];
+        const s = typeof v === 'string' ? v : JSON.stringify(v);
+        summary[k] = s.length > 200 ? s.slice(0, 200) + '…' : s;
+      }
+      return { keys: Object.keys(all), summary };
+    }).catch(err => ({ keys: [], summary: {}, err: String(err) }));
+    console.log(`[phantom:storage] keys = ${JSON.stringify(storageDump.keys)}`);
+    // Log keys whose name or value hints at chain/bitcoin/enabled state.
+    const interesting = storageDump.keys.filter(k =>
+      /chain|btc|bitcoin|network|enabled|active|provider/i.test(k) ||
+      /chain|btc|bitcoin|enabled|active/i.test(storageDump.summary[k] || ''));
+    for (const k of interesting) {
+      console.log(`[phantom:storage] ${k} = ${storageDump.summary[k]}`);
+    }
   } else {
     console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');
   }
