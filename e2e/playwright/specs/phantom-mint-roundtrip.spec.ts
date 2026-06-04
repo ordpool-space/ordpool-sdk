@@ -162,6 +162,19 @@ test('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom po
     undefined,
     { timeout: 15_000 },
   );
+  // Reload to force Phantom's content script to re-evaluate against
+  // the now-unlocked SW. See phantom-sdk-handshake for rationale.
+  await harness.reload({ waitUntil: 'domcontentloaded' });
+  await harness.waitForFunction(
+    () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
+    undefined,
+    { timeout: 15_000 },
+  );
+  const phantomVisible = await harness.evaluate(() => {
+    const p = (window as unknown as { phantom?: { bitcoin?: unknown } }).phantom;
+    return { hasPhantom: !!p, hasBitcoin: !!p?.bitcoin };
+  });
+  console.log(`[phantom-mint] window.phantom on harness after reload = ${JSON.stringify(phantomVisible)}`);
   await shot(harness, '01-harness-loaded');
 
   const connectKnownPages = new Set(context.pages());

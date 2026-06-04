@@ -337,6 +337,24 @@ test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 
     undefined,
     { timeout: 15_000 },
   );
+  // Diagnostic: is window.phantom.bitcoin reachable on the harness?
+  // Iter 61 confirmed unlock works (SW responds isUnlocked:true) but
+  // both Phantom specs still fail with the harness saying "Phantom
+  // provider not injected". Phantom's content script may register a
+  // stub on page-load while the SW is locked and not re-evaluate
+  // after the SW unlocks. Reload the harness once to force a fresh
+  // content-script evaluation against the now-unlocked SW.
+  await harness.reload({ waitUntil: 'domcontentloaded' });
+  await harness.waitForFunction(
+    () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
+    undefined,
+    { timeout: 15_000 },
+  );
+  const phantomVisible = await harness.evaluate(() => {
+    const p = (window as unknown as { phantom?: { bitcoin?: unknown } }).phantom;
+    return { hasPhantom: !!p, hasBitcoin: !!p?.bitcoin };
+  });
+  console.log(`[phantom:sdk-handshake] window.phantom on harness after reload = ${JSON.stringify(phantomVisible)}`);
 
   const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectPhantom());
