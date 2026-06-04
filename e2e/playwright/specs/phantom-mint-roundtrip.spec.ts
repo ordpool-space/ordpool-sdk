@@ -90,12 +90,18 @@ test.beforeAll(async () => {
   }
   test.setTimeout(240_000);
   await onboardPhantom(onboardPage, extensionId);
-  await shot(onboardPage, '00-onboarded');
-  // Unlock the wallet via runtime.sendMessage({method:'unlockExtension',
-  // params: password}) — source-dive of v26.14.0 serviceWorker.js byte
-  // 97870 confirmed this is the SW handler that flips the wallet to
-  // unlocked. Bypasses the unclickable "Get Started" UI gate.
-  await onboardPage.evaluate(async (pwd: string) => {
+  await shot(onboardPage, '00-onboarded').catch(() => undefined);
+  // Unlock the wallet via runtime.sendMessage({method:'unlockExtension'})
+  // — source-dive of v26.14.0 serviceWorker.js byte 97870 confirmed
+  // this is the SW handler that flips the wallet to unlocked. Bypasses
+  // the unclickable "Get Started" UI gate.
+  //
+  // onboardPhantom navigates through several pages internally and the
+  // outer `onboardPage` reference is stale (closed) by the time we get
+  // here. Open a fresh popup.html for the unlock call.
+  const unlockPage = await context.newPage();
+  await unlockPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  await unlockPage.evaluate(async (pwd: string) => {
     return new Promise<unknown>((resolve, reject) => {
       const c = (globalThis as unknown as { chrome: { runtime: {
         sendMessage: (msg: unknown, cb: (r: unknown) => void) => void;
@@ -107,7 +113,8 @@ test.beforeAll(async () => {
       });
     });
   }, 'TestPassword123!');
-  await shot(onboardPage, '00b-after-unlock');
+  await shot(unlockPage, '00b-after-unlock').catch(() => undefined);
+  await unlockPage.close().catch(() => undefined);
 });
 
 test.afterAll(async () => {

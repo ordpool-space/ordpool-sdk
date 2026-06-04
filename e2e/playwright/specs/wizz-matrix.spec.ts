@@ -122,15 +122,16 @@ async function onboardWizzWithAddressType(
   await expect(okBtn).toBeEnabled({ timeout: 5_000 });
   await okBtn.click();
 
-  await expect(page.getByText('Receive', { exact: true })).toBeVisible({ timeout: 60_000 });
-  // Wait until the asset-class badges render — proves the wallet
-  // finished post-onboard hydration (key derivation, address scan,
-  // asset-list mount).
-  await expect(page.getByText(/ARC20 \(\d+\)/).first()).toBeVisible({ timeout: 30_000 });
-  // Return the dashboard page so the caller can keep a reference
-  // AND bringToFront it before the harness's connectWizz call —
-  // Wizz seems to require its dashboard tab to be the active surface
-  // for window.wizz.requestAccounts to dispatch its approval popup.
+  // Match the dashboard gate from wizz-mint-roundtrip's onboardWizz
+  // (which passes consistently): wait for any of the generic dashboard
+  // markers, NOT for the ARC20 badge. The badge depends on
+  // configs.wizz.cash hydration which we abort at the route layer; the
+  // wait would silently hang or surface "ARC20 (0)" in a degraded
+  // wallet state that fails connect.
+  await page.waitForFunction(() => {
+    const t = (document.body.innerText || '').toLowerCase();
+    return t.includes('receive') || t.includes('send') || t.includes('balance');
+  }, undefined, { timeout: 60_000, polling: 500 });
   return page;
 }
 
