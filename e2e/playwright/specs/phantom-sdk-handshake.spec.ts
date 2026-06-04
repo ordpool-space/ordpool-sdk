@@ -255,41 +255,45 @@ test.beforeAll(async () => {
   // here. Open a fresh popup.html and dispatch the unlock from there —
   // any chrome-extension:// page can call runtime.sendMessage on its
   // own SW.
+  // Iter 58 confirmed: addInitScript capture of sendMessage in main
+  // world still yields a wrapped function that JSON.parse(String(msg))
+  // on the payload. Path 2: bypass Phantom's popup wrapper entirely
+  // by hitting an extension URL that does NOT load Phantom's bundle.
+  //
+  // Chrome's extension origin serves any path inside the extension
+  // root, returning Chrome's "File not found" page for unmapped paths.
+  // That page runs in the extension origin (chrome-extension://[id])
+  // and has chrome.runtime API, but doesn't execute Phantom's JS.
   const unlockPage = await context.newPage();
-  // Stash the unwrapped chrome.runtime.sendMessage BEFORE Phantom's
-  // popup.html scripts execute. Iter 57's "[object Object]" is not
-  // valid JSON SyntaxError pointed at Phantom's popup-side wrapper
-  // that calls JSON.parse(String(msg)) on a non-string payload —
-  // stringifying the message would also fail at their layer because
-  // their wrapper expects JS objects with a specific shape. The clean
-  // bypass is the raw Chrome API reference, captured via addInitScript
-  // before page scripts run.
-  await unlockPage.addInitScript(() => {
-    const w = globalThis as unknown as {
-      __ordpoolRawSendMessage?: unknown;
-      chrome?: { runtime?: { sendMessage?: unknown } };
-    };
-    const rt = w.chrome?.runtime;
-    const sm = rt?.sendMessage;
-    if (rt && typeof sm === 'function') {
-      w.__ordpoolRawSendMessage = (sm as (...a: unknown[]) => unknown).bind(rt);
-    }
-  });
-  await unlockPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  await unlockPage.evaluate(async (pwd: string) => {
-    return new Promise<void>((resolve, reject) => {
-      const w = globalThis as unknown as {
-        __ordpoolRawSendMessage?: (msg: unknown, cb: (r: unknown) => void) => void;
-        chrome: { runtime: { lastError?: { message: string } } };
-      };
-      const send = w.__ordpoolRawSendMessage;
-      if (!send) { reject(new Error('raw sendMessage was not captured before page scripts ran')); return; }
-      send({ method: 'unlockExtension', params: pwd, id: 1 }, () => {
-        if (w.chrome.runtime.lastError) reject(new Error(w.chrome.runtime.lastError.message));
-        else resolve();
-      });
-    });
-  }, 'TestPassword123!');
+  await unlockPage.goto(
+    `chrome-extension://${extensionId}/__ordpool_e2e_unlock_not_a_real_page__.html`,
+    { waitUntil: 'domcontentloaded' },
+  ).catch(() => undefined);
+  // Diagnostic: log what chrome.runtime.sendMessage looks like here.
+  const smInfo = await unlockPage.evaluate(() => {
+    const c = (globalThis as unknown as { chrome?: { runtime?: { sendMessage?: unknown } } }).chrome;
+    const sm = c?.runtime?.sendMessage;
+    return { available: typeof sm === 'function', src: typeof sm === 'function' ? (sm as () => unknown).toString().slice(0, 200) : null };
+  }).catch(err => ({ available: false, src: null, err: String(err) }));
+  console.log(`[phantom:unlock-page] sendMessage info = ${JSON.stringify(smInfo).slice(0, 300)}`);
+  if (smInfo.available) {
+    const unlockOutcome = await unlockPage.evaluate(async (pwd: string) => {
+      try {
+        const c = (globalThis as unknown as { chrome: { runtime: {
+          sendMessage: (msg: unknown) => Promise<unknown>;
+          lastError?: { message: string };
+        } } }).chrome;
+        // Promise-style sendMessage (MV3) — single-arg, no callback.
+        const r = await c.runtime.sendMessage({ method: 'unlockExtension', params: pwd, id: 1 });
+        return { ok: true, response: JSON.stringify(r).slice(0, 200) };
+      } catch (e) {
+        return { ok: false, err: String(e).slice(0, 300) };
+      }
+    }, 'TestPassword123!');
+    console.log(`[phantom:unlock-page] unlock outcome = ${JSON.stringify(unlockOutcome)}`);
+  } else {
+    console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available on the 404 page; unlock skipped.');
+  }
   await shot(unlockPage, '00b-after-unlock').catch(() => undefined);
   await unlockPage.close().catch(() => undefined);
 });

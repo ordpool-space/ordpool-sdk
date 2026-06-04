@@ -217,15 +217,26 @@ for (const variant of VARIANTS) {
       void dashboardPage;
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
+      // Diagnostic: surface whether the wizz provider is even on the
+      // harness page. Previous iterations swallowed connectWizz
+      // rejections with a silent .catch(), so a "not injected" or
+      // synchronous reject looked identical to a popup-no-show.
+      const wizzVisible = await harness.evaluate(() => {
+        return typeof (window as unknown as { wizz?: unknown }).wizz !== 'undefined';
+      });
+      // eslint-disable-next-line no-console
+      console.log(`[wizz-matrix:${variant.label}] window.wizz detected on harness = ${wizzVisible}`);
+
       const knownPages = new Set(context.pages());
-      // Bind the rejection handler immediately so a fast reject from
-      // window.wizz.requestAccounts doesn't become an unhandled
-      // rejection that kills the test before approveConnectPopup
-      // gets a chance to run.
       const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
-      resultPromise.catch(() => undefined);
-      await approveConnectPopup(context, knownPages, variantTag);
-      const info = await resultPromise;
+      // Race popup-wait against connectWizz. If connectWizz rejects
+      // fast (wallet returned an error without showing a popup), we
+      // see THAT error instead of the misleading "popup did not
+      // appear within 60s" timeout.
+      const info = await Promise.race([
+        resultPromise,
+        approveConnectPopup(context, knownPages, variantTag).then(() => resultPromise),
+      ]);
 
       // eslint-disable-next-line no-console
       console.log(`[wizz-matrix:${variant.label}] address = ${info.paymentAddress}`);
