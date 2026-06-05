@@ -185,11 +185,17 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    // Narrow abort matches wizz-sdk-handshake exactly. The approval
-    // popup creation pathway is independent of indexer fetches per
-    // source-dive — broader aborts must have been breaking something
-    // else in Wizz's startup.
-    await context.route('**/configs.wizz.cash/**', route => route.abort());
+    // P2WPKH passes flakily, P2TR consistently fails with -32603
+    // "Connection error". Different abort policy per variant:
+    //   - P2WPKH (BIP-84): keep the configs.wizz.cash abort (it
+    //     matches wizz-sdk-handshake and wizz-mint, both passing).
+    //   - P2TR (BIP-86): DON'T abort — Taproot derivation may
+    //     legitimately require the CDN for fee curves or chain
+    //     metadata, and the abort would explain the consistent
+    //     reject. Let CI's own network fail it naturally if needed.
+    if (variant.label.startsWith('P2WPKH')) {
+      await context.route('**/configs.wizz.cash/**', route => route.abort());
+    }
 
     try {
       let [worker] = context.serviceWorkers();
