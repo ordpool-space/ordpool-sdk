@@ -202,11 +202,17 @@ export function okxBasicInfoToWalletInfo(address: string, publicKey: string): Wa
   };
 }
 
-/** One entry in Phantom's `btc_requestAccounts` response. */
+/**
+ * One entry in Phantom's `bitcoin.requestAccounts()` response. The
+ * in-page provider strips the `bip122_` prefix from `addressType`
+ * before returning (verified by disassembling btc.js v26.14.0,
+ * see class Lh's #s helper at byte ~471900).
+ */
 export interface PhantomBtcAddress {
   address: string;
   publicKey: string;
-  addressType: 'bip122_p2tr' | 'bip122_p2wpkh' | 'bip122_p2sh' | 'bip122_p2pkh';
+  addressType: 'p2tr' | 'p2wpkh' | 'p2sh' | 'p2pkh';
+  purpose: 'payment' | 'ordinals';
 }
 
 /** Oyl's getAddresses response: per-type address-and-pubkey objects. */
@@ -244,19 +250,19 @@ export function parseOylAddressResponse(r: OylAddressResponse): WalletInfo {
 }
 
 /**
- * Phantom's `btc_requestAccounts` returns an array of addresses,
- * each tagged with `addressType` (the CAIP-122 BTC variant). Split
- * into the SDK's ordinals vs payment lanes:
- *   - bip122_p2tr (Taproot) → ordinalsAddress
- *   - bip122_p2wpkh / p2sh / p2pkh → paymentAddress
+ * Phantom's `bitcoin.requestAccounts()` returns an array of
+ * addresses, each tagged with `addressType` (p2tr/p2wpkh/p2sh/p2pkh)
+ * and `purpose` ('payment' or 'ordinals'). Split into the SDK's
+ * lanes by `purpose` (more reliable than addressType — Phantom's
+ * "payment" address can be any non-taproot type per user setting).
  *
  * Throws if either lane is absent. Phantom v26 returns both lanes
- * by default; older versions accepted a `purposes` filter on the
- * request — kept defaulted so we always get both.
+ * by default unless the caller passes `{purposes:[…]}` to
+ * `requestAccounts`.
  */
 export function parsePhantomAddressResponse(addresses: PhantomBtcAddress[]): WalletInfo {
-  const ordinals = addresses.find(a => a.addressType === 'bip122_p2tr');
-  const payment = addresses.find(a => a.addressType !== 'bip122_p2tr');
+  const ordinals = addresses.find(a => a.purpose === 'ordinals');
+  const payment = addresses.find(a => a.purpose === 'payment');
   if (!ordinals || !payment) {
     throw new Error('Required address not found?!');
   }

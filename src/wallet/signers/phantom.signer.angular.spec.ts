@@ -13,13 +13,13 @@ import { phantomSigner } from './phantom.signer';
 
 describe('phantomSigner.signAndBroadcast', () => {
 
-  let requestMock: jest.Mock;
+  let signPSBTMock: jest.Mock;
   const broadcastSignedPsbtMock = broadcastSignedPsbt as unknown as jest.Mock;
 
   beforeEach(() => {
-    requestMock = jest.fn();
-    (window as unknown as { phantom: { bitcoin: { request: jest.Mock } } }).phantom = {
-      bitcoin: { request: requestMock },
+    signPSBTMock = jest.fn();
+    (window as unknown as { phantom: { bitcoin: { signPSBT: jest.Mock } } }).phantom = {
+      bitcoin: { signPSBT: signPSBTMock },
     };
     broadcastSignedPsbtMock.mockReset();
     broadcastSignedPsbtMock.mockReturnValue(of({ txId: 'TXID-FROM-BROADCAST' }));
@@ -29,10 +29,10 @@ describe('phantomSigner.signAndBroadcast', () => {
     delete (window as unknown as { phantom?: unknown }).phantom;
   });
 
-  it('asks phantom.bitcoin.request("btc_signPSBT") with finalize:false + inputsToSign[0]=paymentAddress and hands the result to broadcastSignedPsbt', async () => {
+  it('calls phantom.bitcoin.signPSBT(bytes, {finalize:false, inputsToSign[0]=paymentAddress}) and hands the result to broadcastSignedPsbt', async () => {
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
     const signedBytes = new Uint8Array([0x99, 0x88, 0x77]);
-    requestMock.mockResolvedValue(signedBytes as never);
+    signPSBTMock.mockResolvedValue(signedBytes as never);
 
     const input = {
       psbtBytes: unsignedBytes,
@@ -42,15 +42,14 @@ describe('phantomSigner.signAndBroadcast', () => {
     };
     const result = await firstValueFrom(phantomSigner.signAndBroadcast(input));
 
-    expect(requestMock).toHaveBeenCalledTimes(1);
-    const args = requestMock.mock.calls[0][0] as {
-      method: string;
-      params: [Uint8Array, { inputsToSign: { address: string; signingIndexes: number[]; sigHash?: number }[]; finalize: boolean }];
-    };
-    expect(args.method).toBe('btc_signPSBT');
-    expect(args.params[0]).toBe(unsignedBytes);
-    expect(args.params[1].finalize).toBe(false);
-    expect(args.params[1].inputsToSign).toEqual([{
+    expect(signPSBTMock).toHaveBeenCalledTimes(1);
+    const [psbtArg, optsArg] = signPSBTMock.mock.calls[0] as [
+      Uint8Array,
+      { inputsToSign: { address: string; signingIndexes: number[]; sigHash?: number }[]; finalize: boolean },
+    ];
+    expect(psbtArg).toBe(unsignedBytes);
+    expect(optsArg.finalize).toBe(false);
+    expect(optsArg.inputsToSign).toEqual([{
       address: 'bc1qpayment',
       signingIndexes: [0],
       sigHash: 0x01,
@@ -62,8 +61,8 @@ describe('phantomSigner.signAndBroadcast', () => {
     expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST' });
   });
 
-  it('when request rejects, propagates the error and never reaches the broadcast helper', async () => {
-    requestMock.mockRejectedValue(new Error('user rejected') as never);
+  it('when signPSBT rejects, propagates the error and never reaches the broadcast helper', async () => {
+    signPSBTMock.mockRejectedValue(new Error('user rejected') as never);
 
     const result$ = phantomSigner.signAndBroadcast({
       psbtBytes: new Uint8Array(8),
@@ -77,7 +76,7 @@ describe('phantomSigner.signAndBroadcast', () => {
   });
 
   it('when broadcastSignedPsbt errors (mempool rejected), the adapter propagates the error', async () => {
-    requestMock.mockResolvedValue(new Uint8Array([0xab]) as never);
+    signPSBTMock.mockResolvedValue(new Uint8Array([0xab]) as never);
     broadcastSignedPsbtMock.mockReturnValue(throwError(() => new Error('txn-mempool-conflict')));
 
     const result$ = phantomSigner.signAndBroadcast({
