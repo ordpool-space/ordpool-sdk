@@ -73,6 +73,8 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   // tolerate version drift across cached extensions.
   const deadline = Date.now() + 120_000;
   let approval: Page | null = null;
+  let lastLog = 0;
+  const seenSnapshots = new Set<string>();
   while (Date.now() < deadline) {
     for (const p of ctx.pages()) {
       if (!p.url().startsWith('chrome-extension://')) continue;
@@ -81,8 +83,22 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
         approval = p;
         break;
       }
+      // Diagnostic snapshot of every extension page's URL + first
+      // headline text, deduped, logged on a 10s cadence. Helps spot
+      // OKX moving the sign approval to a side panel or a new hash
+      // route across versions.
+      const snippet = (text.split('\n').find(s => s.trim().length > 0) ?? '').slice(0, 80);
+      const key = `${p.url()}|${snippet}`;
+      if (!seenSnapshots.has(key)) {
+        seenSnapshots.add(key);
+        console.log(`[okx-mint:diag] page url=${p.url().slice(0, 100)} first-line="${snippet}"`);
+      }
     }
     if (approval) break;
+    if (Date.now() - lastLog > 10_000) {
+      console.log(`[okx-mint:diag] waiting for sign popup… elapsed=${Math.round((Date.now() - (deadline - 120_000)) / 1000)}s pages=${ctx.pages().length}`);
+      lastLog = Date.now();
+    }
     await new Promise(r => setTimeout(r, 500));
   }
   if (!approval) throw new Error('OKX sign popup never showed Signature request | Confirm Trade within 120s');
