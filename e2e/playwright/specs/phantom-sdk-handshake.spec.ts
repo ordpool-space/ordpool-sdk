@@ -329,45 +329,30 @@ test.beforeAll(async () => {
     });
     console.log(`[phantom:btc-probe] btc_requestAccounts → ${JSON.stringify(btcProbe)}`);
 
-    // Full dump of mmkv:items:syncedStorage — likely holds per-dApp
-    // permission/connection records. Also full dump of any key
-    // containing "trusted", "connected", "permission", "allowedSites",
-    // "origins" so we can locate the permission grant we need to
-    // forge.
-    const fullDump = await unlockPage.evaluate(async () => {
+    // Last shot at Phantom Pipeline B: manually inject the harness
+    // origin into phantomwallet-dApps-list-data. Iter 65 showed the
+    // list shape is [{dontOverrideWindowEthereum, hideProvidersArray,
+    // hostname}, …]. If Phantom's content script consults this list
+    // to decide whether to expose the BTC sub-provider, prepending
+    // {hostname: 'localhost'} may unblock it.
+    const dAppInjectOutcome = await unlockPage.evaluate(async () => {
       const c = (globalThis as unknown as { chrome: { storage: { local: {
-        get: (k: null, cb: (v: Record<string, unknown>) => void) => void;
+        get: (k: string, cb: (v: Record<string, unknown>) => void) => void;
+        set: (d: Record<string, unknown>, cb: () => void) => void;
       } } } }).chrome;
-      const all = await new Promise<Record<string, unknown>>(r => c.storage.local.get(null, r));
-      const fullKeys = ['mmkv:items:syncedStorage', 'mmkv:items:localStorage', 'mmkv:items:flags'];
-      const out: Record<string, string> = {};
-      for (const k of fullKeys) {
-        const v = all[k];
-        if (v !== undefined) out[k] = typeof v === 'string' ? v : JSON.stringify(v);
-      }
-      // Search ALL keys + values for "localhost" or permission-suggesting strings.
-      const matches: Array<{ key: string; snippet: string }> = [];
-      for (const k of Object.keys(all)) {
-        const v = all[k];
-        const s = typeof v === 'string' ? v : JSON.stringify(v);
-        const idx = s.search(/localhost|trustedSite|connectedSite|permittedDapps|permitted|allowedOrigins|connectedOrigins|dAppPermissions/i);
-        if (idx >= 0) {
-          const start = Math.max(0, idx - 80);
-          matches.push({ key: k, snippet: s.slice(start, idx + 200) });
-        }
-      }
-      return { fullKeys: out, matches };
-    }).catch(err => ({ fullKeys: {}, matches: [] as Array<{ key: string; snippet: string }>, err: String(err) }));
-    for (const [k, v] of Object.entries(fullDump.fullKeys)) {
-      // Log in 1000-char chunks so nothing gets truncated.
-      const chunks = Math.ceil(v.length / 1000);
-      for (let i = 0; i < chunks; i++) {
-        console.log(`[phantom:storage:full] ${k} [${i + 1}/${chunks}] = ${v.slice(i * 1000, (i + 1) * 1000)}`);
-      }
-    }
-    for (const m of fullDump.matches) {
-      console.log(`[phantom:storage:match] ${m.key} → ${m.snippet}`);
-    }
+      const key = 'phantomwallet-dApps-list-data';
+      const current = await new Promise<Record<string, unknown>>(r => c.storage.local.get(key, r));
+      const list = (current[key] as Array<Record<string, unknown>> | undefined) ?? [];
+      const entry = {
+        dontOverrideWindowEthereum: false,
+        hideProvidersArray: false,
+        hostname: 'localhost',
+      };
+      const updated = [entry, ...list];
+      await new Promise<void>(r => c.storage.local.set({ [key]: updated }, r));
+      return { count: updated.length };
+    }).catch(err => ({ count: -1, err: String(err) }));
+    console.log(`[phantom:dapps-inject] ${JSON.stringify(dAppInjectOutcome)}`);
   } else {
     console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');
   }
