@@ -238,6 +238,15 @@ test.beforeAll(async () => {
       `--load-extension=${EXT_PATH}`,
       '--no-sandbox',
       '--disable-dev-shm-usage',
+      // Treat the harness HTTP origin as secure. Iter 65 confirmed
+      // Phantom injects .solana (chain-agnostic) but NEVER .bitcoin
+      // on http://localhost:4500 — a 30s timeline poll showed
+      // .bitcoin permanently absent. The most plausible remaining
+      // gate is "BTC sub-provider requires secure context"; this
+      // flag tells Chrome to treat the harness origin as secure
+      // so a BTC-on-HTTPS-only check inside Phantom's content
+      // script returns true.
+      `--unsafely-treat-insecure-origin-as-secure=http://localhost:4500`,
     ],
   });
 

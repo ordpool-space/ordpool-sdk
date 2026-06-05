@@ -79,6 +79,10 @@ test.beforeAll(async () => {
       `--load-extension=${EXT_PATH}`,
       '--no-sandbox',
       '--disable-dev-shm-usage',
+      // See phantom-sdk-handshake for rationale: treat the harness
+      // HTTP origin as secure so a possible BTC-on-HTTPS-only gate
+      // inside Phantom's content script returns true.
+      `--unsafely-treat-insecure-origin-as-secure=http://localhost:4500`,
     ],
   });
 
