@@ -226,6 +226,24 @@ for (const variant of VARIANTS) {
       void dashboardPage;
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
+      // Wizz P2WPKH flakes with -32603 "Connection error" when the
+      // test races requestAccounts before the wallet's BTC handler
+      // is fully ready. wizz-mint doesn't see this because beforeAll
+      // adds an idle gap between dashboard-render and connect. In
+      // matrix the same flow happens within one test fn — no gap.
+      // Wait until a non-popup wizz method (getNetwork) returns
+      // before kicking off requestAccounts.
+      await harness.waitForFunction(async () => {
+        const w = (window as unknown as { wizz?: { getNetwork?: () => Promise<unknown> } }).wizz;
+        if (!w?.getNetwork) return false;
+        try {
+          await w.getNetwork();
+          return true;
+        } catch {
+          return false;
+        }
+      }, undefined, { timeout: 20_000, polling: 250 });
+
       // Diagnostic: surface whether the wizz provider is even on the
       // harness page. Previous iterations swallowed connectWizz
       // rejections with a silent .catch(), so a "not injected" or
