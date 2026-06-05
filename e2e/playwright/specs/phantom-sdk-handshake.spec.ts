@@ -372,6 +372,25 @@ test.afterAll(async () => {
 // REVERSE-ENGINEERING POST-MORTEM, Phantom v26.14.0
 // (iters 47-73, manual disassembly of /tmp/phantom-ext/*.js):
 //
+// CONTEXT (researched 2026-06-05, see "Phantom Bitcoin support
+// research report" in session transcript):
+//   * Phantom remains committed to Bitcoin (Help Center, supported
+//     networks list, blog/learn pages all current). No retreat
+//     announced anywhere.
+//   * BUT every page under docs.phantom.com/bitcoin/* now carries:
+//       "The window.phantom.bitcoin provider will be deprecated
+//        in an upcoming release."
+//     They're mid-migration toward Wallet Standard (bip122: chain
+//     IDs). The new @phantom/react-sdk lists its Bitcoin module as
+//     "Coming Soon" — no replacement is shipped yet.
+//   * Our v26.14.0 observation ("btc.js bundled but never injected,
+//     SW has zero btc_* handlers") is undocumented in any public
+//     source the researcher could find. Most plausible explanation
+//     is a regression during the migration cutover, or an Eppo-
+//     gated staged rollout we never landed on. Worth filing at
+//     github.com/orgs/phantom/discussions — nobody else has
+//     publicly reported this symptom.
+//
 // THE WALL: v26.14.0 SHIPS NO DAPP-SIDE BITCOIN SUPPORT AT ALL.
 //
 // Three layers needed for Phantom to serve a BTC dApp request:
