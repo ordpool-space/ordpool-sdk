@@ -151,12 +151,19 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Re-skipped alongside phantom-sdk-handshake (iter 47): the storage-
-// bypass for firstTimeOnboarding lands in chrome.storage.local but
-// doesn't actually unblock dApp connect — Phantom must hold a
-// parallel runtime state that the SW doesn't re-derive from storage
-// on each request. See phantom-sdk-handshake skip rationale.
-test('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
+// SKIPPED (iter 68): see phantom-sdk-handshake for the full
+// post-mortem of why Phantom Pipeline B is structurally blocked.
+// Short version: window.phantom.bitcoin never injects on
+// http://localhost:4500 even with the wallet unlocked, BTC
+// enabled, harness origin pre-added to dApps-list-data, and
+// --unsafely-treat-insecure-origin-as-secure. The gate lives
+// inside Phantom's content script and isn't reachable from
+// outside the wallet UI.
+//
+// Phantom Pipeline A (mocked unit tests in
+// `phantom.signer.angular.spec.ts`) continues to pin our adapter
+// contract.
+test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();

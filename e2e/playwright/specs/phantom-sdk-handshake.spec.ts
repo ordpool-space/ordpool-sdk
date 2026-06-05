@@ -364,22 +364,51 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Re-skipped after iter 47. Source-dive of v26.14.0 found
-// chrome.storage.local.firstTimeOnboarding ({isFirstTimeOnboarding:
-// bool}) — the key Phantom reads to decide whether to gate dApp
-// requests. Writing {isFirstTimeOnboarding: false} from the SW
-// context successfully landed in storage, but Phantom STILL did
-// not process dApp connect requests — the approval popup never
-// opens. There's likely a parallel runtime state (in-memory) that
-// the SW also checks, and the SW doesn't re-read storage on every
-// dApp request. The next attempt would be to either trigger the SW
-// to re-read state (e.g. via chrome.runtime.sendMessage) or unpack
-// what other state is set on the real Get Started click.
+// SKIPPED (iter 68). Phantom Pipeline B post-mortem:
 //
-// Wire contract remains pinned by phantom.signer.angular.spec.ts in
-// Pipeline A. Phantom-onboard (the gold-standard click-through) is
-// passing.
-test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+// Iters 47-68 chased a clean programmatic unlock + BTC sub-provider
+// path. Confirmed working:
+//   * Unlock via chrome.runtime.sendMessage from an injected
+//     extension-origin page (__ordpool_unlock__.html written into
+//     the unpacked Phantom dir). Payload must be JSON.stringify'd.
+//     SW responds {jsonrpc:"2.0", id:1, result:{isUnlocked:true}}.
+//   * After unlock, EXTENSION_LOCKED=false,
+//     firstTimeOnboarding={isFirstTimeOnboarding:false},
+//     enabledChainsOverrideSettings = {bitcoin:true, …},
+//     userPropsCache.bitcoinAddress = our BIP-84 address.
+//   * Reloading the harness IS effective: window.phantom appears
+//     (with .solana) instead of being absent.
+//
+// What still won't budge:
+//   * window.phantom.bitcoin never appears on http://localhost:4500.
+//     30s timeline poll shows {hasPhantom:true, hasBitcoin:false,
+//     hasSolana:true} at t=0 and never changes.
+//   * Direct btc_requestAccounts to the SW returns
+//     "btc_requestAccounts not permitted" — the SW HAS the handler
+//     but the per-dApp permission check fails.
+//   * No persistent storage key matches localhost / trustedSite /
+//     connectedSite / permitted / allowedOrigins / dAppPermissions
+//     anywhere in chrome.storage.local (iter 66 full dump).
+//   * --unsafely-treat-insecure-origin-as-secure on localhost:4500
+//     doesn't help (iter 67) — the gate isn't a secure-context
+//     check.
+//   * Prepending {hostname: "localhost"} to
+//     phantomwallet-dApps-list-data doesn't help (iter 68) — that
+//     list is UI metadata, not a permission grant.
+//
+// Conclusion: the BTC-sub-provider gate is enforced inside
+// Phantom's content script with in-memory SW state that isn't
+// reachable from outside the wallet UI. Pipeline B for Phantom
+// is provably impossible to drive programmatically from the
+// current vantage point. A future attempt would need either
+// (a) a custom bridge extension that proxies harness requests to
+// Phantom's SW (cross-extension messaging) or (b) running the
+// harness on real HTTPS so we can test if Phantom's actual gate
+// is HTTPS-protocol-not-just-secure-context.
+//
+// Pipeline A (`phantom.signer.angular.spec.ts`) continues to
+// pin our adapter against a mocked Phantom API.
+test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();
