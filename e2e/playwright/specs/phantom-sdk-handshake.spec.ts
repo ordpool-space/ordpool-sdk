@@ -329,30 +329,35 @@ test.beforeAll(async () => {
     });
     console.log(`[phantom:btc-probe] btc_requestAccounts → ${JSON.stringify(btcProbe)}`);
 
-    // Last shot at Phantom Pipeline B: manually inject the harness
-    // origin into phantomwallet-dApps-list-data. Iter 65 showed the
-    // list shape is [{dontOverrideWindowEthereum, hideProvidersArray,
-    // hostname}, …]. If Phantom's content script consults this list
-    // to decide whether to expose the BTC sub-provider, prepending
-    // {hostname: 'localhost'} may unblock it.
-    const dAppInjectOutcome = await unlockPage.evaluate(async () => {
-      const c = (globalThis as unknown as { chrome: { storage: { local: {
-        get: (k: string, cb: (v: Record<string, unknown>) => void) => void;
-        set: (d: Record<string, unknown>, cb: () => void) => void;
-      } } } }).chrome;
-      const key = 'phantomwallet-dApps-list-data';
-      const current = await new Promise<Record<string, unknown>>(r => c.storage.local.get(key, r));
-      const list = (current[key] as Array<Record<string, unknown>> | undefined) ?? [];
-      const entry = {
-        dontOverrideWindowEthereum: false,
-        hideProvidersArray: false,
-        hostname: 'localhost',
-      };
-      const updated = [entry, ...list];
-      await new Promise<void>(r => c.storage.local.set({ [key]: updated }, r));
-      return { count: updated.length };
-    }).catch(err => ({ count: -1, err: String(err) }));
-    console.log(`[phantom:dapps-inject] ${JSON.stringify(dAppInjectOutcome)}`);
+    // Register btc.js as a MAIN-world content script for the
+    // harness origin. Phantom's SW never does this on its own
+    // (the Cn function in serviceWorker.js only registers
+    // evmAsk/evmPhantom/evmMetamask/sui — no BTC case), so the
+    // BTC sub-provider that ships in the build remains dormant.
+    // We do it ourselves from the unlock page, which is on the
+    // extension origin and inherits Phantom's "scripting"
+    // permission.
+    const registerOutcome = await unlockPage.evaluate(async () => {
+      try {
+        const c = (globalThis as unknown as { chrome: { scripting: {
+          registerContentScripts: (scripts: unknown[]) => Promise<void>;
+          unregisterContentScripts: (opts: { ids: string[] }) => Promise<void>;
+        } } }).chrome;
+        await c.scripting.unregisterContentScripts({ ids: ['ordpool_btc_inject'] }).catch(() => undefined);
+        await c.scripting.registerContentScripts([{
+          id: 'ordpool_btc_inject',
+          matches: ['http://localhost:4500/*'],
+          js: ['btc.js'],
+          runAt: 'document_start',
+          allFrames: true,
+          world: 'MAIN',
+        }]);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, err: String(e).slice(0, 300) };
+      }
+    });
+    console.log(`[phantom:btc-inject-register] ${JSON.stringify(registerOutcome)}`);
   } else {
     console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');
   }
@@ -364,51 +369,34 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// SKIPPED (iter 68). Phantom Pipeline B post-mortem:
+// REVERSE-ENGINEERING FINDING (iter 72, manual disassembly of
+// Phantom v26.14.0):
 //
-// Iters 47-68 chased a clean programmatic unlock + BTC sub-provider
-// path. Confirmed working:
-//   * Unlock via chrome.runtime.sendMessage from an injected
-//     extension-origin page (__ordpool_unlock__.html written into
-//     the unpacked Phantom dir). Payload must be JSON.stringify'd.
-//     SW responds {jsonrpc:"2.0", id:1, result:{isUnlocked:true}}.
-//   * After unlock, EXTENSION_LOCKED=false,
-//     firstTimeOnboarding={isFirstTimeOnboarding:false},
-//     enabledChainsOverrideSettings = {bitcoin:true, …},
-//     userPropsCache.bitcoinAddress = our BIP-84 address.
-//   * Reloading the harness IS effective: window.phantom appears
-//     (with .solana) instead of being absent.
+// Phantom's content_scripts (manifest.json) loads `phantom.js` +
+// `solana.js` in MAIN world at document_start. Neither defines
+// `window.phantom.bitcoin`. They only inject {app, ethereum,
+// solana, sui} sub-providers.
 //
-// What still won't budge:
-//   * window.phantom.bitcoin never appears on http://localhost:4500.
-//     30s timeline poll shows {hasPhantom:true, hasBitcoin:false,
-//     hasSolana:true} at t=0 and never changes.
-//   * Direct btc_requestAccounts to the SW returns
-//     "btc_requestAccounts not permitted" — the SW HAS the handler
-//     but the per-dApp permission check fails.
-//   * No persistent storage key matches localhost / trustedSite /
-//     connectedSite / permitted / allowedOrigins / dAppPermissions
-//     anywhere in chrome.storage.local (iter 66 full dump).
-//   * --unsafely-treat-insecure-origin-as-secure on localhost:4500
-//     doesn't help (iter 67) — the gate isn't a secure-context
-//     check.
-//   * Prepending {hostname: "localhost"} to
-//     phantomwallet-dApps-list-data doesn't help (iter 68) — that
-//     list is UI metadata, not a permission grant.
+// BUT the bundle ALSO ships `btc.js` — a complete BTC sub-provider
+// that, when executed, calls Object.defineProperty(window.phantom,
+// "bitcoin", …) and exposes `btc_requestAccounts` + `btc_signPSBT`.
+// Verified by grep on the unpacked extension.
 //
-// Conclusion: the BTC-sub-provider gate is enforced inside
-// Phantom's content script with in-memory SW state that isn't
-// reachable from outside the wallet UI. Pipeline B for Phantom
-// is provably impossible to drive programmatically from the
-// current vantage point. A future attempt would need either
-// (a) a custom bridge extension that proxies harness requests to
-// Phantom's SW (cross-extension messaging) or (b) running the
-// harness on real HTTPS so we can test if Phantom's actual gate
-// is HTTPS-protocol-not-just-secure-context.
+// `btc.js` is NOT in `content_scripts`, NOT in `web_accessible_
+// resources`, and the SW's `Cn` function that calls
+// `chrome.scripting.registerContentScripts({id:"conditional
+// InpageScripts"})` only ever pushes evmAsk/evmPhantom/evmMetamask/
+// sui.js to the registration list. The Se enum used there has
+// `Se.EVM`, `Se.Solana`, `Se.Sui` and NO `Se.Bitcoin`. So in
+// v26.14.0 Phantom ships the BTC sub-provider but never injects
+// it into web pages — dead code in the build.
 //
-// Pipeline A (`phantom.signer.angular.spec.ts`) continues to
-// pin our adapter against a mocked Phantom API.
-test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+// The bypass: load btc.js into the harness page ourselves via
+// Playwright's `addInitScript`, reading the file content from
+// the unpacked extension dir. Phantom's SW handlers for
+// btc_requestAccounts / btc_signPSBT still exist and respond
+// normally once the page-side proxy is in place.
+test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();

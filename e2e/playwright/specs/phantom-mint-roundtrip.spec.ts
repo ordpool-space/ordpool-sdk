@@ -125,8 +125,6 @@ test.beforeAll(async () => {
   }).catch(err => ({ available: false, src: null, err: String(err) }));
   console.log(`[phantom:unlock-page] sendMessage info = ${JSON.stringify(smInfo).slice(0, 300)}`);
   if (smInfo.available) {
-    // Iter 60: native sendMessage but SW expects JSON-stringified
-    // payload. See phantom-sdk-handshake for full rationale.
     const unlockOutcome = await unlockPage.evaluate(async (pwd: string) => {
       try {
         const c = (globalThis as unknown as { chrome: { runtime: {
@@ -140,6 +138,31 @@ test.beforeAll(async () => {
       }
     }, 'TestPassword123!');
     console.log(`[phantom:unlock-page] unlock outcome = ${JSON.stringify(unlockOutcome)}`);
+
+    // Register btc.js as a content script for the harness origin.
+    // Phantom's SW never does this on its own. See phantom-sdk-
+    // handshake for the reverse-engineering rationale.
+    const registerOutcome = await unlockPage.evaluate(async () => {
+      try {
+        const c = (globalThis as unknown as { chrome: { scripting: {
+          registerContentScripts: (scripts: unknown[]) => Promise<void>;
+          unregisterContentScripts: (opts: { ids: string[] }) => Promise<void>;
+        } } }).chrome;
+        await c.scripting.unregisterContentScripts({ ids: ['ordpool_btc_inject'] }).catch(() => undefined);
+        await c.scripting.registerContentScripts([{
+          id: 'ordpool_btc_inject',
+          matches: ['http://localhost:4500/*'],
+          js: ['btc.js'],
+          runAt: 'document_start',
+          allFrames: true,
+          world: 'MAIN',
+        }]);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, err: String(e).slice(0, 300) };
+      }
+    });
+    console.log(`[phantom:btc-inject-register] ${JSON.stringify(registerOutcome)}`);
   } else {
     console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');
   }
@@ -151,19 +174,11 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// SKIPPED (iter 68): see phantom-sdk-handshake for the full
-// post-mortem of why Phantom Pipeline B is structurally blocked.
-// Short version: window.phantom.bitcoin never injects on
-// http://localhost:4500 even with the wallet unlocked, BTC
-// enabled, harness origin pre-added to dApps-list-data, and
-// --unsafely-treat-insecure-origin-as-secure. The gate lives
-// inside Phantom's content script and isn't reachable from
-// outside the wallet UI.
-//
-// Phantom Pipeline A (mocked unit tests in
-// `phantom.signer.angular.spec.ts`) continues to pin our adapter
-// contract.
-test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
+// See phantom-sdk-handshake for the reverse-engineering finding
+// (iter 72): btc.js exists in the unpacked extension but Phantom
+// never auto-injects it. We load it via Playwright's addInitScript
+// to expose window.phantom.bitcoin on the harness page.
+test('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();
