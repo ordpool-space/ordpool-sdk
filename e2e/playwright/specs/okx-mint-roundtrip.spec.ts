@@ -63,14 +63,21 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   // OKX reuses the connect popup's Page for sign (CI iter 39 trace
   // confirmed) — waitForApprovalPopup's knownPages filter would skip
   // it. Poll every chrome-extension page for the sign-popup
-  // "Confirm Trade" heading regardless of when the page was created.
+  // heading regardless of when the page was created.
+  //
+  // OKX renamed the popup heading in a recent release: their
+  // _locales/en/messages.json now has
+  //   "wallet_dapp_conncetion_notify_signature_request":
+  //     "Signature request"
+  // The legacy "Confirm Trade" copy is gone. Match either so we
+  // tolerate version drift across cached extensions.
   const deadline = Date.now() + 120_000;
   let approval: Page | null = null;
   while (Date.now() < deadline) {
     for (const p of ctx.pages()) {
       if (!p.url().startsWith('chrome-extension://')) continue;
       const text = await p.locator('body').innerText().catch(() => '');
-      if (/Confirm Trade|Asset transfer pending/i.test(text)) {
+      if (/Signature request|Confirm Trade|Asset transfer pending/i.test(text)) {
         approval = p;
         break;
       }
@@ -78,7 +85,7 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
     if (approval) break;
     await new Promise(r => setTimeout(r, 500));
   }
-  if (!approval) throw new Error('OKX sign popup never showed Confirm Trade within 120s');
+  if (!approval) throw new Error('OKX sign popup never showed Signature request | Confirm Trade within 120s');
   await shot(approval, '03a-sign-approval');
 
   // OKX's sign popup may open with an "Asset transfer pending" promo
