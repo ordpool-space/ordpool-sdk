@@ -320,25 +320,26 @@ test.beforeAll(async () => {
     });
     console.log(`[phantom:btc-probe] btc_requestAccounts → ${JSON.stringify(btcProbe)}`);
 
-    // Dump mmkv flags / state keys (feature gates) raw — these may
-    // hold the per-content-script chain-injection feature flag.
-    const mmkvDump = await unlockPage.evaluate(async () => {
+    // Dump dApp permission / connected-sites storage. Phantom's
+    // sub-provider injection may be gated on the harness URL being
+    // in the connected-dApps list.
+    const dAppsDump = await unlockPage.evaluate(async () => {
       const c = (globalThis as unknown as { chrome: { storage: { local: {
         get: (k: null, cb: (v: Record<string, unknown>) => void) => void;
       } } } }).chrome;
       const all = await new Promise<Record<string, unknown>>(r => c.storage.local.get(null, r));
       const out: Record<string, string> = {};
       for (const k of Object.keys(all)) {
-        if (/^mmkv:|^EXTENSION_|^firstTime|^HAS_|providers/i.test(k)) {
+        if (/dApp|dapp|connectedSites|permission|allowed|origin/i.test(k)) {
           const v = all[k];
           const s = typeof v === 'string' ? v : JSON.stringify(v);
-          out[k] = s.length > 400 ? s.slice(0, 400) + '…' : s;
+          out[k] = s.length > 600 ? s.slice(0, 600) + '…' : s;
         }
       }
       return out;
     }).catch(err => ({ err: String(err) }));
-    for (const [k, v] of Object.entries(mmkvDump)) {
-      console.log(`[phantom:storage:flag] ${k} = ${v}`);
+    for (const [k, v] of Object.entries(dAppsDump)) {
+      console.log(`[phantom:storage:dapps] ${k} = ${v}`);
     }
   } else {
     console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');
@@ -376,24 +377,36 @@ test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 
     undefined,
     { timeout: 15_000 },
   );
-  // Diagnostic: is window.phantom.bitcoin reachable on the harness?
-  // Iter 61 confirmed unlock works (SW responds isUnlocked:true) but
-  // both Phantom specs still fail with the harness saying "Phantom
-  // provider not injected". Phantom's content script may register a
-  // stub on page-load while the SW is locked and not re-evaluate
-  // after the SW unlocks. Reload the harness once to force a fresh
-  // content-script evaluation against the now-unlocked SW.
+  // Reload to force Phantom's content script to re-evaluate against
+  // the now-unlocked SW.
   await harness.reload({ waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
     { timeout: 15_000 },
   );
-  const phantomVisible = await harness.evaluate(() => {
-    const p = (window as unknown as { phantom?: { bitcoin?: unknown } }).phantom;
-    return { hasPhantom: !!p, hasBitcoin: !!p?.bitcoin };
+  // Iter 64 finding: btc_requestAccounts via SW returns "not
+  // permitted" — the harness URL isn't an authorized dApp. The
+  // sub-provider gating is permission-based. Poll for up to 30s
+  // with a millisecond-precision arrival log so we can confirm
+  // whether .bitcoin EVER appears or is permanently gated.
+  const phantomTimeline = await harness.evaluate(async () => {
+    const t0 = Date.now();
+    const log: Array<{ at: number; hasPhantom: boolean; hasBitcoin: boolean; hasSolana: boolean }> = [];
+    while (Date.now() - t0 < 30_000) {
+      const w = window as unknown as { phantom?: { bitcoin?: unknown; solana?: unknown } };
+      const p = w.phantom;
+      const entry = { at: Date.now() - t0, hasPhantom: !!p, hasBitcoin: !!p?.bitcoin, hasSolana: !!p?.solana };
+      const last = log[log.length - 1];
+      if (!last || last.hasPhantom !== entry.hasPhantom || last.hasBitcoin !== entry.hasBitcoin || last.hasSolana !== entry.hasSolana) {
+        log.push(entry);
+        if (entry.hasBitcoin) break;
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
+    return log;
   });
-  console.log(`[phantom:sdk-handshake] window.phantom on harness after reload = ${JSON.stringify(phantomVisible)}`);
+  console.log(`[phantom:sdk-handshake] phantomTimeline = ${JSON.stringify(phantomTimeline)}`);
 
   const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectPhantom());
