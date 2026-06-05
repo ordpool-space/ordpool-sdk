@@ -369,34 +369,72 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// REVERSE-ENGINEERING FINDING (iter 72, manual disassembly of
-// Phantom v26.14.0):
+// REVERSE-ENGINEERING POST-MORTEM, Phantom v26.14.0
+// (iters 47-73, manual disassembly of /tmp/phantom-ext/*.js):
 //
-// Phantom's content_scripts (manifest.json) loads `phantom.js` +
-// `solana.js` in MAIN world at document_start. Neither defines
-// `window.phantom.bitcoin`. They only inject {app, ethereum,
-// solana, sui} sub-providers.
+// THE WALL: v26.14.0 SHIPS NO DAPP-SIDE BITCOIN SUPPORT AT ALL.
 //
-// BUT the bundle ALSO ships `btc.js` — a complete BTC sub-provider
-// that, when executed, calls Object.defineProperty(window.phantom,
-// "bitcoin", …) and exposes `btc_requestAccounts` + `btc_signPSBT`.
-// Verified by grep on the unpacked extension.
+// Three layers needed for Phantom to serve a BTC dApp request:
 //
-// `btc.js` is NOT in `content_scripts`, NOT in `web_accessible_
-// resources`, and the SW's `Cn` function that calls
-// `chrome.scripting.registerContentScripts({id:"conditional
-// InpageScripts"})` only ever pushes evmAsk/evmPhantom/evmMetamask/
-// sui.js to the registration list. The Se enum used there has
-// `Se.EVM`, `Se.Solana`, `Se.Sui` and NO `Se.Bitcoin`. So in
-// v26.14.0 Phantom ships the BTC sub-provider but never injects
-// it into web pages — dead code in the build.
+//   (1) An in-page provider that exposes window.phantom.bitcoin
+//       with requestAccounts() / signPSBT() / signMessage().
+//   (2) A content script registered for dApp URLs that loads (1)
+//       into the page's MAIN world.
+//   (3) Service-worker handlers for the JSON-RPC method names (1)
+//       proxies to (btc_requestAccounts / btc_signPSBT / etc).
 //
-// The bypass: load btc.js into the harness page ourselves via
-// Playwright's `addInitScript`, reading the file content from
-// the unpacked extension dir. Phantom's SW handlers for
-// btc_requestAccounts / btc_signPSBT still exist and respond
-// normally once the page-side proxy is in place.
-test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+// Phantom v26.14.0 ships (1) — btc.js, fully functional, see
+// disassembly notes in phantom.signer.ts. It does NOT ship (2)
+// or (3):
+//
+//   (2): manifest.json content_scripts loads only phantom.js +
+//        solana.js + contentScript.js. The SW's conditional
+//        content-script registrar Cn (byte 73937 of
+//        serviceWorker.js) only handles Se.EVM and Se.Sui:
+//
+//        if (e.includes(Se.EVM)) switch (t) {
+//          case "ALWAYS_ASK":   r.push("evmAsk.js"); break;
+//          case "USE_PHANTOM":  r.push("evmPhantom.js"); break;
+//          case "USE_METAMASK": r.push("evmMetamask.js"); break;
+//        }
+//        if (e.some(n => n === Se.Sui)) r.push("sui.js");
+//
+//        No Se.Bitcoin case. The Se enum only has EVM/Solana/Sui.
+//        btc.js is in the build but no code path loads it. We can
+//        register it ourselves with chrome.scripting.register-
+//        ContentScripts from the unlock page (which inherits
+//        Phantom's "scripting" permission) — proven in iter 72:
+//        window.phantom.bitcoin appears after that.
+//
+//   (3): grep'd every .js file in the extension for btc_*,
+//        bitcoin:*, signPSBT, requestBitcoinAccounts — ONLY
+//        btc.js itself mentions them. serviceWorker.js + every
+//        chunk: zero. The SW's RPC router (chunk-TRVAUBUF.js
+//        byte 12704) returns `${method} isn't implemented` for
+//        any method not in its handler map. Bitcoin methods are
+//        never in the map. Iter 73 hit exactly this error:
+//        `Me: btc_requestAccounts isn't implemented`.
+//
+// Phantom-as-wallet (UI, internal balances, address derivation,
+// chrome.storage.local.userPropsCache.bitcoinAddress) works.
+// Phantom-as-dApp-provider for Bitcoin does NOT work in v26.14.0.
+// The integration is half-shipped — page side ready, SW side
+// absent. Either rolled back from a previous version or staged
+// for a future release that flipped some flag.
+//
+// What's still useful:
+//   * The adapter in src/wallet/connectors/phantom.connector.ts +
+//     signer in src/wallet/signers/phantom.signer.ts now match
+//     the real btc.js API (requestAccounts(), signPSBT(bytes,
+//     opts)) — iter 73. They'll work as-is the day Phantom
+//     finishes wiring it up.
+//   * Pipeline A (phantom.signer.angular.spec.ts, 138/138
+//     passing) pins our adapter against a correctly-shaped mock.
+//
+// Skip these specs until Phantom completes (3). Re-enable by
+// removing test.skip and confirming the SW responds to
+// btc_requestAccounts.
+test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();
