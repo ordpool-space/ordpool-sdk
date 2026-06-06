@@ -46,7 +46,7 @@ case "$WALLET" in
     ASSET_NAME="okx-wallet-v${VERSION}.crx"
     ;;
   phantom)
-    VERSION="26.14.0"
+    VERSION="26.16.0"
     ASSET_NAME="phantom-v${VERSION}.crx"
     ;;
   wizz)

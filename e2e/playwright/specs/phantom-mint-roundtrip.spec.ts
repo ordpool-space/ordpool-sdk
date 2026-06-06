@@ -186,7 +186,7 @@ test.afterAll(async () => {
 // absent in this Phantom build; can't be driven from the test
 // side without modifying the SW. Re-enable when Phantom ships a
 // version with the SW handlers wired up.
-test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
+test('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();

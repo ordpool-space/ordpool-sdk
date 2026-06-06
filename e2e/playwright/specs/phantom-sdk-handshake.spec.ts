@@ -453,7 +453,7 @@ test.afterAll(async () => {
 // Skip these specs until Phantom completes (3). Re-enable by
 // removing test.skip and confirming the SW responds to
 // btc_requestAccounts.
-test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();
