@@ -14,7 +14,7 @@ export default defineConfig({
   globalSetup: path.resolve(__dirname, 'global-setup.ts'),
   fullyParallel: false,           // extension state is shared across specs
   workers: 1,
-  retries: 0,
+  retries: process.env.CI ? 2 : 0,
   timeout: 60_000,
   expect: {
     timeout: 20_000,

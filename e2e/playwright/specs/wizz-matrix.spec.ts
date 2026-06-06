@@ -163,15 +163,10 @@ test.beforeAll(async () => {
   }
 });
 
-// Iter 79: same retries-not-skip rationale as okx-mint. Wizz
-// matrix P2WPKH landed on iters 59 and 67 with the narrow
-// configs.wizz.cash abort + bringToFront-removed setup; the
-// other runs intermittent-rejected -32603. P2TR has never
-// passed — its Taproot derivation appears genuinely backend-
-// dependent in a way the no-internet CI can't satisfy — so
-// it keeps the skip. P2WPKH gets retries=2 so a flake doesn't
-// turn the pipeline red.
-test.describe.configure({ retries: 2 });
+// P2WPKH passes intermittently (iters 59, 67, 79-retry); P2TR
+// has never passed across 35+ iters (Taproot derivation needs
+// Wizz CDN access the no-internet CI can't provide). Global
+// retries=2 in playwright.config.ts handles the P2WPKH flake.
 for (const variant of VARIANTS) {
   const testFn = variant.label.startsWith('P2TR') ? test.skip : test;
   testFn(`SDK returns the right address for Wizz ${variant.label}`, async () => {

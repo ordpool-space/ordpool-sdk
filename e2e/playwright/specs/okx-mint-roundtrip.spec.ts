@@ -196,10 +196,8 @@ test.afterAll(async () => {
 // the harness's buildAndSignMintViaOkx — the failures from iter
 // 56 onward are a CI-side race against OKX's bridge (popup
 // dispatch + window-create timing), not a code regression.
-// Configure per-test retries=2 so a single flake doesn't drag
-// the whole job red; a real regression still surfaces on all 3
-// attempts.
-test.describe.configure({ retries: 2 });
+// Global retries=2 in playwright.config.ts covers the CI flake;
+// a real regression still surfaces on all 3 attempts.
 test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
