@@ -453,7 +453,23 @@ test.afterAll(async () => {
 // Skip these specs until Phantom completes (3). Re-enable by
 // removing test.skip and confirming the SW responds to
 // btc_requestAccounts.
-test('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+// EMPIRICAL CONFIRMATION (iter 82, 2026-06-06): re-vendored
+// Phantom v26.16.0 from current Chrome Web Store. Disassembly is
+// byte-identical to v26.14.0 in the relevant paths (Bn renamed
+// from Cn, same EVM/Sui-only registrar, same Se enum without
+// Bitcoin, same zero btc_* SW handlers). CI runtime:
+//   * iter-72 self-registration still works → hasBitcoin:true on
+//     harness after reload
+//   * SW response to btc_requestAccounts (via in-page provider OR
+//     direct probe): "btc_requestAccounts isn't implemented"
+//     ("not permitted" via the direct extension-origin probe)
+// So this is NOT a stale-cache issue; Phantom currently ships
+// the dApp BTC pipeline this way across at least v26.14.0 and
+// v26.16.0. Likely Phantom stopped maintaining the legacy SW
+// handlers ahead of the Wallet-Standard migration (per the
+// docs.phantom.com/bitcoin/* deprecation banner) without
+// shipping the new surface yet.
+test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();
