@@ -201,6 +201,18 @@ for (const variant of VARIANTS) {
 
       const dashboardPage = await onboardWizzWithAddressType(context, extensionId, variant);
 
+      // Source-dive of wizz background.js byte 2285200: -32603
+      // "Connection error" fires from the per-tab session router when
+      // the harness tab's session.origin isn't set yet (tabCheckin
+      // hasn't landed) OR when it doesn't match the page-claimed
+      // origin. The dashboard tab holds a wizz-extension-origin
+      // session in the SW. wizz-mint passes because its beforeAll-to-
+      // test transition adds idle time for tabCheckin to complete on
+      // the harness tab. In matrix, the same flow lives in one fn —
+      // no gap. Close the dashboard tab before opening harness so the
+      // SW has no other live wizz session competing.
+      await dashboardPage.close().catch(() => undefined);
+
       const harness = await context.newPage();
       await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
       await harness.waitForFunction(
@@ -208,16 +220,6 @@ for (const variant of VARIANTS) {
         undefined,
         { timeout: 15_000 },
       );
-
-      // Mirror wizz-mint-roundtrip exactly: NO bringToFront on the
-      // dashboard before connect. wizz-mint is the canonical passing
-      // pattern; the earlier theory that Wizz needs its dashboard tab
-      // active for requestAccounts to fire its popup isn't supported
-      // by the mint spec (which has no bringToFront and works
-      // consistently). Iter 50→57 the popup-no-show kept reproducing
-      // — try this knob since it's the last remaining mint-vs-matrix
-      // divergence.
-      void dashboardPage;
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
       // Wizz P2WPKH flakes with -32603 "Connection error" when the
