@@ -190,20 +190,17 @@ test.afterAll(async () => {
 // runs (likely related to which wallet tab is focused, or whether the
 // previous Connected modal is still open). Until then, mint coverage
 // is provided by Xverse + Unisat + Leather.
-// SKIPPED (iter 77). Iter 76 diagnostic confirmed OKX's signPsbt
-// drops silently on this flow: after the connect popup closes the
-// page count stays at 2 for the entire 120s wait, no new URL ever
-// appears, the harness's signedHexPromise never settles. Connect
-// popup works ("Connected" first-line at notification.html#/connect/
-// …) — the regression is specifically in the sign dispatch.
-// History: iters 36-40 each found a DIFFERENT shape of the same
-// flake (no popup / Asset-transfer-pending modal / pre-emptive
-// open / no opens at all). The signature wire shape is pinned by
-// okx.signer.angular.spec.ts in Pipeline A; Pipeline B remains
-// covered by okx-loads + okx-onboard + okx-sdk-handshake +
-// okx-matrix (the address-handshake matrix is the most thorough
-// real-binary coverage).
-test.skip('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
+// Iter 79 reinstated. The same spec + same OKX v4.1.0 cache passed
+// in 5.8s on iter 46 (CI run 26864265895 / commit 0d8e8147 /
+// 2026-06-03). Since then, zero meaningful diff in this spec or
+// the harness's buildAndSignMintViaOkx — the failures from iter
+// 56 onward are a CI-side race against OKX's bridge (popup
+// dispatch + window-create timing), not a code regression.
+// Configure per-test retries=2 so a single flake doesn't drag
+// the whole job red; a real regression still surfaces on all 3
+// attempts.
+test.describe.configure({ retries: 2 });
+test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();
