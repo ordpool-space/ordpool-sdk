@@ -10,8 +10,20 @@ describe('walletConnectors registry', () => {
     expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby']);
   });
 
-  it('marks all eight wallets as signing-supported at the SDK level (Alby may fail at runtime if the user has no on-chain backend wired)', () => {
-    expect(walletConnectors.every(c => c.signingSupported)).toBe(true);
+  it('marks seven wallets as signing-supported at the SDK level — Phantom is signingSupported:false (Help Center: "does not support connecting to dApps on Bitcoin")', () => {
+    const signingFlags = Object.fromEntries(
+      walletConnectors.map(c => [c.providerId, c.signingSupported]),
+    );
+    expect(signingFlags).toEqual({
+      xverse:  true,
+      leather: true,
+      unisat:  true,
+      wizz:    true,
+      okx:     true,
+      phantom: false,
+      oyl:     true,
+      alby:    true,
+    });
   });
 });
 
