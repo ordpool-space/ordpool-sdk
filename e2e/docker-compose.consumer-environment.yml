@@ -55,7 +55,12 @@ services:
       test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=ordpool", "-rpcpassword=ordpool", "getblockchaininfo"]
       interval: 2s
       timeout: 2s
-      retries: 15
+      retries: 30
+      # CI cold-start (image pull + container init) can eat the first
+      # ~20 seconds before bitcoind's RPC accepts connections. Without
+      # a start_period docker counts those as failures and burns through
+      # the retry budget before the daemon's even up.
+      start_period: 30s
 
   electrs:
     image: mempool/electrs:latest
@@ -79,6 +84,11 @@ services:
       interval: 2s
       timeout: 2s
       retries: 30
+      # electrs needs to open RocksDB + run the initial 0-block index
+      # before the REST server binds. Observed at 60s on ubuntu-latest
+      # cold runs (image not in cache). Give docker enough start_period
+      # so failures during init don't count toward the retry budget.
+      start_period: 90s
 
   mariadb:
     image: mariadb:11
@@ -97,6 +107,10 @@ services:
       interval: 2s
       timeout: 2s
       retries: 30
+      # mariadb 11's first-boot bootstrap (running mariadb-init/*.sql)
+      # adds noticeable startup time on cold runners; same start_period
+      # treatment as the other infra services.
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
