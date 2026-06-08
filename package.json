@@ -82,6 +82,7 @@
   "files": [
     "dist",
     "src",
+    "e2e",
     "*.js",
     "*.json"
   ]
