@@ -284,9 +284,7 @@ describe('parsePhantomAddressResponse', () => {
     expect(info.type).toBe(KnownOrdinalWalletType.phantom);
     expect(info.ordinalsAddress).toBe('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr');
     expect(info.paymentAddress).toBe('bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu');
-    // Phantom does not support dApp connections on Bitcoin per
-    // their Help Center; surface that to consumers via the flag.
-    expect(info.signingSupported).toBe(false);
+    expect(info.signingSupported).toBe(true);
   });
 
   it('normalises a compressed taproot ordinalsPublicKey to x-only (Phantom may return compressed like Leather does)', () => {

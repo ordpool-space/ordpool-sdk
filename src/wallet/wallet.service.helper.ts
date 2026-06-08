@@ -275,8 +275,6 @@ export function parsePhantomAddressResponse(addresses: PhantomBtcAddress[]): Wal
     ordinalsPublicKey: toXOnlyPubkeyHex(ordinals.publicKey),
     paymentAddress:    payment.address,
     paymentPublicKey:  payment.publicKey,
-    // Mirrors phantomConnector.signingSupported — Phantom does not
-    // support dApp connections on Bitcoin per their Help Center.
-    signingSupported:  false,
+    signingSupported:  true,
   };
 }
