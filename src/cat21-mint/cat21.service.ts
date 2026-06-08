@@ -1,7 +1,22 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import * as btc from '@scure/btc-signer';
-import { concatMap, map, mergeMap, Observable, of, tap, timer, toArray } from 'rxjs';
+import {
+  catchError,
+  concatMap,
+  forkJoin,
+  interval,
+  map,
+  mergeMap,
+  Observable,
+  of,
+  shareReplay,
+  startWith,
+  switchMap,
+  tap,
+  timer,
+  toArray,
+} from 'rxjs';
 
 import { toScureNetwork } from '../network';
 import { bitcoinNetwork } from '../network-token';
@@ -13,7 +28,24 @@ import {
   getDummyKeypair,
   isSegWit,
 } from './cat21.service.helper';
-import { SimulateTransactionResult, TxnOutput } from './cat21.service.types';
+import {
+  MempoolTx,
+  PendingMint,
+  SimulateTransactionResult,
+  TxnOutput,
+} from './cat21.service.types';
+import {
+  gcFirstSeen,
+  selectMatchingPendingMints,
+} from './pending-mints.helper';
+
+/**
+ * How often `pendingMints$` polls electrs for each subscribed address
+ * set. 30s is the documented cadence in PLAN-cat21-mint-port.md;
+ * mempool turnover for CAT-21 mints is on the order of minutes so this
+ * gives a quick-enough surface without hammering the upstream.
+ */
+const PENDING_MINTS_POLL_MS = 30_000;
 
 
 @Injectable({ providedIn: 'root' })
@@ -184,5 +216,61 @@ export class Cat21Service {
     });
 
     return result;
+  }
+
+  /**
+   * Stream of CAT-21 mints currently in the mempool whose first output
+   * is addressed to one of the supplied addresses.
+   *
+   * Polls electrs every 30s for as long as anyone is subscribed. The
+   * SDK does NOT auto-stop on wallet disconnect — the consumer
+   * unsubscribes (e.g. by switching to a fresh observable when the
+   * wallet changes, or destroying the component) to stop polling.
+   *
+   * Cross-device awareness: because the source of truth is the
+   * mempool (not localStorage), a mint started from another device is
+   * picked up by the next poll cycle.
+   *
+   * Empty `addresses` returns `of([])` immediately — no polling, no
+   * subscription overhead. Useful when a component renders before a
+   * wallet is connected.
+   *
+   * Each call to this method returns a fresh observable with its own
+   * polling chain. Multiple subscribers of the SAME returned
+   * observable share the chain via `shareReplay({refCount:true})`.
+   */
+  pendingMints$(addresses: string[]): Observable<PendingMint[]> {
+    if (addresses.length === 0) return of([]);
+
+    const querySet = new Set(addresses);
+    // First-seen timestamps, kept in the closure across poll cycles
+    // so a tx that's been in the mempool for several intervals reports
+    // when we first saw it — not when the latest poll fired.
+    const firstSeen = new Map<string, string>();
+
+    return interval(PENDING_MINTS_POLL_MS).pipe(
+      startWith(0),
+      switchMap(() => {
+        const requests = addresses.map((addr) =>
+          this.http
+            .get<MempoolTx[]>(`${this.mempoolApiUrl}/api/address/${addr}/txs/mempool`)
+            .pipe(catchError(() => of([] as MempoolTx[]))),
+        );
+        return forkJoin(requests);
+      }),
+      map((arrays) => {
+        const nowIso = new Date().toISOString();
+        const result = selectMatchingPendingMints(arrays, querySet, firstSeen, nowIso);
+
+        // GC entries that left the mempool (mined) so the closure
+        // doesn't accumulate stale txids across a long session.
+        const currentIds = new Set<string>();
+        for (const arr of arrays) for (const tx of arr) currentIds.add(tx.txid);
+        gcFirstSeen(firstSeen, currentIds);
+
+        return result;
+      }),
+      shareReplay({ bufferSize: 1, refCount: true }),
+    );
   }
 }

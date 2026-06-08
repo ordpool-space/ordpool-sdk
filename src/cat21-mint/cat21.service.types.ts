@@ -80,3 +80,35 @@ export interface SimulateTransactionResult extends CreateTransactionResult {
   vsize: number
 }
 
+/**
+ * Trimmed shape of a mempool transaction as returned by electrs
+ * (`/api/address/:addr/txs/mempool`). Only the fields the pendingMints
+ * helper needs are declared — electrs returns more (vin, scriptpubkey
+ * details, weight breakdowns), all ignored.
+ */
+export interface MempoolTx {
+  txid: string;
+  locktime: number;
+  weight: number;
+  fee: number;
+  vout: Array<{
+    scriptpubkey_address?: string;
+    value: number;
+  }>;
+}
+
+/**
+ * A CAT-21 mint we've spotted in the mempool addressed to one of the
+ * wallet's queried addresses. `seenAt` is the ISO timestamp of the
+ * first poll that included this txid — stable across re-emissions in
+ * the same polling session, so a UI can render "in mempool for 2m".
+ */
+export interface PendingMint {
+  txid: string;
+  vsize: number;
+  fee: number;
+  feeRate: number; // sat/vB, rounded to one decimal
+  recipientAddress: string; // vout[0].scriptpubkey_address
+  seenAt: string; // ISO timestamp
+}
+

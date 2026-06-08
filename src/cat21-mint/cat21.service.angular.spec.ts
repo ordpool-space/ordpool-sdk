@@ -1,4 +1,4 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { HttpClient } from '@angular/common/http';
 import { Injector, runInInjectionContext } from '@angular/core';
 import { firstValueFrom, Observable, of, throwError } from 'rxjs';
@@ -7,13 +7,13 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { cat21Config } from './cat21-sdk-config';
 import { Cat21Service } from './cat21.service';
-import { TxnOutput } from './cat21.service.types';
+import { MempoolTx, TxnOutput } from './cat21.service.types';
 
 
 const mempoolApiUrl = 'https://mempool.test';
 const cat21ApiUrl = 'https://api.cat21.test';
 
-type HttpGetResult = TxnOutput[] | string;
+type HttpGetResult = TxnOutput[] | string | MempoolTx[];
 type MockHttp = {
   get: jest.MockedFunction<(url: string, opts?: { responseType: 'text' }) => Observable<HttpGetResult>>;
   post: jest.MockedFunction<(url: string, body: string, opts?: { responseType: 'text' }) => Observable<string>>;
@@ -151,3 +151,130 @@ describe('Cat21Service.postTransaction', () => {
 });
 
 
+describe('Cat21Service.pendingMints$', () => {
+
+  // The polling chain uses RxJS `interval(30_000)`. Fake timers let us
+  // advance through poll cycles synchronously without sleeping the
+  // test suite for 30 seconds per tick.
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  const ORDINALS = 'bc1ptrrx4duc8afs4ye63xgcyf6d7kg29a4myay4nqxmd04zx8j9jers899d0x';
+  const PAYMENT  = 'bc1qexample';
+
+  const sampleMint = (overrides: Partial<MempoolTx> = {}): MempoolTx => ({
+    txid: 'a'.repeat(64),
+    locktime: 21,
+    weight: 704,
+    fee: 880,
+    vout: [
+      { scriptpubkey_address: ORDINALS, value: 546 },
+      { scriptpubkey_address: PAYMENT,  value: 9000 },
+    ],
+    ...overrides,
+  });
+
+  it('returns of([]) without polling when given an empty address list', async () => {
+    const { service, http } = buildService();
+    const value = await firstValueFrom(service.pendingMints$([]));
+    expect(value).toEqual([]);
+    expect(http.get).not.toHaveBeenCalled();
+  });
+
+  it('polls electrs mempool for each supplied address on subscribe and emits the filtered union', async () => {
+    const { service, http } = buildService();
+    http.get.mockReturnValueOnce(of([sampleMint()]));
+    http.get.mockReturnValueOnce(of([])); // payment-address mempool empty
+
+    const value = await firstValueFrom(service.pendingMints$([ORDINALS, PAYMENT]));
+
+    expect(http.get).toHaveBeenCalledWith(`${mempoolApiUrl}/api/address/${ORDINALS}/txs/mempool`);
+    expect(http.get).toHaveBeenCalledWith(`${mempoolApiUrl}/api/address/${PAYMENT}/txs/mempool`);
+    expect(value).toHaveLength(1);
+    expect(value[0]).toMatchObject({
+      txid: 'a'.repeat(64),
+      vsize: 176,
+      fee: 880,
+      feeRate: 5,
+      recipientAddress: ORDINALS,
+    });
+  });
+
+  it('keeps polling every 30 seconds while subscribed (cross-device mint scenario)', async () => {
+    const { service, http } = buildService();
+    // Three polling cycles' worth of responses: empty, empty, then a mint
+    // shows up (e.g. user minted from another device).
+    http.get
+      .mockReturnValueOnce(of([])) // poll 1, addr 1
+      .mockReturnValueOnce(of([])) // poll 1, addr 2
+      .mockReturnValueOnce(of([])) // poll 2, addr 1
+      .mockReturnValueOnce(of([])) // poll 2, addr 2
+      .mockReturnValueOnce(of([sampleMint({ txid: 'b'.repeat(64) })])) // poll 3, addr 1
+      .mockReturnValueOnce(of([])); // poll 3, addr 2
+
+    const emissions: number[] = [];
+    const sub = service.pendingMints$([ORDINALS, PAYMENT]).subscribe((mints) => {
+      emissions.push(mints.length);
+    });
+
+    // Poll 1 fires synchronously via startWith(0).
+    expect(emissions).toEqual([0]);
+
+    // Advance to poll 2.
+    jest.advanceTimersByTime(30_000);
+    expect(emissions).toEqual([0, 0]);
+
+    // Advance to poll 3 — the new mint surfaces.
+    jest.advanceTimersByTime(30_000);
+    expect(emissions).toEqual([0, 0, 1]);
+
+    sub.unsubscribe();
+  });
+
+  it('stamps seenAt with the first-sight time, not the most-recent poll time', async () => {
+    const { service, http } = buildService();
+    const tx = sampleMint({ txid: 'c'.repeat(64) });
+    // Same tx returned across three poll cycles.
+    http.get.mockReturnValue(of([tx]));
+
+    // Pin Date.now so the ISO timestamp is deterministic.
+    const start = new Date('2026-06-08T12:00:00.000Z').getTime();
+    jest.setSystemTime(start);
+
+    const emissions: string[] = [];
+    const sub = service.pendingMints$([ORDINALS]).subscribe((mints) => {
+      if (mints.length) emissions.push(mints[0].seenAt);
+    });
+
+    expect(emissions).toEqual(['2026-06-08T12:00:00.000Z']);
+
+    jest.setSystemTime(start + 30_000);
+    jest.advanceTimersByTime(30_000);
+    expect(emissions).toEqual([
+      '2026-06-08T12:00:00.000Z',
+      '2026-06-08T12:00:00.000Z', // still first-sight time
+    ]);
+
+    jest.setSystemTime(start + 60_000);
+    jest.advanceTimersByTime(30_000);
+    expect(emissions).toEqual([
+      '2026-06-08T12:00:00.000Z',
+      '2026-06-08T12:00:00.000Z',
+      '2026-06-08T12:00:00.000Z',
+    ]);
+
+    sub.unsubscribe();
+  });
+
+  it('survives a per-address electrs failure by treating it as an empty list (one address down does not kill the chain)', async () => {
+    const { service, http } = buildService();
+    // ORDINALS endpoint returns a mint; PAYMENT endpoint errors out.
+    http.get.mockReturnValueOnce(of([sampleMint()]));
+    http.get.mockReturnValueOnce(throwError(() => new Error('electrs is grumpy')));
+
+    const value = await firstValueFrom(service.pendingMints$([ORDINALS, PAYMENT]));
+
+    expect(value).toHaveLength(1);
+    expect(value[0].txid).toBe('a'.repeat(64));
+  });
+});
