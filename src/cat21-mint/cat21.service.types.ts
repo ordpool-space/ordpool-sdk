@@ -112,3 +112,19 @@ export interface PendingMint {
   seenAt: string; // ISO timestamp
 }
 
+/**
+ * Shape of the mempool-framework `/api/v1/fees/recommended` response
+ * (api.ordpool.space proxies/serves it). Five tiers in sat/vB —
+ * fastest within ~10 minutes, halfHour, hour, economy, and the
+ * mempool minimum that would be accepted at all. The fee picker in
+ * both consumers renders the three middle tiers as quick-pick
+ * buttons; minimumFee is used as a lower-bound validation hint.
+ */
+export interface RecommendedFees {
+  fastestFee: number;
+  halfHourFee: number;
+  hourFee: number;
+  economyFee: number;
+  minimumFee: number;
+}
+

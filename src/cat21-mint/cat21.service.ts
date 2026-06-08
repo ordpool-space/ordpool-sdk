@@ -31,6 +31,7 @@ import {
 import {
   MempoolTx,
   PendingMint,
+  RecommendedFees,
   SimulateTransactionResult,
   TxnOutput,
 } from './cat21.service.types';
@@ -46,6 +47,13 @@ import {
  * gives a quick-enough surface without hammering the upstream.
  */
 const PENDING_MINTS_POLL_MS = 30_000;
+
+/**
+ * How often `recommendedFees$` polls the mempool fees endpoint. Same
+ * 30s cadence — the user picks a fee once per mint, the value only
+ * needs to be reasonably fresh.
+ */
+const RECOMMENDED_FEES_POLL_MS = 30_000;
 
 
 @Injectable({ providedIn: 'root' })
@@ -239,6 +247,23 @@ export class Cat21Service {
    * polling chain. Multiple subscribers of the SAME returned
    * observable share the chain via `shareReplay({refCount:true})`.
    */
+  /**
+   * Stream of mempool-framework recommended fee rates, polled every
+   * 30s. Built lazily on first subscribe via `shareReplay({refCount:
+   * true})` so multiple subscribers share one polling chain.
+   *
+   * The endpoint (`/api/v1/fees/recommended`) is served by the same
+   * `mempoolApiUrl` as the rest of the mint flow — on prod for
+   * cat21.space that's `api.ordpool.space` (we run it ourselves);
+   * for ordpool's own frontend it's whatever ordpool's environment
+   * points at. No third-party dependency.
+   */
+  readonly recommendedFees$: Observable<RecommendedFees> = interval(RECOMMENDED_FEES_POLL_MS).pipe(
+    startWith(0),
+    switchMap(() => this.http.get<RecommendedFees>(`${this.mempoolApiUrl}/api/v1/fees/recommended`)),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  );
+
   pendingMints$(addresses: string[]): Observable<PendingMint[]> {
     if (addresses.length === 0) return of([]);
 

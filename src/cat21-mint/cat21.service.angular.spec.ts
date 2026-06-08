@@ -7,13 +7,13 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { cat21Config } from './cat21-sdk-config';
 import { Cat21Service } from './cat21.service';
-import { MempoolTx, TxnOutput } from './cat21.service.types';
+import { MempoolTx, RecommendedFees, TxnOutput } from './cat21.service.types';
 
 
 const mempoolApiUrl = 'https://mempool.test';
 const cat21ApiUrl = 'https://api.cat21.test';
 
-type HttpGetResult = TxnOutput[] | string | MempoolTx[];
+type HttpGetResult = TxnOutput[] | string | MempoolTx[] | RecommendedFees;
 type MockHttp = {
   get: jest.MockedFunction<(url: string, opts?: { responseType: 'text' }) => Observable<HttpGetResult>>;
   post: jest.MockedFunction<(url: string, body: string, opts?: { responseType: 'text' }) => Observable<string>>;
@@ -276,5 +276,72 @@ describe('Cat21Service.pendingMints$', () => {
 
     expect(value).toHaveLength(1);
     expect(value[0].txid).toBe('a'.repeat(64));
+  });
+});
+
+
+describe('Cat21Service.recommendedFees$', () => {
+
+  beforeEach(() => { jest.useFakeTimers(); });
+  afterEach(() => { jest.useRealTimers(); });
+
+  const fees = (overrides: Partial<RecommendedFees> = {}): RecommendedFees => ({
+    fastestFee: 12,
+    halfHourFee: 8,
+    hourFee: 5,
+    economyFee: 2,
+    minimumFee: 1,
+    ...overrides,
+  });
+
+  it('hits /api/v1/fees/recommended on the configured mempoolApiUrl and emits the full tier set', async () => {
+    const { service, http } = buildService();
+    http.get.mockReturnValueOnce(of(fees()));
+
+    const value = await firstValueFrom(service.recommendedFees$);
+
+    expect(http.get).toHaveBeenCalledWith(`${mempoolApiUrl}/api/v1/fees/recommended`);
+    expect(value).toEqual({
+      fastestFee: 12,
+      halfHourFee: 8,
+      hourFee: 5,
+      economyFee: 2,
+      minimumFee: 1,
+    });
+  });
+
+  it('re-polls every 30 seconds and emits each fresh response (fee rates change while user lingers on the form)', async () => {
+    const { service, http } = buildService();
+    http.get
+      .mockReturnValueOnce(of(fees({ hourFee: 5 })))
+      .mockReturnValueOnce(of(fees({ hourFee: 7 })))
+      .mockReturnValueOnce(of(fees({ hourFee: 6 })));
+
+    const emissions: number[] = [];
+    const sub = service.recommendedFees$.subscribe((f) => emissions.push(f.hourFee));
+
+    expect(emissions).toEqual([5]);
+
+    jest.advanceTimersByTime(30_000);
+    expect(emissions).toEqual([5, 7]);
+
+    jest.advanceTimersByTime(30_000);
+    expect(emissions).toEqual([5, 7, 6]);
+
+    sub.unsubscribe();
+  });
+
+  it('shares one polling chain across multiple subscribers (refCount semantics)', async () => {
+    const { service, http } = buildService();
+    http.get.mockReturnValue(of(fees()));
+
+    const subA = service.recommendedFees$.subscribe();
+    const subB = service.recommendedFees$.subscribe();
+
+    // Two subscribers on the same observable — only one HTTP call.
+    expect(http.get).toHaveBeenCalledTimes(1);
+
+    subA.unsubscribe();
+    subB.unsubscribe();
   });
 });
