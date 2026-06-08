@@ -1,13 +1,12 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
-import { Observable, interval, shareReplay, startWith, switchMap, takeWhile } from 'rxjs';
+import { Observable, shareReplay } from 'rxjs';
 
 import { cat21Config } from './cat21-sdk-config';
 import {
   buildCatImageUrl,
   buildLatestCatNumbersUrl,
   buildStatusUrl,
-  buildWhitelistStatusUrl,
 } from './cat21-api.urls';
 
 export interface StatusResult {
@@ -59,25 +58,6 @@ export interface ErrorResponse {
   stack?: string;
 }
 
-export interface WhitelistStatusResult {
-  walletAddress: string;
-  level: string;
-  mintingAllowed: boolean;
-  mintingAllowedAt: string;
-}
-
-export interface MintTransaction {
-  transactionId: string;
-  network: string;
-  transactionHex: string;
-  paymentAddress: string;
-  recipientAddress: string;
-  createdAt: string;
-}
-
-
-
-
 @Injectable({ providedIn: 'root' })
 export class Cat21ApiService {
 
@@ -111,10 +91,6 @@ export class Cat21ApiService {
   }
   */
 
-  getWhitelistStatus(walletAddress: string): Observable<WhitelistStatusResult> {
-    return this.http.get<WhitelistStatusResult>(buildWhitelistStatusUrl(this.baseUrl, walletAddress));
-  }
-
   getStatus(): Observable<StatusResult> {
     return this.http.get<StatusResult>(buildStatusUrl(this.baseUrl)).pipe(
       shareReplay({ bufferSize: 1, refCount: true })
@@ -130,19 +106,4 @@ export class Cat21ApiService {
   getCatImageUrl(catNumber: number): string {
     return buildCatImageUrl(this.baseUrl, catNumber);
   }
-
-  /*
-  getWhitelistStatusPolled(walletAddress: string): Observable<WhitelistStatusResult> {
-    return interval(10000).pipe(
-      startWith(0),
-      switchMap(() => this.http.get<WhitelistStatusResult>(`${this.baseUrl}/whitelist/status/${walletAddress}`)),
-      // Stop polling when mintingAllowed is true!
-      takeWhile((result: WhitelistStatusResult) => !result.mintingAllowed, true)
-    );
-  }
-
-  announceMintTransaction(mintTransaction: MintTransaction) {
-    return this.http.post<any>(`${this.baseUrl}/whitelist/announceMintTransaction`, mintTransaction);
-  }
-  */
 }

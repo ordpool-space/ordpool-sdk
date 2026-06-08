@@ -3,10 +3,6 @@
 // — a typo in `buildCatImageUrl` ships broken `<img>` tags everywhere
 // it's bound.
 
-export function buildWhitelistStatusUrl(baseUrl: string, walletAddress: string): string {
-  return `${baseUrl}/whitelist/status/${walletAddress}`;
-}
-
 export function buildStatusUrl(baseUrl: string): string {
   return `${baseUrl}/api/status`;
 }

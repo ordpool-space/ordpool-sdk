@@ -4,17 +4,11 @@ import {
   buildCatImageUrl,
   buildLatestCatNumbersUrl,
   buildStatusUrl,
-  buildWhitelistStatusUrl,
 } from './cat21-api.urls';
 
 const base = 'https://api.cat21.test';
 
 describe('cat21-api URL builders', () => {
-
-  it('builds the whitelist status URL', () => {
-    expect(buildWhitelistStatusUrl(base, 'bc1qexample'))
-      .toBe(`${base}/whitelist/status/bc1qexample`);
-  });
 
   it('builds the status URL', () => {
     expect(buildStatusUrl(base)).toBe(`${base}/api/status`);

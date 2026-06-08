@@ -8,8 +8,8 @@ import { InjectionToken } from '@angular/core';
  *   (utxo lookups, raw-tx fetch, broadcast). The network the URL
  *   points at must match `bitcoinNetwork`; the consumer picks both.
  * - `cat21ApiUrl` — base URL of the cat21-indexer REST API
- *   (status, cats list, whitelist lookup). Same rule — match
- *   the URL to `bitcoinNetwork`.
+ *   (status, cats list). Same rule — match the URL to
+ *   `bitcoinNetwork`.
  */
 export interface Cat21SdkConfig {
   mempoolApiUrl: string;
