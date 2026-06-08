@@ -1,0 +1,111 @@
+# Shared infrastructure for consumer E2E workflows (ordpool + cat21).
+#
+# The SDK owns the *base layer* — bitcoind, electrs, mariadb, optional
+# redis. Each consumer's CI workflow then composes their own backend
+# services on top via an additional `-f docker-compose.<consumer>.yml`
+# file. This split keeps the SDK from knowing anything about either
+# consumer's backend Dockerfile, while still giving both a single
+# reproducible Bitcoin/DB substrate they share.
+#
+# Profiles:
+#   (default)  — bitcoind, electrs, mariadb. Required for any consumer mint flow.
+#   redis      — opt-in redis cache. Pass `--profile redis` when bringing up
+#                if the consumer's backend uses it.
+#
+# Usage:
+#   # cat21-indexer (no redis, just mariadb is enough):
+#   docker compose -f e2e/docker-compose.consumer-environment.yml \
+#                  -f e2e/docker-compose.cat21-indexer.yml \
+#                  up -d
+#
+#   # ordpool (wants redis too):
+#   docker compose -f e2e/docker-compose.consumer-environment.yml \
+#                  -f e2e/docker-compose.ordpool.yml \
+#                  --profile redis \
+#                  up -d
+#
+# The base bitcoind + electrs services here duplicate
+# `docker-compose.regtest.yml` rather than `include:`-ing it; that
+# file is the SDK's own E2E surface and we don't want a change there
+# to silently alter consumer environments. Two files, two scopes.
+
+services:
+
+  bitcoind:
+    image: ruimarinho/bitcoin-core:24-alpine
+    container_name: ordpool-e2e-consumer-bitcoind
+    command:
+      - -regtest
+      - -server=1
+      - -txindex=1
+      - -fallbackfee=0.0002
+      - -rpcuser=ordpool
+      - -rpcpassword=ordpool
+      - -rpcallowip=0.0.0.0/0
+      - -rpcbind=0.0.0.0
+      - -listen=1
+      - -zmqpubrawblock=tcp://0.0.0.0:28332
+      - -zmqpubrawtx=tcp://0.0.0.0:28333
+    ports:
+      - "18443:18443"
+      - "18444:18444"
+      - "28332:28332"
+      - "28333:28333"
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=ordpool", "-rpcpassword=ordpool", "getblockchaininfo"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  electrs:
+    image: mempool/electrs:latest
+    container_name: ordpool-e2e-consumer-electrs
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    command:
+      - --network=regtest
+      - --daemon-rpc-addr=bitcoind:18443
+      - --cookie=ordpool:ordpool
+      - --http-addr=0.0.0.0:3000
+      - --electrum-rpc-addr=0.0.0.0:50001
+      - --jsonrpc-import
+      - -vvvv
+    ports:
+      - "3000:3000"
+      - "50001:50001"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000/blocks/tip/height"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  mariadb:
+    image: mariadb:11
+    container_name: ordpool-e2e-consumer-mariadb
+    environment:
+      MARIADB_ROOT_PASSWORD: ordpool
+    volumes:
+      # init.d scripts run on first start. Creates both databases +
+      # both per-consumer users so each backend can connect without
+      # the CI workflow having to script DDL.
+      - ./mariadb-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: ordpool-e2e-consumer-redis
+    profiles: ["redis"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
