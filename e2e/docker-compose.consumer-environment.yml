@@ -80,14 +80,22 @@ services:
       - "3000:3000"
       - "50001:50001"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000/blocks/tip/height"]
+      # Bash /dev/tcp socket probe. The mempool/electrs:latest image is
+      # debian-slim based — no wget, no curl, no netcat — so the
+      # upstream-style wget healthcheck always fails even when the
+      # REST server is up on :3000. Confirmed by container logs
+      # showing "REST server running on 0.0.0.0:3000" right next to
+      # docker marking the container unhealthy. bash IS in the image
+      # and its /dev/tcp magic file checks the port for free.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3000"]
       interval: 2s
       timeout: 2s
       retries: 30
       # electrs needs to open RocksDB + run the initial 0-block index
-      # before the REST server binds. Observed at 60s on ubuntu-latest
-      # cold runs (image not in cache). Give docker enough start_period
-      # so failures during init don't count toward the retry budget.
+      # before the REST server binds. Observed at ~150s on cold
+      # ubuntu-latest runs (image pull + cold init). 90s of
+      # start_period absorbs init while the socket-listening retries
+      # cover any remaining slack.
       start_period: 90s
 
   mariadb:
