@@ -3,7 +3,7 @@ import { inject, Injectable } from '@angular/core';
 import * as btc from '@scure/btc-signer';
 import { BehaviorSubject, concatMap, map, mergeMap, Observable, of, tap, timer, toArray } from 'rxjs';
 
-import { Network, toScureNetwork } from '../network';
+import { toScureNetwork } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { findSignerOrThrow } from '../wallet/signers';
@@ -152,7 +152,13 @@ export class Cat21Service {
 
   /**
    * Constructs a PSBT with a CAT-21 mint transaction,
-   * prompts the user to sign it and broadcasts the transaction
+   * prompts the user to sign it and broadcasts the transaction.
+   *
+   * Emits the broadcast `txId` and nothing else — the consumer already
+   * has every other field it passed in (wallet, addresses) and the
+   * network is known from the injected `bitcoinNetwork` token. Pending
+   * mempool tracking after broadcast is the consumer's job (see
+   * `pendingMints$`).
    */
   createCat21Transaction(
     walletType: KnownOrdinalWalletType,
@@ -162,14 +168,7 @@ export class Cat21Service {
     paymentAddress: string,
     paymentPublicKey: Uint8Array,
     transactionFee: bigint
-  ): Observable<{
-      txId: string,
-      network: string;
-      transactionHex: string;
-      paymentAddress: string;
-      recipientAddress: string;
-      createdAt: string;
-    }> {
+  ): Observable<{ txId: string }> {
 
     // create the real transaction
     const { tx } = createTransaction(
@@ -197,16 +196,8 @@ export class Cat21Service {
 
     return result.pipe(
       tap(({ txId }) => {
-        this.saveNewMint(txId, paymentAddress,  recipientAddress);
-      }),
-      map(({ txId }) => ({
-        txId,
-        network: this.network === Network.Mainnet ? 'mainnet' : 'testnet',
-        transactionHex: 'TODO',
-        paymentAddress,
-        recipientAddress,
-        createdAt: (new Date()).toISOString()
-      }))
+        this.saveNewMint(txId, paymentAddress, recipientAddress);
+      })
     );
   }
 
