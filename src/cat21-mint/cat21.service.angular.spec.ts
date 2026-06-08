@@ -5,55 +5,39 @@ import { firstValueFrom, Observable, of, throwError } from 'rxjs';
 
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
-import { storage, StorageLike } from '../storage-like';
 import { cat21Config } from './cat21-sdk-config';
-import { Cat21Service, LAST_CAT21_MINTS } from './cat21.service';
-import { Cat21Mint, TxnOutput } from './cat21.service.types';
+import { Cat21Service } from './cat21.service';
+import { TxnOutput } from './cat21.service.types';
 
 
 const mempoolApiUrl = 'https://mempool.test';
 const cat21ApiUrl = 'https://api.cat21.test';
 
-// Typed mocks: the second arg of mock.calls[N] keeps its real type
-// instead of degrading to `unknown`, so `JSON.parse(setValue.mock.calls[0][1])`
-// type-checks without any `as` casts.
 type HttpGetResult = TxnOutput[] | string;
 type MockHttp = {
   get: jest.MockedFunction<(url: string, opts?: { responseType: 'text' }) => Observable<HttpGetResult>>;
   post: jest.MockedFunction<(url: string, body: string, opts?: { responseType: 'text' }) => Observable<string>>;
 };
-type MockStorage = {
-  getValue: jest.MockedFunction<StorageLike['getValue']>;
-  setValue: jest.MockedFunction<StorageLike['setValue']>;
-  removeItem: jest.MockedFunction<StorageLike['removeItem']>;
-};
 
-const buildService = (storedMints: string | null = null): {
+const buildService = (): {
   service: Cat21Service;
   http: MockHttp;
-  store: MockStorage;
 } => {
   const http: MockHttp = {
     get: jest.fn<MockHttp['get']>(),
     post: jest.fn<MockHttp['post']>(),
   };
-  const store: MockStorage = {
-    getValue: jest.fn<StorageLike['getValue']>().mockImplementation(key => (key === LAST_CAT21_MINTS ? storedMints : null)),
-    setValue: jest.fn<StorageLike['setValue']>(),
-    removeItem: jest.fn<StorageLike['removeItem']>(),
-  };
 
   const injector = Injector.create({
     providers: [
       { provide: HttpClient, useValue: http },
-      { provide: storage,   useValue: store },
       { provide: bitcoinNetwork, useValue: Network.Mainnet },
       { provide: cat21Config, useValue: { mempoolApiUrl, cat21ApiUrl } },
     ],
   });
 
   const service = runInInjectionContext(injector, () => new Cat21Service());
-  return { service, http, store };
+  return { service, http };
 };
 
 
@@ -167,55 +151,3 @@ describe('Cat21Service.postTransaction', () => {
 });
 
 
-describe('Cat21Service localStorage round-trip', () => {
-
-  it('hydrates allMints$ from storage on construction', () => {
-    const stored: Cat21Mint[] = [
-      { txId: 't1', paymentAddress: 'p1', recipientAddress: 'r1', createdAt: '2026-01-01T00:00:00Z' },
-    ];
-    const { service, store } = buildService(JSON.stringify(stored));
-
-    expect(store.getValue).toHaveBeenCalledWith(LAST_CAT21_MINTS);
-    expect(service.allMints$.value).toEqual(stored);
-  });
-
-  it('returns an empty array when nothing is stored', () => {
-    const { service } = buildService(null);
-    expect(service.allMints$.value).toEqual([]);
-    expect(service.getAllMints()).toEqual([]);
-  });
-
-  it('saveNewMint persists, updates allMints$, and includes a created-at timestamp', () => {
-    const { service, store } = buildService(null);
-
-    service.saveNewMint('new-tx', 'pay-addr', 'recv-addr');
-
-    expect(store.setValue).toHaveBeenCalledWith(
-      LAST_CAT21_MINTS,
-      expect.any(String),
-    );
-    const persisted: Cat21Mint[] = JSON.parse(store.setValue.mock.calls[0][1]);
-    expect(persisted).toHaveLength(1);
-    expect(persisted[0]).toMatchObject({
-      txId: 'new-tx',
-      paymentAddress: 'pay-addr',
-      recipientAddress: 'recv-addr',
-    });
-    expect(persisted[0].createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(service.allMints$.value).toEqual(persisted);
-  });
-
-  it('appends to existing mints rather than replacing', () => {
-    const existing: Cat21Mint[] = [
-      { txId: 'old', paymentAddress: 'old-pay', recipientAddress: 'old-rec', createdAt: '2025-12-01T00:00:00Z' },
-    ];
-    const { service, store } = buildService(JSON.stringify(existing));
-
-    service.saveNewMint('new-tx', 'new-pay', 'new-rec');
-
-    const persisted: Cat21Mint[] = JSON.parse(store.setValue.mock.calls[0][1]);
-    expect(persisted).toHaveLength(2);
-    expect(persisted[0].txId).toBe('old');
-    expect(persisted[1].txId).toBe('new-tx');
-  });
-});

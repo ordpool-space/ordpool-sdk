@@ -1,11 +1,10 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import * as btc from '@scure/btc-signer';
-import { BehaviorSubject, concatMap, map, mergeMap, Observable, of, tap, timer, toArray } from 'rxjs';
+import { concatMap, map, mergeMap, Observable, of, tap, timer, toArray } from 'rxjs';
 
 import { toScureNetwork } from '../network';
 import { bitcoinNetwork } from '../network-token';
-import { storage } from '../storage-like';
 import { findSignerOrThrow } from '../wallet/signers';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { cat21Config } from './cat21-sdk-config';
@@ -14,10 +13,8 @@ import {
   getDummyKeypair,
   isSegWit,
 } from './cat21.service.helper';
-import { Cat21Mint, SimulateTransactionResult, TxnOutput } from './cat21.service.types';
+import { SimulateTransactionResult, TxnOutput } from './cat21.service.types';
 
-
-export const LAST_CAT21_MINTS = 'LAST_CAT21_MINTS';
 
 @Injectable({ providedIn: 'root' })
 export class Cat21Service {
@@ -27,16 +24,8 @@ export class Cat21Service {
   mempoolApiUrl = this.config.mempoolApiUrl;
 
   http = inject(HttpClient);
-  storageService = inject(storage);
 
   private txHexCache: { [transactionId: string]: string } = {}; // Cache object
-
-  allMints$ = new BehaviorSubject<Cat21Mint[]>([]);
-
-  constructor() {
-    const allMint = this.getAllMints();
-    this.allMints$.next(allMint);
-  }
 
   /**
    * Get the list of unspent transaction outputs associated with the address/scripthash.
@@ -194,42 +183,6 @@ export class Cat21Service {
       broadcast: (txHex: string) => this.postTransaction(txHex),
     });
 
-    return result.pipe(
-      tap(({ txId }) => {
-        this.saveNewMint(txId, paymentAddress, recipientAddress);
-      })
-    );
-  }
-
-  /**
-   * Get all mints from local storage
-   */
-  getAllMints(): Cat21Mint[] {
-
-    let lastMints: Cat21Mint[] = [];
-    const stringified = this.storageService.getValue(LAST_CAT21_MINTS);
-    if (stringified) {
-      lastMints = JSON.parse(stringified);
-    }
-
-    return lastMints;
-  }
-
-  /**
-   * Save to local storage
-   */
-  saveNewMint(txId: string, paymentAddress: string, recipientAddress: string): void {
-
-    const allMints = this.getAllMints();
-
-    allMints.push({
-      txId,
-      paymentAddress,
-      recipientAddress,
-      createdAt: (new Date()).toISOString()
-    });
-
-    this.storageService.setValue(LAST_CAT21_MINTS, JSON.stringify(allMints));
-    this.allMints$.next(allMints);
+    return result;
   }
 }

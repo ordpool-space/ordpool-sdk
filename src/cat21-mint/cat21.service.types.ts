@@ -80,10 +80,3 @@ export interface SimulateTransactionResult extends CreateTransactionResult {
   vsize: number
 }
 
-export interface Cat21Mint {
-  txId: string,
-  paymentAddress: string,
-  recipientAddress: string,
-  createdAt: string // ISO formated string
-}
-
