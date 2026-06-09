@@ -164,11 +164,53 @@ test.beforeAll(async () => {
 });
 
 // P2WPKH passes intermittently (iters 59, 67, 79-retry); P2TR
-// has never passed across 35+ iters (Taproot derivation needs
-// Wizz CDN access the no-internet CI can't provide). Global
-// retries=2 in playwright.config.ts handles the P2WPKH flake.
+// historically failed because Wizz's Taproot derivation needs
+// data from configs.wizz.cash that the no-internet CI can't
+// fetch and that an aborted/empty response can't satisfy.
+//
+// Fix path (iter 86): replay a captured real configs.wizz.cash
+// response from a fixture file. When the fixture is present,
+// P2TR's route.fulfill serves the captured payload, Wizz's SW
+// derives Taproot locally from it, and the popup opens normally.
+//
+// Capture procedure (one-time, manual; do this from a connected
+// machine, NOT in CI):
+//   1. Launch Chromium with the Wizz extension loaded and DevTools
+//      open on the dashboard tab.
+//   2. Watch Network → filter by `configs.wizz.cash`.
+//   3. Onboard with the BIP-39 test seed
+//      (abandon × 11 + about), Taproot address type.
+//   4. Right-click each `configs.wizz.cash/*` request → "Copy
+//      response". Concatenate into a single JSON object keyed by
+//      pathname → body string, save as
+//      e2e/playwright/fixtures/wizz-configs-response.json
+//   5. Commit the fixture. The runtime check below picks it up
+//      and un-skips P2TR automatically — no further code change.
+//
+// If the fixture file is missing, P2TR stays skipped and the
+// pipeline doesn't regress.
+const WIZZ_CONFIGS_FIXTURE_PATH = path.resolve(
+  __dirname, '..', 'fixtures', 'wizz-configs-response.json',
+);
+const WIZZ_CONFIGS_FIXTURE: Record<string, string> | null = (() => {
+  try {
+    if (!fs.existsSync(WIZZ_CONFIGS_FIXTURE_PATH)) return null;
+    const raw = fs.readFileSync(WIZZ_CONFIGS_FIXTURE_PATH, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+})();
+
 for (const variant of VARIANTS) {
-  const testFn = variant.label.startsWith('P2TR') ? test.skip : test;
+  const isP2TR = variant.label.startsWith('P2TR');
+  // P2TR runs only when the captured-fixture replay is available.
+  // Without the fixture an abort/empty response causes the
+  // documented -32603 "Connection error" — skip is the right call.
+  const skipP2TR = isP2TR && !WIZZ_CONFIGS_FIXTURE;
+  const testFn = skipP2TR ? test.skip : test;
   testFn(`SDK returns the right address for Wizz ${variant.label}`, async () => {
     test.setTimeout(180_000);
 
@@ -182,16 +224,33 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    // P2WPKH passes flakily, P2TR consistently fails with -32603
-    // "Connection error". Different abort policy per variant:
-    //   - P2WPKH (BIP-84): keep the configs.wizz.cash abort (it
-    //     matches wizz-sdk-handshake and wizz-mint, both passing).
-    //   - P2TR (BIP-86): DON'T abort — Taproot derivation may
-    //     legitimately require the CDN for fee curves or chain
-    //     metadata, and the abort would explain the consistent
-    //     reject. Let CI's own network fail it naturally if needed.
+    // Variant-specific route handling for configs.wizz.cash:
+    //   - P2WPKH (BIP-84): abort. Derivation is local; the abort
+    //     just prevents the hung-fetch slowdown.
+    //   - P2TR (BIP-86): fulfill with captured fixture payload (see
+    //     WIZZ_CONFIGS_FIXTURE block above for capture procedure).
+    //     Taproot derivation reads what it needs from the replayed
+    //     response; popup dispatches normally.
     if (variant.label.startsWith('P2WPKH')) {
       await context.route('**/configs.wizz.cash/**', route => route.abort());
+    } else if (isP2TR && WIZZ_CONFIGS_FIXTURE) {
+      await context.route('**/configs.wizz.cash/**', route => {
+        // Match by the request's pathname (host-relative). Falls
+        // back to the first fixture entry if no exact match — many
+        // configs.wizz.cash endpoints are stateless enough that any
+        // payload satisfies the SW.
+        const url = new URL(route.request().url());
+        const path = url.pathname + url.search;
+        const body = WIZZ_CONFIGS_FIXTURE[path]
+          ?? WIZZ_CONFIGS_FIXTURE[url.pathname]
+          ?? Object.values(WIZZ_CONFIGS_FIXTURE)[0]
+          ?? '';
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body,
+        }).catch(() => undefined);
+      });
     }
 
     try {
