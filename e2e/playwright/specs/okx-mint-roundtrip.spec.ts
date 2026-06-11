@@ -182,9 +182,11 @@ test.afterAll(async () => {
 // Iter 39 was the closest pass: OKX DOES sign with the mainnet-address
 // trick, the popup IS reachable when present. But the popup opens
 // inconsistently — sometimes during connect, sometimes not at all — and
-// each iter tried to chase a different observation. The adapter wire
-// shape is pinned by okx.signer.angular.spec.ts in Pipeline A. Pipeline
-// B handshake + onboard + matrix (default Taproot) remain green.
+// each iter tried to chase a different observation. okx.signer.angular
+// .spec.ts catches our own adapter-edit regressions fast (mock-based,
+// not a contract pin against the real wallet). The real contract check
+// is Pipeline B itself — handshake + onboard + matrix (default Taproot)
+// remain green there.
 //
 // To re-enable: inventory why OKX skips opening the sign popup on some
 // runs (likely related to which wallet tab is focused, or whether the

@@ -10,8 +10,9 @@ import { waitForApprovalPopup } from '../approval-popup';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
- * extension. Combines Pipeline B's wallet (Playwright + Xverse) with
- * Pipeline A's regtest stack (bitcoind + electrs on localhost).
+ * extension. Drives the real Xverse .crx via Playwright (the
+ * wallet side) against the local regtest stack (bitcoind +
+ * electrs on localhost) for the broadcast side.
  *
  * Flow:
  *   1. Clone the seeded user-data-dir, launch Chromium, unlock the

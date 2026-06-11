@@ -441,18 +441,25 @@ test.afterAll(async () => {
 // absent. Either rolled back from a previous version or staged
 // for a future release that flipped some flag.
 //
-// What's still useful:
-//   * The adapter in src/wallet/connectors/phantom.connector.ts +
-//     signer in src/wallet/signers/phantom.signer.ts now match
-//     the real btc.js API (requestAccounts(), signPSBT(bytes,
-//     opts)) — iter 73. They'll work as-is the day Phantom
-//     finishes wiring it up.
-//   * Pipeline A (phantom.signer.angular.spec.ts, 138/138
-//     passing) pins our adapter against a correctly-shaped mock.
+// What's still here:
+//   * src/wallet/connectors/phantom.connector.ts +
+//     src/wallet/signers/phantom.signer.ts match what
+//     docs.phantom.com/bitcoin describes (direct
+//     requestAccounts() + signPSBT(bytes, opts)). That's
+//     literate code-as-documentation against a docs page that
+//     itself carries a deprecation banner; we have NO
+//     independent test pinning either side. When Phantom flips
+//     a working surface back on, expect to rewrite the adapter
+//     against whatever shape they actually ship, not what we
+//     assumed today.
+//   * Pipeline A signer mock spec for Phantom was deleted as
+//     hallucinated-against-hallucinated coverage. The parser
+//     unit test stays (pure function on a documented response
+//     shape).
 //
-// Skip these specs until Phantom completes (3). Re-enable by
-// removing test.skip and confirming the SW responds to
-// btc_requestAccounts.
+// Skip these e2e specs until Phantom completes (3). Re-enable
+// by removing test.skip and confirming the SW responds to
+// btc_requestAccounts (or whatever the successor method is).
 // EMPIRICAL CONFIRMATION (iter 82, 2026-06-06): re-vendored
 // Phantom v26.16.0 from current Chrome Web Store. Disassembly is
 // byte-identical to v26.14.0 in the relevant paths (Bn renamed
