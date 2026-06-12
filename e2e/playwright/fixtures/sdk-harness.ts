@@ -120,6 +120,18 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
+      /**
+       * Build-only helper: produce a cat21 mint PSBT (hex) with a
+       * P2TR (Taproot, key-spend) input. Used by Alby — and any
+       * future wallet — that signs Taproot inputs directly rather
+       * than going through the SDK's per-wallet build+sign wrapper.
+       */
+      buildCat21TaprootPsbt(input: {
+        utxo: { txid: string; vout: number; value: number };
+        taprootAddress: string;
+        taprootPublicKey: string;
+        feeSats: number;
+      }): { psbtHex: string };
     };
   }
 }
@@ -828,4 +840,30 @@ window.ordpoolSdkHarness.buildAndSignMintViaPhantom = async (input: MintRequest)
   const txHex = extractWireTxFromPsbt(signedBytes);
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
+};
+
+window.ordpoolSdkHarness.buildCat21TaprootPsbt = (input) => {
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  // Route through the unisat path with a P2TR address; createInput
+  // ScriptForUnisat already handles the Taproot case (x-only pubkey
+  // + p2tr key-spend). Recipient mirrors the input address (cat21
+  // mints a sat back to the same wallet for self-mint flows).
+  const paymentPubkey = hexToBytes(input.taprootPublicKey);
+  const result = createTransaction(
+    KnownOrdinalWalletType.unisat,
+    input.taprootAddress,
+    txnOutput,
+    paymentPubkey,
+    input.taprootAddress,
+    BigInt(input.feeSats),
+    false,
+    Network.Regtest,
+  );
+  const psbtHex = bytesToHex(result.tx.toPSBT());
+  log('mint.taproot-psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
+  return { psbtHex };
 };
