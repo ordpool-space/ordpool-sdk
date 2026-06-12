@@ -117,16 +117,43 @@ simulates the entire flow against regtest (`e2e/docker-compose
 .regtest.yml`: bitcoind + electrs, headed Chromium + the real
 extension `.crx` under xvfb), which is exactly the point.
 
-The gating bar for adding a signer to `walletSigners`
-(`src/wallet/signers/index.ts`) is: **green Pipeline B
-mint-roundtrip in CI.** No earlier "manual smoke pass on a
-real machine" precondition exists or will exist. If Pipeline B
-is green, the signer ships. If it can't be made green in CI
-(e.g. wallet needs an external service we can't simulate), the
-signer is blocked on that infra, not on a human's time.
+CI is a verification tool, not a release gate. Pipeline B
+gives us evidence about whether a real wallet binary plays
+along with our adapter; that evidence shapes documentation
+and skip-comments but it does NOT decide what ships in the
+public API.
 
-Goal: complete signer coverage. Heavy lifting goes through
-CI iteration. The maintainer does NOT do manual wallet QA.
+## HARD RULE: Ship every signer we have code for
+
+`walletSigners` (`src/wallet/signers/index.ts`) contains every
+WalletSigner file in the directory, period. No second-gate
+filtering on top of detect-by-signature.
+
+Reasoning: detect-by-signature already gates surface
+visibility. If `window.<wallet>` isn't present at runtime,
+the wallet picker never offers that option, the user never
+clicks "sign with X," and the signer never gets called. The
+registry's only job is to give us the call shape WHEN detect
+succeeds. Withholding signer code from the registry doesn't
+prevent bugs — it just prevents users from exercising the
+code and giving us real-world feedback.
+
+This means:
+- Phantom signer ships even though the v26.x desktop binary
+  ships btc.js dormant. Mobile users on Phantom's in-app
+  browser have `window.phantom.bitcoin` per the docs; they
+  get the signer. Desktop users don't see Phantom in the
+  picker because detect returns false.
+- Alby signer ships even though we don't have an Alby Hub
+  in CI to drive a mint-roundtrip. Users with a real Alby
+  Hub backend get the signer; users without get a clean
+  runtime error from the wallet.
+
+Pipeline B gaps get documented as known-caveats in the
+signer file's docstring, NOT as registry exclusions.
+
+Goal: complete signer coverage in the published API. Real
+user signal is the missing piece, not a stricter gate.
 
 Full definitions, iteration ladder, and bootstrap/caching procedure
 in `/Work/ordpool/WALLETS.md` (the workspace HQ). Read it before

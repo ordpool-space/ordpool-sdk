@@ -1,7 +1,9 @@
 import { KnownOrdinalWalletType, WalletSigner } from '../wallet.service.types';
+import { albySigner } from './alby.signer';
 import { leatherSigner } from './leather.signer';
 import { okxSigner } from './okx.signer';
 import { oylSigner } from './oyl.signer';
+import { phantomSigner } from './phantom.signer';
 import { psbtExportSigner } from './psbt-export.signer';
 import { unisatSigner } from './unisat.signer';
 import { wizzSigner } from './wizz.signer';
@@ -9,39 +11,34 @@ import { xverseSigner } from './xverse.signer';
 
 
 /**
- * Sign-side wallet roster. Gating bar per CLAUDE.md "CI is the
- * test, no manual smoke": entries here have a green Pipeline B
- * mint-roundtrip in `e2e/playwright/specs/<wallet>-mint-roundtrip
- * .spec.ts` running against the real .crx + regtest stack in CI.
+ * Sign-side wallet roster. Per CLAUDE.md "Ship every signer we
+ * have code for": every WalletSigner file in this directory is
+ * registered here. No second-gate filtering on top of
+ * detect-by-signature.
  *
- * Current entries pass that bar:
- *   xverse / leather / unisat / okx / oyl / wizz
+ * The wallet picker surfaces a wallet IF `window.<wallet>` is
+ * present at runtime. If a user reaches the signer call, detect
+ * already said yes. The registry's only job is to provide the
+ * call shape — Pipeline B evidence about whether a particular
+ * shipped binary honours that shape lives in skip-comments on
+ * the e2e specs and docstrings on the signer files, NOT here.
+ *
+ * Known runtime caveats (see each signer file for details):
+ *   - phantom: current desktop binary ships btc.js dormant
+ *     (v26.x), so detect returns false on desktop and the
+ *     signer isn't reached. Phantom mobile in-app browser is
+ *     documented to expose `window.phantom.bitcoin`; signer is
+ *     ready for that case automatically.
+ *   - alby: signPsbt delegates to whatever on-chain backend the
+ *     user wired (Alby Hub / Mutiny / …). Users without one
+ *     get a runtime error from the wallet.
  *
  * `psbtExportSigner` is the universal watch-only signer (Sparrow,
- * Electrum, Coldcard, Ledger, Trezor, …). It covers any wallet that
- * speaks PSBT but doesn't inject JS into the browser. No Pipeline
- * B mint-roundtrip needed because there's no browser provider to
- * drive — coverage is via the standalone psbt-export.signer.angular
- * .spec.ts.
+ * Electrum, Coldcard, Ledger, Trezor, …). It covers any wallet
+ * that speaks PSBT but doesn't inject JS into the browser.
  *
- * Wallets with a signer file but NOT yet in the roster (blocked on
- * CI evidence, not on a human-smoke prerequisite):
- *   - alby: no alby-mint-roundtrip spec exists. Alby Browser
- *     Extension delegates signPsbt to whatever on-chain backend
- *     the user wired (Alby Hub / Mutiny / …). Building a Pipeline
- *     B mint-roundtrip means standing up an Alby Hub instance in
- *     CI — possible but non-trivial. Land when the spec lands
- *     green.
- *   - phantom: phantom-mint-roundtrip exists but is skipped
- *     because Phantom's current desktop binary ships btc.js
- *     dormant (v26.x confirmed). The signer file matches the
- *     documented API for the eventual reactivation; land when CI
- *     can actually exercise it.
- *
- * Read roster lives in `connectors/` and is allowed to be broad —
- * detect-by-signature surfaces whatever the user has installed,
- * and the signer roster is the narrower "we can actually drive
- * this end-to-end" set.
+ * Read roster lives in `connectors/` and uses the same one-rule
+ * gating (detect-by-signature).
  */
 export const walletSigners: readonly WalletSigner[] = [
   xverseSigner,
@@ -50,6 +47,8 @@ export const walletSigners: readonly WalletSigner[] = [
   okxSigner,
   oylSigner,
   wizzSigner,
+  phantomSigner,
+  albySigner,
   psbtExportSigner,
 ];
 
@@ -70,9 +69,11 @@ export function findSignerOrThrow(type: KnownOrdinalWalletType): WalletSigner {
   return signer;
 }
 
+export { albySigner } from './alby.signer';
 export { leatherSigner } from './leather.signer';
 export { okxSigner } from './okx.signer';
 export { oylSigner } from './oyl.signer';
+export { phantomSigner } from './phantom.signer';
 export { psbtExportSigner } from './psbt-export.signer';
 export { unisatSigner } from './unisat.signer';
 export { wizzSigner } from './wizz.signer';
