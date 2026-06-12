@@ -144,10 +144,22 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // Open any chrome-extension origin page to talk to the router.
-  // popup.html requires the extension to be unlocked; options.html
-  // is the welcome/onboard screen and accepts messages before any
-  // password has been set.
+  // Iter 93/94 confirmed Alby's popup AND options.html self-close
+  // (or self-navigate, killing our page handle) very shortly after
+  // load — the React welcome wizard calls window.close() / replaces
+  // location on first paint. Block that BEFORE any Alby script runs
+  // via addInitScript, so our seed page survives long enough to
+  // fire chrome.runtime.sendMessage and await responses.
+  await context.addInitScript(() => {
+    try {
+      Object.defineProperty(window, 'close', { value: () => undefined, writable: false, configurable: false });
+    } catch { /* ignore */ }
+    try {
+      const stop = (e: Event) => { e.preventDefault(); e.stopImmediatePropagation(); };
+      window.addEventListener('beforeunload', stop as unknown as EventListener, true);
+    } catch { /* ignore */ }
+  });
+
   const seedPage = await context.newPage();
   await seedPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
   // Give the SW a moment to finish initializing its state machine.
@@ -156,9 +168,7 @@ test.beforeAll(async () => {
 
   await seedAlbyAccount(seedPage);
 
-  // Reload popup so the freshly seeded state takes effect.
-  await seedPage.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  await shot(seedPage, '00-after-seed');
+  await shot(seedPage, '00-after-seed').catch(() => undefined);
   await seedPage.close().catch(() => undefined);
 });
 
