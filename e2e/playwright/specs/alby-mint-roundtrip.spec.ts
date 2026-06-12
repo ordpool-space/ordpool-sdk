@@ -71,21 +71,28 @@ async function shot(p: Page, name: string): Promise<void> {
 
 /**
  * Send a message to Alby's background-script router via
- * chrome.runtime.sendMessage. Pattern matches Alby's own
- * `common/lib/msg.ts` (origin: "background", type: <route name>,
- * args: <payload>).
+ * chrome.runtime.sendMessage. Envelope shape pulled verbatim from
+ * Alby's `common/lib/msg.ts → msg.request`:
+ *
+ *   { application: "LBE", prompt: true, action, args,
+ *     origin: { internal: true } }
+ *
+ * Iter 92 used the wrong shape ({type, args, origin: "background"})
+ * and every message returned null — no listener picked them up.
  */
-async function sendAlbyMessage(page: Page, type: string, args: Record<string, unknown>): Promise<unknown> {
-  return page.evaluate(async ({ type, args }) => {
+async function sendAlbyMessage(page: Page, action: string, args: Record<string, unknown>): Promise<{ data?: unknown; error?: string } | null> {
+  return page.evaluate(async ({ action, args }) => {
     const c = (globalThis as unknown as { chrome: { runtime: {
       sendMessage: (msg: unknown) => Promise<unknown>;
     } } }).chrome;
     return await c.runtime.sendMessage({
-      type,
+      application: 'LBE',
+      prompt: true,
+      action,
       args,
-      origin: 'background',
-    });
-  }, { type, args });
+      origin: { internal: true },
+    }) as { data?: unknown; error?: string } | null;
+  }, { action, args });
 }
 
 async function seedAlbyAccount(page: Page): Promise<string> {
@@ -107,13 +114,13 @@ async function seedAlbyAccount(page: Page): Promise<string> {
     connector: 'lndhub',
     config: { url: 'https://example.invalid', login: 'x', password: 'x' },
     bitcoinNetwork: 'regtest',
-  }) as { data?: { accountId: string }; error?: string };
+  }) as { data?: { accountId: string }; error?: string } | null;
   // eslint-disable-next-line no-console
   console.log(`[alby-mint:seed] addAccount resp = ${JSON.stringify(addAccResp).slice(0, 200)}`);
-  if (!addAccResp.data?.accountId) {
+  const accountId = addAccResp?.data?.accountId;
+  if (!accountId) {
     throw new Error(`Alby addAccount failed: ${JSON.stringify(addAccResp)}`);
   }
-  const accountId = addAccResp.data.accountId;
 
   // 3. Attach the test mnemonic. Alby encrypts it under the
   //    password (actions/mnemonic/setMnemonic.ts) and stores it on
