@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, Observable, catchError, forkJoin, map, of, shareReplay, tap } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
 
 import { cat21Config } from './cat21-sdk-config';
 import {
@@ -20,6 +20,14 @@ import {
  * a deliberate-payment shape.
  */
 export const AUTO_SCAN_MAX_VALUE_SAT = 50_000;
+
+/**
+ * Concurrency ceiling for `autoScan` HTTP fan-out. Each scan fires two
+ * ord requests in parallel; six is the de-facto browser per-host
+ * connection limit so we batch 5 outpoints (= 10 requests) at a time
+ * to leave one slot for unrelated traffic.
+ */
+const AUTO_SCAN_CONCURRENCY = 5;
 
 /**
  * Per-outpoint asset scanner backed by ord-proxy (`ord.ordpool.space`,
@@ -103,7 +111,7 @@ export class UtxoContentScanner {
         this.setState(outpoint, state);
         this.inFlight.delete(outpoint);
       }),
-      shareReplay({ bufferSize: 1, refCount: false }),
+      shareReplay({ bufferSize: 1, refCount: true }),
     );
 
     this.inFlight.set(outpoint, flight);
@@ -112,18 +120,37 @@ export class UtxoContentScanner {
 
   /**
    * Convenience batch scanner. Scans every outpoint whose UTXO value
-   * is at or below `AUTO_SCAN_MAX_VALUE_SAT`. Returns nothing — the
-   * caller reads results off the `states$` stream.
+   * is at or below `AUTO_SCAN_MAX_VALUE_SAT`. Throttles HTTP fan-out
+   * via `mergeMap` with `AUTO_SCAN_CONCURRENCY` so a wallet with 30
+   * UTXOs doesn't try to open 60 simultaneous TCP connections (browser
+   * per-host cap is 6, anything above queues anyway). Returns nothing
+   * — the caller reads results off the `states$` stream.
    */
   autoScan(utxos: { txid: string; vout: number; value: number }[]): void {
+    const targets: string[] = [];
     for (const u of utxos) {
       if (u.value > AUTO_SCAN_MAX_VALUE_SAT) continue;
       const outpoint = `${u.txid}:${u.vout}`;
-      const s = this.getState(outpoint);
-      if (s.kind === 'not-scanned') {
-        this.scan(outpoint).subscribe();
+      if (this.getState(outpoint).kind === 'not-scanned') {
+        targets.push(outpoint);
       }
     }
+    if (targets.length === 0) return;
+    from(targets).pipe(
+      mergeMap((outpoint) => this.scan(outpoint), AUTO_SCAN_CONCURRENCY),
+    ).subscribe();
+  }
+
+  /**
+   * Wipe both caches. Call this when the connected wallet changes —
+   * UTXO outpoints from the previous wallet are no longer relevant
+   * and would otherwise accumulate forever on a long-lived session
+   * (the singleton's `states` Map is unbounded).
+   */
+  reset(): void {
+    this.states.clear();
+    this.inFlight.clear();
+    this.statesSubject.next(new Map());
   }
 
   private fetchOrd(outpoint: string): Observable<OrdOutputResponse> {

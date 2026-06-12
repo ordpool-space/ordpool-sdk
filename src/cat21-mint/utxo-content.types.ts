@@ -82,3 +82,78 @@ export type UtxoScanState =
 export function isScanComplete(s: UtxoScanState): boolean {
   return s.kind === 'scanned-clean' || s.kind === 'scanned-with-assets' || s.kind === 'scan-failed';
 }
+
+/**
+ * Picker-display bucket the mint-flow UI bands UTXOs on. Maps 1:1 from
+ * UtxoScanState but as a flat name the template can `@switch` on. Both
+ * consumers (ordpool /cat21-mint and cat21.space /dashboard/mint) bind
+ * the same five values; the SDK owns the type so they can't drift.
+ */
+export type UtxoScanBucket = 'clean' | 'unscanned' | 'assets' | 'scanning' | 'failed';
+
+/**
+ * Map a UtxoScanState to its display bucket. Drives badge labels,
+ * row-button copy, and the auto-pick priority order.
+ */
+export function bucketOf(state: UtxoScanState): UtxoScanBucket {
+  switch (state.kind) {
+    case 'not-scanned': return 'unscanned';
+    case 'scanning': return 'scanning';
+    case 'scanned-clean': return 'clean';
+    case 'scanned-with-assets': return 'assets';
+    case 'scan-failed': return 'failed';
+  }
+}
+
+/**
+ * Auto-pick the largest "safe-enough" row from a bucket-annotated list.
+ * Priority: scanned-clean (verified safe) → unscanned (probably-safe big
+ * UTXO) → scan-failed (unknown, better than nothing). NEVER auto-pick
+ * scanned-with-assets — that row requires an explicit "Use anyway"
+ * click from the user.
+ *
+ * Callers pass any row shape that carries a `bucket` field; this
+ * preserves the row type so consumers can use whatever shape they
+ * stored (UtxoSimulation, ViableUtxoRow, etc.).
+ */
+export function findAutoPickCandidate<T extends { bucket: UtxoScanBucket }>(rows: T[]): T | null {
+  return rows.find((r) => r.bucket === 'clean')
+    ?? rows.find((r) => r.bucket === 'unscanned')
+    ?? rows.find((r) => r.bucket === 'failed')
+    ?? null;
+}
+
+/**
+ * Names of every rune balance present on a scanned UTXO. `null` runes
+ * (cat21-ord) or empty object short-circuits to an empty array. Used
+ * by the asset-found UI to render one link per rune.
+ */
+export function runeNamesFromContent(content: UtxoContent): string[] {
+  return content.runes ? Object.keys(content.runes) : [];
+}
+
+/**
+ * UTXOs at or below this value on a single-address wallet are flagged
+ * as potentially holding an ordinal-bound asset (inscription, rune,
+ * rare sat, CAT-21 cat). 10k sat is the de-facto industry cut-off:
+ * most ordinal-bearing UTXOs are 546 sat (the dust limit) or slightly
+ * above; almost none exceed 10k. Content-safety heuristics, not fee
+ * math.
+ */
+export const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10_000;
+
+/**
+ * Funding floor in sats for the empty-state hint in the mint flow.
+ * Derived from the user's currently-picked fee rate using a
+ * conservative ~200 vB reference vsize (real CAT-21 mints are
+ * ~150–170 vB depending on wallet type), rounded up to the next 100
+ * sat so the displayed number reads cleanly. At 1 sat/vB that's
+ * ~800 sat; at 5 sat/vB ~1600; at 100 sat/vB ~20,600.
+ *
+ * The SDK's actual viable-UTXO check is dynamic per-PSBT; this helper
+ * just stops the user-facing hint from quoting launch-era numbers
+ * (10k or 200k sat) when current mainnet fees are much lower.
+ */
+export function calculateRecommendedFundingSats(feeRatePerVb: number): number {
+  return Math.ceil((546 + 200 * feeRatePerVb) / 100) * 100;
+}
