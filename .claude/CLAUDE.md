@@ -109,6 +109,25 @@ pipelines, with different blast radii and different questions:
   unverified extension binaries on a dev machine. Iteration ladder:
   loads → onboard → SDK-handshake → matrix → mint roundtrip.
 
+## HARD RULE: CI is the test. No manual smoke.
+
+The maintainer is Bitcoin-poor and will not install wallets +
+fund them with real BTC to "smoke-test" each release. CI
+simulates the entire flow against regtest (`e2e/docker-compose
+.regtest.yml`: bitcoind + electrs, headed Chromium + the real
+extension `.crx` under xvfb), which is exactly the point.
+
+The gating bar for adding a signer to `walletSigners`
+(`src/wallet/signers/index.ts`) is: **green Pipeline B
+mint-roundtrip in CI.** No earlier "manual smoke pass on a
+real machine" precondition exists or will exist. If Pipeline B
+is green, the signer ships. If it can't be made green in CI
+(e.g. wallet needs an external service we can't simulate), the
+signer is blocked on that infra, not on a human's time.
+
+Goal: complete signer coverage. Heavy lifting goes through
+CI iteration. The maintainer does NOT do manual wallet QA.
+
 Full definitions, iteration ladder, and bootstrap/caching procedure
 in `/Work/ordpool/WALLETS.md` (the workspace HQ). Read it before
 starting work on a new wallet.
