@@ -1,8 +1,9 @@
 /**
  * Asset-detection types for the mint flow's UTXO scanner. We query
- * BOTH our ord-proxy (`ord.ordpool.space`, returns regular inscriptions
- * + runes) AND our cat21-ord (`ord.cat21.space`, returns CAT-21 cats)
- * per outpoint, merging the answers into one `UtxoContent`.
+ * BOTH our ord instance (`ord.ordpool.space`, returns regular
+ * inscriptions + runes) AND our cat21-ord (`ord.cat21.space`, returns
+ * CAT-21 cats) per outpoint, merging the answers into one
+ * `UtxoContent`.
  *
  * The detection is content-safety, not fee-math: an inscription at the
  * dust limit (546 sat) reads as "tiny UTXO" to the picker but carries
@@ -11,10 +12,9 @@
  */
 
 /**
- * Raw `/output/{outpoint}` shape returned by ord-proxy (and any real
- * ord with `--enable-json-api`). The subset we read here; ord ships
- * more fields (address, sat_ranges, script_pubkey, etc.) that we
- * ignore.
+ * Raw `/output/{outpoint}` shape returned by ord with the JSON API
+ * enabled. The subset we read here; ord ships more fields (address,
+ * sat_ranges, script_pubkey, etc.) that we ignore.
  */
 export interface OrdOutputResponse {
   inscriptions?: string[];

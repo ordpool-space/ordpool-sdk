@@ -10,8 +10,8 @@ import { InjectionToken } from '@angular/core';
  * - `cat21ApiUrl` — base URL of the cat21-indexer REST API
  *   (status, cats list). Same rule — match the URL to
  *   `bitcoinNetwork`.
- * - `ordApiUrl` — base URL of an ord JSON API (typically our
- *   ord-proxy at `ord.ordpool.space`). Used by `UtxoContentScanner`
+ * - `ordApiUrl` — base URL of an ord JSON API (typically our ord
+ *   instance at `ord.ordpool.space`). Used by `UtxoContentScanner`
  *   to detect inscriptions + runes per outpoint before the user
  *   mints with that UTXO.
  * - `cat21OrdApiUrl` — base URL of cat21-ord (typically

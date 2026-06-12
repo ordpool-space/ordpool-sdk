@@ -30,12 +30,12 @@ export const AUTO_SCAN_MAX_VALUE_SAT = 50_000;
 const AUTO_SCAN_CONCURRENCY = 5;
 
 /**
- * Per-outpoint asset scanner backed by ord-proxy (`ord.ordpool.space`,
- * for inscriptions + runes) and cat21-ord (`ord.cat21.space`, for CAT-
- * 21 cats). Results are cached for the singleton's lifetime — a UTXO's
- * content is immutable until the UTXO is spent, and a spent UTXO
- * doesn't appear in the payment-address list anymore, so the cache
- * never goes stale.
+ * Per-outpoint asset scanner backed by our ord instance
+ * (`ord.ordpool.space`, for inscriptions + runes) and cat21-ord
+ * (`ord.cat21.space`, for CAT-21 cats). Results are cached for the
+ * singleton's lifetime — a UTXO's content is immutable until the UTXO
+ * is spent, and a spent UTXO doesn't appear in the payment-address
+ * list anymore, so the cache never goes stale.
  *
  * The scanner does NOT decide which UTXOs to scan; the caller picks
  * via `scan(outpoint)`. The orchestrator exposes the auto-scan
