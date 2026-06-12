@@ -1,5 +1,6 @@
 import { KnownOrdinalWalletType, WalletSigner } from '../wallet.service.types';
 import { albySigner } from './alby.signer';
+import { binanceSigner } from './binance.signer';
 import { leatherSigner } from './leather.signer';
 import { okxSigner } from './okx.signer';
 import { oylSigner } from './oyl.signer';
@@ -49,6 +50,7 @@ export const walletSigners: readonly WalletSigner[] = [
   wizzSigner,
   phantomSigner,
   albySigner,
+  binanceSigner,
   psbtExportSigner,
 ];
 
@@ -70,6 +72,7 @@ export function findSignerOrThrow(type: KnownOrdinalWalletType): WalletSigner {
 }
 
 export { albySigner } from './alby.signer';
+export { binanceSigner } from './binance.signer';
 export { leatherSigner } from './leather.signer';
 export { okxSigner } from './okx.signer';
 export { oylSigner } from './oyl.signer';

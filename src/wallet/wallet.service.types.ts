@@ -21,6 +21,7 @@ export interface WindowLike {
   oyl?: unknown;
   alby?: unknown;
   webln?: unknown;           // alby's standard Lightning provider name
+  binancew3w?: unknown;      // Binance Web3 Wallet multi-chain namespace
 }
 
 
@@ -86,9 +87,11 @@ export interface SignAndBroadcastInput {
 /**
  * A wallet signer handles the SIGN side of a wallet integration:
  * given an unsigned PSBT, ask the wallet to sign, and emit a txid
- * once it's broadcast. Sign roster is intentionally narrow — only
- * the wallets ordpool has byte-snapshot tests and a manual smoke
- * test for.
+ * once it's broadcast. Sign roster is broad per CLAUDE.md
+ * "Ship every signer we have code for" — detect-by-signature
+ * gates surface visibility, so signer code that ships against a
+ * wallet without a runtime API surface is just dormant rather
+ * than harmful.
  *
  * Generic against the PSBT (not cat21-specific). Used by
  * `Cat21Service` today; future inscription-creation / rune-etch /
@@ -108,6 +111,7 @@ export enum KnownOrdinalWalletType {
   phantom = 'phantom',
   oyl = 'oyl',
   alby = 'alby',
+  binance = 'binance',
   /**
    * Watch-only via BIP-32 xpub paste. Covers Sparrow, Electrum,
    * Coldcard, Ledger, Trezor, Specter, Bitcoin Core — every desktop
@@ -190,6 +194,13 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     logo: '/resources/ordinal-wallets/btc-alby-logo.svg',
     downloadLink: 'https://getalby.com/',
     onChainOrdinals: false,
+  },
+  [KnownOrdinalWalletType.binance]: {
+    type: KnownOrdinalWalletType.binance,
+    label: 'Binance Wallet',
+    subLabel: 'API documented but not exposed in v1.17.2 — surfaces only if Binance enables it',
+    logo: '/resources/ordinal-wallets/btc-binance-logo.svg',
+    downloadLink: 'https://www.binance.com/en/web3wallet',
   },
   [KnownOrdinalWalletType.xpub]: {
     type: KnownOrdinalWalletType.xpub,

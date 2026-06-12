@@ -6,11 +6,11 @@ import { detectInstalledWallets, walletConnectors } from './index';
 
 describe('walletConnectors registry', () => {
 
-  it('lists Xverse, Leather, Unisat, Wizz, OKX, Phantom, Oyl, Alby in detection order', () => {
-    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby']);
+  it('lists Xverse, Leather, Unisat, Wizz, OKX, Phantom, Oyl, Alby, Binance in detection order', () => {
+    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby', 'binance']);
   });
 
-  it('marks all eight wallets as signing-supported at the SDK level (Alby may fail at runtime if the user has no on-chain backend wired)', () => {
+  it('marks every wallet as signing-supported at the SDK level (runtime detect-by-signature gates surface visibility — see CLAUDE.md "Ship every signer we have code for")', () => {
     expect(walletConnectors.every(c => c.signingSupported)).toBe(true);
   });
 });
@@ -18,7 +18,7 @@ describe('walletConnectors registry', () => {
 
 describe('detectInstalledWallets', () => {
 
-  it('returns all eight as not-installed when window is undefined', () => {
+  it('returns all nine as not-installed when window is undefined', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
     expect(installedWallets).toEqual([]);
     expect(notInstalledWallets).toEqual([
@@ -30,11 +30,12 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
       KnownOrdinalWallets.alby,
+      KnownOrdinalWallets.binance,
     ]);
   });
 
-  it('returns all eight as installed when every extension is present', () => {
-    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {} };
+  it('returns all nine as installed when every extension is present', () => {
+    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {}, binancew3w: { bitcoin: {} } };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([
       KnownOrdinalWallets.xverse,
@@ -45,6 +46,7 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
       KnownOrdinalWallets.alby,
+      KnownOrdinalWallets.binance,
     ]);
     expect(notInstalledWallets).toEqual([]);
   });
@@ -60,11 +62,12 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
       KnownOrdinalWallets.alby,
+      KnownOrdinalWallets.binance,
     ]);
   });
 
   it('keeps a stable detection order matching walletConnectors', () => {
-    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {} });
+    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {}, binancew3w: { bitcoin: {} } });
     expect(installedWallets.map(w => w.label)).toEqual([
       KnownOrdinalWallets.xverse.label,
       KnownOrdinalWallets.leather.label,
@@ -74,6 +77,7 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.phantom.label,
       KnownOrdinalWallets.oyl.label,
       KnownOrdinalWallets.alby.label,
+      KnownOrdinalWallets.binance.label,
     ]);
   });
 
@@ -101,6 +105,17 @@ describe('detectInstalledWallets', () => {
     expect(notForBtc).toEqual([]);
     const { installedWallets: forBtc } = detectInstalledWallets({ okxwallet: { bitcoin: {} } });
     expect(forBtc).toEqual([KnownOrdinalWallets.okx]);
+  });
+
+  it('requires window.binancew3w.bitcoin (the BTC sub-provider) — bare binancew3w without it is NOT considered installed', () => {
+    // Binance Web3 Wallet is multi-chain (wallet / ethereum / solana
+    // / tron / sui / tonconnect on current v1.17.2 binaries). The
+    // documented .bitcoin sub-provider isn't injected yet; this
+    // assertion captures the "ready when Binance exposes it" state.
+    const { installedWallets: notForBtc } = detectInstalledWallets({ binancew3w: {} });
+    expect(notForBtc).toEqual([]);
+    const { installedWallets: forBtc } = detectInstalledWallets({ binancew3w: { bitcoin: {} } });
+    expect(forBtc).toEqual([KnownOrdinalWallets.binance]);
   });
 
   it('accepts the legacy HiroWalletProvider global for Leather detection', () => {

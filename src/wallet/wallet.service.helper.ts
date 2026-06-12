@@ -90,6 +90,24 @@ export function isAlbyInstalled(win: WindowLike | undefined): boolean {
 }
 
 /**
+ * Binance Web3 Wallet is multi-chain — require the `bitcoin`
+ * sub-provider specifically (analogous to OKX / Phantom).
+ *
+ * Status note: developer docs (developers.binance.com/docs/binance
+ * -w3w/bitcoin-provider) document a `window.binancew3w.bitcoin`
+ * surface with requestAccounts / getPublicKey / signPsbt / etc.
+ * The shipped v1.17.2 binary, however, injects only wallet /
+ * ethereum / solana / tron / sui / tonconnect sub-providers — no
+ * `.bitcoin` assignment. Detect returns false on current binaries.
+ * If Binance ships the documented surface, this connector auto-
+ * works without code changes.
+ */
+export function isBinanceInstalled(win: WindowLike | undefined): boolean {
+  const b = win?.binancew3w as { bitcoin?: unknown } | undefined;
+  return !!b?.bitcoin;
+}
+
+/**
  * Narrow a raw sats-connect `getAddress` response into the SDK's
  * `WalletInfo` shape. Throws if either the Ordinals or Payment
  * address is absent — both are required for a CAT-21 mint flow,
@@ -204,6 +222,27 @@ export function wizzBasicInfoToWalletInfo(address: string, publicKey: string): W
 export function okxBasicInfoToWalletInfo(address: string, publicKey: string): WalletInfo {
   return {
     type: KnownOrdinalWalletType.okx,
+    ordinalsAddress:   address,
+    ordinalsPublicKey: publicKey,
+    paymentAddress:    address,
+    paymentPublicKey:  publicKey,
+    signingSupported:  true,
+  };
+}
+
+/**
+ * Binance's documented BTC sub-provider is Unisat-API-shaped:
+ * single-address contract, both ordinals and payment lanes from
+ * the same address. Per the docs, Binance also proxies
+ * `window.unisat` (with API differences), confirming the family
+ * resemblance. We do NOT proxy through `window.unisat` because
+ * other wallets that overwrite that global would route to the
+ * wrong provider; detect-by-`window.binancew3w.bitcoin` is the
+ * specific check.
+ */
+export function binanceBasicInfoToWalletInfo(address: string, publicKey: string): WalletInfo {
+  return {
+    type: KnownOrdinalWalletType.binance,
     ordinalsAddress:   address,
     ordinalsPublicKey: publicKey,
     paymentAddress:    address,
