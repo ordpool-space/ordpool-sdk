@@ -34,11 +34,14 @@ interface AlbyApi {
  * another on-chain-capable wallet. Users with only a custodial
  * Lightning account (no on-chain backend) will get a runtime error
  * when signPsbt is invoked. We don't gate on this at the SDK level
- * because there's no static signal for it; the error propagates to
- * the caller. The Alby connector is also exposed with
- * `signingSupported: false` separately for the picker UI, which
- * the SDK consumer can override if it wants to surface Alby as a
- * signer for users who have Alby Hub.
+ * because there's no static signal for it; the error propagates
+ * to the caller. The connector reports `signingSupported: true`
+ * because the API is technically present; the runtime backend
+ * check is the user's responsibility.
+ *
+ * Targets the Alby Browser Extension. Alby Go (mobile) doesn't
+ * inject in-page providers — it uses NWC deeplinks, a completely
+ * different integration model that this signer doesn't cover.
  */
 export const albySigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.alby,

@@ -54,8 +54,18 @@ export function isOkxInstalled(win: WindowLike | undefined): boolean {
 
 /**
  * Phantom is multi-chain — require the `bitcoin` sub-provider
- * specifically (users without BTC enabled in Phantom shouldn't be
- * listed as "Phantom installed for BTC").
+ * specifically. Detect-by-signature is the single rule: if
+ * `window.phantom.bitcoin` is present we treat Phantom as
+ * installed for BTC, if not we don't.
+ *
+ * On current Phantom desktop extension (v26.x confirmed
+ * 2026-06), this returns false — the binary ships the BTC
+ * sub-provider as dead code (btc.js exists but isn't registered
+ * as a content script). So Phantom desktop currently never
+ * shows up as installed in our picker. Phantom mobile in-app
+ * browser is documented to expose this surface; if a user comes
+ * through there, the same check returns true and the connector
+ * works without code changes.
  */
 export function isPhantomInstalled(win: WindowLike | undefined): boolean {
   const p = win?.phantom as { bitcoin?: unknown } | undefined;
@@ -250,15 +260,20 @@ export function parseOylAddressResponse(r: OylAddressResponse): WalletInfo {
 }
 
 /**
- * Phantom's `bitcoin.requestAccounts()` returns an array of
+ * Phantom's `bitcoin.requestAccounts()` is documented (and
+ * confirmed by btc.js v26 disassembly) to return an array of
  * addresses, each tagged with `addressType` (p2tr/p2wpkh/p2sh/p2pkh)
  * and `purpose` ('payment' or 'ordinals'). Split into the SDK's
  * lanes by `purpose` (more reliable than addressType — Phantom's
  * "payment" address can be any non-taproot type per user setting).
  *
- * Throws if either lane is absent. Phantom v26 returns both lanes
- * by default unless the caller passes `{purposes:[…]}` to
- * `requestAccounts`.
+ * Throws if either lane is absent. The docs say both lanes come
+ * back by default unless the caller passes `{purposes:[…]}` —
+ * we don't, so we expect both.
+ *
+ * Pure-function unit test on a documented input shape. NOT a
+ * contract pin against the live wallet (the live desktop wallet
+ * currently doesn't expose this API at all, see isPhantomInstalled).
  */
 export function parsePhantomAddressResponse(addresses: PhantomBtcAddress[]): WalletInfo {
   const ordinals = addresses.find(a => a.purpose === 'ordinals');
