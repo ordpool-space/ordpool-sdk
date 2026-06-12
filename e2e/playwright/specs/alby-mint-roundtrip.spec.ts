@@ -179,6 +179,25 @@ test.afterAll(async () => {
 test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Taproot PSBT, broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
+  // alby.enable() opens a permission popup that a real user clicks.
+  // In CI, install a page listener that auto-confirms any newly
+  // opened Alby UI page by clicking the first Connect / Allow /
+  // Confirm button it finds. The same listener also covers the
+  // signPsbt confirmation that follows.
+  context.on('page', async (popup) => {
+    try {
+      await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+      const btn = popup.getByRole('button', { name: /connect|allow|confirm|approve|sign/i }).first();
+      await btn.waitFor({ state: 'visible', timeout: 10_000 });
+      await btn.click({ timeout: 5_000 });
+      // eslint-disable-next-line no-console
+      console.log(`[alby-mint] auto-clicked popup: ${popup.url()}`);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.log(`[alby-mint] popup auto-click skipped (${popup.url()}): ${String(e).slice(0, 120)}`);
+    }
+  });
+
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
