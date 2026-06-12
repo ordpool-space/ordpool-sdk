@@ -70,69 +70,56 @@ async function shot(p: Page, name: string): Promise<void> {
 }
 
 /**
- * Send a message to Alby's background-script router via
- * chrome.runtime.sendMessage. Envelope shape pulled verbatim from
- * Alby's `common/lib/msg.ts → msg.request`:
+ * Seed Alby's account state by firing all three router messages
+ * (setPassword → addAccount → setMnemonic) inside a single
+ * page.evaluate. Iter 93 confirmed each call individually
+ * succeeds, but Alby's React app on options.html navigates the
+ * page reactively once `unlocked:true` lands, so between two
+ * separate page.evaluate calls the page can close on us. Batching
+ * keeps the page alive for one synchronous-from-Playwright's-view
+ * sequence.
  *
- *   { application: "LBE", prompt: true, action, args,
- *     origin: { internal: true } }
- *
- * Iter 92 used the wrong shape ({type, args, origin: "background"})
- * and every message returned null — no listener picked them up.
+ * Envelope shape per Alby's common/lib/msg.ts → msg.request.
  */
-async function sendAlbyMessage(page: Page, action: string, args: Record<string, unknown>): Promise<{ data?: unknown; error?: string } | null> {
-  return page.evaluate(async ({ action, args }) => {
+async function seedAlbyAccount(page: Page): Promise<string> {
+  const result = await page.evaluate(async ({ password, mnemonic }) => {
     const c = (globalThis as unknown as { chrome: { runtime: {
       sendMessage: (msg: unknown) => Promise<unknown>;
     } } }).chrome;
-    return await c.runtime.sendMessage({
-      application: 'LBE',
-      prompt: true,
-      action,
-      args,
-      origin: { internal: true },
-    }) as { data?: unknown; error?: string } | null;
-  }, { action, args });
-}
+    const send = (action: string, args: Record<string, unknown>) =>
+      c.runtime.sendMessage({
+        application: 'LBE',
+        prompt: true,
+        action,
+        args,
+        origin: { internal: true },
+      }) as Promise<{ data?: unknown; error?: string } | null>;
 
-async function seedAlbyAccount(page: Page): Promise<string> {
-  // 1. Set the unlock password. Alby's state.password() reads this
-  //    back; setMnemonic / addAccount need it to encrypt.
-  const setPwResp = await sendAlbyMessage(page, 'setPassword', { password: TEST_PASSWORD });
-  // eslint-disable-next-line no-console
-  console.log(`[alby-mint:seed] setPassword resp = ${JSON.stringify(setPwResp).slice(0, 200)}`);
+    const setPwResp = await send('setPassword', { password });
+    const addAccResp = await send('addAccount', {
+      name: 'ordpool-e2e',
+      connector: 'lndhub',
+      config: { url: 'https://example.invalid', login: 'x', password: 'x' },
+      bitcoinNetwork: 'regtest',
+    }) as { data?: { accountId: string }; error?: string } | null;
+    const accountId = addAccResp?.data?.accountId;
+    const setMnemoResp = accountId
+      ? await send('setMnemonic', { id: accountId, mnemonic })
+      : null;
+    return { setPwResp, addAccResp, accountId, setMnemoResp };
+  }, { password: TEST_PASSWORD, mnemonic: TEST_MNEMONIC });
 
-  // 2. Add a minimal account. We use the lndhub connector with
-  //    dummy config because (a) addAccount itself doesn't validate
-  //    per actions/accounts/add.ts, (b) the connector is only
-  //    instantiated on Lightning operations, which our on-chain
-  //    test doesn't trigger. bitcoinNetwork: "regtest" matches
-  //    background-script/bitcoin/index.ts BTC_TAPROOT_DERIVATION
-  //    _PATH_REGTEST = m/86'/1'/0'/0.
-  const addAccResp = await sendAlbyMessage(page, 'addAccount', {
-    name: 'ordpool-e2e',
-    connector: 'lndhub',
-    config: { url: 'https://example.invalid', login: 'x', password: 'x' },
-    bitcoinNetwork: 'regtest',
-  }) as { data?: { accountId: string }; error?: string } | null;
   // eslint-disable-next-line no-console
-  console.log(`[alby-mint:seed] addAccount resp = ${JSON.stringify(addAccResp).slice(0, 200)}`);
-  const accountId = addAccResp?.data?.accountId;
-  if (!accountId) {
-    throw new Error(`Alby addAccount failed: ${JSON.stringify(addAccResp)}`);
+  console.log(`[alby-mint:seed] setPassword resp = ${JSON.stringify(result.setPwResp).slice(0, 200)}`);
+  // eslint-disable-next-line no-console
+  console.log(`[alby-mint:seed] addAccount resp = ${JSON.stringify(result.addAccResp).slice(0, 200)}`);
+  // eslint-disable-next-line no-console
+  console.log(`[alby-mint:seed] setMnemonic resp = ${JSON.stringify(result.setMnemoResp).slice(0, 200)}`);
+
+  if (!result.accountId) {
+    throw new Error(`Alby addAccount failed: ${JSON.stringify(result.addAccResp)}`);
   }
-
-  // 3. Attach the test mnemonic. Alby encrypts it under the
-  //    password (actions/mnemonic/setMnemonic.ts) and stores it on
-  //    the Account record.
-  const setMnemoResp = await sendAlbyMessage(page, 'setMnemonic', {
-    id: accountId,
-    mnemonic: TEST_MNEMONIC,
-  });
-  // eslint-disable-next-line no-console
-  console.log(`[alby-mint:seed] setMnemonic resp = ${JSON.stringify(setMnemoResp).slice(0, 200)}`);
-
-  return accountId;
+  return result.accountId;
 }
 
 test.beforeAll(async () => {
