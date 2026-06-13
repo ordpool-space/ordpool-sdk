@@ -231,37 +231,48 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   );
   await shot(harness, '01-harness-loaded');
 
-  // Enumerate window.alby's actual API surface — iter 98 confirmed
-  // alby.getBitcoin() (v2 API) is gone in v3.14.2. Log what's there.
+  // Iter 99 enumeration confirmed: alby exposes webln/nostr/webbtc/
+  // liquid as sub-namespaces. The Bitcoin one is `webbtc` (not
+  // `bitcoin`). Methods live on the prototype so Object.keys returns
+  // only the closure state — walk the prototype chain too.
   const apiSurface = await harness.evaluate(() => {
+    const allMethods = (o: object): string[] => {
+      const out: string[] = [];
+      let cur: object | null = o;
+      while (cur && cur !== Object.prototype) {
+        for (const k of Object.getOwnPropertyNames(cur)) {
+          if (typeof (o as Record<string, unknown>)[k] === 'function' && !out.includes(k)) out.push(k);
+        }
+        cur = Object.getPrototypeOf(cur);
+      }
+      return out;
+    };
     const w = window as unknown as Record<string, unknown>;
     const alby = w.alby as Record<string, unknown> | undefined;
-    const webln = w.webln as Record<string, unknown> | undefined;
-    const nostr = w.nostr as Record<string, unknown> | undefined;
     return {
       alby: alby ? Object.keys(alby) : null,
-      albyBitcoin: alby?.bitcoin ? Object.keys(alby.bitcoin as object) : null,
-      webln: webln ? Object.keys(webln) : null,
-      weblnBitcoin: webln?.bitcoin ? Object.keys(webln.bitcoin as object) : null,
-      nostr: nostr ? Object.keys(nostr) : null,
+      albyMethods: alby ? allMethods(alby) : null,
+      webbtcMethods: alby?.webbtc ? allMethods(alby.webbtc as object) : null,
+      weblnMethods: alby?.webln ? allMethods(alby.webln as object) : null,
     };
   });
   console.log(`[alby-mint] API surface = ${JSON.stringify(apiSurface)}`);
 
   // Call window.alby.enable() to grant the dApp permission, then
-  // walk whichever Bitcoin namespace v3.14.2 exposes.
+  // call alby.webbtc.getAddress() (the WebBTC namespace, v3.14.2).
   const connectInfo = await harness.evaluate(async () => {
+    interface WebBtcApi {
+      enable?(): Promise<void>;
+      getAddress(): Promise<{ address: string; publicKey: string } | string>;
+    }
     interface AlbyApi {
       enable(): Promise<void>;
-      bitcoin?: { getAddress?: () => Promise<{ address: string; publicKey: string } | string> };
+      webbtc: WebBtcApi;
     }
     const alby = (window as unknown as { alby: AlbyApi }).alby;
     await alby.enable();
-    const btc = alby.bitcoin;
-    if (!btc?.getAddress) {
-      throw new Error(`alby.bitcoin.getAddress not exposed. alby keys: ${Object.keys(alby).join(',')}`);
-    }
-    const res = await btc.getAddress();
+    if (alby.webbtc.enable) await alby.webbtc.enable();
+    const res = await alby.webbtc.getAddress();
     return typeof res === 'string'
       ? { address: res, publicKey: '' }
       : { address: res.address ?? '', publicKey: res.publicKey ?? '' };
@@ -308,17 +319,16 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   // {signed: <string>} response from the WebBTC layer wraps that
   // wire-tx hex.
   const signResult = await harness.evaluate(async (psbtHex: string) => {
-    interface AlbyBtcApi {
+    interface WebBtcApi {
       signPsbt(psbtHex: string): Promise<{ signed: string }>;
     }
     interface AlbyApi {
       enable(): Promise<void>;
-      getBitcoin(): AlbyBtcApi;
+      webbtc: WebBtcApi;
     }
     const alby = (window as unknown as { alby: AlbyApi }).alby;
     await alby.enable();
-    const btc = alby.getBitcoin();
-    const res = await btc.signPsbt(psbtHex);
+    const res = await alby.webbtc.signPsbt(psbtHex);
     return res;
   }, psbtHex);
   console.log(`[alby-mint] signPsbt response = ${JSON.stringify(signResult).slice(0, 200)}`);
