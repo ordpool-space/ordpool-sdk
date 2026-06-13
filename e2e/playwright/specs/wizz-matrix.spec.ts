@@ -321,19 +321,30 @@ for (const variant of VARIANTS) {
       if (expectFixtureGatedFailure) {
         // Positive assertion that without the captured
         // configs.wizz.cash payload, the wallet's per-tab session
-        // router rejects requestAccounts with -32603. The error
-        // surfaces through the harness's connectWizz wrapper.
+        // router rejects requestAccounts with -32603. Probe
+        // window.wizz directly with a single call — the harness's
+        // connectWizz wrapper has a 6-attempt retry loop tuned for
+        // P2WPKH's tabCheckin race that would multiply this
+        // expected-rejection cost by 6× and hit the test timeout.
         const outcome = await harness.evaluate(async () => {
+          interface WizzApi { requestAccounts?(): Promise<unknown> }
+          const wizz = (window as unknown as { wizz?: WizzApi }).wizz;
+          if (!wizz?.requestAccounts) return { ok: true, info: 'no requestAccounts surface' };
           try {
-            const info = await window.ordpoolSdkHarness.connectWizz();
-            return { ok: true, info };
+            const accs = await wizz.requestAccounts();
+            return { ok: true, accs };
           } catch (e) {
-            return { ok: false, err: String((e as Error).message || e) };
+            const err = e as { code?: number; message?: string; toString?: () => string };
+            return {
+              ok: false,
+              code: err?.code,
+              err: err?.message ?? err?.toString?.() ?? JSON.stringify(err),
+            };
           }
         });
         console.log(`[wizz-matrix:${variant.label}] fixture-gated outcome = ${JSON.stringify(outcome).slice(0, 200)}`);
         expect(outcome.ok).toBe(false);
-        expect(outcome.err).toMatch(/-32603|Connection error/);
+        expect(JSON.stringify(outcome)).toMatch(/-32603|Connection error/);
       } else {
         const knownPages = new Set(context.pages());
         const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
