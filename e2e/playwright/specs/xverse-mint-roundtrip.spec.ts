@@ -145,6 +145,15 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   }, undefined, { timeout: 60_000, polling: 500 });
   await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
   const wallet = await connectResultPromise;
+  // Xverse leaves the connect popup tab open after approval; in CI
+  // it then displays the wallet dashboard. When signTransaction
+  // fires later, Xverse sometimes reuses that tab — but our
+  // `knownPagesAtStart` snapshot below would filter it, so
+  // waitForApprovalPopup never sees the "Review transaction" page
+  // and times out at 120s. Closing it forces Xverse to open a
+  // fresh tab for the sign step, which `context.on('page')`
+  // reliably catches.
+  await approvalConnect.close().catch(() => undefined);
   // eslint-disable-next-line no-console
   console.log(`[mint] payment = ${wallet.paymentAddress}  ordinals = ${wallet.ordinalsAddress}`);
   expect(wallet.paymentAddress).toMatch(/^bcrt1q/);
