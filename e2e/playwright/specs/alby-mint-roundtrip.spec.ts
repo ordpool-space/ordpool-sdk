@@ -319,14 +319,15 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   // — i.e. wire-format raw tx hex, NOT signed-PSBT hex. The
   // {signed: <string>} response from the WebBTC layer wraps that
   // wire-tx hex.
-  // Iter 102 surfaced: popup #5 shows a "buffer length" error toast
-  // and a stuck loading spinner — Alby's PSBT parser rejected our
-  // base64. Per WebBTC docs and LaserEyes' alby provider, Alby's
-  // signPsbt expects HEX. Send hex with a 45s timeout so we see
-  // either success or a clean error.
+  // Iter 103 popup-5-after-click.png showed the exact rejection:
+  //   "Error: signPsbt failed: Sighash type is not allowed.
+  //    Retry the sign method passing the sighashTypes array
+  //    of whitelisted types. Sighash type: SIGHASH_ALL"
+  // Alby refuses to sign unless the caller explicitly whitelists
+  // the sighash types it intends to sign. Pass [1] = SIGHASH_ALL.
   const signResult = await harness.evaluate(async ({ psbtHex }) => {
     interface WebBtcApi {
-      signPsbt(psbt: string): Promise<{ signed: string } | string>;
+      signPsbt(psbt: string, opts?: { sighashTypes?: number[] }): Promise<{ signed: string } | string>;
     }
     interface AlbyApi {
       enable(): Promise<void>;
@@ -347,7 +348,11 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
       }
     };
 
-    const r = await withTimeout(alby.webbtc.signPsbt(psbtHex), 45_000, 'signPsbt(hex)');
+    const r = await withTimeout(
+      alby.webbtc.signPsbt(psbtHex, { sighashTypes: [1] }),
+      45_000,
+      'signPsbt',
+    );
     return { ok: 'hex', res: r };
   }, { psbtHex });
   console.log(`[alby-mint] signPsbt response = ${JSON.stringify(signResult).slice(0, 400)}`);
