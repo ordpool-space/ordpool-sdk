@@ -2,16 +2,20 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
 
 /**
- * Iteration 3 of the OKX E2E pipeline: SDK ↔ OKX handshake.
+ * Pipeline B handshake for Alby: seed the wallet via SW messages
+ * (the only mnemonic-import path Alby exposes — the UI is
+ * Lightning-first and has no BIP-39 input flow), then drive
+ * albyConnector.connect through the harness and assert the
+ * returned address matches the canonical BIP-86 mainnet test
+ * vector for our test seed.
  *
- * OKX is a multi-chain wallet but the Bitcoin path follows a
- * single-address-per-wallet contract (like Unisat / Wizz). The SDK
- * connector populates both paymentAddress and ordinalsAddress from
- * the same Bitcoin address; we assert the BIP-84 derivation for the
- * abandon-seed.
+ * Seeds with bitcoinNetwork:"bitcoin" (mainnet) so the derivation
+ * path is m/86'/0'/0'/0/0 — that's the BIP-86 vector our
+ * EXPECTED_MAINNET_TAPROOT comes from. Different from the mint
+ * roundtrip spec which uses bitcoinNetwork:"regtest" to enable
+ * funding from a local bitcoind.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/alby');
@@ -19,13 +23,17 @@ const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
 const TEST_PASSWORD = 'TestPassword123!';
 
-const EXPECTED_PAYMENT_ADDRESS = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
+// BIP-86 mainnet test-vector first address for the abandon×11+about
+// seed at m/86'/0'/0'/0/0. Same value published in BIP-86's
+// "Test vectors" → "Account 0, second receiving address" is bc1p4qhj...,
+// but the FIRST receiving address (m/86'/0'/0'/0/0) is this one.
+const EXPECTED_MAINNET_TAPROOT = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
 
 let context: BrowserContext;
 let extensionId: string;
+let seedPage: Page;
 
 async function shot(p: Page, name: string): Promise<void> {
   await p.screenshot({
@@ -34,52 +42,46 @@ async function shot(p: Page, name: string): Promise<void> {
   }).catch(() => undefined);
 }
 
-async function onboardAlby(page: Page): Promise<void> {
-  // page may already be the auto-opened onboarding tab from beforeAll.
-  if (page.url() === 'about:blank') {
-    await page.setViewportSize({ width: 400, height: 800 });
-    await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
-  }
+/**
+ * Seed an Alby mnemonic account by firing the three internal SW
+ * actions (setPassword → addAccount → setMnemonic) inside one
+ * page.evaluate. Same flow alby-mint-roundtrip uses; full
+ * archaeology of how this envelope was reverse-engineered lives
+ * in that spec's comment block.
+ */
+async function seedAlbyAccount(page: Page, bitcoinNetwork: 'bitcoin' | 'regtest'): Promise<string> {
+  const result = await page.evaluate(async ({ password, mnemonic, bitcoinNetwork }) => {
+    const c = (globalThis as unknown as { chrome: { runtime: {
+      sendMessage: (msg: unknown) => Promise<unknown>;
+    } } }).chrome;
+    const send = (action: string, args: Record<string, unknown>) =>
+      c.runtime.sendMessage({
+        application: 'LBE',
+        prompt: true,
+        action,
+        args,
+        origin: { internal: true },
+      }) as Promise<{ data?: unknown; error?: string } | null>;
 
-  // Alby: passcode-first flow.
-  await expect(page.getByText('Set extension unlock passcode', { exact: false })).toBeVisible({ timeout: 30_000 });
-  const passcodeInputs = page.locator('input[type="password"]');
-  await expect(passcodeInputs.first()).toBeVisible({ timeout: 10_000 });
-  await passcodeInputs.nth(0).fill(TEST_PASSWORD);
-  await passcodeInputs.nth(1).fill(TEST_PASSWORD);
-  const passcodeNext = page.getByRole('button', { name: /^next$/i });
-  await expect(passcodeNext).toBeEnabled({ timeout: 10_000 });
-  await passcodeNext.click();
+    await send('setPassword', { password });
+    const addAccResp = await send('addAccount', {
+      name: 'ordpool-handshake',
+      connector: 'lndhub',
+      config: { url: 'https://example.invalid', login: 'x', password: 'x' },
+      bitcoinNetwork,
+    }) as { data?: { accountId: string }; error?: string } | null;
+    const accountId = addAccResp?.data?.accountId;
+    if (accountId) await send('setMnemonic', { id: accountId, mnemonic });
+    return accountId;
+  }, { password: TEST_PASSWORD, mnemonic: TEST_MNEMONIC, bitcoinNetwork });
 
-  // "Connect Alby Extension to a wallet" → click "Find Your Wallet"
-  // button on the Bring Your Own Wallet card.
-  const findWalletBtn = page.getByRole('button', { name: 'Find Your Wallet' });
-  await expect(findWalletBtn).toBeVisible({ timeout: 20_000 });
-  await findWalletBtn.click();
-
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"], textarea');
-  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
-  const inputCount = await mnemonicInputs.count();
-  if (inputCount >= 12) {
-    for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-      await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
-    }
-  } else {
-    await mnemonicInputs.first().fill(TEST_MNEMONIC);
-  }
-  const importBtn = page.getByRole('button', { name: /^(confirm|continue|next|import|restore|finish)$/i }).first();
-  await expect(importBtn).toBeEnabled({ timeout: 15_000 });
-  await importBtn.click();
-
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('account');
-  }, undefined, { timeout: 60_000, polling: 500 });
+  if (!result) throw new Error('Alby addAccount returned no accountId');
+  return result;
 }
 
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
-    throw new Error(`OKX extension not unpacked at ${EXT_PATH}.`);
+    throw new Error(`Alby extension not unpacked at ${EXT_PATH}. Run e2e/playwright/playwright-bootstrap.sh.`);
   }
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
@@ -99,33 +101,53 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // Alby auto-opens its onboarding (options.html) in a new tab on
-  // first install. Prefer that page; fall back to a manual newPage
-  // if no auto-open happens.
-  let onboardPage: Page;
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    onboardPage = await context.newPage();
-  }
+  seedPage = await context.newPage();
+  // Alby's React welcome wizard on options.html calls window.close()
+  // on first paint — block it so the seedPage survives the evaluate.
+  // Scoped to seedPage only so Alby's permission/sign popups can
+  // close themselves later.
+  await seedPage.addInitScript(() => {
+    try {
+      Object.defineProperty(window, 'close', { value: () => undefined, writable: false, configurable: false });
+    } catch { /* ignore */ }
+  });
+  await seedPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
+  await seedPage.waitForFunction(() => true, undefined, { timeout: 2_000 }).catch(() => undefined);
 
   test.setTimeout(180_000);
-  await onboardAlby(onboardPage);
-  await shot(onboardPage, '00-onboarded');
+  await seedAlbyAccount(seedPage, 'bitcoin');
+  await shot(seedPage, '00-after-seed');
 });
 
 test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped — Alby's UI has no BIP-39 mnemonic import path (Lightning-
-// first, requires Alby Hub / NWC backend that's not provisionable on CI).
-// See alby-onboard.spec.ts for the full reasoning.
-test.skip('albyConnector.connect via the harness page returns the BIP-84 mainnet address for the test seed', async () => {
+test('albyConnector.connect via the harness page returns the BIP-86 mainnet Taproot address for the test seed', async () => {
   test.setTimeout(180_000);
+
+  // alby.enable() opens a permission popup; auto-click any Alby
+  // chrome-extension popup that has a Connect / Confirm button.
+  // Wait out the lndhub-validation error toast (~6s) before
+  // clicking so the click lands on the real button, not the toast.
+  let popupCount = 0;
+  context.on('page', async (popup) => {
+    const idx = ++popupCount;
+    try {
+      await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+      if (!popup.url().startsWith('chrome-extension://')) return;
+      await shot(popup, `popup-${idx}-loaded`).catch(() => undefined);
+      await popup.waitForTimeout(6_000);
+      const btn = popup.locator('button', { hasText: /^(connect|allow|confirm|approve)$/i }).first();
+      await btn.waitFor({ state: 'visible', timeout: 5_000 });
+      await btn.click({ timeout: 5_000 });
+      // eslint-disable-next-line no-console
+      console.log(`[alby-handshake] auto-clicked popup #${idx}`);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.log(`[alby-handshake] popup #${idx} skipped: ${String(e).slice(0, 120)}`);
+    }
+  });
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
@@ -134,33 +156,15 @@ test.skip('albyConnector.connect via the harness page returns the BIP-84 mainnet
     undefined,
     { timeout: 15_000 },
   );
+  await shot(harness, '01-harness-loaded');
 
-  const knownPages = new Set(context.pages());
-  const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
-  resultPromise.catch(() => undefined);
-
-  // OKX's approval surface — try URL-anchor first, then fall back to
-  // a generic "Connect/Approve" button on any new chrome-extension page.
-  const approval = await waitForApprovalPopup({
-    context,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
-      return true;
-    },
-  });
-  await shot(approval, '01-approval');
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
-
-  const info = await resultPromise;
+  const info = await harness.evaluate(() => window.ordpoolSdkHarness.connectAlby());
   // eslint-disable-next-line no-console
-  console.log(`[alby:sdk-handshake] paymentAddress = ${info.paymentAddress}`);
+  console.log(`[alby-handshake] paymentAddress = ${info.paymentAddress}`);
 
+  expect(info.paymentAddress).toBe(EXPECTED_MAINNET_TAPROOT);
+  // Alby's webbtc.getAddress maps to both lanes — same Taproot
+  // identity for payment and ordinals.
+  expect(info.ordinalsAddress).toBe(EXPECTED_MAINNET_TAPROOT);
   expect(info.signingSupported).toBe(true);
-  expect(info.paymentAddress).toBe(EXPECTED_PAYMENT_ADDRESS);
-  // OKX single-address contract: ordinalsAddress mirrors payment.
-  expect(info.ordinalsAddress).toBe(EXPECTED_PAYMENT_ADDRESS);
-  expect(info.paymentPublicKey).toMatch(/^[0-9a-f]{66}$/);
 });

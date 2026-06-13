@@ -11,36 +11,42 @@ import {
 } from '../wallet.service.types';
 
 
-interface AlbyBtcApi {
+interface WebBtcApi {
+  enable?(): Promise<void>;
   getAddress(): Promise<{ address: string; publicKey: string } | string>;
 }
 
-interface AlbyWeblnApi {
-  enable(): Promise<void>;
-  getInfo(): Promise<{
+interface WebLnApi {
+  enable?(): Promise<void>;
+  getInfo?(): Promise<{
     node?: { alias?: string; pubkey?: string };
     alby?: { lightning_address?: string };
   }>;
-  getBitcoin?(): AlbyBtcApi;
+}
+
+interface AlbyApi {
+  enable(): Promise<void>;
+  webbtc?: WebBtcApi;
+  webln?: WebLnApi;
 }
 
 
 /**
- * Alby — `window.alby.enable()` + WebBTC BTC sub-provider via
- * `getBitcoin()`.
+ * Alby — `window.alby.enable()` + WebBTC sub-provider at
+ * `alby.webbtc.getAddress()`.
  *
- * Alby implements three WebBTC methods (`getInfo`, `signPsbt`,
- * `getAddress`) on its BTC sub-provider. Address + signing
- * functionality both delegate to whichever on-chain backend the
- * user has wired up to their Alby account — Alby Hub, Mutiny,
- * etc. Users on a Lightning-only Alby account get runtime errors
- * from getAddress/signPsbt.
+ * Verified iter 99 against background.bundle.js v3.14.2: alby's
+ * sub-providers are `webbtc` / `webln` / `nostr` / `liquid`.
+ * Methods live on the prototype: webbtc has `getInfo`, `signPsbt`,
+ * `getAddress`, `sendTransaction`, `request`. There is no v2-style
+ * `alby.getBitcoin()` and no top-level `alby.getInfo()`.
  *
- * Our connector tries the on-chain path (getBitcoin().getAddress)
- * and uses the BTC address when available. If the call fails or
- * the BTC sub-provider isn't there, we fall back to the user's
- * Lightning address from getInfo() — usable for sign-in
- * identification even when L1 isn't.
+ * Address derivation uses Alby's on-chain Taproot path
+ * (m/86'/0'/0'/0/0 on mainnet, m/86'/1'/0'/0/0 on regtest/testnet)
+ * from the user's BIP-39 mnemonic. Users with only a custodial
+ * Lightning account get an error from webbtc.getAddress; we fall
+ * back to the user's Lightning address from webln.getInfo() — still
+ * useful for sign-in identification, just not for receiving sats.
  *
  * `signingSupported: true` at the SDK level — the alby signer is
  * registered. Runtime behaviour determines whether actual signing
@@ -57,32 +63,41 @@ export const albyConnector: WalletConnector = {
   },
 
   connect(_network: Network): Observable<WalletInfo> {
-    const alby = (window as unknown as { alby: AlbyWeblnApi }).alby;
+    const alby = (window as unknown as { alby: AlbyApi }).alby;
     const p = (async () => {
       await alby.enable();
-      const info = await alby.getInfo();
-      const lnAddr = info?.alby?.lightning_address ?? info?.node?.alias ?? '';
-      const lnPubkey = info?.node?.pubkey ?? '';
 
-      // Try the on-chain BTC sub-provider. Failure (no backend
-      // wired up) is fine — we fall back to the LN identity.
+      // Try the on-chain BTC sub-provider first. Failure (no
+      // backend wired up, no Bitcoin account, etc.) is fine — we
+      // fall back to the Lightning identity below.
       let onchainAddress = '';
       let onchainPubkey = '';
       try {
-        const btc = alby.getBitcoin?.();
-        if (btc) {
-          const res = await btc.getAddress();
-          // Alby's getAddress contract: returns either a plain
-          // string (older variants) or {address, publicKey}. Normalise.
-          if (typeof res === 'string') {
-            onchainAddress = res;
-          } else if (res && typeof res === 'object') {
-            onchainAddress = res.address ?? '';
-            onchainPubkey  = res.publicKey ?? '';
-          }
+        if (alby.webbtc?.enable) await alby.webbtc.enable();
+        const res = await alby.webbtc?.getAddress();
+        if (typeof res === 'string') {
+          onchainAddress = res;
+        } else if (res && typeof res === 'object') {
+          onchainAddress = res.address ?? '';
+          onchainPubkey  = res.publicKey ?? '';
         }
       } catch {
         // No on-chain backend → keep onchainAddress empty, fall through.
+      }
+
+      let lnAddr = '';
+      let lnPubkey = '';
+      if (!onchainAddress) {
+        try {
+          if (alby.webln?.enable) await alby.webln.enable();
+          const info = await alby.webln?.getInfo?.();
+          lnAddr = info?.alby?.lightning_address ?? info?.node?.alias ?? '';
+          lnPubkey = info?.node?.pubkey ?? '';
+        } catch {
+          // No Lightning backend either — leave empty; consumer
+          // sees the empty paymentAddress and can surface its own
+          // "wallet not configured" message.
+        }
       }
 
       const address = onchainAddress || lnAddr;
