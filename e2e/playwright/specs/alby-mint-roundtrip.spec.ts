@@ -319,12 +319,11 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   // — i.e. wire-format raw tx hex, NOT signed-PSBT hex. The
   // {signed: <string>} response from the WebBTC layer wraps that
   // wire-tx hex.
-  // Iter 101 reached signPsbt with the Confirm popup auto-clicked,
-  // then hung 5min. Suspect: Alby can't match the PSBT inputs to
-  // its own m/86'/1'/0'/0/0 key (missing tapInternalKey /
-  // tapBip32Derivation) OR signPsbt expects base64 not hex. Wrap
-  // each variant in a 30s timeout so the failure mode is visible
-  // instead of a 5-min hang. Try base64 first (Alby's docs).
+  // Iter 102 surfaced: popup #5 shows a "buffer length" error toast
+  // and a stuck loading spinner — Alby's PSBT parser rejected our
+  // base64. Per WebBTC docs and LaserEyes' alby provider, Alby's
+  // signPsbt expects HEX. Send hex with a 45s timeout so we see
+  // either success or a clean error.
   const signResult = await harness.evaluate(async ({ psbtHex }) => {
     interface WebBtcApi {
       signPsbt(psbt: string): Promise<{ signed: string } | string>;
@@ -335,18 +334,6 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
     }
     const alby = (window as unknown as { alby: AlbyApi }).alby;
     await alby.enable();
-
-    const hexToBytes = (hex: string): Uint8Array => {
-      const out = new Uint8Array(hex.length / 2);
-      for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
-      return out;
-    };
-    const bytesToBase64 = (bytes: Uint8Array): string => {
-      let bin = '';
-      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-      return btoa(bin);
-    };
-    const psbtBase64 = bytesToBase64(hexToBytes(psbtHex));
 
     const withTimeout = async <T>(p: Promise<T>, ms: number, tag: string): Promise<T> => {
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -360,13 +347,8 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
       }
     };
 
-    try {
-      const r = await withTimeout(alby.webbtc.signPsbt(psbtBase64), 30_000, 'signPsbt(base64)');
-      return { ok: 'base64', res: r };
-    } catch (e) {
-      const r = await withTimeout(alby.webbtc.signPsbt(psbtHex), 30_000, 'signPsbt(hex)');
-      return { ok: 'hex', res: r, base64Error: String(e).slice(0, 200) };
-    }
+    const r = await withTimeout(alby.webbtc.signPsbt(psbtHex), 45_000, 'signPsbt(hex)');
+    return { ok: 'hex', res: r };
   }, { psbtHex });
   console.log(`[alby-mint] signPsbt response = ${JSON.stringify(signResult).slice(0, 400)}`);
 
