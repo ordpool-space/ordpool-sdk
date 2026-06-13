@@ -319,15 +319,15 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   // — i.e. wire-format raw tx hex, NOT signed-PSBT hex. The
   // {signed: <string>} response from the WebBTC layer wraps that
   // wire-tx hex.
-  // Iter 103 popup-5-after-click.png showed the exact rejection:
-  //   "Error: signPsbt failed: Sighash type is not allowed.
-  //    Retry the sign method passing the sighashTypes array
-  //    of whitelisted types. Sighash type: SIGHASH_ALL"
-  // Alby refuses to sign unless the caller explicitly whitelists
-  // the sighash types it intends to sign. Pass [1] = SIGHASH_ALL.
-  const signResult = await harness.evaluate(async ({ psbtHex }) => {
+  // Iter 104 cleared the sighash check but signing hangs. Likely
+  // Alby's WebBTC signPsbt mirrors Unisat's API and needs explicit
+  // signInputs telling it WHICH input to sign with WHICH key. Pass
+  // both signInputs and sighashTypes.
+  const signResult = await harness.evaluate(async ({ psbtHex, address }) => {
+    interface SignInput { address: string; signingIndexes: number[] }
+    interface SignOpts { sighashTypes?: number[]; signInputs?: SignInput[]; autoFinalized?: boolean }
     interface WebBtcApi {
-      signPsbt(psbt: string, opts?: { sighashTypes?: number[] }): Promise<{ signed: string } | string>;
+      signPsbt(psbt: string, opts?: SignOpts): Promise<{ signed: string } | string>;
     }
     interface AlbyApi {
       enable(): Promise<void>;
@@ -349,12 +349,16 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
     };
 
     const r = await withTimeout(
-      alby.webbtc.signPsbt(psbtHex, { sighashTypes: [1] }),
+      alby.webbtc.signPsbt(psbtHex, {
+        sighashTypes: [1],
+        signInputs: [{ address, signingIndexes: [0] }],
+        autoFinalized: true,
+      }),
       45_000,
       'signPsbt',
     );
     return { ok: 'hex', res: r };
-  }, { psbtHex });
+  }, { psbtHex, address: connectInfo.address });
   console.log(`[alby-mint] signPsbt response = ${JSON.stringify(signResult).slice(0, 400)}`);
 
   // Per Alby's source, `signed` is wire-tx hex (already finalised).
