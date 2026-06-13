@@ -254,16 +254,35 @@ window.ordpoolSdkHarness = {
     statusEl().textContent = `connecting to wizz…`;
     // wizzConnector.connect ignores the network arg (network is
     // selected via the wallet UI, like Unisat).
+    //
+    // Wizz's per-tab session router (background.js byte 2285200)
+    // rejects requestAccounts with -32603 "Connection error,
+    // please try again" while `tabCheckin` is in-flight — the
+    // wallet itself is telling us to retry. The bug is fatal for
+    // a single-shot caller because tabCheckin can take several
+    // hundred ms after window.wizz appears + getNetwork resolves.
+    //
+    // Retry on -32603 only; any other rejection propagates so we
+    // don't mask real bugs. Crucially, the popup hasn't opened on
+    // a -32603 (we see no approval URL on the failing attempts in
+    // CI), so retrying doesn't orphan a stale popup.
     let info;
-    try {
-      info = await firstValueFrom(wizzConnector.connect(Network.Mainnet));
-    } catch (e) {
-      // Surface the wallet's actual error shape — Wizz's
-      // requestAccounts rejects with an Object (e.g. {code, message})
-      // that Playwright stringifies to "Object" if we propagate it
-      // unchanged. Rewrap as a real Error so the upstream stack
-      // includes a readable message.
-      const err = e as { code?: number; message?: string; toString?: () => string };
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      try {
+        info = await firstValueFrom(wizzConnector.connect(Network.Mainnet));
+        if (attempt > 1) log('connectWizz.recovered', { attempt });
+        break;
+      } catch (e) {
+        lastErr = e;
+        const err = e as { code?: number };
+        if (err?.code !== -32603) break;
+        log('connectWizz.retry-32603', { attempt });
+        await new Promise(r => setTimeout(r, 500));
+      }
+    }
+    if (!info) {
+      const err = lastErr as { code?: number; message?: string; toString?: () => string };
       const msg = err?.message ?? err?.toString?.() ?? JSON.stringify(err);
       const code = err?.code !== undefined ? ` (code=${err.code})` : '';
       throw new Error(`wizzConnector.connect rejected${code}: ${msg}`);
