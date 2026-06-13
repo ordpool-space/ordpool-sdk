@@ -140,17 +140,19 @@ export interface KnownOrdinalWallet {
   onChainOrdinals?: boolean;
 }
 
+import { walletLogos } from './wallet-logos';
+
 export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalWallet } = {
   [KnownOrdinalWalletType.xverse]: {
     type: KnownOrdinalWalletType.xverse,
     label: 'Xverse',
-    logo: '/resources/ordinal-wallets/btc-xverse-logo.png',
+    logo: walletLogos.xverse,
     downloadLink: 'https://www.xverse.app/download'
   },
   [KnownOrdinalWalletType.leather]: {
     type: KnownOrdinalWalletType.leather,
     label: 'Leather',
-    logo: '/resources/ordinal-wallets/btc-leather-logo.png',
+    logo: walletLogos.leather,
     // Was /install-extension, but that path now 404s — Leather archived it
     // (leather.io/install redirects to /old-page/install-extension).
     // Homepage is the stable CTA.
@@ -160,38 +162,38 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     type: KnownOrdinalWalletType.unisat,
     label: 'Unisat',
     // subLabel: '(not fully supported)',
-    logo: '/resources/ordinal-wallets/btc-unisat-logo.svg',
+    logo: walletLogos.unisat,
     downloadLink: 'https://unisat.io/download'
   },
   [KnownOrdinalWalletType.wizz]: {
     type: KnownOrdinalWalletType.wizz,
     label: 'Wizz',
-    logo: '/resources/ordinal-wallets/btc-wizz-logo.svg',
+    logo: walletLogos.wizz,
     downloadLink: 'https://wizzwallet.io/',
   },
   [KnownOrdinalWalletType.okx]: {
     type: KnownOrdinalWalletType.okx,
     label: 'OKX',
-    logo: '/resources/ordinal-wallets/btc-okx-logo.svg',
+    logo: walletLogos.okx,
     downloadLink: 'https://web3.okx.com/download',
   },
   [KnownOrdinalWalletType.phantom]: {
     type: KnownOrdinalWalletType.phantom,
     label: 'Phantom',
-    logo: '/resources/ordinal-wallets/btc-phantom-logo.svg',
+    logo: walletLogos.phantom,
     downloadLink: 'https://phantom.com/download',
   },
   [KnownOrdinalWalletType.oyl]: {
     type: KnownOrdinalWalletType.oyl,
     label: 'Oyl',
-    logo: '/resources/ordinal-wallets/btc-oyl-logo.svg',
+    logo: walletLogos.oyl,
     downloadLink: 'https://oyl.io/',
   },
   [KnownOrdinalWalletType.alby]: {
     type: KnownOrdinalWalletType.alby,
     label: 'Alby',
     subLabel: 'Lightning + Nostr (not on-chain ordinals)',
-    logo: '/resources/ordinal-wallets/btc-alby-logo.svg',
+    logo: walletLogos.alby,
     downloadLink: 'https://getalby.com/',
     onChainOrdinals: false,
   },
@@ -199,14 +201,14 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     type: KnownOrdinalWalletType.binance,
     label: 'Binance Wallet',
     subLabel: 'API documented but not exposed in v1.17.2 — surfaces only if Binance enables it',
-    logo: '/resources/ordinal-wallets/btc-binance-logo.svg',
+    logo: walletLogos.binance,
     downloadLink: 'https://www.binance.com/en/web3wallet',
   },
   [KnownOrdinalWalletType.xpub]: {
     type: KnownOrdinalWalletType.xpub,
     label: 'Watch-only (xpub)',
     subLabel: 'Sparrow, Electrum, Coldcard, Ledger, Trezor, …',
-    logo: '/resources/ordinal-wallets/btc-xpub-logo.svg',
+    logo: walletLogos.xpub,
     downloadLink: '',
   },
 };
