@@ -206,12 +206,17 @@ const WIZZ_CONFIGS_FIXTURE: Record<string, string> | null = (() => {
 
 for (const variant of VARIANTS) {
   const isP2TR = variant.label.startsWith('P2TR');
-  // P2TR runs only when the captured-fixture replay is available.
-  // Without the fixture an abort/empty response causes the
-  // documented -32603 "Connection error" — skip is the right call.
-  const skipP2TR = isP2TR && !WIZZ_CONFIGS_FIXTURE;
-  const testFn = skipP2TR ? test.skip : test;
-  testFn(`SDK returns the right address for Wizz ${variant.label}`, async () => {
+  // P2TR has two modes depending on whether the captured-fixture
+  // replay is available:
+  //   - Fixture present → positive assertion that the wallet
+  //     returns variant.expectedAddress
+  //   - Fixture absent  → positive assertion that the wallet
+  //     rejects with the documented -32603 "Connection error"
+  // We never skip. The fixture-absent case pins Wizz's current
+  // network-dependent behaviour; when the fixture lands, the test
+  // automatically switches to the positive-address branch.
+  const expectFixtureGatedFailure = isP2TR && !WIZZ_CONFIGS_FIXTURE;
+  test(`SDK returns the right address for Wizz ${variant.label}`, async () => {
     test.setTimeout(180_000);
 
     const context = await chromium.launchPersistentContext('', {
@@ -309,25 +314,43 @@ for (const variant of VARIANTS) {
       // eslint-disable-next-line no-console
       console.log(`[wizz-matrix:${variant.label}] window.wizz detected on harness = ${wizzVisible}`);
 
-      const knownPages = new Set(context.pages());
-      const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
-      // Race popup-wait against connectWizz. If connectWizz rejects
-      // fast (wallet returned an error without showing a popup), we
-      // see THAT error instead of the misleading "popup did not
-      // appear within 60s" timeout.
-      const info = await Promise.race([
-        resultPromise,
-        approveConnectPopup(context, knownPages, variantTag).then(() => resultPromise),
-      ]);
+      if (expectFixtureGatedFailure) {
+        // Positive assertion that without the captured
+        // configs.wizz.cash payload, the wallet's per-tab session
+        // router rejects requestAccounts with -32603. The error
+        // surfaces through the harness's connectWizz wrapper.
+        const outcome = await harness.evaluate(async () => {
+          try {
+            const info = await window.ordpoolSdkHarness.connectWizz();
+            return { ok: true, info };
+          } catch (e) {
+            return { ok: false, err: String((e as Error).message || e) };
+          }
+        });
+        console.log(`[wizz-matrix:${variant.label}] fixture-gated outcome = ${JSON.stringify(outcome).slice(0, 200)}`);
+        expect(outcome.ok).toBe(false);
+        expect(outcome.err).toMatch(/-32603|Connection error/);
+      } else {
+        const knownPages = new Set(context.pages());
+        const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
+        // Race popup-wait against connectWizz. If connectWizz rejects
+        // fast (wallet returned an error without showing a popup), we
+        // see THAT error instead of the misleading "popup did not
+        // appear within 60s" timeout.
+        const info = await Promise.race([
+          resultPromise,
+          approveConnectPopup(context, knownPages, variantTag).then(() => resultPromise),
+        ]);
 
-      // eslint-disable-next-line no-console
-      console.log(`[wizz-matrix:${variant.label}] address = ${info.paymentAddress}`);
-      await shot(harness, `${variant.rowLabel.replace(/[^a-z0-9]+/gi, '-')}-after-connect`);
+        // eslint-disable-next-line no-console
+        console.log(`[wizz-matrix:${variant.label}] address = ${info.paymentAddress}`);
+        await shot(harness, `${variant.rowLabel.replace(/[^a-z0-9]+/gi, '-')}-after-connect`);
 
-      expect(info.paymentAddress).toBe(variant.expectedAddress);
-      // Wizz's single-address contract (inherited from Unisat):
-      // ordinalsAddress mirrors paymentAddress.
-      expect(info.ordinalsAddress).toBe(variant.expectedAddress);
+        expect(info.paymentAddress).toBe(variant.expectedAddress);
+        // Wizz's single-address contract (inherited from Unisat):
+        // ordinalsAddress mirrors paymentAddress.
+        expect(info.ordinalsAddress).toBe(variant.expectedAddress);
+      }
     } finally {
       await context.close();
     }

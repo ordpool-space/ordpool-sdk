@@ -2,10 +2,6 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
-
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardPhantom } from '../onboard-phantom';
 
 /**
@@ -30,8 +26,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/phantom');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
-const FUND_AMOUNT_BTC = 0.001;
-
 let context: BrowserContext;
 let extensionId: string;
 
@@ -40,21 +34,6 @@ async function shot(p: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `phantom-mint-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-async function approveGeneric(ctx: BrowserContext, knownPages: Set<Page>, timeoutMs = 60_000): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    timeoutMs,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow|sign)$/i }).first()
-        .waitFor({ state: 'visible', timeout: timeoutMs });
-      return true;
-    },
-  });
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow|sign)$/i }).first().click();
 }
 
 test.beforeAll(async () => {
@@ -190,8 +169,16 @@ test.afterAll(async () => {
 // Web Store version): the SW still throws
 // `Me: btc_requestAccounts isn't implemented`. See
 // phantom-sdk-handshake.spec.ts for the full empirical writeup.
-test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phantom popup, broadcast via local electrs', async () => {
-  test.setTimeout(300_000);
+// Pin Phantom's current desktop-build reality: the mint roundtrip
+// can't even start because phantomConnector.connect rejects (SW
+// has no btc_* handlers). See phantom-sdk-handshake for the full
+// reverse-engineering writeup. This test runs instead of being
+// skipped — it asserts the connect rejection so we get a positive
+// signal that pins the wallet's current state. If Phantom enables
+// the SW handlers, this test flips red and we know to rewrite
+// the spec as a full mint roundtrip.
+test('phantom v26.16: mint roundtrip blocked at connect step (SW lacks btc_* handlers)', async () => {
+  test.setTimeout(180_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
@@ -215,62 +202,28 @@ test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phant
   console.log(`[phantom-mint] window.phantom on harness after reload = ${JSON.stringify(phantomVisible)}`);
   await shot(harness, '01-harness-loaded');
 
-  const connectKnownPages = new Set(context.pages());
-  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectPhantom());
-  await approveGeneric(context, connectKnownPages, 60_000);
-  const wallet = await connectResultPromise;
-  await closeLeftoverExtensionPages(context, connectKnownPages);
-  console.log(`[phantom-mint] payment = ${wallet.paymentAddress}`);
-  console.log(`[phantom-mint] ordinals = ${wallet.ordinalsAddress}`);
-  expect(wallet.paymentAddress).toBe('bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu');
-  expect(wallet.ordinalsAddress).toBe('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr');
+  // The self-registration of btc.js (in beforeAll) means window
+  // .phantom.bitcoin DID appear and detection succeeds.
+  expect(phantomVisible.hasPhantom).toBe(true);
+  expect(phantomVisible.hasBitcoin).toBe(true);
 
-  const regtest = await harness.evaluate(
-    (pk: string) => window.ordpoolSdkHarness.deriveRegtestAddresses(pk),
-    wallet.paymentPublicKey,
-  );
-  console.log(`[phantom-mint] regtest payment = ${regtest.paymentAddress}`);
-  console.log(`[phantom-mint] regtest ordinals = ${regtest.ordinalsAddress}`);
-
-  const fundTxid = rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', regtest.paymentAddress, String(FUND_AMOUNT_BTC)).trim();
-  console.log(`[phantom-mint] funded ${regtest.paymentAddress} with ${FUND_AMOUNT_BTC} BTC in tx ${fundTxid}`);
-  const newTip = mineBlocks(1);
-  await waitForElectrsSync(newTip);
-
-  const utxos = await getUtxos(regtest.paymentAddress);
-  const utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
-  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${regtest.paymentAddress}`);
-  console.log(`[phantom-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
-
-  const signKnownPages = new Set(context.pages());
-  const signedHexPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignMintViaPhantom(args),
-    {
-      utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
-      paymentAddress: regtest.paymentAddress,
-      paymentPublicKey: wallet.paymentPublicKey,
-      recipientAddress: regtest.ordinalsAddress,
-      feeSats: 1500,
-    },
-  );
-  await approveGeneric(context, signKnownPages, 90_000);
-  const signed = await signedHexPromise;
-  console.log(`[phantom-mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
-
-  const broadcastTxid = await postTx(signed.txHex);
-  console.log(`[phantom-mint] broadcast txid = ${broadcastTxid}`);
-  expect(broadcastTxid).toMatch(/^[0-9a-f]{64}$/);
-
-  const confirmedTip = mineBlocks(1);
-  await waitForElectrsSync(confirmedTip);
-  const esploraTx = await getTx(broadcastTxid);
-  console.log(`[phantom-mint] locktime=${esploraTx.locktime}`);
-  expect(esploraTx.locktime).toBe(21);
-  assertAllInputsSighashAll(esploraTx);
-
-  const parsed = Cat21ParserService.parse(esploraTx);
-  expect(parsed).not.toBeNull();
-  expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
-  expect(parsed!.transactionId).toBe(broadcastTxid);
-  expect(parsed!.getImage()).toMatch(/^<svg/);
+  // But connect rejects — SW has no btc_requestAccounts handler.
+  const connectOutcome = await harness.evaluate(async () => {
+    try {
+      const info = await window.ordpoolSdkHarness.connectPhantom();
+      return { ok: true, info };
+    } catch (e) {
+      return { ok: false, err: String((e as Error).message || e) };
+    }
+  });
+  console.log(`[phantom-mint] connectPhantom outcome = ${JSON.stringify(connectOutcome).slice(0, 300)}`);
+  expect(connectOutcome.ok).toBe(false);
+  expect(connectOutcome.err).toMatch(/btc_requestAccounts isn't implemented|not permitted/);
 });
+
+// Reference addresses for the day Phantom ships BTC support and
+// we rewrite this spec as a full mint roundtrip. Source: BIP-84
+// m/84'/0'/0'/0/0 + BIP-86 m/86'/0'/0'/0/0 for the abandon×11+
+// about test seed.
+//   payment  (P2WPKH): bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu
+//   ordinals (P2TR):   bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr

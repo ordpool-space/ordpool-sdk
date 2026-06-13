@@ -2,8 +2,6 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
-
 /**
  * Iteration 3 of the Phantom E2E pipeline: SDK ↔ Phantom handshake.
  *
@@ -476,7 +474,24 @@ test.afterAll(async () => {
 // handlers ahead of the Wallet-Standard migration (per the
 // docs.phantom.com/bitcoin/* deprecation banner) without
 // shipping the new surface yet.
-test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BIP-86 mainnet addresses for the test seed', async () => {
+// Pin Phantom's current desktop-build reality (v26.16.0, verified
+// iter 82 + reconfirmed iter 113): the bundle SHIPS btc.js but the
+// SW never registers it as a content script and the SW has no
+// btc_* method handlers. Our iter-72 self-registration restores
+// window.phantom.bitcoin on the harness, but the SW still rejects
+// `btc_requestAccounts` with "isn't implemented".
+//
+// The original speculation that this would return BIP-84/86
+// addresses was based on docs.phantom.com/bitcoin/* which is
+// banner-deprecated and never matched the actual SW.
+//
+// This test exists to pin THAT REALITY: detection works
+// (phantomConnector.detect returns true after btc.js
+// re-registration), but the connect path rejects with the documented
+// error. If Phantom finally ships the SW handlers, this test
+// flips red and we know to rewrite it against whatever real
+// addresses they return.
+test('phantom v26.16: detect succeeds (post self-registration) but phantomConnector.connect rejects because the SW has no btc_* handlers', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();
@@ -517,35 +532,39 @@ test.skip('phantomConnector.connect via the harness page returns the BIP-84 + BI
   });
   console.log(`[phantom:sdk-handshake] phantomTimeline = ${JSON.stringify(phantomTimeline)}`);
 
-  const knownPages = new Set(context.pages());
-  const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectPhantom());
-  resultPromise.catch(() => undefined);
+  // window.phantom.bitcoin DID appear (self-registration succeeded).
+  const lastSnapshot = phantomTimeline[phantomTimeline.length - 1];
+  expect(lastSnapshot).toBeDefined();
+  expect(lastSnapshot.hasPhantom).toBe(true);
+  expect(lastSnapshot.hasBitcoin).toBe(true);
 
-  const approval = await waitForApprovalPopup({
-    context,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
-      return true;
-    },
+  // Detection should pass via the SDK's own predicate.
+  const detected = await harness.evaluate(() => window.ordpoolSdkHarness.detectPhantom());
+  expect(detected).toBe(true);
+
+  // But the actual connect call REJECTS because Phantom's SW has
+  // no btc_* handlers. Pin the rejection message so we're alerted
+  // the moment Phantom enables BTC support and the test starts
+  // failing — at which point rewrite this against the real addresses.
+  const connectOutcome = await harness.evaluate(async () => {
+    try {
+      const info = await window.ordpoolSdkHarness.connectPhantom();
+      return { ok: true, info };
+    } catch (e) {
+      return { ok: false, err: String((e as Error).message || e) };
+    }
   });
-  await shot(approval, '01-approval');
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
+  console.log(`[phantom:sdk-handshake] connectPhantom outcome = ${JSON.stringify(connectOutcome).slice(0, 300)}`);
 
-  const info = await resultPromise;
-  // eslint-disable-next-line no-console
-  console.log(`[phantom:sdk-handshake] payment = ${info.paymentAddress}`);
-  // eslint-disable-next-line no-console
-  console.log(`[phantom:sdk-handshake] ordinals = ${info.ordinalsAddress}`);
-
-  expect(info.signingSupported).toBe(true);
-  expect(info.paymentAddress).toBe(EXPECTED_PAYMENT_ADDRESS);
-  expect(info.ordinalsAddress).toBe(EXPECTED_ORDINALS_ADDRESS);
-  // Payment pubkey = compressed sec256k1 = 33 bytes = 66 hex.
-  expect(info.paymentPublicKey).toMatch(/^[0-9a-f]{66}$/);
-  // Ordinals pubkey is x-only (32 bytes = 64 hex) — Phantom returns
-  // compressed but the SDK normalises to x-only for consistency.
-  expect(info.ordinalsPublicKey).toMatch(/^[0-9a-f]{64}$/);
+  expect(connectOutcome.ok).toBe(false);
+  // Phantom's two documented rejection shapes for an unimplemented
+  // SW method (depending on whether the call routes through the
+  // in-page provider or directly to runtime).
+  expect(connectOutcome.err).toMatch(/btc_requestAccounts isn't implemented|not permitted/);
 });
+
+// Reference values that the speculative original test asserted.
+// Kept for the day Phantom actually wires up BTC support and we
+// rewrite the test above to consume them.
+void EXPECTED_PAYMENT_ADDRESS;
+void EXPECTED_ORDINALS_ADDRESS;
