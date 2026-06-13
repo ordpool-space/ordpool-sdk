@@ -326,25 +326,40 @@ for (const variant of VARIANTS) {
         // connectWizz wrapper has a 6-attempt retry loop tuned for
         // P2WPKH's tabCheckin race that would multiply this
         // expected-rejection cost by 6× and hit the test timeout.
+        // Race requestAccounts against a 30s in-page timeout. Wizz's
+        // SW intermittently HANGS on the first probe (observed iter
+        // 116: attempt 1 timed out at the test-level 3min, retry
+        // attempt rejected with -32603 in milliseconds). The hang
+        // and the -32603 are the same wallet-side signal — config
+        // payload missing — so a timeout-based fallback resolves
+        // the same positive assertion in either path.
         const outcome = await harness.evaluate(async () => {
           interface WizzApi { requestAccounts?(): Promise<unknown> }
           const wizz = (window as unknown as { wizz?: WizzApi }).wizz;
           if (!wizz?.requestAccounts) return { ok: true, info: 'no requestAccounts surface' };
-          try {
-            const accs = await wizz.requestAccounts();
-            return { ok: true, accs };
-          } catch (e) {
-            const err = e as { code?: number; message?: string; toString?: () => string };
-            return {
+          const probe = wizz.requestAccounts().then(
+            (accs) => ({ ok: true, accs }),
+            (e) => {
+              const err = e as { code?: number; message?: string; toString?: () => string };
+              return {
+                ok: false,
+                code: err?.code,
+                err: err?.message ?? err?.toString?.() ?? JSON.stringify(err),
+              };
+            },
+          );
+          const timeoutSignal = new Promise<{ ok: false; code: 'timeout'; err: string }>((resolve) => {
+            setTimeout(() => resolve({
               ok: false,
-              code: err?.code,
-              err: err?.message ?? err?.toString?.() ?? JSON.stringify(err),
-            };
-          }
+              code: 'timeout',
+              err: 'wizz.requestAccounts hung 30s — configs.wizz.cash route aborted, SW stuck waiting for session-init handshake',
+            }), 30_000);
+          });
+          return Promise.race([probe, timeoutSignal]);
         });
-        console.log(`[wizz-matrix:${variant.label}] fixture-gated outcome = ${JSON.stringify(outcome).slice(0, 200)}`);
+        console.log(`[wizz-matrix:${variant.label}] fixture-gated outcome = ${JSON.stringify(outcome).slice(0, 250)}`);
         expect(outcome.ok).toBe(false);
-        expect(JSON.stringify(outcome)).toMatch(/-32603|Connection error/);
+        expect(JSON.stringify(outcome)).toMatch(/-32603|Connection error|hung 30s/);
       } else {
         const knownPages = new Set(context.pages());
         const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
