@@ -13,7 +13,7 @@
 import { firstValueFrom } from 'rxjs';
 import { signTransaction } from 'sats-connect';
 import { base64 } from '@scure/base';
-import { p2wpkh, p2tr } from '@scure/btc-signer';
+import { p2wpkh, p2tr, Transaction } from '@scure/btc-signer';
 
 import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector';
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
@@ -843,27 +843,32 @@ window.ordpoolSdkHarness.buildAndSignMintViaPhantom = async (input: MintRequest)
 };
 
 window.ordpoolSdkHarness.buildCat21TaprootPsbt = (input) => {
-  const txnOutput: TxnOutput = {
-    txid:  input.utxo.txid,
-    vout:  input.utxo.vout,
-    value: input.utxo.value,
-  };
-  // Route through the unisat path with a P2TR address; createInput
-  // ScriptForUnisat already handles the Taproot case (x-only pubkey
-  // + p2tr key-spend). Recipient mirrors the input address (cat21
-  // mints a sat back to the same wallet for self-mint flows).
-  const paymentPubkey = hexToBytes(input.taprootPublicKey);
-  const result = createTransaction(
-    KnownOrdinalWalletType.unisat,
-    input.taprootAddress,
-    txnOutput,
-    paymentPubkey,
-    input.taprootAddress,
-    BigInt(input.feeSats),
-    false,
-    Network.Regtest,
-  );
-  const psbtHex = bytesToHex(result.tx.toPSBT());
+  // Direct scure build (NOT via createTransaction) — Alby's
+  // bitcoinjs-lib signer rejects sighashType:SIGHASH_ALL on
+  // Taproot inputs because bitcoinjs-lib's default whitelist only
+  // accepts SIGHASH_DEFAULT (0) unless the caller passes
+  // allowedSighashTypes. Alby's webbtc/signPsbt doesn't pass it.
+  // So we OMIT sighashType on the input — scure / bitcoinjs both
+  // treat absence as SIGHASH_DEFAULT for Taproot, which encodes
+  // identically to SIGHASH_ALL on the wire for key-path spends.
+  const pubkey = hexToBytes(input.taprootPublicKey);
+  const xOnly = pubkey.length === 33 ? pubkey.slice(1) : pubkey;
+  const network = toScureNetwork(Network.Regtest);
+  const p2trOut = p2tr(xOnly, undefined, network, true);
+
+  const tx = new Transaction({ lockTime: 21 });
+  tx.addInput({
+    txid: input.utxo.txid,
+    index: input.utxo.vout,
+    witnessUtxo: { script: p2trOut.script, amount: BigInt(input.utxo.value) },
+    tapInternalKey: xOnly,
+    // no sighashType — defaults to SIGHASH_DEFAULT
+  });
+  tx.addOutput({
+    script: p2trOut.script,
+    amount: BigInt(input.utxo.value - input.feeSats),
+  });
+  const psbtHex = bytesToHex(tx.toPSBT());
   log('mint.taproot-psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
   return { psbtHex };
 };
