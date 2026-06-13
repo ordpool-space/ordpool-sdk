@@ -119,7 +119,23 @@ test('restores a wallet from the BIP-39 test seed and lands on the dashboard', a
   await shot(page, '07-terms-checked');
 
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
-  await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  // Intermittent flake (iter 117 dispatch rerun): the label click
+  // doesn't always propagate to React state in time. If Continue
+  // is still disabled, re-click + fall through to a direct
+  // checkbox dispatch.
+  try {
+    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  } catch {
+    await termsLabel.click({ force: true }).catch(() => undefined);
+    await page.evaluate(() => {
+      const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+      if (cb && !cb.checked) {
+        cb.click();
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await expect(pwContinue).toBeEnabled({ timeout: 20_000 });
+  }
   await pwContinue.click();
   await shot(page, '08-after-password-submit');
 

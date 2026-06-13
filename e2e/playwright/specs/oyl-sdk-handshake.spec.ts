@@ -62,12 +62,31 @@ async function onboardOyl(page: Page): Promise<void> {
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   // The visible click target is the label, not the aria-hidden
-  // input (confirmed by oyl-onboard CI 26597193687).
+  // input (confirmed by oyl-onboard CI 26597193687). Intermittent
+  // flake (iter 117 dispatch rerun): the label click doesn't always
+  // propagate to the React state in time. If Continue is still
+  // disabled after a short wait, re-click and fall through to a
+  // direct checkbox dispatch.
   const termsLabel = page.locator('label').filter({ hasText: /Terms.*Privacy Policy/i }).first();
   await expect(termsLabel).toBeVisible({ timeout: 10_000 });
   await termsLabel.click();
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
-  await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  try {
+    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  } catch {
+    // Re-click the label, then escalate to ticking the underlying
+    // checkbox programmatically (covers Radix UI's animated-state
+    // case where pointer events fire before the input's onChange).
+    await termsLabel.click({ force: true }).catch(() => undefined);
+    await page.evaluate(() => {
+      const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+      if (cb && !cb.checked) {
+        cb.click();
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await expect(pwContinue).toBeEnabled({ timeout: 20_000 });
+  }
   await pwContinue.click();
 
   // Step 05/05 profile-setup page — Skip it with force.

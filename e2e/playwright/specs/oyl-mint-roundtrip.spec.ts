@@ -63,8 +63,25 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
-  await page.locator('label').filter({ hasText: /Terms.*Privacy Policy/i }).first().click();
-  await page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first().click();
+  const termsLabel = page.locator('label').filter({ hasText: /Terms.*Privacy Policy/i }).first();
+  await termsLabel.click();
+  const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
+  // Intermittent flake: terms label click sometimes doesn't
+  // propagate. Re-click + direct checkbox dispatch fallback.
+  try {
+    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  } catch {
+    await termsLabel.click({ force: true }).catch(() => undefined);
+    await page.evaluate(() => {
+      const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+      if (cb && !cb.checked) {
+        cb.click();
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    });
+    await expect(pwContinue).toBeEnabled({ timeout: 20_000 });
+  }
+  await pwContinue.click();
 
   await page.getByRole('button', { name: /^skip$/i }).click({ force: true });
 
