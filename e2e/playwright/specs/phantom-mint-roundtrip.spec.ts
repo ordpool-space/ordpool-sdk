@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
+import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup } from '../approval-popup';
 import { onboardPhantom } from '../onboard-phantom';
 
@@ -265,6 +265,7 @@ test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phant
   const esploraTx = await getTx(broadcastTxid);
   console.log(`[phantom-mint] locktime=${esploraTx.locktime}`);
   expect(esploraTx.locktime).toBe(21);
+  assertAllInputsSighashAll(esploraTx);
 
   const parsed = Cat21ParserService.parse(esploraTx);
   expect(parsed).not.toBeNull();

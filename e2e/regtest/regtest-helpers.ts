@@ -112,3 +112,60 @@ export async function getTx(txid: string): Promise<EsploraTx> {
   if (!res.ok) throw new Error(`tx fetch failed: ${res.status} ${await res.text()}`);
   return res.json() as Promise<EsploraTx>;
 }
+
+
+interface EsploraVin {
+  witness?: string[];
+  scriptsig?: string;
+  prevout?: { scriptpubkey_type?: string };
+  is_coinbase?: boolean;
+}
+
+/**
+ * Throws unless every signed input in `tx` commits to all outputs
+ * under SIGHASH_ALL semantics. Used by every cat21 mint roundtrip
+ * spec — a SIGHASH_NONE / SINGLE / ANYONECANPAY signature on the
+ * mint input would let a relay-or-miner-side counterparty swap the
+ * outputs (and steal the cat sat) while keeping the lockTime=21
+ * commitment intact.
+ *
+ * Encoding per BIP-341 / BIP-143 / Bitcoin legacy:
+ *  - Taproot key-path (witness item 0 is the Schnorr sig):
+ *      64 bytes → SIGHASH_DEFAULT (encodes identically to
+ *                 SIGHASH_ALL on the wire — both commit to all
+ *                 outputs; the explicit-default form is shorter)
+ *      65 bytes → last byte is the sighash flag; must be 0x01
+ *  - ECDSA SegWit (P2WPKH, witness item 0 is DER sig + sighash):
+ *      last byte of the sig must be 0x01
+ *  - Legacy P2PKH (scriptsig starts with a push of DER sig):
+ *      last byte of the pushed sig must be 0x01
+ */
+export function assertAllInputsSighashAll(tx: EsploraTx): void {
+  for (let i = 0; i < tx.vin.length; i++) {
+    const input = tx.vin[i] as EsploraVin;
+    if (input.is_coinbase) continue;
+    const witness = input.witness ?? [];
+    if (witness.length > 0) {
+      const sigHex = witness[0];
+      const isTaproot = input.prevout?.scriptpubkey_type === 'v1_p2tr';
+      if (isTaproot) {
+        if (sigHex.length === 128) continue;
+        if (sigHex.length === 130) {
+          const flag = sigHex.slice(-2);
+          if (flag === '01') continue;
+          throw new Error(`Input ${i}: Taproot sighash flag 0x${flag} (expected 0x01 = SIGHASH_ALL)`);
+        }
+        throw new Error(`Input ${i}: Taproot sig wrong length ${sigHex.length / 2} bytes (expected 64 or 65)`);
+      }
+      const flag = sigHex.slice(-2);
+      if (flag !== '01') throw new Error(`Input ${i}: SegWit sighash flag 0x${flag} (expected 0x01 = SIGHASH_ALL)`);
+    } else if (input.scriptsig) {
+      const ss = input.scriptsig;
+      const pushLen = parseInt(ss.slice(0, 2), 16);
+      const sigEnd = (1 + pushLen) * 2;
+      const sigHex = ss.slice(2, sigEnd);
+      const flag = sigHex.slice(-2);
+      if (flag !== '01') throw new Error(`Input ${i}: Legacy sighash flag 0x${flag} (expected 0x01 = SIGHASH_ALL)`);
+    }
+  }
+}

@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
+import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup } from '../approval-popup';
 
 /**
@@ -266,6 +266,7 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   console.log(`[mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);
   expect(esploraTx.status.block_hash).toBeTruthy();
+  assertAllInputsSighashAll(esploraTx);
 
   const parsed = Cat21ParserService.parse(esploraTx);
   expect(parsed).not.toBeNull();

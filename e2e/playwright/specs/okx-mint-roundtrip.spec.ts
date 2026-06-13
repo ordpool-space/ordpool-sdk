@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx } from '../../regtest/regtest-helpers';
+import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 
@@ -293,6 +293,7 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
   console.log(`[okx-mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);
   expect(esploraTx.status.block_hash).toBeTruthy();
+  assertAllInputsSighashAll(esploraTx);
 
   const parsed = Cat21ParserService.parse(esploraTx);
   expect(parsed).not.toBeNull();

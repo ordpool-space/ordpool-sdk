@@ -39,6 +39,30 @@ interface AlbyApi {
  * because the API is technically present; the runtime backend
  * check is the user's responsibility.
  *
+ * **Two Alby quirks every caller must respect** (verified iter 108
+ * against background.bundle.js):
+ *
+ * 1. **Alby signs EVERY input in the PSBT, no opt-in.** The
+ *    background-script's `bitcoin.signPsbt` does
+ *    `psbt.data.inputs.forEach(i => psbt.signTaprootInput(i, key))`
+ *    with the user's single key at `m/86'/1'/0'/0/0`. There is no
+ *    `signInputs` / `toSignInputs` knob — those args are dropped on
+ *    the floor. Caller MUST only hand Alby a PSBT whose inputs are
+ *    all the user's own UTXOs. A multi-party / collab-swap PSBT
+ *    will either throw on the first non-matching input or blindly
+ *    sign with the user's key. For our cat21 mint (1 input, owner's
+ *    own UTXO, owner-pays-fee) this is fine.
+ *
+ * 2. **The Taproot input MUST be built with SIGHASH_DEFAULT.**
+ *    Alby's signer doesn't pass `allowedSighashTypes` to
+ *    bitcoinjs-lib's `signTaprootInput`, so bitcoinjs's default
+ *    whitelist rejects anything other than SIGHASH_DEFAULT (0).
+ *    PSBTs built with `sighashType: SIGHASH_ALL` get
+ *    `Sighash type is not allowed. Sighash type: SIGHASH_ALL`.
+ *    For Taproot key-path the two encode identically on the wire
+ *    (both commit to all outputs), so SIGHASH_DEFAULT is the
+ *    correct + only working choice.
+ *
  * Targets the Alby Browser Extension. Alby Go (mobile) doesn't
  * inject in-page providers — it uses NWC deeplinks, a completely
  * different integration model that this signer doesn't cover.
