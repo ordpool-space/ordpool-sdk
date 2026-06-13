@@ -319,9 +319,15 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   // — i.e. wire-format raw tx hex, NOT signed-PSBT hex. The
   // {signed: <string>} response from the WebBTC layer wraps that
   // wire-tx hex.
-  const signResult = await harness.evaluate(async (psbtHex: string) => {
+  // Iter 101 reached signPsbt with the Confirm popup auto-clicked,
+  // then hung 5min. Suspect: Alby can't match the PSBT inputs to
+  // its own m/86'/1'/0'/0/0 key (missing tapInternalKey /
+  // tapBip32Derivation) OR signPsbt expects base64 not hex. Wrap
+  // each variant in a 30s timeout so the failure mode is visible
+  // instead of a 5-min hang. Try base64 first (Alby's docs).
+  const signResult = await harness.evaluate(async ({ psbtHex }) => {
     interface WebBtcApi {
-      signPsbt(psbtHex: string): Promise<{ signed: string }>;
+      signPsbt(psbt: string): Promise<{ signed: string } | string>;
     }
     interface AlbyApi {
       enable(): Promise<void>;
@@ -329,14 +335,47 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
     }
     const alby = (window as unknown as { alby: AlbyApi }).alby;
     await alby.enable();
-    const res = await alby.webbtc.signPsbt(psbtHex);
-    return res;
-  }, psbtHex);
-  console.log(`[alby-mint] signPsbt response = ${JSON.stringify(signResult).slice(0, 200)}`);
+
+    const hexToBytes = (hex: string): Uint8Array => {
+      const out = new Uint8Array(hex.length / 2);
+      for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.substr(i * 2, 2), 16);
+      return out;
+    };
+    const bytesToBase64 = (bytes: Uint8Array): string => {
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    };
+    const psbtBase64 = bytesToBase64(hexToBytes(psbtHex));
+
+    const withTimeout = async <T>(p: Promise<T>, ms: number, tag: string): Promise<T> => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const timeout = new Promise<never>((_, rej) => {
+        timeoutId = setTimeout(() => rej(new Error(`${tag} timed out after ${ms}ms`)), ms);
+      });
+      try {
+        return await Promise.race([p, timeout]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
+
+    try {
+      const r = await withTimeout(alby.webbtc.signPsbt(psbtBase64), 30_000, 'signPsbt(base64)');
+      return { ok: 'base64', res: r };
+    } catch (e) {
+      const r = await withTimeout(alby.webbtc.signPsbt(psbtHex), 30_000, 'signPsbt(hex)');
+      return { ok: 'hex', res: r, base64Error: String(e).slice(0, 200) };
+    }
+  }, { psbtHex });
+  console.log(`[alby-mint] signPsbt response = ${JSON.stringify(signResult).slice(0, 400)}`);
 
   // Per Alby's source, `signed` is wire-tx hex (already finalised).
   // Broadcast directly via local electrs.
-  const broadcastTxid = await postTx(signResult.signed);
+  // signResult.res may be { signed: <wire-tx-hex> } per Alby's
+  // source (extractTransaction().toHex()), OR a bare string.
+  const signed = typeof signResult.res === 'string' ? signResult.res : signResult.res.signed;
+  const broadcastTxid = await postTx(signed);
   console.log(`[alby-mint] broadcast txid = ${broadcastTxid}`);
   expect(broadcastTxid).toMatch(/^[0-9a-f]{64}$/);
 
