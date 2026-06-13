@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardPhantom } from '../onboard-phantom';
 
 /**
@@ -219,6 +219,7 @@ test.skip('mint a cat21 on regtest via Phantom: build PSBT in SDK, sign in Phant
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectPhantom());
   await approveGeneric(context, connectKnownPages, 60_000);
   const wallet = await connectResultPromise;
+  await closeLeftoverExtensionPages(context, connectKnownPages);
   console.log(`[phantom-mint] payment = ${wallet.paymentAddress}`);
   console.log(`[phantom-mint] ordinals = ${wallet.ordinalsAddress}`);
   expect(wallet.paymentAddress).toBe('bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu');

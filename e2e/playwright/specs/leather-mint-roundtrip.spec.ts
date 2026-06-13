@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
  * Iteration 4 — full cat21 mint roundtrip with the real Leather
@@ -160,6 +160,7 @@ test('mint a cat21 on regtest via Leather: build PSBT in SDK, sign in popup (net
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectLeather());
   await approveConnectPopup(context, connectKnownPages);
   const wallet = await connectResultPromise;
+  await closeLeftoverExtensionPages(context, connectKnownPages);
   // eslint-disable-next-line no-console
   console.log(`[leather-mint] mainnet payment = ${wallet.paymentAddress}`);
   // BIP-84 m/84'/0'/0'/0/0 derivation of `abandon × 11 + about` on

@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 
 /**
@@ -216,6 +216,11 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
   await approveConnectPopup(context, connectKnownPages);
   const wallet = await connectResultPromise;
+  // Close any extension popups left over from the connect step
+  // (OKX leaves a "Connected" notification tab open which races
+  // against the sign popup). Wallet result already resolved, so
+  // we're not interrupting a mid-handshake handover.
+  await closeLeftoverExtensionPages(context, connectKnownPages);
   console.log(`[okx-mint] mainnet payment = ${wallet.paymentAddress}`);
   // OKX default = BIP-86 Taproot.
   expect(wallet.paymentAddress).toBe('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr');

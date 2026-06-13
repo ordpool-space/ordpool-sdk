@@ -87,3 +87,31 @@ export async function waitForApprovalPopup(opts: {
     for (const p of context.pages()) void tryPage(p);
   });
 }
+
+
+/**
+ * Close every chrome-extension page in the context except those
+ * in `keep`. Defensive — wallets like Xverse, OKX, Phantom, Alby
+ * routinely leave a "Connected" dashboard tab open after approval,
+ * which then races against the next sign popup (sometimes the
+ * wallet reuses that tab; sometimes it opens a fresh one). The
+ * `knownPages` filter inside `waitForApprovalPopup` excludes the
+ * dashboard, so if the wallet reuses it, the test times out
+ * waiting for a sign popup that's actually rendering on the
+ * filtered tab.
+ *
+ * Always call this AFTER the connect/approval result resolved —
+ * we never close a popup that's still mid-handshake with the
+ * wallet's SW, only ones that already did their job.
+ */
+export async function closeLeftoverExtensionPages(
+  context: BrowserContext,
+  keep: Iterable<Page>,
+): Promise<void> {
+  const keepSet = new Set(keep);
+  for (const p of context.pages()) {
+    if (keepSet.has(p)) continue;
+    if (!p.url().startsWith('chrome-extension://')) continue;
+    await p.close().catch(() => undefined);
+  }
+}

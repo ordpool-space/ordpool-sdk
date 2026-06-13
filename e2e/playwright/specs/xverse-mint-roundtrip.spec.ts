@@ -6,7 +6,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse

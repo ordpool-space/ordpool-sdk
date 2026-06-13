@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
  * Iteration 5 — full cat21 mint roundtrip with the real Oyl
@@ -152,6 +152,7 @@ test('mint a cat21 on regtest via Oyl: build PSBT in SDK, sign in popup (mainnet
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOyl());
   await approveOylPopup(context, connectKnownPages);
   const wallet = await connectResultPromise;
+  await closeLeftoverExtensionPages(context, connectKnownPages);
   console.log(`[oyl-mint] mainnet payment = ${wallet.paymentAddress}`);
   console.log(`[oyl-mint] mainnet ordinals = ${wallet.ordinalsAddress}`);
   expect(wallet.paymentAddress).toBe('bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu');
