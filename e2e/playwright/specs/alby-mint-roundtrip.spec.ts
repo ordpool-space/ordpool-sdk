@@ -50,12 +50,13 @@ const HARNESS_URL = 'http://localhost:4500/';
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_PASSWORD = 'TestPassword123!';
 
-// Alby's m/86'/1'/0'/0/0 for the abandon×11+about seed on regtest.
-// Verified by deriving the same path with @scure/btc-signer in the
-// harness; if Alby instead returns the mainnet path
-// (m/86'/0'/0'/0/0), the assertion below catches it and we know
-// the seed step failed to write `bitcoinNetwork: "regtest"`.
-const EXPECTED_REGTEST_TAPROOT = 'bcrt1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
+// Alby v3.14.2's m/86'/1'/0'/0/0 derivation for the abandon×11+
+// about seed (bitcoinNetwork: "regtest" → testnet coin-type). Value
+// observed in iter 100 with the actual extension binary. Earlier
+// iterations hard-coded the m/86'/0'/0'/0/0 (mainnet path) value
+// by mistake — same x-only key visually familiar from BIP-86 test
+// vectors but Alby honours its bitcoinNetwork: regtest setting.
+const EXPECTED_REGTEST_TAPROOT = 'bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg';
 
 const FUND_AMOUNT_BTC = 0.001;
 
