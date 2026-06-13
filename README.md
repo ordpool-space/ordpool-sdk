@@ -26,7 +26,7 @@ Detection is signature-based: whatever exposes the expected `window.<wallet>` gl
 | Wizz | ✅ (P2WPKH path; P2TR matrix needs the wallet's CDN we can't reach from CI) |
 | OKX | ✅ |
 | Oyl | ✅ |
-| Alby | partial — loads / onboard / handshake / getAddress green; mint roundtrip blocked at signPsbt step (Alby's SW signer never returns from the Confirm popup; see `alby-mint-roundtrip.spec.ts` for the full investigation) |
+| Alby | ✅ (full mint roundtrip — see `alby-mint-roundtrip.spec.ts` for the workaround: bypass Alby's confirm-popup UI by hitting the internal `webbtc/signPsbt` SW route directly from an extension-origin page) |
 | Phantom | **Untested — see note below** |
 | Binance Wallet | **Untested — see note below** |
 | Watch-only (xpub) | ✅ (Sparrow, Electrum, Coldcard, Ledger, Trezor, Specter, Bitcoin Core via PSBT paste) |
