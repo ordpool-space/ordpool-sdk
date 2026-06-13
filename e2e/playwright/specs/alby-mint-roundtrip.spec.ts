@@ -190,25 +190,34 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
     const idx = ++popupCount;
     try {
       await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
-      // Skip non-Alby popups (e.g. the harness page itself).
       if (!popup.url().startsWith('chrome-extension://')) return;
-      // Take a debug screenshot before we touch it.
       await shot(popup, `popup-${idx}-loaded`).catch(() => undefined);
-      // Wait for React to actually paint something — Alby's prompt
-      // route renders async after a SW round-trip for dApp metadata.
-      await popup.waitForTimeout(800);
-      const btn = popup.getByRole('button', { name: /connect|allow|confirm|approve|sign/i }).first();
-      await btn.waitFor({ state: 'visible', timeout: 10_000 });
-      // force:true bypasses actionability checks — the Connect
-      // button can be enabled but covered by a transient modal/
-      // skeleton during render.
-      await btn.click({ force: true, timeout: 5_000 });
+      // Iter 97 screenshots showed a transient error toast ("API
+      // error https://example.invalid") covering the Connect button.
+      // Source: our dummy lndhub config triggers an auto-validate
+      // balance fetch that fails — harmless but the toast occludes
+      // clicks for ~5s. Wait it out, then enumerate buttons so we
+      // can pick the actual Connect by aria/text rather than first-
+      // matching anything.
+      await popup.waitForTimeout(6_000);
+      const buttons = await popup.locator('button').all();
+      const labels: string[] = [];
+      for (const b of buttons) {
+        const text = (await b.textContent().catch(() => '') ?? '').trim();
+        const aria = (await b.getAttribute('aria-label').catch(() => null)) ?? '';
+        labels.push(`"${text}"${aria ? `[aria=${aria}]` : ''}`);
+      }
       // eslint-disable-next-line no-console
-      console.log(`[alby-mint] auto-clicked popup #${idx}: ${popup.url().slice(0, 80)}`);
+      console.log(`[alby-mint] popup #${idx} buttons: ${labels.join(' | ')}`);
+      const connect = popup.locator('button', { hasText: /^(connect|allow|confirm|approve|sign)$/i }).first();
+      await connect.waitFor({ state: 'visible', timeout: 5_000 });
+      await connect.click({ timeout: 5_000 });
+      // eslint-disable-next-line no-console
+      console.log(`[alby-mint] clicked Connect on popup #${idx}: ${popup.url().slice(0, 80)}`);
       await shot(popup, `popup-${idx}-after-click`).catch(() => undefined);
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.log(`[alby-mint] popup #${idx} auto-click skipped: ${String(e).slice(0, 120)}`);
+      console.log(`[alby-mint] popup #${idx} auto-click skipped: ${String(e).slice(0, 200)}`);
       await shot(popup, `popup-${idx}-failed`).catch(() => undefined);
     }
   });
