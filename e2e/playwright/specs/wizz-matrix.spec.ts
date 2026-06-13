@@ -236,7 +236,11 @@ for (const variant of VARIANTS) {
     //     WIZZ_CONFIGS_FIXTURE block above for capture procedure).
     //     Taproot derivation reads what it needs from the replayed
     //     response; popup dispatches normally.
-    if (variant.label.startsWith('P2WPKH')) {
+    if (variant.label.startsWith('P2WPKH') || (isP2TR && !WIZZ_CONFIGS_FIXTURE)) {
+      // P2WPKH derivation is local — abort the network request so
+      // it doesn't slow CI down. P2TR without the fixture: abort
+      // so the SW reaches its -32603 rejection FAST rather than
+      // hanging on a multi-minute network timeout.
       await context.route('**/configs.wizz.cash/**', route => route.abort());
     } else if (isP2TR && WIZZ_CONFIGS_FIXTURE) {
       await context.route('**/configs.wizz.cash/**', route => {

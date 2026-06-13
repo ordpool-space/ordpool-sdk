@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 1 — full cat21 mint roundtrip with the real Alby
@@ -297,9 +297,7 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   const newTip = mineBlocks(1);
   await waitForElectrsSync(newTip);
 
-  const utxos = await getUtxos(connectInfo.address);
-  const utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
-  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${connectInfo.address}`);
+  const utxo = await waitForUtxoAt(connectInfo.address, Math.round(FUND_AMOUNT_BTC * 1e8));
   console.log(`[alby-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
   // Build a Taproot-input cat21 mint PSBT in the harness. The

@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
@@ -217,19 +217,7 @@ test('mint a cat21 on regtest via Wizz: build PSBT in SDK, sign in popup (mainne
   const newTip = mineBlocks(1);
   await waitForElectrsSync(newTip);
 
-  // Tip sync via waitForElectrsSync says the block is indexed, but
-  // address-history endpoints occasionally lag behind by a poll
-  // interval. Retry the UTXO lookup with a short backoff before giving
-  // up — race observed in iter 45.
-  const utxoDeadline = Date.now() + 30_000;
-  let utxo;
-  while (Date.now() < utxoDeadline) {
-    const utxos = await getUtxos(regtest.paymentAddress);
-    utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
-    if (utxo) break;
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${regtest.paymentAddress} within 30s`);
+  const utxo = await waitForUtxoAt(regtest.paymentAddress, Math.round(FUND_AMOUNT_BTC * 1e8), 30_000);
   console.log(`[wizz-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
   const signKnownPages = new Set(context.pages());

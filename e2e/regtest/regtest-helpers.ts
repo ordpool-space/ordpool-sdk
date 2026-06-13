@@ -55,6 +55,30 @@ export async function waitForElectrsSync(targetHeight: number, timeoutMs = 15_00
   throw new Error(`electrs didn't reach height ${targetHeight} within ${timeoutMs}ms`);
 }
 
+/**
+ * Wait for at least one UTXO to appear at `address` worth exactly
+ * `expectedSats`. `waitForElectrsSync` only guarantees the block
+ * tip is at the target height — electrs still needs additional
+ * time to index that block's transactions into per-address UTXO
+ * sets. The xverse / wizz / okx mint specs all hit this race
+ * intermittently before this helper landed.
+ */
+export async function waitForUtxoAt(
+  address: string,
+  expectedSats: number,
+  timeoutMs = 15_000,
+): Promise<ElectrsUtxo> {
+  const deadline = Date.now() + timeoutMs;
+  let lastUtxos: ElectrsUtxo[] = [];
+  while (Date.now() < deadline) {
+    lastUtxos = await getUtxos(address);
+    const hit = lastUtxos.find(u => u.value === expectedSats);
+    if (hit) return hit;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  throw new Error(`UTXO of ${expectedSats} sats at ${address} didn't appear within ${timeoutMs}ms; got ${JSON.stringify(lastUtxos)}`);
+}
+
 export interface ElectrsUtxo {
   txid: string;
   vout: number;

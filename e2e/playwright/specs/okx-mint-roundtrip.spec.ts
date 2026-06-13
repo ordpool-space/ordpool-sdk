@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 
@@ -241,9 +241,7 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
   const newTip = mineBlocks(1);
   await waitForElectrsSync(newTip);
 
-  const utxos = await getUtxos(paymentBcrt1p);
-  const utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
-  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${paymentBcrt1p}`);
+  const utxo = await waitForUtxoAt(paymentBcrt1p, Math.round(FUND_AMOUNT_BTC * 1e8));
   console.log(`[okx-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
   const signedHexPromise = harness.evaluate(

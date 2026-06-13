@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
@@ -170,9 +170,7 @@ test('mint a cat21 on regtest via Oyl: build PSBT in SDK, sign in popup (mainnet
   const newTip = mineBlocks(1);
   await waitForElectrsSync(newTip);
 
-  const utxos = await getUtxos(regtest.paymentAddress);
-  const utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
-  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${regtest.paymentAddress}`);
+  const utxo = await waitForUtxoAt(regtest.paymentAddress, Math.round(FUND_AMOUNT_BTC * 1e8));
   console.log(`[oyl-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
   if (onboardedDashboard) await onboardedDashboard.bringToFront();

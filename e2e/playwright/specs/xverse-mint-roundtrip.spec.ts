@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { getUtxos, waitForElectrsSync, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
@@ -168,10 +168,10 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   const newTip = mineBlocks(1);
   await waitForElectrsSync(newTip);
 
-  const utxos = await getUtxos(wallet.paymentAddress);
-  expect(utxos.length).toBeGreaterThan(0);
-  const utxo = utxos.find(u => u.value === Math.round(FUND_AMOUNT_BTC * 1e8));
-  if (!utxo) throw new Error(`could not find ${FUND_AMOUNT_BTC} BTC UTXO at ${wallet.paymentAddress}; got ${JSON.stringify(utxos)}`);
+  // waitForElectrsSync only proves the block tip moved; electrs
+  // still needs time to index the tx into per-address UTXO sets.
+  // Use the explicit poll so we don't intermittently miss it.
+  const utxo = await waitForUtxoAt(wallet.paymentAddress, Math.round(FUND_AMOUNT_BTC * 1e8));
   // eslint-disable-next-line no-console
   console.log(`[mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
