@@ -231,20 +231,36 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   );
   await shot(harness, '01-harness-loaded');
 
+  // Enumerate window.alby's actual API surface — iter 98 confirmed
+  // alby.getBitcoin() (v2 API) is gone in v3.14.2. Log what's there.
+  const apiSurface = await harness.evaluate(() => {
+    const w = window as unknown as Record<string, unknown>;
+    const alby = w.alby as Record<string, unknown> | undefined;
+    const webln = w.webln as Record<string, unknown> | undefined;
+    const nostr = w.nostr as Record<string, unknown> | undefined;
+    return {
+      alby: alby ? Object.keys(alby) : null,
+      albyBitcoin: alby?.bitcoin ? Object.keys(alby.bitcoin as object) : null,
+      webln: webln ? Object.keys(webln) : null,
+      weblnBitcoin: webln?.bitcoin ? Object.keys(webln.bitcoin as object) : null,
+      nostr: nostr ? Object.keys(nostr) : null,
+    };
+  });
+  console.log(`[alby-mint] API surface = ${JSON.stringify(apiSurface)}`);
+
   // Call window.alby.enable() to grant the dApp permission, then
-  // window.alby.getBitcoin().getAddress() to retrieve the Taproot
-  // address Alby derived from the seeded mnemonic.
+  // walk whichever Bitcoin namespace v3.14.2 exposes.
   const connectInfo = await harness.evaluate(async () => {
-    interface AlbyBtcApi {
-      getAddress(): Promise<{ address: string; publicKey: string } | string>;
-    }
     interface AlbyApi {
       enable(): Promise<void>;
-      getBitcoin(): AlbyBtcApi;
+      bitcoin?: { getAddress?: () => Promise<{ address: string; publicKey: string } | string> };
     }
     const alby = (window as unknown as { alby: AlbyApi }).alby;
     await alby.enable();
-    const btc = alby.getBitcoin();
+    const btc = alby.bitcoin;
+    if (!btc?.getAddress) {
+      throw new Error(`alby.bitcoin.getAddress not exposed. alby keys: ${Object.keys(alby).join(',')}`);
+    }
     const res = await btc.getAddress();
     return typeof res === 'string'
       ? { address: res, publicKey: '' }
