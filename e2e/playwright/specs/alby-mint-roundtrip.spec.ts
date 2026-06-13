@@ -144,13 +144,16 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // Iter 93/94 confirmed Alby's popup AND options.html self-close
-  // (or self-navigate, killing our page handle) very shortly after
-  // load — the React welcome wizard calls window.close() / replaces
-  // location on first paint. Block that BEFORE any Alby script runs
-  // via addInitScript, so our seed page survives long enough to
-  // fire chrome.runtime.sendMessage and await responses.
-  await context.addInitScript(() => {
+  const seedPage = await context.newPage();
+  // Iter 95 nailed the seed step by blocking window.close() before
+  // Alby's React welcome wizard runs — options.html otherwise
+  // self-closes on first paint and the seed evaluate dies. Scope
+  // the override to seedPage only (page.addInitScript), NOT the
+  // whole context, so Alby's permission/sign popups can still
+  // close themselves after the user (or our auto-clicker) clicks
+  // Connect — without that, the click in the popup hangs waiting
+  // for window.close() to complete.
+  await seedPage.addInitScript(() => {
     try {
       Object.defineProperty(window, 'close', { value: () => undefined, writable: false, configurable: false });
     } catch { /* ignore */ }
@@ -159,8 +162,6 @@ test.beforeAll(async () => {
       window.addEventListener('beforeunload', stop as unknown as EventListener, true);
     } catch { /* ignore */ }
   });
-
-  const seedPage = await context.newPage();
   await seedPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
   // Give the SW a moment to finish initializing its state machine.
   await seedPage.waitForFunction(() => true, undefined, { timeout: 2_000 }).catch(() => undefined);
@@ -184,17 +185,31 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   // opened Alby UI page by clicking the first Connect / Allow /
   // Confirm button it finds. The same listener also covers the
   // signPsbt confirmation that follows.
+  let popupCount = 0;
   context.on('page', async (popup) => {
+    const idx = ++popupCount;
     try {
       await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+      // Skip non-Alby popups (e.g. the harness page itself).
+      if (!popup.url().startsWith('chrome-extension://')) return;
+      // Take a debug screenshot before we touch it.
+      await shot(popup, `popup-${idx}-loaded`).catch(() => undefined);
+      // Wait for React to actually paint something — Alby's prompt
+      // route renders async after a SW round-trip for dApp metadata.
+      await popup.waitForTimeout(800);
       const btn = popup.getByRole('button', { name: /connect|allow|confirm|approve|sign/i }).first();
       await btn.waitFor({ state: 'visible', timeout: 10_000 });
-      await btn.click({ timeout: 5_000 });
+      // force:true bypasses actionability checks — the Connect
+      // button can be enabled but covered by a transient modal/
+      // skeleton during render.
+      await btn.click({ force: true, timeout: 5_000 });
       // eslint-disable-next-line no-console
-      console.log(`[alby-mint] auto-clicked popup: ${popup.url()}`);
+      console.log(`[alby-mint] auto-clicked popup #${idx}: ${popup.url().slice(0, 80)}`);
+      await shot(popup, `popup-${idx}-after-click`).catch(() => undefined);
     } catch (e) {
       // eslint-disable-next-line no-console
-      console.log(`[alby-mint] popup auto-click skipped (${popup.url()}): ${String(e).slice(0, 120)}`);
+      console.log(`[alby-mint] popup #${idx} auto-click skipped: ${String(e).slice(0, 120)}`);
+      await shot(popup, `popup-${idx}-failed`).catch(() => undefined);
     }
   });
 
