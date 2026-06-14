@@ -19,6 +19,70 @@ pin a git SHA:
 The `prepare` lifecycle script builds `dist/` automatically when a git
 ref is installed.
 
+## Architecture: layered security, the wallet is dumb on purpose
+
+CAT-21 safety is enforced **before** the wallet signs anything. The
+chain has five steps, each with a single responsibility:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. Agent / dapp DECLARES intent                                     │
+│    e.g. AgentActionContext { kind: 'buy', spendSats, counterparty } │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. SDK agent-policy GATES the declared intent                       │
+│    evaluateAgentPolicy(policy, action) → allow | deny + reason      │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. SDK BUILDS the PSBT from the validated intent                    │
+│    buildCat21BuyOfferPsbt(args) → unsigned PSBT bytes               │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 4. (Optional) SDK consumer RE-VALIDATES PSBT matches intent         │
+│    validateCat21BuyOfferPsbt(psbt, expected*, floor) — defence in   │
+│    depth before handing bytes to the wallet                         │
+└─────────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│ 5. Wallet shows standard signPsbt UI, user confirms, wallet signs   │
+│    The wallet does NOT analyse what the PSBT means.                 │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Why the wallet stays dumb
+
+Trying to infer "this PSBT is a buy-offer / transfer / something
+else" from the raw bytes inside the wallet is a Sisyphean fight
+against ever-more-creative crafting. Every heuristic eventually gets
+bypassed. The wallet's correct job is:
+
+- show the user the inputs, outputs, fee that will be signed;
+- ask for a confirmation click;
+- sign the bytes.
+
+The intent must be declared **upstream** (in the agent or in the SDK
+consumer) and validated **before** the PSBT exists or **before** it
+leaves the consumer for the wallet. By the time bytes reach the
+wallet, the security gate is already closed.
+
+### What the wallet IS still responsible for
+
+These are conservative structural defaults, NOT intent inference:
+
+- **Cat-bearing UTXO protection.** The wallet's BTC send
+  coin-selection never picks a UTXO that holds a cat. No intent is
+  inferred — the UTXOs are simply removed from the spend pool.
+- **nLockTime preservation through RBF.** Any replacement tx the
+  wallet builds for an existing tx carries the original locktime
+  through verbatim. No intent is inferred — a structural property
+  is preserved.
+
+See [`cat21-wallet/CLAUDE.md`](https://github.com/ordpool-space/cat21-wallet/blob/main/CLAUDE.md)
+HARD RULE #6 for the wallet-side framing of the same rule.
+
 ## Consumers
 
 The SDK is built around two primary consumer profiles:
