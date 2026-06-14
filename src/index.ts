@@ -18,3 +18,7 @@ export * from './cat21-mint/cat21-api.service';
 export * from './cat21-mint/cat21-mint-orchestrator.service';
 export * from './cat21-mint/utxo-content.types';
 export * from './cat21-mint/utxo-content-scanner.service';
+
+// --- cat21 offer (ord-style buyer-initiated PSBT builder + seller-side validator) ---
+export * from './cat21-offer/cat21-offer.helper';
+export * from './cat21-offer/cat21-offer.types';
