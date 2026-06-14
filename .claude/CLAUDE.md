@@ -19,6 +19,44 @@ edge cases are exactly the kind of comment a future reader cannot
 reconstruct from code alone. Full decision tree in the workspace
 `CLAUDE.md` HARD RULE "Keep useful comments (JSDoc AND inline 'why')".
 
+## HARD RULE: CAT-21 mints — RBF policy (per-wallet)
+
+**CAT-21 mint inputs carry a wallet-specific sequence number.**
+The choice is anchored at PSBT-build time, not at signer time,
+because the sequence is part of the bytes the wallet signs over —
+choosing it later would invalidate the signature.
+
+| Wallet | Sequence | Property | Why |
+|---|---|---|---|
+| **Cat21 Wallet** (`KnownOrdinalWalletType.cat21wallet`) | `0xfffffffd` | RBF-signaling + lockTime-enforced | OUR wallet. Knows about cats by construction. Its mempool-acceleration UI guarantees nLockTime=21 is preserved on any RBF replacement (HARD RULE #1 in `cat21-wallet/CLAUDE.md` — `CAT21_MINT_INPUT_SEQUENCE` constant, replacement-construction asserts `lockTime === 21` before broadcast). RBF here is safe AND useful — users can bump fee in mempool congestion without rebuilding the mint. |
+| **Everyone else** (Xverse, Unisat, Leather, OKX, Oyl, Wizz, Phantom, Alby, …) | `0xfffffffe` | Non-RBF + lockTime-enforced | Third-party wallets don't know about cats. If their UI offers "accelerate / replace with higher fee" on a CAT-21 mint, the replacement is built without nLockTime=21 and the cat is burned. The 2024 Xverse incident is the lesson. Default policy: refuse to signal RBF so no external wallet ever offers to accelerate. |
+
+**Why two non-equivalent non-RBF values matter** — both `0xfffffffe`
+and `0xffffffff` are non-RBF. Only `0xfffffffe` ALSO keeps the
+lockTime-enforcement flag active at consensus level. `0xffffffff`
+("sequence final") tells Bitcoin to IGNORE the transaction's
+lockTime field — which would let a CAT-21 mint with `nLockTime=21`
+confirm even if the chain tip were at height 21 already, but more
+importantly would land a tx whose `nLockTime=21` field is present
+but consensus-irrelevant. cat21-ord still indexes such txs as cats
+because its filter is purely structural (`nLockTime === 21`), so
+the cat IS minted — but the historical pre-iter-119 SDK used the
+scure default of `0xffffffff` and got away with it. We now pin
+`0xfffffffe` explicitly so the lockTime IS consensus-enforced.
+
+The rule is enforced at exactly ONE place:
+`src/cat21-mint/cat21.service.helper.ts → createInput()`. Don't
+duplicate the branch elsewhere. If a future signer wants to override
+the sequence, it must update this function, not work around it. A
+focused spec at the bottom of `cat21.service.helper.spec.ts` pins
+the per-wallet sequence value — touch one without the other and CI
+catches it.
+
+**See also**: `cat21-wallet/CLAUDE.md` HARD RULE #1 (the wallet
+side of the contract), `project_cat21_must_not_signal_rbf` memory
+(the 2024 Xverse incident origin), `INTEGRATION-ORDPOOL-SDK.md` in
+the cat21-wallet repo (provider discovery contract).
+
 ## What goes here vs. where
 
 | Where it belongs | Pattern |

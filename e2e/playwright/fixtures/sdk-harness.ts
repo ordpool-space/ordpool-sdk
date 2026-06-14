@@ -637,11 +637,13 @@ window.ordpoolSdkHarness.buildAndSignMintViaCat21Wallet = async (input: MintRequ
     vout:  input.utxo.vout,
     value: input.utxo.value,
   };
-  // The cat21 mint PSBT builder is wallet-agnostic at the input
-  // shape level; cat21wallet inherits Leather's BIP-84 P2WPKH for
-  // payments, so route through the leather branch of createTransaction.
+  // Route through the cat21wallet branch — script shape is shared
+  // with Leather (BIP-84 P2WPKH payment), but the SDK's
+  // createInput sets the RBF-signaling sequence (0xfffffffd)
+  // specifically for KnownOrdinalWalletType.cat21wallet per the
+  // "CAT-21 mints: RBF policy" rule in SDK CLAUDE.md.
   const result = createTransaction(
-    KnownOrdinalWalletType.leather,
+    KnownOrdinalWalletType.cat21wallet,
     input.recipientAddress,
     txnOutput,
     paymentPubkey,

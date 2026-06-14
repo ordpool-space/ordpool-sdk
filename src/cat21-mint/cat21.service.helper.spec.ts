@@ -657,3 +657,92 @@ describe('createTransaction dust-limit boundary', () => {
     });
   });
 });
+
+
+// CAT-21 RBF policy — see CLAUDE.md "CAT-21 mints: RBF policy".
+//
+// Default (every external wallet): sequence = 0xfffffffe. Non-RBF,
+// lockTime=21 enforced at consensus level. Prevents wallet
+// "acceleration" from dropping nLockTime=21 and burning the cat.
+//
+// Cat21 Wallet exception: sequence = 0xfffffffd. RBF-signaling and
+// safe because OUR wallet knows about cats — its acceleration UI
+// preserves nLockTime=21 on the replacement tx. Users can bump fee
+// in mempool congestion without rebuilding the mint.
+describe('CAT-21 RBF policy (per-wallet sequence)', () => {
+  const paymentUtxo: TxnOutput = {
+    txid: hex.encode(sha256('rbf-test-txid')),
+    vout: 0,
+    value: 10000,
+    status: unconfirmedStatus,
+    transactionHex: undefined,
+  };
+  const paymentPublicKey = dummyKeypair.dummyPublicKey;
+  const xOnlyKey = toXOnly(paymentPublicKey);
+  const network = btc.NETWORK;
+  // Test addresses by wallet.
+  const xverseNestedPayment = btc.p2sh(btc.p2wpkh(paymentPublicKey, network), network).address!;
+  const leatherNativeSegwit = btc.p2wpkh(paymentPublicKey, network).address!;
+  const taprootRecipient = btc.p2tr(xOnlyKey, undefined, network, true).address!;
+
+  function inputSequenceFor(walletType: KnownOrdinalWalletType, paymentAddress: string): number {
+    const result = createTransaction(
+      walletType,
+      taprootRecipient,
+      paymentUtxo,
+      paymentAddress.startsWith('bc1p') ? xOnlyKey : paymentPublicKey,
+      paymentAddress,
+      BigInt(2000),
+      /* isSimulation = */ false,
+      Network.Mainnet,
+    );
+    return result.tx.getInput(0).sequence!;
+  }
+
+  it('Xverse mint input has sequence=0xfffffffe (non-RBF, lockTime-enforced)', () => {
+    expect(inputSequenceFor(KnownOrdinalWalletType.xverse, xverseNestedPayment)).toBe(0xfffffffe);
+  });
+
+  it('Leather mint input has sequence=0xfffffffe (non-RBF, lockTime-enforced)', () => {
+    expect(inputSequenceFor(KnownOrdinalWalletType.leather, leatherNativeSegwit)).toBe(0xfffffffe);
+  });
+
+  it('Unisat mint input has sequence=0xfffffffe (non-RBF, lockTime-enforced)', () => {
+    expect(inputSequenceFor(KnownOrdinalWalletType.unisat, leatherNativeSegwit)).toBe(0xfffffffe);
+  });
+
+  it('Cat21 Wallet mint input has sequence=0xfffffffd (RBF-signaling, lockTime-enforced) — OUR wallet, knows about cats, safe to allow RBF', () => {
+    expect(inputSequenceFor(KnownOrdinalWalletType.cat21wallet, leatherNativeSegwit)).toBe(0xfffffffd);
+  });
+
+  it('Cat21 Wallet shares Leather\'s BIP-84 P2WPKH script for the input — sequence is the only diff from Leather\'s mint', () => {
+    const leatherResult = createTransaction(
+      KnownOrdinalWalletType.leather,
+      taprootRecipient,
+      paymentUtxo,
+      paymentPublicKey,
+      leatherNativeSegwit,
+      BigInt(2000),
+      false,
+      Network.Mainnet,
+    );
+    const cat21Result = createTransaction(
+      KnownOrdinalWalletType.cat21wallet,
+      taprootRecipient,
+      paymentUtxo,
+      paymentPublicKey,
+      leatherNativeSegwit,
+      BigInt(2000),
+      false,
+      Network.Mainnet,
+    );
+    const leatherInput = leatherResult.tx.getInput(0);
+    const cat21Input = cat21Result.tx.getInput(0);
+    // Same script.
+    expect(cat21Input.witnessUtxo?.script).toEqual(leatherInput.witnessUtxo?.script);
+    // Different sequence — that's the whole rule.
+    expect(cat21Input.sequence).not.toBe(leatherInput.sequence);
+    expect(cat21Input.sequence).toBe(0xfffffffd);
+    expect(leatherInput.sequence).toBe(0xfffffffe);
+  });
+});

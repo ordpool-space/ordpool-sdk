@@ -349,7 +349,10 @@ export function createInput(walletType: KnownOrdinalWalletType,
   }
 
   switch (walletType) {
-    case KnownOrdinalWalletType.leather: {
+    case KnownOrdinalWalletType.leather:
+    case KnownOrdinalWalletType.cat21wallet: {
+      // Cat21 Wallet is forked from Leather and inherits its BIP-84
+      // P2WPKH payment-address derivation. Same script shape.
       scriptData = createInputScriptForLeather(paymentPublicKeyToUse, network);
       break;
     }
@@ -379,11 +382,35 @@ export function createInput(walletType: KnownOrdinalWalletType,
 
   const { script, redeemScript } = scriptData;
 
+  // CAT-21 sequence rule (see CLAUDE.md "CAT-21 mints: RBF policy"):
+  //
+  //   - DEFAULT (every external wallet — Xverse, Unisat, Leather,
+  //     OKX, Oyl, Wizz, Phantom, Alby, …): sequence = 0xfffffffe.
+  //     Non-RBF, lockTime-enforced. Prevents the wallet from later
+  //     "accelerating" the mint via RBF replacement that drops
+  //     nLockTime=21 and burns the cat (Xverse incident 2024, see
+  //     project_cat21_must_not_signal_rbf memory).
+  //
+  //   - EXCEPTION (Cat21 Wallet only): sequence = 0xfffffffd.
+  //     RBF-signaling, lockTime-enforced. Cat21 Wallet is OUR own
+  //     wallet, knows about cats by construction (per ADR-3 / ADR-10
+  //     in CAT21-WALLET-FORK-PLAN.md), and its mempool-acceleration
+  //     UI is guaranteed to preserve nLockTime=21 on the replacement
+  //     tx — so RBF is safe AND useful (users can bump fee when
+  //     mempool is congested without rebuilding the mint).
+  //
+  // The choice is anchored at PSBT-build time, not at signer time,
+  // because the sequence is part of the bytes the wallet signs over
+  // — selecting it later would invalidate the signature.
+  const sequence = walletType === KnownOrdinalWalletType.cat21wallet
+    ? 0xfffffffd
+    : 0xfffffffe;
+
   let input: btc.TransactionInputUpdate = {
     txid: paymentOutput.txid,
     index: paymentOutput.vout,
     redeemScript,
-    // sequence: 0xfffffffd, // DISABLES RBF!! (the cat killer 🙀)
+    sequence,
     sighashType: btc.SigHash.ALL
   };
 
