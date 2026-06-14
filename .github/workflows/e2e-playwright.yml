@@ -157,8 +157,20 @@ jobs:
       # prerequisite for SDK CI. Clone the public repo (read-only
       # HTTPS, no auth, no main-identity attribution lands), pnpm
       # build, then point the bootstrap at the resulting dist.
-      # Cached by the dev-extension key commit pinned in
-      # cat21-wallet PROTOCOL.md (deterministic extension ID).
+      #
+      # Cache key includes cat21-wallet's remote HEAD SHA so the
+      # cached dist invalidates the moment the wallet repo gets a
+      # new commit (iter 121 lesson: the previous key was based on
+      # the bootstrap script's hash, which doesn't change across
+      # wallet commits → stale dist served, Cat21Provider injection
+      # missing).
+      - name: Compute cat21-wallet HEAD SHA (for cache invalidation)
+        id: cat21wallet-rev
+        run: |
+          REV=$(git ls-remote https://github.com/ordpool-space/cat21-wallet.git refs/heads/dev | cut -f1)
+          echo "Cat21 Wallet dev HEAD = $REV"
+          echo "rev=$REV" >> "$GITHUB_OUTPUT"
+
       - name: Cache cat21-wallet source + build
         id: cat21wallet-cache
         uses: actions/cache@v4
@@ -166,7 +178,7 @@ jobs:
           path: |
             e2e/extensions/cat21wallet
             ~/.local/share/pnpm/store
-          key: cat21wallet-from-source-${{ hashFiles('e2e/playwright/playwright-bootstrap.sh') }}
+          key: cat21wallet-from-source-${{ steps.cat21wallet-rev.outputs.rev }}
 
       - name: Install pnpm for cat21-wallet build
         if: steps.cat21wallet-cache.outputs.cache-hit != 'true'
@@ -182,14 +194,14 @@ jobs:
         run: |
           set -euo pipefail
           STAGING_DIR="/tmp/cat21-wallet-staging"
-          if [ ! -d "$STAGING_DIR" ]; then
-            git clone --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$STAGING_DIR"
-          fi
+          rm -rf "$STAGING_DIR"
+          git clone --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$STAGING_DIR"
           cd "$STAGING_DIR"
           pnpm install --frozen-lockfile
           pnpm build:extension
           export CAT21_WALLET_LOCAL_DIST="${STAGING_DIR}/apps/extension/dist"
           cd "$GITHUB_WORKSPACE"
+          rm -rf "e2e/extensions/cat21wallet"
           bash e2e/playwright/playwright-bootstrap.sh cat21wallet
 
       - name: Build SDK harness bundle for the fixtures server
