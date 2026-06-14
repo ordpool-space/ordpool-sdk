@@ -261,7 +261,26 @@ window.ordpoolSdkHarness = {
       await new Promise(r => setTimeout(r, 100));
     }
     if (!cat21walletConnector.detect(window)) {
-      throw new Error('Cat21 Wallet provider not injected on the harness page within 15s');
+      // Diagnostic dump — what providers ARE visible on the harness?
+      // Surface lets us tell "wallet injected at LeatherProvider only"
+      // (stale-build / shim-only) from "wallet didn't inject at all"
+      // (content-script ran but Cat21Provider Object.defineProperty
+      // is gone from inpage.js) from "different binary entirely".
+      const w = window as unknown as Record<string, unknown>;
+      const probe = (key: string) => {
+        const v = w[key] as { isCat21?: boolean; isLeather?: boolean } | undefined;
+        if (!v) return `${key}=undefined`;
+        return `${key}={isCat21:${v.isCat21}, isLeather:${v.isLeather}}`;
+      };
+      const btcProviders = w.btc_providers;
+      const dump = [
+        probe('Cat21Provider'),
+        probe('LeatherProvider'),
+        probe('HiroWalletProvider'),
+        `btc_providers=${Array.isArray(btcProviders) ? JSON.stringify((btcProviders as Array<{ id?: string }>).map(p => p?.id)) : typeof btcProviders}`,
+      ].join('  ');
+      log('connectCat21Wallet.no-provider', dump);
+      throw new Error('Cat21 Wallet provider not injected on the harness page within 15s. ' + dump);
     }
     statusEl().textContent = `connecting to cat21-wallet…`;
     const info = await firstValueFrom(cat21walletConnector.connect(Network.Mainnet));
