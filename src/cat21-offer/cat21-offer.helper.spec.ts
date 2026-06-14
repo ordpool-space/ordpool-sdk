@@ -505,6 +505,44 @@ describe('validateCat21BuyOfferPsbt', () => {
       expect(result.ok).toBe(true);
     });
 
+    it('per-address-type: accepts P2WPKH match on regtest (bcrt1q…)', () => {
+      // Regtest's HRP is `bcrt`, distinct from mainnet `bc` and testnet `tb`.
+      // The validator round-trips Output 1's script through
+      // `btc.Address(REGTEST_NETWORK).encode(...)`, so the regtest network
+      // mapping at `network.ts` must produce a `bcrt1q…` string that matches
+      // the address we built the PSBT against.
+      const regtestNet = { bech32: 'bcrt', pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
+      const regtestPay = btc.p2wpkh(publicKey, regtestNet);
+      const args = makeBaseArgs({
+        network: Network.Regtest,
+        sellerInput: { ...makeBaseArgs().sellerInput, scriptPubKey: regtestPay.script },
+        buyerInputs: [
+          {
+            txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+            vout: 1,
+            value: 50_000,
+            scriptPubKey: regtestPay.script,
+          },
+        ],
+        destinations: {
+          buyerReceiveAddress: regtestPay.address!,
+          sellerPaymentAddress: regtestPay.address!,
+          buyerChangeAddress: regtestPay.address!,
+        },
+      });
+      const built = buildCat21BuyOfferPsbt(args);
+      const tx = btc.Transaction.fromPSBT(built.psbt);
+      tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+      const result = validateCat21BuyOfferPsbt({
+        psbt: tx.toPSBT(),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: regtestPay.address!,
+        network: Network.Regtest,
+      });
+      expect(result.ok).toBe(true);
+    });
+
     it('surfaces payment-output-wrong-address BEFORE wrong-price when both would fail', () => {
       // The address attack is more dangerous than the price one, so it
       // must surface first. PSBT pays the wrong address AND below floor.
@@ -564,6 +602,33 @@ describe('validateCat21BuyOfferPsbt', () => {
       tx.addInput({
         txid: args.sellerInput.txid,
         index: args.sellerInput.vout,
+        witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(1000) },
+        sighashType: btc.SigHash.ALL,
+      });
+      tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(546), btc.TEST_NETWORK);
+      const result = validateCat21BuyOfferPsbt({
+        psbt: tx.toPSBT(),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 1,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('missing-seller-payment-output');
+    });
+
+    it('pins outputs-length check BEFORE seller-utxo check', () => {
+      // The previous test's PSBT happens to satisfy the seller-utxo gate, so
+      // swapping the two gate positions wouldn't break it. Disentangle:
+      // build a 1-output PSBT whose Input 0 also points at the WRONG seller
+      // txid. Both gates would fail; the typed reason must be the earlier
+      // one. If a future refactor reorders the gates, this test surfaces it
+      // as `missing-seller-input` instead of `missing-seller-payment-output`
+      // and fails loudly.
+      const args = makeBaseArgs();
+      const wrongTxid = '0000000000000000000000000000000000000000000000000000000000000099';
+      const tx = new btc.Transaction({ allowUnknownInputs: true });
+      tx.addInput({
+        txid: wrongTxid,
+        index: 99,
         witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(1000) },
         sighashType: btc.SigHash.ALL,
       });
