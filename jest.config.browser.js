@@ -5,7 +5,9 @@ module.exports = {
   ...createCjsPreset(),
   testEnvironment: 'jsdom',
   setupFilesAfterEnv: ['<rootDir>/jest.config.browser.setup.ts'],
-  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/'],
+  // RESCUE/ holds code rescued from cat21-wallet pending port to
+  // the SDK proper — see jest.config.node.js for the full rationale.
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // Transform every node_modules file except snapshots — sats-connect
   // v4 ships ESM-only. Same rationale as jest.config.node.js.
