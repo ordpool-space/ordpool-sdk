@@ -19,6 +19,7 @@ import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
 import { unisatConnector } from '../../../src/wallet/connectors/unisat.connector';
 import { leatherConnector } from '../../../src/wallet/connectors/leather.connector';
+import { cat21walletConnector } from '../../../src/wallet/connectors/cat21wallet.connector';
 import { wizzConnector } from '../../../src/wallet/connectors/wizz.connector';
 import { okxConnector } from '../../../src/wallet/connectors/okx.connector';
 import { phantomConnector } from '../../../src/wallet/connectors/phantom.connector';
@@ -71,6 +72,16 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaLeather(input: MintRequest): Promise<{ txHex: string }>;
+      detectCat21Wallet(): boolean;
+      connectCat21Wallet(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
+      buildAndSignMintViaCat21Wallet(input: MintRequest): Promise<{ txHex: string }>;
       detectWizz(): boolean;
       connectWizz(): Promise<{
         type: KnownOrdinalWalletType;
@@ -234,6 +245,28 @@ window.ordpoolSdkHarness = {
     const info = await firstValueFrom(leatherConnector.connect(Network.Mainnet));
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectLeather.result', info);
+    return info;
+  },
+
+  detectCat21Wallet(): boolean {
+    return cat21walletConnector.detect(window);
+  },
+  async connectCat21Wallet() {
+    // Cat21 Wallet injects window.Cat21Provider; it can also be
+    // discovered via the WBIP004 window.btc_providers array.
+    // cat21walletConnector.detect() handles both paths.
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (cat21walletConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!cat21walletConnector.detect(window)) {
+      throw new Error('Cat21 Wallet provider not injected on the harness page within 15s');
+    }
+    statusEl().textContent = `connecting to cat21-wallet…`;
+    const info = await firstValueFrom(cat21walletConnector.connect(Network.Mainnet));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectCat21Wallet.result', info);
     return info;
   },
 
@@ -572,6 +605,71 @@ window.ordpoolSdkHarness.buildAndSignMintViaLeather = async (input: MintRequest)
     // broadcast the resulting tx to local regtest electrs.
     network: 'mainnet',
     broadcast: false,  // we broadcast via postTx (WE broadcast convention)
+  });
+  log('mint.signed-psbt', { length: response.result.hex.length });
+
+  const txHex = extractWireTxFromPsbt(hexToBytes(response.result.hex));
+  log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
+  return { txHex };
+};
+
+/**
+ * Cat21 Wallet mint — same Bitcoin signPsbt RPC shape as Leather
+ * (Cat21 Wallet is forked from Leather). The wallet signs the PSBT
+ * and hands the signed bytes back; we finalize via scure and
+ * broadcast via input.broadcast (WE broadcast convention).
+ *
+ * Uses the cross-network-keys trick: Cat21 Wallet is mainnet-only
+ * by ADR-7, so we tell it `network: 'mainnet'` while passing a
+ * regtest-encoded PSBT. The P2WPKH script hash is HRP-agnostic so
+ * the wallet's "is this my address?" check matches against its
+ * mainnet bc1q derivation and signing succeeds.
+ */
+window.ordpoolSdkHarness.buildAndSignMintViaCat21Wallet = async (input: MintRequest) => {
+  if (!cat21walletConnector.detect(window)) {
+    throw new Error('Cat21 Wallet provider not injected on the harness page');
+  }
+  statusEl().textContent = `building + signing cat21 mint via cat21-wallet…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+  };
+  // The cat21 mint PSBT builder is wallet-agnostic at the input
+  // shape level; cat21wallet inherits Leather's BIP-84 P2WPKH for
+  // payments, so route through the leather branch of createTransaction.
+  const result = createTransaction(
+    KnownOrdinalWalletType.leather,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    /* isSimulation = */ false,
+    Network.Regtest,
+  );
+  const psbtHex = bytesToHex(result.tx.toPSBT());
+  log('mint.psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
+
+  const cat21 = (window as unknown as {
+    Cat21Provider: {
+      request: (m: 'signPsbt', p: {
+        hex: string;
+        allowedSighash: number[];
+        signAtIndex: number;
+        network: string;
+        broadcast: boolean;
+      }) => Promise<{ result: { hex: string } }>;
+    };
+  }).Cat21Provider;
+  const response = await cat21.request('signPsbt', {
+    hex: psbtHex,
+    allowedSighash: [0x01], // SIGHASH_ALL
+    signAtIndex: 0,
+    network: 'mainnet',     // cross-network-keys trick; same as leather mint
+    broadcast: false,
   });
   log('mint.signed-psbt', { length: response.result.hex.length });
 

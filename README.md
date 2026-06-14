@@ -20,6 +20,7 @@ Detection is signature-based: whatever exposes the expected `window.<wallet>` gl
 
 | Wallet | Connect + sign tested against real binary in CI? |
 |---|---|
+| Cat21 Wallet | ✅ (our own wallet — ordpool-space/cat21-wallet, forked from Leather; canonical `window.Cat21Provider` slot with politeness model for co-installation with real Leather) |
 | Xverse | ✅ |
 | Leather | ✅ |
 | Unisat | ✅ |

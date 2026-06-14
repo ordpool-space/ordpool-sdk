@@ -23,7 +23,33 @@ export function isXverseInstalled(win: WindowLike | undefined): boolean {
 export function isLeatherInstalled(win: WindowLike | undefined): boolean {
   // `LeatherProvider` is the post-rebrand global; `HiroWalletProvider`
   // is the pre-rebrand one. Some users still have older versions.
-  return !!(win?.LeatherProvider ?? win?.HiroWalletProvider);
+  //
+  // Cat21 Wallet — our own fork of Leather — politely fills the
+  // `LeatherProvider` slot only when real Leather is NOT installed
+  // (see INTEGRATION-ORDPOOL-SDK.md in the cat21-wallet repo). If
+  // we see `isCat21: true` on the provider, this is Cat21 Wallet
+  // backfilling Leather's slot, not actual Leather. Defer to the
+  // cat21wallet connector so the picker shows the right entry.
+  const lp = win?.LeatherProvider as { isCat21?: boolean } | undefined;
+  if (lp?.isCat21) return false;
+  const hp = win?.HiroWalletProvider as { isCat21?: boolean } | undefined;
+  if (hp?.isCat21) return false;
+  return !!(lp ?? hp);
+}
+
+/**
+ * Cat21 Wallet detection. Canonical slot is `window.Cat21Provider`
+ * with `isCat21: true` (always present when Cat21 Wallet is
+ * installed). WBIP004 secondary lookup: a `{ id: 'Cat21Provider' }`
+ * entry in `window.btc_providers` — survives co-installation with
+ * other Bitcoin extensions per the integration contract.
+ */
+export function isCat21WalletInstalled(win: WindowLike | undefined): boolean {
+  const direct = win?.Cat21Provider as { isCat21?: boolean } | undefined;
+  if (direct?.isCat21) return true;
+  const list = win?.btc_providers as { id?: string }[] | undefined;
+  if (Array.isArray(list) && list.some(p => p?.id === 'Cat21Provider')) return true;
+  return false;
 }
 
 export function isUnisatInstalled(win: WindowLike | undefined): boolean {

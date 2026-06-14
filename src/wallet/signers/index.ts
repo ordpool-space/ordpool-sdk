@@ -1,6 +1,7 @@
 import { KnownOrdinalWalletType, WalletSigner } from '../wallet.service.types';
 import { albySigner } from './alby.signer';
 import { binanceSigner } from './binance.signer';
+import { cat21walletSigner } from './cat21wallet.signer';
 import { leatherSigner } from './leather.signer';
 import { okxSigner } from './okx.signer';
 import { oylSigner } from './oyl.signer';
@@ -42,6 +43,7 @@ import { xverseSigner } from './xverse.signer';
  * gating (detect-by-signature).
  */
 export const walletSigners: readonly WalletSigner[] = [
+  cat21walletSigner,
   xverseSigner,
   leatherSigner,
   unisatSigner,
@@ -73,6 +75,7 @@ export function findSignerOrThrow(type: KnownOrdinalWalletType): WalletSigner {
 
 export { albySigner } from './alby.signer';
 export { binanceSigner } from './binance.signer';
+export { cat21walletSigner } from './cat21wallet.signer';
 export { leatherSigner } from './leather.signer';
 export { okxSigner } from './okx.signer';
 export { oylSigner } from './oyl.signer';

@@ -61,8 +61,17 @@ case "$WALLET" in
     VERSION="3.14.2"
     ASSET_NAME="alby-bitcoin-wallet-v${VERSION}.crx"
     ;;
+  cat21wallet)
+    # Cat21 Wallet — our own fork of Leather. Built from source in
+    # the cat21-wallet repo's apps/extension/dist/ (no CRX
+    # packaging in the wallet's CI yet); CI publishes the same
+    # bytes attested via gh attestation under the release tag
+    # below.
+    VERSION="6.103.0.675"
+    ASSET_NAME="cat21-wallet-v${VERSION}.crx"
+    ;;
   *)
-    echo "ERROR: unknown wallet '$WALLET'. Supported: xverse, unisat, leather, okx, phantom, wizz, oyl, alby." >&2
+    echo "ERROR: unknown wallet '$WALLET'. Supported: xverse, unisat, leather, okx, phantom, wizz, oyl, alby, cat21wallet." >&2
     exit 2
     ;;
 esac
@@ -83,6 +92,26 @@ if [ -d "$EXT_DIR" ] && [ -f "$EXT_DIR/manifest.json" ]; then
     exit 0
   fi
   echo "Cached extension is v${CACHED_VERSION}, want v${VERSION}. Re-downloading."
+fi
+
+if [ "$WALLET" = "cat21wallet" ] && [ -n "${CAT21_WALLET_LOCAL_DIST:-}" ]; then
+  # Source-built dist override. The cat21-wallet repo ships an
+  # already-unpacked `apps/extension/dist/` after `pnpm build:extension`.
+  # When CI builds the wallet alongside the SDK (or a dev wants to
+  # iterate locally without publishing a CRX), point CAT21_WALLET_LOCAL_DIST
+  # at that directory and we copy it straight in. Skips the CRX
+  # download + unpack path entirely.
+  if [ ! -f "${CAT21_WALLET_LOCAL_DIST}/manifest.json" ]; then
+    echo "ERROR: CAT21_WALLET_LOCAL_DIST=${CAT21_WALLET_LOCAL_DIST} does not contain a manifest.json" >&2
+    exit 1
+  fi
+  echo "Copying cat21-wallet dist from ${CAT21_WALLET_LOCAL_DIST}"
+  rm -rf "$EXT_DIR"
+  mkdir -p "$EXT_DIR"
+  cp -R "${CAT21_WALLET_LOCAL_DIST}/." "$EXT_DIR/"
+  EXT_VERSION="$(node -p "require('$EXT_DIR/manifest.json').version")"
+  echo "Staged cat21-wallet v${EXT_VERSION} to ${EXT_DIR}"
+  exit 0
 fi
 
 if [ -z "${GH_TOKEN:-}" ]; then

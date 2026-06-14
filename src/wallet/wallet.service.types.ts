@@ -22,6 +22,18 @@ export interface WindowLike {
   alby?: unknown;
   webln?: unknown;           // alby's standard Lightning provider name
   binancew3w?: unknown;      // Binance Web3 Wallet multi-chain namespace
+  /**
+   * Cat21 Wallet — our own Bitcoin L1 wallet, forked from Leather.
+   * Per the wallet's INTEGRATION-ORDPOOL-SDK contract this slot is
+   * ALWAYS present when Cat21 Wallet is installed AND the provider
+   * carries `isCat21: true`. The wallet's politeness model also fills
+   * `window.LeatherProvider` only if real Leather is NOT installed,
+   * so we never identify Cat21 Wallet from the Leather slot —
+   * `isLeatherInstalled` filters out `isCat21` providers.
+   */
+  Cat21Provider?: unknown;
+  /** WBIP004 multi-wallet registry. Cat21 Wallet pushes an entry here too. */
+  btc_providers?: unknown;
 }
 
 
@@ -113,6 +125,16 @@ export enum KnownOrdinalWalletType {
   alby = 'alby',
   binance = 'binance',
   /**
+   * Cat21 Wallet — our own Bitcoin-L1 wallet, forked from Leather.
+   * The maintainer ships this one. Provider lives at
+   * `window.Cat21Provider` (with `isCat21: true`) per
+   * INTEGRATION-ORDPOOL-SDK.md in the cat21-wallet repo. Wire
+   * protocol matches Leather's Bitcoin RPC subset
+   * (getAddresses / signPsbt / etc.) so the connector + signer
+   * shape mirrors Leather's. Stacks methods are stripped.
+   */
+  cat21wallet = 'cat21wallet',
+  /**
    * Watch-only via BIP-32 xpub paste. Covers Sparrow, Electrum,
    * Coldcard, Ledger, Trezor, Specter, Bitcoin Core — every desktop
    * or hardware wallet that doesn't inject into the browser but
@@ -203,6 +225,13 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     subLabel: 'API documented but not exposed in v1.17.2 — surfaces only if Binance enables it',
     logo: walletLogos.binance,
     downloadLink: 'https://www.binance.com/en/web3wallet',
+  },
+  [KnownOrdinalWalletType.cat21wallet]: {
+    type: KnownOrdinalWalletType.cat21wallet,
+    label: 'Cat21 Wallet',
+    subLabel: 'Our own — hot wallet for active cat trading. BTC L1 mainnet.',
+    logo: walletLogos.cat21wallet,
+    downloadLink: 'https://github.com/ordpool-space/cat21-wallet',
   },
   [KnownOrdinalWalletType.xpub]: {
     type: KnownOrdinalWalletType.xpub,

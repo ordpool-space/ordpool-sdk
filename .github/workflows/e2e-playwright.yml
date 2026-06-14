@@ -152,6 +152,46 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash e2e/playwright/playwright-bootstrap.sh alby
 
+      # Cat21 Wallet — our own wallet (ordpool-space/cat21-wallet).
+      # We build from source so a CRX release of the wallet isn't a
+      # prerequisite for SDK CI. Clone the public repo (read-only
+      # HTTPS, no auth, no main-identity attribution lands), pnpm
+      # build, then point the bootstrap at the resulting dist.
+      # Cached by the dev-extension key commit pinned in
+      # cat21-wallet PROTOCOL.md (deterministic extension ID).
+      - name: Cache cat21-wallet source + build
+        id: cat21wallet-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            e2e/extensions/cat21wallet
+            ~/.local/share/pnpm/store
+          key: cat21wallet-from-source-${{ hashFiles('e2e/playwright/playwright-bootstrap.sh') }}
+
+      - name: Install pnpm for cat21-wallet build
+        if: steps.cat21wallet-cache.outputs.cache-hit != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Clone + build cat21-wallet from source
+        if: steps.cat21wallet-cache.outputs.cache-hit != 'true'
+        env:
+          # GitHub-provided token is enough for read-only public clone.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          STAGING_DIR="/tmp/cat21-wallet-staging"
+          if [ ! -d "$STAGING_DIR" ]; then
+            git clone --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$STAGING_DIR"
+          fi
+          cd "$STAGING_DIR"
+          pnpm install --frozen-lockfile
+          pnpm build:extension
+          export CAT21_WALLET_LOCAL_DIST="${STAGING_DIR}/apps/extension/dist"
+          cd "$GITHUB_WORKSPACE"
+          bash e2e/playwright/playwright-bootstrap.sh cat21wallet
+
       - name: Build SDK harness bundle for the fixtures server
         run: npm run e2e:harness:build
 

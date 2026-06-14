@@ -5,6 +5,7 @@ import {
 } from '../wallet.service.types';
 import { albyConnector } from './alby.connector';
 import { binanceConnector } from './binance.connector';
+import { cat21walletConnector } from './cat21wallet.connector';
 import { leatherConnector } from './leather.connector';
 import { okxConnector } from './okx.connector';
 import { oylConnector } from './oyl.connector';
@@ -19,9 +20,13 @@ import { xverseConnector } from './xverse.connector';
  * `WalletService` walks this list for detection and dispatch.
  *
  * Detection order matters — first-installed shows up first in the
- * picker. Xverse leads because it's our headline recommendation.
+ * picker. Cat21 Wallet leads because it's OUR wallet (the
+ * maintainer ships this one). Xverse follows as the headline
+ * external recommendation. Everything else by installed-base
+ * heuristic.
  */
 export const walletConnectors: readonly WalletConnector[] = [
+  cat21walletConnector,
   xverseConnector,
   leatherConnector,
   unisatConnector,
@@ -59,6 +64,7 @@ export function detectInstalledWallets(
 
 export { albyConnector } from './alby.connector';
 export { binanceConnector } from './binance.connector';
+export { cat21walletConnector } from './cat21wallet.connector';
 export { leatherConnector } from './leather.connector';
 export { okxConnector } from './okx.connector';
 export { oylConnector } from './oyl.connector';

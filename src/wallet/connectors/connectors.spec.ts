@@ -6,8 +6,8 @@ import { detectInstalledWallets, walletConnectors } from './index';
 
 describe('walletConnectors registry', () => {
 
-  it('lists Xverse, Leather, Unisat, Wizz, OKX, Phantom, Oyl, Alby, Binance in detection order', () => {
-    expect(walletConnectors.map(c => c.providerId)).toEqual(['xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby', 'binance']);
+  it('lists Cat21 Wallet first (our own wallet), then Xverse + the rest in detection order', () => {
+    expect(walletConnectors.map(c => c.providerId)).toEqual(['cat21wallet', 'xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby', 'binance']);
   });
 
   it('marks every wallet as signing-supported at the SDK level (runtime detect-by-signature gates surface visibility — see CLAUDE.md "Ship every signer we have code for")', () => {
@@ -18,10 +18,11 @@ describe('walletConnectors registry', () => {
 
 describe('detectInstalledWallets', () => {
 
-  it('returns all nine as not-installed when window is undefined', () => {
+  it('returns all ten as not-installed when window is undefined', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
     expect(installedWallets).toEqual([]);
     expect(notInstalledWallets).toEqual([
+      KnownOrdinalWallets.cat21wallet,
       KnownOrdinalWallets.xverse,
       KnownOrdinalWallets.leather,
       KnownOrdinalWallets.unisat,
@@ -34,10 +35,11 @@ describe('detectInstalledWallets', () => {
     ]);
   });
 
-  it('returns all nine as installed when every extension is present', () => {
-    const win = { XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {}, binancew3w: { bitcoin: {} } };
+  it('returns all ten as installed when every extension is present', () => {
+    const win = { Cat21Provider: { isCat21: true }, XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {}, binancew3w: { bitcoin: {} } };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([
+      KnownOrdinalWallets.cat21wallet,
       KnownOrdinalWallets.xverse,
       KnownOrdinalWallets.leather,
       KnownOrdinalWallets.unisat,
@@ -56,6 +58,7 @@ describe('detectInstalledWallets', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([KnownOrdinalWallets.xverse, KnownOrdinalWallets.unisat]);
     expect(notInstalledWallets).toEqual([
+      KnownOrdinalWallets.cat21wallet,
       KnownOrdinalWallets.leather,
       KnownOrdinalWallets.wizz,
       KnownOrdinalWallets.okx,
@@ -67,8 +70,9 @@ describe('detectInstalledWallets', () => {
   });
 
   it('keeps a stable detection order matching walletConnectors', () => {
-    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {}, binancew3w: { bitcoin: {} } });
+    const { installedWallets } = detectInstalledWallets({ unisat: {}, LeatherProvider: {}, XverseProviders: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {}, binancew3w: { bitcoin: {} }, Cat21Provider: { isCat21: true } });
     expect(installedWallets.map(w => w.label)).toEqual([
+      KnownOrdinalWallets.cat21wallet.label,
       KnownOrdinalWallets.xverse.label,
       KnownOrdinalWallets.leather.label,
       KnownOrdinalWallets.unisat.label,
@@ -125,8 +129,50 @@ describe('detectInstalledWallets', () => {
     expect(installedWallets).toEqual([KnownOrdinalWallets.leather]);
   });
 
+  it('detects Cat21 Wallet via window.Cat21Provider.isCat21', () => {
+    const { installedWallets } = detectInstalledWallets({ Cat21Provider: { isCat21: true } });
+    expect(installedWallets).toEqual([KnownOrdinalWallets.cat21wallet]);
+  });
+
+  it('detects Cat21 Wallet via the WBIP004 btc_providers array (works when window.Cat21Provider was overwritten by another extension racing to inject)', () => {
+    const { installedWallets } = detectInstalledWallets({ btc_providers: [{ id: 'Cat21Provider', name: 'Cat21 Wallet' }] });
+    expect(installedWallets).toEqual([KnownOrdinalWallets.cat21wallet]);
+  });
+
+  it('rejects window.Cat21Provider without isCat21 (an unrelated extension squatted the slot — without the marker we must not trust it)', () => {
+    const { installedWallets } = detectInstalledWallets({ Cat21Provider: {} });
+    expect(installedWallets).toEqual([]);
+  });
+
+  it('shows Cat21 Wallet (NOT Leather) when Cat21 Wallet has backfilled the LeatherProvider slot per its politeness model', () => {
+    // Cat21 Wallet's politeness model fills window.LeatherProvider
+    // only when real Leather is NOT installed, marking the
+    // backfilled provider with isCat21:true. Surface as Cat21
+    // Wallet exactly once — never confuse it with real Leather.
+    const provider = { isCat21: true, isLeather: true };
+    const { installedWallets } = detectInstalledWallets({
+      Cat21Provider: provider,
+      LeatherProvider: provider,
+    });
+    expect(installedWallets).toEqual([KnownOrdinalWallets.cat21wallet]);
+  });
+
+  it('shows BOTH Cat21 Wallet and real Leather when both are co-installed (real Leather keeps its LeatherProvider slot per the politeness model)', () => {
+    const { installedWallets } = detectInstalledWallets({
+      Cat21Provider: { isCat21: true, isLeather: true },
+      // Real Leather — no isCat21 marker.
+      LeatherProvider: {},
+    });
+    expect(installedWallets).toEqual([
+      KnownOrdinalWallets.cat21wallet,
+      KnownOrdinalWallets.leather,
+    ]);
+  });
+
   it('walks a caller-supplied connector list (for tests with stub rosters)', () => {
-    const stubConnectors = [walletConnectors[0]]; // Xverse only
+    // Pick Xverse explicitly so the test is stable even when the
+    // roster head changes (Cat21 Wallet leads as of iter 119).
+    const stubConnectors = walletConnectors.filter(c => c.providerId === 'xverse');
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(
       { XverseProviders: {} },
       stubConnectors,
