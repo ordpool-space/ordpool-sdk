@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
@@ -236,7 +236,7 @@ test('mint a cat21 on regtest via Unisat: build PSBT in SDK, sign in popup (main
   // ─── Confirm + verify via parser ───────────────────────────────
   const confirmedTip = mineBlocks(1);
   await waitForElectrsSync(confirmedTip);
-  const esploraTx = await getTx(broadcastTxid);
+  const esploraTx = await waitForTxConfirmed(broadcastTxid);
   // eslint-disable-next-line no-console
   console.log(`[unisat-mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);

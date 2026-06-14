@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 1 — full cat21 mint roundtrip with the real Alby
@@ -371,7 +371,7 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
 
   const confirmedTip = mineBlocks(1);
   await waitForElectrsSync(confirmedTip);
-  const esploraTx = await getTx(broadcastTxid);
+  const esploraTx = await waitForTxConfirmed(broadcastTxid);
   console.log(`[alby-mint] locktime=${esploraTx.locktime}`);
   expect(esploraTx.locktime).toBe(21);
   assertAllInputsSighashAll(esploraTx);

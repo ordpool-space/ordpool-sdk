@@ -131,6 +131,45 @@ export interface EsploraTx {
   status: { confirmed: boolean; block_height?: number; block_hash?: string; block_time?: number };
 }
 
+/**
+ * Wait until electrs has CONFIRMED `txid` — i.e. the per-tx status
+ * endpoint returns `confirmed: true` AND a non-empty `block_hash`.
+ *
+ * Why this exists separately from `waitForElectrsSync`:
+ * `waitForElectrsSync` only checks the chain-tip height endpoint
+ * (`/blocks/tip/height`). electrs serves that endpoint the moment
+ * it sees the new block header, but the per-tx status (`/tx/:id/
+ * status`) needs an extra pass to map the tx into its containing
+ * block. That gap is hundreds of ms to a few seconds on a cold
+ * runner. Without this helper a mint roundtrip's subsequent
+ * `getTx(txid)` call intermittently returns `block_hash: undefined`
+ * (iter 114 — `block_hash=undefined` race, observed flaking on
+ * xverse-mint, leather-mint, and any other mint spec that
+ * inspects the confirmation status).
+ *
+ * Polls every 200ms by default. Returns the EsploraTx once the
+ * confirmation is observable; throws if the deadline is reached.
+ */
+export async function waitForTxConfirmed(
+  txid: string,
+  timeoutMs = 15_000,
+): Promise<EsploraTx> {
+  const deadline = Date.now() + timeoutMs;
+  let lastSeen: EsploraTx | undefined;
+  while (Date.now() < deadline) {
+    const tx = await getTx(txid).catch(() => undefined);
+    if (tx) {
+      lastSeen = tx;
+      if (tx.status.confirmed && tx.status.block_hash) return tx;
+    }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  throw new Error(
+    `tx ${txid} not confirmed within ${timeoutMs}ms; ` +
+    `last status: ${lastSeen ? JSON.stringify(lastSeen.status) : 'not-found'}`
+  );
+}
+
 export async function getTx(txid: string): Promise<EsploraTx> {
   const res = await fetch(`${ELECTRS_URL}/tx/${txid}`);
   if (!res.ok) throw new Error(`tx fetch failed: ${res.status} ${await res.text()}`);

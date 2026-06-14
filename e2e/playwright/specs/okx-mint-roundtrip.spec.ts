@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, rpc, mineBlocks, getTx, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 
@@ -285,14 +285,10 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
 
   const confirmedTip = mineBlocks(1);
   await waitForElectrsSync(confirmedTip);
-  // electrs indexes the block one polling cycle after the tip moves;
-  // retry the per-tx fetch until status.block_hash materialises.
-  let esploraTx = await getTx(broadcastTxid);
-  const blockDeadline = Date.now() + 15_000;
-  while (!esploraTx.status?.block_hash && Date.now() < blockDeadline) {
-    await new Promise(r => setTimeout(r, 500));
-    esploraTx = await getTx(broadcastTxid);
-  }
+  // waitForTxConfirmed polls per-tx status until status.block_hash
+  // materialises (replaces the bespoke retry loop that lived here
+  // through iter 78 — same shape, now shared across all mint specs).
+  const esploraTx = await waitForTxConfirmed(broadcastTxid);
   console.log(`[okx-mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);
   expect(esploraTx.status.block_hash).toBeTruthy();
