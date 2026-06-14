@@ -385,6 +385,144 @@ describe('validateCat21BuyOfferPsbt', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toBe('payment-output-wrong-address');
     });
+
+    it('rejects with detail "scriptPubKey not decodable to address" when Output 1 script is missing', () => {
+      // Build a normal PSBT, then surgically replace Output 1 with an
+      // empty-script output post-finalisation using fromPSBT/round-trip.
+      // The PSBT format permits empty scripts; the validator must reject
+      // them with the typed reason.
+      const args = makeBaseArgs();
+      const built = buildCat21BuyOfferPsbt(args);
+      // Decode → mutate Output 1 → re-encode by writing raw PSBT bytes is
+      // out of scope. Easier: construct from scratch with no partialSig,
+      // then add the sig via updateInput AFTER addOutput.
+      const tx = new btc.Transaction({
+        allowUnknownInputs: true,
+        allowUnknownOutputs: true,
+      });
+      tx.addInput({
+        txid: args.sellerInput.txid,
+        index: args.sellerInput.vout,
+        witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(546) },
+        sighashType: btc.SigHash.ALL,
+      });
+      tx.addInput({
+        txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+        index: 1,
+        witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(50_000) },
+        sighashType: btc.SigHash.ALL,
+      });
+      tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(546), btc.TEST_NETWORK);
+      tx.addOutput({ script: new Uint8Array(), amount: BigInt(21_000) });
+      tx.updateInput(1, {
+        partialSig: [[publicKey, new Uint8Array(71).fill(1)]],
+      });
+      const result = validateCat21BuyOfferPsbt({
+        psbt: tx.toPSBT(),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        network: Network.Testnet3,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe('payment-output-wrong-address');
+        expect(result.detail).toContain('scriptPubKey not decodable to address');
+      }
+      void built;
+    });
+
+    it('rejects with detail "scriptPubKey not decodable to address" when Output 1 carries an unaddressable script (OP_RETURN)', () => {
+      const args = makeBaseArgs();
+      const tx = new btc.Transaction({
+        allowUnknownInputs: true,
+        allowUnknownOutputs: true,
+      });
+      tx.addInput({
+        txid: args.sellerInput.txid,
+        index: args.sellerInput.vout,
+        witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(546) },
+        sighashType: btc.SigHash.ALL,
+      });
+      tx.addInput({
+        txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+        index: 1,
+        witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(50_000) },
+        sighashType: btc.SigHash.ALL,
+      });
+      tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(546), btc.TEST_NETWORK);
+      // OP_RETURN script: 0x6a 0x00 — decodable, but Address(...).encode
+      // rejects 'unknown' / data-carrier outputs.
+      tx.addOutput({ script: new Uint8Array([0x6a, 0x00]), amount: BigInt(21_000) });
+      tx.updateInput(1, {
+        partialSig: [[publicKey, new Uint8Array(71).fill(1)]],
+      });
+      const result = validateCat21BuyOfferPsbt({
+        psbt: tx.toPSBT(),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        network: Network.Testnet3,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe('payment-output-wrong-address');
+        expect(result.detail).toContain('scriptPubKey not decodable to address');
+      }
+    });
+
+    it('per-address-type: accepts P2SH match (wrapped segwit, 3…)', () => {
+      const p2wpkhInner = btc.p2wpkh(publicKey, btc.NETWORK);
+      const p2sh = btc.p2sh(p2wpkhInner, btc.NETWORK);
+      const buyer = btc.p2wpkh(publicKey, btc.NETWORK);
+      const args = makeBaseArgs({
+        network: Network.Mainnet,
+        sellerInput: { ...makeBaseArgs().sellerInput, scriptPubKey: p2sh.script },
+        buyerInputs: [
+          {
+            txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+            vout: 1,
+            value: 50_000,
+            scriptPubKey: buyer.script,
+          },
+        ],
+        destinations: {
+          buyerReceiveAddress: buyer.address!,
+          sellerPaymentAddress: p2sh.address!,
+          buyerChangeAddress: buyer.address!,
+        },
+      });
+      const built = buildCat21BuyOfferPsbt(args);
+      const tx = btc.Transaction.fromPSBT(built.psbt);
+      tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+      const result = validateCat21BuyOfferPsbt({
+        psbt: tx.toPSBT(),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: p2sh.address!,
+        network: Network.Mainnet,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('surfaces payment-output-wrong-address BEFORE wrong-price when both would fail', () => {
+      // The address attack is more dangerous than the price one, so it
+      // must surface first. PSBT pays the wrong address AND below floor.
+      const args = makeBaseArgs();
+      const built = buildCat21BuyOfferPsbt(args);
+      const taproot = btc.p2tr(publicKey.slice(1, 33), undefined, btc.TEST_NETWORK);
+      const tx = btc.Transaction.fromPSBT(built.psbt);
+      tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+      const result = validateCat21BuyOfferPsbt({
+        psbt: tx.toPSBT(),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 1_000_000, // PSBT pays only 21k, would trip wrong-price.
+        expectedSellerPaymentAddress: taproot.address!, // also wrong address.
+        network: Network.Testnet3,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('payment-output-wrong-address');
+    });
   });
 
   describe('Finding #2 — sellerInput.value below postage requirement', () => {

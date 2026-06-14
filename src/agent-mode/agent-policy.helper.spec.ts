@@ -205,6 +205,33 @@ describe('evaluateAgentPolicy', () => {
       if (!decision.allowed) expect(decision.reason).toBe('fee-rate-above-ceiling');
     });
 
+    it('returns "agent-disabled" when EVERY gate would trip simultaneously', () => {
+      // Full-chain stress test: one input simultaneously fails every
+      // single gate. Cheapest-first ordering demands the very first one
+      // ('agent-disabled') wins. A refactor that quietly moves any
+      // gate before the enabled check would surface a different reason
+      // and fail this test.
+      const decision = evaluateAgentPolicy(
+        {
+          enabled: false,
+          maxSpendPerActionSats: 1,
+          dailyCapSats: 1,
+          maxFeeRateSatPerVbyte: 1,
+          floorPriceSatsPerCat: 1_000_000,
+          allowedCounterparties: ['bc1qknownbuyer'],
+        },
+        {
+          kind: 'sell-accept',
+          spendSats: 1_000_000,
+          spentTodaySats: 1_000_000,
+          feeRateSatPerVbyte: 1_000,
+          receivePriceSats: 1,
+          counterpartyAddress: 'bc1qstranger',
+        }
+      );
+      expect(decision).toEqual({ allowed: false, reason: 'agent-disabled' });
+    });
+
     it('floor-price deny precedes counterparty deny on a sell-accept that trips both', () => {
       const decision = evaluateAgentPolicy(
         {

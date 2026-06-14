@@ -266,20 +266,18 @@ export function validateCat21BuyOfferPsbt(
     return fail('wrong-postage', `${postageSats} < ${minPostage}`);
   }
 
-  // 5. Seller payment.
   const paymentOutput = tx.getOutput(1);
-  const pricePaidSats = Number(paymentOutput.amount ?? 0n);
-  if (pricePaidSats < args.floorPriceSats) {
-    return fail('wrong-price', `${pricePaidSats} < ${args.floorPriceSats}`);
-  }
 
-  // 6. Seller payment address — decoded from Output 1's scriptPubKey and
+  // 5. Seller payment address — decoded from Output 1's scriptPubKey and
   //    compared against the caller-supplied expectation. Skipped when the
   //    expectation is absent (backwards-compat); strongly recommended
-  //    whenever a human eventually signs. Without this gate a malicious
-  //    buyer can construct a PSBT where Output 1 pays a third address —
-  //    price ≥ floor passes, signer-side UI fails to notice, cat moves to
-  //    buyer, payment never reaches the seller.
+  //    whenever a human eventually signs. Runs BEFORE the price check so
+  //    that a PSBT which is both underpriced AND points at the wrong
+  //    address surfaces the more dangerous reason — the address attack —
+  //    not the cheaper wrong-price one. Without this gate a malicious
+  //    buyer can construct a PSBT where Output 1 pays a third address;
+  //    signer-side UI fails to notice, cat moves to buyer, payment never
+  //    reaches the seller.
   if (args.expectedSellerPaymentAddress !== undefined) {
     const scureNetwork = toScureNetwork(args.network ?? Network.Mainnet);
     let actualAddress: string;
@@ -305,6 +303,12 @@ export function validateCat21BuyOfferPsbt(
         `expected ${args.expectedSellerPaymentAddress}, got ${actualAddress}`
       );
     }
+  }
+
+  // 6. Seller payment amount.
+  const pricePaidSats = Number(paymentOutput.amount ?? 0n);
+  if (pricePaidSats < args.floorPriceSats) {
+    return fail('wrong-price', `${pricePaidSats} < ${args.floorPriceSats}`);
   }
 
   return { ok: true, pricePaidSats, postageSats };
