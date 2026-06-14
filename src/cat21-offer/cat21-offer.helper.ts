@@ -178,6 +178,19 @@ export interface ValidateCat21BuyOfferArgs {
   floorPriceSats: number;
   /** Optional override; defaults to CAT21_OFFER_POSTAGE_SATS. */
   minPostageSats?: number;
+  /**
+   * Strongly recommended whenever a human eventually signs. When set, the
+   * validator decodes Output 1's `scriptPubKey` back to an address string
+   * and compares it against this value; mismatch returns
+   * `'payment-output-wrong-address'`. Omitting it leaves the address
+   * un-checked (pre-2026-06 behaviour, retained for backwards-compat).
+   */
+  expectedSellerPaymentAddress?: string;
+  /**
+   * Network used to decode Output 1's `scriptPubKey` back to an address.
+   * Defaults to mainnet. Callers signing on testnet/regtest must pass it.
+   */
+  network?: Network;
 }
 
 /**
@@ -193,10 +206,12 @@ export interface ValidateCat21BuyOfferArgs {
  *      tapKeySig, or finalScriptWitness).
  *   4. Output 0 (cat output) postage ≥ configured minimum.
  *   5. Output 1 (seller payment) ≥ floor price.
- *
- * Output 1's destination address is NOT decoded back from its scriptPubKey
- * here. The caller is the seller and already knows the address it expects;
- * the address match belongs to the UI layer, not this protocol validator.
+ *   6. When `expectedSellerPaymentAddress` is supplied, Output 1's
+ *      `scriptPubKey` is decoded back to an address string and compared.
+ *      Strongly recommended whenever a human eventually signs — the
+ *      validator is the single source of truth for the wallet-side
+ *      defence-in-depth check and cannot delegate this gate to a UI
+ *      layer that may or may not exist.
  */
 export function validateCat21BuyOfferPsbt(
   args: ValidateCat21BuyOfferArgs
@@ -256,6 +271,40 @@ export function validateCat21BuyOfferPsbt(
   const pricePaidSats = Number(paymentOutput.amount ?? 0n);
   if (pricePaidSats < args.floorPriceSats) {
     return fail('wrong-price', `${pricePaidSats} < ${args.floorPriceSats}`);
+  }
+
+  // 6. Seller payment address — decoded from Output 1's scriptPubKey and
+  //    compared against the caller-supplied expectation. Skipped when the
+  //    expectation is absent (backwards-compat); strongly recommended
+  //    whenever a human eventually signs. Without this gate a malicious
+  //    buyer can construct a PSBT where Output 1 pays a third address —
+  //    price ≥ floor passes, signer-side UI fails to notice, cat moves to
+  //    buyer, payment never reaches the seller.
+  if (args.expectedSellerPaymentAddress !== undefined) {
+    const scureNetwork = toScureNetwork(args.network ?? Network.Mainnet);
+    let actualAddress: string;
+    try {
+      if (!paymentOutput.script) {
+        return fail(
+          'payment-output-wrong-address',
+          'scriptPubKey not decodable to address'
+        );
+      }
+      actualAddress = btc.Address(scureNetwork).encode(
+        btc.OutScript.decode(paymentOutput.script)
+      );
+    } catch {
+      return fail(
+        'payment-output-wrong-address',
+        'scriptPubKey not decodable to address'
+      );
+    }
+    if (actualAddress !== args.expectedSellerPaymentAddress) {
+      return fail(
+        'payment-output-wrong-address',
+        `expected ${args.expectedSellerPaymentAddress}, got ${actualAddress}`
+      );
+    }
   }
 
   return { ok: true, pricePaidSats, postageSats };

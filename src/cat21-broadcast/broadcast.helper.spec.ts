@@ -147,4 +147,17 @@ describe('broadcastCat21', () => {
     expect(mempool).not.toHaveBeenCalled();
     expect(result.channel).toBe('slipstream');
   });
+
+  // Finding #8 — symmetric to the slipstream-error bubble-up test.
+  it('lets a mempool-callback rejection bubble up unchanged (no slipstream auto-fallback)', async () => {
+    const mempool = jest
+      .fn<(hex: string) => Promise<string>>()
+      .mockRejectedValue(new Error('mempool rejected'));
+    const fetchSpy = jest.fn<typeof fetch>();
+
+    await expect(
+      broadcastCat21({ hex: 'cafebabe', weight: 600 }, mempool, { fetchImpl: fetchSpy })
+    ).rejects.toThrow(/mempool rejected/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

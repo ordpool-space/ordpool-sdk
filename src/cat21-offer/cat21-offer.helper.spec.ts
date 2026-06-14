@@ -248,4 +248,271 @@ describe('validateCat21BuyOfferPsbt', () => {
   it('test setup compiles with mainnet payment helper', () => {
     expect(p2wpkh.script).toBeInstanceOf(Uint8Array);
   });
+
+  describe('payment-output address gate (Finding #1)', () => {
+
+    function attachBuyerSig(psbtBytes: Uint8Array): Uint8Array {
+      const tx = btc.Transaction.fromPSBT(psbtBytes);
+      tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+      return tx.toPSBT();
+    }
+
+    it('accepts when expectedSellerPaymentAddress matches Output 1 (testnet P2WPKH)', () => {
+      const args = makeBaseArgs();
+      const built = buildCat21BuyOfferPsbt(args);
+      const result = validateCat21BuyOfferPsbt({
+        psbt: attachBuyerSig(built.psbt),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        network: Network.Testnet3,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('rejects when Output 1 pays a different address than expected', () => {
+      const args = makeBaseArgs({
+        destinations: {
+          ...makeBaseArgs().destinations,
+          sellerPaymentAddress: p2wpkhTestnet.address!,
+        },
+      });
+      const built = buildCat21BuyOfferPsbt(args);
+      // Caller expected a DIFFERENT address. PSBT pays p2wpkhTestnet; we
+      // expect the (also-testnet) taproot pubkey-derived address.
+      const taproot = btc.p2tr(publicKey.slice(1, 33), undefined, btc.TEST_NETWORK);
+      const result = validateCat21BuyOfferPsbt({
+        psbt: attachBuyerSig(built.psbt),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: taproot.address!,
+        network: Network.Testnet3,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.reason).toBe('payment-output-wrong-address');
+        // Detail contains BOTH addresses for auditability.
+        expect(result.detail).toContain(taproot.address!);
+        expect(result.detail).toContain(p2wpkhTestnet.address!);
+      }
+    });
+
+    it('pass-through: when expectedSellerPaymentAddress is omitted, address is not checked', () => {
+      const args = makeBaseArgs();
+      const built = buildCat21BuyOfferPsbt(args);
+      const result = validateCat21BuyOfferPsbt({
+        psbt: attachBuyerSig(built.psbt),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('per-address-type: accepts P2WPKH match (bc1q…)', () => {
+      const mainPay = btc.p2wpkh(publicKey, btc.NETWORK);
+      const seller = btc.p2wpkh(publicKey, btc.NETWORK);
+      const buyer = btc.p2wpkh(publicKey, btc.NETWORK);
+      const args = makeBaseArgs({
+        network: Network.Mainnet,
+        sellerInput: { ...makeBaseArgs().sellerInput, scriptPubKey: seller.script },
+        buyerInputs: [
+          {
+            txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+            vout: 1,
+            value: 50_000,
+            scriptPubKey: buyer.script,
+          },
+        ],
+        destinations: {
+          buyerReceiveAddress: buyer.address!,
+          sellerPaymentAddress: mainPay.address!,
+          buyerChangeAddress: buyer.address!,
+        },
+      });
+      const built = buildCat21BuyOfferPsbt(args);
+      const result = validateCat21BuyOfferPsbt({
+        psbt: attachBuyerSig(built.psbt),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: mainPay.address!,
+        network: Network.Mainnet,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('per-address-type: accepts P2TR match (bc1p…)', () => {
+      const taproot = btc.p2tr(publicKey.slice(1, 33), undefined, btc.NETWORK);
+      const buyer = btc.p2wpkh(publicKey, btc.NETWORK);
+      const args = makeBaseArgs({
+        network: Network.Mainnet,
+        sellerInput: { ...makeBaseArgs().sellerInput, scriptPubKey: taproot.script },
+        buyerInputs: [
+          {
+            txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+            vout: 1,
+            value: 50_000,
+            scriptPubKey: buyer.script,
+          },
+        ],
+        destinations: {
+          buyerReceiveAddress: buyer.address!,
+          sellerPaymentAddress: taproot.address!,
+          buyerChangeAddress: buyer.address!,
+        },
+      });
+      const built = buildCat21BuyOfferPsbt(args);
+      const result = validateCat21BuyOfferPsbt({
+        psbt: attachBuyerSig(built.psbt),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: taproot.address!,
+        network: Network.Mainnet,
+      });
+      expect(result.ok).toBe(true);
+    });
+
+    it('network-aware: same pubkey on mainnet vs testnet does NOT match', () => {
+      // PSBT pays the testnet address; caller expected the mainnet form.
+      const args = makeBaseArgs();
+      const built = buildCat21BuyOfferPsbt(args);
+      const result = validateCat21BuyOfferPsbt({
+        psbt: attachBuyerSig(built.psbt),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: p2wpkh.address!, // mainnet bc1q…
+        network: Network.Testnet3,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('payment-output-wrong-address');
+    });
+  });
+
+  describe('Finding #2 — sellerInput.value below postage requirement', () => {
+
+    it('builder rejects when seller UTXO value is below the postage requirement', () => {
+      expect(() =>
+        buildCat21BuyOfferPsbt(
+          makeBaseArgs({
+            sellerInput: { ...makeBaseArgs().sellerInput, value: 100 },
+          })
+        )
+      ).toThrow(/below configured postage/);
+    });
+  });
+
+  describe('Finding #3 — sighash-not-all reject branch', () => {
+
+    it('rejects PSBT with non-ALL sighashType on any input', () => {
+      const args = makeBaseArgs();
+      const built = buildCat21BuyOfferPsbt(args);
+      const tx = btc.Transaction.fromPSBT(built.psbt);
+      tx.updateInput(0, { sighashType: btc.SigHash.SINGLE });
+      tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+      const result = validateCat21BuyOfferPsbt({
+        psbt: tx.toPSBT(),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 21_000,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('sighash-not-all');
+    });
+  });
+
+  describe('Finding #4 — missing-seller-payment-output reject branch', () => {
+
+    it('rejects a PSBT with fewer than 2 outputs', () => {
+      const args = makeBaseArgs();
+      const tx = new btc.Transaction({ allowUnknownInputs: true });
+      tx.addInput({
+        txid: args.sellerInput.txid,
+        index: args.sellerInput.vout,
+        witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(1000) },
+        sighashType: btc.SigHash.ALL,
+      });
+      tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(546), btc.TEST_NETWORK);
+      const result = validateCat21BuyOfferPsbt({
+        psbt: tx.toPSBT(),
+        expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+        floorPriceSats: 1,
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.reason).toBe('missing-seller-payment-output');
+    });
+  });
+
+  describe('Finding #5 — change dust threshold boundary', () => {
+
+    it('emits change output at exactly 546 sats (boundary)', () => {
+      // 21_000 price + 546 postage - 546 recycled + 1_000 fee = 22_000 obligation
+      // 22_546 input - 22_000 obligation = 546 change → emit
+      const result = buildCat21BuyOfferPsbt(
+        makeBaseArgs({
+          buyerInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 22_546,
+              scriptPubKey: p2wpkhTestnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.changeSats).toBe(546);
+      expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(3);
+    });
+
+    it('absorbs 545 sats change into fee (just below dust)', () => {
+      const result = buildCat21BuyOfferPsbt(
+        makeBaseArgs({
+          buyerInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 22_545,
+              scriptPubKey: p2wpkhTestnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.changeSats).toBe(0);
+      expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(2);
+    });
+  });
+
+  describe('Finding #6 — result.hex parseability', () => {
+
+    it('returns result.hex as parseable raw transaction bytes', () => {
+      const result = buildCat21BuyOfferPsbt(makeBaseArgs());
+      const parsed = btc.Transaction.fromRaw(hex.decode(result.hex), {
+        allowUnknownOutputs: false,
+      });
+      expect(parsed.inputsLength).toBeGreaterThanOrEqual(2);
+      expect(parsed.outputsLength).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('Finding #7 — result.buyerInputTotalSats', () => {
+
+    it('returns buyerInputTotalSats summing all buyer-funded inputs', () => {
+      const result = buildCat21BuyOfferPsbt(
+        makeBaseArgs({
+          buyerInputs: [
+            {
+              txid: 'aa'.repeat(32),
+              vout: 0,
+              value: 30_000,
+              scriptPubKey: p2wpkhTestnet.script,
+            },
+            {
+              txid: 'bb'.repeat(32),
+              vout: 1,
+              value: 20_000,
+              scriptPubKey: p2wpkhTestnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.buyerInputTotalSats).toBe(50_000);
+    });
+  });
 });
