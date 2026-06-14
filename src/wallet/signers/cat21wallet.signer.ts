@@ -26,15 +26,15 @@ interface Cat21WalletSignPsbtParams {
 }
 
 /**
- * Cat21 Wallet — `window.Cat21Provider.request('signPsbt', …)`.
+ * CAT-21 wallet — `window.Cat21Provider.request('signPsbt', …)`.
  *
- * Cat21 Wallet is forked from Leather and inherits Leather's
+ * CAT-21 wallet is forked from Leather and inherits Leather's
  * Bitcoin signPsbt JSON-RPC shape verbatim. The wallet signs the
  * PSBT, hands the signed bytes back, and broadcasting is our job
  * via `input.broadcast(...)` (electrs `POST /tx`).
  *
  * Network mapping uses Leather's network strings even though
- * Cat21 Wallet is mainnet-only per its ADR-7 (Stacks/Lightning/
+ * CAT-21 wallet is mainnet-only per its ADR-7 (Stacks/Lightning/
  * testnet UI hidden). The string is still in the request envelope
  * so the wallet's internal validators get what they expect.
  *
@@ -59,7 +59,7 @@ export const cat21walletSigner: WalletSigner = {
 
     const provider = findCat21WalletProvider(window as unknown as WindowLike);
     if (!provider) {
-      throw new Error('Cat21 Wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
+      throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
     }
     const signPromise = provider.request(
       'signPsbt',

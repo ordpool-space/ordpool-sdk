@@ -20,7 +20,7 @@ import { xverseConnector } from './xverse.connector';
  * `WalletService` walks this list for detection and dispatch.
  *
  * Detection order matters — first-installed shows up first in the
- * picker. Cat21 Wallet leads because it's OUR wallet (the
+ * picker. CAT-21 wallet leads because it's OUR wallet (the
  * maintainer ships this one). Xverse follows as the headline
  * external recommendation. Everything else by installed-base
  * heuristic.

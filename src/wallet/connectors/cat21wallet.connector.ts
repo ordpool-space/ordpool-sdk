@@ -17,9 +17,9 @@ import {
 
 
 /**
- * Cat21 Wallet — `window.Cat21Provider.request('getAddresses')`.
+ * CAT-21 wallet — `window.Cat21Provider.request('getAddresses')`.
  *
- * Cat21 Wallet is our own Bitcoin-L1 wallet, forked from Leather.
+ * CAT-21 wallet is our own Bitcoin-L1 wallet, forked from Leather.
  * The wire protocol for the Bitcoin RPC subset (`getAddresses`,
  * `signPsbt`, `signMessage`, `sendTransfer`, `getInfo`,
  * `supportedMethods`, `open`) is identical to Leather's, so the
@@ -27,7 +27,7 @@ import {
  *
  * Discovery rules per the wallet's INTEGRATION-ORDPOOL-SDK.md
  * contract:
- *   - `window.Cat21Provider` is ALWAYS present when Cat21 Wallet
+ *   - `window.Cat21Provider` is ALWAYS present when CAT-21 wallet
  *     is installed.
  *   - The provider self-identifies with `isCat21: true`. Branch
  *     on this for positive identification, NOT on `isLeather`
@@ -40,7 +40,7 @@ import {
  *     `{ id: 'Cat21Provider' }` entry.
  *
  * Stacks methods (`stx_*`) are not registered by the wallet — they
- * return `METHOD_NOT_FOUND`, not a hang. Cat21 Wallet is BTC L1
+ * return `METHOD_NOT_FOUND`, not a hang. CAT-21 wallet is BTC L1
  * mainnet only per the wallet's ADR-7.
  */
 export const cat21walletConnector: WalletConnector = {
@@ -55,7 +55,7 @@ export const cat21walletConnector: WalletConnector = {
   connect(_network: Network): Observable<WalletInfo> {
     const provider = findCat21WalletProvider(window as unknown as WindowLike);
     if (!provider) {
-      throw new Error('Cat21 Wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
+      throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
     }
     return from(provider.request('getAddresses') as Promise<LeatherAddressResponse>).pipe(
       map(resp => {

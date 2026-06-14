@@ -6,7 +6,7 @@ import { detectInstalledWallets, walletConnectors } from './index';
 
 describe('walletConnectors registry', () => {
 
-  it('lists Cat21 Wallet first (our own wallet), then Xverse + the rest in detection order', () => {
+  it('lists CAT-21 wallet first (our own wallet), then Xverse + the rest in detection order', () => {
     expect(walletConnectors.map(c => c.providerId)).toEqual(['cat21wallet', 'xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby', 'binance']);
   });
 
@@ -129,13 +129,13 @@ describe('detectInstalledWallets', () => {
     expect(installedWallets).toEqual([KnownOrdinalWallets.leather]);
   });
 
-  it('detects Cat21 Wallet via window.Cat21Provider.isCat21', () => {
+  it('detects CAT-21 wallet via window.Cat21Provider.isCat21', () => {
     const { installedWallets } = detectInstalledWallets({ Cat21Provider: { isCat21: true } });
     expect(installedWallets).toEqual([KnownOrdinalWallets.cat21wallet]);
   });
 
-  it('detects Cat21 Wallet via the WBIP004 btc_providers array (works when window.Cat21Provider was overwritten by another extension racing to inject)', () => {
-    const { installedWallets } = detectInstalledWallets({ btc_providers: [{ id: 'Cat21Provider', name: 'Cat21 Wallet' }] });
+  it('detects CAT-21 wallet via the WBIP004 btc_providers array (works when window.Cat21Provider was overwritten by another extension racing to inject)', () => {
+    const { installedWallets } = detectInstalledWallets({ btc_providers: [{ id: 'Cat21Provider', name: 'CAT-21 wallet' }] });
     expect(installedWallets).toEqual([KnownOrdinalWallets.cat21wallet]);
   });
 
@@ -144,12 +144,12 @@ describe('detectInstalledWallets', () => {
     expect(installedWallets).toEqual([]);
   });
 
-  it('shows Cat21 Wallet via the canonical Cat21Provider slot even when the wallet has ALSO politely backfilled LeatherProvider (no real Leather installed) — never doubled up', () => {
-    // Cat21 Wallet always populates window.Cat21Provider AND
+  it('shows CAT-21 wallet via the canonical Cat21Provider slot even when the wallet has ALSO politely backfilled LeatherProvider (no real Leather installed) — never doubled up', () => {
+    // CAT-21 wallet always populates window.Cat21Provider AND
     // backfills window.LeatherProvider when real Leather isn't
     // installed (politeness model). The backfilled LeatherProvider
     // carries isCat21:true; isLeatherInstalled filters those out so
-    // we never surface Cat21 Wallet twice in the picker.
+    // we never surface CAT-21 wallet twice in the picker.
     const provider = { isCat21: true, isLeather: true };
     const { installedWallets } = detectInstalledWallets({
       Cat21Provider: provider,
@@ -158,7 +158,7 @@ describe('detectInstalledWallets', () => {
     expect(installedWallets).toEqual([KnownOrdinalWallets.cat21wallet]);
   });
 
-  it('shows BOTH Cat21 Wallet and real Leather when both are co-installed (real Leather keeps its LeatherProvider slot per the politeness model)', () => {
+  it('shows BOTH CAT-21 wallet and real Leather when both are co-installed (real Leather keeps its LeatherProvider slot per the politeness model)', () => {
     const { installedWallets } = detectInstalledWallets({
       Cat21Provider: { isCat21: true, isLeather: true },
       // Real Leather — no isCat21 marker.
@@ -172,7 +172,7 @@ describe('detectInstalledWallets', () => {
 
   it('walks a caller-supplied connector list (for tests with stub rosters)', () => {
     // Pick Xverse explicitly so the test is stable even when the
-    // roster head changes (Cat21 Wallet leads as of iter 119).
+    // roster head changes (CAT-21 wallet leads as of iter 119).
     const stubConnectors = walletConnectors.filter(c => c.providerId === 'xverse');
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(
       { XverseProviders: {} },

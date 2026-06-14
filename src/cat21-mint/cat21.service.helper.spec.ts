@@ -665,7 +665,7 @@ describe('createTransaction dust-limit boundary', () => {
 // lockTime=21 enforced at consensus level. Prevents wallet
 // "acceleration" from dropping nLockTime=21 and burning the cat.
 //
-// Cat21 Wallet exception: sequence = 0xfffffffd. RBF-signaling and
+// CAT-21 wallet exception: sequence = 0xfffffffd. RBF-signaling and
 // safe because OUR wallet knows about cats — its acceleration UI
 // preserves nLockTime=21 on the replacement tx. Users can bump fee
 // in mempool congestion without rebuilding the mint.
@@ -711,11 +711,11 @@ describe('CAT-21 RBF policy (per-wallet sequence)', () => {
     expect(inputSequenceFor(KnownOrdinalWalletType.unisat, leatherNativeSegwit)).toBe(0xfffffffe);
   });
 
-  it('Cat21 Wallet mint input has sequence=0xfffffffd (RBF-signaling, lockTime-enforced) — OUR wallet, knows about cats, safe to allow RBF', () => {
+  it('CAT-21 wallet mint input has sequence=0xfffffffd (RBF-signaling, lockTime-enforced) — OUR wallet, knows about cats, safe to allow RBF', () => {
     expect(inputSequenceFor(KnownOrdinalWalletType.cat21wallet, leatherNativeSegwit)).toBe(0xfffffffd);
   });
 
-  it('Cat21 Wallet shares Leather\'s BIP-84 P2WPKH script for the input — sequence is the only diff from Leather\'s mint', () => {
+  it('CAT-21 wallet shares Leather\'s BIP-84 P2WPKH script for the input — sequence is the only diff from Leather\'s mint', () => {
     const leatherResult = createTransaction(
       KnownOrdinalWalletType.leather,
       taprootRecipient,

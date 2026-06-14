@@ -24,10 +24,10 @@ export function isLeatherInstalled(win: WindowLike | undefined): boolean {
   // `LeatherProvider` is the post-rebrand global; `HiroWalletProvider`
   // is the pre-rebrand one. Some users still have older versions.
   //
-  // Cat21 Wallet — our own fork of Leather — politely fills the
+  // CAT-21 wallet — our own fork of Leather — politely fills the
   // `LeatherProvider` slot only when real Leather is NOT installed
   // (see INTEGRATION-ORDPOOL-SDK.md in the cat21-wallet repo). If
-  // we see `isCat21: true` on the provider, this is Cat21 Wallet
+  // we see `isCat21: true` on the provider, this is CAT-21 wallet
   // backfilling Leather's slot, not actual Leather. Defer to the
   // cat21wallet connector so the picker shows the right entry.
   const lp = win?.LeatherProvider as { isCat21?: boolean } | undefined;
@@ -36,18 +36,18 @@ export function isLeatherInstalled(win: WindowLike | undefined): boolean {
 }
 
 /**
- * Cat21 Wallet detection. Per INTEGRATION-ORDPOOL-SDK.md in the
+ * CAT-21 wallet detection. Per INTEGRATION-ORDPOOL-SDK.md in the
  * cat21-wallet repo:
  *
  *   - canonical slot: `window.Cat21Provider` ALWAYS present when
- *     Cat21 Wallet is installed; positive ID via `isCat21: true`
+ *     CAT-21 wallet is installed; positive ID via `isCat21: true`
  *   - WBIP004 fallback: `window.btc_providers[]` carries a
  *     `{ id: 'Cat21Provider' }` entry, survives co-installation
  *
  * The wallet also politely backfills `window.LeatherProvider` (only
  * when real Leather is NOT installed); `isLeatherInstalled` filters
  * out `isCat21:true` providers so the picker never confuses the two.
- * We do NOT detect Cat21 Wallet via the Leather slot here — the
+ * We do NOT detect CAT-21 wallet via the Leather slot here — the
  * canonical Cat21Provider slot is always populated when the wallet
  * is present, so the LeatherProvider backfill is purely a courtesy
  * for dApps that key off `isLeather` and is not our discovery path.
@@ -61,7 +61,7 @@ export function isCat21WalletInstalled(win: WindowLike | undefined): boolean {
 }
 
 /**
- * Resolve the active Cat21 Wallet provider object. Same discovery
+ * Resolve the active CAT-21 wallet provider object. Same discovery
  * path as `isCat21WalletInstalled`; returns `undefined` if no
  * provider with the `isCat21` marker is visible.
  *

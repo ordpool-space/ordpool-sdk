@@ -351,7 +351,7 @@ export function createInput(walletType: KnownOrdinalWalletType,
   switch (walletType) {
     case KnownOrdinalWalletType.leather:
     case KnownOrdinalWalletType.cat21wallet: {
-      // Cat21 Wallet is forked from Leather and inherits its BIP-84
+      // CAT-21 wallet is forked from Leather and inherits its BIP-84
       // P2WPKH payment-address derivation. Same script shape.
       scriptData = createInputScriptForLeather(paymentPublicKeyToUse, network);
       break;
@@ -391,8 +391,8 @@ export function createInput(walletType: KnownOrdinalWalletType,
   //     nLockTime=21 and burns the cat (Xverse incident 2024, see
   //     project_cat21_must_not_signal_rbf memory).
   //
-  //   - EXCEPTION (Cat21 Wallet only): sequence = 0xfffffffd.
-  //     RBF-signaling, lockTime-enforced. Cat21 Wallet is OUR own
+  //   - EXCEPTION (CAT-21 wallet only): sequence = 0xfffffffd.
+  //     RBF-signaling, lockTime-enforced. CAT-21 wallet is OUR own
   //     wallet, knows about cats by construction (per ADR-3 / ADR-10
   //     in CAT21-WALLET-FORK-PLAN.md), and its mempool-acceleration
   //     UI is guaranteed to preserve nLockTime=21 on the replacement

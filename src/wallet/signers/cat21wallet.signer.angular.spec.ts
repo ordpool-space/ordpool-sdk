@@ -8,7 +8,7 @@ import { getDummyKeypair } from '../../cat21-mint/cat21.service.helper';
 import { cat21walletSigner } from './cat21wallet.signer';
 
 
-// Build a real signed-but-not-finalized PSBT the way Cat21 Wallet
+// Build a real signed-but-not-finalized PSBT the way CAT-21 wallet
 // (forked from Leather, identical signPsbt response shape) would
 // return it, so the signer's finalize step has something legit to
 // consume.
@@ -72,7 +72,7 @@ describe('cat21walletSigner.signAndBroadcast', () => {
     expect(params.broadcast).toBe(false);
   });
 
-  it('when Cat21 Wallet returns a signed PSBT, finalises it via scure and broadcasts the wire-tx hex through input.broadcast', async () => {
+  it('when CAT-21 wallet returns a signed PSBT, finalises it via scure and broadcasts the wire-tx hex through input.broadcast', async () => {
     const { hex: signedHex, expectedTxHex } = makeCat21WalletResponse();
     requestMock.mockResolvedValue({ result: { hex: signedHex } } as never);
 
