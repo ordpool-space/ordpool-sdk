@@ -21,7 +21,7 @@ interface Cat21WalletSignPsbtParams {
   hex: string;
   allowedSighash: number[];
   signAtIndex: number;
-  network: 'mainnet' | 'testnet' | 'signet' | 'sbtcDevenv' | 'devnet';
+  network: 'mainnet' | 'testnet' | 'signet' | 'sbtcDevenv' | 'devnet' | 'regtest';
   broadcast: false;
 }
 
