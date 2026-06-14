@@ -4,10 +4,12 @@ import { from, Observable, switchMap } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network';
 import { broadcastSignedPsbt } from '../psbt-extract';
+import { findCat21WalletProvider } from '../wallet.service.helper';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   WalletSigner,
+  WindowLike,
 } from '../wallet.service.types';
 
 
@@ -22,13 +24,6 @@ interface Cat21WalletSignPsbtParams {
   network: 'mainnet' | 'testnet' | 'signet' | 'sbtcDevenv' | 'devnet';
   broadcast: false;
 }
-
-interface Cat21WalletRpcWindow {
-  Cat21Provider: {
-    request(method: 'signPsbt', params: Cat21WalletSignPsbtParams): Promise<Cat21WalletPSBTResponse>;
-  };
-}
-
 
 /**
  * Cat21 Wallet — `window.Cat21Provider.request('signPsbt', …)`.
@@ -62,8 +57,14 @@ export const cat21walletSigner: WalletSigner = {
       broadcast: false, // we broadcast via input.broadcast(...)
     };
 
-    const win = window as unknown as Cat21WalletRpcWindow;
-    const signPromise = win.Cat21Provider.request('signPsbt', signRequestParams);
+    const provider = findCat21WalletProvider(window as unknown as WindowLike);
+    if (!provider) {
+      throw new Error('Cat21 Wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
+    }
+    const signPromise = provider.request(
+      'signPsbt',
+      signRequestParams,
+    ) as Promise<Cat21WalletPSBTResponse>;
 
     return from(signPromise).pipe(
       switchMap(resp => broadcastSignedPsbt(input, hex.decode(resp.result.hex))),

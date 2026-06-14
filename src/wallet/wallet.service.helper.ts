@@ -32,17 +32,25 @@ export function isLeatherInstalled(win: WindowLike | undefined): boolean {
   // cat21wallet connector so the picker shows the right entry.
   const lp = win?.LeatherProvider as { isCat21?: boolean } | undefined;
   if (lp?.isCat21) return false;
-  const hp = win?.HiroWalletProvider as { isCat21?: boolean } | undefined;
-  if (hp?.isCat21) return false;
-  return !!(lp ?? hp);
+  return !!(lp ?? win?.HiroWalletProvider);
 }
 
 /**
- * Cat21 Wallet detection. Canonical slot is `window.Cat21Provider`
- * with `isCat21: true` (always present when Cat21 Wallet is
- * installed). WBIP004 secondary lookup: a `{ id: 'Cat21Provider' }`
- * entry in `window.btc_providers` — survives co-installation with
- * other Bitcoin extensions per the integration contract.
+ * Cat21 Wallet detection. Per INTEGRATION-ORDPOOL-SDK.md in the
+ * cat21-wallet repo:
+ *
+ *   - canonical slot: `window.Cat21Provider` ALWAYS present when
+ *     Cat21 Wallet is installed; positive ID via `isCat21: true`
+ *   - WBIP004 fallback: `window.btc_providers[]` carries a
+ *     `{ id: 'Cat21Provider' }` entry, survives co-installation
+ *
+ * The wallet also politely backfills `window.LeatherProvider` (only
+ * when real Leather is NOT installed); `isLeatherInstalled` filters
+ * out `isCat21:true` providers so the picker never confuses the two.
+ * We do NOT detect Cat21 Wallet via the Leather slot here — the
+ * canonical Cat21Provider slot is always populated when the wallet
+ * is present, so the LeatherProvider backfill is purely a courtesy
+ * for dApps that key off `isLeather` and is not our discovery path.
  */
 export function isCat21WalletInstalled(win: WindowLike | undefined): boolean {
   const direct = win?.Cat21Provider as { isCat21?: boolean } | undefined;
@@ -50,6 +58,33 @@ export function isCat21WalletInstalled(win: WindowLike | undefined): boolean {
   const list = win?.btc_providers as { id?: string }[] | undefined;
   if (Array.isArray(list) && list.some(p => p?.id === 'Cat21Provider')) return true;
   return false;
+}
+
+/**
+ * Resolve the active Cat21 Wallet provider object. Same discovery
+ * path as `isCat21WalletInstalled`; returns `undefined` if no
+ * provider with the `isCat21` marker is visible.
+ *
+ * Used by `cat21walletConnector` / `cat21walletSigner` to find the
+ * `.request(...)` entry point.
+ */
+export function findCat21WalletProvider(win: WindowLike | undefined):
+  | { isCat21: true; request: (method: string, params?: unknown) => Promise<unknown> }
+  | undefined {
+  type P = { isCat21?: boolean; request?: (m: string, p?: unknown) => Promise<unknown> };
+  const direct = win?.Cat21Provider as P | undefined;
+  if (direct?.isCat21 && typeof direct.request === 'function') return direct as never;
+  // WBIP004 entry shape: the provider object itself is the second
+  // element of the {id, name, provider} record (some wallets nest
+  // the provider). Walk safely.
+  const list = win?.btc_providers as Array<{ id?: string; provider?: P }> | undefined;
+  if (Array.isArray(list)) {
+    const entry = list.find(p => p?.id === 'Cat21Provider');
+    if (entry?.provider?.isCat21 && typeof entry.provider.request === 'function') {
+      return entry.provider as never;
+    }
+  }
+  return undefined;
 }
 
 export function isUnisatInstalled(win: WindowLike | undefined): boolean {

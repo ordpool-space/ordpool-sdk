@@ -41,7 +41,8 @@ describe('cat21walletSigner.signAndBroadcast', () => {
 
   beforeEach(() => {
     requestMock = jest.fn();
-    (window as unknown as { Cat21Provider: { request: jest.Mock } }).Cat21Provider = {
+    (window as unknown as { Cat21Provider: { isCat21: true; request: jest.Mock } }).Cat21Provider = {
+      isCat21: true,
       request: requestMock,
     };
   });

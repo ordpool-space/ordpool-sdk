@@ -144,11 +144,12 @@ describe('detectInstalledWallets', () => {
     expect(installedWallets).toEqual([]);
   });
 
-  it('shows Cat21 Wallet (NOT Leather) when Cat21 Wallet has backfilled the LeatherProvider slot per its politeness model', () => {
-    // Cat21 Wallet's politeness model fills window.LeatherProvider
-    // only when real Leather is NOT installed, marking the
-    // backfilled provider with isCat21:true. Surface as Cat21
-    // Wallet exactly once — never confuse it with real Leather.
+  it('shows Cat21 Wallet via the canonical Cat21Provider slot even when the wallet has ALSO politely backfilled LeatherProvider (no real Leather installed) — never doubled up', () => {
+    // Cat21 Wallet always populates window.Cat21Provider AND
+    // backfills window.LeatherProvider when real Leather isn't
+    // installed (politeness model). The backfilled LeatherProvider
+    // carries isCat21:true; isLeatherInstalled filters those out so
+    // we never surface Cat21 Wallet twice in the picker.
     const provider = { isCat21: true, isLeather: true };
     const { installedWallets } = detectInstalledWallets({
       Cat21Provider: provider,

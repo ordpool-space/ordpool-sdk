@@ -2,6 +2,7 @@ import { from, map, Observable } from 'rxjs';
 
 import { Network } from '../../network';
 import {
+  findCat21WalletProvider,
   isCat21WalletInstalled,
   parseLeatherAddressResponse,
 } from '../wallet.service.helper';
@@ -13,14 +14,6 @@ import {
   WalletInfo,
   WindowLike,
 } from '../wallet.service.types';
-
-
-interface Cat21Provider {
-  isCat21: true;
-  isLeather?: true;
-  request(method: string, params?: unknown): Promise<LeatherAddressResponse>;
-  getProductInfo?(): { version: string; name: 'Cat21 Wallet'; meta: { tag: string; commit: string } };
-}
 
 
 /**
@@ -60,11 +53,11 @@ export const cat21walletConnector: WalletConnector = {
   },
 
   connect(_network: Network): Observable<WalletInfo> {
-    const w = window as unknown as { Cat21Provider?: Cat21Provider };
-    if (!w.Cat21Provider) {
-      throw new Error('Cat21 Wallet provider not present (window.Cat21Provider undefined)');
+    const provider = findCat21WalletProvider(window as unknown as WindowLike);
+    if (!provider) {
+      throw new Error('Cat21 Wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
     }
-    return from(w.Cat21Provider.request('getAddresses')).pipe(
+    return from(provider.request('getAddresses') as Promise<LeatherAddressResponse>).pipe(
       map(resp => {
         const info = parseLeatherAddressResponse(resp);
         // Stamp our own wallet type so consumers branch on Cat21
