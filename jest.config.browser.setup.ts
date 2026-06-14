@@ -30,3 +30,4 @@ import { DecompressionStream } from 'stream/web';
 import { webcrypto } from 'crypto';
 Object.defineProperty(global, 'crypto', { value: webcrypto, configurable: true, writable: true });
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true, writable: true });
+

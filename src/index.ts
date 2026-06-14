@@ -22,3 +22,11 @@ export * from './cat21-mint/utxo-content-scanner.service';
 // --- cat21 offer (ord-style buyer-initiated PSBT builder + seller-side validator) ---
 export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
+
+// --- cat21 broadcast (mempool / Slipstream dispatcher + Slipstream client) ---
+export * from './cat21-broadcast/broadcast.helper';
+export * from './cat21-broadcast/slipstream.helper';
+
+// --- agent-mode (autonomous-action policy gate) ---
+export * from './agent-mode/agent-policy.helper';
+export * from './agent-mode/agent-policy.types';
