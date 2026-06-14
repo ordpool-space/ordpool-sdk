@@ -1,6 +1,6 @@
 import { from, map, Observable } from 'rxjs';
 
-import { Network } from '../../network';
+import { Network, toLeatherNetworkString } from '../../network';
 import {
   findCat21WalletProvider,
   isCat21WalletInstalled,
@@ -52,16 +52,29 @@ export const cat21walletConnector: WalletConnector = {
     return isCat21WalletInstalled(win);
   },
 
-  connect(_network: Network): Observable<WalletInfo> {
+  connect(network: Network): Observable<WalletInfo> {
     const provider = findCat21WalletProvider(window as unknown as WindowLike);
     if (!provider) {
       throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
     }
-    return from(provider.request('getAddresses') as Promise<LeatherAddressResponse>).pipe(
+    // CAT-21 wallet's `getAddresses` honors a `network` parameter
+    // (handler at `apps/extension/src/background/messaging/rpc-methods/
+    // get-addresses.ts:22-24` forwards it as a URL param to the
+    // confirmation popup, which then derives addresses for the
+    // requested network). Without it, the popup defaults to whatever
+    // the wallet is currently set to in its UI (typically mainnet),
+    // which means a dapp on regtest can't drive a cleanly-signed
+    // PSBT against bcrt1q addresses. Passing the network here closes
+    // that gap so the consumer mint flow works on regtest without a
+    // separate `deriveRegtestAddresses` step in the harness.
+    const walletNetwork = toLeatherNetworkString(network);
+    return from(
+      provider.request('getAddresses', { network: walletNetwork }) as Promise<LeatherAddressResponse>,
+    ).pipe(
       map(resp => {
         const info = parseLeatherAddressResponse(resp);
-        // Stamp our own wallet type so consumers branch on Cat21
-        // Wallet rather than mistaking us for Leather (the parser
+        // Stamp our own wallet type so consumers branch on CAT-21
+        // wallet rather than mistaking us for Leather (the parser
         // sets `type: leather` because it's shared with the
         // Leather connector).
         return { ...info, type: KnownOrdinalWalletType.cat21wallet };
