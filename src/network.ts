@@ -64,14 +64,23 @@ export function toBitcoinNetworkType(network: Network): BitcoinNetworkType {
 }
 
 /**
- * Leather wallet's `network` field accepts these five strings.
+ * Leather wallet's `network` field accepts these strings.
  * Testnet variants flatten to 'testnet'.
+ *
+ * Regtest mapping nuance: upstream Leather labels its bcrt-HRP
+ * network slot `devnet` (a Stacks-isms artifact inherited from
+ * Hiro's stacks-devnet convention). CAT-21 wallet adds the
+ * Bitcoin-standard `regtest` slot alongside it (see the wallet's
+ * `WalletDefaultNetworkConfigurationIds.regtest` HACK marker), so
+ * we return the standard term going forward. The wallet still
+ * accepts `'devnet'` for back-compat with dapps written against
+ * the upstream-Leather contract.
  */
-export function toLeatherNetworkString(network: Network): 'mainnet' | 'testnet' | 'signet' | 'sbtcDevenv' | 'devnet' {
+export function toLeatherNetworkString(network: Network): 'mainnet' | 'testnet' | 'signet' | 'sbtcDevenv' | 'devnet' | 'regtest' {
   switch (network) {
     case Network.Mainnet: return 'mainnet';
     case Network.Signet: return 'signet';
-    case Network.Regtest: return 'devnet';
+    case Network.Regtest: return 'regtest';
     default: return 'testnet';
   }
 }
