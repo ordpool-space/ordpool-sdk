@@ -112,7 +112,10 @@ describe('broadcastCat21', () => {
       { fetchImpl: fetchSpy, slipstreamBaseUrl: 'https://miner.example.com' }
     );
 
-    expect(fetchSpy.mock.calls[0][0]).toBe('https://miner.example.com/api/v1/transactions');
+    // Slipstream path was migrated from /api/v1/transactions to /api/transactions
+    // (which is the real endpoint, verified by curl against the live host
+    // on 2026-06-15 — see slipstream.helper.ts JSDoc for proof).
+    expect(fetchSpy.mock.calls[0][0]).toBe('https://miner.example.com/api/transactions');
   });
 
   it('lets the slipstream error bubble up unchanged (no auto-fallback)', async () => {

@@ -23,6 +23,10 @@ export * from './cat21-mint/utxo-content-scanner.service';
 export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
 
+// --- cat21 transfer (move a cat to another address; mints a fresh cat on the same ordinal) ---
+export * from './cat21-transfer/cat21-transfer.helper';
+export * from './cat21-transfer/cat21-transfer.types';
+
 // --- cat21 broadcast (mempool / Slipstream dispatcher + Slipstream client) ---
 export * from './cat21-broadcast/broadcast.helper';
 export * from './cat21-broadcast/slipstream.helper';
