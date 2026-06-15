@@ -5,9 +5,113 @@
 **ordpool-sdk** is the higher-level domain library for the ordpool ecosystem. It sits one layer above [`ordpool-parser`](https://github.com/ordpool-space/ordpool-parser): the parser extracts artifacts from raw transactions; the SDK does everything one step up from that — REST wrappers, calendar clients, signing helpers, anything that needs to talk to a network or hold side-effecting logic.
 
 - **MIT licensed.**
-- **Dual output**: ESM (`dist/`) and CommonJS (`dist-commonjs/`).
+- **Two entry points** (see "Two entry points" section below):
+  - `ordpool-sdk` — Angular Package Format bundle for cat21.space.
+  - `ordpool-sdk/core` — plain CommonJS for cat21-wallet and any
+    other non-Angular consumer.
 - Works in Node.js AND browsers.
-- No external consumers yet — only `ordpool.space` and `cat21.space` will use it. No CHANGELOG, no semver gymnastics.
+- No external consumers yet — only `ordpool.space`, `cat21.space`, and
+  `cat21-wallet` use it. No CHANGELOG, no semver gymnastics.
+
+## Two entry points: `ordpool-sdk` vs `ordpool-sdk/core`
+
+The SDK ships pure helpers AND Angular `@Injectable` services in the
+same source tree. Both genuinely belong here — pure helpers are the
+reusable primitives, Angular services are cat21.space's stateful
+orchestrators. They cannot share one entry point because Angular's
+bundler emits `import * as i0 from '@angular/core'` at the top of
+the fesm bundle, and any consumer that imports from that bundle
+pulls Angular into their build.
+
+So the SDK has two parallel build outputs:
+
+| Entry point | Build tool | Output | For |
+|---|---|---|---|
+| `ordpool-sdk` | `ng-packagr` (Angular AOT) | `dist/fesm2022/ordpool-sdk.mjs` + `dist/index.d.ts` | cat21.space (Angular app) |
+| `ordpool-sdk/core` | plain `tsc` | `dist-core/core.js` (CommonJS) + `dist-core/core.d.ts` + per-file emit | cat21-wallet, any plain Node/Webpack/Vite consumer |
+
+`package.json` `exports` map wires the resolution. Consumers
+write:
+
+```ts
+// cat21.space (Angular):
+import { Cat21Service, buildCat21TransferPsbt } from 'ordpool-sdk';
+
+// cat21-wallet (React + Webpack, no Angular):
+import { buildCat21TransferPsbt } from 'ordpool-sdk/core';
+```
+
+### What goes in `core.ts`
+
+`src/core.ts` is the manifest for the `/core` subpath. Re-export
+ONLY symbols whose entire transitive import graph is Angular-free.
+
+Allowed:
+- Pure functions and types (`buildCat21TransferPsbt`,
+  `evaluateAgentPolicy`, `Network`, `KnownOrdinalWalletType`, …).
+- Constants and enums.
+- Files under `cat21-mint/cat21.service.helper.ts`,
+  `cat21-mint/cat21.service.types.ts`,
+  `cat21-mint/cat21-mint.helper.ts`,
+  `cat21-transfer/*`,
+  `cat21-offer/*`,
+  `cat21-broadcast/*`,
+  `agent-mode/*`,
+  `wallet/wallet.service.types.ts`,
+  `wallet/wallet-logos.ts`,
+  `network.ts`.
+
+NOT allowed (stays in main entry only):
+- `WalletService`, `Cat21Service`, `Cat21ApiService`,
+  `Cat21MintOrchestrator`, `UtxoContentScanner` — Angular
+  `@Injectable` classes.
+- `InjectionToken` constants (`storage`, `bitcoinNetwork`,
+  `cat21SdkConfig`).
+- Anything that imports `@angular/*`.
+
+When adding a new pure helper:
+
+1. Create the file under `src/`.
+2. Export from its own file as usual.
+3. Re-export from `src/core.ts`.
+4. Add the source file to the `include` list in `tsconfig.core.json`.
+5. `npm run build` (or just `npm run build:core` if you only
+   changed pure code) — regenerates BOTH dist outputs.
+
+When adding a new Angular-using piece:
+
+1. Create the file under `src/`.
+2. Export from `src/index.ts` ONLY (NOT `src/core.ts`).
+3. Don't add to `tsconfig.core.json`.
+
+If a refactor accidentally adds an Angular dependency to a file
+that's already in `core.ts`, the tsc-only build at `npm run
+build:core` fails (no Angular shims in the core tsconfig). That's
+the structural guard.
+
+### Build commands
+
+```bash
+npm run build           # builds both entry points
+npm run build:angular   # ng-packagr for the main entry only
+npm run build:core      # tsc for the /core entry only
+npm run clean           # removes dist/ AND dist-core/
+```
+
+`prepare` hook on install runs `npm run build`, so a fresh clone
+or `npm install` produces both outputs.
+
+### Consumer-side staleness guard
+
+cat21-wallet imports the COMPILED bytes from `dist-core/`, not
+`src/*.ts`. If you edit SDK source without rebuilding, the wallet
+runs against stale bytes. The wallet ships a pre-hook
+(`apps/extension/scripts/check-sdk-fresh.cjs`) that fires before
+`vitest`, `webpack`, and `tsc`; if `src/` mtimes are newer than
+`dist-core/` mtimes, it exits 1 with the rebuild command.
+
+In wallet-side dev, a side-terminal `pnpm sdk:watch` keeps the
+core build incremental, so you never trip the guard.
 
 ## HARD RULE: Keep useful comments
 
