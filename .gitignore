@@ -1,6 +1,7 @@
 /node_modules/
 /dist
 /dist-commonjs
+/dist-core
 
 # Playwright + Xverse: fetched fresh in CI, never committed
 /e2e/extensions/

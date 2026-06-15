@@ -12,9 +12,25 @@
   "main": "./dist/fesm2022/ordpool-sdk.mjs",
   "module": "./dist/fesm2022/ordpool-sdk.mjs",
   "typings": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/fesm2022/ordpool-sdk.mjs"
+    },
+    "./core": {
+      "types": "./dist-core/core.d.ts",
+      "default": "./dist-core/core.js"
+    }
+  },
+  "files": [
+    "dist",
+    "dist-core"
+  ],
   "scripts": {
-    "clean": "rimraf dist",
-    "build": "ng-packagr -p ng-package.json",
+    "clean": "rimraf dist dist-core",
+    "build": "npm run build:angular && npm run build:core",
+    "build:angular": "ng-packagr -p ng-package.json",
+    "build:core": "tsc -p tsconfig.core.json",
     "start": "npm run test",
     "test": "npm run test:node && npm run test:browser",
     "test:node": "jest --config jest.config.node.js",
