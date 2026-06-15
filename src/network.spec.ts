@@ -57,8 +57,8 @@ describe('toLeatherNetworkString', () => {
     expect(toLeatherNetworkString(Network.Signet)).toBe('signet');
   });
 
-  it('maps Regtest to "devnet"', () => {
-    expect(toLeatherNetworkString(Network.Regtest)).toBe('devnet');
+  it('maps Regtest to "regtest"', () => {
+    expect(toLeatherNetworkString(Network.Regtest)).toBe('regtest');
   });
 
   it('maps Testnet3 and Testnet4 to "testnet"', () => {
