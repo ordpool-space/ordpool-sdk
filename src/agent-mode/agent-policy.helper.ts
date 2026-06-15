@@ -8,8 +8,8 @@ import {
 /**
  * Pure-functional policy gate for agent-mode autonomous CAT-21 actions.
  *
- * Every autonomous mint / buy / sell-accept must pass through this gate
- * BEFORE the agent constructs a PSBT or asks the wallet to sign. A deny
+ * Every autonomous `cat21_*` action must pass through this gate BEFORE
+ * the agent constructs a PSBT or asks the wallet to sign. A deny
  * decision short-circuits the action with a typed reason; the caller
  * surfaces the reason verbatim to the user (or logs it for the bot).
  *
@@ -20,6 +20,11 @@ import {
  * Counterparty check is substring/equality on Bitcoin addresses — no
  * BIP-32 re-derivation, no DNS resolution. The caller already knows the
  * exact address being paid / received and passes it through.
+ *
+ * Floor-price check fires only on `cat21_accept_offer` because that's
+ * the one flow where we receive BTC for a cat — every other flow
+ * either pays out (mint, transfer, create-offer-publication) or has
+ * no price (the listing-publish doesn't move sats).
  */
 export function evaluateAgentPolicy(
   policy: AgentPolicy,
@@ -46,7 +51,7 @@ export function evaluateAgentPolicy(
       `${action.feeRateSatPerVbyte} > ${policy.maxFeeRateSatPerVbyte}`
     );
   }
-  if (action.kind === 'sell-accept') {
+  if (action.kind === 'cat21_accept_offer') {
     const receivePrice = action.receivePriceSats ?? 0;
     if (receivePrice < policy.floorPriceSatsPerCat) {
       return deny(

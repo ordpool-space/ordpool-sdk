@@ -25,7 +25,22 @@ export interface AgentPolicy {
   allowedCounterparties: string[];
 }
 
-export type AgentActionKind = 'mint' | 'buy' | 'sell-accept';
+/**
+ * The four CAT-21 RPC method names — matches the wallet's typed RPC
+ * surface (`cat21_mint`, `cat21_transfer`, `cat21_create_offer`,
+ * `cat21_accept_offer`) verbatim so the mapping between agent-policy
+ * `kind` and wallet RPC method is the identity function. No
+ * translation layer = no place for the mapping to drift.
+ *
+ * The literal names also document themselves: a reader of the SDK
+ * sees `'cat21_accept_offer'` and knows exactly which wallet RPC
+ * method the policy is gating, without having to chase an alias.
+ */
+export type AgentActionKind =
+  | 'cat21_mint'
+  | 'cat21_transfer'
+  | 'cat21_create_offer'
+  | 'cat21_accept_offer';
 
 export interface AgentActionContext {
   kind: AgentActionKind;
@@ -33,9 +48,16 @@ export interface AgentActionContext {
   spendSats: number;
   /** sat/vB the agent intends to pay. */
   feeRateSatPerVbyte: number;
-  /** Counterparty address (seller for buy, buyer for sell-accept). */
+  /**
+   * Counterparty address.
+   *   - `cat21_create_offer`: the buyer we'd accept BTC from (we are
+   *     the seller; this is where the BTC payment lands).
+   *   - `cat21_accept_offer`: the buyer whose PSBT we're signing.
+   *   - `cat21_transfer`: the recipient of the cat.
+   *   - `cat21_mint`: unused (no counterparty — we're paying the network).
+   */
   counterpartyAddress?: string;
-  /** For sell-accept: the price we'd receive in sats. */
+  /** For `cat21_accept_offer`: the price we'd receive in sats. */
   receivePriceSats?: number;
   /** Sats already spent today by the agent. Caller passes the rolling sum. */
   spentTodaySats: number;

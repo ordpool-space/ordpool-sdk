@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { evaluateAgentPolicy } from './agent-policy.helper';
-import { AgentActionContext, AgentPolicy } from './agent-policy.types';
+import { AgentActionContext, AgentActionKind, AgentPolicy } from './agent-policy.types';
 
 const basePolicy: AgentPolicy = {
   enabled: true,
@@ -13,11 +13,35 @@ const basePolicy: AgentPolicy = {
 };
 
 const baseAction: AgentActionContext = {
-  kind: 'mint',
+  kind: 'cat21_mint',
   spendSats: 5_000,
   feeRateSatPerVbyte: 10,
   spentTodaySats: 0,
 };
+
+describe('AgentActionKind — wallet RPC method names verbatim', () => {
+
+  // Pinning the four exact strings the wallet emits over chrome.runtime /
+  // NMH. If the wallet renames a method or the SDK drifts, this test goes
+  // red before the dispatcher silently mis-routes a real action.
+  it('accepts the four cat21_* method names', () => {
+    const validKinds: AgentActionKind[] = [
+      'cat21_mint',
+      'cat21_transfer',
+      'cat21_create_offer',
+      'cat21_accept_offer',
+    ];
+    for (const kind of validKinds) {
+      const decision = evaluateAgentPolicy(basePolicy, {
+        ...baseAction,
+        kind,
+        // accept-offer needs a price >= floor to pass; the others ignore it
+        receivePriceSats: basePolicy.floorPriceSatsPerCat,
+      });
+      expect(decision).toEqual({ allowed: true });
+    }
+  });
+});
 
 describe('evaluateAgentPolicy', () => {
 
@@ -79,44 +103,44 @@ describe('evaluateAgentPolicy', () => {
     if (!decision.allowed) expect(decision.reason).toBe('fee-rate-above-ceiling');
   });
 
-  it('denies sell-accept below floor price', () => {
+  it('denies cat21_accept_offer below floor price', () => {
     const decision = evaluateAgentPolicy(basePolicy, {
       ...baseAction,
-      kind: 'sell-accept',
+      kind: 'cat21_accept_offer',
       receivePriceSats: basePolicy.floorPriceSatsPerCat - 1,
     });
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) expect(decision.reason).toBe('price-below-floor');
   });
 
-  it('allows sell-accept at exactly floor price', () => {
+  it('allows cat21_accept_offer at exactly floor price', () => {
     expect(
       evaluateAgentPolicy(basePolicy, {
         ...baseAction,
-        kind: 'sell-accept',
+        kind: 'cat21_accept_offer',
         receivePriceSats: basePolicy.floorPriceSatsPerCat,
       })
     ).toEqual({ allowed: true });
   });
 
-  it('treats sell-accept without receivePriceSats as 0 (denies if floor > 0)', () => {
+  it('treats cat21_accept_offer without receivePriceSats as 0 (denies if floor > 0)', () => {
     const decision = evaluateAgentPolicy(basePolicy, {
       ...baseAction,
-      kind: 'sell-accept',
+      kind: 'cat21_accept_offer',
       // receivePriceSats omitted
     });
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) expect(decision.reason).toBe('price-below-floor');
   });
 
-  it('does NOT apply floor-price gate to mint or buy actions', () => {
+  it('does NOT apply floor-price gate to non-accept-offer actions', () => {
     expect(
-      evaluateAgentPolicy(basePolicy, { ...baseAction, kind: 'mint' })
+      evaluateAgentPolicy(basePolicy, { ...baseAction, kind: 'cat21_mint' })
     ).toEqual({ allowed: true });
     expect(
       evaluateAgentPolicy(basePolicy, {
         ...baseAction,
-        kind: 'buy',
+        kind: 'cat21_transfer',
         counterpartyAddress: 'bc1qbuy',
       })
     ).toEqual({ allowed: true });
@@ -125,7 +149,7 @@ describe('evaluateAgentPolicy', () => {
   it('denies counterparty not on allowlist when allowlist is non-empty', () => {
     const decision = evaluateAgentPolicy(
       { ...basePolicy, allowedCounterparties: ['bc1qknownseller'] },
-      { ...baseAction, kind: 'buy', counterpartyAddress: 'bc1qstranger' }
+      { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: 'bc1qstranger' }
     );
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
@@ -135,7 +159,7 @@ describe('evaluateAgentPolicy', () => {
     expect(
       evaluateAgentPolicy(
         { ...basePolicy, allowedCounterparties: ['bc1qknownbuyer'] },
-        { ...baseAction, kind: 'buy', counterpartyAddress: 'bc1qknownbuyer' }
+        { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: 'bc1qknownbuyer' }
       )
     ).toEqual({ allowed: true });
   });
@@ -191,12 +215,12 @@ describe('evaluateAgentPolicy', () => {
       if (!decision.allowed) expect(decision.reason).toBe('spend-above-daily-cap');
     });
 
-    it('fee-rate deny precedes floor-price deny on a sell-accept that trips both', () => {
+    it('fee-rate deny precedes floor-price deny on a cat21_accept_offer that trips both', () => {
       const decision = evaluateAgentPolicy(
         { ...basePolicy, maxFeeRateSatPerVbyte: 1, floorPriceSatsPerCat: 1_000_000 },
         {
           ...baseAction,
-          kind: 'sell-accept',
+          kind: 'cat21_accept_offer',
           feeRateSatPerVbyte: 100,
           receivePriceSats: 1,
         }
@@ -221,7 +245,7 @@ describe('evaluateAgentPolicy', () => {
           allowedCounterparties: ['bc1qknownbuyer'],
         },
         {
-          kind: 'sell-accept',
+          kind: 'cat21_accept_offer',
           spendSats: 1_000_000,
           spentTodaySats: 1_000_000,
           feeRateSatPerVbyte: 1_000,
@@ -232,7 +256,7 @@ describe('evaluateAgentPolicy', () => {
       expect(decision).toEqual({ allowed: false, reason: 'agent-disabled' });
     });
 
-    it('floor-price deny precedes counterparty deny on a sell-accept that trips both', () => {
+    it('floor-price deny precedes counterparty deny on a cat21_accept_offer that trips both', () => {
       const decision = evaluateAgentPolicy(
         {
           ...basePolicy,
@@ -241,7 +265,7 @@ describe('evaluateAgentPolicy', () => {
         },
         {
           ...baseAction,
-          kind: 'sell-accept',
+          kind: 'cat21_accept_offer',
           receivePriceSats: 1,
           counterpartyAddress: 'bc1qstranger',
         }
@@ -256,21 +280,21 @@ describe('evaluateAgentPolicy', () => {
     it('treats empty-string counterpartyAddress as a normal allowlist miss when allowlist is non-empty', () => {
       const decision = evaluateAgentPolicy(
         { ...basePolicy, allowedCounterparties: ['bc1qknown'] },
-        { ...baseAction, kind: 'buy', counterpartyAddress: '' }
+        { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: '' }
       );
       expect(decision.allowed).toBe(false);
       if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
     });
   });
 
-  describe('Finding #12 — sell-accept + counterparty allowlist combined', () => {
+  describe('Finding #12 — cat21_accept_offer + counterparty allowlist combined', () => {
 
-    it('on sell-accept, denies a price-above-floor offer from an unknown buyer', () => {
+    it('on cat21_accept_offer, denies a price-above-floor offer from an unknown buyer', () => {
       const decision = evaluateAgentPolicy(
         { ...basePolicy, allowedCounterparties: ['bc1qknownbuyer'] },
         {
           ...baseAction,
-          kind: 'sell-accept',
+          kind: 'cat21_accept_offer',
           receivePriceSats: basePolicy.floorPriceSatsPerCat + 1_000,
           counterpartyAddress: 'bc1qstranger',
         }
@@ -279,13 +303,13 @@ describe('evaluateAgentPolicy', () => {
       if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
     });
 
-    it('on sell-accept, allows a price-above-floor offer from a known buyer', () => {
+    it('on cat21_accept_offer, allows a price-above-floor offer from a known buyer', () => {
       expect(
         evaluateAgentPolicy(
           { ...basePolicy, allowedCounterparties: ['bc1qknownbuyer'] },
           {
             ...baseAction,
-            kind: 'sell-accept',
+            kind: 'cat21_accept_offer',
             receivePriceSats: basePolicy.floorPriceSatsPerCat + 1_000,
             counterpartyAddress: 'bc1qknownbuyer',
           }
