@@ -82,7 +82,14 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);
-  const tx = new btc.Transaction({ allowUnknownInputs: true });
+  // lockTime = 21 makes the offer-acceptance tx a CAT-21 mint in addition
+  // to a transfer: cat21-ord reads tx.lock_time structurally and mints a
+  // fresh cat at output 0 (the buyer's receive output), onto the same
+  // satoshi the existing cat ordinal travels to via FIFO. Per cat21/
+  // README.md a single CAT-21 ordinal can carry multiple cats through
+  // repeated minting. The value is pure data — block 21 was mined in
+  // 2009, so the field has no consensus meaning.
+  const tx = new btc.Transaction({ lockTime: 21, allowUnknownInputs: true });
 
   // Input 0: seller's cat UTXO, unsigned, sighash ALL pinned.
   tx.addInput({
@@ -148,11 +155,17 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
     );
   }
 
-  // Sanity assert: every input MUST carry SIGHASH_ALL.
+  // Sanity assert: every input MUST carry SIGHASH_ALL. SIGHASH_ALL
+  // commits to the lockTime field across the whole tx (BIP-143 / legacy /
+  // BIP-341), so once any input signs, the 21 marker is cryptographically
+  // locked into the transaction.
   for (let i = 0; i < tx.inputsLength; i++) {
     if (tx.getInput(i).sighashType !== btc.SigHash.ALL) {
       throw new Error('Internal error: input sighashType drifted from SIGHASH_ALL');
     }
+  }
+  if (tx.lockTime !== 21) {
+    throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
   }
 
   return {

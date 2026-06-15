@@ -51,6 +51,11 @@ describe('buildCat21BuyOfferPsbt', () => {
     expect(Array.from(result.psbt.slice(0, 5))).toEqual(psbtMagic);
   });
 
+  it('sets lockTime=21 (the offer tx is also a CAT-21 mint)', () => {
+    const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(makeBaseArgs()).psbt);
+    expect(tx.lockTime).toBe(21);
+  });
+
   it('puts the seller input at index 0 with sighashType SIGHASH_ALL', () => {
     const args = makeBaseArgs();
     const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(args).psbt);
