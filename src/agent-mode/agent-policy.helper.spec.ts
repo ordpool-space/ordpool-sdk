@@ -287,6 +287,20 @@ describe('evaluateAgentPolicy', () => {
     });
   });
 
+  describe('Round-2 Finding 2 — floor-price gate also fires on cat21_create_offer (autonomous-undercut defence)', () => {
+
+    // SHAPES committed first per HARD RULE #8 #1. The five it.todo
+    // entries pin the contract; the impl commit converts them to
+    // real assertions and the body of evaluateAgentPolicy extends
+    // the floor-price branch to include cat21_create_offer.
+
+    it.todo('denies cat21_create_offer when listing price is below floor');
+    it.todo('allows cat21_create_offer when listing price equals floor');
+    it.todo('allows cat21_create_offer when listing price exceeds floor');
+    it.todo('treats cat21_create_offer without receivePriceSats as 0 (denies if floor > 0)');
+    it.todo('cat21_mint and cat21_transfer remain exempt from the floor-price gate (no price field)');
+  });
+
   describe('Finding #12 — cat21_accept_offer + counterparty allowlist combined', () => {
 
     it('on cat21_accept_offer, denies a price-above-floor offer from an unknown buyer', () => {
