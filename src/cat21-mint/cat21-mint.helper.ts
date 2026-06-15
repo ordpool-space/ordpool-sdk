@@ -82,9 +82,9 @@ export interface BuildCat21MintResult {
  *              first sat of output 0 by ordinal-theory FIFO, which is
  *              where cat21-ord mints the new cat.
  *   Output 0 — recipient address, postage sats. Cat lands here.
- *   Output 1 — optional developer-tip output.
- *   Output 2 — change to sender (skipped when sub-dust; absorbed into
- *              miner fee).
+ *   Output 1 — optional developer-tip output (skipped when value=0).
+ *   Output N — change to sender (skipped when sub-dust; absorbed into
+ *              miner fee). N = 1 with no tip, N = 2 with tip.
  *
  * Hard invariants (asserted before return):
  *   1. `lockTime === 21`.
