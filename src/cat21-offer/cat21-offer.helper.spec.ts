@@ -56,6 +56,17 @@ describe('buildCat21BuyOfferPsbt', () => {
     expect(tx.lockTime).toBe(21);
   });
 
+  it('sets sequence=0xfffffffd on every input (RBF allowed for offers)', () => {
+    // @scure/btc-signer's DEFAULT_SEQUENCE is 0xffffffff (final, RBF off);
+    // the builder must override explicitly so non-mint cat-flows stay
+    // fee-bumpable. Per cat21-wallet HARD RULE #1.
+    const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(makeBaseArgs()).psbt);
+    expect(tx.inputsLength).toBeGreaterThanOrEqual(2);
+    for (let i = 0; i < tx.inputsLength; i++) {
+      expect(tx.getInput(i).sequence).toBe(0xfffffffd);
+    }
+  });
+
   it('puts the seller input at index 0 with sighashType SIGHASH_ALL', () => {
     const args = makeBaseArgs();
     const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(args).psbt);

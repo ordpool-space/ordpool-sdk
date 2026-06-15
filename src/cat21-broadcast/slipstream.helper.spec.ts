@@ -1,7 +1,9 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
 import {
+  SLIPSTREAM_BODY_TX_FIELD,
   SLIPSTREAM_DEFAULT_BASE_URL,
+  SLIPSTREAM_SUBMIT_PATH,
   submitToSlipstream,
 } from './slipstream.helper';
 
@@ -23,16 +25,34 @@ function fakeResponse(body: unknown, init: { status?: number } = {}): Response {
 
 describe('submitToSlipstream', () => {
 
-  it('POSTs to the default Slipstream URL with raw_transaction wrapped', async () => {
+  it('POSTs to the verified Slipstream endpoint with tx_hex wrapped', async () => {
     const fetchSpy = jest.fn<typeof fetch>().mockResolvedValue(fakeResponse({ txid: 'abc' }));
     await submitToSlipstream('deadbeef', { fetchImpl: fetchSpy });
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const [url, init] = fetchSpy.mock.calls[0];
-    expect(url).toBe(`${SLIPSTREAM_DEFAULT_BASE_URL}/api/v1/transactions`);
+    // Endpoint verified by curl on 2026-06-15 against the live host. See
+    // slipstream.helper.ts JSDoc for the proof.
+    expect(url).toBe(`${SLIPSTREAM_DEFAULT_BASE_URL}${SLIPSTREAM_SUBMIT_PATH}`);
+    expect(url).toBe('https://slipstream.mara.com/api/transactions');
     expect(init?.method).toBe('POST');
     expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json');
-    expect(JSON.parse(init?.body as string)).toEqual({ raw_transaction: 'deadbeef' });
+    expect(JSON.parse(init?.body as string)).toEqual({ [SLIPSTREAM_BODY_TX_FIELD]: 'deadbeef' });
+    expect(SLIPSTREAM_BODY_TX_FIELD).toBe('tx_hex');
+  });
+
+  it('attaches a Bearer Authorization header when a bearerToken is supplied', async () => {
+    const fetchSpy = jest.fn<typeof fetch>().mockResolvedValue(fakeResponse({ txid: 'abc' }));
+    await submitToSlipstream('deadbeef', { fetchImpl: fetchSpy, bearerToken: 'tok-xyz' });
+    const headers = fetchSpy.mock.calls[0][1]?.headers as Record<string, string>;
+    expect(headers['Authorization']).toBe('Bearer tok-xyz');
+  });
+
+  it('omits the Authorization header when no bearerToken is provided', async () => {
+    const fetchSpy = jest.fn<typeof fetch>().mockResolvedValue(fakeResponse({ txid: 'abc' }));
+    await submitToSlipstream('deadbeef', { fetchImpl: fetchSpy });
+    const headers = fetchSpy.mock.calls[0][1]?.headers as Record<string, string>;
+    expect(headers['Authorization']).toBeUndefined();
   });
 
   it('returns the parsed { txid } body on success', async () => {
@@ -47,7 +67,7 @@ describe('submitToSlipstream', () => {
       fetchImpl: fetchSpy,
       baseUrl: 'https://miner.example.com',
     });
-    expect(fetchSpy.mock.calls[0][0]).toBe('https://miner.example.com/api/v1/transactions');
+    expect(fetchSpy.mock.calls[0][0]).toBe('https://miner.example.com/api/transactions');
   });
 
   it('forwards an AbortSignal to fetch so callers can cancel', async () => {
@@ -60,12 +80,26 @@ describe('submitToSlipstream', () => {
     expect(fetchSpy.mock.calls[0][1]?.signal).toBe(controller.signal);
   });
 
-  it('throws on non-2xx with the HTTP status + body text in the message', async () => {
+  it('throws on non-2xx with the HTTP status + parsed error message in the message', async () => {
+    // Slipstream's documented error envelope: { status: "error", message: string }.
+    // Verified by curl probe: POST with bad field name returns
+    // {"status":"error","message":"Invalid JSON payload"}.
     const fetchSpy = jest
       .fn<typeof fetch>()
-      .mockResolvedValue(fakeResponse('bad request', { status: 400 }));
+      .mockResolvedValue(
+        fakeResponse({ status: 'error', message: 'Invalid JSON payload' }, { status: 400 })
+      );
     await expect(submitToSlipstream('deadbeef', { fetchImpl: fetchSpy })).rejects.toThrow(
-      /HTTP 400.*bad request/
+      /HTTP 400.*Invalid JSON payload/
+    );
+  });
+
+  it('falls back to raw body text when the error body is not JSON', async () => {
+    const fetchSpy = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(fakeResponse('plain text error', { status: 502 }));
+    await expect(submitToSlipstream('deadbeef', { fetchImpl: fetchSpy })).rejects.toThrow(
+      /HTTP 502.*plain text error/
     );
   });
 

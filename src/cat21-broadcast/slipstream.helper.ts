@@ -8,17 +8,72 @@
  * The base URL is the published one. Users running their own miner relay
  * (rare) can pass an override. There is no testnet endpoint; Slipstream is
  * mainnet-only.
+ *
+ * # API contract — verified 2026-06-15
+ *
+ * Endpoint:        POST https://slipstream.mara.com/api/transactions
+ * Body:            `{ "tx_hex": "<hex-encoded-raw-tx>" }`
+ * Auth:            Client code required (`Authorization: Bearer <token>`,
+ *                  per the frontend bundle). Without a client code the
+ *                  endpoint accepts the call up through deserialisation
+ *                  but rejects the actual broadcast. Contact
+ *                  foundation@mara.com to provision.
+ *
+ * Source of truth: derived by reading the Slipstream operator UI bundle
+ * at `https://slipstream.mara.com/assets/index-T1J5o0ND.js`, which
+ * defines `sx = "https://slipstream.mara.com"`,
+ * `Pn = \`${sx}/api/\``, `Sl = \`${Pn}transactions\`` and the submit
+ * function `(e) => Te.post(Sl, e).data`. Verified by curl probe on
+ * 2026-06-15 17:07-08 UTC:
+ *
+ *     curl -X POST https://slipstream.mara.com/api/transactions \
+ *          -H 'Content-Type: application/json' -d '{}'
+ *     → 400 {"status":"error","message":"Invalid JSON payload"}
+ *
+ *     curl -X POST https://slipstream.mara.com/api/transactions \
+ *          -H 'Content-Type: application/json' -d '{"tx_hex":"0100"}'
+ *     → 400 {"status":"error","message":"Failed to deserialize transaction"}
+ *
+ *     curl -X POST https://slipstream.mara.com/api/transactions \
+ *          -H 'Content-Type: application/json' -d '{"raw_transaction":"0100"}'
+ *     → 400 {"status":"error","message":"Invalid JSON payload"}  // wrong field
+ *
+ *     curl https://slipstream.mara.com/api/v1/transactions
+ *     → 404 Cannot POST /api/v1/transactions                     // wrong path
+ *
+ * Error response envelope: `{ status: "error", message: string }`.
+ * Success response: `{ txid: string }` (frontend reads `(await Te.post
+ * (Sl, e)).data.txid`).
  */
 export const SLIPSTREAM_DEFAULT_BASE_URL = 'https://slipstream.mara.com';
 
-/** Shape of the Slipstream `/api/v1/transactions` success response. */
+/** Path component appended to the base URL for the submit endpoint. */
+export const SLIPSTREAM_SUBMIT_PATH = '/api/transactions';
+
+/** JSON body field name carrying the raw tx hex. */
+export const SLIPSTREAM_BODY_TX_FIELD = 'tx_hex';
+
+/** Shape of the Slipstream submit success response. */
 export interface SlipstreamSubmitResponse {
   txid: string;
+}
+
+/** Shape of Slipstream's error envelope. */
+interface SlipstreamErrorBody {
+  status: 'error';
+  message: string;
 }
 
 export interface SubmitToSlipstreamOptions {
   /** Override base URL, e.g. for a self-hosted miner relay. */
   baseUrl?: string;
+  /**
+   * Bearer token issued by Marathon. Required for the broadcast to
+   * actually fire — without it, the endpoint will accept the JSON +
+   * deserialise the tx but the submission is rejected at the
+   * authorisation gate. Contact foundation@mara.com to provision.
+   */
+  bearerToken?: string;
   signal?: AbortSignal;
   /**
    * `fetch` impl. Defaults to the global `fetch`. Allows tests + Node
@@ -46,21 +101,33 @@ export async function submitToSlipstream(
     throw new Error('rawTxHex must be a non-empty string');
   }
 
-  const url = `${options.baseUrl ?? SLIPSTREAM_DEFAULT_BASE_URL}/api/v1/transactions`;
+  const url = `${options.baseUrl ?? SLIPSTREAM_DEFAULT_BASE_URL}${SLIPSTREAM_SUBMIT_PATH}`;
   const fetchFn = options.fetchImpl ?? fetch;
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (options.bearerToken) {
+    headers.Authorization = `Bearer ${options.bearerToken}`;
+  }
 
   const res = await fetchFn(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ raw_transaction: rawTxHex }),
+    headers,
+    body: JSON.stringify({ [SLIPSTREAM_BODY_TX_FIELD]: rawTxHex }),
     signal: options.signal,
   });
 
   if (!res.ok) {
     const text = await safeReadText(res);
-    throw new Error(
-      `Slipstream rejected submission with HTTP ${res.status}: ${text || '(empty body)'}`
-    );
+    // Slipstream's documented error envelope is `{status:"error",message:string}`.
+    // We surface the message if present, fall back to raw body.
+    let detail = text || '(empty body)';
+    try {
+      const parsed = JSON.parse(text) as Partial<SlipstreamErrorBody>;
+      if (parsed && typeof parsed.message === 'string') detail = parsed.message;
+    } catch {
+      // not JSON — keep raw text
+    }
+    throw new Error(`Slipstream rejected submission with HTTP ${res.status}: ${detail}`);
   }
 
   const body: unknown = await res.json();

@@ -11,6 +11,24 @@ import {
 } from './cat21-offer.types';
 
 /**
+ * Sequence number set on every input of a CAT-21 buy-offer PSBT.
+ *
+ * `0xfffffffd` signals BIP-125 RBF — the buyer (or any party with the
+ * authority to rebuild the tx) can submit a higher-fee replacement if
+ * the mempool congests after broadcast. This is the SDK default for
+ * non-mint cat-flows per the cat21-wallet HARD RULE #1: offers and
+ * transfers allow RBF; the only flow that disables RBF is the mint
+ * (and only for third-party wallets that can't be trusted to preserve
+ * `lockTime=21` through a replacement — see
+ * `cat21-mint/cat21.service.helper.ts:CAT21_MINT_INPUT_SEQUENCE`).
+ *
+ * `@scure/btc-signer`'s default sequence is `0xffffffff` (final, RBF
+ * off), so this MUST be set explicitly. Verified by reading the
+ * scure source (`DEFAULT_SEQUENCE = 4294967295`).
+ */
+export const CAT21_OFFER_INPUT_SEQUENCE = 0xfffffffd;
+
+/**
  * Arguments for `buildCat21BuyOfferPsbt`.
  *
  * The caller is responsible for coin selection (the SDK exposes coin-selection
@@ -91,10 +109,16 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // 2009, so the field has no consensus meaning.
   const tx = new btc.Transaction({ lockTime: 21, allowUnknownInputs: true });
 
-  // Input 0: seller's cat UTXO, unsigned, sighash ALL pinned.
+  // Input 0: seller's cat UTXO, unsigned, sighash ALL pinned, RBF-signalling.
+  // The @scure default sequence is 0xffffffff (final, RBF off); we set
+  // 0xfffffffd explicitly so the buyer keeps the option to fee-bump if
+  // the mempool congests after broadcast. Per cat21-wallet HARD RULE #1,
+  // non-mint cat-flows allow RBF — third-party accelerators that drop
+  // lockTime=21 cost the user a missed bonus mint, not a cat.
   tx.addInput({
     txid: args.sellerInput.txid,
     index: args.sellerInput.vout,
+    sequence: CAT21_OFFER_INPUT_SEQUENCE,
     witnessUtxo: {
       script: args.sellerInput.scriptPubKey,
       amount: BigInt(args.sellerInput.value),
@@ -102,13 +126,15 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
     sighashType: btc.SigHash.ALL,
   });
 
-  // Inputs 1..N: buyer-funded.
+  // Inputs 1..N: buyer-funded. Same RBF-signalling sequence — keeps the
+  // entire transaction replaceable as a unit.
   let buyerInputTotalSats = 0;
   for (const input of args.buyerInputs) {
     buyerInputTotalSats += input.value;
     const base: btc.TransactionInputUpdate = {
       txid: input.txid,
       index: input.vout,
+      sequence: CAT21_OFFER_INPUT_SEQUENCE,
       witnessUtxo: {
         script: input.scriptPubKey,
         amount: BigInt(input.value),
@@ -155,13 +181,19 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
     );
   }
 
-  // Sanity assert: every input MUST carry SIGHASH_ALL. SIGHASH_ALL
-  // commits to the lockTime field across the whole tx (BIP-143 / legacy /
-  // BIP-341), so once any input signs, the 21 marker is cryptographically
+  // Sanity asserts. SIGHASH_ALL commits to lockTime + sequence across
+  // the whole tx (BIP-143 / legacy / BIP-341), so once any input signs,
+  // the 21 marker AND the RBF-signalling sequence are cryptographically
   // locked into the transaction.
   for (let i = 0; i < tx.inputsLength; i++) {
-    if (tx.getInput(i).sighashType !== btc.SigHash.ALL) {
+    const input = tx.getInput(i);
+    if (input.sighashType !== btc.SigHash.ALL) {
       throw new Error('Internal error: input sighashType drifted from SIGHASH_ALL');
+    }
+    if (input.sequence !== CAT21_OFFER_INPUT_SEQUENCE) {
+      throw new Error(
+        `Internal error: input ${i} sequence=${input.sequence}, expected ${CAT21_OFFER_INPUT_SEQUENCE}`
+      );
     }
   }
   if (tx.lockTime !== 21) {
