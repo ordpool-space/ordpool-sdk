@@ -1,6 +1,7 @@
 import * as btc from '@scure/btc-signer';
 
 import { Network, toScureNetwork } from '../network';
+import { resolveCat21InputSequence } from '../cat21-mint/cat21-mint-sequence';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   CAT21_TRANSFER_POSTAGE_SATS,
@@ -95,7 +96,7 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);
-  const sequence = walletInputSequence(args.walletType);
+  const sequence = resolveCat21InputSequence(args.walletType);
 
   const tx = new btc.Transaction({
     lockTime: 21,
@@ -156,23 +157,6 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
     fundingInputTotalSats,
     changeSats,
   };
-}
-
-/**
- * Per-wallet sequence rule. Matches the mint-builder rule documented in
- * `cat21-mint/cat21.service.helper.ts:CAT21_MINT_INPUT_SEQUENCE`:
- *
- *   - `cat21wallet` (our own wallet): RBF-signalling. Our accelerate
- *     code preserves `lockTime=21` through any replacement, so signalling
- *     RBF is safe AND useful (fee-bump a stuck transfer).
- *   - everyone else: non-RBF. Third-party accelerate UIs can't fire on
- *     this tx and accidentally drop the marker on a replacement.
- *
- * The value `21` has no consensus meaning either way (block 21, 2009);
- * the sequence choice is purely about which wallets' fee-bump UI fires.
- */
-function walletInputSequence(walletType: KnownOrdinalWalletType): number {
-  return walletType === KnownOrdinalWalletType.cat21wallet ? 0xfffffffd : 0xfffffffe;
 }
 
 function addInput(

@@ -12,6 +12,8 @@ import {
   resolveCat21InputSequence,
 } from './cat21-mint-sequence';
 import { buildCat21MintPsbt } from './cat21-mint.helper';
+import { createTransaction, getDummyKeypair } from './cat21.service.helper';
+import { TxnOutput } from './cat21.service.types';
 
 const publicKey = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
 const p2wpkhMainnet = btc.p2wpkh(publicKey, btc.NETWORK);
@@ -124,15 +126,43 @@ describe('resolveCat21InputSequence (single source of truth)', () => {
       return tx.getInput(0).sequence!;
     }
 
+    // Multi-wallet createTransaction path — the third call site the
+    // audit named. Builds via createTransaction(walletType, …) so any
+    // future drift in cat21.service.helper.ts:createInput() is caught
+    // alongside the other two helpers, completing "all three helpers
+    // return the same per-wallet sequence."
+    function createTransactionSequence(walletType: KnownOrdinalWalletType): number {
+      const dummy = getDummyKeypair(btc.NETWORK);
+      const paymentUtxo: TxnOutput = {
+        txid: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        vout: 0,
+        value: 50_000,
+        status: { confirmed: true, block_height: 800_000 } as TxnOutput['status'],
+        transactionHex: undefined,
+      };
+      const result = createTransaction(
+        walletType,
+        dummy.addressP2WPKH,
+        paymentUtxo,
+        dummy.dummyPublicKey,
+        dummy.addressP2WPKH,
+        BigInt(750),
+        false,
+        Network.Mainnet
+      );
+      return result.tx.getInput(0).sequence!;
+    }
+
     it.each([
       KnownOrdinalWalletType.cat21wallet,
       KnownOrdinalWalletType.xverse,
       KnownOrdinalWalletType.unisat,
       KnownOrdinalWalletType.leather,
-    ])('mint and transfer agree on sequence for %s', wallet => {
+    ])('mint, transfer, AND createTransaction agree on sequence for %s', wallet => {
       const expected = resolveCat21InputSequence(wallet);
       expect(mintSequence(wallet)).toBe(expected);
       expect(transferSequence(wallet)).toBe(expected);
+      expect(createTransactionSequence(wallet)).toBe(expected);
     });
 
     it('buy-offer seller-input sequence is the same 0xfffffffd as cat21wallet mint/transfer', () => {

@@ -33,6 +33,7 @@ export * from './wallet/wallet.service.types';
 export * from './cat21-mint/cat21.service.helper';
 export * from './cat21-mint/cat21.service.types';
 export * from './cat21-mint/cat21-mint.helper';
+export * from './cat21-mint/cat21-mint-sequence';
 
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';

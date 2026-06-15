@@ -2,6 +2,7 @@ import * as btc from '@scure/btc-signer';
 
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { resolveCat21InputSequence } from './cat21-mint-sequence';
 
 /**
  * Cat-output postage on a CAT-21 mint transaction. The first sat of
@@ -99,7 +100,7 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   if (tipValueSats < 0) throw new Error('tip.valueSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);
-  const sequence = walletInputSequence(args.walletType);
+  const sequence = resolveCat21InputSequence(args.walletType);
 
   const tx = new btc.Transaction({
     lockTime: 21,
@@ -154,15 +155,6 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
     psbt: tx.toPSBT(),
     changeSats,
   };
-}
-
-/**
- * Per-wallet sequence rule. Matches the existing rule in
- * `cat21.service.helper.ts:createInput()` so consumers using either
- * builder get identical mint-tx shape.
- */
-function walletInputSequence(walletType: KnownOrdinalWalletType): number {
-  return walletType === KnownOrdinalWalletType.cat21wallet ? 0xfffffffd : 0xfffffffe;
 }
 
 function addInput(
