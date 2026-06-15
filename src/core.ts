@@ -32,6 +32,7 @@ export * from './wallet/wallet.service.types';
 //     orchestrates is at the main entry only). ---
 export * from './cat21-mint/cat21.service.helper';
 export * from './cat21-mint/cat21.service.types';
+export * from './cat21-mint/cat21-mint.helper';
 
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';
