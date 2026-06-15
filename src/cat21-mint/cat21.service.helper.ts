@@ -442,6 +442,34 @@ export function createInput(walletType: KnownOrdinalWalletType,
  * but instead added to the transaction fee. If the change amount is above the dust limit, two outputs are created:
  * one for the recipient and one for the change.
  *
+ * **CONVERGENCE TODO (Round-2 audit Finding 7).** This function and
+ * `buildCat21MintPsbt` in `cat21-mint.helper.ts` both build the same
+ * kind of CAT-21 mint PSBT — both pin `lockTime=21`, both go through
+ * `resolveCat21InputSequence`, both emit the same output structure.
+ * They differ in the input-construction layer:
+ *   - `createTransaction(walletType, paymentOutput, paymentPublicKey,
+ *     paymentAddress, …)` — does the full per-wallet script
+ *     construction (Xverse + Unisat-Taproot + Unisat-SegWit + Leather
+ *     + Legacy P2PKH branches via `createInput()`); drives cat21.space.
+ *   - `buildCat21MintPsbt({ walletType, fundingInput: {scriptPubKey,
+ *     tapInternalKey?, …} })` — caller pre-prepares the input; drives
+ *     cat21-wallet.
+ *
+ * The right structural fix is: `createTransaction` becomes a thin
+ * adapter that constructs the right `Cat21MintFundingInput` per wallet
+ * via `createInput()`, then delegates to `buildCat21MintPsbt`. ONE
+ * PSBT builder, MULTIPLE input-shape adapters. As-is, the two paths
+ * are kept structurally aligned by the cross-builder regression test
+ * in `cat21-mint-sequence.spec.ts` ("mint, transfer, AND
+ * createTransaction agree on sequence for X" iterator), but a
+ * future drift in fee math, dust threshold, or output layout would
+ * NOT be caught — only the sequence is asserted equal.
+ *
+ * Until convergence lands, any change to the mint PSBT shape MUST
+ * be applied to BOTH builders and re-verified against the existing
+ * snapshot tests in `cat21.service.helper.spec.ts` AND the
+ * positive-equality tests in `cat21-mint.helper.spec.ts`.
+ *
  * @param walletType - The type of wallet used for the transaction.
  * @param recipientAddress - The address of the recipient.
  * @param paymentOutput - The UTXO to be used for the transaction.
