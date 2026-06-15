@@ -289,16 +289,61 @@ describe('evaluateAgentPolicy', () => {
 
   describe('Round-2 Finding 2 — floor-price gate also fires on cat21_create_offer (autonomous-undercut defence)', () => {
 
-    // SHAPES committed first per HARD RULE #8 #1. The five it.todo
-    // entries pin the contract; the impl commit converts them to
-    // real assertions and the body of evaluateAgentPolicy extends
-    // the floor-price branch to include cat21_create_offer.
+    it('denies cat21_create_offer when listing price is below floor', () => {
+      const result = evaluateAgentPolicy(
+        { ...basePolicy, floorPriceSatsPerCat: 100_000 },
+        { ...baseAction, kind: 'cat21_create_offer', receivePriceSats: 50_000 }
+      );
+      expect(result).toEqual({
+        allowed: false,
+        reason: 'price-below-floor',
+        detail: '50000 < 100000',
+      });
+    });
 
-    it.todo('denies cat21_create_offer when listing price is below floor');
-    it.todo('allows cat21_create_offer when listing price equals floor');
-    it.todo('allows cat21_create_offer when listing price exceeds floor');
-    it.todo('treats cat21_create_offer without receivePriceSats as 0 (denies if floor > 0)');
-    it.todo('cat21_mint and cat21_transfer remain exempt from the floor-price gate (no price field)');
+    it('allows cat21_create_offer when listing price equals floor', () => {
+      expect(
+        evaluateAgentPolicy(
+          { ...basePolicy, floorPriceSatsPerCat: 100_000 },
+          { ...baseAction, kind: 'cat21_create_offer', receivePriceSats: 100_000 }
+        )
+      ).toEqual({ allowed: true });
+    });
+
+    it('allows cat21_create_offer when listing price exceeds floor', () => {
+      expect(
+        evaluateAgentPolicy(
+          { ...basePolicy, floorPriceSatsPerCat: 100_000 },
+          { ...baseAction, kind: 'cat21_create_offer', receivePriceSats: 250_000 }
+        )
+      ).toEqual({ allowed: true });
+    });
+
+    it('treats cat21_create_offer without receivePriceSats as 0 (denies if floor > 0)', () => {
+      const result = evaluateAgentPolicy(
+        { ...basePolicy, floorPriceSatsPerCat: 1 },
+        { ...baseAction, kind: 'cat21_create_offer' /* receivePriceSats omitted */ }
+      );
+      expect(result.allowed).toBe(false);
+      if (!result.allowed) expect(result.reason).toBe('price-below-floor');
+    });
+
+    it('cat21_mint and cat21_transfer remain exempt from the floor-price gate (no price field)', () => {
+      // These flows don't have a receivePriceSats semantic. The spend
+      // cap + fee-rate ceiling are the relevant gates there.
+      expect(
+        evaluateAgentPolicy(
+          { ...basePolicy, floorPriceSatsPerCat: 1_000_000 },
+          { ...baseAction, kind: 'cat21_mint' }
+        )
+      ).toEqual({ allowed: true });
+      expect(
+        evaluateAgentPolicy(
+          { ...basePolicy, floorPriceSatsPerCat: 1_000_000 },
+          { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: 'bc1qrecipient' }
+        )
+      ).toEqual({ allowed: true });
+    });
   });
 
   describe('Finding #12 — cat21_accept_offer + counterparty allowlist combined', () => {

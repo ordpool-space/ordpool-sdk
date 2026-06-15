@@ -21,10 +21,18 @@ import {
  * BIP-32 re-derivation, no DNS resolution. The caller already knows the
  * exact address being paid / received and passes it through.
  *
- * Floor-price check fires only on `cat21_accept_offer` because that's
- * the one flow where we receive BTC for a cat — every other flow
- * either pays out (mint, transfer, create-offer-publication) or has
- * no price (the listing-publish doesn't move sats).
+ * Floor-price check fires on the two flows where the policy has price
+ * agency:
+ *   - `cat21_accept_offer`: a counterparty's inbound PSBT pays us less
+ *     than our floor (REACTIVE — we either sign or don't).
+ *   - `cat21_create_offer`: the bot autonomously proposes to list our
+ *     cat below our floor (PROACTIVE — the bot picks the price). The
+ *     undercut-prevention case the audit caught; arguably the more
+ *     important of the two since publish-time is the moment the
+ *     autonomous policy actually has agency.
+ *
+ * `cat21_mint` and `cat21_transfer` have no price semantic; spend caps
+ * + fee-rate ceiling are sufficient there.
  */
 export function evaluateAgentPolicy(
   policy: AgentPolicy,
@@ -51,7 +59,7 @@ export function evaluateAgentPolicy(
       `${action.feeRateSatPerVbyte} > ${policy.maxFeeRateSatPerVbyte}`
     );
   }
-  if (action.kind === 'cat21_accept_offer') {
+  if (action.kind === 'cat21_accept_offer' || action.kind === 'cat21_create_offer') {
     const receivePrice = action.receivePriceSats ?? 0;
     if (receivePrice < policy.floorPriceSatsPerCat) {
       return deny(

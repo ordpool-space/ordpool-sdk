@@ -57,7 +57,15 @@ export interface AgentActionContext {
    *   - `cat21_mint`: unused (no counterparty — we're paying the network).
    */
   counterpartyAddress?: string;
-  /** For `cat21_accept_offer`: the price we'd receive in sats. */
+  /**
+   * For `cat21_accept_offer`: the price we'd receive when the buyer's
+   * PSBT confirms.
+   * For `cat21_create_offer`: the listed asking price (what we'd
+   * receive if the listing fills).
+   * Both flows are gated against `floorPriceSatsPerCat` by the same
+   * policy branch — set this on both, omit on `cat21_mint` and
+   * `cat21_transfer` (which have no price semantic).
+   */
   receivePriceSats?: number;
   /** Sats already spent today by the agent. Caller passes the rolling sum. */
   spentTodaySats: number;
