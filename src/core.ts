@@ -22,6 +22,9 @@
  * sdk/core'`, never through bare `'ordpool-sdk'`.
  */
 
+// --- Protocol-wide constants (cat-UTXO postage; one source of truth) ---
+export * from './cat21-postage';
+
 // --- Network primitives ---
 export * from './network';
 

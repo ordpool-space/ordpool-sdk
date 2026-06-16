@@ -123,6 +123,46 @@ edge cases are exactly the kind of comment a future reader cannot
 reconstruct from code alone. Full decision tree in the workspace
 `CLAUDE.md` HARD RULE "Keep useful comments (JSDoc AND inline 'why')".
 
+## HARD RULE: cat UTXO is always 546 sats, FIFO (input 0 → output 0)
+
+**Every cat-bearing UTXO is exactly 546 sats. Every cat-touching tx
+puts the cat UTXO at input 0 and the cat output at output 0.** No
+overrides. No exceptions.
+
+| Concretely | Value |
+|---|---|
+| Mint output 0 (cat lands here, NEW UTXO) | 546 sats |
+| Transfer input 0 (cat UTXO coming in) | 546 sats |
+| Transfer output 0 (cat UTXO going out) | 546 sats |
+| Offer input 0 (seller's cat UTXO) | 546 sats |
+| Offer output 0 (cat goes to buyer) | 546 sats |
+| Offer output 1 (seller's payment) | `priceSats + 546` (ord-parity; seller is made whole on the postage) |
+
+**Why 546 and not 330 or 294**: 546 sats is the conservative
+cross-address-type dust floor — taproot 330, segwit 294, p2sh 540
+— 546 clears them all. Pinning a single value across the protocol
+means every cat UTXO is fungible across address types; a cat in a
+P2TR output can be transferred to a P2SH-P2WPKH output without
+re-dust-validating. **No `postageSats` override on any builder.**
+A future address type with higher dust requirements is a protocol
+event, not a builder argument.
+
+**Why FIFO is load-bearing**: ord assigns the cat to the first sat
+of the first output (ordinal theory). If the cat UTXO is at input
+1 or output 0 is not the cat, the cat lands elsewhere — silently —
+and the next tx that thinks it spends a cat is actually spending
+the wrong sat. The builders enforce input-0-is-cat and
+output-0-is-cat with hard runtime asserts.
+
+**Where enforced**:
+- `cat21-offer/cat21-offer.helper.ts`: rejects `sellerInput.value !== 546`.
+- `cat21-transfer/cat21-transfer.helper.ts`: rejects `catUtxo.value !== 546`.
+- `cat21-mint/cat21-mint.helper.ts`: hard-codes output-0 value at 546.
+- All four builders use the shared `CAT21_POSTAGE_SATS = 546` constant.
+
+This rule is byte-parity with ord's `wallet offer create` and
+`wallet send` for inscription-bearing UTXOs.
+
 ## HARD RULE: CAT-21 mints — RBF policy (per-wallet)
 
 **CAT-21 mint inputs carry a wallet-specific sequence number.**

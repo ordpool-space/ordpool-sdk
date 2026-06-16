@@ -98,16 +98,14 @@ describe('buildCat21TransferPsbt', () => {
     expect(result.changeSats).toBe(0);
   });
 
-  it('uses a single input when the cat UTXO has surplus value covering postage+fee', () => {
+  it('supports zero funding inputs when the caller covers fee with no surplus (fee=0 edge case)', () => {
+    // catUtxo always 546 (HARD RULE). Self-funded transfers are only viable
+    // when feeSats=0 (which a real broadcast wouldn't accept, but the
+    // builder doesn't reject — fee policy is the broadcaster's concern).
     const result = buildCat21TransferPsbt(
       makeBaseArgs({
-        catUtxo: {
-          txid: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-          vout: 0,
-          value: 50_000,
-          scriptPubKey: p2wpkhMainnet.script,
-        },
         fundingInputs: [],
+        feeSats: 0,
       })
     );
     const tx = btc.Transaction.fromPSBT(result.psbt);
@@ -195,8 +193,13 @@ describe('buildCat21TransferPsbt', () => {
     expect(tx.getInput(0).tapInternalKey).toBeDefined();
   });
 
-  it('rejects a postage below the safe dust threshold (330)', () => {
-    expect(() => buildCat21TransferPsbt(makeBaseArgs({ postageSats: 329 }))).toThrow(/dust/);
+  it('rejects a catUtxo whose value is not exactly 546 sats (HARD RULE: cat UTXO is always 546)', () => {
+    expect(() => buildCat21TransferPsbt(makeBaseArgs({
+      catUtxo: { ...makeBaseArgs().catUtxo, value: 545 },
+    }))).toThrow(/CAT21_POSTAGE_SATS|546/);
+    expect(() => buildCat21TransferPsbt(makeBaseArgs({
+      catUtxo: { ...makeBaseArgs().catUtxo, value: 1000 },
+    }))).toThrow(/CAT21_POSTAGE_SATS|546/);
   });
 
   it('rejects a negative fee', () => {

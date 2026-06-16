@@ -1,10 +1,11 @@
+import { CAT21_POSTAGE_SATS } from '../cat21-postage';
+
 /**
- * Postage carried by the cat output of an ord-style offer. The genesis sat
- * sits on the first sat of the first output, so any value above relay dust
- * holds the cat. We match the CAT-21 mint default (546 sats) so the wallet's
- * cat-output value is uniform across mint, buy, and sell flows.
+ * Alias for {@link CAT21_POSTAGE_SATS} kept for legacy import paths. The
+ * canonical constant lives in `cat21-postage.ts`; every cat-touching tx
+ * uses the same value across mint, transfer, and offer flows.
  */
-export const CAT21_OFFER_POSTAGE_SATS = 546;
+export const CAT21_OFFER_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
 /**
  * Description of the cat-bearing UTXO the offer is bidding on. The buyer

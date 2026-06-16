@@ -1,10 +1,10 @@
 import * as btc from '@scure/btc-signer';
 
+import { CAT21_POSTAGE_SATS } from '../cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { resolveCat21InputSequence } from '../cat21-mint/cat21-mint-sequence';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
-  CAT21_TRANSFER_POSTAGE_SATS,
   Cat21TransferCatInput,
   Cat21TransferDestinations,
   Cat21TransferFundingInput,
@@ -43,8 +43,6 @@ export interface BuildCat21TransferArgs {
    */
   fundingInputs: ReadonlyArray<Cat21TransferFundingInput>;
   destinations: Cat21TransferDestinations;
-  /** Optional override for the cat-output postage. Defaults to 546. */
-  postageSats?: number;
   /** Miner fee in sats. Caller computes from intended feeRate × vsize estimate. */
   feeSats: number;
 }
@@ -90,9 +88,13 @@ export interface BuildCat21TransferResult {
  * caller's responsibility.
  */
 export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21TransferResult {
-  const postageSats = args.postageSats ?? CAT21_TRANSFER_POSTAGE_SATS;
-  if (postageSats < 330) throw new Error('postageSats below safe dust threshold');
-  if (args.catUtxo.value < 1) throw new Error('catUtxo.value must be positive');
+  const postageSats = CAT21_POSTAGE_SATS;
+  // HARD RULE: cat UTXO is always exactly 546 sats. See SDK CLAUDE.md.
+  if (args.catUtxo.value !== CAT21_POSTAGE_SATS) {
+    throw new Error(
+      `catUtxo.value must equal CAT21_POSTAGE_SATS (${CAT21_POSTAGE_SATS}); got ${args.catUtxo.value}`
+    );
+  }
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);

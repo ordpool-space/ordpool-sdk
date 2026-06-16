@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
+import { CAT21_POSTAGE_SATS } from '../cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import {
   CAT21_OFFER_POSTAGE_SATS,
@@ -41,10 +42,13 @@ export interface BuildCat21BuyOfferArgs {
   sellerInput: Cat21OfferSellerInput;
   buyerInputs: Cat21OfferBuyerInput[];
   destinations: Cat21OfferDestinations;
-  /** Sats paid to the seller. Does NOT include postage; postage is separate. */
+  /**
+   * Sats paid to the seller (net). The seller's payment output value is
+   * `priceSats + CAT21_POSTAGE_SATS` so the seller is made whole on the
+   * 546 sats they contribute via input 0 (ord-parity, see SDK CLAUDE.md
+   * HARD RULE "cat UTXO is always 546 sats").
+   */
   priceSats: number;
-  /** Optional override for the cat-output postage. Defaults to 546. */
-  postageSats?: number;
   /**
    * Miner fee in sats. Caller computes this from the chosen feeRate and the
    * estimated tx size (use `getBitcoinTransactionFee` from `cat21-mint` or any
@@ -90,11 +94,15 @@ export interface BuildCat21BuyOfferResult {
  * into a sniping transaction.
  */
 export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21BuyOfferResult {
-  const postageSats = args.postageSats ?? CAT21_OFFER_POSTAGE_SATS;
+  const postageSats = CAT21_POSTAGE_SATS;
   if (args.priceSats <= 0) throw new Error('priceSats must be positive');
-  if (postageSats < 330) throw new Error('postageSats below safe dust threshold');
-  if (args.sellerInput.value < postageSats) {
-    throw new Error('sellerInput.value below configured postage');
+  // HARD RULE: cat UTXO is always 546 sats. See SDK CLAUDE.md. Enforce
+  // structurally so a caller can't smuggle a non-protocol-shaped UTXO
+  // through the offer flow.
+  if (args.sellerInput.value !== CAT21_POSTAGE_SATS) {
+    throw new Error(
+      `sellerInput.value must equal CAT21_POSTAGE_SATS (${CAT21_POSTAGE_SATS}); got ${args.sellerInput.value}`
+    );
   }
   if (args.buyerInputs.length === 0) throw new Error('buyerInputs must be non-empty');
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
@@ -155,21 +163,25 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
     scureNetwork
   );
 
-  // Output 1: seller payment.
+  // Output 1: seller payment. Value is `priceSats + postageSats` so the
+  // seller is made whole on the 546 sats they contribute via input 0 —
+  // matching ord's `wallet offer create` convention. Without the
+  // `+ postageSats`, the seller would silently eat the postage every
+  // time they sell. Net to seller: priceSats.
   tx.addOutputAddress(
     args.destinations.sellerPaymentAddress,
-    BigInt(args.priceSats),
+    BigInt(args.priceSats + postageSats),
     scureNetwork
   );
 
-  // Output 2: buyer change when above dust. Buyer needs to fund:
-  //   priceSats + postageSats - sellerInput.value (recycled via input 0) + feeSats.
-  // Buyer contributes buyerInputTotalSats. Anything left over after the above
-  // is change.
-  const obligation = args.priceSats + postageSats - args.sellerInput.value + args.feeSats;
+  // Output 2: buyer change when above dust. Buyer pays:
+  //   priceSats + postageSats (to seller) + postageSats (cat output) + feeSats.
+  // The seller's input value flows to output 1; it does NOT subsidise
+  // the buyer's obligation. Buyer's net cost == priceSats + postageSats + feeSats.
+  const obligation = args.priceSats + postageSats * 2 - args.sellerInput.value + args.feeSats;
   const changeSats = buyerInputTotalSats - obligation;
   if (changeSats < 0) {
-    throw new Error('Buyer inputs do not cover priceSats + postage + fee');
+    throw new Error('Buyer inputs do not cover priceSats + 2*postage + fee - sellerInput.value');
   }
   // Use the seller-payment script type's dust as a conservative floor; 546 is
   // safe across all current address types (taproot 330, segwit 294, p2sh 540).
@@ -221,8 +233,6 @@ export interface ValidateCat21BuyOfferArgs {
   expectedSellerUtxo: { txid: string; vout: number };
   /** Minimum acceptable price in sats. */
   floorPriceSats: number;
-  /** Optional override; defaults to CAT21_OFFER_POSTAGE_SATS. */
-  minPostageSats?: number;
   /**
    * Strongly recommended whenever a human eventually signs. When set, the
    * validator decodes Output 1's `scriptPubKey` back to an address string
@@ -261,7 +271,6 @@ export interface ValidateCat21BuyOfferArgs {
 export function validateCat21BuyOfferPsbt(
   args: ValidateCat21BuyOfferArgs
 ): Cat21OfferValidation {
-  const minPostage = args.minPostageSats ?? CAT21_OFFER_POSTAGE_SATS;
   const tx = btc.Transaction.fromPSBT(args.psbt);
 
   if (tx.inputsLength === 0) {
@@ -304,11 +313,12 @@ export function validateCat21BuyOfferPsbt(
     }
   }
 
-  // 4. Cat output postage.
+  // 4. Cat output postage MUST equal CAT21_POSTAGE_SATS (546). See HARD
+  //    RULE "cat UTXO is always 546 sats" in SDK CLAUDE.md.
   const catOutput = tx.getOutput(0);
   const postageSats = Number(catOutput.amount ?? 0n);
-  if (postageSats < minPostage) {
-    return fail('wrong-postage', `${postageSats} < ${minPostage}`);
+  if (postageSats !== CAT21_POSTAGE_SATS) {
+    return fail('wrong-postage', `${postageSats} !== ${CAT21_POSTAGE_SATS}`);
   }
 
   const paymentOutput = tx.getOutput(1);
@@ -350,8 +360,13 @@ export function validateCat21BuyOfferPsbt(
     }
   }
 
-  // 6. Seller payment amount.
-  const pricePaidSats = Number(paymentOutput.amount ?? 0n);
+  // 6. Seller payment amount. Output 1's value is `priceSats + postageSats`
+  //    (ord-parity). The seller's net is what's left after their own input
+  //    flows back into the same output — `output1 - sellerInputValue`.
+  //    Compare net-to-seller against the caller's floor.
+  const sellerInputValueSats = Number(sellerInput.witnessUtxo?.amount ?? 0n);
+  const paymentOutputValue = Number(paymentOutput.amount ?? 0n);
+  const pricePaidSats = paymentOutputValue - sellerInputValueSats;
   if (pricePaidSats < args.floorPriceSats) {
     return fail('wrong-price', `${pricePaidSats} < ${args.floorPriceSats}`);
   }

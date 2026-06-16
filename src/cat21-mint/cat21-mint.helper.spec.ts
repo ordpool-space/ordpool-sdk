@@ -168,10 +168,6 @@ describe('buildCat21MintPsbt', () => {
     expect(tx.getInput(0).tapInternalKey).toBeDefined();
   });
 
-  it('rejects a postage below the safe dust threshold (330)', () => {
-    expect(() => buildCat21MintPsbt(makeBaseArgs({ postageSats: 329 }))).toThrow(/dust/);
-  });
-
   it('rejects a negative fee', () => {
     expect(() => buildCat21MintPsbt(makeBaseArgs({ feeSats: -1 }))).toThrow(/non-negative/);
   });

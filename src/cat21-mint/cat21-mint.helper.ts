@@ -1,15 +1,15 @@
 import * as btc from '@scure/btc-signer';
 
+import { CAT21_POSTAGE_SATS } from '../cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { resolveCat21InputSequence } from './cat21-mint-sequence';
 
 /**
- * Cat-output postage on a CAT-21 mint transaction. The first sat of
- * output 0 carries the freshly-revealed cat; 546 sats keeps the
- * cat-output value uniform across mint, transfer, and offer flows.
+ * Alias for {@link CAT21_POSTAGE_SATS}. The canonical constant lives in
+ * `cat21-postage.ts`; this re-export exists for legacy import paths.
  */
-export const CAT21_MINT_POSTAGE_SATS = 546;
+export const CAT21_MINT_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
 /**
  * Dust threshold for the change output. 546 sats is the conservative
@@ -56,8 +56,6 @@ export interface BuildCat21MintArgs {
   network: Network;
   fundingInput: Cat21MintFundingInput;
   destinations: Cat21MintDestinations;
-  /** Optional override for the cat-output postage. Defaults to 546. */
-  postageSats?: number;
   /** Miner fee in sats. Caller computes from intended feeRate × vsize estimate. */
   feeSats: number;
 }
@@ -93,8 +91,11 @@ export interface BuildCat21MintResult {
  *   3. Every input carries SIGHASH_ALL.
  */
 export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResult {
-  const postageSats = args.postageSats ?? CAT21_MINT_POSTAGE_SATS;
-  if (postageSats < 330) throw new Error('postageSats below safe dust threshold');
+  // HARD RULE: cat output is always exactly 546 sats. The cat is born
+  // at the first sat of output 0; uniform postage across mint /
+  // transfer / offer means a cat UTXO is fungible across address types.
+  // See SDK CLAUDE.md "cat UTXO is always 546 sats".
+  const postageSats = CAT21_POSTAGE_SATS;
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
   const tipValueSats = args.destinations.tip?.valueSats ?? 0;
   if (tipValueSats < 0) throw new Error('tip.valueSats must be non-negative');

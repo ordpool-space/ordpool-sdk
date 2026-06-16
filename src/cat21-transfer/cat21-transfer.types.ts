@@ -1,9 +1,11 @@
+import { CAT21_POSTAGE_SATS } from '../cat21-postage';
+
 /**
- * Cat-output postage on a CAT-21 transfer transaction. Same value as
- * mint and offer (546 sats) — every flow puts the cat at the first sat
- * of the first output, and the cat-output value is uniform.
+ * Alias for {@link CAT21_POSTAGE_SATS}, kept for legacy import paths. The
+ * canonical constant lives in `cat21-postage.ts`; every cat-touching tx
+ * uses the same value across mint, transfer, and offer flows.
  */
-export const CAT21_TRANSFER_POSTAGE_SATS = 546;
+export const CAT21_TRANSFER_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
 /**
  * The cat-bearing UTXO the seller spends to move the cat. The first sat

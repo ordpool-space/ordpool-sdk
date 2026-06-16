@@ -83,29 +83,30 @@ describe('buildCat21BuyOfferPsbt', () => {
     expect(tx.getOutput(0).amount).toBe(BigInt(CAT21_OFFER_POSTAGE_SATS));
   });
 
-  it('places the seller payment at output 1 with priceSats', () => {
+  it('places the seller payment at output 1 with priceSats + postage (ord-parity; seller made whole on the 546 they contributed via input 0)', () => {
     const args = makeBaseArgs({ priceSats: 42_000 });
     const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(args).psbt);
-    expect(tx.getOutput(1).amount).toBe(BigInt(42_000));
+    expect(tx.getOutput(1).amount).toBe(BigInt(42_000 + CAT21_OFFER_POSTAGE_SATS));
   });
 
   it('emits a change output when buyer change is above the dust floor', () => {
-    // 50k buyer - (21k seller-payment + 546 postage - 546 recycled - 1k fee) = 28k change
+    // Buyer 50k. Obligation = priceSats (21k) + 2*postage (1092) - sellerInput (546) + fee (1k)
+    //                       = 22 546. Change = 50_000 - 22_546 = 27_454.
     const result = buildCat21BuyOfferPsbt(makeBaseArgs());
     const tx = btc.Transaction.fromPSBT(result.psbt);
     expect(tx.outputsLength).toBe(3);
-    expect(tx.getOutput(2).amount).toBe(BigInt(28_000));
-    expect(result.changeSats).toBe(28_000);
+    expect(tx.getOutput(2).amount).toBe(BigInt(27_454));
+    expect(result.changeSats).toBe(27_454);
   });
 
   it('absorbs sub-dust change into the miner fee instead of emitting an output', () => {
-    // Tweak buyerInputs so change is exactly 100 sats.
+    // Obligation = 22_546 (see above). Buyer 22_646 → change 100 (sub-dust, absorbed).
     const args = makeBaseArgs({
       buyerInputs: [
         {
           txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
           vout: 1,
-          value: 22_100,
+          value: 22_646,
           scriptPubKey: p2wpkhTestnet.script,
         },
       ],
@@ -116,22 +117,18 @@ describe('buildCat21BuyOfferPsbt', () => {
     expect(result.changeSats).toBe(0);
   });
 
-  it('uses an override postage when supplied', () => {
-    const args = makeBaseArgs({
-      postageSats: 800,
-      sellerInput: { ...makeBaseArgs().sellerInput, value: 800 },
-    });
-    const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(args).psbt);
-    expect(tx.getOutput(0).amount).toBe(BigInt(800));
-  });
-
   it('rejects non-positive priceSats', () => {
     expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({ priceSats: 0 }))).toThrow(/priceSats/);
     expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({ priceSats: -1 }))).toThrow(/priceSats/);
   });
 
-  it('rejects postage below safe dust threshold', () => {
-    expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({ postageSats: 329 }))).toThrow(/dust/);
+  it('rejects sellerInput.value != 546 (HARD RULE: cat UTXO is always 546)', () => {
+    expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({
+      sellerInput: { ...makeBaseArgs().sellerInput, value: 800 },
+    }))).toThrow(/CAT21_POSTAGE_SATS|546/);
+    expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({
+      sellerInput: { ...makeBaseArgs().sellerInput, value: 330 },
+    }))).toThrow(/CAT21_POSTAGE_SATS|546/);
   });
 
   it('rejects empty buyerInputs', () => {
@@ -232,18 +229,33 @@ describe('validateCat21BuyOfferPsbt', () => {
     if (!result.ok) expect(result.reason).toBe('buyer-input-unsigned');
   });
 
-  it('rejects when minPostageSats is overridden upward and the offer underpays', () => {
+  it('rejects when Output 0 postage is not exactly 546 (HARD RULE)', () => {
+    // Build a PSBT by hand with cat output at 500 sats. Inputs first,
+    // then outputs, THEN sign — scure refuses input mutations after any
+    // signature is attached.
     const args = makeBaseArgs();
-    const built = buildCat21BuyOfferPsbt(args);
-    const tx = btc.Transaction.fromPSBT(built.psbt);
-    tx.updateInput(1, {
-      partialSig: [[publicKey, new Uint8Array(71).fill(1)]],
+    const tx = new btc.Transaction({ allowUnknownInputs: true, lockTime: 21 });
+    tx.addInput({
+      txid: args.sellerInput.txid,
+      index: args.sellerInput.vout,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(CAT21_OFFER_POSTAGE_SATS) },
+      sighashType: btc.SigHash.ALL,
     });
+    tx.addInput({
+      txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+      index: 1,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(50_000) },
+      sighashType: btc.SigHash.ALL,
+    });
+    tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(500), btc.TEST_NETWORK); // wrong postage
+    tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(21_546), btc.TEST_NETWORK);
+    tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
     const result = validateCat21BuyOfferPsbt({
       psbt: tx.toPSBT(),
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_000,
-      minPostageSats: 1_000,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('wrong-postage');
@@ -579,16 +591,16 @@ describe('validateCat21BuyOfferPsbt', () => {
     });
   });
 
-  describe('Finding #2 — sellerInput.value below postage requirement', () => {
+  describe('Finding #2 — sellerInput.value enforced exactly at CAT21_POSTAGE_SATS', () => {
 
-    it('builder rejects when seller UTXO value is below the postage requirement', () => {
+    it('builder rejects when seller UTXO value is below 546 (cat UTXO must be 546)', () => {
       expect(() =>
         buildCat21BuyOfferPsbt(
           makeBaseArgs({
             sellerInput: { ...makeBaseArgs().sellerInput, value: 100 },
           })
         )
-      ).toThrow(/below configured postage/);
+      ).toThrow(/CAT21_POSTAGE_SATS|546/);
     });
   });
 
@@ -662,15 +674,15 @@ describe('validateCat21BuyOfferPsbt', () => {
   describe('Finding #5 — change dust threshold boundary', () => {
 
     it('emits change output at exactly 546 sats (boundary)', () => {
-      // 21_000 price + 546 postage - 546 recycled + 1_000 fee = 22_000 obligation
-      // 22_546 input - 22_000 obligation = 546 change → emit
+      // Obligation = 21_000 (price) + 2*546 (postage on cat output + postage compensation on seller) - 546 (sellerInput) + 1_000 (fee) = 22_546.
+      // Buyer 23_092 - 22_546 obligation = 546 change → emit.
       const result = buildCat21BuyOfferPsbt(
         makeBaseArgs({
           buyerInputs: [
             {
               txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
               vout: 1,
-              value: 22_546,
+              value: 23_092,
               scriptPubKey: p2wpkhTestnet.script,
             },
           ],
@@ -681,13 +693,14 @@ describe('validateCat21BuyOfferPsbt', () => {
     });
 
     it('absorbs 545 sats change into fee (just below dust)', () => {
+      // Buyer 23_091 - 22_546 obligation = 545 change → sub-dust, absorbed.
       const result = buildCat21BuyOfferPsbt(
         makeBaseArgs({
           buyerInputs: [
             {
               txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
               vout: 1,
-              value: 22_545,
+              value: 23_091,
               scriptPubKey: p2wpkhTestnet.script,
             },
           ],
