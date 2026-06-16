@@ -7,6 +7,7 @@
 import { execFileSync } from 'node:child_process';
 
 const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ?? 'http://localhost:3000';
+const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 
 export interface FundedAccount {
   address: string;
@@ -203,6 +204,222 @@ interface EsploraVin {
  *  - Legacy P2PKH (scriptsig starts with a push of DER sig):
  *      last byte of the pushed sig must be 0x01
  */
+// ─── cat21-ord helpers ───────────────────────────────────────────────
+//
+// Used by the multi-step `cat21-flow-roundtrip` spec for two things:
+//   1. Verifying the cat's current address after each step (the spec
+//      asks ord which address owns inscription <minting_tx>i0).
+//   2. Producing ord's reference buy-offer PSBT for byte-comparison
+//      against the SDK's `buildCat21BuyOfferPsbt` output.
+//
+// ord serves HTML by default; every query here sends
+// `Accept: application/json` to get structured output. ord recognises
+// the inscription path by id (`<txid>i<index>`); for cat21 fake-
+// inscriptions, the index is always 0.
+
+/** Build a cat21 inscription id from its minting txid. */
+export function catInscriptionId(mintTxid: string): string {
+  return `${mintTxid}i0`;
+}
+
+/**
+ * Poll ord's HTTP server until it answers `/status` with a 2xx — the
+ * binary takes a moment to warm its index before binding. The compose
+ * file has no healthcheck because the slim runtime image lacks wget/curl,
+ * so the test bootstrap polls here.
+ */
+export async function waitForOrdReady(timeoutMs = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ok = await fetch(`${ORD_URL}/status`).then(r => r.ok).catch(() => false);
+    if (ok) return;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error(`ord didn't respond on /status within ${timeoutMs}ms`);
+}
+
+/**
+ * Block until ord has indexed up to (at least) `targetHeight`. ord's
+ * indexer is one step behind electrs/bitcoind — it sees the new block
+ * via ZMQ or polling and runs its CAT-21 filter on every tx. Without
+ * this gate the cat-state assertions race the indexer.
+ */
+export async function waitForOrdSync(targetHeight: number, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await fetch(`${ORD_URL}/status`, {
+      headers: { Accept: 'application/json' },
+    }).then(r => r.ok ? r.json() : null).catch(() => null) as { height?: number } | null;
+    if (status && typeof status.height === 'number' && status.height >= targetHeight) return;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  throw new Error(`ord didn't reach height ${targetHeight} within ${timeoutMs}ms`);
+}
+
+export interface OrdInscription {
+  /** Address currently holding the inscription (the "owner"). */
+  address: string;
+  /** UTXO carrying the inscription, `<txid>:<vout>` form. */
+  output: string;
+  /** Sat number on which the inscription sits. */
+  sat?: number | null;
+  /** Sats locked in the inscription's UTXO. */
+  value: number;
+  /** ord's inscription number (= cat number under --index-cat21). */
+  number: number;
+  /** The inscription id, `<txid>i<index>`. */
+  id: string;
+}
+
+/**
+ * Fetch a cat's inscription record from ord. Returns the owner address,
+ * current UTXO, and other ord-side state. Throws on any non-2xx — the
+ * caller passes through after asserting on shape.
+ */
+export async function getOrdInscription(inscriptionId: string): Promise<OrdInscription> {
+  const res = await fetch(`${ORD_URL}/inscription/${inscriptionId}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`ord /inscription/${inscriptionId} returned ${res.status}: ${await res.text()}`);
+  }
+  return res.json() as Promise<OrdInscription>;
+}
+
+/**
+ * Wait until ord reports the cat at `inscriptionId` is owned by
+ * `expectedAddress`. Polls every 300ms; throws on timeout with the
+ * last-observed owner.
+ *
+ * Use this after each broadcast + confirm step in the multi-step spec
+ * to assert the cat actually moved where the SDK said it would.
+ */
+export async function waitForCatAtAddress(
+  inscriptionId: string,
+  expectedAddress: string,
+  timeoutMs = 30_000,
+): Promise<OrdInscription> {
+  const deadline = Date.now() + timeoutMs;
+  let lastSeen: OrdInscription | undefined;
+  while (Date.now() < deadline) {
+    const insc = await getOrdInscription(inscriptionId).catch(() => undefined);
+    if (insc) {
+      lastSeen = insc;
+      if (insc.address === expectedAddress) return insc;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  throw new Error(
+    `cat ${inscriptionId} not at ${expectedAddress} within ${timeoutMs}ms; ` +
+    `last owner: ${lastSeen?.address ?? 'unknown'}`
+  );
+}
+
+/**
+ * Invoke ord's CLI inside the regtest container. Returns stdout
+ * trimmed. Errors bubble up via execFileSync's non-zero-exit throw.
+ *
+ * The container's `command:` runs `ord ... server ...`; this helper
+ * spawns a SECOND ord process via `docker exec` for one-shot wallet
+ * commands. Both processes read the same regtest bitcoind + index dir,
+ * so wallet operations are immediately visible to the running server.
+ */
+export function ordCli(...args: string[]): string {
+  return execFileSync(
+    'docker',
+    [
+      'exec', 'ordpool-e2e-cat21-ord',
+      'ord',
+      '--regtest',
+      '--index-cat21',
+      '--index-sats',
+      '--index-addresses',
+      '--bitcoin-rpc-url=bitcoind:18443',
+      '--bitcoin-rpc-username=ordpool',
+      '--bitcoin-rpc-password=ordpool',
+      '--data-dir=/data',
+      ...args,
+    ],
+    { encoding: 'utf8' },
+  ).trim();
+}
+
+/**
+ * `ord wallet …` requires `--name <NAME>` + `--server-url <URL>` on the
+ * wallet subcommand (NOT global). Inside the container the running
+ * ord-server is reachable at localhost:8080.
+ */
+function ordWalletCli(walletName: string, ...subcommandArgs: string[]): string {
+  return ordCli(
+    'wallet',
+    '--name', walletName,
+    '--server-url', 'http://localhost:8080',
+    ...subcommandArgs,
+  );
+}
+
+/**
+ * Reference buy-offer producer. Asks ord to construct a buyer-side
+ * offer for `inscriptionId` at `amountSats`. Returns the PSBT in
+ * base64 form, ready for byte-comparison against the SDK's
+ * `buildCat21BuyOfferPsbt` output (modulo the `lockTime=21` we set —
+ * ord uses `LockTime::ZERO`, we set `21` for the cherry-on-top bonus
+ * mint).
+ *
+ * The ord wallet must be initialised (`ordCreateWallet`) and funded
+ * before this is called.
+ */
+export interface OrdOfferCreateOutput {
+  psbt: string;          // base64
+  inscription: string;   // inscription id
+  seller_address: string;
+}
+
+export function ordCreateOffer(
+  inscriptionId: string,
+  amountSats: number,
+  feeRateSatPerVb: number,
+  wallet = 'ord',
+): OrdOfferCreateOutput {
+  const stdout = ordWalletCli(
+    wallet,
+    'offer', 'create',
+    '--inscription', inscriptionId,
+    '--amount', `${amountSats}sat`,
+    '--fee-rate', String(feeRateSatPerVb),
+  );
+  return JSON.parse(stdout) as OrdOfferCreateOutput;
+}
+
+export interface OrdAddressResponse {
+  address: string;
+}
+
+/**
+ * Create + restore (idempotent) an ord-side bitcoin wallet. ord stores
+ * the wallet inside the regtest bitcoind via `wallet_process_psbt`-
+ * shaped RPCs; this helper exists so the test setup can construct one
+ * deterministically before mining funding blocks to it.
+ *
+ * Returns a fresh receive address from the wallet.
+ */
+export function ordCreateWallet(name = 'ord'): string {
+  // ord's `wallet create` is idempotent only on the wallet's existence;
+  // we ignore the "wallet already exists" error path so the helper can
+  // be called from a clean spec setup or a re-run.
+  try {
+    ordWalletCli(name, 'create');
+  } catch (e) {
+    const msg = (e as Error).message ?? '';
+    if (!msg.includes('already exists') && !msg.includes('already loaded')) throw e;
+  }
+  const stdout = ordWalletCli(name, 'receive');
+  const parsed = JSON.parse(stdout) as { addresses?: string[]; address?: string };
+  if (parsed.address) return parsed.address;
+  if (parsed.addresses && parsed.addresses.length > 0) return parsed.addresses[0];
+  throw new Error(`unexpected ord wallet receive shape: ${stdout}`);
+}
+
 export function assertAllInputsSighashAll(tx: EsploraTx): void {
   for (let i = 0; i < tx.vin.length; i++) {
     const input = tx.vin[i] as EsploraVin;

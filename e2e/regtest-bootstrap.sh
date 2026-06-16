@@ -29,7 +29,9 @@ $RPC getblockchaininfo >/dev/null
 # dump and use in the SDK signer tests. SegWit/Taproot funding is
 # generated on the fly per-test; this bootstrap only needs ANY UTXO
 # to seed the mempool with.
-$RPC createwallet ordpool-e2e false false "" false false >/dev/null 2>&1 || \
+# Bitcoin Core 28+ defaults to descriptor wallets; dumpprivkey only
+# works on legacy ones. Pass `descriptors=false` explicitly.
+$RPC -named createwallet wallet_name=ordpool-e2e descriptors=false load_on_startup=true >/dev/null 2>&1 || \
   $RPC loadwallet ordpool-e2e >/dev/null 2>&1 || true
 
 ADDR=$($RPC -rpcwallet=ordpool-e2e getnewaddress "" legacy)

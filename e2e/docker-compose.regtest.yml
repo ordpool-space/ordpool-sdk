@@ -10,7 +10,11 @@
 
 services:
   bitcoind:
-    image: ruimarinho/bitcoin-core:24-alpine
+    # Official Bitcoin Core image. cat21-ord (ord 0.27) requires
+    # Bitcoin Core 28+. ruimarinho/bitcoin-core:24-alpine was correct
+    # for the previous mint-only spec but doesn't satisfy ord's wallet
+    # commands; we use the official image here.
+    image: bitcoin/bitcoin:28
     container_name: ordpool-e2e-bitcoind
     command:
       - -regtest
@@ -24,6 +28,10 @@ services:
       - -listen=1
       - -zmqpubrawblock=tcp://0.0.0.0:28332
       - -zmqpubrawtx=tcp://0.0.0.0:28333
+      # Bitcoin Core 28 deprecated legacy/BDB wallets. The bootstrap
+      # creates a legacy wallet so `dumpprivkey` still works (the SDK
+      # mint spec wants a WIF for signing).
+      - -deprecatedrpc=create_bdb
     ports:
       - "18443:18443"   # RPC (regtest)
       - "18444:18444"   # P2P (regtest)
@@ -35,6 +43,7 @@ services:
 
   electrs:
     image: mempool/electrs:latest
+    platform: linux/amd64
     container_name: ordpool-e2e-electrs
     depends_on:
       bitcoind:
@@ -55,3 +64,58 @@ services:
       interval: 2s
       timeout: 2s
       retries: 30
+
+  # cat21-ord. The cat21 fork of ord (https://github.com/ordpool-space/cat21-ord)
+  # with --index-cat21 active. Two roles in the regtest spec:
+  #
+  #   1. Authoritative view of cat state. The multi-step roundtrip spec
+  #      asks ord which address currently owns cat #0, cat #1 etc., to
+  #      verify the SDK-built txs moved the cat where we expected.
+  #   2. Reference PSBT producer. `ord wallet offer create` is the
+  #      highest-quality reference implementation of the ord-style
+  #      buyer-initiated offer. The spec compares bytes from the SDK's
+  #      `buildCat21BuyOfferPsbt` against ord's output (modulo the
+  #      lockTime=21 we set for the cherry-on-top bonus mint).
+  #
+  # Built from the cat21-ord checkout at the workspace-standard path
+  # `../../cat21-ord/`. First build takes a few minutes (cargo --release);
+  # subsequent ones hit the Docker layer cache.
+  ord:
+    build:
+      context: ../../cat21-ord
+      # Use a Dockerfile we maintain in this repo so cat21-ord's own
+      # Dockerfile (rust:1.85.0, correct for happysrv prod) stays
+      # untouched. ord@0.27 + redb@3.1 need rust 1.89+; we use 1.90 here.
+      dockerfile: ../ordpool-sdk/e2e/cat21-ord.Dockerfile
+    image: ordpool-e2e-cat21-ord:local
+    container_name: ordpool-e2e-cat21-ord
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+    command:
+      - ord
+      - --regtest
+      - --index-cat21
+      - --index-sats
+      - --index-addresses
+      - --bitcoin-rpc-url=bitcoind:18443
+      - --bitcoin-rpc-username=ordpool
+      - --bitcoin-rpc-password=ordpool
+      - --data-dir=/data
+      - server
+      - --http
+      - --http-port=8080
+      - --address=0.0.0.0
+    ports:
+      - "8080:8080"     # ord HTTP API + UI
+    volumes:
+      - ord-data:/data
+    # No healthcheck. The runtime image is debian:bookworm-slim with only
+    # openssl; wget and curl aren't installed. The test bootstrap polls
+    # the host-exposed :8080/status via `waitForOrdReady` instead.
+
+volumes:
+  ord-data:
