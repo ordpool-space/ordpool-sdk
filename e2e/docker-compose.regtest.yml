@@ -81,6 +81,15 @@ services:
   # `../../cat21-ord/`. First build takes a few minutes (cargo --release);
   # subsequent ones hit the Docker layer cache.
   ord:
+    # Profile-gated so the regtest stack can be brought up WITHOUT
+    # cat21-ord — useful for consumer e2e workflows (ordpool /
+    # cat21-indexer) that don't need ord state for their tests and
+    # don't necessarily have the cat21-ord source checked out at
+    # `../../cat21-ord/`. To include cat21-ord:
+    #     docker compose --profile cat21-ord up -d
+    # Default (no profile) brings up bitcoind + electrs only.
+    profiles:
+      - cat21-ord
     build:
       context: ../../cat21-ord
       # Use a Dockerfile we maintain in this repo so cat21-ord's own
