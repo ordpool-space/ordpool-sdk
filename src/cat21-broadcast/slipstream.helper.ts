@@ -1,4 +1,24 @@
 /**
+ * # DORMANT — currently unused by any SDK consumer.
+ *
+ * Plain CAT-21 mints / transfers / offers are ~150 vB and standard, so
+ * `decideBroadcastChannel` never routes here unless the caller passes
+ * `forceChannel: 'slipstream'` or a tx exceeds `MAX_STANDARD_TX_WEIGHT
+ * = 400 000`. Neither happens in any flow shipping today.
+ *
+ * Kept (not deleted) because the dispatcher pattern + the verified
+ * Marathon contract are non-trivial to re-derive — when a use case
+ * surfaces (oversize witness data bundled with cats, atomicals-like
+ * payloads, future protocol experiments), reviving this helper is
+ * cheaper than rebuilding it.
+ *
+ * **Before re-enabling**, re-verify the Marathon API contract with
+ * curl probes (see the "verified" block below — the contract drifted
+ * once already, both URL path and body field were wrong in an earlier
+ * iteration). Bump the verification date in the docstring.
+ *
+ * # Background
+ *
  * Marathon Slipstream is a direct-to-miner submission API. Useful when the
  * public mempool would policy-reject a transaction (oversize witness,
  * non-standard scripts, datacarrier above local limits). For plain CAT-21

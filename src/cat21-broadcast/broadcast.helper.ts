@@ -14,6 +14,12 @@ import { submitToSlipstream } from './slipstream.helper';
  */
 export const STANDARD_TX_WEIGHT_LIMIT = 400_000;
 
+/**
+ * Broadcast channel. `'slipstream'` is currently DORMANT — see
+ * `slipstream.helper.ts`. No SDK consumer routes there today (every
+ * CAT-21 flow we ship is ~150 vB and standard); the branch is kept
+ * for future oversize-tx use cases.
+ */
 export type Cat21BroadcastChannel = 'mempool' | 'slipstream';
 
 export interface Cat21BroadcastDecision {

@@ -1,3 +1,7 @@
+// Pins the (currently DORMANT — see slipstream.helper.ts header) Marathon
+// Slipstream contract. Kept green so reviving the helper means flipping a
+// caller flag, not rebuilding the contract from scratch.
+
 import { describe, expect, it, jest } from '@jest/globals';
 
 import {
