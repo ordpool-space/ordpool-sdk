@@ -139,6 +139,22 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   let buyerInputTotalSats = 0;
   for (const input of args.buyerInputs) {
     buyerInputTotalSats += input.value;
+
+    // Legacy P2PKH path: scure refuses witnessUtxo on legacy inputs.
+    if (input.nonWitnessUtxo) {
+      const legacyInput: btc.TransactionInputUpdate = {
+        txid: input.txid,
+        index: input.vout,
+        sequence: CAT21_OFFER_INPUT_SEQUENCE,
+        nonWitnessUtxo: input.nonWitnessUtxo,
+        sighashType: btc.SigHash.ALL,
+      };
+      if (input.redeemScript) legacyInput.redeemScript = input.redeemScript;
+      tx.addInput(legacyInput);
+      continue;
+    }
+
+    // SegWit family.
     const base: btc.TransactionInputUpdate = {
       txid: input.txid,
       index: input.vout,
@@ -149,11 +165,9 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
       },
       sighashType: btc.SigHash.ALL,
     };
-    if (input.tapInternalKey) {
-      tx.addInput({ ...base, tapInternalKey: input.tapInternalKey });
-    } else {
-      tx.addInput(base);
-    }
+    if (input.redeemScript) base.redeemScript = input.redeemScript;
+    if (input.tapInternalKey) base.tapInternalKey = input.tapInternalKey;
+    tx.addInput(base);
   }
 
   // Output 0: cat lands at buyer.

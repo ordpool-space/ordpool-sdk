@@ -21,6 +21,13 @@ export interface Cat21TransferCatInput {
   scriptPubKey: Uint8Array;
   /** For taproot inputs, the x-only internal public key. */
   tapInternalKey?: Uint8Array;
+  /** For P2SH-wrapped SegWit (Xverse / Unisat-NestedSegWit). */
+  redeemScript?: Uint8Array;
+  /**
+   * For legacy P2PKH inputs (Unisat-Legacy). Full previous-tx bytes —
+   * scure refuses to sign legacy inputs from witnessUtxo alone.
+   */
+  nonWitnessUtxo?: Uint8Array;
 }
 
 /**
@@ -35,6 +42,13 @@ export interface Cat21TransferFundingInput {
   value: number;
   scriptPubKey: Uint8Array;
   tapInternalKey?: Uint8Array;
+  /** For P2SH-wrapped SegWit (Xverse / Unisat-NestedSegWit). */
+  redeemScript?: Uint8Array;
+  /**
+   * For legacy P2PKH inputs (Unisat-Legacy). Full previous-tx bytes —
+   * scure refuses to sign legacy inputs from witnessUtxo alone.
+   */
+  nonWitnessUtxo?: Uint8Array;
 }
 
 /** Output destinations of a CAT-21 transfer. */

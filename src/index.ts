@@ -30,10 +30,12 @@ export * from './cat21-fee/dummy-keypair';
 // --- cat21 offer (ord-style buyer-initiated PSBT builder + seller-side validator) ---
 export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
+export * from './cat21-offer/cat21-offer-input-adapter';
 
 // --- cat21 transfer (move a cat to another address; mints a fresh cat on the same ordinal) ---
 export * from './cat21-transfer/cat21-transfer.helper';
 export * from './cat21-transfer/cat21-transfer.types';
+export * from './cat21-transfer/cat21-transfer-input-adapter';
 
 // --- cat21 broadcast (mempool / Slipstream dispatcher + Slipstream client) ---
 export * from './cat21-broadcast/broadcast.helper';

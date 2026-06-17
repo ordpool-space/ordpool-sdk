@@ -166,6 +166,24 @@ function addInput(
   utxo: Cat21TransferCatInput | Cat21TransferFundingInput,
   sequence: number
 ): void {
+  // Legacy P2PKH path: scure refuses to sign legacy inputs from
+  // witnessUtxo alone, the caller must supply the full prev-tx bytes
+  // via nonWitnessUtxo.
+  if (utxo.nonWitnessUtxo) {
+    const legacyInput: btc.TransactionInputUpdate = {
+      txid: utxo.txid,
+      index: utxo.vout,
+      sequence,
+      sighashType: btc.SigHash.ALL,
+      nonWitnessUtxo: utxo.nonWitnessUtxo,
+    };
+    if (utxo.redeemScript) legacyInput.redeemScript = utxo.redeemScript;
+    tx.addInput(legacyInput);
+    return;
+  }
+
+  // SegWit family: witnessUtxo + optional redeemScript (P2SH-wrap) +
+  // optional tapInternalKey (Taproot key-path).
   const inputBase: btc.TransactionInputUpdate = {
     txid: utxo.txid,
     index: utxo.vout,
@@ -176,9 +194,7 @@ function addInput(
       amount: BigInt(utxo.value),
     },
   };
-  if (utxo.tapInternalKey) {
-    tx.addInput({ ...inputBase, tapInternalKey: utxo.tapInternalKey });
-  } else {
-    tx.addInput(inputBase);
-  }
+  if (utxo.redeemScript) inputBase.redeemScript = utxo.redeemScript;
+  if (utxo.tapInternalKey) inputBase.tapInternalKey = utxo.tapInternalKey;
+  tx.addInput(inputBase);
 }

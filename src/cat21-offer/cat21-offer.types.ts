@@ -37,6 +37,13 @@ export interface Cat21OfferBuyerInput {
    * key-path signature.
    */
   tapInternalKey?: Uint8Array;
+  /** For P2SH-wrapped SegWit (Xverse / Unisat-NestedSegWit). */
+  redeemScript?: Uint8Array;
+  /**
+   * For legacy P2PKH inputs (Unisat-Legacy). Full previous-tx bytes —
+   * scure refuses to sign legacy inputs from witnessUtxo alone.
+   */
+  nonWitnessUtxo?: Uint8Array;
 }
 
 /** Output destinations of an ord-style offer. */

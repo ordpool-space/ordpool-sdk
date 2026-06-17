@@ -49,10 +49,12 @@ export * from './cat21-fee/dummy-keypair';
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';
 export * from './cat21-transfer/cat21-transfer.types';
+export * from './cat21-transfer/cat21-transfer-input-adapter';
 
 // --- CAT-21 offer (ord-style buy-offer builder + seller validator) ---
 export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
+export * from './cat21-offer/cat21-offer-input-adapter';
 
 // --- CAT-21 broadcast (mempool / Slipstream dispatcher) ---
 export * from './cat21-broadcast/broadcast.helper';
