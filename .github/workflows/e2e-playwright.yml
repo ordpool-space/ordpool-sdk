@@ -193,13 +193,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          STAGING_DIR="/tmp/cat21-wallet-staging"
-          rm -rf "$STAGING_DIR"
-          git clone --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$STAGING_DIR"
-          cd "$STAGING_DIR"
+          WALLET_DIR="/tmp/cat21-wallet"
+          rm -rf "$WALLET_DIR"
+          git clone --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$WALLET_DIR"
+          cd "$WALLET_DIR"
           pnpm install --frozen-lockfile
           pnpm build:extension
-          export CAT21_WALLET_LOCAL_DIST="${STAGING_DIR}/apps/extension/dist"
+          export CAT21_WALLET_LOCAL_DIST="${WALLET_DIR}/apps/extension/dist"
           cd "$GITHUB_WORKSPACE"
           rm -rf "e2e/extensions/cat21wallet"
           bash e2e/playwright/playwright-bootstrap.sh cat21wallet
