@@ -1,477 +1,45 @@
-import { secp256k1, schnorr } from '@noble/curves/secp256k1';
-import { hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
-
-import {
-  CreateTransactionResult,
-  DummyKeypairResult,
-  TxnOutput
-} from './cat21.service.types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
-import { Network, toScureNetwork } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { getMinimumUtxoSize } from '../cat21-script/address-format';
 import { buildCat21MintPsbt } from './cat21-mint.helper';
 import { prepareMintInputForWallet } from './cat21-mint-input-adapter';
+import { CreateTransactionResult, TxnOutput } from './cat21.service.types';
+
+// Re-export from the new locations so existing consumers keep working
+// while the v2 ecosystem migrates to the canonical import paths.
+// Bitcoin / per-wallet script helpers live in `src/cat21-script/`;
+// fee-simulation dummy material lives in `src/cat21-fee/`.
+export {
+  getAddressFormat,
+  getMinimumUtxoSize,
+  isSegWit,
+  toXOnly,
+} from '../cat21-script/address-format';
+export {
+  createInputScriptForLeather,
+  createInputScriptForUnisat,
+  createInputScriptForXverse,
+} from '../cat21-script/per-wallet-scripts';
+export {
+  getDummyKeypair,
+  getDummyLegacyTransaction,
+} from '../cat21-fee/dummy-keypair';
 
 /**
- * Determines the minimum UTXO size based on the Bitcoin address type.
- * Supports both mainnet and testnet address prefixes.
-
- * This function aims to provide the minimum UTXO size to avoid creating dust outputs.
- * Since P2SH* addresses (starting with '3' on mainnet and '2' on testnet)
- * can represent various types of scripts, including Nested SegWit,
- * a conservative approach is taken by assigning the higher minimum UTXO size applicable
- * to P2SH addresses. P2SH-P2WPKH would allow 540, but 6 sats are small enough to ignore them.
+ * Constructs a CAT-21 mint transaction (cat21.space orchestration
+ * entry point).
  *
- * Supported address types and their conservative minimum UTXO sizes are as follows:
- * - P2PKH / "Legacy" Pay-to-Public-Key-Hash (mainnet '1', testnet 'm' or 'n'): 546 satoshis
- * - P2SH / Pay-to-Script-Hash including
- *   ... P2SH-P2WPKH / "Nested SegWit" and
- *   ... P2SH-P2WSH / "Pay To Witness Script Hash Wrapped In P2SH" (mainnet '3', testnet '2'): 546 satoshis !
- * - P2WPKH / Native SegWit (mainnet 'bc1q', testnet 'tb1q'): 294 satoshis
- * - P2TR / Taproot (mainnet 'bc1p', testnet 'tb1p'): 330 satoshis
+ * Layer 4 (orchestration): adapts the cat21.space-shaped arguments to
+ *   - `prepareMintInputForWallet` (Layer 2 per-wallet input adapter)
+ *   - `buildCat21MintPsbt` (Layer 1 pure PSBT builder)
  *
- * Not supported:
- * - P2PK (Pay-to-Public-Key)
+ * One PSBT-assembly path now serves both cat21.space and cat21-wallet's
+ * autonomous flow.
  *
- * References for further reading:
- * - https://help.magiceden.io/en/articles/8665399-navigating-bitcoin-dust-understanding-limits-and-safeguarding-your-transactions-on-magic-eden
- * - https://en.bitcoin.it/wiki/List_of_address_prefixes
- * - https://unchained.com/blog/bitcoin-address-types-compared/
- *
- * @param address - The Bitcoin address to evaluate.
- * @returns The conservative minimum number of satoshis that must be held by a UTXO of the given address type to avoid dust outputs.
- * @throws Throws an error if the address type is unsupported.
- */
-export function getMinimumUtxoSize(address: string): number {
-
-  // Mainnet addresses
-  if (address.startsWith('1')) return 546; // P2PKH
-  if (address.startsWith('3')) return 546; // P2SH??? (including Nested SegWit, conservatively treated)
-  if (address.startsWith('bc1q')) return 294; // P2WPKH
-  if (address.startsWith('bc1p')) return 330; // P2TR
-
-  // Testnet addresses
-  if (address.startsWith('m') || address.startsWith('n')) return 546; // P2PKH testnet
-  if (address.startsWith('2')) return 546; // P2SH??? (including Nested SegWit, conservatively treated) testnet
-  if (address.startsWith('tb1q')) return 294; // P2WPKH testnet
-  if (address.startsWith('tb1p')) return 330; // P2TR testnet
-
-  // Regtest addresses (same key/script prefixes as testnet, but
-  // bech32 HRP is `bcrt`)
-  if (address.startsWith('bcrt1q')) return 294; // P2WPKH regtest
-  if (address.startsWith('bcrt1p')) return 330; // P2TR regtest
-
-  throw new Error('Unsupported address type');
-}
-
-/**
- * Determines the Bitcoin address format based on its prefix.
- *
- * Due to the identical prefixes of P2SH addresses, this function cannot
- * distinguish between different types of P2SH formats (e.g., P2SH-P2WPKH, P2SH-P2WSH)
- * solely based on the address itself. It returns 'P2SH???' to indicate this uncertainty.
- * Additional context or user input is required to accurately identify
- * the specific P2SH format for transaction script creation.
- *
- * Supported address formats are:
- * - P2PKH: Legacy addresses starting with '1' (mainnet) or 'm'/'n' (testnet)
- * - P2SH???: P2SH addresses starting with '3' (mainnet) or '2' (testnet), where
- *            the specific P2SH format is unclear without further context
- * - P2WPKH: Native SegWit addresses starting with 'bc1q' (mainnet) or 'tb1q' (testnet).
- * - P2TR: Taproot addresses starting with 'bc1p' (mainnet) or 'tb1p' (testnet).
- *
- * Not supported:
- * - P2PK (Pay-to-Public-Key)
- *
- * Usage of this function should be accompanied by mechanisms to obtain
- * additional information on the intended script type for P2SH addresses!!
- *
- * @param address - The Bitcoin address to evaluate.
- * @returns The identified address format, or 'P2SH???' when the specific P2SH format cannot be determined.
- * @throws Throws an error if the address format is unsupported.
- */
-export function getAddressFormat(address: string): 'P2WPKH' | 'P2SH???' | 'P2TR' | 'P2PKH' {
-
-  // "Legacy" Pay-to-Public-Key-Hash
-  if (address.startsWith('1') || address.startsWith('m') || address.startsWith('n')) {
-    return 'P2PKH';
-  }
-
-  // Uncertain P2SH format, maybe Nested Segwit
-  if (address.startsWith('3') || address.startsWith('2')) {
-    return 'P2SH???';
-  }
-
-  // Native Seqwit, bcrt1q comes before tb1q because every bcrt1q
-  // also starts with `b`; with the ordering inverted, mainnet `bc1q`
-  // would match first and regtest addresses would be mis-categorized
-  // as mainnet. `bcrt1q` is the only regtest-segwit prefix.
-  if (address.startsWith('bcrt1q') || address.startsWith('bc1q') || address.startsWith('tb1q')) {
-    return 'P2WPKH';
-  }
-
-  // Taproot, same ordering reason as P2WPKH.
-  if (address.startsWith('bcrt1p') || address.startsWith('bc1p') || address.startsWith('tb1p')) {
-    return 'P2TR';
-  }
-
-  throw new Error('Unsupported address format.');
-}
-
-/**
- * Determines whether a given Bitcoin address is a Segregated Witness (SegWit) address.
- *
- * The determination of P2SH addresses as SegWit is based on the assumption that P2SH addresses
- * are being used for SegWit purposes, which may not always be the case.
- */
-export function isSegWit(address: string) {
-  const addressFormat = getAddressFormat(address);
-  return addressFormat !== 'P2PKH';
-}
-
-/**
- * Converts a full public key (including the y-coordinate parity byte) into an x-only public key.
- *
- * In the context of Schnorr signatures and Taproot transactions in Bitcoin, public keys are represented
- * as x-only coordinates. This is because Schnorr signatures utilize x-only public keys, which are 32 bytes long
- * and consist only of the x-coordinate of the elliptic curve point. This format contributes to privacy
- * and efficiency in Taproot transactions by not revealing unnecessary information about the public key
- * and reducing the size of transactions.
- *
- * The first byte of a compressed ECDSA public key (0x02 or 0x03) indicates the y-coordinate's parity
- * and is unnecessary for Schnorr signatures. Removing this byte aligns the public key format with the
- * Schnorr and Taproot standards.
- *
- * as seen here: https://github.com/paulmillr/scure-btc-signer/discussions/77
- *
- * @param pubkey - The full public key, including the y-coordinate parity byte at the beginning.
- * @returns The x-only public key, with the y-coordinate parity byte removed.
- */
-export function toXOnly(pubkey: Uint8Array) {
-  return pubkey.subarray(1, 33);
-}
-
-const getDummyKeypairResult: { [key: string]: DummyKeypairResult } = {};
-
-/**
- * Generates a dummy keypair for simulation or testing purposes.
- *
- * This function creates a deterministic dummy keypair based on a fixed private key.
- * It is intended for use in scenarios where a predictable output is necessary,
- * such as testing transaction signing or simulation processes. The generated public
- * key is derived from the hardcoded private key using the SECP256k1 elliptic curve.
- *
- * Note: This function should never be used with real transactions,
- * as the private key is publicly known and provides no security!!
- *
- * The generated 'dummyPublicKey' key does not work for taproot!
- * Use the 'schnorrDummyPublicKey' for taproot!
- *
- * The results are cached.
- */
-export function getDummyKeypair(network: typeof btc.NETWORK): DummyKeypairResult {
-
-  if (!getDummyKeypairResult[network.bech32]) {
-
-    const dummyPrivateKey: Uint8Array = hex.decode('0101010101010101010101010101010101010101010101010101010101010101');
-    const dummyPublicKey: Uint8Array = secp256k1.getPublicKey(dummyPrivateKey, true);
-
-    // see https://stackoverflow.com/a/72411600
-    const xOnlyDummyPublicKey: Uint8Array = schnorr.getPublicKey(dummyPrivateKey);
-
-    // Legacy address (P2PKH)
-    // 1C6Rc3w25VHud3dLDamutaqfKWqhrLRTaD for mainnet
-    // btc.getAddress + p2ret.address are typed `string | undefined`; the
-    // derivation from a fixed dummy key is deterministic and never returns
-    // undefined in practice.
-    const addressP2PKH = btc.getAddress('pkh', dummyPrivateKey, network)!;
-
-    // Nested Segwit (P2SH-P2WPKH)
-    // 35LM1A29K95ADiQ8rJ9uEfVZCKffZE4D9i for mainnet
-    const p2ret = btc.p2sh(btc.p2wpkh(dummyPublicKey, network), network);
-    const addressP2SH_P2WPKH = p2ret.address!;
-
-    // Native Seqwit (P2WPKH)
-    // bc1q0xcqpzrky6eff2g52qdye53xkk9jxkvrh6yhyw for mainnet
-    const addressP2WPKH = btc.getAddress('wpkh', dummyPrivateKey, network)!;
-
-    // TapRoot KeyPathSpend
-    // bc1p33wm0auhr9kkahzd6l0kqj85af4cswn276hsxg6zpz85xe2r0y8syx4e5t for mainnet
-    const addressP2TR = btc.getAddress('tr', dummyPrivateKey, network)!;
-
-
-    getDummyKeypairResult[network.bech32] = {
-      dummyPrivateKey,
-      dummyPublicKey,
-      xOnlyDummyPublicKey,
-      addressP2PKH,
-      addressP2SH_P2WPKH,
-      addressP2WPKH,
-      addressP2TR,
-    };
-  }
-
-  return getDummyKeypairResult[network.bech32];
-}
-
-/**
- * Generates a dummy legacy (P2PKH) transaction for simulation.
- * The transaction includes a number of outputs equal to the `vout` value of the provided `TxnOutput`,
- * with each output having the same value as in the provided `TxnOutput`.
- *
- * @param txnOutput A transaction output object to base the dummy transaction on.
- * @returns The dummy transaction.
- */
-export function getDummyLegacyTransaction(txnOutput: TxnOutput, network: typeof btc.NETWORK): btc.Transaction {
-
-    const { dummyPrivateKey, dummyPublicKey, addressP2PKH } = getDummyKeypair(network);
-    const tx = new btc.Transaction();
-
-    // P2WPKH requires no damn nonWitnessUtxo which gives us a signable transaction
-    const input: btc.TransactionInputUpdate = {
-      txid: '0000000000000000000000000000000000000000000000000000000000000000',
-      index: 0,
-      witnessUtxo: {
-        script: btc.p2wpkh(dummyPublicKey, network).script,
-        amount: BigInt(txnOutput.value * (txnOutput.vout+1))
-      }
-    };
-    tx.addInput(input);
-
-    // Add outputs based on txnOutput.vout, each output having the same value
-    for (let i = 0; i <= txnOutput.vout; i++) {
-      tx.addOutputAddress(addressP2PKH, BigInt(txnOutput.value), network);
-    }
-
-    // Sign the input with the dummy private key
-    tx.signIdx(dummyPrivateKey, 0);
-    tx.finalize();
-
-    return tx;
-}
-
-/**
- * Creates an input script for the Xverse wallet.
- *
- * Xverse v1 used P2SH-wrapped SegWit (Nested SegWit, `3…` /
- * `2…` testnet) as the only payment format. Xverse v2+ defaults
- * to native SegWit P2WPKH (`bc1q…` / `bcrt1q…`) and exposes
- * nested-SegWit as a secondary option. Dispatch on the actual
- * address format so both flavours work — Unisat already does
- * the same.
- */
-export function createInputScriptForXverse(paymentAddress: string, paymentPublicKey: Uint8Array, network: typeof btc.NETWORK): btc.P2Ret {
-  const addressFormat = getAddressFormat(paymentAddress);
-  switch (addressFormat) {
-    case 'P2WPKH':
-      return btc.p2wpkh(paymentPublicKey, network);
-    case 'P2SH???': {
-      const p2wpkhForP2sh = btc.p2wpkh(paymentPublicKey, network);
-      return btc.p2sh(p2wpkhForP2sh, network);
-    }
-    default:
-      throw new Error(`Xverse: unsupported payment address format ${addressFormat} for ${paymentAddress}`);
-  }
-}
-
-/**
- * Creates an input script for the Leather wallet
- * The payment address for Leather is always a P2WPKH / Native SegWit (bc1q...)
- *
- * see https://leather.gitbook.io/developers/bitcoin/sign-transactions/partially-signed-bitcoin-transactions-psbts
- */
-export function createInputScriptForLeather(paymentPublicKey: Uint8Array, network: typeof btc.NETWORK): btc.P2Ret {
-  return btc.p2wpkh(paymentPublicKey, network);
-}
-
-/**
- * Creates an input script for the Unisat wallet, detecting and handling various address types.
- *
- * The assumption is that we _ONLY_ have these address formats:
- * - Legacy (P2PKH)
- * - Nested Segwit (P2SH-P2WPKH) --> identified as P2SH???
- * - Native Seqwit (P2WPKH)
- * - Taproot (P2TR)
- *
- * see https://docs.unisat.io/unisat-wallet/address-type
- * > UniSat Wallet supports 4 Bitcoin address formats and allows switching between them in the settings.
- *
- * @param paymentAddress - The payment address of the Unisat wallet.
- * @param paymentPublicKey - The public key associated with the payment address.
- * @param network - The Bitcoin network (mainnet or testnet).
- * @returns An object containing the necessary script and redeemScript for the transaction input.
- */
-export function createInputScriptForUnisat(paymentAddress: string, paymentPublicKey: Uint8Array, network: typeof btc.NETWORK): btc.P2Ret {
-  const addressFormat = getAddressFormat(paymentAddress);
-
-  switch (addressFormat) {
-    // "Legacy" Pay-to-Public-Key-Hash
-    case 'P2PKH': {
-      // Legacy addresses do not use witness data
-      return btc.p2pkh(paymentPublicKey, network);
-    }
-    // P2SH could be anything, but for Unisat we know that it is Nested Segwit
-    case 'P2SH???': {
-      const p2wpkhForP2sh = btc.p2wpkh(paymentPublicKey, network);
-      return btc.p2sh(p2wpkhForP2sh, network);
-    }
-    // Native Seqwit
-    case 'P2WPKH': {
-      return btc.p2wpkh(paymentPublicKey, network);
-    }
-    // Taproot
-    case 'P2TR': {
-      // Key-spend -- which is the simpler setup!
-      // for script-spend see here: https://github.com/paulmillr/scure-btc-signer/issues/51
-      // scriptData = btc.p2tr(undefined, btc.p2tr_pk(paymentPublicKey), network, true); // script-spend
-      return btc.p2tr(paymentPublicKey, undefined, network, true);
-    }
-    default:
-      throw new Error('Unexpected address format encountered.');
-  }
-}
-
-
-/**
- * Creates the funding input for the supported wallets
- */
-export function createInput(walletType: KnownOrdinalWalletType,
-  paymentOutput: TxnOutput,
-  paymentPublicKey: Uint8Array,
-  paymentAddress: string,
-  isSimulation: boolean,
-  network: typeof btc.NETWORK): btc.TransactionInputUpdate {
-
-  let scriptData: btc.P2Ret | btc.P2TROut;
-  let paymentPublicKeyToUse = paymentPublicKey;
-
-  // in a simulation we use our well-known dummy key instead, so that we can do the fake signing
-  if (isSimulation) {
-    paymentPublicKeyToUse = getDummyKeypair(network).dummyPublicKey;
-  }
-
-  switch (walletType) {
-    case KnownOrdinalWalletType.leather:
-    case KnownOrdinalWalletType.cat21wallet: {
-      // CAT-21 wallet is forked from Leather and inherits its BIP-84
-      // P2WPKH payment-address derivation. Same script shape.
-      scriptData = createInputScriptForLeather(paymentPublicKeyToUse, network);
-      break;
-    }
-    case KnownOrdinalWalletType.xverse: {
-      scriptData = createInputScriptForXverse(paymentAddress, paymentPublicKeyToUse, network);
-      break;
-    }
-    case KnownOrdinalWalletType.unisat: {
-
-      // special case for taproot --> x-only public key
-      if (getAddressFormat(paymentAddress) === 'P2TR') {
-
-        if (isSimulation) {
-          paymentPublicKeyToUse = getDummyKeypair(network).xOnlyDummyPublicKey;
-        } else {
-          paymentPublicKeyToUse = toXOnly(paymentPublicKey);
-        }
-      }
-
-      scriptData = createInputScriptForUnisat(paymentAddress, paymentPublicKeyToUse, network);
-      break;
-    }
-    default:
-      // this case should never happen, but otherwise the code is not type-safe
-      throw new Error('Unknown wallet');
-  }
-
-  const { script, redeemScript } = scriptData;
-
-  // Per-wallet sequence rule — single source of truth is
-  // resolveCat21InputSequence in ./cat21-mint-sequence.ts. See the
-  // SDK CLAUDE.md "CAT-21 mints — RBF policy (per-wallet)" rule and
-  // the JSDoc on that function for the full rationale (Xverse 2024
-  // incident, RBF-on for cat21wallet because our accelerate preserves
-  // the marker, RBF-off for everyone else). The choice is anchored
-  // at PSBT-build time, not at signer time, because sequence is part
-  // of the bytes the wallet signs over.
-  const sequence = resolveCat21InputSequence(walletType);
-
-  let input: btc.TransactionInputUpdate = {
-    txid: paymentOutput.txid,
-    index: paymentOutput.vout,
-    redeemScript,
-    sequence,
-    sighashType: btc.SigHash.ALL
-  };
-
-  if (isSegWit(paymentAddress)) {
-    input.witnessUtxo = {
-      script,
-      amount: BigInt(paymentOutput.value),
-    };
-
-    // taproot uses P2TROut, which has some extra properties that we all just merge into the intput
-    // Required tx input fields to make it spendable: `tapInternalKey`, `tapMerkleRoot`, `tapLeafScript`
-    if (getAddressFormat(paymentAddress) === 'P2TR') {
-      input = { ...input, ...scriptData };
-    }
-  } else {
-    // For non-SegWit (legacy P2PKH), we have to use nonWitnessUtxo instead --> with the full transaction provided
-    // see https://github.com/paulmillr/scure-btc-signer/blob/2d5388ac6c4b94364d65330cdc84a653a6a5281f/README.md?plain=1#L831
-    if (paymentOutput.transactionHex) {
-
-      if (isSimulation) {
-        const dummyTx = getDummyLegacyTransaction(paymentOutput, network);
-        input.txid = dummyTx.id;
-        input.nonWitnessUtxo = hex.decode(dummyTx.hex);
-      } else {
-        input.nonWitnessUtxo = hex.decode(paymentOutput.transactionHex);
-      }
-
-    } else {
-      throw new Error('Missing transaction hex for legacy UTXO input');
-    }
-  }
-
-  return input;
-}
-
-
-/**
- * Constructs a CAT-21 mint transaction.
- *
- * This function creates a transaction with the necessary inputs and outputs based on the provided parameters.
- * If the calculated change amount is below the Bitcoin network's dust limit, the change is not returned to the sender
- * but instead added to the transaction fee. If the change amount is above the dust limit, two outputs are created:
- * one for the recipient and one for the change.
- *
- * **CONVERGENCE TODO (Round-2 audit Finding 7).** This function and
- * `buildCat21MintPsbt` in `cat21-mint.helper.ts` both build the same
- * kind of CAT-21 mint PSBT — both pin `lockTime=21`, both go through
- * `resolveCat21InputSequence`, both emit the same output structure.
- * They differ in the input-construction layer:
- *   - `createTransaction(walletType, paymentOutput, paymentPublicKey,
- *     paymentAddress, …)` — does the full per-wallet script
- *     construction (Xverse + Unisat-Taproot + Unisat-SegWit + Leather
- *     + Legacy P2PKH branches via `createInput()`); drives cat21.space.
- *   - `buildCat21MintPsbt({ walletType, fundingInput: {scriptPubKey,
- *     tapInternalKey?, …} })` — caller pre-prepares the input; drives
- *     cat21-wallet.
- *
- * The right structural fix is: `createTransaction` becomes a thin
- * adapter that constructs the right `Cat21MintFundingInput` per wallet
- * via `createInput()`, then delegates to `buildCat21MintPsbt`. ONE
- * PSBT builder, MULTIPLE input-shape adapters. As-is, the two paths
- * are kept structurally aligned by the cross-builder regression test
- * in `cat21-mint-sequence.spec.ts` ("mint, transfer, AND
- * createTransaction agree on sequence for X" iterator), but a
- * future drift in fee math, dust threshold, or output layout would
- * NOT be caught — only the sequence is asserted equal.
- *
- * Until convergence lands, any change to the mint PSBT shape MUST
- * be applied to BOTH builders and re-verified against the existing
- * snapshot tests in `cat21.service.helper.spec.ts` AND the
- * positive-equality tests in `cat21-mint.helper.spec.ts`.
+ * If the calculated change amount is below the per-address-type dust
+ * limit, change is absorbed into the miner fee. If above the limit,
+ * two outputs are created: recipient + change.
  *
  * @param walletType - The type of wallet used for the transaction.
  * @param recipientAddress - The address of the recipient.
@@ -479,14 +47,13 @@ export function createInput(walletType: KnownOrdinalWalletType,
  * @param paymentPublicKey - The public key of the sender, in hexadecimal.
  * @param paymentAddress - The sender's address, to which change will be returned.
  * @param transactionFee - The miner fee in satoshis.
- * @param isSimulation - Flag indicating whether the transaction should be prepared for a simulation
+ * @param isSimulation - Flag indicating whether the transaction should be prepared for a simulation.
  * @param network - The Bitcoin network the transaction is for (mainnet / testnet3 / testnet4 / signet / regtest).
  * @returns The constructed transaction.
  */
 export function createTransaction(
   walletType: KnownOrdinalWalletType,
   recipientAddress: string,
-
   paymentOutput: TxnOutput,
   paymentPublicKey: Uint8Array,
   paymentAddress: string,
@@ -494,11 +61,6 @@ export function createTransaction(
   isSimulation: boolean,
   network: Network,
 ): CreateTransactionResult {
-
-  // Layer 4 (orchestration): adapt the cat21.space-shaped arguments to
-  // the Layer-2 input adapter + Layer-1 PSBT builder. One PSBT-assembly
-  // path now serves both cat21.space and the cat21-wallet's autonomous
-  // flow; the convergence the Round-2 audit Finding 7 flagged.
 
   const fundingInput = prepareMintInputForWallet(
     walletType,
@@ -542,4 +104,3 @@ export function createTransaction(
     finalTransactionFee: BigInt(built.finalFeeSats),
   };
 }
-

@@ -7,12 +7,16 @@ import {
   createInputScriptForLeather,
   createInputScriptForUnisat,
   createInputScriptForXverse,
+} from '../cat21-script/per-wallet-scripts';
+import {
   getAddressFormat,
-  getDummyKeypair,
-  getDummyLegacyTransaction,
   isSegWit,
   toXOnly,
-} from './cat21.service.helper';
+} from '../cat21-script/address-format';
+import {
+  getDummyKeypair,
+  getDummyLegacyTransaction,
+} from '../cat21-fee/dummy-keypair';
 import { TxnOutput } from './cat21.service.types';
 import { Cat21MintFundingInput } from './cat21-mint.helper';
 

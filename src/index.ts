@@ -2,6 +2,7 @@
 
 // --- shared abstractions ---
 export * from './cat21-protocol';
+export * from './cat21-script';
 export * from './storage-like';
 export * from './network';
 export * from './network-token';
@@ -24,6 +25,7 @@ export * from './cat21-mint/utxo-content-scanner.service';
 // --- cat21 fee simulation + coin selection (Layer 3, shared) ---
 export * from './cat21-fee/fee-simulation.helper';
 export * from './cat21-fee/coin-selection.helper';
+export * from './cat21-fee/dummy-keypair';
 
 // --- cat21 offer (ord-style buyer-initiated PSBT builder + seller-side validator) ---
 export * from './cat21-offer/cat21-offer.helper';
