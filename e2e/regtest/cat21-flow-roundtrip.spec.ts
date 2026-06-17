@@ -90,8 +90,12 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
   let bAddress: string;
   let bScript: Uint8Array;
 
-  // ord's bitcoind wallet — funds the ord-side reference offer for
-  // the step-3b byte-compare.
+  // The buyer-side ord wallet. In the protocol there are exactly two
+  // roles, buyer and seller; this is the BUYER's wallet that calls
+  // `ord wallet offer create` to produce a reference offer PSBT for
+  // byte-compare against the SDK's `buildCat21BuyOfferPsbt`. NOT a
+  // "third party" — it stands in for A's keys in the A-buys-from-B
+  // direction of the multi-step flow.
   let ordWalletAddress: string;
 
   // Stuff carried between steps.
@@ -129,10 +133,16 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     bAddress = bP2.address!;
     bScript  = bP2.script;
 
-    // ord-side wallet for the byte-compare in step 3b. Created in
-    // cat-aware mode (`ordCreateWallet` invokes `--index-cat21` via
+    // Buyer-side ord wallet for the byte-compare in step 3b. Created
+    // in cat-aware mode (`ordCreateWallet` invokes `--index-cat21` via
     // ordCli) so the wallet client decats the cat server's responses
     // before serde parses them — see cat21-ord 2de45815.
+    //
+    // Topology note: a faithful regtest of "A buys from B" runs two
+    // independent ord+wallet stacks sharing one bitcoind (A holds A's
+    // key, B holds B's). Here we collapse to one ord container for
+    // test-rig simplicity; the BYTE-COMPARE doesn't care which party
+    // built the reference PSBT as long as the inputs/outputs line up.
     ordWalletAddress = ordCreateWallet('ord');
 
     // Pin every send to a specific mature coinbase so coin selection

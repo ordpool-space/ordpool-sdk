@@ -8,8 +8,11 @@ import {
   TxnOutput
 } from './cat21.service.types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { CAT21_POSTAGE_SATS } from '../cat21-postage';
 import { resolveCat21InputSequence } from './cat21-mint-sequence';
 import { Network, toScureNetwork } from '../network';
+import { buildCat21MintPsbt } from './cat21-mint.helper';
+import { prepareMintInputForWallet } from './cat21-mint-input-adapter';
 
 /**
  * Determines the minimum UTXO size based on the Bitcoin address type.
@@ -492,58 +495,51 @@ export function createTransaction(
   network: Network,
 ): CreateTransactionResult {
 
-  const scureNetwork = toScureNetwork(network);
+  // Layer 4 (orchestration): adapt the cat21.space-shaped arguments to
+  // the Layer-2 input adapter + Layer-1 PSBT builder. One PSBT-assembly
+  // path now serves both cat21.space and the cat21-wallet's autonomous
+  // flow; the convergence the Round-2 audit Finding 7 flagged.
 
-  const lockTime = 21;
-  const tx = new btc.Transaction({
-    lockTime,
-    allowLegacyWitnessUtxo: true, // for Unisat Legacy address
-    disableScriptCheck: true
-  });
+  const fundingInput = prepareMintInputForWallet(
+    walletType,
+    paymentOutput,
+    paymentPublicKey,
+    paymentAddress,
+    isSimulation,
+    network,
+  );
 
-  const input = createInput(walletType, paymentOutput, paymentPublicKey, paymentAddress, isSimulation, scureNetwork);
-  tx.addInput(input);
-
-  // 546 is the best amount, it makes later transfers between different
-  // address formats easier (no padding will be required)
-  const amountToRecipient = BigInt(546);
-
-  // Calculate change
-  const singleInputAmount = BigInt(paymentOutput.value);
-  let changeAmount = singleInputAmount - amountToRecipient - transactionFee;
-
-  const dustLimit = BigInt(getMinimumUtxoSize(paymentAddress));
-
-  // this UTXO is definitely too small
-  if (changeAmount < 0) {
-    throw new Error('Insufficient funds for transaction');
-  }
-
-  // Check if changeAmount is above the dust limit
-  if (changeAmount >= dustLimit) {
-    // Add recipient and change outputs
-    tx.addOutputAddress(recipientAddress, amountToRecipient, scureNetwork);
-    tx.addOutputAddress(paymentAddress, changeAmount, scureNetwork);
-
-  } else {
-    // Absorb change into the transactionFee if below dust limit and only add recipient output
-    transactionFee = transactionFee + changeAmount;
-    changeAmount = BigInt(0);
-    tx.addOutputAddress(recipientAddress, singleInputAmount - transactionFee, scureNetwork);
-  }
-
-  // all remaining sats that the miner will get
-  const minerAmount = singleInputAmount - changeAmount - amountToRecipient;
-  if (transactionFee !== minerAmount) {
-    throw new Error('My logic is broken?!'); // we should never see this error!
+  let built;
+  try {
+    built = buildCat21MintPsbt({
+      walletType,
+      network,
+      fundingInput,
+      destinations: {
+        recipientAddress,
+        senderChangeAddress: paymentAddress,
+      },
+      feeSats: Number(transactionFee),
+      // cat21.space's per-address-type dust floor (P2TR 330, P2WPKH 294,
+      // P2SH 540). Default 546 if not supplied.
+      changeDustLimitSats: getMinimumUtxoSize(paymentAddress),
+    });
+  } catch (err) {
+    // The builder throws `Mint funding insufficient: …`; the cat21.space
+    // call sites checked the legacy `Insufficient funds for transaction`
+    // string. Translate so the UI keeps working.
+    if (err instanceof Error && /Mint funding insufficient/.test(err.message)) {
+      throw new Error('Insufficient funds for transaction');
+    }
+    throw err;
   }
 
   return {
-    tx,
-    amountToRecipient, // always 546
-    singleInputAmount,
-    changeAmount,
-    finalTransactionFee: transactionFee
+    tx: built.tx,
+    amountToRecipient: BigInt(CAT21_POSTAGE_SATS), // always 546
+    singleInputAmount: BigInt(paymentOutput.value),
+    changeAmount: BigInt(built.changeSats),
+    finalTransactionFee: BigInt(built.finalFeeSats),
   };
 }
 

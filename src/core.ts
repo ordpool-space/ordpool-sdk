@@ -36,7 +36,12 @@ export * from './wallet/wallet.service.types';
 export * from './cat21-mint/cat21.service.helper';
 export * from './cat21-mint/cat21.service.types';
 export * from './cat21-mint/cat21-mint.helper';
+export * from './cat21-mint/cat21-mint-input-adapter';
 export * from './cat21-mint/cat21-mint-sequence';
+
+// --- CAT-21 fee simulation + coin selection (shared across flows) ---
+export * from './cat21-fee/fee-simulation.helper';
+export * from './cat21-fee/coin-selection.helper';
 
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';

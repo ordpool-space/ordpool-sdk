@@ -16,6 +16,7 @@ import {
   throwError,
 } from 'rxjs';
 
+import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletInfo } from '../wallet/wallet.service.types';
 import { Cat21Service } from './cat21.service';
@@ -212,15 +213,24 @@ export class Cat21MintOrchestrator {
 
     let transactionFee: bigint;
     try {
-      const vsize = this.cat21.simulateTransaction(
-        wallet.type,
-        wallet.ordinalsAddress,
-        selected,
-        wallet.paymentAddress,
-        hex.decode(wallet.paymentPublicKey),
-        0n,
-      ).vsize;
-      transactionFee = BigInt(Math.ceil(vsize * feeRate));
+      // Layer-3 two-pass fee simulation. Pass-1 with placeholder fee
+      // measures vsize; pass-2 with the provisional fee measures the
+      // FINAL vsize (which may differ if the change crossed dust
+      // between passes). The miner gets exactly `vsize × feeRate`,
+      // never a stale over-pay from a single-pass estimate.
+      const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
+      const { finalFeeSats } = twoPassFeeSimulation({
+        simulate: (feeSats) => this.cat21.simulateTransaction(
+          wallet.type,
+          wallet.ordinalsAddress,
+          selected,
+          wallet.paymentAddress,
+          paymentPublicKey,
+          BigInt(feeSats),
+        ),
+        feeRatePerVbyte: feeRate,
+      });
+      transactionFee = BigInt(finalFeeSats);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.errorMessage.set(msg);
@@ -281,23 +291,20 @@ export class Cat21MintOrchestrator {
     const out: UtxoSimulation[] = [];
     for (const utxo of utxos) {
       try {
-        const vsize = this.cat21.simulateTransaction(
-          wallet.type,
-          wallet.ordinalsAddress,
-          utxo,
-          wallet.paymentAddress,
-          paymentPublicKey,
-          0n,
-        ).vsize;
-        const fee = BigInt(Math.ceil(vsize * feeRate));
-        const simulation = this.cat21.simulateTransaction(
-          wallet.type,
-          wallet.ordinalsAddress,
-          utxo,
-          wallet.paymentAddress,
-          paymentPublicKey,
-          fee,
-        );
+        // Layer-3 two-pass: pass-1 measures vsize with placeholder fee,
+        // pass-2 re-measures after change-vs-dust resolves. `finalSimulation`
+        // is the pass-2 result — exactly the simulation we'd display.
+        const { finalSimulation: simulation } = twoPassFeeSimulation({
+          simulate: (feeSats) => this.cat21.simulateTransaction(
+            wallet.type,
+            wallet.ordinalsAddress,
+            utxo,
+            wallet.paymentAddress,
+            paymentPublicKey,
+            BigInt(feeSats),
+          ),
+          feeRatePerVbyte: feeRate,
+        });
         out.push({ utxo, simulation, insufficient: false });
       } catch {
         // simulateTransaction throws on "Insufficient funds for

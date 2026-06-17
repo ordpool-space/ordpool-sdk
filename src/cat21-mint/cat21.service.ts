@@ -180,6 +180,24 @@ export class Cat21Service {
   }
 
   /**
+   * Parse a PSBT, dummy-sign input 0 with the well-known dummy key,
+   * finalise, and return the scure Transaction. Used by the Layer-3
+   * `twoPassFeeSimulation` helper as its `signSimulation` callback.
+   *
+   * The dummy key is the SDK's well-known fixed key (`getDummyKeypair`);
+   * the signature is structurally valid (correct DER length, correct
+   * sighash byte) so `tx.vsize` matches what a real-signed tx would
+   * have. Only used in simulation paths; never broadcast.
+   */
+  dummySignAndFinalize(psbtBytes: Uint8Array): btc.Transaction {
+    const tx = btc.Transaction.fromPSBT(psbtBytes);
+    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(this.network));
+    tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.ALL]);
+    tx.finalize();
+    return tx;
+  }
+
+  /**
    * Constructs a PSBT with a CAT-21 mint transaction,
    * prompts the user to sign it and broadcasts the transaction.
    *
