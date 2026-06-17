@@ -47,8 +47,11 @@ jobs:
         run: npm run build
 
       - name: Start bitcoind + electrs + cat21-ord (regtest)
+        # --wait would block on electrs's wget healthcheck which the
+        # mempool/electrs image lacks; regtest-bootstrap.sh polls the
+        # actual readiness check itself.
         working-directory: ordpool-sdk
-        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d --wait
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d
 
       - name: Bootstrap regtest funds (101 blocks, dump WIF)
         id: bootstrap
