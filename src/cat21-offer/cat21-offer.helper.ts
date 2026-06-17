@@ -1,6 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
-import { CAT21_POSTAGE_SATS } from '../cat21-postage';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import {
   CAT21_OFFER_POSTAGE_SATS,

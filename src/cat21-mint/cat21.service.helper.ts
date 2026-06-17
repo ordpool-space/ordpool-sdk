@@ -8,8 +8,8 @@ import {
   TxnOutput
 } from './cat21.service.types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { CAT21_POSTAGE_SATS } from '../cat21-postage';
-import { resolveCat21InputSequence } from './cat21-mint-sequence';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
+import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
 import { Network, toScureNetwork } from '../network';
 import { buildCat21MintPsbt } from './cat21-mint.helper';
 import { prepareMintInputForWallet } from './cat21-mint-input-adapter';

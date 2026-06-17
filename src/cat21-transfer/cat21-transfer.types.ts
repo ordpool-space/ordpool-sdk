@@ -1,4 +1,4 @@
-import { CAT21_POSTAGE_SATS } from '../cat21-postage';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}, kept for legacy import paths. The

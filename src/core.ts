@@ -22,8 +22,8 @@
  * sdk/core'`, never through bare `'ordpool-sdk'`.
  */
 
-// --- Protocol-wide constants (cat-UTXO postage; one source of truth) ---
-export * from './cat21-postage';
+// --- Protocol-wide constants (postage, lockTime, per-wallet sequence) ---
+export * from './cat21-protocol';
 
 // --- Network primitives ---
 export * from './network';
@@ -37,7 +37,6 @@ export * from './cat21-mint/cat21.service.helper';
 export * from './cat21-mint/cat21.service.types';
 export * from './cat21-mint/cat21-mint.helper';
 export * from './cat21-mint/cat21-mint-input-adapter';
-export * from './cat21-mint/cat21-mint-sequence';
 
 // --- CAT-21 fee simulation + coin selection (shared across flows) ---
 export * from './cat21-fee/fee-simulation.helper';

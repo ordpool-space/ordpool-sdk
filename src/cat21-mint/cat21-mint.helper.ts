@@ -1,9 +1,9 @@
 import * as btc from '@scure/btc-signer';
 
-import { CAT21_POSTAGE_SATS } from '../cat21-postage';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { resolveCat21InputSequence } from './cat21-mint-sequence';
+import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}. The canonical constant lives in

@@ -1,7 +1,7 @@
 // ordpool-sdk public API surface.
 
 // --- shared abstractions ---
-export * from './cat21-postage';
+export * from './cat21-protocol';
 export * from './storage-like';
 export * from './network';
 export * from './network-token';

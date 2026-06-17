@@ -10,10 +10,10 @@ import {
   CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE,
   CAT21_WALLET_INPUT_SEQUENCE,
   resolveCat21InputSequence,
-} from './cat21-mint-sequence';
-import { buildCat21MintPsbt } from './cat21-mint.helper';
-import { createTransaction, getDummyKeypair } from './cat21.service.helper';
-import { TxnOutput } from './cat21.service.types';
+} from './cat21-sequence';
+import { buildCat21MintPsbt } from '../cat21-mint/cat21-mint.helper';
+import { createTransaction, getDummyKeypair } from '../cat21-mint/cat21.service.helper';
+import { TxnOutput } from '../cat21-mint/cat21.service.types';
 
 const publicKey = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
 const p2wpkhMainnet = btc.p2wpkh(publicKey, btc.NETWORK);
