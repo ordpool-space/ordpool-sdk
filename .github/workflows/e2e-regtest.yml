@@ -19,21 +19,40 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          path: ordpool-sdk
+
+      # cat21-mint-roundtrip + cat21-flow-roundtrip specs need the cat21-ord
+      # service in the regtest stack (it's the reference PSBT producer and
+      # the authoritative view of cat ownership). docker-compose.regtest.yml
+      # builds it from ../../cat21-ord/; we co-locate the two repos here to
+      # match the workspace convention.
+      - name: Checkout cat21-ord (sibling)
+        uses: actions/checkout@v5
+        with:
+          repository: ordpool-space/cat21-ord
+          ref: index-cat21
+          path: cat21-ord
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
 
       - name: Install deps
+        working-directory: ordpool-sdk
         run: npm ci
 
       - name: Build SDK (so the helpers compile cleanly before the test imports them)
+        working-directory: ordpool-sdk
         run: npm run build
 
-      - name: Start bitcoind + electrs (regtest)
-        run: docker compose -f e2e/docker-compose.regtest.yml up -d
+      - name: Start bitcoind + electrs + cat21-ord (regtest)
+        working-directory: ordpool-sdk
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d --wait
 
       - name: Bootstrap regtest funds (101 blocks, dump WIF)
         id: bootstrap
+        working-directory: ordpool-sdk
         run: |
           chmod +x e2e/regtest-bootstrap.sh
           BOOT=$(./e2e/regtest-bootstrap.sh)
@@ -42,6 +61,7 @@ jobs:
           echo "REGTEST_FUNDED_WIF=$(echo "$BOOT" | jq -r .wif)"     >> "$GITHUB_ENV"
 
       - name: Run E2E specs
+        working-directory: ordpool-sdk
         run: npm run test:e2e:regtest
 
       - name: Container logs on failure
@@ -51,7 +71,10 @@ jobs:
           docker logs ordpool-e2e-bitcoind || true
           echo "=== electrs ==="
           docker logs ordpool-e2e-electrs || true
+          echo "=== cat21-ord ==="
+          docker logs ordpool-e2e-cat21-ord || true
 
       - name: Tear down
         if: always()
-        run: docker compose -f e2e/docker-compose.regtest.yml down -v
+        working-directory: ordpool-sdk
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord down -v
