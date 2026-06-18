@@ -127,15 +127,16 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
     }
     paymentPublicKey = hex.decode(addrInfo.pubkey);
 
-    // Pick a recipient — any Taproot address works; we use a
-    // fresh key. The recipient just needs to be valid on regtest
-    // so we can verify the cat lands there.
-    const recipientPub = JSON.parse(bitcoinCliPsbtWallet('getaddressinfo',
-      bitcoinCliPsbtWallet('getnewaddress', '', 'bech32m'))).pubkey;
-    const xOnly = hex.decode(recipientPub).subarray(1, 33);
-    const p2tr = btc.p2tr(xOnly, undefined, regtestNetwork, true);
-    recipientTaprootAddress = p2tr.address!;
-    expectedRecipientScript = p2tr.script;
+    // Pick a recipient Taproot address. We derive it from the SAME
+    // payment pubkey (self-recipient) because the descriptor wallet
+    // only exposes ECDSA-shaped pubkeys via getaddressinfo —
+    // bech32m / P2TR derivation lives inside the descriptor, not
+    // the `pubkey` JSON field. Self-recipient is fine: the spec
+    // verifies the cat lands at output 0 at 546 sats, not who the
+    // recipient is.
+    const recipientP2tr = btc.p2tr(paymentPublicKey.subarray(1, 33), undefined, regtestNetwork, true);
+    recipientTaprootAddress = recipientP2tr.address!;
+    expectedRecipientScript = recipientP2tr.script;
 
     // Fund the external wallet's payment address.
     rpc(
