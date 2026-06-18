@@ -30,7 +30,11 @@ export const xverseSigner: WalletSigner = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
 
-    const networkType = toBitcoinNetworkType(input.network);
+    // Cast at the sats-connect boundary — see xverse.connector.ts
+    // for the full rationale (network.ts deliberately doesn't import
+    // BitcoinNetworkType from sats-connect to keep axios out of the
+    // /core bundle; the runtime strings agree exactly).
+    const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
     const psbtBase64 = base64.encode(input.psbtBytes);
 
     const signedPsbt$ = new Observable<string>((observer) => {

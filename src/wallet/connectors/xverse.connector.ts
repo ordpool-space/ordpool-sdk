@@ -43,7 +43,13 @@ export const xverseConnector: WalletConnector = {
           purposes: [AddressPurpose.Ordinals, AddressPurpose.Payment],
           message: 'Please share your address for receiving Ordinals and payments.',
           network: {
-            type: toBitcoinNetworkType(network),
+            // sats-connect's BitcoinNetworkType is structurally identical
+            // to ours (the same wire-protocol strings), but TS 5.7+ treats
+            // them as distinct types because they're declared in different
+            // modules. Our `network.ts` deliberately doesn't import from
+            // sats-connect (it would drag axios into the /core bundle); the
+            // runtime strings agree exactly. Cast at the boundary.
+            type: toBitcoinNetworkType(network) as unknown as Parameters<typeof getAddress>[0]['payload']['network']['type'],
           },
         },
         onFinish: (response) => {

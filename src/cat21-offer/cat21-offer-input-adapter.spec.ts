@@ -65,14 +65,19 @@ describe('prepareBuyOfferBuyerInput', () => {
     expect(input.nonWitnessUtxo).toBeUndefined();
   });
 
-  it('rejects unknown wallet type', () => {
-    expect(() => prepareBuyOfferBuyerInput({
-      walletType: 'NOPE' as unknown as KnownOrdinalWalletType,
+  it('accepts an unknown walletType and dispatches purely on address format (no wallet-name switch left)', () => {
+    // The address-format-driven migration means walletType is
+    // orchestration-only; the adapter ignores it for script
+    // construction. Any string produces a valid input as long as
+    // the payment address resolves to a known format.
+    const input = prepareBuyOfferBuyerInput({
+      walletType: 'NOT-A-REAL-WALLET' as unknown as KnownOrdinalWalletType,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: segwitAddr,
       isSimulation: false,
       network: NETWORK,
-    })).toThrow(/Unknown wallet/);
+    });
+    expect(input.scriptPubKey.length).toBe(22);
   });
 });

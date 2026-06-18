@@ -1,22 +1,10 @@
-import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import {
-  createInputScriptForLeather,
-  createInputScriptForUnisat,
-  createInputScriptForXverse,
-} from '../cat21-script/per-wallet-scripts';
-import {
-  getAddressFormat,
-  isSegWit,
-  toXOnly,
-} from '../cat21-script/address-format';
-import {
-  getDummyKeypair,
-  getDummyLegacyTransaction,
-} from '../cat21-fee/dummy-keypair';
+import { buildInputScript } from '../cat21-script/build-input-script';
+import { isSegWit } from '../cat21-script/address-format';
+import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
 import { TxnOutput } from './cat21.service.types';
 import { Cat21MintFundingInput } from './cat21-mint.helper';
 
@@ -25,27 +13,23 @@ import { Cat21MintFundingInput } from './cat21-mint.helper';
  *
  * Takes a raw funding UTXO (`TxnOutput`) plus the wallet's payment
  * details and produces the full `Cat21MintFundingInput` shape that
- * `buildCat21MintPsbt` consumes. Handles every wallet variant the SDK
- * speaks today:
+ * `buildCat21MintPsbt` consumes.
  *
- *   | Wallet              | Address shape   | Adapter output         |
- *   |---------------------|-----------------|------------------------|
- *   | Leather             | P2WPKH          | scriptPubKey only      |
- *   | CAT-21 wallet       | P2WPKH (BIP-84) | scriptPubKey only      |
- *   | Xverse              | P2SH-P2WPKH     | scriptPubKey + redeemScript |
- *   | Unisat — SegWit     | P2WPKH          | scriptPubKey only      |
- *   | Unisat — Taproot    | P2TR key-path   | scriptPubKey + tapInternalKey |
- *   | Unisat — Legacy     | P2PKH           | scriptPubKey + nonWitnessUtxo |
+ * Dispatch is now PURELY address-format-driven via `buildInputScript`
+ * — the `walletType` argument is retained ONLY for orchestration
+ * concerns the SDK still needs (sequence-number rule, signing-flow
+ * routing in the higher layers). The script-construction decision
+ * does NOT look at it.
  *
- * `isSimulation = true` swaps the real pubkey for the SDK's well-known
- * dummy key — used by the fee-simulation pass to compute vsize without
- * exposing the user's key material.
+ * Net effect: every wallet in `KnownOrdinalWalletType` — including
+ * the six (oyl, wizz, okx, phantom, alby, binance) that previously
+ * hit `default → throw 'Unknown wallet'` — now produces a correct
+ * script. The byte-shape gate is the 12 per-wallet snapshots in
+ * `cat21.service.helper.spec.ts.snap`: if they stay green after the
+ * migration, the address-format-driven path is byte-identical to the
+ * old per-wallet switch for Leather / Xverse / Unisat.
  *
- * Pure function. No I/O, no side effects, no Angular. The wallet-side
- * (cat21-wallet React + Webpack background) AND the cat21.space Angular
- * orchestrator both call this adapter and feed the result into the same
- * `buildCat21MintPsbt`. ONE PSBT builder, ONE input shape, MULTIPLE
- * adapters per consumer flavor.
+ * Pure function. No I/O, no Angular.
  */
 export function prepareMintInputForWallet(
   walletType: KnownOrdinalWalletType,
@@ -55,45 +39,20 @@ export function prepareMintInputForWallet(
   isSimulation: boolean,
   network: Network,
 ): Cat21MintFundingInput {
+  // walletType is unused for script construction — kept in the
+  // signature because higher layers (sequence rule, orchestrators)
+  // still need it. The `void` reference silences unused-parameter
+  // warnings without lying about the signature.
+  void walletType;
+
   const scureNetwork = toScureNetwork(network);
 
-  let paymentPublicKeyToUse = paymentPublicKey;
-  if (isSimulation) {
-    paymentPublicKeyToUse = getDummyKeypair(scureNetwork).dummyPublicKey;
-  }
-
-  let scriptData: btc.P2Ret | btc.P2TROut;
-  let tapInternalKey: Uint8Array | undefined;
-
-  switch (walletType) {
-    case KnownOrdinalWalletType.leather:
-    case KnownOrdinalWalletType.cat21wallet: {
-      // CAT-21 wallet is forked from Leather and inherits its BIP-84
-      // P2WPKH payment-address derivation. Same script shape.
-      scriptData = createInputScriptForLeather(paymentPublicKeyToUse, scureNetwork);
-      break;
-    }
-    case KnownOrdinalWalletType.xverse: {
-      scriptData = createInputScriptForXverse(paymentAddress, paymentPublicKeyToUse, scureNetwork);
-      break;
-    }
-    case KnownOrdinalWalletType.unisat: {
-      // Taproot uses x-only pubkey, swap accordingly before constructing script.
-      if (getAddressFormat(paymentAddress) === 'P2TR') {
-        if (isSimulation) {
-          paymentPublicKeyToUse = getDummyKeypair(scureNetwork).xOnlyDummyPublicKey;
-        } else {
-          paymentPublicKeyToUse = toXOnly(paymentPublicKey);
-        }
-        tapInternalKey = paymentPublicKeyToUse;
-      }
-      scriptData = createInputScriptForUnisat(paymentAddress, paymentPublicKeyToUse, scureNetwork);
-      break;
-    }
-    default:
-      // This case should never happen, but otherwise the code is not type-safe.
-      throw new Error('Unknown wallet');
-  }
+  const { scriptData, tapInternalKey } = buildInputScript({
+    paymentAddress,
+    paymentPublicKey,
+    isSimulation,
+    network: scureNetwork,
+  });
 
   const result: Cat21MintFundingInput = {
     txid: paymentOutput.txid,
@@ -111,9 +70,8 @@ export function prepareMintInputForWallet(
   }
 
   if (!isSegWit(paymentAddress)) {
-    // Legacy P2PKH path. scure refuses to sign legacy inputs from
-    // witnessUtxo alone — it wants the full previous-tx bytes via
-    // nonWitnessUtxo (see paulmillr/scure-btc-signer README).
+    // Legacy P2PKH path. Scure refuses witnessUtxo on legacy inputs;
+    // the full previous-tx bytes go via nonWitnessUtxo.
     if (isSimulation) {
       const dummyTx = getDummyLegacyTransaction(paymentOutput, scureNetwork);
       result.txid = dummyTx.id;

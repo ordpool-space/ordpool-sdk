@@ -1,14 +1,9 @@
 import { hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
 
-import { getDummyKeypair, getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
+import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
 import { Network, toScureNetwork } from '../network';
-import { getAddressFormat, isSegWit, toXOnly } from '../cat21-script/address-format';
-import {
-  createInputScriptForLeather,
-  createInputScriptForUnisat,
-  createInputScriptForXverse,
-} from '../cat21-script/per-wallet-scripts';
+import { isSegWit } from '../cat21-script/address-format';
+import { buildInputScript } from '../cat21-script/build-input-script';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
@@ -19,24 +14,19 @@ import {
 /**
  * Layer-2 input adapter for the CAT-21 transfer pipeline.
  *
- * Takes a raw UTXO (cat-bearing OR funding) plus the wallet's payment
- * details and produces a `Cat21TransferCatInput` / `Cat21TransferFundingInput`
- * with the right scriptPubKey + (optional) tapInternalKey / redeemScript /
- * nonWitnessUtxo. Same per-wallet matrix as the mint adapter — Leather,
- * CAT-21 wallet, Xverse, Unisat-SegWit/Taproot/Legacy all flow through
- * one function.
+ * Address-format-driven: dispatches via `buildInputScript`. The
+ * `walletType` argument is retained for orchestration concerns the
+ * SDK still needs (sequence-number rule etc.) but is NOT used to
+ * select script type.
  *
- * `isSimulation = true` swaps the real pubkey for the SDK's well-known
- * dummy key — used during the two-pass fee simulation so vsize is
- * observable without exposing the user's key material.
+ * Net effect: every wallet — including those the SDK previously
+ * threw 'Unknown wallet' on — produces a correct transfer input.
  *
- * Pure function. No I/O, no Angular. Both the wallet-side autonomous
- * transfer flow AND a cat21.space-shaped consumer would call the same
- * adapter and feed the result into the same `buildCat21TransferPsbt`.
+ * Pure function. No I/O, no Angular.
  */
 export interface PrepareTransferInputArgs {
+  /** Orchestration hint only — does NOT affect script construction. */
   walletType: KnownOrdinalWalletType;
-  /** The UTXO to wrap — cat-bearing or funding, same per-wallet logic either way. */
   utxo: TxnOutput;
   paymentPublicKey: Uint8Array;
   paymentAddress: string;
@@ -53,41 +43,16 @@ export function prepareTransferFundingInput(args: PrepareTransferInputArgs): Cat
 }
 
 function prepareInput(args: PrepareTransferInputArgs): Cat21TransferCatInput {
+  void args.walletType;
+
   const scureNetwork = toScureNetwork(args.network);
 
-  let paymentPublicKeyToUse = args.paymentPublicKey;
-  if (args.isSimulation) {
-    paymentPublicKeyToUse = getDummyKeypair(scureNetwork).dummyPublicKey;
-  }
-
-  let scriptData: btc.P2Ret | btc.P2TROut;
-  let tapInternalKey: Uint8Array | undefined;
-
-  switch (args.walletType) {
-    case KnownOrdinalWalletType.leather:
-    case KnownOrdinalWalletType.cat21wallet: {
-      scriptData = createInputScriptForLeather(paymentPublicKeyToUse, scureNetwork);
-      break;
-    }
-    case KnownOrdinalWalletType.xverse: {
-      scriptData = createInputScriptForXverse(args.paymentAddress, paymentPublicKeyToUse, scureNetwork);
-      break;
-    }
-    case KnownOrdinalWalletType.unisat: {
-      if (getAddressFormat(args.paymentAddress) === 'P2TR') {
-        if (args.isSimulation) {
-          paymentPublicKeyToUse = getDummyKeypair(scureNetwork).xOnlyDummyPublicKey;
-        } else {
-          paymentPublicKeyToUse = toXOnly(args.paymentPublicKey);
-        }
-        tapInternalKey = paymentPublicKeyToUse;
-      }
-      scriptData = createInputScriptForUnisat(args.paymentAddress, paymentPublicKeyToUse, scureNetwork);
-      break;
-    }
-    default:
-      throw new Error('Unknown wallet');
-  }
+  const { scriptData, tapInternalKey } = buildInputScript({
+    paymentAddress: args.paymentAddress,
+    paymentPublicKey: args.paymentPublicKey,
+    isSimulation: args.isSimulation,
+    network: scureNetwork,
+  });
 
   const result: Cat21TransferCatInput = {
     txid: args.utxo.txid,
@@ -99,13 +64,11 @@ function prepareInput(args: PrepareTransferInputArgs): Cat21TransferCatInput {
   if (scriptData.redeemScript) {
     result.redeemScript = scriptData.redeemScript;
   }
-
   if (tapInternalKey) {
     result.tapInternalKey = tapInternalKey;
   }
 
   if (!isSegWit(args.paymentAddress)) {
-    // Legacy P2PKH path. Scure refuses witnessUtxo for legacy inputs.
     if (args.isSimulation) {
       const dummyTx = getDummyLegacyTransaction(args.utxo, scureNetwork);
       result.txid = dummyTx.id;

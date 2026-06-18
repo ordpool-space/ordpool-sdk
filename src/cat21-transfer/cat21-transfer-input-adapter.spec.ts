@@ -92,14 +92,21 @@ describe('prepareTransferCatInput / prepareTransferFundingInput', () => {
     expect(hex.encode(real.scriptPubKey)).not.toBe(hex.encode(sim.scriptPubKey));
   });
 
-  it('rejects unknown wallet type', () => {
-    expect(() => prepareTransferCatInput({
-      walletType: 'NOPE' as unknown as KnownOrdinalWalletType,
+  it('accepts an unknown walletType and dispatches purely on address format (no wallet-name switch left)', () => {
+    // Pre-refactor this threw 'Unknown wallet'. After the address-
+    // format-driven migration, walletType is orchestration-only and
+    // the adapter ignores it for script construction. ANY string the
+    // caller passes produces a valid P2WPKH input here because the
+    // payment address is bech32 p2wpkh.
+    const input = prepareTransferCatInput({
+      walletType: 'NOT-A-REAL-WALLET' as unknown as KnownOrdinalWalletType,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: segwitAddr,
       isSimulation: false,
       network: NETWORK,
-    })).toThrow(/Unknown wallet/);
+    });
+    expect(input.scriptPubKey.length).toBe(22); // P2WPKH
+    expect(input.tapInternalKey).toBeUndefined();
   });
 });
