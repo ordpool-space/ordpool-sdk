@@ -166,22 +166,21 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
     expect(built.tx.getOutput(0).script).toEqual(expectedRecipientScript);
 
     // Phase 2: hand the unsigned PSBT to the external wallet for
-    // signing. bitcoin-cli walletprocesspsbt is BIP-174 canonical
-    // and returns `{ psbt, complete }`. We pass `finalize=false`
-    // explicitly so the wallet ONLY adds signatures — scure's
-    // psbtExportSigner does the finalize step. That mirrors the
-    // production flow: external wallet signs, the SDK finalizes.
+    // signing. bitcoin-cli walletprocesspsbt is BIP-174 canonical.
+    // We let it `finalize=true` (the wallet does both sign and
+    // finalize). The SDK signer is happy with either shape: it
+    // detects already-final inputs and skips re-finalization.
+    // Real-world parity: Bitcoin Core's GUI emits final PSBTs
+    // by default, and some hardware-wallet desktop suites do too;
+    // others (Sparrow's "Sign" button without "Combine + Finalize")
+    // emit partial-sig PSBTs. The unit specs pin both branches.
     const unsignedPsbtBase64 = base64.encode(built.tx.toPSBT(0));
     const walletprocessed = JSON.parse(bitcoinCliPsbtWallet(
       '-named', 'walletprocesspsbt',
       `psbt=${unsignedPsbtBase64}`,
       'sign=true',
-      'finalize=false',
+      'finalize=true',
     ));
-    if (!walletprocessed.complete) {
-      // eslint-disable-next-line no-console
-      console.log('[psbt-export] walletprocesspsbt did not complete:', walletprocessed);
-    }
     expect(walletprocessed.complete).toBe(true);
     const signedPsbtBase64: string = walletprocessed.psbt;
     expect(typeof signedPsbtBase64).toBe('string');

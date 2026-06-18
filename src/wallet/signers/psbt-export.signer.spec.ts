@@ -138,6 +138,30 @@ describe('psbtExportSigner.signAndBroadcast', () => {
     await expect(firstValueFrom(result$)).rejects.toThrow(/base64 or hex/);
   });
 
+  it('accepts an already-finalized PSBT (external wallet that runs its own finalize step) and broadcasts without re-finalizing', async () => {
+    // Some external wallets — Bitcoin Core via walletprocesspsbt
+    // with `finalize=true`, plus some hardware-wallet desktop suites
+    // — return a fully-finalized PSBT (final_scriptWitness in place,
+    // ready to extract). scure throws "Not enough partial sign" if
+    // we call finalize() again on that shape. The signer must
+    // detect isFinal and skip the re-finalize.
+    const { signedPsbtBase64, expectedTxHex } = makeSignedPsbtAndExpectedTxHex();
+    const partial = btc.Transaction.fromPSBT(base64.decode(signedPsbtBase64));
+    partial.finalize();
+    const finalizedPsbtBase64 = base64.encode(partial.toPSBT(0));
+
+    let broadcastedHex: string | undefined;
+    await firstValueFrom(psbtExportSigner.signAndBroadcast({
+      psbtBytes: unsignedPsbtBytes,
+      paymentAddress: 'bc1qpayment',
+      network: Network.Mainnet,
+      broadcast: (txHex) => { broadcastedHex = txHex; return of('txid'); },
+      promptForSignedPsbt: () => of(finalizedPsbtBase64),
+    }));
+
+    expect(broadcastedHex).toBe(expectedTxHex);
+  });
+
   it('propagates an error from the prompt without touching broadcast', async () => {
     let broadcastCalled = false;
     const result$ = psbtExportSigner.signAndBroadcast({

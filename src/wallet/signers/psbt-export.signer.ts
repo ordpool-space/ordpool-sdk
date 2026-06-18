@@ -69,7 +69,17 @@ export const psbtExportSigner: WalletSigner = {
       switchMap(signedPsbt => {
         const signedBytes = decodeSignedPsbt(signedPsbt);
         const tx = btc.Transaction.fromPSBT(signedBytes);
-        tx.finalize();
+        // External wallets may return either shape:
+        //   - partial-sig PSBT (inputs have BIP-174 partial sigs but
+        //     no final_scriptWitness / final_scriptSig). We finalize.
+        //   - fully-finalized PSBT (final_scriptWitness present,
+        //     ready to extract). scure rejects a re-finalize attempt
+        //     here ("Not enough partial sign"), so we check isFinal
+        //     and skip finalize().
+        // Both shapes broadcast the same on-chain bytes via tx.hex.
+        if (!tx.isFinal) {
+          tx.finalize();
+        }
         return input.broadcast(tx.hex).pipe(map(txId => ({ txId })));
       })
     );
