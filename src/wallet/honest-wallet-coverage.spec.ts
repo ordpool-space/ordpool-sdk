@@ -96,7 +96,11 @@ describe('Honest wallet coverage (audit gate)', () => {
     //     (Sparrow, Electrum, Coldcard, Ledger, Trezor, Specter,
     //     Bitcoin Core). No browser extension to drive via Playwright;
     //     sign step is user-mediated (paste PSBT, paste signed PSBT
-    //     back). Different test shape entirely.
+    //     back). Covered instead by the regtest spec
+    //     `e2e/regtest/psbt-export-roundtrip.spec.ts`, which stands
+    //     in `bitcoin-cli walletprocesspsbt` as the external offline
+    //     wallet and runs the SDK → external-sign → finalize-and-
+    //     broadcast loop end-to-end against bitcoind + electrs.
     //
     //   binance: signer ships per the "ship every signer" HARD RULE
     //     but the Binance Web3 Wallet binary (v1.17.2 as of this
@@ -163,13 +167,10 @@ describe('Honest wallet coverage (audit gate)', () => {
   });
 
   it('xpub flow can build a mint PSBT via the SDK (non-browser path)', () => {
-    // Even though xpub doesn't have a Playwright spec, the SDK MUST
-    // still build a valid mint PSBT for an xpub-derived address. Pin
-    // that by exercising the universal helper directly.
-    //
-    // This stops the xpub carve-out above from being a free pass: if
-    // the SDK's build path breaks for xpub, this fails.
-    // Inline import to dodge circular spec ordering.
+    // Pin that the SDK's build path works for xpub even though
+    // there's no browser-extension binary to drive. This is the
+    // unit-side guard.
+    // Inline require to dodge circular spec ordering.
     const { buildInputScript } = require('../cat21-script/build-input-script');
     const { hex } = require('@scure/base');
     const btc = require('@scure/btc-signer');
@@ -183,5 +184,16 @@ describe('Honest wallet coverage (audit gate)', () => {
       network,
     });
     expect(result.scriptData.script.length).toBe(22);
+  });
+
+  it('xpub flow has an end-to-end regtest roundtrip spec (psbt-export-roundtrip)', () => {
+    // The xpub carve-out from Pipeline B requires an SDK-level
+    // pin AND a regtest-level pin. The regtest spec stands in
+    // bitcoin-cli walletprocesspsbt as the external offline wallet
+    // (canonical BIP-174 implementation) and proves
+    // psbtExportSigner consumes what every conformant signer emits.
+    const REGTEST_DIR = path.join(REPO_ROOT, 'e2e', 'regtest');
+    const specs = fs.readdirSync(REGTEST_DIR);
+    expect(specs).toContain('psbt-export-roundtrip.spec.ts');
   });
 });
