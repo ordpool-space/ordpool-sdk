@@ -18,6 +18,8 @@ interface OkxBtcApi {
   requestAccounts(): Promise<unknown>;
   getAccounts(): Promise<string[]>;
   getPublicKey(): Promise<string>;
+  on?(event: 'accountChanged' | 'networkChanged', handler: () => void): void;
+  removeListener?(event: 'accountChanged' | 'networkChanged', handler: () => void): void;
 }
 
 async function getBasicOkxInfo(): Promise<{ address: string; publicKey: string }> {
@@ -39,7 +41,9 @@ async function getBasicOkxInfo(): Promise<{ address: string; publicKey: string }
  * caveat as Unisat / Wizz because both ordinals and payment lanes
  * come from the one address.
  *
- * TODO: handle accountChanged / networkChanged events.
+ * Event surface: OKX exposes `accountChanged` (singular — different
+ * from Unisat's plural) and `networkChanged` on the BTC sub-
+ * provider. We fan both into the single `onAccountChange` callback.
  */
 export const okxConnector: WalletConnector = {
   providerId: KnownOrdinalWalletType.okx,
@@ -54,5 +58,16 @@ export const okxConnector: WalletConnector = {
     return from(getBasicOkxInfo()).pipe(
       map(({ address, publicKey }) => okxBasicInfoToWalletInfo(address, publicKey))
     );
+  },
+
+  onAccountChange(handler: () => void): () => void {
+    const okxBtc = (window as unknown as { okxwallet?: { bitcoin?: OkxBtcApi } }).okxwallet?.bitcoin;
+    if (!okxBtc?.on || !okxBtc.removeListener) return () => undefined;
+    okxBtc.on('accountChanged', handler);
+    okxBtc.on('networkChanged', handler);
+    return () => {
+      okxBtc.removeListener!('accountChanged', handler);
+      okxBtc.removeListener!('networkChanged', handler);
+    };
   },
 };

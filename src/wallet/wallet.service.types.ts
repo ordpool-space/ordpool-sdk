@@ -52,6 +52,20 @@ export interface WalletConnector {
   readonly signingSupported: boolean;
   detect(win: WindowLike | undefined): boolean;
   connect(network: Network): Observable<WalletInfo>;
+  /**
+   * Subscribe to in-wallet account-or-network changes. Returns an
+   * unsubscribe function. Consumers call this AFTER `connect()` to
+   * be notified when the user switches accounts or networks inside
+   * the wallet's own UI; the standard reaction is to invalidate any
+   * cached address/publicKey and re-run `connect()` (or abort an
+   * in-flight mint/transfer/offer flow).
+   *
+   * Optional because not every wallet exposes events. When the
+   * method is absent, consumers MUST defend against stale-cache
+   * poisoning by re-running `connect()` at sign-time and asserting
+   * the address still matches what they intend to sign over.
+   */
+  onAccountChange?(handler: () => void): () => void;
 }
 
 

@@ -18,6 +18,8 @@ interface WizzApi {
   requestAccounts(): Promise<unknown>;
   getAccounts(): Promise<string[]>;
   getPublicKey(): Promise<string>;
+  on?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
+  removeListener?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
 }
 
 async function getBasicWizzInfo(): Promise<{ address: string; publicKey: string }> {
@@ -34,11 +36,10 @@ async function getBasicWizzInfo(): Promise<{ address: string; publicKey: string 
  * Atom Wallet compatibility; both reference the same provider).
  *
  * Wizz is a Unisat fork: same getAccounts/getPublicKey/signPsbt
- * shape, same single-address constraint. The "Unisat is NOT safe
- * for cat sats" warning applies here too — one address for both
- * payments and ordinals.
- *
- * TODO: handle accountsChanged / networkChanged events.
+ * shape, same single-address constraint, same EIP-1193-ish event
+ * surface (accountsChanged / networkChanged). The "Unisat is NOT
+ * safe for cat sats" warning applies here too — one address for
+ * both payments and ordinals.
  */
 export const wizzConnector: WalletConnector = {
   providerId: KnownOrdinalWalletType.wizz,
@@ -53,5 +54,16 @@ export const wizzConnector: WalletConnector = {
     return from(getBasicWizzInfo()).pipe(
       map(({ address, publicKey }) => wizzBasicInfoToWalletInfo(address, publicKey))
     );
+  },
+
+  onAccountChange(handler: () => void): () => void {
+    const wizz = (window as unknown as { wizz?: WizzApi }).wizz;
+    if (!wizz?.on || !wizz.removeListener) return () => undefined;
+    wizz.on('accountsChanged', handler);
+    wizz.on('networkChanged', handler);
+    return () => {
+      wizz.removeListener!('accountsChanged', handler);
+      wizz.removeListener!('networkChanged', handler);
+    };
   },
 };

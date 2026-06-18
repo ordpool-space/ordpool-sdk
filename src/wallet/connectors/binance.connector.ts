@@ -17,6 +17,8 @@ import {
 interface BinanceBtcApi {
   requestAccounts(): Promise<string[]>;
   getPublicKey(): Promise<string>;
+  on?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
+  removeListener?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
 }
 
 async function getBasicBinanceInfo(): Promise<{ address: string; publicKey: string }> {
@@ -50,7 +52,11 @@ async function getBasicBinanceInfo(): Promise<{ address: string; publicKey: stri
  * `packages/core/src/client/providers/binance.ts` which is in
  * production use across multiple Ordinals-related projects.
  *
- * TODO: handle accountsChanged / networkChanged events.
+ * Event surface per the developer docs: accountsChanged +
+ * networkChanged on `window.binancew3w.bitcoin`. Same shape as
+ * Unisat. Whether the eventual binary actually wires them is
+ * unverified (the surface itself isn't injected yet); the no-op
+ * guard handles the not-yet-implemented case cleanly.
  */
 export const binanceConnector: WalletConnector = {
   providerId: KnownOrdinalWalletType.binance,
@@ -65,5 +71,16 @@ export const binanceConnector: WalletConnector = {
     return from(getBasicBinanceInfo()).pipe(
       map(({ address, publicKey }) => binanceBasicInfoToWalletInfo(address, publicKey))
     );
+  },
+
+  onAccountChange(handler: () => void): () => void {
+    const binanceBtc = (window as unknown as { binancew3w?: { bitcoin?: BinanceBtcApi } }).binancew3w?.bitcoin;
+    if (!binanceBtc?.on || !binanceBtc.removeListener) return () => undefined;
+    binanceBtc.on('accountsChanged', handler);
+    binanceBtc.on('networkChanged', handler);
+    return () => {
+      binanceBtc.removeListener!('accountsChanged', handler);
+      binanceBtc.removeListener!('networkChanged', handler);
+    };
   },
 };
