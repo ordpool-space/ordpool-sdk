@@ -65,39 +65,26 @@ const RECIPIENT_AMOUNT = BigInt(546);
 const FEE = BigInt(2_000);
 const FUND_AMOUNT_SATS = 100_000_000; // 1 BTC
 
-const PSBT_WALLET = 'psbt-export-tester';
+/**
+ * The "external offline wallet" we stand in with is the existing
+ * `ordpool-e2e` Bitcoin Core wallet — same one that already signs
+ * its own outputs in `cat21-mint-roundtrip.spec.ts`. Bitcoin Core
+ * is the canonical BIP-174 implementation, so any PSBT it signs is
+ * a faithful proxy for what Sparrow / Electrum / Coldcard / Ledger /
+ * Trezor would emit (those wallets all consume the same wire
+ * format).
+ *
+ * We don't create a separate descriptor wallet because doing so
+ * introduces a "does the descriptor wallet's signer recognise the
+ * scure-built PSBT's input shape" question that's outside the
+ * scope of THIS spec (which is testing psbtExportSigner, not
+ * Bitcoin Core's descriptor-wallet ergonomics).
+ */
+const PSBT_WALLET = 'ordpool-e2e';
 
 
 function bitcoinCliPsbtWallet(...args: string[]): string {
   return rpc('-rpcwallet=' + PSBT_WALLET, ...args);
-}
-
-
-/**
- * Create a fresh descriptor wallet that signs offline (no
- * in-browser provider). Models a Sparrow/Electrum user's setup.
- * `disable_private_keys=false` so the wallet has keys to sign with;
- * `descriptors=true` is the modern wallet format.
- */
-function createPsbtExportWallet(): void {
-  // listwallets returns an array of loaded wallet names; a missing
-  // wallet means we haven't created it yet on this regtest run.
-  const loaded: string[] = JSON.parse(rpc('listwallets'));
-  if (loaded.includes(PSBT_WALLET)) return;
-
-  try {
-    rpc(
-      '-named', 'createwallet',
-      `wallet_name=${PSBT_WALLET}`,
-      'disable_private_keys=false',
-      'blank=false',
-      'descriptors=true',
-    );
-  } catch (err) {
-    // Wallet may already exist on disk from a previous run. Try to
-    // load it; if that also fails, surface the original create error.
-    try { rpc('loadwallet', PSBT_WALLET); } catch { throw err; }
-  }
 }
 
 
@@ -112,8 +99,6 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
   let utxo: ElectrsUtxo;
 
   beforeAll(async () => {
-    createPsbtExportWallet();
-
     // The external wallet's payment address. P2WPKH (Native SegWit)
     // is the default descriptor-wallet output type and the most
     // common shape for desktop signers in 2026.
@@ -138,11 +123,9 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
     recipientTaprootAddress = recipientP2tr.address!;
     expectedRecipientScript = recipientP2tr.script;
 
-    // Fund the external wallet's payment address.
-    rpc(
-      '-rpcwallet=ordpool-e2e', 'sendtoaddress',
-      paymentAddress, '1.0',
-    );
+    // Fund the payment address (self-send within ordpool-e2e). The
+    // wallet picks one of its own mature coinbase outputs as input.
+    bitcoinCliPsbtWallet('sendtoaddress', paymentAddress, '1.0');
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
 
@@ -195,6 +178,10 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
       'sign=true',
       'finalize=false',
     ));
+    if (!walletprocessed.complete) {
+      // eslint-disable-next-line no-console
+      console.log('[psbt-export] walletprocesspsbt did not complete:', walletprocessed);
+    }
     expect(walletprocessed.complete).toBe(true);
     const signedPsbtBase64: string = walletprocessed.psbt;
     expect(typeof signedPsbtBase64).toBe('string');
