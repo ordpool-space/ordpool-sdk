@@ -146,6 +146,14 @@ export interface Cat21OperationGateConfig {
    * semantics as `allowedRecipients`.
    */
   allowedCounterparties?: ReadonlyArray<string>;
+
+  /**
+   * Maximum size in decoded bytes of an inbound `offerPsbt` on
+   * `accept_offer`. Default 128 KiB (real offers are ~600 bytes).
+   * DoS guard against an agent flooding the wallet with a giant
+   * PSBT to OOM the popup's PSBT parser.
+   */
+  maxOfferPsbtBytes?: number;
 }
 
 /* ──────────────────────────  Result shapes  ────────────────────────── */
@@ -199,7 +207,9 @@ export type Cat21GateRejectReason =
   | 'expected-price-not-positive'
   | 'expected-price-not-integer'
   | 'expected-seller-utxo-malformed'
-  | 'offer-psbt-malformed';
+  | 'offer-psbt-malformed'
+  | 'offer-psbt-missing-magic-bytes'
+  | 'offer-psbt-too-large';
 
 /**
  * Pre-decoded resources the gate hands the downstream caller on

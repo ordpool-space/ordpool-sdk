@@ -40,7 +40,10 @@ function createOfferIntent(over: Partial<Cat21CreateOfferIntent> = {}): Cat21Cre
 }
 function acceptOfferIntent(over: Partial<Cat21AcceptOfferIntent> = {}): Cat21AcceptOfferIntent {
   return {
-    offerPsbt: 'AAAA',  // 4-char base64 = 3 bytes; PSBT-shape validation is downstream
+    // PSBT magic bytes + a one-byte padding, hex-encoded. The gate's
+    // structural check accepts as soon as the magic matches; the
+    // SDK's `validateCat21BuyOfferPsbt` does the deeper parse later.
+    offerPsbt: '70736274ff00',
     expectedCatId: VALID_CAT_ID,
     expectedPriceSats: 21_000,
     expectedSellerUtxo: {
@@ -453,15 +456,68 @@ describe('validateCat21Operation — accept_offer', () => {
     }
   });
 
-  it('accepts hex-encoded PSBT (fallback path)', () => {
+  it('accepts hex-encoded PSBT (the gate prefers hex over base64 when magic matches)', () => {
+    // Same magic-prefixed hex as the default fixture; this test
+    // exercises the explicit-hex path via a non-default value.
     const result = validateCat21Operation({
       config: mainnetConfig,
       operation: {
         kind: 'accept_offer',
-        intent: acceptOfferIntent({ offerPsbt: 'deadbeef' }),
+        intent: acceptOfferIntent({ offerPsbt: '70736274ff0102030405' }),
       },
     });
     expect(result.ok).toBe(true);
+  });
+
+  it('rejects bytes that successfully hex-decode but do not start with the PSBT magic', () => {
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: { kind: 'accept_offer', intent: acceptOfferIntent({ offerPsbt: 'deadbeef' }) },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'offer-psbt-missing-magic-bytes' });
+  });
+
+  it('rejects PSBT bytes that decode but do not start with the magic 0x70 0x73 0x62 0x74 0xff', () => {
+    // base64('AAAA') = [0x00, 0x00, 0x00] — decodes but no magic.
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: { kind: 'accept_offer', intent: acceptOfferIntent({ offerPsbt: 'AAAA' }) },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'offer-psbt-missing-magic-bytes' });
+  });
+
+  it('accepts PSBT bytes that start with the magic (700a000000 hex = magic+padding)', () => {
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: {
+        kind: 'accept_offer',
+        intent: acceptOfferIntent({ offerPsbt: '70736274ff00' }),
+      },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects raw string longer than 2 × maxOfferPsbtBytes (early DoS short-circuit)', () => {
+    const huge = 'A'.repeat(2 * 1024 + 1);
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, maxOfferPsbtBytes: 1024 },
+      operation: { kind: 'accept_offer', intent: acceptOfferIntent({ offerPsbt: huge }) },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'offer-psbt-too-large' });
+  });
+
+  it('rejects decoded PSBT longer than maxOfferPsbtBytes (post-decode check)', () => {
+    // 18 bytes hex = 9 decoded bytes; cap 5 trips post-decode but the
+    // string length is still under 2×5=10 chars so the early
+    // short-circuit does NOT fire.
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, maxOfferPsbtBytes: 5 },
+      operation: {
+        kind: 'accept_offer',
+        intent: acceptOfferIntent({ offerPsbt: '70736274ff00000000000000ff0000' }),
+      },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'offer-psbt-too-large' });
   });
 
   it('rejects garbage offerPsbt as offer-psbt-malformed', () => {

@@ -154,7 +154,7 @@ function validateCreateOffer(
 
 function validateAcceptOffer(
   intent: Cat21AcceptOfferIntent,
-  _config: Cat21OperationGateConfig,
+  config: Cat21OperationGateConfig,
 ): Cat21OperationGateResult {
   const cat = parseCatId(intent.expectedCatId);
   if (!cat.ok) return reject('expected-cat-id-malformed', intent.expectedCatId);
@@ -170,8 +170,28 @@ function validateAcceptOffer(
     );
   }
 
+  if (
+    typeof intent.offerPsbt === 'string' &&
+    intent.offerPsbt.length > (config.maxOfferPsbtBytes ?? DEFAULT_MAX_OFFER_PSBT_BYTES) * 2
+  ) {
+    // Reject before base64-decoding when the raw string is already
+    // larger than the cap × 2 (base64 expansion factor is ~4/3, but
+    // hex is 2x; ×2 covers the worst case). DoS guard against an
+    // agent flooding the wallet with a huge PSBT.
+    return reject(
+      'offer-psbt-too-large',
+      `${intent.offerPsbt.length} chars > ${(config.maxOfferPsbtBytes ?? DEFAULT_MAX_OFFER_PSBT_BYTES) * 2}`,
+    );
+  }
   const psbtBytes = tryDecodePsbt(intent.offerPsbt);
   if (!psbtBytes) return reject('offer-psbt-malformed');
+  if (!startsWithPsbtMagic(psbtBytes)) {
+    return reject('offer-psbt-missing-magic-bytes');
+  }
+  const cap = config.maxOfferPsbtBytes ?? DEFAULT_MAX_OFFER_PSBT_BYTES;
+  if (psbtBytes.length > cap) {
+    return reject('offer-psbt-too-large', `${psbtBytes.length} > ${cap}`);
+  }
 
   return success({
     kind: 'accept_offer',
@@ -179,6 +199,22 @@ function validateAcceptOffer(
     catTxid: cat.txid,
     catIndex: cat.index,
   });
+}
+
+/**
+ * 128 KiB default cap. Real CAT-21 buy offers are ~600 bytes; this
+ * leaves comfortable headroom while still rejecting a 1 MB DoS blob.
+ * Override via `config.maxOfferPsbtBytes`.
+ */
+const DEFAULT_MAX_OFFER_PSBT_BYTES = 128 * 1024;
+
+const PSBT_MAGIC_BYTES = Uint8Array.from([0x70, 0x73, 0x62, 0x74, 0xff]);
+function startsWithPsbtMagic(bytes: Uint8Array): boolean {
+  if (bytes.length < PSBT_MAGIC_BYTES.length) return false;
+  for (let i = 0; i < PSBT_MAGIC_BYTES.length; i++) {
+    if (bytes[i] !== PSBT_MAGIC_BYTES[i]) return false;
+  }
+  return true;
 }
 
 /* ──────────────────────────  Field validators  ────────────────────────── */
@@ -344,26 +380,44 @@ function isWellFormedUtxoRef(value: unknown): boolean {
 }
 
 /**
- * Try base64 first (cat21.space's wire format), fall back to hex
- * (some agents serialise as hex), reject otherwise. The downstream
- * `validateCat21BuyOfferPsbt` re-parses; we just want to fail FAST
- * here on garbage.
+ * Try both hex and base64 decoders; prefer the one whose bytes start
+ * with the PSBT magic (`0x70 0x73 0x62 0x74 0xff`). Falls back to
+ * the first successful decode when neither has the magic, so the
+ * caller's magic check fires with the right reason.
+ *
+ * The two encodings share the lowercase a–f alphabet (base64
+ * includes them, hex uses them), so a string like `70736274ff…`
+ * is valid BOTH ways but only the hex result carries the PSBT
+ * magic. Pick the one that does.
  */
 function tryDecodePsbt(value: unknown): Uint8Array | undefined {
   if (typeof value !== 'string' || value.length === 0) return undefined;
-  try {
-    const decoded = base64.decode(value);
-    if (decoded.length > 0) return decoded;
-  } catch {
-    /* fall through */
-  }
+  const hexBytes = tryHex(value);
+  if (hexBytes && startsWithPsbtMagic(hexBytes)) return hexBytes;
+  const b64Bytes = tryBase64(value);
+  if (b64Bytes && startsWithPsbtMagic(b64Bytes)) return b64Bytes;
+  // Neither decoded result has the magic; return whichever decoded
+  // at all so the caller's missing-magic check can fire instead of
+  // a generic 'malformed'.
+  return hexBytes ?? b64Bytes ?? undefined;
+}
+
+function tryHex(value: string): Uint8Array | undefined {
   try {
     const decoded = hex.decode(value);
-    if (decoded.length > 0) return decoded;
+    return decoded.length > 0 ? decoded : undefined;
   } catch {
-    /* fall through */
+    return undefined;
   }
-  return undefined;
+}
+
+function tryBase64(value: string): Uint8Array | undefined {
+  try {
+    const decoded = base64.decode(value);
+    return decoded.length > 0 ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
