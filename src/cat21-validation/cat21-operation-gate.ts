@@ -59,7 +59,7 @@ export function validateCat21Operation(args: {
       // BEFORE it reaches the runtime check.
       const _exhaustive: never = operation;
       void _exhaustive;
-      return reject('unsupported-operation-kind', String((operation as { kind: unknown }).kind));
+      return reject('unsupported-operation-kind', safeStringify((operation as { kind: unknown }).kind));
     }
   }
 }
@@ -236,7 +236,7 @@ function validateAddress(
   | { ok: true; script: Uint8Array }
   | { ok: false; result: Cat21OperationGateResult } {
   if (typeof address !== 'string' || address.length === 0) {
-    return { ok: false, result: reject(malformedReason(field), String(address)) };
+    return { ok: false, result: reject(malformedReason(field), safeStringify(address)) };
   }
   const targetNet = toScureNetwork(config.network);
   // Try the target network first; record whether the address parsed on
@@ -262,13 +262,13 @@ function validateFeeRate(
   config: Cat21OperationGateConfig,
 ): { ok: true } | { ok: false; result: Cat21OperationGateResult } {
   if (typeof feeRate !== 'number' || !Number.isFinite(feeRate)) {
-    return { ok: false, result: reject('fee-rate-not-finite-number', String(feeRate)) };
+    return { ok: false, result: reject('fee-rate-not-finite-number', safeStringify(feeRate)) };
   }
   if (!Number.isInteger(feeRate)) {
-    return { ok: false, result: reject('fee-rate-not-integer', String(feeRate)) };
+    return { ok: false, result: reject('fee-rate-not-integer', safeStringify(feeRate)) };
   }
   if (feeRate <= 0) {
-    return { ok: false, result: reject('fee-rate-not-positive', String(feeRate)) };
+    return { ok: false, result: reject('fee-rate-not-positive', safeStringify(feeRate)) };
   }
   if (config.maxFeeRatePerVbyte != null && feeRate > config.maxFeeRatePerVbyte) {
     return {
@@ -286,13 +286,13 @@ function validateTip(
   | { ok: true; script: Uint8Array | undefined }
   | { ok: false; result: Cat21OperationGateResult } {
   if (typeof tip.value !== 'number' || !Number.isFinite(tip.value)) {
-    return { ok: false, result: reject('tip-value-not-finite-number', String(tip.value)) };
+    return { ok: false, result: reject('tip-value-not-finite-number', safeStringify(tip.value)) };
   }
   if (!Number.isInteger(tip.value)) {
-    return { ok: false, result: reject('tip-value-not-integer', String(tip.value)) };
+    return { ok: false, result: reject('tip-value-not-integer', safeStringify(tip.value)) };
   }
   if (tip.value < 0) {
-    return { ok: false, result: reject('tip-value-negative', String(tip.value)) };
+    return { ok: false, result: reject('tip-value-negative', safeStringify(tip.value)) };
   }
   const tipCap = config.maxTipValueSats ?? config.maxPriceSats;
   if (tipCap != null && tip.value > tipCap) {
@@ -312,13 +312,13 @@ function validatePrice(
   config: Cat21OperationGateConfig,
 ): { ok: true } | { ok: false; result: Cat21OperationGateResult } {
   if (typeof priceSats !== 'number' || !Number.isFinite(priceSats)) {
-    return { ok: false, result: reject('price-not-finite-number', String(priceSats)) };
+    return { ok: false, result: reject('price-not-finite-number', safeStringify(priceSats)) };
   }
   if (!Number.isInteger(priceSats)) {
-    return { ok: false, result: reject('price-not-integer', String(priceSats)) };
+    return { ok: false, result: reject('price-not-integer', safeStringify(priceSats)) };
   }
   if (priceSats <= 0) {
-    return { ok: false, result: reject('price-not-positive', String(priceSats)) };
+    return { ok: false, result: reject('price-not-positive', safeStringify(priceSats)) };
   }
   if (priceSats < CAT21_POSTAGE_SATS) {
     return {
@@ -341,14 +341,14 @@ function validateExpectedPrice(
   if (typeof expectedPriceSats !== 'number' || !Number.isFinite(expectedPriceSats)) {
     return {
       ok: false,
-      result: reject('expected-price-not-finite-number', String(expectedPriceSats)),
+      result: reject('expected-price-not-finite-number', safeStringify(expectedPriceSats)),
     };
   }
   if (!Number.isInteger(expectedPriceSats)) {
-    return { ok: false, result: reject('expected-price-not-integer', String(expectedPriceSats)) };
+    return { ok: false, result: reject('expected-price-not-integer', safeStringify(expectedPriceSats)) };
   }
   if (expectedPriceSats <= 0) {
-    return { ok: false, result: reject('expected-price-not-positive', String(expectedPriceSats)) };
+    return { ok: false, result: reject('expected-price-not-positive', safeStringify(expectedPriceSats)) };
   }
   return { ok: true };
 }
@@ -422,6 +422,23 @@ function tryBase64(value: string): Uint8Array | undefined {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Stringify any input — including Symbol, BigInt, prototype-less
+ * objects — without throwing. `String(Symbol())` throws TypeError;
+ * `String.prototype.toString` on Object.create(null) throws too.
+ * The detail field is debug telemetry only, so a "[Symbol]"
+ * placeholder is more useful than a runtime crash.
+ */
+function safeStringify(value: unknown): string {
+  try {
+    if (typeof value === 'symbol') return value.toString();
+    if (typeof value === 'bigint') return `${value}n`;
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
 }
 
 function reject(
