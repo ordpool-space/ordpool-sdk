@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Bring up bitcoind + electrs (regtest) and mine 101 blocks so the
-# coinbase rewards mature. Prints the funded address + private key
-# on stdout (as JSON) so the E2E suite can pick them up.
+# coinbase rewards mature. Prints a regtest funder keypair (address +
+# WIF) on stdout (as JSON) so the E2E suite can pick them up.
 #
 # Usage:
 #   ./e2e/regtest-bootstrap.sh
@@ -24,24 +24,29 @@ for _ in $(seq 1 30); do
 done
 $RPC getblockchaininfo >/dev/null
 
-# --- generate or reuse a funded address ---
-# Create a fresh legacy address (p2pkh) so we have a known privkey to
-# dump and use in the SDK signer tests. SegWit/Taproot funding is
-# generated on the fly per-test; this bootstrap only needs ANY UTXO
-# to seed the mempool with.
-# Bitcoin Core 28+ defaults to descriptor wallets; dumpprivkey only
-# works on legacy ones. Pass `descriptors=false` explicitly.
-$RPC -named createwallet wallet_name=ordpool-e2e descriptors=false load_on_startup=true >/dev/null 2>&1 || \
+# --- bitcoind wallet for mining + funding sends ---
+# A descriptor wallet (the only kind Bitcoin Core 29+ can create — the
+# legacy/BDB backend was removed). It owns the mined coinbases the SDK
+# specs spend from; it does NOT hold the funder signing key below.
+$RPC -named createwallet wallet_name=ordpool-e2e load_on_startup=true >/dev/null 2>&1 || \
   $RPC loadwallet ordpool-e2e >/dev/null 2>&1 || true
 
-ADDR=$($RPC -rpcwallet=ordpool-e2e getnewaddress "" legacy)
-WIF=$($RPC -rpcwallet=ordpool-e2e dumpprivkey "$ADDR")
+MINING_ADDR=$($RPC -rpcwallet=ordpool-e2e getnewaddress)
+
+# --- funder keypair the SDK specs sign with ---
+# Supplied as a fixed regtest keypair instead of dumped from bitcoind:
+# descriptor wallets can't export a WIF and legacy wallets are gone on
+# Core 29+. The specs derive the funder pubkey from this WIF and fund
+# pubkey-derived addresses from the wallet's coinbases, then sign with
+# the WIF. Throwaway regtest-only key (deterministic, zero real value).
+ADDR="bcrt1qw5pw5evmamu6dm5qze7a8yg07wmamvzpq3huc3"
+WIF="cNvr6PMcpe862cZuaxP4kqMDodEUxLXSW7DGxW6c7PiYTZ5sWQcK"
 
 # --- mine 101 blocks to mature the coinbase ---
 TIP=$($RPC getblockcount)
 if [ "$TIP" -lt 101 ]; then
   NEEDED=$((101 - TIP))
-  $RPC -rpcwallet=ordpool-e2e generatetoaddress "$NEEDED" "$ADDR" >/dev/null
+  $RPC -rpcwallet=ordpool-e2e generatetoaddress "$NEEDED" "$MINING_ADDR" >/dev/null
 fi
 
 # --- wait for electrs to catch up to bitcoind's tip ---

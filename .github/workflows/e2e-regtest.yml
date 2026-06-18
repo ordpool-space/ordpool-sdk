@@ -53,7 +53,7 @@ jobs:
         working-directory: ordpool-sdk
         run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d
 
-      - name: Bootstrap regtest funds (101 blocks, dump WIF)
+      - name: Bootstrap regtest funds (101 blocks, emit funder keypair)
         id: bootstrap
         working-directory: ordpool-sdk
         run: |

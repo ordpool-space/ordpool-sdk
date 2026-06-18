@@ -32,7 +32,11 @@
 services:
 
   bitcoind:
-    image: ruimarinho/bitcoin-core:24-alpine
+    # Official Bitcoin Core image, pinned to the major version happysrv
+    # prod runs (v30). Same image + command the regtest stack uses, so
+    # the consumer substrate matches what cat21-ord and the SDK specs
+    # are verified against.
+    image: bitcoin/bitcoin:30
     container_name: ordpool-e2e-consumer-bitcoind
     command:
       - -regtest

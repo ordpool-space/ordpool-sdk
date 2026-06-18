@@ -10,11 +10,13 @@
 
 services:
   bitcoind:
-    # Official Bitcoin Core image. cat21-ord (ord 0.27) requires
-    # Bitcoin Core 28+. ruimarinho/bitcoin-core:24-alpine was correct
-    # for the previous mint-only spec but doesn't satisfy ord's wallet
-    # commands; we use the official image here.
-    image: bitcoin/bitcoin:28
+    # Official Bitcoin Core image, pinned to the major version happysrv
+    # prod runs (v30). cat21-ord (ord 0.27) needs Core 28+ for its wallet
+    # commands; ruimarinho/bitcoin-core:24-alpine (the old mint-only
+    # image) doesn't satisfy those. The bootstrap creates a descriptor
+    # wallet and supplies the SDK signer's WIF itself, so no legacy/BDB
+    # wallet (removed in Core 29) and no -deprecatedrpc escape hatch.
+    image: bitcoin/bitcoin:30
     container_name: ordpool-e2e-bitcoind
     command:
       - -regtest
@@ -28,10 +30,6 @@ services:
       - -listen=1
       - -zmqpubrawblock=tcp://0.0.0.0:28332
       - -zmqpubrawtx=tcp://0.0.0.0:28333
-      # Bitcoin Core 28 deprecated legacy/BDB wallets. The bootstrap
-      # creates a legacy wallet so `dumpprivkey` still works (the SDK
-      # mint spec wants a WIF for signing).
-      - -deprecatedrpc=create_bdb
     ports:
       - "18443:18443"   # RPC (regtest)
       - "18444:18444"   # P2P (regtest)

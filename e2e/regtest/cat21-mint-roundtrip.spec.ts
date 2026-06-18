@@ -140,13 +140,11 @@ describe('cat21 mint roundtrip on regtest', () => {
     transactionHex?: string;
   }> = {};
   /**
-   * Dust-absorb branch uses its own keypair, separate from the
-   * funder. The legacy wallet auto-derives P2WPKH for any key it
-   * holds and treats outputs at those addresses as wallet change.
-   * If the dust UTXO landed at the funder's P2WPKH (Leather's
-   * address), default coin-selection would spend the freshly-funded
-   * 1-BTC UTXO at that address to pay for the dust send, consuming
-   * it. Different key, different unrecognised address, no collision.
+   * Dust-absorb branch uses its own keypair, separate from the funder,
+   * so its 1000-sat dust UTXO sits at a dedicated address. That keeps
+   * it unambiguous — never tangled with the funder's per-case funding
+   * UTXOs when the SDK looks up spendable outputs for the dust mint
+   * (the funder's P2WPKH case address would otherwise carry both).
    */
   let dustPrivateKey: Uint8Array;
   let dustPublicKey: Uint8Array;
@@ -170,13 +168,11 @@ describe('cat21 mint roundtrip on regtest', () => {
     let tip = mineBlocks(2);
     await waitForElectrsSync(tip);
 
-    // Pin inputs explicitly. The legacy wallet auto-derives P2PKH /
-    // P2WPKH / P2SH-P2WPKH addresses from any key it holds, so all
-    // four case payment addresses look wallet-owned once funded.
-    // Default coin-selection would then spend those fresh case
-    // UTXOs to fund subsequent sends, which previously consumed
-    // Leather's funding before the mint tx ran. Pinning `inputs` on
-    // every `send` leaves coin selection no room to surprise us.
+    // Pin inputs explicitly so each `send` spends a specific mature
+    // coinbase. The bitcoind wallet holds only its own coinbases (the
+    // funder key is foreign to it), so once we pin, coin selection
+    // can't reach for a coinbase a later step depends on. Keeps the
+    // funding deterministic and reproducible.
     //
     // listunspent yields every wallet UTXO; we pick two mature
     // 50-BTC coinbases as funding sources (one for the dust send,
