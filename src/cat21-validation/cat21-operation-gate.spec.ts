@@ -603,3 +603,179 @@ describe('validateCat21Operation — accept_offer', () => {
     expect(result).toMatchObject({ ok: false, reason: 'expected-seller-utxo-malformed' });
   });
 });
+
+/* ──────────────────────────  allowedOperations  ────────────────────────── */
+
+describe('validateCat21Operation — allowedOperations capability gate', () => {
+  it('accepts a mint when allowedOperations includes mint', () => {
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedOperations: ['mint'] },
+      operation: { kind: 'mint', intent: mintIntent() },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects a transfer when allowedOperations is ["mint"]', () => {
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedOperations: ['mint'] },
+      operation: { kind: 'transfer', intent: transferIntent() },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'operation-kind-not-allowed',
+      detail: 'transfer',
+    });
+  });
+
+  it('rejects a create_offer when allowedOperations is ["mint", "transfer"]', () => {
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedOperations: ['mint', 'transfer'] },
+      operation: { kind: 'create_offer', intent: createOfferIntent() },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'operation-kind-not-allowed',
+      detail: 'create_offer',
+    });
+  });
+
+  it('rejects an accept_offer when allowedOperations omits it', () => {
+    const result = validateCat21Operation({
+      config: {
+        ...mainnetConfig,
+        allowedOperations: ['mint', 'transfer', 'create_offer'],
+      },
+      operation: { kind: 'accept_offer', intent: acceptOfferIntent() },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'operation-kind-not-allowed',
+      detail: 'accept_offer',
+    });
+  });
+
+  it('treats an empty allowedOperations array as the permissive default', () => {
+    // Wallets that build the config defensively might pass `[]` if the
+    // policy slice hasn't been populated yet. That MUST be the
+    // permissive default (any kind accepted), not the locked-down
+    // "no kinds at all" — otherwise an empty policy would brick the
+    // wallet for every operation.
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedOperations: [] },
+      operation: { kind: 'mint', intent: mintIntent() },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('fires BEFORE per-operation field validation (no capability leak via reason)', () => {
+    // A curious agent must not be able to probe which fields a
+    // disallowed operation accepts. Pass a transfer intent with a
+    // malformed catId; the gate's response should still be
+    // 'operation-kind-not-allowed', NOT 'cat-id-malformed'.
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedOperations: ['mint'] },
+      operation: {
+        kind: 'transfer',
+        intent: transferIntent({ catId: 'not-a-cat-id' }),
+      },
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'operation-kind-not-allowed',
+    });
+  });
+});
+
+/* ──────────────────────────  Address equivalence  ────────────────────────── */
+
+describe('validateCat21Operation — address equivalence (BIP173 case-insensitive)', () => {
+  // Per BIP173 bech32 strings are valid in either ALL-LOWERCASE or
+  // ALL-UPPERCASE form and decode to the same address. Allowlist /
+  // self-send checks MUST compare scriptPubKey, not literal string,
+  // so an agent can't bypass either check by passing a different
+  // case to a config that holds the other.
+
+  const MAINNET_ADDR_UPPERCASE = MAINNET_ADDR.toUpperCase();
+
+  it('self-send fires when recipient and ownPaymentAddress differ only in case (mint)', () => {
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, ownPaymentAddress: MAINNET_ADDR },
+      operation: {
+        kind: 'mint',
+        intent: mintIntent({ recipient: MAINNET_ADDR_UPPERCASE }),
+      },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'self-send' });
+  });
+
+  it('self-send fires when recipient and ownPaymentAddress differ only in case (transfer)', () => {
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, ownPaymentAddress: MAINNET_ADDR_UPPERCASE },
+      operation: {
+        kind: 'transfer',
+        intent: transferIntent({ recipient: MAINNET_ADDR }),
+      },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'self-send' });
+  });
+
+  it('allowedRecipients matches case-insensitively (mint)', () => {
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedRecipients: [MAINNET_ADDR] },
+      operation: {
+        kind: 'mint',
+        intent: mintIntent({ recipient: MAINNET_ADDR_UPPERCASE }),
+      },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('allowedRecipients matches case-insensitively (transfer)', () => {
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedRecipients: [MAINNET_ADDR_UPPERCASE] },
+      operation: {
+        kind: 'transfer',
+        intent: transferIntent({ recipient: MAINNET_ADDR }),
+      },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('allowedCounterparties matches case-insensitively (create_offer)', () => {
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedCounterparties: [MAINNET_ADDR_UPPERCASE] },
+      operation: {
+        kind: 'create_offer',
+        intent: createOfferIntent({ paymentAddress: MAINNET_ADDR }),
+      },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('different address types (P2WPKH vs P2TR) are NOT equivalent even at scriptPubKey level', () => {
+    // Sanity check the equivalence helper: bech32 and bech32m on
+    // different witness versions decode to different scripts; the
+    // allowlist must not coalesce them.
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedRecipients: [MAINNET_TAPROOT] },
+      operation: {
+        kind: 'mint',
+        intent: mintIntent({ recipient: MAINNET_ADDR }),
+      },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'recipient-not-allowed' });
+  });
+
+  it('malformed allowlist entry does not crash the check', () => {
+    // A typo'd allowlist entry should make the gate skip that entry
+    // and reject if no valid entry matches — never throw.
+    const result = validateCat21Operation({
+      config: { ...mainnetConfig, allowedRecipients: ['typo-address-not-decodable', MAINNET_ADDR] },
+      operation: {
+        kind: 'mint',
+        intent: mintIntent({ recipient: MAINNET_ADDR }),
+      },
+    });
+    expect(result.ok).toBe(true);
+  });
+});

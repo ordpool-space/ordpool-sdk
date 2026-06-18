@@ -45,6 +45,20 @@ export function validateCat21Operation(args: {
     return reject('intent-not-an-object');
   }
 
+  // Operation-kind allowlist runs BEFORE per-operation validation so
+  // a wallet-configured "mint only" agent's transfer attempt fails
+  // closed without exposing per-transfer field-level reasons (which
+  // a curious agent could probe for capability-leak info).
+  if (
+    Array.isArray(config.allowedOperations) &&
+    config.allowedOperations.length > 0 &&
+    !config.allowedOperations.includes(
+      operation.kind as 'mint' | 'transfer' | 'create_offer' | 'accept_offer',
+    )
+  ) {
+    return reject('operation-kind-not-allowed', operation.kind);
+  }
+
   switch (operation.kind) {
     case 'mint':
       return validateMint(operation.intent, config);
@@ -73,12 +87,16 @@ function validateMint(
   const recipient = validateAddress(intent.recipient, config, 'recipient');
   if (!recipient.ok) return recipient.result;
 
+  const targetNet = toScureNetwork(config.network);
   if (config.allowedRecipients && config.allowedRecipients.length > 0) {
-    if (!config.allowedRecipients.includes(intent.recipient)) {
+    if (!allowlistContainsAddress(intent.recipient, config.allowedRecipients, targetNet)) {
       return reject('recipient-not-allowed', intent.recipient);
     }
   }
-  if (config.ownPaymentAddress && intent.recipient === config.ownPaymentAddress) {
+  if (
+    config.ownPaymentAddress &&
+    addressesEquivalent(intent.recipient, config.ownPaymentAddress, targetNet)
+  ) {
     return reject('self-send', intent.recipient);
   }
 
@@ -105,12 +123,16 @@ function validateTransfer(
   const recipient = validateAddress(intent.recipient, config, 'recipient');
   if (!recipient.ok) return recipient.result;
 
+  const targetNet = toScureNetwork(config.network);
   if (config.allowedRecipients && config.allowedRecipients.length > 0) {
-    if (!config.allowedRecipients.includes(intent.recipient)) {
+    if (!allowlistContainsAddress(intent.recipient, config.allowedRecipients, targetNet)) {
       return reject('recipient-not-allowed', intent.recipient);
     }
   }
-  if (config.ownPaymentAddress && intent.recipient === config.ownPaymentAddress) {
+  if (
+    config.ownPaymentAddress &&
+    addressesEquivalent(intent.recipient, config.ownPaymentAddress, targetNet)
+  ) {
     return reject('self-send', intent.recipient);
   }
 
@@ -139,7 +161,8 @@ function validateCreateOffer(
   if (!payment.ok) return payment.result;
 
   if (config.allowedCounterparties && config.allowedCounterparties.length > 0) {
-    if (!config.allowedCounterparties.includes(intent.paymentAddress)) {
+    const targetNet = toScureNetwork(config.network);
+    if (!allowlistContainsAddress(intent.paymentAddress, config.allowedCounterparties, targetNet)) {
       return reject('payment-address-not-allowed', intent.paymentAddress);
     }
   }
@@ -431,6 +454,61 @@ function isObject(value: unknown): value is Record<string, unknown> {
  * The detail field is debug telemetry only, so a "[Symbol]"
  * placeholder is more useful than a runtime crash.
  */
+/**
+ * Compare two addresses for protocol-level equivalence by decoding
+ * both to scriptPubKey bytes and comparing those. Defends against:
+ *
+ *   - BIP173 uppercase/lowercase: `BC1QW508…` and `bc1qw508…` are
+ *     the same address (scure accepts both), so a config storing
+ *     one form must also match the other.
+ *   - Mixed encodings: `bc1q…` (bech32, P2WPKH) and `3…` (P2SH-
+ *     wrapped) decode to different scripts — correctly different
+ *     addresses. Different scripts → different bytes → unequal.
+ *   - Address-set lookup-by-string with a config that has typos /
+ *     whitespace: throws on decode, so the check returns `false`
+ *     (the candidate is rejected, but the gate doesn't crash).
+ *
+ * Returns `false` on any decode failure of EITHER address. Caller
+ * decides what to do — typically "reject as not-equivalent and
+ * surface a typed reason elsewhere".
+ */
+function addressesEquivalent(
+  a: string,
+  b: string,
+  network: typeof btc.NETWORK | typeof btc.TEST_NETWORK,
+): boolean {
+  let aScript: Uint8Array;
+  let bScript: Uint8Array;
+  try {
+    aScript = btc.OutScript.encode(btc.Address(network).decode(a));
+    bScript = btc.OutScript.encode(btc.Address(network).decode(b));
+  } catch {
+    return false;
+  }
+  if (aScript.length !== bScript.length) return false;
+  for (let i = 0; i < aScript.length; i++) {
+    if (aScript[i] !== bScript[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Test whether `candidate` is equivalent (in the
+ * `addressesEquivalent` sense) to any address in `allowlist`. Returns
+ * `false` on any decode failure inside the loop so a malformed
+ * allowlist entry doesn't crash the check.
+ */
+function allowlistContainsAddress(
+  candidate: string,
+  allowlist: ReadonlyArray<string>,
+  network: typeof btc.NETWORK | typeof btc.TEST_NETWORK,
+): boolean {
+  for (const entry of allowlist) {
+    if (addressesEquivalent(candidate, entry, network)) return true;
+  }
+  return false;
+}
+
 function safeStringify(value: unknown): string {
   try {
     if (typeof value === 'symbol') return value.toString();

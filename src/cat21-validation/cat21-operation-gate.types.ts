@@ -154,6 +154,22 @@ export interface Cat21OperationGateConfig {
    * PSBT to OOM the popup's PSBT parser.
    */
   maxOfferPsbtBytes?: number;
+
+  /**
+   * Positive allowlist on the operation kind itself. When set and
+   * non-empty, ONLY the listed operation kinds are accepted; any
+   * other kind is rejected with `operation-kind-not-allowed`.
+   *
+   * Use case: an agent identity is provisioned with "mint only" or
+   * "no offer creation". The wallet builds a config carrying just
+   * `['mint']` and feeds it to every gate call from that agent;
+   * transfer / offer attempts fail closed with a typed reason
+   * (no silent acceptance).
+   *
+   * When unset or empty array → all four kinds accepted (default
+   * permissive).
+   */
+  allowedOperations?: ReadonlyArray<'mint' | 'transfer' | 'create_offer' | 'accept_offer'>;
 }
 
 /* ──────────────────────────  Result shapes  ────────────────────────── */
@@ -167,6 +183,7 @@ export type Cat21GateRejectReason =
   // Generic shape errors
   | 'intent-not-an-object'
   | 'unsupported-operation-kind'
+  | 'operation-kind-not-allowed'
 
   // Address validation (recipient, tip, payment, counterparty)
   | 'recipient-not-a-bitcoin-address'
