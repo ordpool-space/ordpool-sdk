@@ -31,7 +31,7 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import { base58 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { CAT21_POSTAGE_SATS } from '../../src/cat21-postage';
+import { CAT21_POSTAGE_SATS } from '../../src/cat21-protocol/cat21-postage';
 import {
   CAT21_OFFER_INPUT_SEQUENCE,
   buildCat21BuyOfferPsbt,

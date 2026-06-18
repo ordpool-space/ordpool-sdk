@@ -312,11 +312,15 @@ describe('cat21 mint roundtrip on regtest', () => {
         Network.Regtest,
       );
       const { dummyPrivateKey } = getDummyKeypair(regtestNetwork);
-      sim.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.ALL]);
+      // Taproot inputs in the SDK now omit `sighashType`
+      // (SIGHASH_DEFAULT, wire-equivalent to SIGHASH_ALL per
+      // BIP-341); allow both shapes so the Taproot test case
+      // doesn't trip scure's allowed-sighash check.
+      sim.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
       sim.tx.finalize();
 
       // ─── Phase 5: sign + finalize the real tx ───
-      tx.signIdx(funderPrivateKey, 0, [btc.SigHash.ALL]);
+      tx.signIdx(funderPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
       tx.finalize();
       // ECDSA DER signatures vary by 0-2 bytes depending on whether
       // r/s components hit a high bit and need a leading zero. For
@@ -444,7 +448,7 @@ describe('cat21 mint roundtrip on regtest', () => {
       expect(onlyOutput.script).not.toEqual(dustPaymentScript);
 
       // ─── sign + broadcast + mine ───
-      tx.signIdx(dustPrivateKey, 0, [btc.SigHash.ALL]);
+      tx.signIdx(dustPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
       tx.finalize();
       const broadcastedTxid = await postTx(tx.hex);
       expect(broadcastedTxid).toBe(tx.id);
