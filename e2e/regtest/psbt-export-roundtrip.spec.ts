@@ -161,6 +161,7 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
       txid: utxo.txid,
       vout: utxo.vout,
       value: utxo.value,
+      status: { confirmed: true },
     };
 
     // Phase 1: SDK build. walletType=xpub goes through the
@@ -243,7 +244,7 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
     expect(status.block_height).toBe(tipAfterMine);
 
     const retrievedHex = await getTxHex(broadcastedTxid);
-    expect(retrievedHex).toBe(broadcastedTxHex);
+    expect(retrievedHex).toBe(capturedTxHex);
 
     // Phase 7: ordpool-parser recognises the on-chain tx as a CAT-21.
     const esploraTx = await getTx(broadcastedTxid);
