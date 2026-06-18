@@ -196,6 +196,15 @@ jobs:
           WALLET_DIR="/tmp/cat21-wallet"
           rm -rf "$WALLET_DIR"
           git clone --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$WALLET_DIR"
+          # cat21-wallet's prebuild hook (apps/extension/scripts/
+          # check-sdk-fresh.cjs) expects ordpool-sdk to be checked
+          # out as a sibling at /tmp/ordpool-sdk. This workflow
+          # checks the SDK out at $GITHUB_WORKSPACE (default
+          # location); symlink so the wallet's freshness check
+          # finds it. dist-core is already built earlier in this
+          # job by `npm ci` → prepare → npm run build.
+          rm -rf /tmp/ordpool-sdk
+          ln -s "$GITHUB_WORKSPACE" /tmp/ordpool-sdk
           cd "$WALLET_DIR"
           pnpm install --frozen-lockfile
           pnpm build:extension
