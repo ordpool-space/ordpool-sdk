@@ -1,5 +1,27 @@
 import * as btc from '@scure/btc-signer';
-import { BitcoinNetworkType } from 'sats-connect';
+
+/**
+ * Sats-connect's `BitcoinNetworkType` enum, redeclared locally.
+ *
+ * Why not import from `sats-connect` directly: sats-connect's index
+ * pulls axios (and therefore `process/browser`) into anything that
+ * imports `ordpool-sdk/core`. The wallet's MV3 background bundle
+ * can't resolve `process/browser` from inside the SDK's
+ * `node_modules/axios/lib`, so the whole core entry stops importing.
+ * The enum values are wire-protocol strings, identical to what
+ * sats-connect declares (`'Mainnet' | 'Testnet' | 'Testnet4' |
+ * 'Signet' | 'Regtest'`), so a local copy passes Xverse's mode-
+ * string check at runtime without any sats-connect code being
+ * loaded.
+ */
+const BitcoinNetworkType = {
+  Mainnet: 'Mainnet',
+  Testnet: 'Testnet',
+  Testnet4: 'Testnet4',
+  Signet: 'Signet',
+  Regtest: 'Regtest',
+} as const;
+type BitcoinNetworkType = (typeof BitcoinNetworkType)[keyof typeof BitcoinNetworkType];
 
 /**
  * Bitcoin network the SDK is operating on. Matches the bitcoinjs /
