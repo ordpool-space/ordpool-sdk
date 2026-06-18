@@ -28,7 +28,7 @@
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { base58 } from '@scure/base';
+import { base58, base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { CAT21_POSTAGE_SATS } from '../../src/cat21-protocol/cat21-postage';
@@ -48,6 +48,7 @@ import {
   getFundedAccount,
   getUtxos,
   mineBlocks,
+  ordCreateOffer,
   ordCreateWallet,
   postTx,
   rpc,
@@ -347,11 +348,10 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     // After this skeleton ord calls `fund_raw_transaction` to add buyer
     // inputs + (maybe) a change output.
     //
-    // The byte-compare via `ord wallet offer create` is parked behind a
-    // cat21-ord fix (its cat21_text_layer breaks ord's wallet HTTP
-    // client — see the header docstring). For now we assert the SDK
-    // PSBT matches every byte-field ord's skeleton commits to,
-    // sourced by reading ord's create.rs directly.
+    // Step 3c runs the live `ord wallet offer create` and byte-compares
+    // its output. This step pins the same fields against ord's create.rs
+    // source directly, so the SDK contract stays guarded even when the
+    // docker ord stack isn't in the loop.
     const sdkTx = btc.Transaction.fromPSBT(sdkOfferPsbtBytes);
 
     // version
@@ -379,41 +379,83 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     expect(sdkTx.lockTime).toBe(21);
   });
 
-  it('step 3c: ord-parity — `ord wallet offer create` reaches into bitcoind fundrawtransaction (live byte-compare deferred)', () => {
-    // cat21-ord's wallet now reads a cat server correctly (commit
-    // 2de45815 — cat21_decat_json runs every response body through
-    // the reverse of the server's text-layer rewrite before serde).
-    // That fix took us from "blessed_inscriptions missing" to a
-    // fresh downstream block:
+  it('step 3c: ord-parity — live `ord wallet offer create` funds a cross-wallet seller input and byte-matches the SDK', () => {
+    // The live counterpart to step 3b: this runs the real
+    // `ord wallet offer create` against Bitcoin Core and byte-compares
+    // its PSBT to the SDK's. It exercises two cat21-ord fixes end to end:
     //
-    //   ord wallet offer create
-    //     → fund_raw_transaction(ord_bitcoind_client, …)
-    //     → fundrawtransaction RPC on Bitcoin Core 28
-    //     → "Not solvable pre-selected input COutPoint(<seller>, 0)"
+    //   1. Wallet decat (cat21-ord a4ac4ad9): the buyer wallet runs in
+    //      `--index-cat21` mode and reverses the server's text-layer
+    //      rename before serde, so `wallet.get_inscription(id)` can parse
+    //      the cat server's `/inscription/<id>` JSON at all.
+    //   2. Offer-create input_weights (cat21-ord 86e4ac5d, upstream PR
+    //      ordinals/ord#4537): the seller's cat UTXO sits at B's address,
+    //      which the buyer's Bitcoin Core wallet holds no descriptor for.
+    //      Core v24+ rejects an unsolvable pre-selected input in
+    //      fundrawtransaction unless its weight is supplied. Without the
+    //      fix this call dies with
+    //      "Not solvable pre-selected input COutPoint(<seller>, 0)"; with
+    //      it, funding succeeds.
     //
-    // The seller's cat UTXO is at B's address. ord's bitcoind wallet
-    // doesn't hold B's key/descriptor. Bitcoin Core 28's
-    // fundrawtransaction (descriptor wallets) tightened input
-    // solvability — pre-selected inputs whose scripts the wallet
-    // can't solve are rejected so the fee estimator stays accurate.
-    // ord builds the seller input UNSIGNED (intentionally — it's the
-    // buyer-initiated PSBT contract) but Core 28 still wants the
-    // script descriptor to be in scope.
-    //
-    // Workaround on the ord side: import the seller's address as
-    // watch-only into ord's bitcoind wallet, OR teach ord to pass
-    // `solving_data` to fundrawtransaction (vanilla ord hits this
-    // too on Core 28; not a cat21-ord fork issue). Out of scope for
-    // this commit.
-    //
-    // The byte-compare itself is already pinned against ord's
-    // create.rs source above (step 3b — version, sequence, output
-    // values, lockTime delta). The "live" version of this test would
-    // confirm we read create.rs correctly; until ord on Core 28 can
-    // fund a cross-wallet seller input, the source-level pin is the
-    // ground truth.
-    expect(typeof inscriptionId).toBe('string');
-    expect(sdkOfferPsbtBytes.length).toBeGreaterThan(0);
+    // A green run here IS the proof that offer create works on real Core:
+    // ordCreateOffer throws on any non-zero exit, so a regressed fix
+    // fails the test at the call below.
+    const ordOffer = ordCreateOffer(inscriptionId, PRICE_SATS, 1);
+    expect(ordOffer.inscription).toBe(inscriptionId);
+
+    const ordTx = btc.Transaction.fromPSBT(base64.decode(ordOffer.psbt));
+    const sdkTx = btc.Transaction.fromPSBT(sdkOfferPsbtBytes);
+
+    // version: both 2
+    expect(ordTx.version).toBe(2);
+    expect(ordTx.version).toBe(sdkTx.version);
+
+    // The seller's cat UTXO appears as a pre-selected, UNSIGNED input in
+    // both PSBTs. ord resolves it from the inscription id; the SDK was
+    // handed it explicitly. Both end up on the post-transfer satpoint
+    // (transferTxid:0). fundrawtransaction APPENDS the buyer's funding
+    // inputs (ord only pins the change-output position, not input order),
+    // so locate the seller input by outpoint rather than by index. Both
+    // txids come from the same parser, so the raw bytes compare directly.
+    const sdkSeller = sdkTx.getInput(0);
+    const bytesEqual = (a?: Uint8Array, b?: Uint8Array): boolean => {
+      if (!a || !b || a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) return false;
+      }
+      return true;
+    };
+    let ordSellerIdx = -1;
+    for (let i = 0; i < ordTx.inputsLength; i++) {
+      const candidate = ordTx.getInput(i);
+      if (candidate.index === sdkSeller.index && bytesEqual(candidate.txid, sdkSeller.txid)) {
+        ordSellerIdx = i;
+        break;
+      }
+    }
+    expect(ordSellerIdx).toBeGreaterThanOrEqual(0);
+
+    // seller input: sequence ENABLE_RBF_NO_LOCKTIME (0xfffffffd), left
+    // UNSIGNED — the seller signs it on `offer accept`.
+    const ordSeller = ordTx.getInput(ordSellerIdx);
+    expect(ordSeller.sequence).toBe(CAT21_OFFER_INPUT_SEQUENCE);
+    expect(ordSeller.sequence).toBe(sdkSeller.sequence);
+    expect(ordSeller.partialSig).toBeUndefined();
+    expect(ordSeller.tapKeySig).toBeUndefined();
+
+    // output[0]: 546 postage (the cat lands on the buyer side).
+    expect(ordTx.getOutput(0).amount).toBe(BigInt(CAT21_POSTAGE_SATS));
+    expect(ordTx.getOutput(0).amount).toBe(sdkTx.getOutput(0).amount);
+
+    // output[1]: priceSats + postage to the seller.
+    expect(ordTx.getOutput(1).amount).toBe(BigInt(PRICE_SATS + CAT21_POSTAGE_SATS));
+    expect(ordTx.getOutput(1).amount).toBe(sdkTx.getOutput(1).amount);
+
+    // The sole intentional structural diff: lockTime. ord sets 0; the
+    // SDK sets 21 so the accept tx ALSO mints a fresh cat onto the same
+    // ordinal (wallet HARD RULE #1).
+    expect(ordTx.lockTime).toBe(0);
+    expect(sdkTx.lockTime).toBe(21);
   });
 
   it('step 4: B signs the buyer-built offer; cat returns to A', async () => {
