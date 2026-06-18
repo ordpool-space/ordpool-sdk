@@ -300,21 +300,25 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   const utxo = await waitForUtxoAt(connectInfo.address, Math.round(FUND_AMOUNT_BTC * 1e8));
   console.log(`[alby-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
-  // Build a Taproot-input cat21 mint PSBT in the harness. The
-  // harness already has @scure/btc-signer wired up; we drive the
-  // same createTransaction path Unisat/Wizz/OKX use, but with a
-  // Taproot input shape (cat21 mint has nLockTime=21, single
-  // input, single output that mirrors the input minus fee).
+  // Build via the REAL SDK. Post-26730b0 the SDK's mint pipeline
+  // dispatches on address format via buildInputScript, AND omits
+  // sighashType on Taproot inputs (BIP-341-equivalent to
+  // SIGHASH_ALL on the wire for key-path spends, and what Alby's
+  // bitcoinjs-lib signer accepts by default). The harness no longer
+  // needs the parallel buildCat21TaprootPsbt detour — Alby exercises
+  // the same `createTransaction(KnownOrdinalWalletType.alby, ...)`
+  // path as every other wallet.
   const psbtBuildResult = await harness.evaluate((args) => {
-    return window.ordpoolSdkHarness.buildCat21TaprootPsbt(args);
+    return window.ordpoolSdkHarness.buildCat21MintPsbtForAlby(args);
   }, {
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
-    taprootAddress: connectInfo.address,
-    taprootPublicKey: connectInfo.publicKey,
+    paymentAddress: connectInfo.address,
+    paymentPublicKey: connectInfo.publicKey,
+    recipientAddress: connectInfo.address, // self-recipient for the smoke roundtrip
     feeSats: 1500,
   }).catch((e) => ({ error: String(e) } as { psbtHex?: string; error?: string }));
   if ('error' in psbtBuildResult && psbtBuildResult.error) {
-    throw new Error(`harness PSBT build failed (probably needs buildCat21TaprootPsbt added): ${psbtBuildResult.error}`);
+    throw new Error(`harness PSBT build failed: ${psbtBuildResult.error}`);
   }
   const psbtHex = (psbtBuildResult as { psbtHex: string }).psbtHex;
   console.log(`[alby-mint] PSBT hex length = ${psbtHex.length}`);

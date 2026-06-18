@@ -143,7 +143,11 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   }
   for (let i = 0; i < tx.inputsLength; i++) {
     const input = tx.getInput(i);
-    if (input.sighashType !== btc.SigHash.ALL) {
+    // Taproot inputs intentionally omit sighashType (see addInput);
+    // SIGHASH_DEFAULT and SIGHASH_ALL are wire-equivalent for key-path
+    // spends per BIP-341.
+    const isTaproot = !!input.tapInternalKey;
+    if (!isTaproot && input.sighashType !== btc.SigHash.ALL) {
       throw new Error(`Internal error: input ${i} sighashType is not SIGHASH_ALL`);
     }
     if (input.sequence !== sequence) {
@@ -184,16 +188,23 @@ function addInput(
 
   // SegWit family: witnessUtxo + optional redeemScript (P2SH-wrap) +
   // optional tapInternalKey (Taproot key-path).
+  //
+  // Taproot inputs OMIT sighashType — see the same comment in
+  // cat21-mint.helper.ts. SIGHASH_DEFAULT and SIGHASH_ALL commit to
+  // identical bytes for Taproot key-path spends (BIP-341); omitting
+  // the field lets the wallet's signer use its default (DEFAULT) and
+  // avoids the Alby/bitcoinjs-lib whitelist rejection.
+  const isTaproot = !!utxo.tapInternalKey;
   const inputBase: btc.TransactionInputUpdate = {
     txid: utxo.txid,
     index: utxo.vout,
     sequence,
-    sighashType: btc.SigHash.ALL,
     witnessUtxo: {
       script: utxo.scriptPubKey,
       amount: BigInt(utxo.value),
     },
   };
+  if (!isTaproot) inputBase.sighashType = btc.SigHash.ALL;
   if (utxo.redeemScript) inputBase.redeemScript = utxo.redeemScript;
   if (utxo.tapInternalKey) inputBase.tapInternalKey = utxo.tapInternalKey;
   tx.addInput(inputBase);

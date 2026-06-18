@@ -123,7 +123,14 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // the mempool congests after broadcast. Per cat21-wallet HARD RULE #1,
   // non-mint cat-flows allow RBF — third-party accelerators that drop
   // lockTime=21 cost the user a missed bonus mint, not a cat.
-  tx.addInput({
+  // Detect Taproot from the scriptPubKey shape (OP_1 + 0x20-prefixed
+  // 32-byte push = 34 bytes total, starts with 0x51). On Taproot
+  // inputs we OMIT sighashType — same BIP-341 rationale as in
+  // cat21-mint.helper.ts.
+  const sellerIsTaproot =
+    args.sellerInput.scriptPubKey.length === 34 &&
+    args.sellerInput.scriptPubKey[0] === 0x51;
+  const sellerInput: btc.TransactionInputUpdate = {
     txid: args.sellerInput.txid,
     index: args.sellerInput.vout,
     sequence: CAT21_OFFER_INPUT_SEQUENCE,
@@ -131,8 +138,9 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
       script: args.sellerInput.scriptPubKey,
       amount: BigInt(args.sellerInput.value),
     },
-    sighashType: btc.SigHash.ALL,
-  });
+  };
+  if (!sellerIsTaproot) sellerInput.sighashType = btc.SigHash.ALL;
+  tx.addInput(sellerInput);
 
   // Inputs 1..N: buyer-funded. Same RBF-signalling sequence — keeps the
   // entire transaction replaceable as a unit.
@@ -155,6 +163,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
     }
 
     // SegWit family.
+    const isTaproot = !!input.tapInternalKey;
     const base: btc.TransactionInputUpdate = {
       txid: input.txid,
       index: input.vout,
@@ -163,8 +172,8 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
         script: input.scriptPubKey,
         amount: BigInt(input.value),
       },
-      sighashType: btc.SigHash.ALL,
     };
+    if (!isTaproot) base.sighashType = btc.SigHash.ALL;
     if (input.redeemScript) base.redeemScript = input.redeemScript;
     if (input.tapInternalKey) base.tapInternalKey = input.tapInternalKey;
     tx.addInput(base);
@@ -213,7 +222,12 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // locked into the transaction.
   for (let i = 0; i < tx.inputsLength; i++) {
     const input = tx.getInput(i);
-    if (input.sighashType !== btc.SigHash.ALL) {
+    // Taproot inputs intentionally omit sighashType (SIGHASH_DEFAULT ≡
+    // SIGHASH_ALL on the wire for key-path spends, BIP-341).
+    const isTaproot =
+      !!input.tapInternalKey ||
+      (input.witnessUtxo?.script?.length === 34 && input.witnessUtxo.script[0] === 0x51);
+    if (!isTaproot && input.sighashType !== btc.SigHash.ALL) {
       throw new Error('Internal error: input sighashType drifted from SIGHASH_ALL');
     }
     if (input.sequence !== CAT21_OFFER_INPUT_SEQUENCE) {

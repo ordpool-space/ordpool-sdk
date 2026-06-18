@@ -348,7 +348,10 @@ describe('createTransaction byte snapshot (pinned for @scure/btc-signer)', () =>
         false,
         Network.Mainnet
       );
-      result.tx.signIdx(dummyKeypair.dummyPrivateKey, 0, [btc.SigHash.ALL], zeroAux);
+      // Taproot inputs omit `sighashType` (DEFAULT ≡ ALL on the wire for
+// key-path spends per BIP-341). Accept either in the allowed-sighash
+// list so the same call works for both shapes.
+result.tx.signIdx(dummyKeypair.dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL], zeroAux);
       result.tx.finalize();
       return result.tx.hex;
     };
@@ -463,7 +466,7 @@ createTransactionTestCases.forEach(({ info, walletType, recipientAddress, paymen
     afterEach(() => {
 
       if (result?.tx) {
-        result.tx.signIdx(dummyKeypair.dummyPrivateKey, 0, [btc.SigHash.ALL]);
+        result.tx.signIdx(dummyKeypair.dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
         result.tx.finalize();
         expect(result.tx.vsize).toBeGreaterThan(100);
       }

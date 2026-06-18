@@ -195,6 +195,17 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   }
   for (let i = 0; i < tx.inputsLength; i++) {
     const input = tx.getInput(i);
+    // Taproot inputs deliberately omit `sighashType` so signers default
+    // to SIGHASH_DEFAULT (wire-equivalent to SIGHASH_ALL on key-path
+    // spends per BIP-341). Allow undefined for those; require SIGHASH_ALL
+    // explicitly on every non-Taproot input.
+    const isTaproot = !!input.tapInternalKey;
+    if (isTaproot) {
+      if (input.sighashType !== undefined && input.sighashType !== btc.SigHash.ALL) {
+        throw new Error(`Internal error: input ${i} taproot sighashType=${input.sighashType}, expected undefined or SIGHASH_ALL`);
+      }
+      continue;
+    }
     if (input.sighashType !== btc.SigHash.ALL) {
       throw new Error(`Internal error: input ${i} sighashType is not SIGHASH_ALL`);
     }
@@ -239,16 +250,29 @@ function addInput(
 
   // SegWit family: witnessUtxo + (optional) redeemScript for P2SH-wrap
   // + (optional) tapInternalKey for Taproot key-path.
+  //
+  // For Taproot inputs we OMIT `sighashType`. Per BIP-341, SIGHASH_DEFAULT
+  // (absent) and SIGHASH_ALL (0x01) commit to identical bytes — only the
+  // signature length differs (64 vs 65 bytes; DEFAULT skips the explicit
+  // flag suffix). Most wallet signers default to DEFAULT for Taproot and
+  // some (Alby's bitcoinjs-lib-based signer) REJECT an explicit
+  // SIGHASH_ALL on Taproot inputs because their whitelist requires
+  // `allowedSighashTypes` to be passed to opt in, and not every wallet
+  // exposes that knob. Omitting the field lets the signer pick its
+  // default; the wire-format commitment is identical.
+  const isTaproot = !!utxo.tapInternalKey;
   const inputBase: btc.TransactionInputUpdate = {
     txid: utxo.txid,
     index: utxo.vout,
     sequence,
-    sighashType: btc.SigHash.ALL,
     witnessUtxo: {
       script: utxo.scriptPubKey,
       amount: BigInt(utxo.value),
     },
   };
+  if (!isTaproot) {
+    inputBase.sighashType = btc.SigHash.ALL;
+  }
   if (utxo.redeemScript) {
     inputBase.redeemScript = utxo.redeemScript;
   }

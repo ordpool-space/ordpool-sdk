@@ -132,10 +132,24 @@ declare global {
         signingSupported: boolean;
       }>;
       /**
-       * Build-only helper: produce a cat21 mint PSBT (hex) with a
-       * P2TR (Taproot, key-spend) input. Used by Alby — and any
-       * future wallet — that signs Taproot inputs directly rather
-       * than going through the SDK's per-wallet build+sign wrapper.
+       * Alby mint — pure PSBT build (no signing). Returns the
+       * unfinalized PSBT bytes the Alby spec then hands to Alby's
+       * background-script signPsbt. Builds via the REAL SDK API
+       * (`createTransaction(KnownOrdinalWalletType.alby, ...)`) —
+       * post-26730b0 the SDK dispatches on address format so Alby
+       * no longer needs the parallel buildCat21TaprootPsbt detour.
+       */
+      buildCat21MintPsbtForAlby(input: {
+        utxo: { txid: string; vout: number; value: number };
+        paymentAddress: string;
+        paymentPublicKey: string;
+        recipientAddress: string;
+        feeSats: number;
+      }): { psbtHex: string };
+      /**
+       * @deprecated kept for transitional compatibility — DO NOT use
+       * in new specs. The Alby spec migrates to
+       * `buildCat21MintPsbtForAlby` which goes through the real SDK.
        */
       buildCat21TaprootPsbt(input: {
         utxo: { txid: string; vout: number; value: number };
@@ -717,13 +731,11 @@ window.ordpoolSdkHarness.buildAndSignMintViaWizz = async (input: MintRequest) =>
     vout:  input.utxo.vout,
     value: input.utxo.value,
   };
-  // createTransaction's switch only branches on leather/xverse/unisat
-  // — Wizz is a Unisat fork with the same single-address contract, so
-  // route through the unisat input-script path. The signing layer
-  // still calls window.wizz below; only the PSBT construction reuses
-  // unisat's branch.
+  // Pass the REAL walletType. Post-26730b0 the SDK dispatches on
+  // address format via buildInputScript, so wizz no longer needs to
+  // pose as unisat. Pipeline B exercises the wizz code path honestly.
   const result = createTransaction(
-    KnownOrdinalWalletType.unisat,
+    KnownOrdinalWalletType.wizz,
     input.recipientAddress,
     txnOutput,
     paymentPubkey,
@@ -772,11 +784,11 @@ window.ordpoolSdkHarness.buildAndSignMintViaOkx = async (input: MintRequest) => 
     vout:  input.utxo.vout,
     value: input.utxo.value,
   };
-  // Route PSBT construction through unisat's input-script path —
-  // OKX's signPsbt accepts the same wire shape as Unisat's and is
-  // a single-address-per-active-type wallet.
+  // Pass the REAL walletType — post-26730b0 the SDK no longer
+  // dispatches on wallet name, so OKX no longer needs to pose as
+  // Unisat.
   const result = createTransaction(
-    KnownOrdinalWalletType.unisat,
+    KnownOrdinalWalletType.okx,
     input.recipientAddress,
     txnOutput,
     paymentPubkey,
@@ -848,12 +860,10 @@ window.ordpoolSdkHarness.buildAndSignMintViaOyl = async (input: MintRequest) => 
     vout:  input.utxo.vout,
     value: input.utxo.value,
   };
-  // Oyl exposes nativeSegwit + taproot per connect. With the default
-  // nativeSegwit payment address, the input-script needs match
-  // unisat's P2WPKH path. Routing through unisat's case constructs
-  // the right witness script.
+  // Pass the REAL walletType — the SDK dispatches on address format
+  // now, not wallet name.
   const result = createTransaction(
-    KnownOrdinalWalletType.unisat,
+    KnownOrdinalWalletType.oyl,
     input.recipientAddress,
     txnOutput,
     paymentPubkey,
@@ -933,8 +943,10 @@ window.ordpoolSdkHarness.buildAndSignMintViaPhantom = async (input: MintRequest)
     vout:  input.utxo.vout,
     value: input.utxo.value,
   };
+  // Pass the REAL walletType — Phantom's address-format-driven
+  // input shape comes out of the universal helper now.
   const result = createTransaction(
-    KnownOrdinalWalletType.unisat,
+    KnownOrdinalWalletType.phantom,
     input.recipientAddress,
     txnOutput,
     paymentPubkey,
@@ -978,6 +990,38 @@ window.ordpoolSdkHarness.buildAndSignMintViaPhantom = async (input: MintRequest)
   const txHex = extractWireTxFromPsbt(signedBytes);
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
+};
+
+/**
+ * Alby mint via the REAL SDK API. Goes through `createTransaction`
+ * with the actual walletType — the universal address-format-driven
+ * helper produces a P2TR input shape with `sighashType` OMITTED
+ * (SIGHASH_DEFAULT, BIP-341-equivalent to SIGHASH_ALL on key-path
+ * spends), which is exactly what Alby's bitcoinjs-lib signer wants.
+ *
+ * No sighash workaround needed at the harness layer — the SDK
+ * itself does the right thing now.
+ */
+window.ordpoolSdkHarness.buildCat21MintPsbtForAlby = (input) => {
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const txnOutput: TxnOutput = {
+    txid: input.utxo.txid,
+    vout: input.utxo.vout,
+    value: input.utxo.value,
+  };
+  const result = createTransaction(
+    KnownOrdinalWalletType.alby,
+    input.recipientAddress,
+    txnOutput,
+    paymentPubkey,
+    input.paymentAddress,
+    BigInt(input.feeSats),
+    false,
+    Network.Regtest,
+  );
+  const psbtHex = bytesToHex(result.tx.toPSBT());
+  log('mint.psbt-built-for-alby', { bytes: psbtHex.length / 2, fee: input.feeSats });
+  return { psbtHex };
 };
 
 window.ordpoolSdkHarness.buildCat21TaprootPsbt = (input) => {

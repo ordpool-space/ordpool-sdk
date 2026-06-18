@@ -169,7 +169,11 @@ export class Cat21Service {
       this.network
     );
 
-    result.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.ALL]);
+    // Taproot inputs omit `sighashType` in the PSBT (SIGHASH_DEFAULT is
+    // wire-equivalent to SIGHASH_ALL for key-path spends per BIP-341).
+    // signIdx's allowed-sighash list must match the input's expectation,
+    // so we pass [DEFAULT, ALL] to cover both shapes.
+    result.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
     result.tx.finalize();
     const vsize = result.tx.vsize; // 🎉
 
@@ -192,7 +196,7 @@ export class Cat21Service {
   dummySignAndFinalize(psbtBytes: Uint8Array): btc.Transaction {
     const tx = btc.Transaction.fromPSBT(psbtBytes);
     const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(this.network));
-    tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.ALL]);
+    tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
     tx.finalize();
     return tx;
   }
