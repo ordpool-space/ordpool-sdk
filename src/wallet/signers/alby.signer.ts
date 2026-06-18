@@ -1,6 +1,7 @@
 import { hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
+import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -20,7 +21,7 @@ interface AlbyApi {
 
 
 /**
- * Alby — `window.alby.webbtc.signPsbt(psbtHex, { sighashTypes: [1] })`.
+ * Alby — `window.alby.webbtc.signPsbt(psbtHex, { sighashTypes })`.
  *
  * Alby's BTC sub-provider sits at `alby.webbtc` (verified iter 99
  * against background.bundle.js v3.14.2). signPsbt accepts the PSBT
@@ -29,29 +30,23 @@ interface AlbyApi {
  * bitcoinjs-lib `extractTransaction().toHex()`. NOT a signed PSBT.
  * We broadcast that wire-tx directly.
  *
- * **Two Alby quirks every caller must respect** (verified iter 108
- * against background.bundle.js):
+ * **Alby quirk every caller must respect** (verified iter 108
+ * against background.bundle.js): Alby signs EVERY input in the
+ * PSBT, no opt-in. The background-script's `bitcoin.signPsbt` does
+ * `psbt.data.inputs.forEach(i => psbt.signTaprootInput(i, key))`
+ * with the user's single key at `m/86'/1'/0'/0/0`. There is no
+ * `signInputs` / `toSignInputs` knob — those args are dropped on
+ * the floor. Caller MUST only hand Alby a PSBT whose inputs are
+ * all the user's own UTXOs. For our cat21 mint (1 input, owner's
+ * own UTXO, owner-pays-fee) this is fine.
  *
- * 1. **Alby signs EVERY input in the PSBT, no opt-in.** The
- *    background-script's `bitcoin.signPsbt` does
- *    `psbt.data.inputs.forEach(i => psbt.signTaprootInput(i, key))`
- *    with the user's single key at `m/86'/1'/0'/0/0`. There is no
- *    `signInputs` / `toSignInputs` knob — those args are dropped on
- *    the floor. Caller MUST only hand Alby a PSBT whose inputs are
- *    all the user's own UTXOs. A multi-party / collab-swap PSBT
- *    will either throw on the first non-matching input or blindly
- *    sign with the user's key. For our cat21 mint (1 input, owner's
- *    own UTXO, owner-pays-fee) this is fine.
- *
- * 2. **The Taproot input MUST be built with SIGHASH_DEFAULT.**
- *    Alby's signer doesn't pass `allowedSighashTypes` to
- *    bitcoinjs-lib's `signTaprootInput`, so bitcoinjs's default
- *    whitelist rejects anything other than SIGHASH_DEFAULT (0).
- *    PSBTs built with `sighashType: SIGHASH_ALL` get
- *    `Sighash type is not allowed. Sighash type: SIGHASH_ALL`.
- *    For Taproot key-path the two encode identically on the wire
- *    (both commit to all outputs), so SIGHASH_DEFAULT is the
- *    correct + only working choice.
+ * The `sighashTypes` whitelist IS forwarded to bitcoinjs-lib's
+ * `signTaprootInput` `allowedSighashTypes` arg. Alby's default
+ * whitelist (when the option is omitted) accepts only
+ * SIGHASH_DEFAULT, so PSBTs with explicit SIGHASH_ALL get rejected.
+ * We pass both DEFAULT (0x00) and ALL (0x01) so Alby accepts
+ * whichever shape the SDK emits — per BIP-341 they're wire-
+ * equivalent on key-path spends.
  *
  * Targets the Alby Browser Extension. Alby Go (mobile) doesn't
  * inject in-page providers — it uses NWC deeplinks, a completely
@@ -67,12 +62,9 @@ export const albySigner: WalletSigner = {
     const p = (async () => {
       await alby.enable();
       if (alby.webbtc.enable) await alby.webbtc.enable();
-      // sighashTypes:[1] = SIGHASH_ALL whitelist required by Alby's
-      // bitcoinjs-lib (its default whitelist only allows SIGHASH_
-      // DEFAULT — see iter 104). Our PSBTs target Taproot key-path
-      // and the wire encoding is identical, so the whitelist just
-      // satisfies Alby's policy check.
-      const { signed } = await alby.webbtc.signPsbt(psbtHex, { sighashTypes: [1] });
+      const { signed } = await alby.webbtc.signPsbt(psbtHex, {
+        sighashTypes: [...BIP341_KEYPATH_SIGHASHES],
+      });
       return signed;
     })();
 

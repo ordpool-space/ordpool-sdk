@@ -31,7 +31,7 @@ describe('albySigner.signAndBroadcast', () => {
     delete (window as unknown as { alby?: unknown }).alby;
   });
 
-  it('calls alby.enable(), alby.webbtc.enable(), then webbtc.signPsbt(hex, {sighashTypes:[1]}) and broadcasts the returned wire-tx hex directly', async () => {
+  it('calls alby.enable(), alby.webbtc.enable(), then webbtc.signPsbt(hex, {sighashTypes:[0,1]}) and broadcasts the returned wire-tx hex directly', async () => {
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
     signPsbtMock.mockResolvedValue({ signed: '0200000001abcd' } as never);
     broadcastMock.mockReturnValue(of('TXID-FROM-BROADCAST'));
@@ -47,7 +47,7 @@ describe('albySigner.signAndBroadcast', () => {
     expect(albyEnableMock).toHaveBeenCalledTimes(1);
     expect(webbtcEnableMock).toHaveBeenCalledTimes(1);
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
-    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), { sighashTypes: [1] });
+    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), { sighashTypes: [0x00, 0x01] });
 
     // Wire-tx hex from Alby goes straight to input.broadcast — no
     // PSBT extract step. The result is the txId from broadcast.

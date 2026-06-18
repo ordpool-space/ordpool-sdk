@@ -2,6 +2,7 @@ import { hex } from '@scure/base';
 import { from, Observable, switchMap } from 'rxjs';
 
 import { broadcastSignedPsbt } from '../psbt-extract';
+import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -54,7 +55,11 @@ export const binanceSigner: WalletSigner = {
         toSignInputs: [{
           index: 0,
           address: input.paymentAddress,
-          sighashTypes: [0x01], // SIGHASH_ALL
+          // BIP-341 key-path: DEFAULT (0x00) and ALL (0x01) cover
+          // identical wire bytes; accept either so the wallet's
+          // policy check passes regardless of which shape the SDK
+          // emits on the Taproot input.
+          sighashTypes: [...BIP341_KEYPATH_SIGHASHES],
         }],
       }),
     ).pipe(

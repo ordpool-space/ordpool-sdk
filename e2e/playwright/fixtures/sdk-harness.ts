@@ -29,6 +29,7 @@ import { albyConnector } from '../../../src/wallet/connectors/alby.connector';
 // and the harness. Full "WE finalize, WE broadcast" reasoning in
 // /Work/ordpool/WALLETS.md.
 import { extractWireTxFromPsbt } from '../../../src/wallet/psbt-extract';
+import { BIP341_KEYPATH_SIGHASHES } from '../../../src/wallet/sighash';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
 import { Network, toBitcoinNetworkType, toScureNetwork } from '../../../src/network';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
@@ -824,7 +825,10 @@ window.ordpoolSdkHarness.buildAndSignMintViaOkx = async (input: MintRequest) => 
       toSignInputs: [{
         index: 0,
         address: mainnetTaproot.address!,
-        sighashTypes: [0x01],
+        // BIP-341 key-path: DEFAULT (0x00) and ALL (0x01) commit
+        // to identical wire bytes; accept either so OKX's policy
+        // check passes regardless of which shape the SDK emits.
+        sighashTypes: [...BIP341_KEYPATH_SIGHASHES],
         disableTweakSigner: false,
       }],
     });
