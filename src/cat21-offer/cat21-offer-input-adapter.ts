@@ -5,7 +5,6 @@ import { Network, toScureNetwork } from '../network';
 import { isSegWit } from '../cat21-script/address-format';
 import { buildInputScript } from '../cat21-script/build-input-script';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { Cat21OfferBuyerInput } from './cat21-offer.types';
 
 /**
@@ -21,12 +20,9 @@ import { Cat21OfferBuyerInput } from './cat21-offer.types';
  *               those, dispatching via the address-format-driven
  *               `buildInputScript`.
  *
- * Pure function. No I/O, no Angular. `walletType` is retained for
- * orchestration concerns but is NOT used for script construction.
+ * Pure function. No I/O, no Angular.
  */
 export interface PrepareBuyOfferBuyerInputArgs {
-  /** Orchestration hint only — does NOT affect script construction. */
-  walletType: KnownOrdinalWalletType;
   utxo: TxnOutput;
   paymentPublicKey: Uint8Array;
   paymentAddress: string;
@@ -35,8 +31,6 @@ export interface PrepareBuyOfferBuyerInputArgs {
 }
 
 export function prepareBuyOfferBuyerInput(args: PrepareBuyOfferBuyerInputArgs): Cat21OfferBuyerInput {
-  void args.walletType;
-
   const scureNetwork = toScureNetwork(args.network);
 
   const { scriptData, tapInternalKey } = buildInputScript({

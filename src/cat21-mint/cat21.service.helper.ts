@@ -17,11 +17,6 @@ export {
   toXOnly,
 } from '../cat21-script/address-format';
 export {
-  createInputScriptForLeather,
-  createInputScriptForUnisat,
-  createInputScriptForXverse,
-} from '../cat21-script/per-wallet-scripts';
-export {
   getDummyKeypair,
   getDummyLegacyTransaction,
 } from '../cat21-fee/dummy-keypair';
@@ -63,7 +58,6 @@ export function createTransaction(
 ): CreateTransactionResult {
 
   const fundingInput = prepareMintInputForWallet(
-    walletType,
     paymentOutput,
     paymentPublicKey,
     paymentAddress,

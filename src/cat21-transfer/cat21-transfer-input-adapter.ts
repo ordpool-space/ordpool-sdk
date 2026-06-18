@@ -5,7 +5,6 @@ import { Network, toScureNetwork } from '../network';
 import { isSegWit } from '../cat21-script/address-format';
 import { buildInputScript } from '../cat21-script/build-input-script';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   Cat21TransferCatInput,
   Cat21TransferFundingInput,
@@ -14,19 +13,13 @@ import {
 /**
  * Layer-2 input adapter for the CAT-21 transfer pipeline.
  *
- * Address-format-driven: dispatches via `buildInputScript`. The
- * `walletType` argument is retained for orchestration concerns the
- * SDK still needs (sequence-number rule etc.) but is NOT used to
- * select script type.
- *
- * Net effect: every wallet — including those the SDK previously
- * threw 'Unknown wallet' on — produces a correct transfer input.
+ * Address-format-driven: dispatches via `buildInputScript`. Works
+ * for every wallet — the wallet identity is irrelevant to script
+ * construction, only the payment address shape matters.
  *
  * Pure function. No I/O, no Angular.
  */
 export interface PrepareTransferInputArgs {
-  /** Orchestration hint only — does NOT affect script construction. */
-  walletType: KnownOrdinalWalletType;
   utxo: TxnOutput;
   paymentPublicKey: Uint8Array;
   paymentAddress: string;
@@ -43,8 +36,6 @@ export function prepareTransferFundingInput(args: PrepareTransferInputArgs): Cat
 }
 
 function prepareInput(args: PrepareTransferInputArgs): Cat21TransferCatInput {
-  void args.walletType;
-
   const scureNetwork = toScureNetwork(args.network);
 
   const { scriptData, tapInternalKey } = buildInputScript({

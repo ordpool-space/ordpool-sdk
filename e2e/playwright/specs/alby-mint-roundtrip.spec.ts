@@ -300,14 +300,12 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   const utxo = await waitForUtxoAt(connectInfo.address, Math.round(FUND_AMOUNT_BTC * 1e8));
   console.log(`[alby-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
-  // Build via the REAL SDK. Post-26730b0 the SDK's mint pipeline
-  // dispatches on address format via buildInputScript, AND omits
-  // sighashType on Taproot inputs (BIP-341-equivalent to
-  // SIGHASH_ALL on the wire for key-path spends, and what Alby's
-  // bitcoinjs-lib signer accepts by default). The harness no longer
-  // needs the parallel buildCat21TaprootPsbt detour — Alby exercises
-  // the same `createTransaction(KnownOrdinalWalletType.alby, ...)`
-  // path as every other wallet.
+  // Build via the real SDK. The mint pipeline dispatches on
+  // address format via buildInputScript and omits sighashType on
+  // Taproot inputs (BIP-341-equivalent to SIGHASH_ALL on the wire
+  // for key-path spends). Alby exercises the same
+  // `createTransaction(KnownOrdinalWalletType.alby, ...)` path as
+  // every other wallet.
   const psbtBuildResult = await harness.evaluate((args) => {
     return window.ordpoolSdkHarness.buildCat21MintPsbtForAlby(args);
   }, {

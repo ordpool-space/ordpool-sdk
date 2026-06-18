@@ -3,7 +3,6 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { prepareBuyOfferBuyerInput } from './cat21-offer-input-adapter';
 
 const PUBKEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
@@ -23,9 +22,8 @@ const baseUtxo = {
 
 describe('prepareBuyOfferBuyerInput', () => {
 
-  it('returns a SegWit-shaped input for Leather (P2WPKH script, no redeemScript/nonWitnessUtxo)', () => {
+  it('returns a SegWit-shaped input for a P2WPKH payment address (no redeemScript/nonWitnessUtxo)', () => {
     const input = prepareBuyOfferBuyerInput({
-      walletType: KnownOrdinalWalletType.leather,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: segwitAddr,
@@ -39,9 +37,8 @@ describe('prepareBuyOfferBuyerInput', () => {
     expect(input.value).toBe(50_000);
   });
 
-  it('returns Taproot-shape for Unisat-P2TR', () => {
+  it('returns Taproot-shape for a P2TR payment address', () => {
     const input = prepareBuyOfferBuyerInput({
-      walletType: KnownOrdinalWalletType.unisat,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: p2trAddr,
@@ -52,9 +49,8 @@ describe('prepareBuyOfferBuyerInput', () => {
     expect(input.tapInternalKey!.length).toBe(32);
   });
 
-  it('returns P2SH-wrapped shape for Xverse (with redeemScript)', () => {
+  it('returns P2SH-wrapped shape for a P2SH-P2WPKH payment address (with redeemScript)', () => {
     const input = prepareBuyOfferBuyerInput({
-      walletType: KnownOrdinalWalletType.xverse,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: p2shAddr,
@@ -63,21 +59,5 @@ describe('prepareBuyOfferBuyerInput', () => {
     });
     expect(input.redeemScript).toBeDefined();
     expect(input.nonWitnessUtxo).toBeUndefined();
-  });
-
-  it('accepts an unknown walletType and dispatches purely on address format (no wallet-name switch left)', () => {
-    // The address-format-driven migration means walletType is
-    // orchestration-only; the adapter ignores it for script
-    // construction. Any string produces a valid input as long as
-    // the payment address resolves to a known format.
-    const input = prepareBuyOfferBuyerInput({
-      walletType: 'NOT-A-REAL-WALLET' as unknown as KnownOrdinalWalletType,
-      utxo: baseUtxo,
-      paymentPublicKey: PUBKEY,
-      paymentAddress: segwitAddr,
-      isSimulation: false,
-      network: NETWORK,
-    });
-    expect(input.scriptPubKey.length).toBe(22);
   });
 });

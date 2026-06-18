@@ -16,7 +16,7 @@ import { KnownOrdinalWalletType } from './wallet.service.types';
  * `KnownOrdinalWalletType.unisat` to `createTransaction` while
  * advertising they were testing the actual wallet — the harness lied
  * at the API boundary. Alby bypassed the SDK API entirely via a
- * parallel scure build (`buildCat21TaprootPsbt`).
+ * parallel scure build that has since been deleted.
  *
  * After 26730b0 the SDK dispatches on address format, so harnesses
  * no longer need to lie. This test pins that they DON'T.

@@ -13,7 +13,7 @@
 import { firstValueFrom } from 'rxjs';
 import { signTransaction } from 'sats-connect';
 import { base64 } from '@scure/base';
-import { p2wpkh, p2tr, Transaction } from '@scure/btc-signer';
+import { p2wpkh, p2tr } from '@scure/btc-signer';
 
 import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector';
 import { xverseSigner } from '../../../src/wallet/signers/xverse.signer';
@@ -135,27 +135,14 @@ declare global {
       /**
        * Alby mint — pure PSBT build (no signing). Returns the
        * unfinalized PSBT bytes the Alby spec then hands to Alby's
-       * background-script signPsbt. Builds via the REAL SDK API
-       * (`createTransaction(KnownOrdinalWalletType.alby, ...)`) —
-       * post-26730b0 the SDK dispatches on address format so Alby
-       * no longer needs the parallel buildCat21TaprootPsbt detour.
+       * background-script signPsbt. Builds via the real SDK API
+       * (`createTransaction(KnownOrdinalWalletType.alby, ...)`).
        */
       buildCat21MintPsbtForAlby(input: {
         utxo: { txid: string; vout: number; value: number };
         paymentAddress: string;
         paymentPublicKey: string;
         recipientAddress: string;
-        feeSats: number;
-      }): { psbtHex: string };
-      /**
-       * @deprecated kept for transitional compatibility — DO NOT use
-       * in new specs. The Alby spec migrates to
-       * `buildCat21MintPsbtForAlby` which goes through the real SDK.
-       */
-      buildCat21TaprootPsbt(input: {
-        utxo: { txid: string; vout: number; value: number };
-        taprootAddress: string;
-        taprootPublicKey: string;
         feeSats: number;
       }): { psbtHex: string };
     };
@@ -1025,36 +1012,5 @@ window.ordpoolSdkHarness.buildCat21MintPsbtForAlby = (input) => {
   );
   const psbtHex = bytesToHex(result.tx.toPSBT());
   log('mint.psbt-built-for-alby', { bytes: psbtHex.length / 2, fee: input.feeSats });
-  return { psbtHex };
-};
-
-window.ordpoolSdkHarness.buildCat21TaprootPsbt = (input) => {
-  // Direct scure build (NOT via createTransaction) — Alby's
-  // bitcoinjs-lib signer rejects sighashType:SIGHASH_ALL on
-  // Taproot inputs because bitcoinjs-lib's default whitelist only
-  // accepts SIGHASH_DEFAULT (0) unless the caller passes
-  // allowedSighashTypes. Alby's webbtc/signPsbt doesn't pass it.
-  // So we OMIT sighashType on the input — scure / bitcoinjs both
-  // treat absence as SIGHASH_DEFAULT for Taproot, which encodes
-  // identically to SIGHASH_ALL on the wire for key-path spends.
-  const pubkey = hexToBytes(input.taprootPublicKey);
-  const xOnly = pubkey.length === 33 ? pubkey.slice(1) : pubkey;
-  const network = toScureNetwork(Network.Regtest);
-  const p2trOut = p2tr(xOnly, undefined, network, true);
-
-  const tx = new Transaction({ lockTime: 21 });
-  tx.addInput({
-    txid: input.utxo.txid,
-    index: input.utxo.vout,
-    witnessUtxo: { script: p2trOut.script, amount: BigInt(input.utxo.value) },
-    tapInternalKey: xOnly,
-    // no sighashType — defaults to SIGHASH_DEFAULT
-  });
-  tx.addOutput({
-    script: p2trOut.script,
-    amount: BigInt(input.utxo.value - input.feeSats),
-  });
-  const psbtHex = bytesToHex(tx.toPSBT());
-  log('mint.taproot-psbt-built', { bytes: psbtHex.length / 2, fee: input.feeSats });
   return { psbtHex };
 };

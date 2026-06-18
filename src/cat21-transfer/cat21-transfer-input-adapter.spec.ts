@@ -3,7 +3,6 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { prepareTransferCatInput, prepareTransferFundingInput } from './cat21-transfer-input-adapter';
 
 const PUBKEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
@@ -23,9 +22,8 @@ const baseUtxo = {
 
 describe('prepareTransferCatInput / prepareTransferFundingInput', () => {
 
-  it('returns a SegWit-shaped input for Leather (P2WPKH script, no redeemScript/nonWitnessUtxo/tapInternalKey)', () => {
+  it('returns a SegWit-shaped input for a P2WPKH payment address (no redeemScript/nonWitnessUtxo/tapInternalKey)', () => {
     const input = prepareTransferCatInput({
-      walletType: KnownOrdinalWalletType.leather,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: segwitAddr,
@@ -38,9 +36,8 @@ describe('prepareTransferCatInput / prepareTransferFundingInput', () => {
     expect(input.tapInternalKey).toBeUndefined();
   });
 
-  it('returns a Taproot-shaped input for Unisat-P2TR (with tapInternalKey)', () => {
+  it('returns a Taproot-shaped input for a P2TR payment address (with tapInternalKey)', () => {
     const input = prepareTransferFundingInput({
-      walletType: KnownOrdinalWalletType.unisat,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: p2trAddr,
@@ -54,9 +51,8 @@ describe('prepareTransferCatInput / prepareTransferFundingInput', () => {
     expect(input.nonWitnessUtxo).toBeUndefined();
   });
 
-  it('returns a P2SH-wrapped SegWit shape for Xverse-P2SH (with redeemScript)', () => {
+  it('returns a P2SH-wrapped SegWit shape for a P2SH-P2WPKH payment address (with redeemScript)', () => {
     const input = prepareTransferFundingInput({
-      walletType: KnownOrdinalWalletType.xverse,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: p2shAddr,
@@ -74,7 +70,6 @@ describe('prepareTransferCatInput / prepareTransferFundingInput', () => {
     // and real PSBT input differ in scriptPubKey because the dummy pubkey
     // produces a different script.
     const real = prepareTransferFundingInput({
-      walletType: KnownOrdinalWalletType.leather,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: segwitAddr,
@@ -82,7 +77,6 @@ describe('prepareTransferCatInput / prepareTransferFundingInput', () => {
       network: NETWORK,
     });
     const sim = prepareTransferFundingInput({
-      walletType: KnownOrdinalWalletType.leather,
       utxo: baseUtxo,
       paymentPublicKey: PUBKEY,
       paymentAddress: segwitAddr,
@@ -90,23 +84,5 @@ describe('prepareTransferCatInput / prepareTransferFundingInput', () => {
       network: NETWORK,
     });
     expect(hex.encode(real.scriptPubKey)).not.toBe(hex.encode(sim.scriptPubKey));
-  });
-
-  it('accepts an unknown walletType and dispatches purely on address format (no wallet-name switch left)', () => {
-    // Pre-refactor this threw 'Unknown wallet'. After the address-
-    // format-driven migration, walletType is orchestration-only and
-    // the adapter ignores it for script construction. ANY string the
-    // caller passes produces a valid P2WPKH input here because the
-    // payment address is bech32 p2wpkh.
-    const input = prepareTransferCatInput({
-      walletType: 'NOT-A-REAL-WALLET' as unknown as KnownOrdinalWalletType,
-      utxo: baseUtxo,
-      paymentPublicKey: PUBKEY,
-      paymentAddress: segwitAddr,
-      isSimulation: false,
-      network: NETWORK,
-    });
-    expect(input.scriptPubKey.length).toBe(22); // P2WPKH
-    expect(input.tapInternalKey).toBeUndefined();
   });
 });

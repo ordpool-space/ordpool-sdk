@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from '@jest/globals';
 
-import { createInputScriptForLeather, createInputScriptForUnisat, createInputScriptForXverse, createTransaction, getAddressFormat, getDummyKeypair, getMinimumUtxoSize, getDummyLegacyTransaction, toXOnly, isSegWit } from './cat21.service.helper';
+import { createTransaction, getAddressFormat, getDummyKeypair, getMinimumUtxoSize, getDummyLegacyTransaction, toXOnly, isSegWit } from './cat21.service.helper';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { Network, toScureNetwork } from '../network';
 import { sha256 } from '@noble/hashes/sha256';
@@ -152,84 +152,6 @@ describe('getDummyLegacyTransaction', () => {
     expect(transaction.outputsLength).toBe(3);
     expect(transaction.hex).toBeTruthy();
   });
-});
-
-describe('createInputScriptForUnisat', () => {
-  const { dummyPublicKey, xOnlyDummyPublicKey } = getDummyKeypair(btc.NETWORK);
-
-  // "Legacy" Pay-to-Public-Key-Hash
-  it('creates script for P2PKH addresses', () => {
-    const result = createInputScriptForUnisat('1...', dummyPublicKey, btc.NETWORK);
-    expect(result).toHaveProperty('script');
-    expect(result.redeemScript).toBeUndefined();
-  });
-
-  // Nested Segwit
-  it('creates script for P2SH addresses', () => {
-    const result = createInputScriptForUnisat('3...', dummyPublicKey, btc.NETWORK);
-    expect(result).toHaveProperty('script');
-    expect(result).toHaveProperty('redeemScript');
-  });
-
-  // Native Seqwit
-  it('creates script for P2WPKH addresses', () => {
-    const result = createInputScriptForUnisat('bc1q...', dummyPublicKey, btc.NETWORK);
-    expect(result).toHaveProperty('script');
-    expect(result.redeemScript).toBeUndefined();
-  });
-
-  // Taproot
-  it('creates script for P2TR addresses', () => {
-    const result = createInputScriptForUnisat('bc1p...', xOnlyDummyPublicKey, btc.NETWORK);
-    expect(result).toHaveProperty('script');
-    expect(result.redeemScript).toBeUndefined();
-  });
-
-});
-
-describe('createInputScriptForXverse', () => {
-  // Xverse exposes two payment address formats today:
-  // - Nested SegWit (P2SH-P2WPKH, "3..." mainnet / "2..." testnet) —
-  //   the Xverse v1 default, kept as a secondary preference in v2.
-  // - Native SegWit (P2WPKH, "bc1q..." mainnet / "tb1q..." testnet /
-  //   "bcrt1q..." regtest) — the v2 default since ~2024.
-  //
-  // The helper must dispatch on the actual address format so a
-  // v2-onboarded wallet mints cleanly. Prior to the dispatch fix,
-  // every v2 user's mint failed mempool policy with
-  // "Witness requires empty scriptSig" at broadcast.
-  const { dummyPublicKey } = getDummyKeypair(btc.NETWORK);
-
-  it('builds P2SH-wrapped P2WPKH for "3..." nested-segwit addresses (Xverse v1)', () => {
-    const result = createInputScriptForXverse('3xverseNested...', dummyPublicKey, btc.NETWORK);
-    expect(result).toHaveProperty('script');
-    expect(result).toHaveProperty('redeemScript');
-    expect(result.redeemScript).toBeDefined();
-  });
-
-  it('builds native P2WPKH for "bc1q..." addresses (Xverse v2 default)', () => {
-    const result = createInputScriptForXverse('bc1qxverseNative...', dummyPublicKey, btc.NETWORK);
-    expect(result).toHaveProperty('script');
-    expect(result.redeemScript).toBeUndefined();
-  });
-
-  it('produces byte-identical native-segwit script to createInputScriptForLeather (same pubkey, same network)', () => {
-    // Cross-helper invariant: when Xverse hands a native-segwit
-    // payment address, the resulting P2WPKH script must match what
-    // the Leather branch produces from the same pubkey. If these
-    // ever diverge, one of the helpers has drifted from BIP-141.
-    const fromXverse  = createInputScriptForXverse('bc1qsameAsLeather...', dummyPublicKey, btc.NETWORK);
-    const fromLeather = createInputScriptForLeather(dummyPublicKey, btc.NETWORK);
-    expect(fromXverse.script).toEqual(fromLeather.script);
-  });
-
-  it('throws for unsupported address formats (P2PKH legacy / P2TR taproot)', () => {
-    expect(() => createInputScriptForXverse('1XverseLegacy...', dummyPublicKey, btc.NETWORK))
-      .toThrow(/unsupported.*P2PKH/i);
-    expect(() => createInputScriptForXverse('bc1pXverseTaproot...', dummyPublicKey, btc.NETWORK))
-      .toThrow(/unsupported.*P2TR/i);
-  });
-
 });
 
 describe('proof that we can create+sign a taproot input + output with dummy data', () => {
