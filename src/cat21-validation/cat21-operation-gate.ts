@@ -1,0 +1,382 @@
+/**
+ * Bulletproof validation gate for the four cat21 mutating operations.
+ *
+ * Single entry: `validateCat21Operation({ config, operation })`.
+ *
+ * Failure mode is a typed discriminated union — no exceptions, no
+ * phantom `Validated<I>` brand. The success branch hands back
+ * pre-decoded resources (scriptPubKey, parsed catId pieces) so
+ * downstream code never re-decodes.
+ *
+ * Spec coverage is exhaustive: every member of `Cat21GateRejectReason`
+ * has a dedicated test in `cat21-operation-gate.spec.ts`.
+ */
+
+import { base64, hex } from '@scure/base';
+import * as btc from '@scure/btc-signer';
+
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
+import { Network, toScureNetwork } from '../network';
+
+import type {
+  Cat21AcceptOfferIntent,
+  Cat21CreateOfferIntent,
+  Cat21GateRejectReason,
+  Cat21GateResources,
+  Cat21MintIntent,
+  Cat21Operation,
+  Cat21OperationGateConfig,
+  Cat21OperationGateResult,
+  Cat21TransferIntent,
+} from './cat21-operation-gate.types';
+
+/* ──────────────────────────  Public entry  ────────────────────────── */
+
+export function validateCat21Operation(args: {
+  config: Cat21OperationGateConfig;
+  operation: Cat21Operation;
+}): Cat21OperationGateResult {
+  const { config, operation } = args;
+
+  if (!isObject(operation) || typeof operation.kind !== 'string') {
+    return reject('intent-not-an-object');
+  }
+  if (!isObject(operation.intent)) {
+    return reject('intent-not-an-object');
+  }
+
+  switch (operation.kind) {
+    case 'mint':
+      return validateMint(operation.intent, config);
+    case 'transfer':
+      return validateTransfer(operation.intent, config);
+    case 'create_offer':
+      return validateCreateOffer(operation.intent, config);
+    case 'accept_offer':
+      return validateAcceptOffer(operation.intent, config);
+    default: {
+      // Exhaustiveness: any new `kind` member trips a TS error here
+      // BEFORE it reaches the runtime check.
+      const _exhaustive: never = operation;
+      void _exhaustive;
+      return reject('unsupported-operation-kind', String((operation as { kind: unknown }).kind));
+    }
+  }
+}
+
+/* ──────────────────────────  Per-operation  ────────────────────────── */
+
+function validateMint(
+  intent: Cat21MintIntent,
+  config: Cat21OperationGateConfig,
+): Cat21OperationGateResult {
+  const recipient = validateAddress(intent.recipient, config, 'recipient');
+  if (!recipient.ok) return recipient.result;
+
+  if (config.allowedRecipients && config.allowedRecipients.length > 0) {
+    if (!config.allowedRecipients.includes(intent.recipient)) {
+      return reject('recipient-not-allowed', intent.recipient);
+    }
+  }
+  if (config.ownPaymentAddress && intent.recipient === config.ownPaymentAddress) {
+    return reject('self-send', intent.recipient);
+  }
+
+  const fee = validateFeeRate(intent.feeRate, config);
+  if (!fee.ok) return fee.result;
+
+  let tipScript: Uint8Array | undefined;
+  if (intent.tip != null) {
+    const tipResult = validateTip(intent.tip, config);
+    if (!tipResult.ok) return tipResult.result;
+    tipScript = tipResult.script;
+  }
+
+  return success({ kind: 'mint', recipientScript: recipient.script, tipScript });
+}
+
+function validateTransfer(
+  intent: Cat21TransferIntent,
+  config: Cat21OperationGateConfig,
+): Cat21OperationGateResult {
+  const cat = parseCatId(intent.catId);
+  if (!cat.ok) return reject('cat-id-malformed', intent.catId);
+
+  const recipient = validateAddress(intent.recipient, config, 'recipient');
+  if (!recipient.ok) return recipient.result;
+
+  if (config.allowedRecipients && config.allowedRecipients.length > 0) {
+    if (!config.allowedRecipients.includes(intent.recipient)) {
+      return reject('recipient-not-allowed', intent.recipient);
+    }
+  }
+  if (config.ownPaymentAddress && intent.recipient === config.ownPaymentAddress) {
+    return reject('self-send', intent.recipient);
+  }
+
+  const fee = validateFeeRate(intent.feeRate, config);
+  if (!fee.ok) return fee.result;
+
+  return success({
+    kind: 'transfer',
+    recipientScript: recipient.script,
+    catTxid: cat.txid,
+    catIndex: cat.index,
+  });
+}
+
+function validateCreateOffer(
+  intent: Cat21CreateOfferIntent,
+  config: Cat21OperationGateConfig,
+): Cat21OperationGateResult {
+  const cat = parseCatId(intent.catId);
+  if (!cat.ok) return reject('cat-id-malformed', intent.catId);
+
+  const price = validatePrice(intent.priceSats, config);
+  if (!price.ok) return price.result;
+
+  const payment = validateAddress(intent.paymentAddress, config, 'payment-address');
+  if (!payment.ok) return payment.result;
+
+  if (config.allowedCounterparties && config.allowedCounterparties.length > 0) {
+    if (!config.allowedCounterparties.includes(intent.paymentAddress)) {
+      return reject('payment-address-not-allowed', intent.paymentAddress);
+    }
+  }
+
+  return success({
+    kind: 'create_offer',
+    paymentScript: payment.script,
+    catTxid: cat.txid,
+    catIndex: cat.index,
+  });
+}
+
+function validateAcceptOffer(
+  intent: Cat21AcceptOfferIntent,
+  _config: Cat21OperationGateConfig,
+): Cat21OperationGateResult {
+  const cat = parseCatId(intent.expectedCatId);
+  if (!cat.ok) return reject('expected-cat-id-malformed', intent.expectedCatId);
+
+  const priceCheck = validateExpectedPrice(intent.expectedPriceSats);
+  if (!priceCheck.ok) return priceCheck.result;
+
+  const utxoOk = isWellFormedUtxoRef(intent.expectedSellerUtxo);
+  if (!utxoOk) {
+    return reject(
+      'expected-seller-utxo-malformed',
+      JSON.stringify(intent.expectedSellerUtxo),
+    );
+  }
+
+  const psbtBytes = tryDecodePsbt(intent.offerPsbt);
+  if (!psbtBytes) return reject('offer-psbt-malformed');
+
+  return success({
+    kind: 'accept_offer',
+    offerPsbtBytes: psbtBytes,
+    catTxid: cat.txid,
+    catIndex: cat.index,
+  });
+}
+
+/* ──────────────────────────  Field validators  ────────────────────────── */
+
+type AddressField = 'recipient' | 'tip-address' | 'payment-address';
+
+function malformedReason(field: AddressField): Cat21GateRejectReason {
+  return `${field}-not-a-bitcoin-address` as Cat21GateRejectReason;
+}
+function wrongNetworkReason(field: AddressField): Cat21GateRejectReason {
+  return `${field}-wrong-network` as Cat21GateRejectReason;
+}
+
+function validateAddress(
+  address: unknown,
+  config: Cat21OperationGateConfig,
+  field: AddressField,
+):
+  | { ok: true; script: Uint8Array }
+  | { ok: false; result: Cat21OperationGateResult } {
+  if (typeof address !== 'string' || address.length === 0) {
+    return { ok: false, result: reject(malformedReason(field), String(address)) };
+  }
+  const targetNet = toScureNetwork(config.network);
+  // Try the target network first; record whether the address parsed on
+  // the OTHER network so the failure can be 'wrong-network' instead of
+  // 'malformed' for an otherwise valid string.
+  try {
+    const decoded = btc.Address(targetNet).decode(address);
+    const script = btc.OutScript.encode(decoded);
+    return { ok: true, script };
+  } catch {
+    const otherNet = config.network === Network.Mainnet ? btc.TEST_NETWORK : btc.NETWORK;
+    try {
+      btc.Address(otherNet).decode(address);
+      return { ok: false, result: reject(wrongNetworkReason(field), address) };
+    } catch {
+      return { ok: false, result: reject(malformedReason(field), address) };
+    }
+  }
+}
+
+function validateFeeRate(
+  feeRate: unknown,
+  config: Cat21OperationGateConfig,
+): { ok: true } | { ok: false; result: Cat21OperationGateResult } {
+  if (typeof feeRate !== 'number' || !Number.isFinite(feeRate)) {
+    return { ok: false, result: reject('fee-rate-not-finite-number', String(feeRate)) };
+  }
+  if (!Number.isInteger(feeRate)) {
+    return { ok: false, result: reject('fee-rate-not-integer', String(feeRate)) };
+  }
+  if (feeRate <= 0) {
+    return { ok: false, result: reject('fee-rate-not-positive', String(feeRate)) };
+  }
+  if (config.maxFeeRatePerVbyte != null && feeRate > config.maxFeeRatePerVbyte) {
+    return {
+      ok: false,
+      result: reject('fee-rate-above-cap', `${feeRate} > ${config.maxFeeRatePerVbyte}`),
+    };
+  }
+  return { ok: true };
+}
+
+function validateTip(
+  tip: { address: unknown; value: unknown },
+  config: Cat21OperationGateConfig,
+):
+  | { ok: true; script: Uint8Array | undefined }
+  | { ok: false; result: Cat21OperationGateResult } {
+  if (typeof tip.value !== 'number' || !Number.isFinite(tip.value)) {
+    return { ok: false, result: reject('tip-value-not-finite-number', String(tip.value)) };
+  }
+  if (!Number.isInteger(tip.value)) {
+    return { ok: false, result: reject('tip-value-not-integer', String(tip.value)) };
+  }
+  if (tip.value < 0) {
+    return { ok: false, result: reject('tip-value-negative', String(tip.value)) };
+  }
+  const tipCap = config.maxTipValueSats ?? config.maxPriceSats;
+  if (tipCap != null && tip.value > tipCap) {
+    return { ok: false, result: reject('tip-value-above-cap', `${tip.value} > ${tipCap}`) };
+  }
+  if (tip.value === 0) {
+    // Builder skips the output entirely. Address irrelevant.
+    return { ok: true, script: undefined };
+  }
+  const tipAddr = validateAddress(tip.address, config, 'tip-address');
+  if (!tipAddr.ok) return tipAddr;
+  return { ok: true, script: tipAddr.script };
+}
+
+function validatePrice(
+  priceSats: unknown,
+  config: Cat21OperationGateConfig,
+): { ok: true } | { ok: false; result: Cat21OperationGateResult } {
+  if (typeof priceSats !== 'number' || !Number.isFinite(priceSats)) {
+    return { ok: false, result: reject('price-not-finite-number', String(priceSats)) };
+  }
+  if (!Number.isInteger(priceSats)) {
+    return { ok: false, result: reject('price-not-integer', String(priceSats)) };
+  }
+  if (priceSats <= 0) {
+    return { ok: false, result: reject('price-not-positive', String(priceSats)) };
+  }
+  if (priceSats < CAT21_POSTAGE_SATS) {
+    return {
+      ok: false,
+      result: reject('price-below-postage-floor', `${priceSats} < ${CAT21_POSTAGE_SATS}`),
+    };
+  }
+  if (config.maxPriceSats != null && priceSats > config.maxPriceSats) {
+    return {
+      ok: false,
+      result: reject('price-above-cap', `${priceSats} > ${config.maxPriceSats}`),
+    };
+  }
+  return { ok: true };
+}
+
+function validateExpectedPrice(
+  expectedPriceSats: unknown,
+): { ok: true } | { ok: false; result: Cat21OperationGateResult } {
+  if (typeof expectedPriceSats !== 'number' || !Number.isFinite(expectedPriceSats)) {
+    return {
+      ok: false,
+      result: reject('expected-price-not-finite-number', String(expectedPriceSats)),
+    };
+  }
+  if (!Number.isInteger(expectedPriceSats)) {
+    return { ok: false, result: reject('expected-price-not-integer', String(expectedPriceSats)) };
+  }
+  if (expectedPriceSats <= 0) {
+    return { ok: false, result: reject('expected-price-not-positive', String(expectedPriceSats)) };
+  }
+  return { ok: true };
+}
+
+/* ──────────────────────────  Pure shape helpers  ────────────────────── */
+
+const CAT_ID_RE = /^([0-9a-f]{64})i(\d+)$/;
+
+function parseCatId(value: unknown):
+  | { ok: true; txid: string; index: number }
+  | { ok: false } {
+  if (typeof value !== 'string') return { ok: false };
+  const m = CAT_ID_RE.exec(value);
+  if (!m) return { ok: false };
+  const index = Number.parseInt(m[2], 10);
+  if (!Number.isFinite(index) || index < 0) return { ok: false };
+  return { ok: true, txid: m[1], index };
+}
+
+const TXID_RE = /^[0-9a-f]{64}$/;
+
+function isWellFormedUtxoRef(value: unknown): boolean {
+  if (!isObject(value)) return false;
+  const v = value as { txid?: unknown; vout?: unknown };
+  if (typeof v.txid !== 'string' || !TXID_RE.test(v.txid)) return false;
+  if (typeof v.vout !== 'number') return false;
+  if (!Number.isInteger(v.vout) || v.vout < 0) return false;
+  return true;
+}
+
+/**
+ * Try base64 first (cat21.space's wire format), fall back to hex
+ * (some agents serialise as hex), reject otherwise. The downstream
+ * `validateCat21BuyOfferPsbt` re-parses; we just want to fail FAST
+ * here on garbage.
+ */
+function tryDecodePsbt(value: unknown): Uint8Array | undefined {
+  if (typeof value !== 'string' || value.length === 0) return undefined;
+  try {
+    const decoded = base64.decode(value);
+    if (decoded.length > 0) return decoded;
+  } catch {
+    /* fall through */
+  }
+  try {
+    const decoded = hex.decode(value);
+    if (decoded.length > 0) return decoded;
+  } catch {
+    /* fall through */
+  }
+  return undefined;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function reject(
+  reason: Cat21GateRejectReason,
+  detail?: string,
+): { ok: false; reason: Cat21GateRejectReason; detail?: string } {
+  return detail != null ? { ok: false, reason, detail } : { ok: false, reason };
+}
+
+function success(resources: Cat21GateResources): Cat21OperationGateResult {
+  return { ok: true, resources };
+}

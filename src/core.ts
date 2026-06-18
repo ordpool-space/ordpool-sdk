@@ -63,3 +63,6 @@ export * from './cat21-broadcast/slipstream.helper';
 // --- Agent-mode policy gate ---
 export * from './agent-mode/agent-policy.helper';
 export * from './agent-mode/agent-policy.types';
+
+// --- Bulletproof operation validation gate ---
+export * from './cat21-validation';

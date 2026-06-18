@@ -41,7 +41,10 @@
     "src/cat21-broadcast/broadcast.helper.ts",
     "src/cat21-broadcast/slipstream.helper.ts",
     "src/agent-mode/agent-policy.helper.ts",
-    "src/agent-mode/agent-policy.types.ts"
+    "src/agent-mode/agent-policy.types.ts",
+    "src/cat21-validation/index.ts",
+    "src/cat21-validation/cat21-operation-gate.ts",
+    "src/cat21-validation/cat21-operation-gate.types.ts"
   ],
   "exclude": [
     "node_modules",
