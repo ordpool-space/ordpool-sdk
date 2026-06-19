@@ -66,6 +66,7 @@ declare global {
         ordinalsAddress: string;
       };
       buildAndSignMintViaUnisat(input: MintRequest): Promise<{ txHex: string }>;
+      buildAndSignInscribeViaUnisat(input: InscribeRequest): Promise<InscribeSignedResult>;
       /**
        * Subscribe to Unisat onAccountChange and capture the
        * post-change WalletInfo via re-connect. Returns a promise
@@ -717,6 +718,57 @@ window.ordpoolSdkHarness.buildAndSignMintViaUnisat = async (input: MintRequest) 
   const txHex = extractWireTxFromPsbt(hexToBytes(signedPsbtHex));
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
+};
+
+window.ordpoolSdkHarness.buildAndSignInscribeViaUnisat = async (input: InscribeRequest) => {
+  if (!unisatConnector.detect(window)) {
+    throw new Error('Unisat provider not injected on the harness page');
+  }
+  statusEl().textContent = `building inscribe (commit+reveal) via unisat…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const paymentPubkeyXonly = hexToBytes(input.paymentPubkeyXonly);
+  const body = hexToBytes(input.bodyHex);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+    status: { confirmed: true },
+  };
+
+  const inscribed = createInscribeTransactions({
+    paymentOutput: txnOutput,
+    paymentPublicKey: paymentPubkey,
+    paymentAddress: input.paymentAddress,
+    paymentPubkeyXonly,
+    recipientAddress: input.recipientAddress,
+    body,
+    contentType: input.contentType,
+    feeRatePerVbyte: input.feeRatePerVbyte,
+    network: Network.Regtest,
+  });
+  log('inscribe.built', {
+    commitPsbtBytes: inscribed.commitPsbt.length,
+    revealHexChars: inscribed.revealHex.length,
+    commitTxid: inscribed.commitTxid,
+    revealTxid: inscribed.revealTxid,
+  });
+
+  const unisat = (window as unknown as {
+    unisat: { signPsbt: (h: string, o?: { autoFinalized?: boolean }) => Promise<string> };
+  }).unisat;
+  const signedCommitPsbtHex = await unisat.signPsbt(bytesToHex(inscribed.commitPsbt), {
+    autoFinalized: false,
+  });
+  const commitHex = extractWireTxFromPsbt(hexToBytes(signedCommitPsbtHex));
+  log('inscribe.commit-signed', { commitHex: commitHex.slice(0, 40) + '…', length: commitHex.length });
+
+  return {
+    commitHex,
+    revealHex: inscribed.revealHex,
+    commitTxid: inscribed.commitTxid,
+    revealTxid: inscribed.revealTxid,
+  };
 };
 
 /**
