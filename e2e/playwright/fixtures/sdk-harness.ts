@@ -63,6 +63,18 @@ declare global {
         ordinalsAddress: string;
       };
       buildAndSignMintViaUnisat(input: MintRequest): Promise<{ txHex: string }>;
+      /**
+       * Subscribe to Unisat onAccountChange and capture the
+       * post-change WalletInfo via re-connect. Returns a promise
+       * that resolves the next time the event fires. The test
+       * triggers the event by calling
+       * `window.unisat.switchNetwork('mainnet'|'testnet')`.
+       */
+      armUnisatAccountChangeProbe(): Promise<{
+        ordinalsAddress: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+      }>;
       detectLeather(): boolean;
       connectLeather(): Promise<{
         type: KnownOrdinalWalletType;
@@ -225,6 +237,33 @@ window.ordpoolSdkHarness = {
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectUnisat.result', info);
     return info;
+  },
+
+  async armUnisatAccountChangeProbe() {
+    // Subscribe to onAccountChange. When the event fires we re-call
+    // connect() to fetch the NEW WalletInfo (the SDK contract).
+    // Wrap the whole thing in a promise the test can await.
+    return new Promise<{ ordinalsAddress: string; paymentAddress: string; paymentPublicKey: string }>((resolve, reject) => {
+      if (!unisatConnector.onAccountChange) {
+        reject(new Error('unisatConnector.onAccountChange is missing'));
+        return;
+      }
+      const unsubscribe = unisatConnector.onAccountChange(() => {
+        unsubscribe();
+        firstValueFrom(unisatConnector.connect(Network.Mainnet))
+          .then(info => {
+            statusEl().textContent = `account changed: ${info.paymentAddress}`;
+            log('unisat.account-change.refetched', info);
+            resolve({
+              ordinalsAddress: info.ordinalsAddress,
+              paymentAddress: info.paymentAddress,
+              paymentPublicKey: info.paymentPublicKey,
+            });
+          })
+          .catch(reject);
+      });
+      log('unisat.account-change.armed', { subscribed: true });
+    });
   },
 
   detectLeather(): boolean {
