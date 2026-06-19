@@ -19,8 +19,9 @@ import {
  * `/Work/ordpool/WALLETS.md`): we ask Xverse to sign only
  * (`broadcast: false`), extract the wire-format tx ourselves, and
  * hand it to `input.broadcast(rawTxHex)`. The caller's broadcast
- * callback decides the endpoint — electrs, mempool.space,
- * api.ordpool.space, Mara non-standard-relay, etc.
+ * callback decides the endpoint — electrs, api.ordpool.space, or
+ * a future non-standard-relay path. NEVER mempool.space (host-banned,
+ * see workspace `CLAUDE.md`).
  *
  * Migration to sats-connect v3+ `provider.request('signPsbt', ...)`
  * is a separate stream.

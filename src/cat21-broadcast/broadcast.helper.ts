@@ -51,11 +51,25 @@ export interface Cat21BroadcastResult {
 }
 
 /**
- * Decision-only entry point. Useful for callers (cat21.space UI) that want
- * to show "your tx will go to X" before the user confirms the broadcast.
+ * # DORMANT — currently unused by any SDK consumer.
  *
- * The decision is deterministic given the input + options; it has no side
- * effects.
+ * Zero callers anywhere in the SDK or in cat21.space / ordpool. Every
+ * cat-touching tx we ship (mint, transfer, buy-offer, accept-offer) is
+ * ~150–250 vB and standard, so the dispatcher's only non-mempool branch
+ * — `weight > STANDARD_TX_WEIGHT_LIMIT` → Slipstream — never fires.
+ * `forceChannel: 'slipstream'` likewise has no caller. Slipstream itself
+ * is DORMANT (see `slipstream.helper.ts`).
+ *
+ * Kept (not deleted) because the dispatcher is the natural shape for the
+ * day a use case surfaces (large witness bundled with a cat, future
+ * protocol experiments). Reviving this is cheaper than rebuilding it.
+ *
+ * **Before re-enabling**: re-verify the Slipstream contract per
+ * `slipstream.helper.ts`, and confirm the mempool callback the consumer
+ * supplies still resolves the right way (electrs POST `/tx`).
+ *
+ * Decision-only entry point — deterministic given the input + options,
+ * no side effects.
  */
 export function decideBroadcastChannel(
   input: Cat21BroadcastInput,
@@ -80,21 +94,23 @@ export function decideBroadcastChannel(
 }
 
 /**
- * Broadcasts a CAT-21 tx through the appropriate channel and returns the
- * accepted txid.
+ * # DORMANT — currently unused by any SDK consumer.
  *
- * The mempool path is the caller's job — pass `broadcastViaMempool` as the
- * second argument. This keeps the SDK decoupled from the specific mempool
- * API any one consumer uses (mempool.space vs blockstream vs self-hosted
- * electrs); we just call the callback when the dispatcher picks mempool.
+ * The thin wrapper over `decideBroadcastChannel` + the mempool/Slipstream
+ * branches. Every shipping cat-flow calls its broadcast callback
+ * (electrs `POST /tx` via the ordpool backend) directly. See the dormancy
+ * note on `decideBroadcastChannel`.
  *
- * Slipstream is owned by the SDK (`submitToSlipstream`) because every
- * caller would otherwise duplicate the same fetch wrapper.
+ * The `broadcastViaMempool` callback is supplied by the consumer so the
+ * SDK stays decoupled from any specific Esplora endpoint. The endpoint
+ * is always **our own** electrs / ordpool backend — never mempool.space
+ * (their API rejects our host by ban, and they're a competitor anyway;
+ * see the workspace `CLAUDE.md` HARD RULE "Never call mempool.space from
+ * shipping code").
  *
  * Failure mode: never silently retries. If Slipstream rejects, the caller
- * decides whether to fall back to the mempool callback (which may itself
- * reject for the same standardness reason). Auto-retry across channels
- * risks double-broadcast and is the caller's policy decision.
+ * decides whether to fall back to the mempool callback. Auto-retry across
+ * channels risks double-broadcast and is the caller's policy decision.
  */
 export async function broadcastCat21(
   input: Cat21BroadcastInput,
