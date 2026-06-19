@@ -89,6 +89,7 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaLeather(input: MintRequest): Promise<{ txHex: string }>;
+      buildAndSignInscribeViaLeather(input: InscribeRequest): Promise<InscribeSignedResult>;
       detectCat21Wallet(): boolean;
       connectCat21Wallet(): Promise<{
         type: KnownOrdinalWalletType;
@@ -99,6 +100,7 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaCat21Wallet(input: MintRequest): Promise<{ txHex: string }>;
+      buildAndSignInscribeViaCat21Wallet(input: InscribeRequest): Promise<InscribeSignedResult>;
       detectWizz(): boolean;
       connectWizz(): Promise<{
         type: KnownOrdinalWalletType;
@@ -109,6 +111,7 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaWizz(input: MintRequest): Promise<{ txHex: string }>;
+      buildAndSignInscribeViaWizz(input: InscribeRequest): Promise<InscribeSignedResult>;
       detectOkx(): boolean;
       connectOkx(): Promise<{
         type: KnownOrdinalWalletType;
@@ -119,6 +122,7 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaOkx(input: MintRequest): Promise<{ txHex: string }>;
+      buildAndSignInscribeViaOkx(input: InscribeRequest): Promise<InscribeSignedResult>;
       detectPhantom(): boolean;
       connectPhantom(): Promise<{
         type: KnownOrdinalWalletType;
@@ -129,6 +133,7 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaPhantom(input: MintRequest): Promise<{ txHex: string }>;
+      buildAndSignInscribeViaPhantom(input: InscribeRequest): Promise<InscribeSignedResult>;
       detectOyl(): boolean;
       connectOyl(): Promise<{
         type: KnownOrdinalWalletType;
@@ -139,6 +144,8 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaOyl(input: MintRequest): Promise<{ txHex: string }>;
+      buildAndSignInscribeViaOyl(input: InscribeRequest): Promise<InscribeSignedResult>;
+      buildInscribePsbtForAlby(input: InscribeRequest): { commitPsbtHex: string; revealHex: string; commitTxid: string; revealTxid: string };
       detectAlby(): boolean;
       connectAlby(): Promise<{
         type: KnownOrdinalWalletType;
@@ -1188,6 +1195,235 @@ window.ordpoolSdkHarness.buildAndSignMintViaPhantom = async (input: MintRequest)
   const txHex = extractWireTxFromPsbt(signedBytes);
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
+};
+
+/**
+ * Shared inscribe orchestrator entry. All wallet-specific inscribe
+ * harness methods call this first to get the unsigned commit PSBT
+ * + the already-signed reveal hex, then they only differ in how
+ * they ask the wallet to sign the commit's input 0.
+ */
+function orchestrateInscribe(input: InscribeRequest): {
+  commitPsbt: Uint8Array;
+  revealHex: string;
+  commitTxid: string;
+  revealTxid: string;
+} {
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const paymentPubkeyXonly = hexToBytes(input.paymentPubkeyXonly);
+  const body = hexToBytes(input.bodyHex);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+    status: { confirmed: true },
+  };
+  const r = createInscribeTransactions({
+    paymentOutput: txnOutput,
+    paymentPublicKey: paymentPubkey,
+    paymentAddress: input.paymentAddress,
+    paymentPubkeyXonly,
+    recipientAddress: input.recipientAddress,
+    body,
+    contentType: input.contentType,
+    feeRatePerVbyte: input.feeRatePerVbyte,
+    network: Network.Regtest,
+  });
+  return {
+    commitPsbt: r.commitPsbt,
+    revealHex: r.revealHex,
+    commitTxid: r.commitTxid,
+    revealTxid: r.revealTxid,
+  };
+}
+
+window.ordpoolSdkHarness.buildAndSignInscribeViaLeather = async (input: InscribeRequest) => {
+  if (!leatherConnector.detect(window)) {
+    throw new Error('Leather provider not injected on the harness page');
+  }
+  statusEl().textContent = `building inscribe (commit+reveal) via leather…`;
+  const o = orchestrateInscribe(input);
+
+  const leather = (window as unknown as {
+    LeatherProvider: {
+      request: (m: 'signPsbt', p: {
+        hex: string;
+        allowedSighash: number[];
+        signAtIndex: number;
+        network: string;
+        broadcast: boolean;
+      }) => Promise<{ result: { hex: string } }>;
+    };
+  }).LeatherProvider;
+  const response = await leather.request('signPsbt', {
+    hex: bytesToHex(o.commitPsbt),
+    allowedSighash: [0x01],
+    signAtIndex: 0,
+    network: 'mainnet', // cross-network-keys trick; Leather is mainnet-only
+    broadcast: false,
+  });
+  const commitHex = extractWireTxFromPsbt(hexToBytes(response.result.hex));
+  log('inscribe.commit-signed', { commitHex: commitHex.slice(0, 40) + '…' });
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+};
+
+window.ordpoolSdkHarness.buildAndSignInscribeViaCat21Wallet = async (input: InscribeRequest) => {
+  if (!cat21walletConnector.detect(window)) {
+    throw new Error('Cat21 Wallet provider not injected on the harness page');
+  }
+  statusEl().textContent = `building inscribe (commit+reveal) via cat21-wallet…`;
+  const o = orchestrateInscribe(input);
+
+  const cat21 = (window as unknown as {
+    Cat21Provider: {
+      request: (m: 'signPsbt', p: {
+        hex: string;
+        allowedSighash: number[];
+        signAtIndex: number;
+        network: string;
+        broadcast: boolean;
+      }) => Promise<{ result: { hex: string } }>;
+    };
+  }).Cat21Provider;
+  const response = await cat21.request('signPsbt', {
+    hex: bytesToHex(o.commitPsbt),
+    allowedSighash: [0x01],
+    signAtIndex: 0,
+    network: 'mainnet',
+    broadcast: false,
+  });
+  const commitHex = extractWireTxFromPsbt(hexToBytes(response.result.hex));
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+};
+
+window.ordpoolSdkHarness.buildAndSignInscribeViaWizz = async (input: InscribeRequest) => {
+  if (!wizzConnector.detect(window)) {
+    throw new Error('Wizz provider not injected on the harness page');
+  }
+  statusEl().textContent = `building inscribe (commit+reveal) via wizz…`;
+  const o = orchestrateInscribe(input);
+
+  const wizz = (window as unknown as {
+    wizz: { signPsbt: (h: string, o?: { autoFinalized?: boolean }) => Promise<string> };
+  }).wizz;
+  const signedCommitHex = await wizz.signPsbt(bytesToHex(o.commitPsbt), { autoFinalized: false });
+  const commitHex = extractWireTxFromPsbt(hexToBytes(signedCommitHex));
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+};
+
+window.ordpoolSdkHarness.buildAndSignInscribeViaOkx = async (input: InscribeRequest) => {
+  if (!okxConnector.detect(window)) {
+    throw new Error('OKX provider not injected on the harness page');
+  }
+  statusEl().textContent = `building inscribe (commit+reveal) via okx…`;
+  const o = orchestrateInscribe(input);
+
+  const okxBtc = (window as unknown as {
+    okxwallet: { bitcoin: {
+      signPsbt: (h: string, o?: {
+        autoFinalized?: boolean;
+        from?: string;
+        toSignInputs?: { index: number; address: string; sighashTypes?: number[]; disableTweakSigner?: boolean }[];
+      }) => Promise<string>;
+    } };
+  }).okxwallet.bitcoin;
+  // OKX validates toSignInputs[i].address against mainnet; the
+  // funding input is P2WPKH (bcrt1q), so we pass the mainnet-encoded
+  // equivalent (bc1q) for the same pubkey. Script hash is identical
+  // — the signature works on the regtest tx.
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const mainnetPayment = p2wpkh(paymentPubkey, toScureNetwork(Network.Mainnet));
+  const signedCommitHex = await okxBtc.signPsbt(bytesToHex(o.commitPsbt), {
+    autoFinalized: false,
+    toSignInputs: [{
+      index: 0,
+      address: mainnetPayment.address!,
+      sighashTypes: [0x01],
+      disableTweakSigner: false,
+    }],
+  });
+  const commitHex = extractWireTxFromPsbt(hexToBytes(signedCommitHex));
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+};
+
+window.ordpoolSdkHarness.buildAndSignInscribeViaOyl = async (input: InscribeRequest) => {
+  if (!oylConnector.detect(window)) {
+    throw new Error('Oyl provider not injected on the harness page');
+  }
+  statusEl().textContent = `building inscribe (commit+reveal) via oyl…`;
+  const o = orchestrateInscribe(input);
+
+  const oyl = (window as unknown as {
+    oyl: {
+      signPsbt: (a: {
+        psbt: string;
+        inputsToSign?: { address: string; signingIndexes: number[]; sigHash: number }[];
+        broadcast?: boolean;
+        finalize?: boolean;
+      }) => Promise<{ signedPsbt?: string; signedPsbtHex?: string; psbt?: string }>;
+    };
+  }).oyl;
+  const response = await oyl.signPsbt({
+    psbt: bytesToHex(o.commitPsbt),
+    inputsToSign: [{ address: input.paymentAddress, signingIndexes: [0], sigHash: 0x01 }],
+    broadcast: false,
+    finalize: false,
+  });
+  const signedHex = response.signedPsbtHex
+    || (response.psbt && /^[0-9a-f]+$/i.test(response.psbt) ? response.psbt : undefined);
+  const signedBytes = signedHex
+    ? hexToBytes(signedHex)
+    : base64.decode(response.signedPsbt ?? response.psbt ?? '');
+  const commitHex = extractWireTxFromPsbt(signedBytes);
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+};
+
+window.ordpoolSdkHarness.buildAndSignInscribeViaPhantom = async (input: InscribeRequest) => {
+  if (!phantomConnector.detect(window)) {
+    throw new Error('Phantom provider not injected on the harness page');
+  }
+  statusEl().textContent = `building inscribe (commit+reveal) via phantom…`;
+  const o = orchestrateInscribe(input);
+
+  const phantomBtc = (window as unknown as {
+    phantom: {
+      bitcoin: {
+        request: (a: {
+          method: 'btc_signPSBT';
+          params: [Uint8Array, {
+            inputsToSign: { address: string; signingIndexes: number[]; sigHash?: number }[];
+            finalize: boolean;
+          }];
+        }) => Promise<Uint8Array>;
+      };
+    };
+  }).phantom.bitcoin;
+  const signedBytes = await phantomBtc.request({
+    method: 'btc_signPSBT',
+    params: [
+      o.commitPsbt,
+      {
+        inputsToSign: [{ address: input.paymentAddress, signingIndexes: [0], sigHash: 0x01 }],
+        finalize: false,
+      },
+    ],
+  });
+  const commitHex = extractWireTxFromPsbt(signedBytes);
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+};
+
+window.ordpoolSdkHarness.buildInscribePsbtForAlby = (input: InscribeRequest) => {
+  // Alby's signing path runs through the REAL SDK in the spec (NWC
+  // signMessage doesn't expose signPsbt; Alby Hub does). The harness
+  // only ships the unsigned commit PSBT + the reveal artifacts; the
+  // spec hands the PSBT to Hub via Alby's API and finalizes there.
+  const o = orchestrateInscribe(input);
+  return {
+    commitPsbtHex: bytesToHex(o.commitPsbt),
+    revealHex: o.revealHex,
+    commitTxid: o.commitTxid,
+    revealTxid: o.revealTxid,
+  };
 };
 
 /**

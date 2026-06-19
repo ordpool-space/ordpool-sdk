@@ -87,6 +87,35 @@ describe('Honest wallet coverage (audit gate)', () => {
     expect(violations).toEqual([]);
   });
 
+  it('every PIPELINE-B-DRIVABLE wallet has a *-inscribe-roundtrip.spec.ts file', () => {
+    // Same carve-outs as mint: xpub (no browser binary; covered by
+    // e2e/regtest/psbt-export-inscribe-roundtrip.spec.ts) and binance
+    // (the v1.17.2 binary doesn't inject window.binancew3w.bitcoin
+    // — see the mint coverage carve-out for the full rationale).
+    const WALLETS_WITHOUT_PIPELINE_B = new Set(['xpub', 'binance']);
+    const variants = (Object.values(KnownOrdinalWalletType) as string[])
+      .filter(v => !WALLETS_WITHOUT_PIPELINE_B.has(v));
+    const specs = fs.readdirSync(SPECS_DIR);
+    const missing = variants.filter(v => !specs.includes(`${v}-inscribe-roundtrip.spec.ts`));
+    if (missing.length > 0) {
+      throw new Error(
+        `Pipeline-B-drivable wallets in KnownOrdinalWalletType with NO inscribe-roundtrip spec: ${missing.join(', ')}.\n` +
+        `Add the matching <wallet>-inscribe-roundtrip.spec.ts in e2e/playwright/specs/.`,
+      );
+    }
+  });
+
+  it('xpub flow has an end-to-end regtest inscribe-roundtrip spec (psbt-export-inscribe-roundtrip)', () => {
+    // The xpub carve-out from Pipeline B requires an SDK-level + a
+    // regtest-level pin for inscribe too. The regtest spec stands
+    // in bitcoin-cli walletprocesspsbt as the external offline
+    // wallet and proves psbtExportSigner roundtrips an inscribe
+    // commit byte-for-byte.
+    const REGTEST_DIR = path.join(REPO_ROOT, 'e2e', 'regtest');
+    const specs = fs.readdirSync(REGTEST_DIR);
+    expect(specs).toContain('psbt-export-inscribe-roundtrip.spec.ts');
+  });
+
   it('every PIPELINE-B-DRIVABLE wallet has a *-mint-roundtrip.spec.ts file', () => {
     // Two structural carve-outs from Pipeline B (real-wallet-binary
     // driven mint roundtrip in regtest). Each must have an SDK-level

@@ -1,4 +1,4 @@
-import { secp256k1 } from '@noble/curves/secp256k1';
+import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
@@ -91,6 +91,53 @@ export interface CreateInscribeTransactionsResult {
   commitAddress: string;
   /** Final fees (sats), vsizes, and the funding requirement. */
   fees: SimulateInscribeFeesResult;
+  /**
+   * Material for the recovery path — leaf-1 of the commit's
+   * taptree. Lets the consumer build + broadcast a tx that spends
+   * the commit output back to the user when the reveal never lands.
+   *
+   * The user signs `recovery.leafScript` with their `userPubkey
+   * Xonly` private key (Schnorr); the witness for the recovery tx
+   * is `[signature, leafScript, controlBlock]`. See
+   * `buildInscribeRecoveryTx` for the canonical builder.
+   */
+  recovery: {
+    /** Commit output script (P2TR). */
+    commitOutputScript: Uint8Array;
+    /** Postage + revealFeeReserve, in sats. */
+    commitOutputValueSats: number;
+    /** Recovery tapscript leaf: `<userPubkeyXonly> CHECKSIG`. */
+    leafScript: Uint8Array;
+    /** scure-encoded control block for the recovery leaf. */
+    controlBlock: Uint8Array;
+  };
+}
+
+export interface BuildInscribeRecoveryTxArgs {
+  /** From `result.commitTxid`. */
+  commitTxid: string;
+  /** Always 0 — the commit output is at vout 0. */
+  commitVout?: number;
+  /** From `result.recovery`. */
+  recovery: CreateInscribeTransactionsResult['recovery'];
+  /** Where the recovered postage lands. */
+  recoveryAddress: string;
+  /** sat/vB target for the recovery tx itself. */
+  feeRatePerVbyte: number;
+  /** User's recovery private key (32 bytes). The Schnorr signer for leaf-1. */
+  userRecoveryPrivKey: Uint8Array;
+  /** Network. */
+  network: Network;
+}
+
+export interface BuildInscribeRecoveryTxResult {
+  /** Finalized recovery tx hex (broadcastable). */
+  recoveryHex: string;
+  recoveryTxid: string;
+  /** Sats actually delivered to `recoveryAddress`. */
+  recoveryAmountSats: number;
+  /** Fee paid by the recovery tx. */
+  recoveryFeeSats: number;
 }
 
 /**
@@ -227,6 +274,18 @@ export function createInscribeTransactions(
       network: args.network,
     });
 
+    // Recovery material: leaf-1 of the commit's 2-leaf taptree.
+    // scure's `commitP2tr.tapLeafScript` returns ALL leaves in the
+    // order we built them ([envelope, recovery]); the orchestrator
+    // exposes [0] to the reveal helper above and [1] here for the
+    // user-facing recovery path.
+    const recoveryEntry = commit.taproot.tapLeafScript[1];
+    if (!recoveryEntry) {
+      throw new Error('Internal error: commit taptree missing recovery leaf');
+    }
+    const [recoveryCb, recoveryLeafScript] = recoveryEntry;
+    const recoveryControlBlock = btc.TaprootControlBlock.encode(recoveryCb);
+
     return {
       commitPsbt: commit.commitPsbt,
       commitTxid: commitTxidUnsigned,
@@ -234,12 +293,95 @@ export function createInscribeTransactions(
       revealTxid: reveal.revealTxid,
       commitAddress: commit.commitAddress,
       fees,
+      recovery: {
+        commitOutputScript: commit.commitOutputScript,
+        commitOutputValueSats: commit.commitOutputValueSats,
+        leafScript: recoveryLeafScript,
+        controlBlock: recoveryControlBlock,
+      },
     };
   } finally {
     // Zero the ephemeral key. After this, the only way to spend
     // the commit output is via leaf 1 (the user's recovery key).
     ephemeralPrivKey.fill(0);
   }
+}
+
+/**
+ * Builds + signs the recovery tx that spends the commit output via
+ * leaf 1 (`<userPubkeyXonly> CHECKSIG`). Use when the reveal can't
+ * or won't broadcast and the user wants the postage back. Self-
+ * contained — output is broadcastable wire-tx hex.
+ *
+ * The recovery tx is a 1-input, 1-output P2TR-script-path spend.
+ * Estimated vsize is ~110 vB at the conservative end (32-byte sig +
+ * 34-byte leaf + 33-byte control block = ~110 vB after segwit
+ * discount). Fee is derived as `feeRate * 110` to give the recovery
+ * room without overpaying.
+ */
+export function buildInscribeRecoveryTx(
+  args: BuildInscribeRecoveryTxArgs,
+): BuildInscribeRecoveryTxResult {
+  if (args.feeRatePerVbyte <= 0) {
+    throw new Error('feeRatePerVbyte must be positive');
+  }
+  if (args.userRecoveryPrivKey.length !== 32) {
+    throw new Error('userRecoveryPrivKey must be 32 bytes');
+  }
+
+  const scureNetwork = toScureNetwork(args.network);
+  const commitVout = args.commitVout ?? 0;
+  // Conservative recovery-tx vsize for fee derivation. 1 P2TR input
+  // (script-path with leaf=34B + control=33B + sig=64B), 1 P2TR
+  // output (~43B). After segwit discount ≈ 110 vB.
+  const recoveryVsizeEstimate = 110;
+  const recoveryFee = BigInt(args.feeRatePerVbyte * recoveryVsizeEstimate);
+  const commitValue = BigInt(args.recovery.commitOutputValueSats);
+  if (commitValue <= recoveryFee) {
+    throw new Error(
+      `Recovery infeasible: commit output ${commitValue} <= estimated fee ${recoveryFee}`,
+    );
+  }
+  const recoveredAmount = commitValue - recoveryFee;
+
+  const tx = new btc.Transaction({ allowUnknownOutputs: false });
+  tx.addInput({
+    txid: args.commitTxid,
+    index: commitVout,
+    witnessUtxo: {
+      script: args.recovery.commitOutputScript,
+      amount: commitValue,
+    },
+  });
+  tx.addOutputAddress(args.recoveryAddress, recoveredAmount, scureNetwork);
+
+  // Sign leaf 1 via Schnorr against the BIP-341 sighash for the
+  // recovery's input 0. Same manual finalize pattern as the reveal
+  // helper (scure 1.2.x can't auto-finalize this tapscript shape).
+  const sighash = tx.preimageWitnessV1(
+    0,
+    [args.recovery.commitOutputScript],
+    btc.SignatureHash.DEFAULT,
+    [commitValue],
+    undefined,
+    args.recovery.leafScript,
+    0xc0,
+  );
+  const signature = schnorr.sign(sighash, args.userRecoveryPrivKey);
+  tx.updateInput(
+    0,
+    {
+      finalScriptWitness: [signature, args.recovery.leafScript, args.recovery.controlBlock],
+    },
+    true,
+  );
+
+  return {
+    recoveryHex: tx.hex,
+    recoveryTxid: tx.id,
+    recoveryAmountSats: Number(recoveredAmount),
+    recoveryFeeSats: Number(recoveryFee),
+  };
 }
 
 /** Per-address-type dust limit, mirroring `getMinimumUtxoSize`. */
