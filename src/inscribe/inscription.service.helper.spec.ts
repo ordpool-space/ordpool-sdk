@@ -110,13 +110,14 @@ describe('createInscribeTransactions', () => {
       network: NETWORK,
     });
 
-    const commitTx = btc.Transaction.fromPSBT(r.commitPsbt);
     const decodedReveal = btc.Transaction.fromRaw(hex.decode(r.revealHex));
 
     expect(decodedReveal.getInput(0).index).toBe(0);
-    // txid bytes in the reveal input's outpoint match commit tx's id.
+    // txid bytes in the reveal input's outpoint match the orchestrator-
+    // computed commit txid (which equals what the wallet-signed commit
+    // will produce — segwit txid is witness-independent).
     const revealInputTxid = decodedReveal.getInput(0).txid;
-    expect(hex.encode(revealInputTxid!)).toBe(commitTx.id);
+    expect(hex.encode(revealInputTxid!)).toBe(r.commitTxid);
   });
 
   it('end-to-end: ordpool-parser reconstructs the original content from the broadcast reveal', () => {

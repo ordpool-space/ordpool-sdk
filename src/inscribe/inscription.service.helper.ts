@@ -78,6 +78,11 @@ export interface CreateInscribeTransactionsArgs {
 export interface CreateInscribeTransactionsResult {
   /** Unsigned commit PSBT — hand to the user's wallet for signing. */
   commitPsbt: Uint8Array;
+  /**
+   * Computed txid of the commit. SegWit txids are witness-independent,
+   * so this matches what the wallet-signed commit will produce.
+   */
+  commitTxid: string;
   /** Signed, finalized reveal-tx hex. Self-contained; broadcast as-is. */
   revealHex: string;
   /** Computed txid of the reveal (lets consumers display/track before broadcast). */
@@ -137,17 +142,29 @@ export function createInscribeTransactions(
       isSimulation: true,
       network: args.network,
     });
-    const fees = simulateInscribeFees({
-      feeRatePerVbyte: args.feeRatePerVbyte,
-      body: args.body,
-      contentType: args.contentType,
-      envelopeFields: args.envelopeFields,
-      fundingInput: simulationFundingInput,
-      senderChangeAddress: args.paymentAddress,
-      recipientAddress: args.recipientAddress,
-      userRecoveryPubkeyXonly: args.paymentPubkeyXonly,
-      network: args.network,
-    });
+    let fees: SimulateInscribeFeesResult;
+    try {
+      fees = simulateInscribeFees({
+        feeRatePerVbyte: args.feeRatePerVbyte,
+        body: args.body,
+        contentType: args.contentType,
+        envelopeFields: args.envelopeFields,
+        fundingInput: simulationFundingInput,
+        senderChangeAddress: args.paymentAddress,
+        recipientAddress: args.recipientAddress,
+        userRecoveryPubkeyXonly: args.paymentPubkeyXonly,
+        network: args.network,
+      });
+    } catch (err) {
+      // The commit helper throws `Funding insufficient: ...` when the
+      // funding UTXO is below the postage + fees floor. Re-cast to
+      // the orchestrator's typed message so consumers can branch on it
+      // (same translation pattern cat21's createTransaction uses).
+      if (err instanceof Error && /Funding insufficient/.test(err.message)) {
+        throw new Error('Insufficient funds for inscribe');
+      }
+      throw err;
+    }
 
     if (args.paymentOutput.value < fees.fundingRequirementSats) {
       throw new Error(
@@ -212,6 +229,7 @@ export function createInscribeTransactions(
 
     return {
       commitPsbt: commit.commitPsbt,
+      commitTxid: commitTxidUnsigned,
       revealHex: reveal.revealHex,
       revealTxid: reveal.revealTxid,
       commitAddress: commit.commitAddress,
