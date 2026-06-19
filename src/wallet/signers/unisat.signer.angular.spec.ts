@@ -1,5 +1,6 @@
 import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals';
 import { hex } from '@scure/base';
+import * as btc from '@scure/btc-signer';
 import { firstValueFrom, of, throwError } from 'rxjs';
 
 import { Network } from '../../network';
@@ -49,6 +50,31 @@ describe('unisatSigner.signAndBroadcast', () => {
     expect(broadcastSignedPsbtMock).toHaveBeenCalledWith(input, hex.decode('70736274ff01'));
 
     expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST' });
+  });
+
+  it('signMultiInputAndBroadcast: maps the signingMap onto Unisat toSignInputs (cat at ordinals, funding at payment)', async () => {
+    const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
+    signPsbtMock.mockResolvedValue('70736274ff01' as never);
+
+    const input = {
+      psbtBytes: unsignedBytes,
+      signingMap: [
+        { address: 'bc1pordinals', indexes: [0] },
+        { address: 'bc1qpayment', indexes: [1, 2] },
+      ],
+      network: Network.Mainnet,
+      broadcast: ((_rawTxHex: string) => of('UNUSED')) as never,
+    };
+    await firstValueFrom(unisatSigner.signMultiInputAndBroadcast(input));
+
+    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), {
+      autoFinalized: false,
+      toSignInputs: [
+        { index: 0, address: 'bc1pordinals', sighashTypes: [btc.SigHash.ALL] },
+        { index: 1, address: 'bc1qpayment', sighashTypes: [btc.SigHash.ALL] },
+        { index: 2, address: 'bc1qpayment', sighashTypes: [btc.SigHash.ALL] },
+      ],
+    });
   });
 
   it('when signPsbt rejects, propagates the error and never reaches the broadcast helper', async () => {

@@ -8,8 +8,10 @@ import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMultiInputAndBroadcastInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { resolveSigningTargets } from './signing-targets.helper';
 
 
 /**
@@ -26,50 +28,66 @@ import {
  * Migration to sats-connect v3+ `provider.request('signPsbt', ...)`
  * is a separate stream.
  */
+function callXverseSignTransaction(
+  psbtBytes: Uint8Array,
+  inputsToSign: { address: string; signingIndexes: number[]; sigHash: number }[],
+  network: Parameters<typeof signTransaction>[0]['payload']['network']['type'],
+  message: string,
+): Observable<string> {
+  const psbtBase64 = base64.encode(psbtBytes);
+  return new Observable<string>((observer) => {
+    signTransaction({
+      payload: {
+        network: { type: network },
+        message,
+        psbtBase64,
+        broadcast: false,
+        inputsToSign,
+      },
+      onFinish: (response) => {
+        const signed = (response as { psbtBase64?: string }).psbtBase64;
+        if (!signed) {
+          observer.error(new Error('Xverse signTransaction returned without psbtBase64'));
+          return;
+        }
+        observer.next(signed);
+        observer.complete();
+      },
+      onCancel: () => observer.error(new Error('Request was cancelled')),
+    });
+  });
+}
+
 export const xverseSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.xverse,
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
-
-    // Cast at the sats-connect boundary — see xverse.connector.ts
-    // for the full rationale (network.ts deliberately doesn't import
-    // BitcoinNetworkType from sats-connect to keep axios out of the
-    // /core bundle; the runtime strings agree exactly).
     const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
-    const psbtBase64 = base64.encode(input.psbtBytes);
+    return callXverseSignTransaction(
+      input.psbtBytes,
+      [{ address: input.paymentAddress, signingIndexes: [0], sigHash: btc.SigHash.ALL }],
+      networkType,
+      'Sign Transaction (CAT-21 Mint)',
+    ).pipe(
+      switchMap((signedPsbtBase64) => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))),
+    );
+  },
 
-    const signedPsbt$ = new Observable<string>((observer) => {
-      signTransaction({
-        payload: {
-          network: { type: networkType },
-          message: 'Sign Transaction (CAT-21 Mint)',
-          psbtBase64,
-          broadcast: false, // we broadcast via input.broadcast(...)
-          inputsToSign: [
-            {
-              address: input.paymentAddress,
-              signingIndexes: [0],
-              sigHash: btc.SigHash.ALL,
-            },
-          ],
-        },
-        onFinish: (response) => {
-          const signed = (response as { psbtBase64?: string }).psbtBase64;
-          if (!signed) {
-            observer.error(new Error('Xverse signTransaction returned without psbtBase64'));
-            return;
-          }
-          observer.next(signed);
-          observer.complete();
-        },
-        onCancel: () => {
-          observer.error(new Error('Request was cancelled'));
-        },
-      });
-    });
-
-    return signedPsbt$.pipe(
-      switchMap(signedPsbtBase64 => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))),
+  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
+    const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
+    const targets = resolveSigningTargets(input);
+    const inputsToSign = targets.map((t) => ({
+      address: t.address,
+      signingIndexes: t.indexes,
+      sigHash: t.sigHash,
+    }));
+    return callXverseSignTransaction(
+      input.psbtBytes,
+      inputsToSign,
+      networkType,
+      'Sign CAT-21 transaction',
+    ).pipe(
+      switchMap((signedPsbtBase64) => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))),
     );
   },
 };

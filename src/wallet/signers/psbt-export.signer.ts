@@ -5,6 +5,7 @@ import { map, Observable, switchMap, throwError } from 'rxjs';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMultiInputAndBroadcastInput,
   WalletSigner,
 } from '../wallet.service.types';
 
@@ -82,6 +83,33 @@ export const psbtExportSigner: WalletSigner = {
         }
         return input.broadcast(tx.hex).pipe(map(txId => ({ txId })));
       })
+    );
+  },
+
+  /**
+   * The watch-only path doesn't differentiate single- vs multi-input
+   * because external wallets (Sparrow, Electrum, Coldcard, etc.) read
+   * the whole PSBT themselves and sign every input they own. The
+   * caller hands them the same unsigned-PSBT-as-base64/hex regardless
+   * of which inputs need which keys. We just trust the user's wallet
+   * to do the right thing and finalise whatever comes back.
+   */
+  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
+    if (!input.promptForSignedPsbt) {
+      return throwError(() => new Error(
+        'Watch-only signing requires a promptForSignedPsbt callback to be provided'
+      ));
+    }
+    return input.promptForSignedPsbt({
+      base64: base64.encode(input.psbtBytes),
+      hex: hex.encode(input.psbtBytes),
+    }).pipe(
+      switchMap((signedPsbt) => {
+        const signedBytes = decodeSignedPsbt(signedPsbt);
+        const tx = btc.Transaction.fromPSBT(signedBytes);
+        if (!tx.isFinal) tx.finalize();
+        return input.broadcast(tx.hex).pipe(map((txId) => ({ txId })));
+      }),
     );
   },
 };

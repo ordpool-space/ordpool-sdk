@@ -5,12 +5,23 @@ import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMultiInputAndBroadcastInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { resolveSigningTargets } from './signing-targets.helper';
 
+
+interface WizzToSignInput {
+  index: number;
+  address?: string;
+  sighashTypes?: number[];
+}
 
 interface WizzRpc {
-  signPsbt(psbtHex: string, options?: { autoFinalized?: boolean }): Promise<string>;
+  signPsbt(
+    psbtHex: string,
+    options?: { autoFinalized?: boolean; toSignInputs?: WizzToSignInput[] }
+  ): Promise<string>;
 }
 
 
@@ -37,6 +48,23 @@ export const wizzSigner: WalletSigner = {
     const wizz = (window as unknown as { wizz: WizzRpc }).wizz;
 
     return from(wizz.signPsbt(psbtHex, { autoFinalized: false })).pipe(
+      switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
+    );
+  },
+
+  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
+    const psbtHex = hex.encode(input.psbtBytes);
+    const wizz = (window as unknown as { wizz: WizzRpc }).wizz;
+
+    const targets = resolveSigningTargets(input);
+    const toSignInputs: WizzToSignInput[] = [];
+    for (const t of targets) {
+      for (const i of t.indexes) {
+        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+      }
+    }
+
+    return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
       switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
     );
   },

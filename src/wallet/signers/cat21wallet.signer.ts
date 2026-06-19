@@ -1,6 +1,6 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { from, Observable, switchMap } from 'rxjs';
+import { defer, from, Observable, switchMap } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network';
 import { broadcastSignedPsbt } from '../psbt-extract';
@@ -8,9 +8,11 @@ import { findCat21WalletProvider } from '../wallet.service.helper';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMultiInputAndBroadcastInput,
   WalletSigner,
   WindowLike,
 } from '../wallet.service.types';
+import { resolveSigningTargets } from './signing-targets.helper';
 
 
 interface Cat21WalletPSBTResponse {
@@ -39,35 +41,62 @@ interface Cat21WalletSignPsbtParams {
  * so the wallet's internal validators get what they expect.
  *
  * sighash whitelist is `[SigHash.ALL]` — same as Leather, same as
- * the rest of the SDK's mint roundtrip path. The Cat21 mint PSBT
- * commits to all outputs under SIGHASH_ALL; anything else would be
- * rejected by `assertAllInputsSighashAll` after broadcast.
+ * the rest of the SDK's cat-flow path.
+ *
+ * Multi-input signing: the wallet's `signPsbt` JSON-RPC takes a
+ * single `signAtIndex`. For flows that need multiple inputs signed
+ * (transfer, offer-accept) the multi method iterates the flat
+ * index list, threading the partially-signed PSBT hex through each
+ * call. Each call shows a confirmation dialog so the user sees and
+ * approves every signature.
  */
+function callCat21WalletSignPsbt(
+  psbtHex: string,
+  signAtIndex: number,
+  network: Cat21WalletSignPsbtParams['network'],
+): Promise<string> {
+  const provider = findCat21WalletProvider(window as unknown as WindowLike);
+  if (!provider) {
+    throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
+  }
+  const params: Cat21WalletSignPsbtParams = {
+    hex: psbtHex,
+    allowedSighash: [btc.SigHash.ALL],
+    signAtIndex,
+    network,
+    broadcast: false,
+  };
+  return (provider.request('signPsbt', params) as Promise<Cat21WalletPSBTResponse>)
+    .then((resp) => resp.result.hex);
+}
+
 export const cat21walletSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.cat21wallet,
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
+    const psbtHex = hex.encode(input.psbtBytes);
+    const network = toLeatherNetworkString(input.network);
+    return defer(() => from(callCat21WalletSignPsbt(psbtHex, 0, network))).pipe(
+      switchMap((signedHex) => broadcastSignedPsbt(input, hex.decode(signedHex))),
+    );
+  },
 
-    const psbtHex: string = hex.encode(input.psbtBytes);
-    const signRequestParams: Cat21WalletSignPsbtParams = {
-      hex: psbtHex,
-      allowedSighash: [btc.SigHash.ALL],
-      signAtIndex: 0,
-      network: toLeatherNetworkString(input.network),
-      broadcast: false, // we broadcast via input.broadcast(...)
-    };
-
-    const provider = findCat21WalletProvider(window as unknown as WindowLike);
-    if (!provider) {
-      throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
+  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
+    const targets = resolveSigningTargets(input);
+    const flatIndexes: number[] = [];
+    for (const t of targets) {
+      for (const i of t.indexes) flatIndexes.push(i);
     }
-    const signPromise = provider.request(
-      'signPsbt',
-      signRequestParams,
-    ) as Promise<Cat21WalletPSBTResponse>;
+    const network = toLeatherNetworkString(input.network);
 
-    return from(signPromise).pipe(
-      switchMap(resp => broadcastSignedPsbt(input, hex.decode(resp.result.hex))),
+    return defer(() => {
+      let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));
+      for (const i of flatIndexes) {
+        chain = chain.then((currentHex) => callCat21WalletSignPsbt(currentHex, i, network));
+      }
+      return from(chain);
+    }).pipe(
+      switchMap((finalHex) => broadcastSignedPsbt(input, hex.decode(finalHex))),
     );
   },
 };

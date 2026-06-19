@@ -6,8 +6,10 @@ import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMultiInputAndBroadcastInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { resolveSigningTargets } from './signing-targets.helper';
 
 
 interface BinanceBtcRpc {
@@ -63,6 +65,23 @@ export const binanceSigner: WalletSigner = {
         }],
       }),
     ).pipe(
+      switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
+    );
+  },
+
+  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
+    const psbtHex = hex.encode(input.psbtBytes);
+    const binanceBtc = (window as unknown as { binancew3w: { bitcoin: BinanceBtcRpc } }).binancew3w.bitcoin;
+
+    const targets = resolveSigningTargets(input);
+    const toSignInputs: { index: number; address?: string; sighashTypes?: number[] }[] = [];
+    for (const t of targets) {
+      for (const i of t.indexes) {
+        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+      }
+    }
+
+    return from(binanceBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
       switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
     );
   },

@@ -91,60 +91,9 @@ export interface WalletConnector {
  * DOM dependencies while still letting the contract be "PSBT in,
  * txid out" for every wallet uniformly.
  */
-/**
- * One row of the signingMap: "sign these specific input indexes
- * with the private key behind this address". Multiple rows ⇒
- * multi-address signing (transfer: ordinals address on input 0,
- * payment address on funding inputs; offer-accept: ordinals
- * address on input 0 only).
- *
- * For wallets whose RPC takes one address+indexes pair per call
- * (Xverse, Unisat, Phantom, Oyl, OKX, Wizz): the signer maps
- * directly to the wallet's per-pair array shape.
- *
- * For single-index wallets (Leather, cat21-wallet): the signer
- * iterates the rows, calling signPsbt once per (address, index)
- * pair, threading the partially-signed PSBT through each call.
- */
-export interface PsbtSigningTarget {
-  address: string;
-  indexes: number[];
-  /** SIGHASH override per-row. Defaults to SIGHASH_ALL on every cat-flow we ship today. */
-  sigHash?: number;
-}
-
 export interface SignAndBroadcastInput {
   psbtBytes: Uint8Array;
-  /**
-   * The wallet's payment address. Always required (we broadcast
-   * via electrs and several signer APIs want the address as a label).
-   *
-   * Historical: was the only signing address back when mint was the
-   * only flow. New flows (transfer, offer) supply `signingMap`
-   * additionally to drive multi-address signing.
-   */
   paymentAddress: string;
-  /**
-   * Which inputs each address signs. Optional; defaults to
-   * `[{ address: paymentAddress, indexes: [0] }]` to keep the
-   * legacy mint call shape working unchanged.
-   *
-   * For a transfer (cat input at ordinals + funding at payment):
-   *   `[{ address: ordinalsAddress, indexes: [0] },
-   *     { address: paymentAddress,  indexes: [1, 2, …] }]`
-   * For a buyer-side offer create (buyer signs only their funding
-   * inputs at payment; seller's cat input at index 0 stays unsigned):
-   *   `[{ address: paymentAddress, indexes: [1, 2, …] }]`
-   * For a seller-side offer accept (seller signs only the cat input
-   * at the ordinals address, every funding input is already buyer-signed):
-   *   `[{ address: ordinalsAddress, indexes: [0] }]`
-   *
-   * Order matters for single-index wallets (Leather, cat21-wallet)
-   * because each call returns a partially-signed PSBT that's threaded
-   * into the next call. Multi-index wallets (Xverse) honour the array
-   * as a whole.
-   */
-  signingMap?: ReadonlyArray<PsbtSigningTarget>;
   network: Network;
   /** Broadcast a finalized tx-hex. Returns the txid. */
   broadcast(txHex: string): Observable<string>;
@@ -158,6 +107,60 @@ export interface SignAndBroadcastInput {
    * as a base64 string. Accepting hex back too is the signer's
    * responsibility; the prompt only needs to return one shape.
    */
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+/**
+ * One row of the signingMap: "sign these specific input indexes
+ * with the private key behind this address". Multiple rows ⇒
+ * multi-address signing.
+ *
+ * For wallets whose RPC takes one address+indexes pair per call
+ * (Xverse, Phantom, Oyl, Unisat with toSignInputs, Binance): the
+ * signer maps directly to the wallet's per-pair array shape.
+ *
+ * For single-index wallets (Leather, cat21-wallet): the signer
+ * iterates the rows, calling signPsbt once per (address, index)
+ * pair, threading the partially-signed PSBT through each call.
+ */
+export interface PsbtSigningTarget {
+  address: string;
+  indexes: number[];
+  /** Per-row SIGHASH override. Defaults to SIGHASH_ALL on every cat-flow we ship today. */
+  sigHash?: number;
+}
+
+/**
+ * Input shape for `signMultiInputAndBroadcast` — the multi-address
+ * signing variant used by transfer and offer flows where the user
+ * signs across BOTH the ordinals address (cat input at index 0) AND
+ * the payment address (funding inputs at indexes 1+). See
+ * `PsbtSigningTarget` for the per-row contract.
+ *
+ * Concrete shapes by flow:
+ *
+ *   transfer: [
+ *     { address: ordinalsAddress, indexes: [0] },
+ *     { address: paymentAddress,  indexes: [1, 2, …] },
+ *   ]
+ *   offer-create (buyer): [
+ *     { address: paymentAddress, indexes: [1, 2, …] },
+ *   ]
+ *   offer-accept (seller): [
+ *     { address: ordinalsAddress, indexes: [0] },
+ *   ]
+ *
+ * Order matters for single-index wallets (Leather, cat21-wallet):
+ * each `signPsbt` call returns a partially-signed PSBT threaded into
+ * the next call. Multi-index wallets honour the array as a whole.
+ */
+export interface SignMultiInputAndBroadcastInput {
+  psbtBytes: Uint8Array;
+  signingMap: ReadonlyArray<PsbtSigningTarget>;
+  network: Network;
+  /** Broadcast a finalized tx-hex. Returns the txid. */
+  broadcast(txHex: string): Observable<string>;
+  /** Mirrors SignAndBroadcastInput.promptForSignedPsbt for watch-only signers. */
   promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
 }
 
@@ -176,7 +179,27 @@ export interface SignAndBroadcastInput {
  */
 export interface WalletSigner {
   readonly providerId: KnownOrdinalWalletType;
+
+  /**
+   * Single-input sign (mint flow). One input at the payment address,
+   * SIGHASH_ALL. The mint PSBT has exactly one input — the user's
+   * funding UTXO — so a dedicated method beats a generalised one.
+   */
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }>;
+
+  /**
+   * Multi-address sign (transfer, offer-create, offer-accept). The
+   * caller drives the per-address, per-index breakdown explicitly
+   * via `signingMap`. See `SignMultiInputAndBroadcastInput` for the
+   * concrete shapes per cat-flow.
+   *
+   * Every shipping signer implements this method. We don't expose a
+   * "this wallet can't do multi" capability bit because flows that
+   * need it (transfer, offer) always reach for it, and signer-level
+   * support is sequence-of-single-sign for the wallets without
+   * native multi-input RPCs (Leather, cat21-wallet).
+   */
+  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }>;
 }
 
 export enum KnownOrdinalWalletType {

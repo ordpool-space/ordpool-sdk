@@ -1,7 +1,15 @@
 import * as btc from '@scure/btc-signer';
 import { map, Observable } from 'rxjs';
 
-import { SignAndBroadcastInput } from './wallet.service.types';
+import { SignAndBroadcastInput, SignMultiInputAndBroadcastInput } from './wallet.service.types';
+
+/**
+ * The two signer-input shapes share `broadcast` — that's all the
+ * post-sign step needs. Typing the helper against just `broadcast`
+ * keeps it usable from both call sites without an unsound union
+ * widening anywhere.
+ */
+type BroadcastingInput = Pick<SignAndBroadcastInput | SignMultiInputAndBroadcastInput, 'broadcast'>;
 
 /**
  * Finalize a signed PSBT (if needed) and extract the wire-format
@@ -43,7 +51,7 @@ export function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
  * production signers + the Pipeline B harness route through here.
  */
 export function broadcastSignedPsbt(
-  input: SignAndBroadcastInput,
+  input: BroadcastingInput,
   signedPsbtBytes: Uint8Array,
 ): Observable<{ txId: string }> {
   const txHex = extractWireTxFromPsbt(signedPsbtBytes);

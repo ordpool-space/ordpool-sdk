@@ -5,6 +5,7 @@ import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMultiInputAndBroadcastInput,
   WalletSigner,
 } from '../wallet.service.types';
 
@@ -74,5 +75,29 @@ export const albySigner: WalletSigner = {
       switchMap(txHex => input.broadcast(txHex)),
       map(txId => ({ txId })),
     );
+  },
+
+  /**
+   * Multi-input flows (transfer, offer-create, offer-accept) cannot
+   * be driven against Alby's current API: `signPsbt` signs every
+   * input in the PSBT unconditionally (verified iter 108 against
+   * background.bundle.js). That breaks offer-create where the buyer
+   * must NOT sign input 0 (the seller's cat UTXO).
+   *
+   * For transfer specifically, where the user signs both the cat and
+   * funding inputs but they're all the user's UTXOs, Alby's "sign
+   * everything" would work — but Alby uses a single Taproot key at
+   * `m/86'/1'/0'/0/0` for every signature, so a transfer that mixes
+   * scriptTypes (cat at the user's taproot, funding at the user's
+   * legacy address) would fail anyway. Until Alby exposes per-input
+   * key derivation, multi-input flows raise here so the consumer
+   * surfaces an unambiguous "this wallet doesn't support that flow yet".
+   */
+  signMultiInputAndBroadcast(_input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
+    return new Observable((observer) => {
+      observer.error(new Error(
+        'Alby does not support per-input signing yet (no toSignInputs / signInputs knob in current webbtc API). Use Xverse, Leather, Unisat, or CAT-21 wallet for transfer / offer flows.',
+      ));
+    });
   },
 };

@@ -1,14 +1,16 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { from, Observable, switchMap } from 'rxjs';
+import { defer, from, Observable, switchMap } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMultiInputAndBroadcastInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { resolveSigningTargets } from './signing-targets.helper';
 
 
 interface LeatherPSBTBroadcastResponse {
@@ -45,26 +47,57 @@ interface LeatherRpcWindow {
  * overwritten; users with multiple wallet extensions installed have
  * hit our code routing to the wrong wallet. See the multi-injection
  * section of PLAN-wallet-roster.md.
+ *
+ * Multi-input signing: Leather's signPsbt takes a single
+ * `signAtIndex`. For flows that need multiple inputs signed the
+ * multi method iterates the flat index list, threading the
+ * partially-signed PSBT hex through each call. Same pattern as
+ * cat21-wallet (which is a Leather fork). Each call surfaces a
+ * confirmation dialog in the wallet.
  */
+function callLeatherSignPsbt(
+  psbtHex: string,
+  signAtIndex: number,
+  network: LeatherSignPsbtRequestParams['network'],
+): Promise<string> {
+  const win = window as unknown as LeatherRpcWindow;
+  const params: LeatherSignPsbtRequestParams = {
+    hex: psbtHex,
+    allowedSighash: [btc.SigHash.ALL],
+    signAtIndex,
+    network,
+    broadcast: false,
+  };
+  return win.LeatherProvider.request('signPsbt', params).then((resp) => resp.result.hex);
+}
+
 export const leatherSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.leather,
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
+    const psbtHex = hex.encode(input.psbtBytes);
+    const network = toLeatherNetworkString(input.network);
+    return defer(() => from(callLeatherSignPsbt(psbtHex, 0, network))).pipe(
+      switchMap((signedHex) => broadcastSignedPsbt(input, hex.decode(signedHex))),
+    );
+  },
 
-    const psbtHex: string = hex.encode(input.psbtBytes);
-    const signRequestParams: LeatherSignPsbtRequestParams = {
-      hex: psbtHex,
-      allowedSighash: [btc.SigHash.ALL],
-      signAtIndex: 0,
-      network: toLeatherNetworkString(input.network),
-      broadcast: false, // we broadcast via input.broadcast(...)
-    };
+  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
+    const targets = resolveSigningTargets(input);
+    const flatIndexes: number[] = [];
+    for (const t of targets) {
+      for (const i of t.indexes) flatIndexes.push(i);
+    }
+    const network = toLeatherNetworkString(input.network);
 
-    const win = window as unknown as LeatherRpcWindow;
-    const signPromise = win.LeatherProvider.request('signPsbt', signRequestParams);
-
-    return from(signPromise).pipe(
-      switchMap(resp => broadcastSignedPsbt(input, hex.decode(resp.result.hex))),
+    return defer(() => {
+      let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));
+      for (const i of flatIndexes) {
+        chain = chain.then((currentHex) => callLeatherSignPsbt(currentHex, i, network));
+      }
+      return from(chain);
+    }).pipe(
+      switchMap((finalHex) => broadcastSignedPsbt(input, hex.decode(finalHex))),
     );
   },
 };

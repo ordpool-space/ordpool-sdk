@@ -5,8 +5,10 @@ import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMultiInputAndBroadcastInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { resolveSigningTargets } from './signing-targets.helper';
 
 
 interface OylInputToSign {
@@ -42,16 +44,25 @@ export const oylSigner: WalletSigner = {
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtBase64 = base64.encode(input.psbtBytes);
     const oyl = (window as unknown as { oyl: OylRpc }).oyl;
-
     const signPromise = oyl.signPsbt({
       psbtBase64,
-      inputsToSign: [{
-        address: input.paymentAddress,
-        signingIndexes: [0],
-        sigHash: 0x01,
-      }],
+      inputsToSign: [{ address: input.paymentAddress, signingIndexes: [0], sigHash: 0x01 }],
     });
+    return from(signPromise).pipe(
+      switchMap(response => broadcastSignedPsbt(input, base64.decode(response.signedPsbt))),
+    );
+  },
 
+  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
+    const psbtBase64 = base64.encode(input.psbtBytes);
+    const oyl = (window as unknown as { oyl: OylRpc }).oyl;
+    const targets = resolveSigningTargets(input);
+    const inputsToSign = targets.map((t) => ({
+      address: t.address,
+      signingIndexes: t.indexes,
+      sigHash: t.sigHash,
+    }));
+    const signPromise = oyl.signPsbt({ psbtBase64, inputsToSign });
     return from(signPromise).pipe(
       switchMap(response => broadcastSignedPsbt(input, base64.decode(response.signedPsbt))),
     );
