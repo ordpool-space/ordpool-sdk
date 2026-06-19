@@ -5,6 +5,7 @@ import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
+  SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
 import { resolveSigningTargets } from './signing-targets.helper';
@@ -85,5 +86,16 @@ export const phantomSigner: WalletSigner = {
     return from(signPromise).pipe(
       switchMap((signedPsbtBytes) => broadcastSignedPsbt(input, signedPsbtBytes)),
     );
+  },
+
+  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
+    const phantomBtc = (window as unknown as { phantom: { bitcoin: PhantomBitcoinSigner } }).phantom.bitcoin;
+    const targets = resolveSigningTargets(input);
+    const inputsToSign = targets.map((t) => ({
+      address: t.address,
+      signingIndexes: t.indexes,
+      sigHash: t.sigHash,
+    }));
+    return from(phantomBtc.signPSBT(input.psbtBytes, { inputsToSign, finalize: false }));
   },
 };

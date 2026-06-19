@@ -6,6 +6,7 @@ import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
+  SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
 
@@ -97,6 +98,14 @@ export const albySigner: WalletSigner = {
     return new Observable((observer) => {
       observer.error(new Error(
         'Alby does not support per-input signing yet (no toSignInputs / signInputs knob in current webbtc API). Use Xverse, Leather, Unisat, or CAT-21 wallet for transfer / offer flows.',
+      ));
+    });
+  },
+
+  signPsbtOnly(_input: SignPsbtOnlyInput): Observable<Uint8Array> {
+    return new Observable((observer) => {
+      observer.error(new Error(
+        'Alby does not support per-input signing yet (no toSignInputs / signInputs knob in current webbtc API). Use Xverse, Leather, Unisat, or CAT-21 wallet for offer-create.',
       ));
     });
   },

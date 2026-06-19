@@ -6,6 +6,7 @@ import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
+  SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
 
@@ -111,5 +112,23 @@ export const psbtExportSigner: WalletSigner = {
         return input.broadcast(tx.hex).pipe(map((txId) => ({ txId })));
       }),
     );
+  },
+
+  /**
+   * Buyer-side offer-create with a watch-only signer: hand the unsigned
+   * PSBT to the user, get back a PSBT that carries buyer-side partial
+   * signatures but NO finalization on input 0. Return those bytes; the
+   * orchestrator surfaces them as the offer artifact.
+   */
+  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
+    if (!input.promptForSignedPsbt) {
+      return throwError(() => new Error(
+        'Watch-only signing requires a promptForSignedPsbt callback to be provided'
+      ));
+    }
+    return input.promptForSignedPsbt({
+      base64: base64.encode(input.psbtBytes),
+      hex: hex.encode(input.psbtBytes),
+    }).pipe(map((signedPsbt) => decodeSignedPsbt(signedPsbt)));
   },
 };

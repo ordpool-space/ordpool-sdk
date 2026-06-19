@@ -1,6 +1,6 @@
 import { base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { Observable, switchMap } from 'rxjs';
+import { Observable, map, switchMap } from 'rxjs';
 import { signTransaction } from 'sats-connect';
 
 import { toBitcoinNetworkType } from '../../network';
@@ -9,6 +9,7 @@ import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
+  SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
 import { resolveSigningTargets } from './signing-targets.helper';
@@ -89,5 +90,21 @@ export const xverseSigner: WalletSigner = {
     ).pipe(
       switchMap((signedPsbtBase64) => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))),
     );
+  },
+
+  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
+    const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
+    const targets = resolveSigningTargets(input);
+    const inputsToSign = targets.map((t) => ({
+      address: t.address,
+      signingIndexes: t.indexes,
+      sigHash: t.sigHash,
+    }));
+    return callXverseSignTransaction(
+      input.psbtBytes,
+      inputsToSign,
+      networkType,
+      'Sign CAT-21 buy offer (no broadcast)',
+    ).pipe(map((signedPsbtBase64) => base64.decode(signedPsbtBase64)));
   },
 };

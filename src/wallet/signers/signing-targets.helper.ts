@@ -1,9 +1,14 @@
 import * as btc from '@scure/btc-signer';
 
-import {
-  PsbtSigningTarget,
-  SignMultiInputAndBroadcastInput,
-} from '../wallet.service.types';
+import { PsbtSigningTarget } from '../wallet.service.types';
+
+/**
+ * Both `SignMultiInputAndBroadcastInput` and `SignPsbtOnlyInput` carry a
+ * `signingMap`. The helper only consults that field, so we pin the
+ * argument shape to just it — keeps both call sites usable from one
+ * helper without an unsound union.
+ */
+type WithSigningMap = { signingMap: ReadonlyArray<PsbtSigningTarget> };
 
 /**
  * Normalises a signingMap to a non-empty array of fully-defaulted
@@ -15,7 +20,7 @@ import {
  * runtime degradation.
  */
 export function resolveSigningTargets(
-  input: SignMultiInputAndBroadcastInput
+  input: WithSigningMap
 ): ReadonlyArray<Required<PsbtSigningTarget>> {
   if (!input.signingMap || input.signingMap.length === 0) {
     throw new Error('signingMap is empty — pass at least one (address, indexes) row');

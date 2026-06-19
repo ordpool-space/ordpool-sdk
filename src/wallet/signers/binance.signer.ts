@@ -1,5 +1,5 @@
 import { hex } from '@scure/base';
-import { from, Observable, switchMap } from 'rxjs';
+import { from, map, Observable, switchMap } from 'rxjs';
 
 import { broadcastSignedPsbt } from '../psbt-extract';
 import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
@@ -7,6 +7,7 @@ import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
+  SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
 import { resolveSigningTargets } from './signing-targets.helper';
@@ -83,6 +84,21 @@ export const binanceSigner: WalletSigner = {
 
     return from(binanceBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
       switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
+    );
+  },
+
+  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
+    const psbtHex = hex.encode(input.psbtBytes);
+    const binanceBtc = (window as unknown as { binancew3w: { bitcoin: BinanceBtcRpc } }).binancew3w.bitcoin;
+    const targets = resolveSigningTargets(input);
+    const toSignInputs: { index: number; address?: string; sighashTypes?: number[] }[] = [];
+    for (const t of targets) {
+      for (const i of t.indexes) {
+        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+      }
+    }
+    return from(binanceBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
+      map((signedPsbtHex) => hex.decode(signedPsbtHex)),
     );
   },
 };

@@ -1,6 +1,6 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { defer, from, Observable, switchMap } from 'rxjs';
+import { defer, from, map, Observable, switchMap } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network';
 import { broadcastSignedPsbt } from '../psbt-extract';
@@ -9,6 +9,7 @@ import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
+  SignPsbtOnlyInput,
   WalletSigner,
   WindowLike,
 } from '../wallet.service.types';
@@ -98,5 +99,22 @@ export const cat21walletSigner: WalletSigner = {
     }).pipe(
       switchMap((finalHex) => broadcastSignedPsbt(input, hex.decode(finalHex))),
     );
+  },
+
+  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
+    const targets = resolveSigningTargets(input);
+    const flatIndexes: number[] = [];
+    for (const t of targets) {
+      for (const i of t.indexes) flatIndexes.push(i);
+    }
+    const network = toLeatherNetworkString(input.network);
+
+    return defer(() => {
+      let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));
+      for (const i of flatIndexes) {
+        chain = chain.then((currentHex) => callCat21WalletSignPsbt(currentHex, i, network));
+      }
+      return from(chain);
+    }).pipe(map((finalHex) => hex.decode(finalHex)));
   },
 };

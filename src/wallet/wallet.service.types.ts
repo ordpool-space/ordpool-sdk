@@ -165,6 +165,26 @@ export interface SignMultiInputAndBroadcastInput {
 }
 
 /**
+ * Input shape for `signPsbtOnly` — buyer-side offer-create. The PSBT
+ * is signed at the addresses + indexes in `signingMap` and returned as
+ * raw partial-sig PSBT bytes. NO broadcast — the buyer's signed PSBT
+ * is incomplete by design (seller's cat input at index 0 stays
+ * unsigned). The buyer ships those bytes as the offer artifact; the
+ * seller signs input 0 and broadcasts via `signMultiInputAndBroadcast`.
+ *
+ * The returned bytes are still in PSBT format (not wire-format tx) —
+ * they carry buyer partial sigs but no `finalScriptWitness` for input
+ * 0. `validateCat21BuyOfferPsbt` reads them directly.
+ */
+export interface SignPsbtOnlyInput {
+  psbtBytes: Uint8Array;
+  signingMap: ReadonlyArray<PsbtSigningTarget>;
+  network: Network;
+  /** Mirrors SignAndBroadcastInput.promptForSignedPsbt for watch-only signers. */
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+/**
  * A wallet signer handles the SIGN side of a wallet integration:
  * given an unsigned PSBT, ask the wallet to sign, and emit a txid
  * once it's broadcast. Sign roster is broad per CLAUDE.md
@@ -188,10 +208,10 @@ export interface WalletSigner {
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }>;
 
   /**
-   * Multi-address sign (transfer, offer-create, offer-accept). The
-   * caller drives the per-address, per-index breakdown explicitly
-   * via `signingMap`. See `SignMultiInputAndBroadcastInput` for the
-   * concrete shapes per cat-flow.
+   * Multi-address sign (transfer, offer-accept). The caller drives
+   * the per-address, per-index breakdown explicitly via `signingMap`.
+   * See `SignMultiInputAndBroadcastInput` for the concrete shapes per
+   * cat-flow.
    *
    * Every shipping signer implements this method. We don't expose a
    * "this wallet can't do multi" capability bit because flows that
@@ -200,6 +220,19 @@ export interface WalletSigner {
    * native multi-input RPCs (Leather, cat21-wallet).
    */
   signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }>;
+
+  /**
+   * Sign-only (buy-offer create). Used when the resulting PSBT is
+   * incomplete-by-design and broadcasting would fail at finalisation.
+   * Returns the signed partial-sig PSBT bytes. Today's only caller is
+   * buyer-side offer-create.
+   *
+   * Signers that have no in-wallet sign-without-broadcast path can
+   * throw with a clear message; the consumer will steer the user to a
+   * wallet that does (xverse / cat21-wallet / leather / unisat
+   * implement this today).
+   */
+  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array>;
 }
 
 export enum KnownOrdinalWalletType {

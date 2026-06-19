@@ -1,11 +1,12 @@
 import { base64 } from '@scure/base';
-import { from, Observable, switchMap } from 'rxjs';
+import { from, map, Observable, switchMap } from 'rxjs';
 
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
+  SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
 import { resolveSigningTargets } from './signing-targets.helper';
@@ -65,6 +66,20 @@ export const oylSigner: WalletSigner = {
     const signPromise = oyl.signPsbt({ psbtBase64, inputsToSign });
     return from(signPromise).pipe(
       switchMap(response => broadcastSignedPsbt(input, base64.decode(response.signedPsbt))),
+    );
+  },
+
+  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
+    const psbtBase64 = base64.encode(input.psbtBytes);
+    const oyl = (window as unknown as { oyl: OylRpc }).oyl;
+    const targets = resolveSigningTargets(input);
+    const inputsToSign = targets.map((t) => ({
+      address: t.address,
+      signingIndexes: t.indexes,
+      sigHash: t.sigHash,
+    }));
+    return from(oyl.signPsbt({ psbtBase64, inputsToSign })).pipe(
+      map((response) => base64.decode(response.signedPsbt)),
     );
   },
 };

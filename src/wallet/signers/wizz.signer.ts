@@ -1,11 +1,12 @@
 import { hex } from '@scure/base';
-import { from, Observable, switchMap } from 'rxjs';
+import { from, map, Observable, switchMap } from 'rxjs';
 
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
+  SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
 import { resolveSigningTargets } from './signing-targets.helper';
@@ -66,6 +67,21 @@ export const wizzSigner: WalletSigner = {
 
     return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
       switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
+    );
+  },
+
+  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
+    const psbtHex = hex.encode(input.psbtBytes);
+    const wizz = (window as unknown as { wizz: WizzRpc }).wizz;
+    const targets = resolveSigningTargets(input);
+    const toSignInputs: WizzToSignInput[] = [];
+    for (const t of targets) {
+      for (const i of t.indexes) {
+        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+      }
+    }
+    return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
+      map((signedPsbtHex) => hex.decode(signedPsbtHex)),
     );
   },
 };
