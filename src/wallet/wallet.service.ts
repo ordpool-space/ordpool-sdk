@@ -11,6 +11,11 @@ import {
   timer,
 } from 'rxjs';
 
+import {
+  AddressNetworkGroup,
+  getAddressNetwork,
+  isAddressCompatibleWithNetwork,
+} from '../cat21-script/address-format';
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
@@ -57,10 +62,51 @@ export class WalletService {
   readonly isMainnet = this.network === Network.Mainnet;
   readonly isMainnet$: Observable<boolean> = of(this.isMainnet);
 
+  /**
+   * Coarse network group ('mainnet' | 'regtest' | 'testnet') the
+   * consumer is configured against. Compared against the connected
+   * wallet's address prefix to surface the "wrong network" red banner.
+   */
+  readonly expectedNetworkGroup: AddressNetworkGroup =
+    this.network === Network.Mainnet ? 'mainnet'
+      : this.network === Network.Regtest ? 'regtest'
+        : 'testnet';
+
+  /**
+   * Emits `true` when the connected wallet's address prefix is
+   * incompatible with the configured network. Consumers wire this
+   * directly to a red-banner component. `false` when no wallet is
+   * connected (nothing to compare against) AND when the prefix
+   * matches the expected group.
+   */
+  readonly networkMismatch$: Observable<boolean> = this.connectedWallet$.pipe(
+    map((info) => {
+      if (!info?.paymentAddress) return false;
+      try {
+        return !isAddressCompatibleWithNetwork(info.paymentAddress, this.expectedNetworkGroup);
+      } catch {
+        // Unrecognized prefix counts as a mismatch — better to warn
+        // than to silently accept an unknown shape.
+        return true;
+      }
+    }),
+    distinctUntilChanged(),
+  );
+
+  /**
+   * Last-seen unsubscribe handle returned by the active connector's
+   * onAccountChange. Lives across reconnects; cleared on disconnect.
+   */
+  private accountChangeUnsubscribe: (() => void) | null = null;
+
   constructor() {
     const lastConnectedWallet = this.storageService.getValue(LAST_CONNECTED_WALLET);
     if (lastConnectedWallet) {
-      this.connectedWallet$.next(JSON.parse(lastConnectedWallet));
+      const info: WalletInfo = JSON.parse(lastConnectedWallet);
+      this.connectedWallet$.next(info);
+      // Restore the event subscription so an account-switch fires
+      // even if the user only refreshed the page.
+      this.armAccountChangeSubscription(info.type);
     }
   }
 
@@ -86,7 +132,8 @@ export class WalletService {
   connectWallet(key: KnownOrdinalWalletType): Observable<WalletInfo> {
     return this.findConnector(key).connect(this.network).pipe(
       tap(walletInfo => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo))),
-      tap(walletInfo => this.connectedWallet$.next(walletInfo))
+      tap(walletInfo => this.connectedWallet$.next(walletInfo)),
+      tap(walletInfo => this.armAccountChangeSubscription(walletInfo.type)),
     );
   }
 
@@ -96,8 +143,40 @@ export class WalletService {
   }
 
   disconnectWallet(): void {
+    this.tearDownAccountChangeSubscription();
     this.storageService.removeItem(LAST_CONNECTED_WALLET);
     this.connectedWallet$.next(null);
+  }
+
+  /**
+   * Subscribe to the connector's `onAccountChange` (if exposed). When
+   * the wallet emits an account / network / disconnect event we
+   * re-call `connect()` silently — most wallets return the current
+   * account without a popup once the user has previously approved.
+   * The fresh WalletInfo overwrites the cached one, so the UI
+   * updates automatically through `connectedWallet$`. On failure we
+   * disconnect (the wallet has lost the connection).
+   */
+  private armAccountChangeSubscription(type: KnownOrdinalWalletType): void {
+    this.tearDownAccountChangeSubscription();
+    const connector = this.findConnector(type);
+    if (!connector.onAccountChange) return;
+    this.accountChangeUnsubscribe = connector.onAccountChange(() => {
+      connector.connect(this.network).subscribe({
+        next: (info) => {
+          this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info));
+          this.connectedWallet$.next(info);
+        },
+        error: () => this.disconnectWallet(),
+      });
+    });
+  }
+
+  private tearDownAccountChangeSubscription(): void {
+    if (this.accountChangeUnsubscribe) {
+      this.accountChangeUnsubscribe();
+      this.accountChangeUnsubscribe = null;
+    }
   }
 
   requestWalletConnect(): void {
