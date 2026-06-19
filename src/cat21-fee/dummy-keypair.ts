@@ -19,20 +19,17 @@ import { DummyKeypairResult, TxnOutput } from '../cat21-mint/cat21.service.types
 const getDummyKeypairResult: { [key: string]: DummyKeypairResult } = {};
 
 /**
- * Generates a deterministic dummy keypair for SIMULATION purposes.
+ * Deterministic dummy keypair for SIMULATION only. Private key is
+ * the hardcoded constant `0x0101…01`; addresses for P2PKH,
+ * P2SH-P2WPKH, P2WPKH, P2TR are pre-derived so every Layer-2 input
+ * adapter can dummy-sign its matching shape. Cached per network
+ * bech32 prefix.
  *
- * The private key is the hardcoded constant `0x0101…01`; the public
- * key is derived via SECP256k1. The function returns dummy addresses
- * for P2PKH, P2SH-P2WPKH, P2WPKH, and P2TR so every Layer-2 input
- * adapter can dummy-sign the matching shape.
+ * **Never broadcast** — the private key is publicly known, so
+ * signatures provide zero security.
  *
- * The result is cached per network bech32 prefix.
- *
- * **NEVER use these keypairs for real transactions** — the private
- * key is publicly known, so signatures provide ZERO security.
- *
- * The generated `dummyPublicKey` does not work for Taproot. Use
- * `xOnlyDummyPublicKey` for Taproot inputs.
+ * For Taproot inputs use `xOnlyDummyPublicKey`; the ECDSA
+ * `dummyPublicKey` will not work.
  */
 export function getDummyKeypair(network: typeof btc.NETWORK): DummyKeypairResult {
   if (!getDummyKeypairResult[network.bech32]) {

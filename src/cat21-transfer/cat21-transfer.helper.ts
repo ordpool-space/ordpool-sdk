@@ -61,31 +61,21 @@ export interface BuildCat21TransferResult {
 /**
  * Builds the unsigned CAT-21 transfer PSBT.
  *
- * Every cat-touching tx OUR code builds is structurally a CAT-21 mint:
- * we set `lockTime=21` so cat21-ord mints a fresh cat onto the same
- * ordinal that already carries the original cat. Per cat21/README.md,
- * a single CAT-21 ordinal can carry multiple cats through repeated
- * minting. The value `21` is pure protocol-marker data — block 21 was
- * mined in 2009, so the field has no consensus meaning.
+ * Every cat-touching tx we build is structurally a CAT-21 mint:
+ * `lockTime=21` re-mints a fresh cat onto the same ordinal that
+ * already carries the original — a single ordinal can carry multiple
+ * cats. The value `21` is a protocol marker (block 21 mined in 2009),
+ * no consensus meaning.
  *
  * Structure:
- *   Input 0  — cat-bearing UTXO. The cat's sat is the first sat of this
- *              UTXO and (by ordinal-theory FIFO) ends up at the first
- *              sat of output 0.
- *   Input 1+ — funding UTXOs (may be empty when the cat UTXO has
- *              surplus value).
- *   Output 0 — recipient address, postage sats. Cat + fresh mint land
- *              here.
- *   Output 1 — change to senderChangeAddress (skipped when sub-dust;
- *              absorbed into the miner fee).
+ *   Input 0  — cat-bearing UTXO. Cat's sat is the first sat of this
+ *              UTXO; ends up at the first sat of output 0 (FIFO).
+ *   Input 1+ — funding UTXOs (empty when the cat UTXO has surplus).
+ *   Output 0 — recipient address, postage sats. Cat lands here.
+ *   Output 1 — change (absorbed into fee when sub-dust).
  *
- * Hard invariants (asserted before return):
- *   1. `lockTime === 21`.
- *   2. Every input's sequence matches the per-wallet rule.
- *   3. Every input carries SIGHASH_ALL.
- *
- * Coin selection (which cat UTXO + which funding UTXOs) is the
- * caller's responsibility.
+ * Hard invariants (asserted): lockTime=21, per-wallet sequence,
+ * every input SIGHASH_ALL. Coin selection is the caller's job.
  */
 export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21TransferResult {
   const postageSats = CAT21_POSTAGE_SATS;

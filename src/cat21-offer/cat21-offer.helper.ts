@@ -71,27 +71,22 @@ export interface BuildCat21BuyOfferResult {
 }
 
 /**
- * Builds the buyer-initiated CAT-21 offer PSBT (ord-style, SIGHASH_ALL on
- * every input).
+ * Builds the buyer-initiated CAT-21 offer PSBT (ord-style,
+ * SIGHASH_ALL on every input).
  *
  * Structure:
- *   Input 0  — seller's cat-bearing UTXO. Referenced. Witness data is
- *              populated with the scriptPubKey + value the buyer
- *              specifies so the seller can sign without a round-trip.
- *              UNSIGNED at the time the PSBT leaves the buyer.
- *   Input 1+ — buyer's funding UTXOs. ALL SIGHASH_ALL.
- *   Output 0 — buyer's receive address, postage sats. The cat lands here
- *              because its sat is the first sat of the first output.
+ *   Input 0  — seller's cat UTXO. Witness data is pre-populated
+ *              (scriptPubKey + value) so the seller can sign
+ *              without a round-trip. UNSIGNED on emit.
+ *   Input 1+ — buyer's funding UTXOs. All SIGHASH_ALL.
+ *   Output 0 — buyer's receive address, postage sats. Cat lands here.
  *   Output 1 — seller's payment address, `priceSats`.
- *   Output 2 — buyer's change (skipped when sub-dust; absorbed into the
- *              miner fee).
+ *   Output 2 — buyer's change (absorbed into fee when sub-dust).
  *
- * Why this is sniping-proof: the only signature missing at the time the PSBT
- * leaves the buyer is the seller's. Once the seller signs (SIGHASH_ALL),
- * every byte of the transaction is committed to by some signature; the
- * seller cannot mutate outputs, inputs, fees, or anything else without
- * invalidating the buyer's signatures. No half-signed PSBT can be spliced
- * into a sniping transaction.
+ * Sniping-proof: when the PSBT leaves the buyer it's missing only
+ * the seller's signature. Once the seller signs (SIGHASH_ALL),
+ * every byte is committed by some signature — no half-signed PSBT
+ * can be spliced into a sniping tx.
  */
 export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21BuyOfferResult {
   const postageSats = CAT21_POSTAGE_SATS;
@@ -279,22 +274,19 @@ export interface ValidateCat21BuyOfferArgs {
 /**
  * Validates the on-the-wire shape of an inbound buy-offer PSBT.
  *
- * Checks performed:
- *   1. Input 0 references the seller's cat-bearing UTXO (txid + vout).
- *   2. Every input carries `sighashType === SIGHASH_ALL` (or undefined for
- *      already-finalised inputs whose metadata was stripped — treated as
- *      pass-through because the signature itself commits to a specific
- *      sighash).
- *   3. Every input 1..N has a buyer signature attached (partialSig,
+ *   1. Input 0 references the seller's cat UTXO.
+ *   2. Every input has `sighashType === SIGHASH_ALL` (or undefined
+ *      for already-finalised inputs — the embedded signature itself
+ *      commits to its sighash).
+ *   3. Every input 1..N carries a buyer signature (partialSig,
  *      tapKeySig, or finalScriptWitness).
- *   4. Output 0 (cat output) postage ≥ configured minimum.
+ *   4. Output 0 (cat) postage ≥ configured minimum.
  *   5. Output 1 (seller payment) ≥ floor price.
  *   6. When `expectedSellerPaymentAddress` is supplied, Output 1's
- *      `scriptPubKey` is decoded back to an address string and compared.
- *      Strongly recommended whenever a human eventually signs — the
- *      validator is the single source of truth for the wallet-side
- *      defence-in-depth check and cannot delegate this gate to a UI
- *      layer that may or may not exist.
+ *      script is decoded and compared. Strongly recommended whenever
+ *      a human eventually signs — the validator is the single source
+ *      of truth and can't delegate to a UI layer that may or may
+ *      not exist.
  */
 export function validateCat21BuyOfferPsbt(
   args: ValidateCat21BuyOfferArgs

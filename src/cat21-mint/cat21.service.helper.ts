@@ -22,29 +22,13 @@ export {
 } from '../cat21-fee/dummy-keypair';
 
 /**
- * Constructs a CAT-21 mint transaction (cat21.space orchestration
- * entry point).
+ * Layer-4 orchestration entry: adapts cat21.space-shaped args to
+ * `prepareMintInputForWallet` (Layer 2) + `buildCat21MintPsbt`
+ * (Layer 1). One PSBT-assembly path for cat21.space and
+ * cat21-wallet's autonomous flow.
  *
- * Layer 4 (orchestration): adapts the cat21.space-shaped arguments to
- *   - `prepareMintInputForWallet` (Layer 2 per-wallet input adapter)
- *   - `buildCat21MintPsbt` (Layer 1 pure PSBT builder)
- *
- * One PSBT-assembly path now serves both cat21.space and cat21-wallet's
- * autonomous flow.
- *
- * If the calculated change amount is below the per-address-type dust
- * limit, change is absorbed into the miner fee. If above the limit,
- * two outputs are created: recipient + change.
- *
- * @param walletType - The type of wallet used for the transaction.
- * @param recipientAddress - The address of the recipient.
- * @param paymentOutput - The UTXO to be used for the transaction.
- * @param paymentPublicKey - The public key of the sender, in hexadecimal.
- * @param paymentAddress - The sender's address, to which change will be returned.
- * @param transactionFee - The miner fee in satoshis.
- * @param isSimulation - Flag indicating whether the transaction should be prepared for a simulation.
- * @param network - The Bitcoin network the transaction is for (mainnet / testnet3 / testnet4 / signet / regtest).
- * @returns The constructed transaction.
+ * Change below the per-address-type dust limit is absorbed into
+ * the miner fee; above it, a second output is added.
  */
 export function createTransaction(
   walletType: KnownOrdinalWalletType,

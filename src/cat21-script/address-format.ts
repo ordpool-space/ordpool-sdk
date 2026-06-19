@@ -11,34 +11,21 @@
  */
 
 /**
- * Determines the minimum UTXO size based on the Bitcoin address type.
- * Supports both mainnet and testnet address prefixes.
+ * Conservative dust-floor (in sats) per address type. P2SH could
+ * be Nested SegWit (540) or full-witness-script wrap; we return 546
+ * uniformly — the 6-sat slack is negligible. P2PK is not supported.
  *
- * This function aims to provide the minimum UTXO size to avoid creating dust outputs.
- * Since P2SH* addresses (starting with '3' on mainnet and '2' on testnet)
- * can represent various types of scripts, including Nested SegWit,
- * a conservative approach is taken by assigning the higher minimum UTXO size applicable
- * to P2SH addresses. P2SH-P2WPKH would allow 540, but 6 sats are small enough to ignore them.
+ *   P2PKH               → 546
+ *   P2SH (any wrap)     → 546
+ *   P2WPKH              → 294
+ *   P2TR                → 330
  *
- * Supported address types and their conservative minimum UTXO sizes are as follows:
- * - P2PKH / "Legacy" Pay-to-Public-Key-Hash (mainnet '1', testnet 'm' or 'n'): 546 satoshis
- * - P2SH / Pay-to-Script-Hash including
- *   ... P2SH-P2WPKH / "Nested SegWit" and
- *   ... P2SH-P2WSH / "Pay To Witness Script Hash Wrapped In P2SH" (mainnet '3', testnet '2'): 546 satoshis !
- * - P2WPKH / Native SegWit (mainnet 'bc1q', testnet 'tb1q'): 294 satoshis
- * - P2TR / Taproot (mainnet 'bc1p', testnet 'tb1p'): 330 satoshis
+ * References:
+ *   https://help.magiceden.io/en/articles/8665399-navigating-bitcoin-dust-understanding-limits-and-safeguarding-your-transactions-on-magic-eden
+ *   https://en.bitcoin.it/wiki/List_of_address_prefixes
+ *   https://unchained.com/blog/bitcoin-address-types-compared/
  *
- * Not supported:
- * - P2PK (Pay-to-Public-Key)
- *
- * References for further reading:
- * - https://help.magiceden.io/en/articles/8665399-navigating-bitcoin-dust-understanding-limits-and-safeguarding-your-transactions-on-magic-eden
- * - https://en.bitcoin.it/wiki/List_of_address_prefixes
- * - https://unchained.com/blog/bitcoin-address-types-compared/
- *
- * @param address - The Bitcoin address to evaluate.
- * @returns The conservative minimum number of satoshis that must be held by a UTXO of the given address type to avoid dust outputs.
- * @throws Throws an error if the address type is unsupported.
+ * @throws if the address prefix isn't recognised.
  */
 export function getMinimumUtxoSize(address: string): number {
   // Mainnet addresses
@@ -62,25 +49,16 @@ export function getMinimumUtxoSize(address: string): number {
 }
 
 /**
- * Determines the Bitcoin address format based on its prefix.
+ * Address format from prefix. `P2SH???` because P2SH covers multiple
+ * wrap shapes (P2SH-P2WPKH, P2SH-P2WSH); resolving the inner shape
+ * needs the redeem script. P2PK not supported.
  *
- * Due to the identical prefixes of P2SH addresses, this function cannot
- * distinguish between different types of P2SH formats (e.g., P2SH-P2WPKH, P2SH-P2WSH)
- * solely based on the address itself. It returns 'P2SH???' to indicate this uncertainty.
- * Additional context or user input is required to accurately identify
- * the specific P2SH format for transaction script creation.
+ *   '1' / 'm' / 'n'                   → P2PKH
+ *   '3' / '2'                         → P2SH???
+ *   'bc1q' / 'tb1q' / 'bcrt1q'        → P2WPKH
+ *   'bc1p' / 'tb1p' / 'bcrt1p'        → P2TR
  *
- * Supported address formats are:
- * - P2PKH: Legacy addresses starting with '1' (mainnet) or 'm'/'n' (testnet)
- * - P2SH???: P2SH addresses starting with '3' (mainnet) or '2' (testnet), where
- *            the specific P2SH format is unclear without further context
- * - P2WPKH: Native SegWit addresses starting with 'bc1q' (mainnet) or 'tb1q' (testnet).
- * - P2TR: Taproot addresses starting with 'bc1p' (mainnet) or 'tb1p' (testnet).
- *
- * Not supported:
- * - P2PK (Pay-to-Public-Key)
- *
- * @throws Throws an error if the address format is unsupported.
+ * @throws if the prefix isn't recognised.
  */
 export function getAddressFormat(address: string): 'P2WPKH' | 'P2SH???' | 'P2TR' | 'P2PKH' {
   // "Legacy" Pay-to-Public-Key-Hash

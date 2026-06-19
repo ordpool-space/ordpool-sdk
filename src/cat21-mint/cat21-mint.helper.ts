@@ -19,25 +19,16 @@ export const CAT21_MINT_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 export const CAT21_MINT_CHANGE_DUST_LIMIT_SATS = 546;
 
 /**
- * Funding UTXO the wallet selects to pay postage + miner fee + optional
- * tip. Coin selection is the caller's responsibility — the builder
- * does NOT select.
+ * Funding UTXO that pays postage + miner fee + optional tip. Coin
+ * selection is the caller's job; the builder does not select.
  *
- * The optional fields cover the full per-wallet matrix produced by
- * `prepareMintInputForWallet` (the Layer-2 adapter):
- *   - SegWit v0 (Leather, cat21wallet, Unisat-SegWit) → set `scriptPubKey`.
- *   - P2SH-wrapped SegWit (Xverse, Unisat-NestedSegWit) → set
- *     `scriptPubKey` AND `redeemScript`.
- *   - Taproot key-path (Unisat-Taproot) → set `scriptPubKey` AND
- *     `tapInternalKey`.
- *   - Legacy P2PKH (Unisat-Legacy) → set `scriptPubKey` AND
- *     `nonWitnessUtxo` (full previous-tx bytes; scure requires this for
- *     legacy inputs, see paulmillr/scure-btc-signer README).
- *
- * `buildCat21MintPsbt` consults the present fields and assembles the
- * scure `addInput` shape internally. Callers that already know the
- * wallet's exact shape can pass just the SegWit subset; the
- * multi-wallet path goes through the adapter.
+ * Per-address-shape fields (set what applies; `prepareMintInputForWallet`
+ * does this automatically):
+ *   - SegWit v0 (P2WPKH): `scriptPubKey` only.
+ *   - P2SH-wrapped SegWit: `scriptPubKey` + `redeemScript`.
+ *   - Taproot key-path: `scriptPubKey` + `tapInternalKey`.
+ *   - Legacy P2PKH: `scriptPubKey` + `nonWitnessUtxo` (full
+ *     previous-tx bytes; scure requires this for legacy inputs).
  */
 export interface Cat21MintFundingInput {
   txid: string;

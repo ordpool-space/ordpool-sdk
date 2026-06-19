@@ -1,34 +1,21 @@
 /**
- * Layer-3 two-pass fee simulation. Used by every CAT-21 flow
- * (mint, transfer, offer): vsize depends on the bytes; bytes depend
- * on the fee (because change presence + size depends on what's left
- * after the fee); so we build twice.
+ * Layer-3 two-pass fee simulation for mint / transfer / offer.
+ * vsize depends on the bytes, bytes depend on the fee (change
+ * presence + size depends on what's left), so we build twice:
  *
- * Pass 1: build + dummy-sign + finalise with a placeholder fee,
- *         read vsize off the resulting transaction.
- * Pass 2: compute `provisionalFee = ceil(vsize × feeRatePerVbyte)`,
- *         re-build with that fee, observe the FINAL vsize (different
- *         if the change crossed the dust limit between passes).
+ *   Pass 1 — placeholder fee → measure vsize.
+ *   Pass 2 — `ceil(vsize × feeRate)` → measure FINAL vsize (may
+ *            differ if change crossed the dust limit between passes).
  *
- * Pass-2 vsize is what the final tx ships with; the returned
- * `finalFeeSats` is `ceil(pass2Vsize × feeRatePerVbyte)`.
+ * `finalFeeSats = ceil(pass2Vsize × feeRate)`. Pure function.
  *
- * Pure function. No I/O, no Angular. cat21.space's Angular
- * orchestrator and cat21-wallet's React/Webpack background call the
- * same helper — no drift between the two consumer flows.
- *
- * The caller supplies ONE callback `simulate(feeSats)` that does
- * whatever's appropriate for the flow:
+ * The caller's `simulate(feeSats)` callback does the per-flow
+ * dummy-sign:
  *   - Mint: build via createTransaction(simulation=true), dummy-sign
  *     input 0, finalise, return vsize.
- *   - Transfer: build via buildCat21TransferPsbt, dummy-sign every
- *     input, finalise, return vsize.
- *   - Offer (buyer side): build via buildCat21BuyOfferPsbt, dummy-
- *     sign buyer inputs (seller stays unsigned by contract), finalise
- *     with seller input stub, return vsize.
- *
- * The caller knows the right dummy-sign pattern for its flow; the
- * helper just runs the loop.
+ *   - Transfer: build + dummy-sign every input + finalise.
+ *   - Offer (buyer): build + dummy-sign buyer inputs (seller stays
+ *     unsigned by contract) + finalise with seller input stub.
  */
 export interface TwoPassFeeSimulationArgs<TResult extends { vsize: number }> {
   /**

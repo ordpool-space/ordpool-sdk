@@ -1,27 +1,17 @@
 /**
- * Coin selection for the CAT-21 flows.
+ * Coin selection for CAT-21 flows. cat21.space lets the user pick
+ * (Cat21MintOrchestrator simulates against every UTXO); cat21-wallet's
+ * autonomous flows pick via the SDK.
  *
- * cat21.space's UX is "user picks the UTXO" — `Cat21MintOrchestrator`
- * simulates fees against every available UTXO and the user clicks
- * one. cat21-wallet's autonomous flows need the SDK to pick for them.
- *
- * Two strategies, BOTH supported:
- *
- *   - `pickLargestFundingUtxoThatCovers` — **the default**. Matches
- *     the historic SDK policy (see `cat21-mint/utxo-content.types.ts:
- *     findAutoPickCandidate` and `Cat21MintOrchestrator.selectedUtxo`
- *     where the orchestrator auto-sets the largest viable UTXO).
- *     Use this unless you have a specific reason not to.
- *
- *   - `pickSmallestFundingUtxoThatCovers` — opt-in. Only worth using
- *     when the consumer's strategy explicitly wants to preserve the
- *     largest balance for later (e.g. a high-volume autonomous bot
+ * Two strategies:
+ *   - `pickLargestFundingUtxoThatCovers` — **default**, matches the
+ *     historic policy (see `findAutoPickCandidate`).
+ *   - `pickSmallestFundingUtxoThatCovers` — opt-in, for strategies
+ *     that want to preserve the largest balance (high-volume bot
  *     spending many small mints).
  *
- * Both functions are pure. The caller passes the already-loaded UTXO
- * list and asserts the candidate UTXO actually meets safety bucket
- * requirements (cat-bearing UTXOs MUST be excluded — that's the
- * caller's job, see `utxo-content.types.ts:findAutoPickCandidate`).
+ * Both pure. Caller MUST exclude cat-bearing UTXOs from the input
+ * list — that filter is not this helper's job.
  */
 
 export interface FundingUtxo {
@@ -38,23 +28,16 @@ export interface PickFundingUtxoArgs<T extends FundingUtxo> {
 }
 
 /**
- * **DEFAULT strategy.** Returns the UTXO with the LARGEST value that
- * covers `targetSpendSats`. `null` when no UTXO is large enough.
+ * **DEFAULT strategy.** Returns the LARGEST-value UTXO that covers
+ * `targetSpendSats`; `null` if none does. Picked as default because
+ * largest-first:
  *
- * Why largest-first is the SDK default:
- * - **Highest mint-success probability** even at high fee rates — no
- *   "Insufficient funds" surprise at the dust boundary.
- * - **Defragments the wallet** rather than fragmenting it. The
- *   smallest-that-covers strategy leaves change just above dust,
- *   multiplying small UTXOs over time.
- * - **Avoids sub-dust change absorption**. Smallest-covers can leave
- *   change just below the dust limit, where the builders absorb it
- *   into the miner fee — the user effectively over-pays.
- *
- * Source of historic truth: see `cat21-mint/utxo-content.types.ts:109`
- * (`findAutoPickCandidate`) and the JSDoc on
- * `Cat21MintOrchestrator.selectedUtxo` ("auto-set to the largest
- * viable one by default").
+ *   - has highest mint-success probability at high fee rates (no
+ *     "Insufficient funds" surprise at the dust boundary);
+ *   - defragments the wallet instead of fragmenting it;
+ *   - avoids sub-dust change absorption (smallest-covers can leave
+ *     change just under dust, where the builders fold it into the
+ *     miner fee — the user over-pays).
  */
 export function pickLargestFundingUtxoThatCovers<T extends FundingUtxo>(
   args: PickFundingUtxoArgs<T>,

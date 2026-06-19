@@ -1,16 +1,14 @@
 import { submitToSlipstream } from './slipstream.helper';
 
 /**
- * Standard relay weight ceiling. Witness transactions above this weight are
- * non-standard and the public mempool rejects them. The constant matches
- * Bitcoin Core's `MAX_STANDARD_TX_WEIGHT` default (400_000 weight units =
- * 100 kvB). When a CAT-21 tx exceeds this, the dispatcher routes to
- * Slipstream because Slipstream bypasses standardness.
+ * Standard-relay weight ceiling — matches Bitcoin Core's
+ * `MAX_STANDARD_TX_WEIGHT` (400 000 WU = 100 kvB). Above this the
+ * public mempool rejects as non-standard and the dispatcher routes
+ * to Slipstream (which bypasses standardness).
  *
- * For plain CAT-21 mints (~150 vB) this ceiling is never reached and the
- * dispatcher always picks the public mempool. Slipstream is the explicit
- * opt-in fallback for unusual cases (oversize witness data attached to a
- * mint, multi-input coin consolidations alongside a mint, etc.).
+ * Plain CAT-21 mints (~150 vB) never hit this. Slipstream is the
+ * explicit fallback for oversize cases (large witness payload,
+ * coin-consolidation alongside a mint, etc.).
  */
 export const STANDARD_TX_WEIGHT_LIMIT = 400_000;
 

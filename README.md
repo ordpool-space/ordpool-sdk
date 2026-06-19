@@ -317,6 +317,37 @@ browser, SQLite in a bot); SDK just evaluates.
 - `connectors/` — wallet-side connect-flow handling.
 - `wallet.service.ts` — top-level wallet API.
 - `psbt-extract.ts` — pull signed input data out of a returned PSBT.
+- `sighash.ts` — `BIP341_KEYPATH_SIGHASHES = [0x00, 0x01]`. Per
+  BIP-341 a Taproot key-path spend commits identically under
+  SIGHASH_DEFAULT and SIGHASH_ALL; signer + harness whitelists
+  accept both shapes so the SDK can emit either.
+
+#### Stale-cache defence: `onAccountChange`
+
+When the user switches account or network inside the wallet's own
+UI, the consumer's cached `paymentAddress` / `paymentPublicKey` go
+stale. The next mint signs over the wrong inputs.
+
+Connectors expose an optional `onAccountChange(handler) =>
+unsubscribe` that fans both `accountsChanged` and `networkChanged`
+events into a single callback:
+
+```ts
+import { unisatConnector } from 'ordpool-sdk';
+
+const unsubscribe = unisatConnector.onAccountChange?.(() => {
+  // wallet info just changed — drop the cache and re-connect
+  walletInfo.set(null);
+});
+
+// later, on component teardown:
+unsubscribe?.();
+```
+
+Currently wired for **Unisat, Wizz, OKX, Binance** (the four whose
+binaries expose the EIP-1193-style event API). When the wallet
+doesn't expose events, the method is absent — consumers should
+poll `connect()` at sign-time as the fallback guard.
 
 ### Other
 
@@ -405,13 +436,24 @@ that exposes the surface and the adapter misbehaves,
 - Real responses from real mainnet endpoints where the test exercises an
   endpoint. Synthetic fixtures hide protocol mismatches.
 - Exact assertions, not ranges. `toBe(9925)`, not `toBeGreaterThan(0)`.
-- Wallet integration is split into two pipelines:
+- Wallet integration is split into three pipelines:
   - **Adapter Pipeline (A):** mocked wallet API → pins our adapter.
     Lives in `src/wallet/signers/*.signer.angular.spec.ts`. Fast,
     runs on every `npm test`.
   - **Wallet Pipeline (B):** real `.crx` running headed in xvfb on CI.
     Lives in `e2e/playwright/specs/<wallet>-*.spec.ts`. CI-only; we
     never run unverified extension binaries on dev machines.
+  - **PSBT-export Pipeline:** for watch-only wallets (Sparrow,
+    Electrum, Coldcard, Ledger, Trezor, …). Lives in
+    `e2e/regtest/psbt-export-roundtrip.spec.ts` — uses Bitcoin Core's
+    `walletprocesspsbt` as the BIP-174-canonical external signer
+    against a Docker regtest stack. Any conformant wallet emits the
+    same wire format; if `psbtExportSigner` consumes Bitcoin Core's
+    PSBT, it consumes them all.
+- `psbtExportSigner` accepts both partial-sig AND already-finalized
+  PSBTs — `isFinal` is checked so wallets that finalize themselves
+  (Bitcoin Core GUI, some hardware-wallet desktop suites) flow
+  through without a re-finalize attempt.
 
 ## Commands
 

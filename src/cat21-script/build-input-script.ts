@@ -4,23 +4,13 @@ import { getAddressFormat, toXOnly } from './address-format';
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
 
 /**
- * Universal input-script builder.
+ * Universal input-script builder. Dispatches purely on the
+ * `paymentAddress` format — no wallet-name switch. Any wallet
+ * produces a correct input shape as long as it returns a payment
+ * address + pubkey. Taproot x-only normalisation happens at runtime
+ * from the pubkey's length (32 vs 33 bytes).
  *
- * Dispatches PURELY on the address format observed in
- * `paymentAddress`. No wallet-name switch. Every wallet — including
- * wallets the SDK doesn't know about by name — produces a correct
- * input shape as long as it returns a payment address + pubkey
- * the caller forwards.
- *
- * Replaces the per-wallet `createInputScriptFor{Leather,Xverse,Unisat}`
- * functions, which were really just address-format dispatchers
- * dressed as wallet-specific code. The only thing wallet identity
- * ever contributed was "is the pubkey already x-only for taproot?"
- * — which we now answer at runtime from the pubkey's length (32 vs
- * 33 bytes).
- *
- * Pure function. No I/O, no Angular. Used by every CAT-21 Layer-2
- * input adapter (mint, transfer, offer).
+ * Pure. Used by every CAT-21 Layer-2 adapter (mint, transfer, offer).
  */
 export interface BuildInputScriptArgs {
   paymentAddress: string;
