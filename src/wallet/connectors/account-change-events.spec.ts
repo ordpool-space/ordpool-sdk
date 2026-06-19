@@ -12,6 +12,8 @@ import { unisatConnector } from './unisat.connector';
 import { wizzConnector } from './wizz.connector';
 import { okxConnector } from './okx.connector';
 import { binanceConnector } from './binance.connector';
+import { phantomConnector } from './phantom.connector';
+import { xverseConnector } from './xverse.connector';
 
 interface MockProvider {
   on: (event: string, handler: () => void) => void;
@@ -148,6 +150,44 @@ describe('onAccountChange wiring', () => {
     it('returns a no-op unsubscribe when binancew3w.bitcoin is absent (current binary)', () => {
       withWindow({ binancew3w: {} }, () => {
         const unsubscribe = binanceConnector.onAccountChange!(() => undefined);
+        expect(() => unsubscribe()).not.toThrow();
+      });
+    });
+  });
+
+  describe('xverse (sats-connect)', () => {
+
+    it('returns a no-op unsubscribe when sats-connect has no provider attached (jest/node default — sats-connect throws on addListener call)', () => {
+      // sats-connect's addListener throws `The wallet provider you
+      // are using does not support the addListener method` when no
+      // adapter is wired (the case in unit tests). The connector
+      // catches and returns a no-op so the consumer's lifecycle
+      // stays clean.
+      const unsubscribe = xverseConnector.onAccountChange!(() => undefined);
+      expect(typeof unsubscribe).toBe('function');
+      expect(() => unsubscribe()).not.toThrow();
+    });
+  });
+
+  describe('phantom', () => {
+
+    it('subscribes when window.phantom.bitcoin exposes on/removeListener (mobile in-app browser case)', () => {
+      const { provider, listeners } = makeMockProvider();
+      withWindow({ phantom: { bitcoin: provider } }, () => {
+        let calls = 0;
+        const unsubscribe = phantomConnector.onAccountChange!(() => { calls++; });
+        expect(listeners.map(l => l.event).sort()).toEqual(['accountsChanged', 'networkChanged']);
+        listeners[0].handler();
+        listeners[1].handler();
+        expect(calls).toBe(2);
+        unsubscribe();
+        expect(listeners).toEqual([]);
+      });
+    });
+
+    it('returns a no-op unsubscribe on desktop builds where phantom.bitcoin is absent (v26.x dormant)', () => {
+      withWindow({ phantom: {} }, () => {
+        const unsubscribe = phantomConnector.onAccountChange!(() => undefined);
         expect(() => unsubscribe()).not.toThrow();
       });
     });

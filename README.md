@@ -325,29 +325,77 @@ browser, SQLite in a bot); SDK just evaluates.
 #### Stale-cache defence: `onAccountChange`
 
 When the user switches account or network inside the wallet's own
-UI, the consumer's cached `paymentAddress` / `paymentPublicKey` go
-stale. The next mint signs over the wrong inputs.
+UI, the consumer's cached `paymentAddress` / `paymentPublicKey`
+goes stale. The next mint signs over the wrong inputs.
 
-Connectors expose an optional `onAccountChange(handler) =>
-unsubscribe` that fans both `accountsChanged` and `networkChanged`
-events into a single callback:
+Every connector ships an `onAccountChange(handler) => unsubscribe`
+method. Native wallet events feed it where available; otherwise
+it returns a no-op `() => undefined` so the consumer's lifecycle
+code stays uniform across wallets.
 
 ```ts
 import { unisatConnector } from 'ordpool-sdk';
 
 const unsubscribe = unisatConnector.onAccountChange?.(() => {
-  // wallet info just changed — drop the cache and re-connect
+  // wallet info just changed — drop the cache and re-connect.
   walletInfo.set(null);
+  unisatConnector.connect(currentNetwork).subscribe(info => walletInfo.set(info));
 });
 
 // later, on component teardown:
 unsubscribe?.();
 ```
 
-Currently wired for **Unisat, Wizz, OKX, Binance** (the four whose
-binaries expose the EIP-1193-style event API). When the wallet
-doesn't expose events, the method is absent — consumers should
-poll `connect()` at sign-time as the fallback guard.
+**Per-wallet event support:**
+
+| Wallet | Native events | Source | Notes |
+|---|---|---|---|
+| Unisat | ✅ | `window.unisat.on('accountsChanged' \| 'networkChanged', cb)` | |
+| Wizz | ✅ | `window.wizz.on(...)` | Unisat-fork shape |
+| OKX | ✅ | `window.okxwallet.bitcoin.on('accountChanged' \| 'networkChanged', cb)` | Singular `accountChanged` (vs Unisat's plural); fan-in handles it. LaserEyes skips OKX events; we wire them. |
+| Binance | ✅ | `window.binancew3w.bitcoin.on(...)` | Documented but the v1.17.2 binary doesn't inject the `.bitcoin` surface yet; subscription is a no-op until it does |
+| Xverse | ✅ | sats-connect `addListener('accountChange' \| 'networkChange' \| 'disconnect', cb)` | Includes `disconnect` — fan-in treats all three as "cache stale" |
+| Phantom | ✅ | `window.phantom.bitcoin.on(...)` | Desktop ships btc.js dormant so `detect` already returns false on desktop; mobile in-app browser is documented to expose the events. Safe no-op when surface absent. |
+| Cat21Wallet | (none) | Leather-forked API — no documented event surface | Use polling fallback |
+| Leather | (none) | No documented event surface | Use polling fallback |
+| Oyl | (none) | No documented event surface | Use polling fallback |
+| Alby | (none) | webbtc has no event API | Use polling fallback |
+
+**Polling fallback (no popup):** for wallets without events, calling
+`connect()` again is silent once the user has previously approved
+the connection. The wallet returns the current account without
+showing a popup. Consumers should re-call `connect()` on
+`visibilitychange` (tab regains focus) and at sign-time as a
+defence-in-depth guard. Never poll on a timer — that's both
+spammy and unnecessary.
+
+#### Wrong-network detection
+
+Address prefixes carry the network — no extra wallet call needed,
+no popup. The SDK ships two helpers for the consumer's red-banner
+"wallet is on the wrong network" check:
+
+```ts
+import { getAddressNetwork, isAddressCompatibleWithNetwork } from 'ordpool-sdk';
+
+// Coarse grouping: 'mainnet' | 'regtest' | 'testnet'.
+const group = getAddressNetwork(walletInfo.address);
+// → 'mainnet' for bc1... / 1... / 3...
+// → 'regtest' for bcrt1...
+// → 'testnet' for tb1... / m... / n... / 2...
+
+// Consumer's wrong-network gate:
+if (!isAddressCompatibleWithNetwork(walletInfo.address, configuredNetworkGroup)) {
+  showRedBanner('Wallet is on the wrong network — switch to mainnet');
+  refuseSignButton();
+}
+```
+
+The compatibility check is **lenient on the legacy testnet/regtest
+ambiguity** — `m...` / `n...` / `2...` addresses share key bytes
+across testnet and regtest, so the address alone can't disambiguate
+and the gate returns `true` for both. Bech32 (`bc1` / `tb1` /
+`bcrt1`) is unambiguous and the gate is strict there.
 
 ### Other
 

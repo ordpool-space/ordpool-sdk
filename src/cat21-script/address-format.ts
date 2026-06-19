@@ -99,6 +99,70 @@ export function isSegWit(address: string): boolean {
 }
 
 /**
+ * Coarse network grouping reachable from an address prefix.
+ *
+ *   'mainnet'  — clearly mainnet (`1` / `3` / `bc1` / `bc1p`).
+ *   'regtest'  — clearly regtest (`bcrt1` / `bcrt1p`).
+ *   'testnet'  — testnet-or-signet bech32 (`tb1` / `tb1p`), OR any of
+ *                the legacy testnet/regtest/signet bytes (`m` / `n` /
+ *                `2`). Legacy regtest shares the same key bytes as
+ *                testnet, so the address alone can't disambiguate.
+ *
+ * Consumers use this to verify the wallet's connected network
+ * matches what the dapp expects — same address prefix is the
+ * cheapest fact available, no extra wallet calls, no popup.
+ */
+export type AddressNetworkGroup = 'mainnet' | 'regtest' | 'testnet';
+
+export function getAddressNetwork(address: string): AddressNetworkGroup {
+  if (address.startsWith('bcrt1')) return 'regtest';
+  if (address.startsWith('bc1') || address.startsWith('1') || address.startsWith('3')) {
+    return 'mainnet';
+  }
+  if (
+    address.startsWith('tb1') ||
+    address.startsWith('m') ||
+    address.startsWith('n') ||
+    address.startsWith('2')
+  ) {
+    return 'testnet';
+  }
+  throw new Error('Unsupported address format.');
+}
+
+/**
+ * `true` when the address could plausibly belong to the network. The
+ * legacy testnet / regtest / signet share key bytes so an `m...`
+ * address compares true against any non-mainnet network. Use this
+ * for the consumer's "wrong-network" red warning — false means
+ * "definitely don't sign here".
+ *
+ * Network values map to address groups as follows:
+ *   - `Network.Mainnet`  → 'mainnet'
+ *   - `Network.Regtest`  → 'regtest' (also accepts 'testnet' for the
+ *                          legacy-byte ambiguity)
+ *   - `Network.Testnet3 / Testnet4 / Signet` → 'testnet' (also
+ *                          accepts 'regtest' for the same reason)
+ */
+export function isAddressCompatibleWithNetwork(
+  address: string,
+  expectedNetworkGroup: AddressNetworkGroup,
+): boolean {
+  const actual = getAddressNetwork(address);
+  if (actual === expectedNetworkGroup) return true;
+  // Legacy testnet ↔ regtest ambiguity (shared key bytes, no bech32
+  // HRP to disambiguate). Treat the two as compatible only when the
+  // address is the legacy / P2SH shape — bech32 prefixes are
+  // unambiguous.
+  const isLegacy = !address.startsWith('bc1') && !address.startsWith('tb1') && !address.startsWith('bcrt1');
+  if (!isLegacy) return false;
+  return (
+    (actual === 'testnet' && expectedNetworkGroup === 'regtest') ||
+    (actual === 'regtest' && expectedNetworkGroup === 'testnet')
+  );
+}
+
+/**
  * Converts a full public key (including the y-coordinate parity byte) into an x-only public key.
  *
  * In the context of Schnorr signatures and Taproot transactions in Bitcoin, public keys are represented

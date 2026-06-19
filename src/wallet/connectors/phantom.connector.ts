@@ -17,6 +17,8 @@ import {
 
 interface PhantomBtcApi {
   requestAccounts(): Promise<PhantomBtcAddress[]>;
+  on?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
+  removeListener?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
 }
 
 
@@ -54,5 +56,24 @@ export const phantomConnector: WalletConnector = {
     return from(phantomBtc.requestAccounts()).pipe(
       map(addresses => parsePhantomAddressResponse(addresses)),
     );
+  },
+
+  /**
+   * Per docs.phantom.com, the BTC sub-provider exposes EIP-1193-style
+   * events. Desktop ships btc.js dormant so detect already returns
+   * false and we never reach this code there. On mobile in-app browsers
+   * (and any future desktop build that re-enables the SW handlers) the
+   * subscription wires up automatically. Safe no-op when `.on` is
+   * absent.
+   */
+  onAccountChange(handler: () => void): () => void {
+    const phantomBtc = (window as unknown as { phantom?: { bitcoin?: PhantomBtcApi } }).phantom?.bitcoin;
+    if (!phantomBtc?.on || !phantomBtc.removeListener) return () => undefined;
+    phantomBtc.on('accountsChanged', handler);
+    phantomBtc.on('networkChanged', handler);
+    return () => {
+      phantomBtc.removeListener!('accountsChanged', handler);
+      phantomBtc.removeListener!('networkChanged', handler);
+    };
   },
 };

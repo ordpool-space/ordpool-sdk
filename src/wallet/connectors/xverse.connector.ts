@@ -1,5 +1,5 @@
 import { Observable } from 'rxjs';
-import { AddressPurpose, getAddress } from 'sats-connect';
+import { addListener, AddressPurpose, getAddress } from 'sats-connect';
 
 import { Network, toBitcoinNetworkType } from '../../network';
 import {
@@ -65,5 +65,29 @@ export const xverseConnector: WalletConnector = {
         },
       });
     });
+  },
+
+  /**
+   * sats-connect v4+ exposes three event types: `accountChange`,
+   * `networkChange`, `disconnect`. All three indicate "the cached
+   * WalletInfo is no longer authoritative" — fan into one callback.
+   *
+   * `addListener` returns an unsubscribe `() => void` directly per
+   * sats-connect's API. If the wallet provider is older than v4 and
+   * doesn't expose the listener API, sats-connect throws — we catch
+   * and return a no-op so the consumer's lifecycle code stays clean.
+   */
+  onAccountChange(handler: () => void): () => void {
+    const unsubscribes: Array<() => void> = [];
+    try {
+      unsubscribes.push(addListener('accountChange', () => handler()));
+      unsubscribes.push(addListener('networkChange', () => handler()));
+      unsubscribes.push(addListener('disconnect', () => handler()));
+    } catch {
+      // Older sats-connect or pre-v4 wallet build: no event surface.
+      // Consumers should re-call connect() at sign-time as the fallback.
+      return () => undefined;
+    }
+    return () => unsubscribes.forEach(u => u());
   },
 };
