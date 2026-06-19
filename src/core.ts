@@ -60,6 +60,14 @@ export * from './cat21-offer/cat21-offer-input-adapter';
 export * from './cat21-broadcast/broadcast.helper';
 export * from './cat21-broadcast/slipstream.helper';
 
+// --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
+export * from './inscribe/inscription-envelope';
+export * from './inscribe/inscription-commit.helper';
+export * from './inscribe/inscription-reveal.helper';
+export * from './inscribe/inscription-input-adapter';
+export * from './inscribe/inscription-fee.helper';
+export * from './inscribe/inscription.service.helper';
+
 // --- Agent-mode policy gate ---
 export * from './agent-mode/agent-policy.helper';
 export * from './agent-mode/agent-policy.types';

@@ -23,6 +23,7 @@ import type {
   Cat21CreateOfferIntent,
   Cat21GateRejectReason,
   Cat21GateResources,
+  Cat21InscribeIntent,
   Cat21MintIntent,
   Cat21Operation,
   Cat21OperationGateConfig,
@@ -53,7 +54,7 @@ export function validateCat21Operation(args: {
     Array.isArray(config.allowedOperations) &&
     config.allowedOperations.length > 0 &&
     !config.allowedOperations.includes(
-      operation.kind as 'mint' | 'transfer' | 'create_offer' | 'accept_offer',
+      operation.kind as 'mint' | 'transfer' | 'create_offer' | 'accept_offer' | 'inscribe',
     )
   ) {
     return reject('operation-kind-not-allowed', operation.kind);
@@ -68,6 +69,8 @@ export function validateCat21Operation(args: {
       return validateCreateOffer(operation.intent, config);
     case 'accept_offer':
       return validateAcceptOffer(operation.intent, config);
+    case 'inscribe':
+      return validateInscribe(operation.intent, config);
     default: {
       // Exhaustiveness: any new `kind` member trips a TS error here
       // BEFORE it reaches the runtime check.
@@ -223,6 +226,81 @@ function validateAcceptOffer(
     catIndex: cat.index,
   });
 }
+
+function validateInscribe(
+  intent: Cat21InscribeIntent,
+  config: Cat21OperationGateConfig,
+): Cat21OperationGateResult {
+  // Recipient — same address-validation pipeline as mint / transfer.
+  const recipient = validateAddress(intent.recipient, config, 'recipient');
+  if (!recipient.ok) return recipient.result;
+
+  const targetNet = toScureNetwork(config.network);
+  if (config.allowedRecipients && config.allowedRecipients.length > 0) {
+    if (!allowlistContainsAddress(intent.recipient, config.allowedRecipients, targetNet)) {
+      return reject('recipient-not-allowed', intent.recipient);
+    }
+  }
+  if (
+    config.ownPaymentAddress &&
+    addressesEquivalent(intent.recipient, config.ownPaymentAddress, targetNet)
+  ) {
+    return reject('self-send', intent.recipient);
+  }
+
+  // Fee rate.
+  const fee = validateFeeRate(intent.feeRate, config);
+  if (!fee.ok) return fee.result;
+
+  // Content body.
+  if (!(intent.body instanceof Uint8Array)) {
+    return reject('content-not-bytes', safeStringify(typeof intent.body));
+  }
+  const cap = config.maxInscribeContentBytes ?? DEFAULT_MAX_INSCRIBE_CONTENT_BYTES;
+  if (intent.body.length > cap) {
+    return reject('content-too-large', `body=${intent.body.length} cap=${cap}`);
+  }
+
+  // Content type — optional, validated when present.
+  let normalisedContentType: string | undefined;
+  if (intent.contentType !== undefined) {
+    if (typeof intent.contentType !== 'string') {
+      return reject('content-type-not-string', safeStringify(typeof intent.contentType));
+    }
+    normalisedContentType = intent.contentType.toLowerCase().trim();
+    // Defensive blocklist runs FIRST. A misconfigured allowlist that
+    // accidentally permits `application/javascript` (a JS XSS vector
+    // inside inscribed HTML) still loses to the blocklist.
+    if (config.blockedContentTypes && config.blockedContentTypes.length > 0) {
+      const blockedLower = config.blockedContentTypes.map(s => s.toLowerCase().trim());
+      if (blockedLower.includes(normalisedContentType)) {
+        return reject('content-type-blocked', intent.contentType);
+      }
+    }
+    if (config.allowedContentTypes && config.allowedContentTypes.length > 0) {
+      const allowedLower = config.allowedContentTypes.map(s => s.toLowerCase().trim());
+      if (!allowedLower.includes(normalisedContentType)) {
+        return reject('content-type-not-allowed', intent.contentType);
+      }
+    }
+  }
+
+  return success({
+    kind: 'inscribe',
+    recipientScript: recipient.script,
+    contentBytes: intent.body,
+    contentType: normalisedContentType,
+  });
+}
+
+/**
+ * 350 KB default cap on inscription body bytes. Phase-1 hard
+ * ceiling — keeps the reveal tx under the ~400 kWU standard relay
+ * cap with room to spare for the envelope overhead + witness +
+ * sighash. Phase-3 lifts this when the Slipstream big-inscribe
+ * path lands. Override via `config.maxInscribeContentBytes`.
+ */
+const DEFAULT_MAX_INSCRIBE_CONTENT_BYTES = 350_000;
 
 /**
  * 128 KiB default cap. Real CAT-21 buy offers are ~600 bytes; this

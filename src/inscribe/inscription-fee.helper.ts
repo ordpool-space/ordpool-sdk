@@ -191,7 +191,11 @@ export { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 export type { OrdEnvelopeField } from './inscription-envelope';
 
 /**
- * Re-import for the Layer-1 arg type referenced above.
+ * Local alias for the Layer-1 funding-input shape referenced in
+ * `SimulateInscribeFeesArgs.fundingInput`. The canonical export
+ * lives on `./inscription-input-adapter` (`InscribeFundingInput`)
+ * so consumers import it from one place; this alias keeps the
+ * fee helper's signature self-describing without re-exporting
+ * the same name twice through the public barrel.
  */
 type InscribeFundingInput = InscribeCommitArgs['fundingInput'];
-export type { InscribeFundingInput };
