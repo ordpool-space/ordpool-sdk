@@ -2,12 +2,11 @@
 
 Higher-level Bitcoin / Ordinals SDK for the [ordpool](https://ordpool.space)
 ecosystem. Sits one layer up from
-[`ordpool-parser`](https://github.com/ordpool-space/ordpool-parser): the
-parser reads raw transactions and pulls out the artifacts inside
-(inscriptions, runes, BRC-20, SRC-20, CAT-21, Atomicals, Labitbu,
-OpenTimestamps). **ordpool-sdk** is everything one layer up — domain
-code that talks to networks, signs things, walks calendars, wraps
-third-party REST APIs.
+[`ordpool-parser`](https://github.com/ordpool-space/ordpool-parser):
+the parser pulls artifacts (inscriptions, runes, BRC-20, SRC-20,
+CAT-21, Atomicals, Labitbu, OpenTimestamps) out of raw transactions;
+**ordpool-sdk** is the domain layer on top — networking, signing,
+REST wrappers, marketplace flows.
 
 MIT-licensed. Works in Node.js and browsers. No npm publish; consumers
 pin a git SHA:
@@ -19,90 +18,74 @@ pin a git SHA:
 The `prepare` lifecycle script builds `dist/` automatically when a git
 ref is installed.
 
-## Architecture: layered security, the wallet is dumb on purpose
+## Architecture: layered security
 
-CAT-21 safety is enforced **before** the wallet signs anything. The
-chain has five steps, each with a single responsibility:
+CAT-21 safety is enforced **before** the wallet signs. Five steps,
+single responsibility each:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│ 1. Agent / dapp DECLARES intent                                     │
-│    e.g. AgentActionContext { kind: 'buy', spendSats, counterparty } │
+│ 1. Caller DECLARES intent (mint / transfer / buy / sell-accept)     │
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
-│ 2. SDK agent-policy GATES the declared intent                       │
-│    evaluateAgentPolicy(policy, action) → allow | deny + reason      │
+│ 2. SDK GATES the intent                                             │
+│    validateCat21Operation (shape, addresses, fee/price caps)        │
+│    evaluateAgentPolicy   (autonomous-mode spend / counterparty)     │
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
 │ 3. SDK BUILDS the PSBT from the validated intent                    │
-│    buildCat21BuyOfferPsbt(args) → unsigned PSBT bytes               │
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
-│ 4. (Optional) SDK consumer RE-VALIDATES PSBT matches intent         │
-│    validateCat21BuyOfferPsbt(psbt, expected*, floor) — defence in   │
-│    depth before handing bytes to the wallet                         │
+│ 4. SDK RE-VALIDATES bytes vs intent (defence-in-depth on offers)    │
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
-│ 5. Wallet shows standard signPsbt UI, user confirms, wallet signs   │
-│    The wallet does NOT analyse what the PSBT means.                 │
+│ 5. Wallet shows signPsbt UI, user confirms, wallet signs            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Why the wallet stays dumb
 
-Trying to infer "this PSBT is a buy-offer / transfer / something
-else" from the raw bytes inside the wallet is a Sisyphean fight
-against ever-more-creative crafting. Every heuristic eventually gets
-bypassed. The wallet's correct job is:
+Inferring "this PSBT is a buy-offer / transfer / mint" from raw
+bytes is unwinnable — every heuristic eventually gets bypassed. The
+wallet shows inputs / outputs / fee, asks for a click, signs. Intent
+is declared upstream and validated **before** the PSBT exists. By
+the time bytes reach the wallet, the gate is already closed.
 
-- show the user the inputs, outputs, fee that will be signed;
-- ask for a confirmation click;
-- sign the bytes.
+### What the wallet IS responsible for
 
-The intent must be declared **upstream** (in the agent or in the SDK
-consumer) and validated **before** the PSBT exists or **before** it
-leaves the consumer for the wallet. By the time bytes reach the
-wallet, the security gate is already closed.
+Structural defaults, not intent inference:
 
-### What the wallet IS still responsible for
-
-These are conservative structural defaults, NOT intent inference:
-
-- **Cat-bearing UTXO protection.** The wallet's BTC send
-  coin-selection never picks a UTXO that holds a cat. No intent is
-  inferred — the UTXOs are simply removed from the spend pool.
-- **nLockTime preservation through RBF.** Any replacement tx the
-  wallet builds for an existing tx carries the original locktime
-  through verbatim. No intent is inferred — a structural property
-  is preserved.
+- **Cat-bearing UTXO protection.** BTC-send coin-selection never
+  picks a UTXO that holds a cat — they're removed from the spend
+  pool.
+- **nLockTime preservation through RBF.** Replacement txs carry the
+  original locktime verbatim.
 
 See [`cat21-wallet/CLAUDE.md`](https://github.com/ordpool-space/cat21-wallet/blob/main/CLAUDE.md)
-HARD RULE #6 for the wallet-side framing of the same rule.
+HARD RULE #6 for the wallet-side framing.
 
 ## Consumers
 
-The SDK is built around two primary consumer profiles:
+Three profiles in the ecosystem:
 
 | Consumer | What they need from the SDK |
 |---|---|
 | **cat21.space** (Angular 21 site) | Mint flow (build PSBT → ask wallet to sign → broadcast), offer flow (build buy-offer PSBT, validate inbound offers), wallet picker + per-wallet signer quirks, cat21-ord API client |
-| **cat21-wallet** (Chrome extension) | Lightweight: cat21-offer **validator** as defence-in-depth before signPsbt user prompt. The wallet does NOT build mint/offer PSBTs — those come from the SDK via signPsbt RPC. |
+| **cat21-wallet** (Chrome extension) | `validateCat21Operation` (entry gate on every typed cat21_* RPC), `validateCat21BuyOfferPsbt` (defence-in-depth before signPsbt), `evaluateAgentPolicy` (autonomous mode), all PSBT builders. Wallet owns no construction logic. |
 | **autonomous bots** (CLI / Discord / Twitter) | Agent-mode policy gate, broadcast dispatcher (Slipstream fallback), per-wallet signer for whichever wallet the operator wired up |
 
-The API is designed so any of these can consume any subset without
-pulling in framework dependencies they don't want — pure functions
-return plain data, network calls take a `fetchImpl` for environments
-that don't have a global fetch, signing is decoupled from broadcast.
+Any consumer can take any subset without pulling in framework deps:
+pure functions return plain data, network calls take a `fetchImpl`,
+signing is decoupled from broadcast.
 
-## Public API surface
+## Modules
 
-Each top-level directory under `src/` is its own module. `src/index.ts`
-is the single export point; everything not re-exported through there is
-internal.
+Each top-level `src/` directory is its own module. `src/index.ts`
+is the single export point; everything else is internal.
 
 ### `src/cat21-mint/` — mint pipeline
 
@@ -116,7 +99,72 @@ See `cat21-mint/README.md` (if present) for deeper notes; the
 canonical safety invariants live in `.claude/CLAUDE.md` HARD RULE
 "CAT-21 mints — RBF policy (per-wallet)".
 
-### `src/cat21-offer/` — ord-style buyer-initiated offers (NEW)
+### `src/cat21-validation/` — operation gate
+
+Single validation entry for all four CAT-21 mutating operations.
+Returns a discriminated union: `{ ok: true, resources }` or
+`{ ok: false, reason, detail? }`. No exceptions, no `Validated<I>`
+brand — type narrowing happens via the result.
+
+```ts
+import { validateCat21Operation, Network } from 'ordpool-sdk/core';
+
+const result = validateCat21Operation({
+  config: {
+    network: Network.Mainnet,
+    maxFeeRatePerVbyte: 1000,
+    maxPriceSats: 21_000_000_000,
+    ownPaymentAddress: 'bc1q...',           // blocks self-send
+    allowedRecipients: ['bc1q...'],          // positive allowlist
+    allowedCounterparties: ['bc1q...'],      // for create_offer
+    allowedOperations: ['mint', 'transfer'], // capability allowlist
+    maxOfferPsbtBytes: 128 * 1024,           // accept_offer DoS guard
+  },
+  operation: {
+    kind: 'mint',
+    intent: { recipient: 'bc1q...', feeRate: 5 },
+  },
+});
+
+if (!result.ok) {
+  console.warn(result.reason, result.detail); // 33 closed-set reasons
+  return;
+}
+// result.resources carries pre-decoded scriptPubKey, parsed catId, ...
+```
+
+**Intents** — `mint { recipient, feeRate, tip? }`,
+`transfer { catId, recipient, feeRate }`,
+`create_offer { catId, priceSats, paymentAddress }`,
+`accept_offer { offerPsbt, expectedCatId, expectedPriceSats, expectedSellerUtxo }`.
+
+**What the gate enforces:**
+
+- Address shape per network. Mainnet address on testnet config →
+  `recipient-wrong-network`, not `-not-a-bitcoin-address`.
+- BIP173 case-insensitive equivalence for self-send + allowlist
+  (so `BC1Q…` and `bc1q…` match).
+- Fee rate: finite, integer, positive, under `maxFeeRatePerVbyte`.
+- Price: finite, integer, positive, at or above the 546-sat postage
+  floor, under `maxPriceSats`.
+- Cat-id: `<64-hex>i<vout>` regex.
+- Accept-offer PSBT: hex OR base64, starts with PSBT magic
+  (`0x70 0x73 0x62 0x74 0xff`), under `maxOfferPsbtBytes`.
+- Operation kind: when `allowedOperations` is set, the kind must be
+  in the list. Fires BEFORE field validation so a disallowed-kind
+  probe can't leak field-level reasons.
+
+**Property-fuzzed.** ~30 garbage shapes (Symbol, BigInt, NaN,
+Infinity, prototype-less objects, RTL-override Unicode, raw
+Buffers, function references) × every field × every operation. The
+gate never throws — any unrecognized input returns a typed reason
+from the closed set. 315 tests on this module alone.
+
+**Use in cat21-wallet:** every `Cat21RpcService.{mint,transfer,
+createOffer,acceptOffer}` method opens with one `validateCat21Operation`
+call. No wallet-side invariants; SDK is the single source of truth.
+
+### `src/cat21-offer/` — ord-style buyer-initiated offers
 
 Sniping-proof by construction: every input carries SIGHASH_ALL so the
 seller's signature, once added, commits to every byte of the
@@ -168,13 +216,12 @@ if (verdict.ok) {
 - `sighash-not-all` — any input uses a sighashType other than ALL.
 - `buyer-input-unsigned` — any input 1..N carries no signature.
 
-**Defence-in-depth pattern (cat21-wallet integration):** the wallet
-runs `validateCat21BuyOfferPsbt` before showing the signPsbt
-confirmation. If validation fails, the wallet refuses to sign and
-surfaces the typed reason to the user. The SDK builds + validates; the
-wallet validates again as a paranoia check.
+**Defence-in-depth:** the cat21-wallet runs
+`validateCat21BuyOfferPsbt` again before showing the signPsbt UI.
+SDK validates; wallet re-validates. Typed rejection surfaces in the
+popup.
 
-### `src/cat21-broadcast/` — mempool / Slipstream dispatcher (NEW)
+### `src/cat21-broadcast/` — mempool / Slipstream dispatcher
 
 ```ts
 import {
@@ -219,7 +266,7 @@ const { txid } = await submitToSlipstream(rawTxHex, {
 decides whether to fall back to mempool (which may reject for the same
 standardness reason). This is the caller's policy, not the SDK's.
 
-### `src/agent-mode/` — autonomous-action policy gate (NEW)
+### `src/agent-mode/` — autonomous-action policy gate
 
 Pure-functional. Every autonomous mint / buy / sell-accept passes
 through this gate before the agent constructs a PSBT.
@@ -258,9 +305,8 @@ Order of checks: `enabled` → per-action cap → daily cap → fee rate →
 floor price (sell-accept only) → counterparty. Cheapest first so the
 gate fails fast on trivially blocked actions.
 
-**The SDK is stateless.** The caller tracks `spentTodaySats` itself
-(local storage in a browser, a SQLite file for a bot). The SDK
-evaluates the policy without persistence.
+**Stateless.** Caller tracks `spentTodaySats` (localStorage in a
+browser, SQLite in a bot); SDK just evaluates.
 
 ### `src/wallet/` — wallet picker + signer adapters
 
@@ -283,9 +329,8 @@ evaluates the policy without persistence.
 
 ## Status
 
-Public API surfaces are wired up and tested. New consumer integrations
-(beyond cat21.space and cat21-wallet) are welcome; file an issue if
-you need a missing piece or a new wallet adapter.
+API is wired and tested. New consumer integrations welcome; file an
+issue if you need a missing piece or a new wallet adapter.
 
 ## Wallet support
 
@@ -309,9 +354,8 @@ doesn't isn't shown.
 
 ### Potentially supported, untested
 
-Two wallets ship connector + signer code matched against their
-official developer documentation but cannot currently be exercised
-end-to-end:
+Two wallets ship code matched against official developer docs but
+can't be exercised end-to-end yet:
 
 - **Phantom**. Per
   [Phantom's own Help Center](https://help.phantom.com/hc/en-us/articles/29995498642195-Connect-Phantom-to-an-app-or-site):
@@ -341,11 +385,9 @@ Adapter shape for Binance is matched against
 [LaserEyes' production-deployed `binance.ts` provider](https://github.com/omnisat/lasereyes-mono/blob/main/packages/core/src/client/providers/binance.ts),
 which is used by multiple Ordinals integrations.
 
-If you're integrating against ordpool-sdk and care about either
-wallet: the code paths exist and are exported; please
-[file an issue](https://github.com/ordpool-space/ordpool-sdk/issues)
-if you encounter a real wallet build that exposes the surface and
-the adapter doesn't work as expected.
+Code paths exist and are exported. If you hit a real wallet build
+that exposes the surface and the adapter misbehaves,
+[file an issue](https://github.com/ordpool-space/ordpool-sdk/issues).
 
 ## Code conventions
 
@@ -383,24 +425,22 @@ npm run build               # ng-packagr (ESM + CJS dual output)
 
 ## Why two packages
 
-We own three TypeScript codebases:
+Three TypeScript codebases we own:
 
 - [`ordpool-parser`](https://github.com/ordpool-space/ordpool-parser)
-  — zero runtime dependencies, pure functions, runs anywhere.
+  — zero deps, pure functions, runs anywhere.
 - [`ordpool-sdk`](https://github.com/ordpool-space/ordpool-sdk) —
-  higher-level domain code that can have dependencies and side effects.
-- `ordpool/frontend` and `ordpool/backend` — forked from mempool.
+  domain code with deps and side effects.
+- `ordpool/frontend` + `ordpool/backend` — forked from mempool.
 
-Helpers that should be reusable from a CLI, GitHub Action, third-party
-app, or another ecosystem repo belong in the parser or the SDK
-depending on shape (pure-function vs. networked).
+Reusable helpers (CLI, GitHub Action, third-party integration) go
+in the parser (pure) or the SDK (networked).
 
-The cat21-wallet repo (also part of the ecosystem) deliberately
-delegates almost all CAT-21 PSBT construction to this SDK; the wallet
-is responsible only for displaying cats, preserving `nLockTime=21`
-through RBF, and exposing an MCP server. See
+The cat21-wallet delegates almost all CAT-21 PSBT construction here
+— the wallet displays cats, preserves `nLockTime=21` through RBF,
+and exposes an MCP server. See
 [`cat21-wallet/CLAUDE.md`](https://github.com/ordpool-space/cat21-wallet/blob/main/CLAUDE.md)
-for the wallet's scope.
+for scope.
 
 ## License
 
