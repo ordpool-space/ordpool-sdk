@@ -36,10 +36,19 @@ export * from './cat21-offer/cat21-offer-input-adapter';
 export * from './cat21-transfer/cat21-transfer.helper';
 export * from './cat21-transfer/cat21-transfer.types';
 export * from './cat21-transfer/cat21-transfer-input-adapter';
+export * from './cat21-transfer/cat21-transfer-orchestrator.service';
 
 // --- cat21 broadcast (mempool / Slipstream dispatcher + Slipstream client) ---
 export * from './cat21-broadcast/broadcast.helper';
 export * from './cat21-broadcast/slipstream.helper';
+
+// --- inscribe (commit + reveal pipeline; ord-compatible envelope) ---
+export * from './inscribe/inscription-envelope';
+export * from './inscribe/inscription-commit.helper';
+export * from './inscribe/inscription-reveal.helper';
+export * from './inscribe/inscription-input-adapter';
+export * from './inscribe/inscription-fee.helper';
+export * from './inscribe/inscription.service.helper';
 
 // --- agent-mode (autonomous-action policy gate) ---
 export * from './agent-mode/agent-policy.helper';
