@@ -91,9 +91,60 @@ export interface WalletConnector {
  * DOM dependencies while still letting the contract be "PSBT in,
  * txid out" for every wallet uniformly.
  */
+/**
+ * One row of the signingMap: "sign these specific input indexes
+ * with the private key behind this address". Multiple rows ⇒
+ * multi-address signing (transfer: ordinals address on input 0,
+ * payment address on funding inputs; offer-accept: ordinals
+ * address on input 0 only).
+ *
+ * For wallets whose RPC takes one address+indexes pair per call
+ * (Xverse, Unisat, Phantom, Oyl, OKX, Wizz): the signer maps
+ * directly to the wallet's per-pair array shape.
+ *
+ * For single-index wallets (Leather, cat21-wallet): the signer
+ * iterates the rows, calling signPsbt once per (address, index)
+ * pair, threading the partially-signed PSBT through each call.
+ */
+export interface PsbtSigningTarget {
+  address: string;
+  indexes: number[];
+  /** SIGHASH override per-row. Defaults to SIGHASH_ALL on every cat-flow we ship today. */
+  sigHash?: number;
+}
+
 export interface SignAndBroadcastInput {
   psbtBytes: Uint8Array;
+  /**
+   * The wallet's payment address. Always required (we broadcast
+   * via electrs and several signer APIs want the address as a label).
+   *
+   * Historical: was the only signing address back when mint was the
+   * only flow. New flows (transfer, offer) supply `signingMap`
+   * additionally to drive multi-address signing.
+   */
   paymentAddress: string;
+  /**
+   * Which inputs each address signs. Optional; defaults to
+   * `[{ address: paymentAddress, indexes: [0] }]` to keep the
+   * legacy mint call shape working unchanged.
+   *
+   * For a transfer (cat input at ordinals + funding at payment):
+   *   `[{ address: ordinalsAddress, indexes: [0] },
+   *     { address: paymentAddress,  indexes: [1, 2, …] }]`
+   * For a buyer-side offer create (buyer signs only their funding
+   * inputs at payment; seller's cat input at index 0 stays unsigned):
+   *   `[{ address: paymentAddress, indexes: [1, 2, …] }]`
+   * For a seller-side offer accept (seller signs only the cat input
+   * at the ordinals address, every funding input is already buyer-signed):
+   *   `[{ address: ordinalsAddress, indexes: [0] }]`
+   *
+   * Order matters for single-index wallets (Leather, cat21-wallet)
+   * because each call returns a partially-signed PSBT that's threaded
+   * into the next call. Multi-index wallets (Xverse) honour the array
+   * as a whole.
+   */
+  signingMap?: ReadonlyArray<PsbtSigningTarget>;
   network: Network;
   /** Broadcast a finalized tx-hex. Returns the txid. */
   broadcast(txHex: string): Observable<string>;
