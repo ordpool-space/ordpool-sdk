@@ -37,7 +37,7 @@ export interface AgentPolicy {
    * field validation, so a disallowed-kind probe can't fingerprint
    * the allowed shape via field-level error reasons.
    */
-  allowedOperations?: ReadonlyArray<AgentActionKind>;
+  allowedOperations?: AgentActionKind[];
 }
 
 /**
