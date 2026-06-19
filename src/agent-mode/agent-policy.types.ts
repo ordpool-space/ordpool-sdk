@@ -23,6 +23,21 @@ export interface AgentPolicy {
    * Non-empty = strict allowlist (Bitcoin address match).
    */
   allowedCounterparties: string[];
+  /**
+   * Operation-kind allowlist. When set and non-empty, ONLY the listed
+   * cat21 RPC methods are accepted; any other kind fails closed with
+   * `operation-kind-not-allowed` from the structural gate.
+   *
+   * Use case: a wallet provisions an agent identity for a specific
+   * job — "mint only" (`['cat21_mint']`) or "trade-only, no minting"
+   * (`['cat21_create_offer', 'cat21_accept_offer']`).
+   *
+   * When unset or empty array → all four kinds accepted (default
+   * permissive). The capability check fires BEFORE per-operation
+   * field validation, so a disallowed-kind probe can't fingerprint
+   * the allowed shape via field-level error reasons.
+   */
+  allowedOperations?: ReadonlyArray<AgentActionKind>;
 }
 
 /**
