@@ -31,6 +31,8 @@ export * from './cat21-fee/dummy-keypair';
 export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
 export * from './cat21-offer/cat21-offer-input-adapter';
+export * from './cat21-offer/cat21-create-offer-orchestrator.service';
+export * from './cat21-offer/cat21-accept-offer-orchestrator.service';
 
 // --- cat21 transfer (move a cat to another address; mints a fresh cat on the same ordinal) ---
 export * from './cat21-transfer/cat21-transfer.helper';
