@@ -350,3 +350,54 @@ user signal is the missing piece, not a stricter gate.
 Full definitions, iteration ladder, and bootstrap/caching procedure
 in `/Work/ordpool/WALLETS.md` (the workspace HQ). Read it before
 starting work on a new wallet.
+
+## HARD RULE: Offers are public; share them anywhere
+
+**A CAT-21 buy-offer PSBT is not secret. There is no need to "protect"
+or "hide" it.** Any channel works — URL query parameter, copy-pasted
+text in a Discord channel, a tweet, an email, a QR code on a poster, a
+file attachment. Every distribution channel is fine.
+
+Reasoning, in priority order:
+
+1. **The offer reveals nothing that won't land on Bitcoin anyway.** A
+   buy-offer PSBT encodes: which cat UTXO is for sale, the asking price
+   in sats, the seller's payout address, `lockTime=21`. The instant the
+   offer is accepted and broadcast, every one of those facts is on a
+   public blockchain forever. A leaked offer that never gets accepted
+   leaks nothing — it's a price quote tied to a cat, both already
+   visible to anyone scanning the chain.
+2. **It's only useful to a willing buyer.** A buy-offer PSBT, by
+   construction, requires the buyer's funding inputs + the buyer's
+   change output + the buyer's signatures (SIGHASH_ALL on every buyer
+   input). A third party who picks the PSBT off a wire cannot accept
+   it without spending their own UTXOs at the seller's price. The
+   worst-case "leak" outcome is the same as the intended outcome: the
+   recipient (or some other willing buyer) accepts the offer at the
+   stated price. The seller's interest is *more* visibility, not less.
+3. **Sniping-proofness is structural, not transport-secrecy.** The
+   PSBT is sniping-proof because once the seller's signature lands,
+   every byte is committed by SIGHASH_ALL signatures (see
+   `buildCat21BuyOfferPsbt`). No partial-PSBT splicing is possible.
+   Transport-layer obfuscation (URL fragments, base64-only artifacts,
+   non-indexable hosting) adds nothing on top of this and creates
+   friction for legitimate distribution.
+
+**Consumer guidance for the SDK's offer flow:**
+
+- The artifact is bare base64 of the unsigned-by-buyer PSBT. Wrap it in
+  whatever transport the consumer wants. Query params (`?accept=…`),
+  fragments (`#…`), plain text in a textarea, QR code, signed message,
+  IPFS pin, GitHub gist — all equivalent from a security perspective.
+- Consumers MAY add cosmetic discovery aids (a hash-fragment so a
+  click-to-buy link works without a server round-trip; a copy-to-
+  clipboard button; a QR rendering). They MUST NOT design around an
+  "offers are leaked" threat model. There is no such threat.
+- If a UI surface chooses one channel for default rendering, don't
+  hand-wave about "for privacy" or "to avoid server logs". The right
+  framing is **"this is the most ergonomic for the average user"** —
+  not security.
+
+Workspace HQ carries the same rule (search "Offers can be shared in
+the wild" in `/Work/ordpool/CLAUDE.md`) so the cat21-indexer / ordpool
+consumer guides stay aligned.
