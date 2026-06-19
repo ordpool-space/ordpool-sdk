@@ -31,6 +31,8 @@ import { albyConnector } from '../../../src/wallet/connectors/alby.connector';
 import { extractWireTxFromPsbt } from '../../../src/wallet/psbt-extract';
 import { BIP341_KEYPATH_SIGHASHES } from '../../../src/wallet/sighash';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
+import { createInscribeTransactions } from '../../../src/inscribe/inscription.service.helper';
+import { schnorr } from '@noble/curves/secp256k1';
 import { Network, toBitcoinNetworkType, toScureNetwork } from '../../../src/network';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import type { TxnOutput } from '../../../src/cat21-mint/cat21.service.types';
@@ -48,6 +50,7 @@ declare global {
         signingSupported: boolean;
       }>;
       buildAndSignMintViaXverse(input: MintRequest): Promise<{ txHex: string }>;
+      buildAndSignInscribeViaXverse(input: InscribeRequest): Promise<InscribeSignedResult>;
       detectUnisat(): boolean;
       connectUnisat(): Promise<{
         type: KnownOrdinalWalletType;
@@ -167,6 +170,43 @@ export interface MintRequest {
   paymentPublicKey: string;     // hex
   recipientAddress: string;
   feeSats: number;
+}
+
+/**
+ * Inscribe request shape. The wallet only signs the COMMIT — the
+ * reveal is finalized inside `createInscribeTransactions` with the
+ * ephemeral key (which the orchestrator zeroes before returning).
+ *
+ * `bodyHex` and `contentType` define the inscription payload. The
+ * `feeRatePerVbyte` is applied identically to commit + reveal per
+ * the CPFP universal pattern; the orchestrator simulates fees.
+ *
+ * `recipientAddress` is where the inscription lands (P2TR
+ * recommended for ord-theory clarity); `paymentPubkeyXonly` is the
+ * wallet's x-only key that backs the 2-leaf recovery tapscript on
+ * the commit output, so the user can recover the postage if the
+ * reveal never broadcasts.
+ */
+export interface InscribeRequest {
+  utxo: { txid: string; vout: number; value: number };
+  paymentAddress: string;
+  paymentPublicKey: string;       // hex (compressed 33-byte)
+  paymentPubkeyXonly: string;     // hex (32-byte) for the recovery leaf
+  recipientAddress: string;
+  bodyHex: string;                // inscription body bytes, hex
+  contentType?: string;
+  feeRatePerVbyte: number;
+}
+
+export interface InscribeSignedResult {
+  /** Wallet-signed commit, broadcastable wire tx hex. */
+  commitHex: string;
+  /** Orchestrator-signed reveal, broadcastable wire tx hex. */
+  revealHex: string;
+  /** SegWit commit txid (witness-independent — matches whatever the wallet finalizes). */
+  commitTxid: string;
+  /** Reveal txid (already finalized). */
+  revealTxid: string;
 }
 
 const statusEl = () => document.getElementById('status')!;
@@ -507,6 +547,82 @@ window.ordpoolSdkHarness.buildAndSignMintViaXverse = async (input: MintRequest) 
   const txHex = extractWireTxFromPsbt(base64.decode(signedPsbtBase64));
   log('mint.finalized', { txHex: txHex.slice(0, 40) + '…', length: txHex.length });
   return { txHex };
+};
+
+window.ordpoolSdkHarness.buildAndSignInscribeViaXverse = async (input: InscribeRequest) => {
+  const detected = await waitForXverseProvider();
+  if (!detected) throw new Error('Xverse provider not injected on the harness page within 15s');
+  statusEl().textContent = `building inscribe (commit+reveal) via xverse…`;
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const paymentPubkeyXonly = hexToBytes(input.paymentPubkeyXonly);
+  const body = hexToBytes(input.bodyHex);
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+    status: { confirmed: true },
+  };
+
+  // Layer-4 orchestrator: builds the commit PSBT (unsigned, awaits
+  // the wallet) and the reveal hex (already finalized with a fresh
+  // ephemeral key that the orchestrator zeroes before returning).
+  const inscribed = createInscribeTransactions({
+    paymentOutput: txnOutput,
+    paymentPublicKey: paymentPubkey,
+    paymentAddress: input.paymentAddress,
+    paymentPubkeyXonly,
+    recipientAddress: input.recipientAddress,
+    body,
+    contentType: input.contentType,
+    feeRatePerVbyte: input.feeRatePerVbyte,
+    network: Network.Regtest,
+  });
+  log('inscribe.built', {
+    commitPsbtBytes: inscribed.commitPsbt.length,
+    revealHexChars: inscribed.revealHex.length,
+    commitTxid: inscribed.commitTxid,
+    revealTxid: inscribed.revealTxid,
+    commitFee: inscribed.fees.commitFeeSats,
+    revealFee: inscribed.fees.revealFeeSats,
+  });
+
+  // Xverse signs ONLY the funding input on the commit (input 0).
+  // sats-connect's `inputsToSign` is keyed by address; same call
+  // shape as the cat21-mint flow above.
+  const signedCommitPsbtBase64 = await new Promise<string>((resolve, reject) => {
+    signTransaction({
+      payload: {
+        network: { type: toBitcoinNetworkType(Network.Regtest) },
+        message: 'Sign Transaction (Inscription Commit)',
+        psbtBase64: base64.encode(inscribed.commitPsbt),
+        broadcast: false,
+        inputsToSign: [{
+          address: input.paymentAddress,
+          signingIndexes: [0],
+          sigHash: 0x01,
+        }],
+      },
+      onFinish: (response) => {
+        const psbt = (response as { psbtBase64?: string }).psbtBase64;
+        if (!psbt) reject(new Error('Xverse signTransaction returned without psbtBase64'));
+        else resolve(psbt);
+      },
+      onCancel: () => reject(new Error('user cancelled signTransaction')),
+    });
+  });
+  const commitHex = extractWireTxFromPsbt(base64.decode(signedCommitPsbtBase64));
+  log('inscribe.commit-signed', {
+    commitHex: commitHex.slice(0, 40) + '…',
+    length: commitHex.length,
+  });
+
+  return {
+    commitHex,
+    revealHex: inscribed.revealHex,
+    commitTxid: inscribed.commitTxid,
+    revealTxid: inscribed.revealTxid,
+  };
 };
 
 function hexToBytes(s: string): Uint8Array {
