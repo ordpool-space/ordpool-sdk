@@ -67,6 +67,7 @@ export * from './inscribe/inscription-reveal.helper';
 export * from './inscribe/inscription-input-adapter';
 export * from './inscribe/inscription-fee.helper';
 export * from './inscribe/inscription.service.helper';
+export * from './inscribe/inscribe-broadcast.helper';
 
 // --- Agent-mode policy gate ---
 export * from './agent-mode/agent-policy.helper';
