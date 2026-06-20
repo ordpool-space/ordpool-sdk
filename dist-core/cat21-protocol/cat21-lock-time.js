@@ -1,3 +1,7 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CAT21_LOCK_TIME = void 0;
+exports.assertCat21LockTime = assertCat21LockTime;
 /**
  * The CAT-21 protocol marker. Every cat-touching tx OUR code builds
  * carries `nLockTime = 21`. cat21-ord reads the field structurally
@@ -14,7 +18,7 @@
  * HARD RULE "CAT-21 mints — RBF policy (per-wallet)" for the full
  * story plus the per-wallet sequence interaction.
  */
-export const CAT21_LOCK_TIME = 21;
+exports.CAT21_LOCK_TIME = 21;
 /**
  * Hard runtime assertion. Every Layer-1 builder calls this after
  * constructing its scure `Transaction` and before returning bytes.
@@ -22,9 +26,9 @@ export const CAT21_LOCK_TIME = 21;
  * other than `CAT21_LOCK_TIME`, which is a load-bearing-bug-class
  * mistake (cat21-ord wouldn't mint the cat).
  */
-export function assertCat21LockTime(lockTime) {
-    if (lockTime !== CAT21_LOCK_TIME) {
-        throw new Error(`Internal error: lockTime=${lockTime}, expected CAT21_LOCK_TIME=${CAT21_LOCK_TIME}`);
+function assertCat21LockTime(lockTime) {
+    if (lockTime !== exports.CAT21_LOCK_TIME) {
+        throw new Error(`Internal error: lockTime=${lockTime}, expected CAT21_LOCK_TIME=${exports.CAT21_LOCK_TIME}`);
     }
 }
 //# sourceMappingURL=cat21-lock-time.js.map

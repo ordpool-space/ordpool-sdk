@@ -1,3 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.operationNamedDefaults = operationNamedDefaults;
 /**
  * Default operation-named methods, delegating to a signer's existing
  * legacy generic methods (`signAndBroadcast`, `signMultiInputAndBroadcast`,
@@ -14,7 +17,7 @@
  * `1..count` AT the same address the builder put the funding inputs at.
  * No signingMap, no off-by-one, no per-row sighash drift.
  */
-export function operationNamedDefaults(legacy) {
+function operationNamedDefaults(legacy) {
     return {
         signSingleFundingInput(input) {
             return legacy.signAndBroadcast({

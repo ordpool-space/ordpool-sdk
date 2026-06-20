@@ -1,3 +1,4 @@
+"use strict";
 /**
  * Inscribe broadcast helper.
  *
@@ -35,7 +36,10 @@
  * land via public mempool; oversized payloads are a Phase-3
  * concern.
  */
-import { STANDARD_TX_WEIGHT_LIMIT } from '../cat21-broadcast/broadcast.helper';
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS = void 0;
+exports.broadcastInscribePackage = broadcastInscribePackage;
+const broadcast_helper_1 = require("../cat21-broadcast/broadcast.helper");
 /**
  * Default fan-out endpoints. Both speak BIP-331 `submitpackage`
  * over an Esplora-compatible `/txs/package` POST.
@@ -45,7 +49,7 @@ import { STANDARD_TX_WEIGHT_LIMIT } from '../cat21-broadcast/broadcast.helper';
  * `reason` field in the response if multiple endpoints succeed
  * simultaneously.
  */
-export const DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS = [
+exports.DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS = [
     'https://api.ordpool.space/api',
     'https://blockstream.info/api',
 ];
@@ -75,9 +79,9 @@ export const DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS = [
  * brief wait for the slow endpoint or its timeout; in practice
  * sub-second.
  */
-export async function broadcastInscribePackage(input, options = {}) {
+async function broadcastInscribePackage(input, options = {}) {
     if (input.packageWeight !== undefined &&
-        input.packageWeight > STANDARD_TX_WEIGHT_LIMIT) {
+        input.packageWeight > broadcast_helper_1.STANDARD_TX_WEIGHT_LIMIT) {
         // Phase 1 fails closed on oversized packages; Phase 3 lifts via
         // Slipstream. We surface the result as a synthetic "all-endpoints-
         // rejected" outcome so consumers don't need a second error path.
@@ -88,12 +92,12 @@ export async function broadcastInscribePackage(input, options = {}) {
                     ok: false,
                     status: -1,
                     body: `Package weight ${input.packageWeight} exceeds standard ceiling ` +
-                        `${STANDARD_TX_WEIGHT_LIMIT}; Phase-1 inscribe rejects to avoid ` +
+                        `${broadcast_helper_1.STANDARD_TX_WEIGHT_LIMIT}; Phase-1 inscribe rejects to avoid ` +
                         `wasting commit fees on a non-standard reveal`,
                 }],
         };
     }
-    const endpoints = options.endpoints ?? DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS;
+    const endpoints = options.endpoints ?? exports.DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS;
     const fetchImpl = options.fetchImpl ?? fetch;
     const timeoutMs = options.perEndpointTimeoutMs ?? 15_000;
     const body = JSON.stringify([input.commitHex, input.revealHex]);

@@ -1,9 +1,12 @@
-import { base64, hex } from '@scure/base';
-import { from, map, switchMap } from 'rxjs';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { KnownOrdinalWalletType, } from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { resolveSigningTargets } from './signing-targets.helper';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.oylSigner = void 0;
+const base_1 = require("@scure/base");
+const rxjs_1 = require("rxjs");
+const psbt_extract_1 = require("../psbt-extract");
+const wallet_service_types_1 = require("../wallet.service.types");
+const operation_named_defaults_1 = require("./operation-named-defaults");
+const signing_targets_helper_1 = require("./signing-targets.helper");
 /**
  * Oyl — `window.oyl.signPsbt({psbt, inputsToSign, broadcast,
  * finalize})`.
@@ -27,17 +30,17 @@ import { resolveSigningTargets } from './signing-targets.helper';
  */
 function decodeOylResponse(r) {
     if (r.signedPsbtHex)
-        return hex.decode(r.signedPsbtHex);
+        return base_1.hex.decode(r.signedPsbtHex);
     if (r.signedPsbt)
-        return base64.decode(r.signedPsbt);
+        return base_1.base64.decode(r.signedPsbt);
     if (r.psbt) {
-        return /^[0-9a-f]+$/i.test(r.psbt) ? hex.decode(r.psbt) : base64.decode(r.psbt);
+        return /^[0-9a-f]+$/i.test(r.psbt) ? base_1.hex.decode(r.psbt) : base_1.base64.decode(r.psbt);
     }
     throw new Error('Oyl signPsbt response carried no signed-psbt field');
 }
 const legacy = {
     signAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const oyl = window.oyl;
         const signPromise = oyl.signPsbt({
             psbt: psbtHex,
@@ -45,12 +48,12 @@ const legacy = {
             broadcast: false,
             finalize: false,
         });
-        return from(signPromise).pipe(switchMap(response => broadcastSignedPsbt(input, decodeOylResponse(response))));
+        return (0, rxjs_1.from)(signPromise).pipe((0, rxjs_1.switchMap)(response => (0, psbt_extract_1.broadcastSignedPsbt)(input, decodeOylResponse(response))));
     },
     signMultiInputAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const oyl = window.oyl;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const inputsToSign = targets.map((t) => ({
             address: t.address,
             signingIndexes: t.indexes,
@@ -62,27 +65,27 @@ const legacy = {
             broadcast: false,
             finalize: false,
         });
-        return from(signPromise).pipe(switchMap(response => broadcastSignedPsbt(input, decodeOylResponse(response))));
+        return (0, rxjs_1.from)(signPromise).pipe((0, rxjs_1.switchMap)(response => (0, psbt_extract_1.broadcastSignedPsbt)(input, decodeOylResponse(response))));
     },
     signPsbtOnly(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const oyl = window.oyl;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const inputsToSign = targets.map((t) => ({
             address: t.address,
             signingIndexes: t.indexes,
             sigHash: t.sigHash,
         }));
-        return from(oyl.signPsbt({
+        return (0, rxjs_1.from)(oyl.signPsbt({
             psbt: psbtHex,
             inputsToSign,
             broadcast: false,
             finalize: false,
-        })).pipe(map((response) => decodeOylResponse(response)));
+        })).pipe((0, rxjs_1.map)((response) => decodeOylResponse(response)));
     },
 };
-export const oylSigner = {
-    providerId: KnownOrdinalWalletType.oyl,
-    ...operationNamedDefaults(legacy),
+exports.oylSigner = {
+    providerId: wallet_service_types_1.KnownOrdinalWalletType.oyl,
+    ...(0, operation_named_defaults_1.operationNamedDefaults)(legacy),
 };
 //# sourceMappingURL=oyl.signer.js.map

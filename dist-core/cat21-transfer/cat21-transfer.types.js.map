@@ -1,1 +1,1 @@
-{"version":3,"file":"cat21-transfer.types.js","sourceRoot":"","sources":["../../src/cat21-transfer/cat21-transfer.types.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,kBAAkB,EAAE,MAAM,iCAAiC,CAAC;AAErE;;;;GAIG;AACH,MAAM,CAAC,MAAM,2BAA2B,GAAG,kBAAkB,CAAC"}
+{"version":3,"file":"cat21-transfer.types.js","sourceRoot":"","sources":["../../src/cat21-transfer/cat21-transfer.types.ts"],"names":[],"mappings":";;;AAAA,mEAAqE;AAErE;;;;GAIG;AACU,QAAA,2BAA2B,GAAG,kCAAkB,CAAC"}

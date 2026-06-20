@@ -1,4 +1,9 @@
-import { submitToSlipstream } from './slipstream.helper';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.STANDARD_TX_WEIGHT_LIMIT = void 0;
+exports.decideBroadcastChannel = decideBroadcastChannel;
+exports.broadcastCat21 = broadcastCat21;
+const slipstream_helper_1 = require("./slipstream.helper");
 /**
  * Standard-relay weight ceiling — matches Bitcoin Core's
  * `MAX_STANDARD_TX_WEIGHT` (400 000 WU = 100 kvB). Above this the
@@ -9,7 +14,7 @@ import { submitToSlipstream } from './slipstream.helper';
  * explicit fallback for oversize cases (large witness payload,
  * coin-consolidation alongside a mint, etc.).
  */
-export const STANDARD_TX_WEIGHT_LIMIT = 400_000;
+exports.STANDARD_TX_WEIGHT_LIMIT = 400_000;
 /**
  * # DORMANT — currently unused by any SDK consumer.
  *
@@ -31,17 +36,17 @@ export const STANDARD_TX_WEIGHT_LIMIT = 400_000;
  * Decision-only entry point — deterministic given the input + options,
  * no side effects.
  */
-export function decideBroadcastChannel(input, options = {}) {
+function decideBroadcastChannel(input, options = {}) {
     if (options.forceChannel) {
         return {
             channel: options.forceChannel,
             reason: `forced by caller (forceChannel=${options.forceChannel})`,
         };
     }
-    if (input.weight > STANDARD_TX_WEIGHT_LIMIT) {
+    if (input.weight > exports.STANDARD_TX_WEIGHT_LIMIT) {
         return {
             channel: 'slipstream',
-            reason: `weight ${input.weight} exceeds standard ceiling ${STANDARD_TX_WEIGHT_LIMIT}`,
+            reason: `weight ${input.weight} exceeds standard ceiling ${exports.STANDARD_TX_WEIGHT_LIMIT}`,
         };
     }
     return {
@@ -68,10 +73,10 @@ export function decideBroadcastChannel(input, options = {}) {
  * decides whether to fall back to the mempool callback. Auto-retry across
  * channels risks double-broadcast and is the caller's policy decision.
  */
-export async function broadcastCat21(input, broadcastViaMempool, options = {}) {
+async function broadcastCat21(input, broadcastViaMempool, options = {}) {
     const decision = decideBroadcastChannel(input, options);
     if (decision.channel === 'slipstream') {
-        const res = await submitToSlipstream(input.hex, {
+        const res = await (0, slipstream_helper_1.submitToSlipstream)(input.hex, {
             baseUrl: options.slipstreamBaseUrl,
             signal: options.signal,
             fetchImpl: options.fetchImpl,

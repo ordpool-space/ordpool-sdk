@@ -1,13 +1,50 @@
-import * as btc from '@scure/btc-signer';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { toScureNetwork } from '../network';
-import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS = void 0;
+exports.buildCat21TransferPsbt = buildCat21TransferPsbt;
+const btc = __importStar(require("@scure/btc-signer"));
+const cat21_postage_1 = require("../cat21-protocol/cat21-postage");
+const network_1 = require("../network");
+const cat21_sequence_1 = require("../cat21-protocol/cat21-sequence");
 /**
  * Dust threshold for the change output. 546 sats is the conservative
  * cross-address-type floor (taproot 330, segwit 294, p2sh 540 — 546
  * clears them all).
  */
-export const CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS = 546;
+exports.CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS = 546;
 /**
  * Builds the unsigned CAT-21 transfer PSBT.
  *
@@ -27,16 +64,16 @@ export const CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS = 546;
  * Hard invariants (asserted): lockTime=21, per-wallet sequence,
  * every input SIGHASH_ALL. Coin selection is the caller's job.
  */
-export function buildCat21TransferPsbt(args) {
-    const postageSats = CAT21_POSTAGE_SATS;
+function buildCat21TransferPsbt(args) {
+    const postageSats = cat21_postage_1.CAT21_POSTAGE_SATS;
     // HARD RULE: cat UTXO is always exactly 546 sats. See SDK CLAUDE.md.
-    if (args.catUtxo.value !== CAT21_POSTAGE_SATS) {
-        throw new Error(`catUtxo.value must equal CAT21_POSTAGE_SATS (${CAT21_POSTAGE_SATS}); got ${args.catUtxo.value}`);
+    if (args.catUtxo.value !== cat21_postage_1.CAT21_POSTAGE_SATS) {
+        throw new Error(`catUtxo.value must equal CAT21_POSTAGE_SATS (${cat21_postage_1.CAT21_POSTAGE_SATS}); got ${args.catUtxo.value}`);
     }
     if (args.feeSats < 0)
         throw new Error('feeSats must be non-negative');
-    const scureNetwork = toScureNetwork(args.network);
-    const sequence = resolveCat21InputSequence(args.walletType);
+    const scureNetwork = (0, network_1.toScureNetwork)(args.network);
+    const sequence = (0, cat21_sequence_1.resolveCat21InputSequence)(args.walletType);
     const tx = new btc.Transaction({
         lockTime: 21,
         allowLegacyWitnessUtxo: true,
@@ -61,7 +98,7 @@ export function buildCat21TransferPsbt(args) {
         throw new Error(`Transfer funding insufficient: ${totalInSats} sats < ${postageSats + args.feeSats} sats required`);
     }
     let changeSats = 0;
-    if (changeRaw >= CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS) {
+    if (changeRaw >= exports.CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS) {
         changeSats = changeRaw;
         tx.addOutputAddress(args.destinations.senderChangeAddress, BigInt(changeSats), scureNetwork);
     }

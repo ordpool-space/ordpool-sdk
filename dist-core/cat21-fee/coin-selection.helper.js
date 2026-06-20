@@ -1,3 +1,4 @@
+"use strict";
 /**
  * Coin selection for CAT-21 flows. cat21.space lets the user pick
  * (Cat21MintOrchestrator simulates against every UTXO); cat21-wallet's
@@ -13,6 +14,10 @@
  * Both pure. Caller MUST exclude cat-bearing UTXOs from the input
  * list — that filter is not this helper's job.
  */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.pickLargestFundingUtxoThatCovers = pickLargestFundingUtxoThatCovers;
+exports.pickSmallestFundingUtxoThatCovers = pickSmallestFundingUtxoThatCovers;
+exports.listFundingUtxosThatCover = listFundingUtxosThatCover;
 /**
  * **DEFAULT strategy.** Returns the LARGEST-value UTXO that covers
  * `targetSpendSats`; `null` if none does. Picked as default because
@@ -25,7 +30,7 @@
  *     change just under dust, where the builders fold it into the
  *     miner fee — the user over-pays).
  */
-export function pickLargestFundingUtxoThatCovers(args) {
+function pickLargestFundingUtxoThatCovers(args) {
     if (args.utxos.length === 0)
         return null;
     if (args.targetSpendSats <= 0) {
@@ -49,7 +54,7 @@ export function pickLargestFundingUtxoThatCovers(args) {
  * offer creation) `pickLargestFundingUtxoThatCovers` is the right
  * call. Default to that unless you have a documented reason.
  */
-export function pickSmallestFundingUtxoThatCovers(args) {
+function pickSmallestFundingUtxoThatCovers(args) {
     if (args.utxos.length === 0)
         return null;
     if (args.targetSpendSats <= 0) {
@@ -66,7 +71,7 @@ export function pickSmallestFundingUtxoThatCovers(args) {
  * caller wants to enumerate options (e.g. cat21.space's per-UTXO
  * fee-simulation grid where the user picks from the list).
  */
-export function listFundingUtxosThatCover(args) {
+function listFundingUtxosThatCover(args) {
     if (args.targetSpendSats <= 0) {
         throw new Error('targetSpendSats must be positive');
     }

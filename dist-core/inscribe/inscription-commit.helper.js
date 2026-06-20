@@ -1,6 +1,43 @@
-import * as btc from '@scure/btc-signer';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { toScureNetwork } from '../network';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.INSCRIBE_POSTAGE_SATS = void 0;
+exports.buildInscribeCommitPsbt = buildInscribeCommitPsbt;
+const btc = __importStar(require("@scure/btc-signer"));
+const cat21_postage_1 = require("../cat21-protocol/cat21-postage");
+const network_1 = require("../network");
 /**
  * Layer-1 builder for the inscribe **commit** transaction.
  *
@@ -36,8 +73,8 @@ import { toScureNetwork } from '../network';
  * AND matches the floor every inscriber in the OSS catalog uses.
  * See HQ rule "cat UTXO is always 546 sats, FIFO".
  */
-export const INSCRIBE_POSTAGE_SATS = CAT21_POSTAGE_SATS;
-export function buildInscribeCommitPsbt(args) {
+exports.INSCRIBE_POSTAGE_SATS = cat21_postage_1.CAT21_POSTAGE_SATS;
+function buildInscribeCommitPsbt(args) {
     if (args.commitFeeSats < 0)
         throw new Error('commitFeeSats must be non-negative');
     if (args.revealFeeReserveSats < 0)
@@ -45,8 +82,8 @@ export function buildInscribeCommitPsbt(args) {
     if (args.ephemeralPubkeyXonly.length !== 32) {
         throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
     }
-    const scureNetwork = toScureNetwork(args.network);
-    const postageSats = INSCRIBE_POSTAGE_SATS;
+    const scureNetwork = (0, network_1.toScureNetwork)(args.network);
+    const postageSats = exports.INSCRIBE_POSTAGE_SATS;
     const commitOutputValueSats = postageSats + args.revealFeeReserveSats;
     // Single envelope leaf; ephemeral key as the taproot internal key.
     // Matches ord's `TaprootBuilder::new().add_leaf(0, reveal_script)

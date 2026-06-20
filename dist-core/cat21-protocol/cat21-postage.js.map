@@ -1,1 +1,1 @@
-{"version":3,"file":"cat21-postage.js","sourceRoot":"","sources":["../../src/cat21-protocol/cat21-postage.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;;;;;GAiBG;AACH,MAAM,CAAC,MAAM,kBAAkB,GAAG,GAAG,CAAC"}
+{"version":3,"file":"cat21-postage.js","sourceRoot":"","sources":["../../src/cat21-protocol/cat21-postage.ts"],"names":[],"mappings":";;;AAAA;;;;;;;;;;;;;;;;;GAiBG;AACU,QAAA,kBAAkB,GAAG,GAAG,CAAC"}

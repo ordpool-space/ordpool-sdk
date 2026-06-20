@@ -1,4 +1,8 @@
-import { Script } from '@scure/btc-signer';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ORD_TAGS = void 0;
+exports.buildInscriptionEnvelope = buildInscriptionEnvelope;
+const btc_signer_1 = require("@scure/btc-signer");
 /**
  * Inscription envelope encoder — the inverse of `ordpool-parser`'s
  * `InscriptionParserService`. Produces the tapscript bytes that
@@ -27,7 +31,7 @@ const ORD_MARKER = new Uint8Array([0x6f, 0x72, 0x64]);
  * value-for-value. See https://docs.ordinals.com/inscriptions.html
  * for the canonical reference.
  */
-export const ORD_TAGS = {
+exports.ORD_TAGS = {
     /** MIME type of the body. */
     content_type: 0x01,
     /** Override placement on a sat other than the first. */
@@ -108,7 +112,7 @@ function tagAsScriptItem(tag) {
  * Returns the encoded tapscript bytes ready for taproot leaf
  * inclusion via `btc.p2tr(..., { script, leafVersion: 0xc0 })`.
  */
-export function buildInscriptionEnvelope(args) {
+function buildInscriptionEnvelope(args) {
     if (args.revealPubkeyXonly.length !== 32) {
         throw new Error(`revealPubkeyXonly must be 32 bytes; got ${args.revealPubkeyXonly.length}`);
     }
@@ -126,7 +130,7 @@ export function buildInscriptionEnvelope(args) {
     // keeping content_type first makes hex-grepping the envelope
     // boundary easier.
     if (args.contentType !== undefined) {
-        items.push(tagAsScriptItem(ORD_TAGS.content_type));
+        items.push(tagAsScriptItem(exports.ORD_TAGS.content_type));
         items.push(new TextEncoder().encode(args.contentType));
     }
     // Other fields in the order the caller supplied.
@@ -143,6 +147,6 @@ export function buildInscriptionEnvelope(args) {
     }
     // Envelope close.
     items.push('ENDIF');
-    return Script.encode(items);
+    return btc_signer_1.Script.encode(items);
 }
 //# sourceMappingURL=inscription-envelope.js.map

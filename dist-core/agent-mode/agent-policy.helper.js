@@ -1,3 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.evaluateAgentPolicy = evaluateAgentPolicy;
 /**
  * Pure-functional policy gate for agent-mode autonomous CAT-21 actions.
  *
@@ -27,7 +30,7 @@
  * `cat21_mint` and `cat21_transfer` have no price semantic; spend caps
  * + fee-rate ceiling are sufficient there.
  */
-export function evaluateAgentPolicy(policy, action) {
+function evaluateAgentPolicy(policy, action) {
     if (!policy.enabled) {
         return deny('agent-disabled');
     }

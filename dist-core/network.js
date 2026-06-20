@@ -1,4 +1,43 @@
-import * as btc from '@scure/btc-signer';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Network = void 0;
+exports.toScureNetwork = toScureNetwork;
+exports.toBitcoinNetworkType = toBitcoinNetworkType;
+exports.toLeatherNetworkString = toLeatherNetworkString;
+const btc = __importStar(require("@scure/btc-signer"));
 /**
  * Sats-connect's `BitcoinNetworkType` enum, redeclared locally.
  *
@@ -29,14 +68,14 @@ const BitcoinNetworkType = {
  * routes a testnet UI). The other variants exist so a future Node
  * script or CLI can target them without re-shaping the API.
  */
-export var Network;
+var Network;
 (function (Network) {
     Network["Mainnet"] = "mainnet";
     Network["Testnet3"] = "testnet3";
     Network["Testnet4"] = "testnet4";
     Network["Signet"] = "signet";
     Network["Regtest"] = "regtest";
-})(Network || (Network = {}));
+})(Network || (exports.Network = Network = {}));
 /**
  * Regtest uses the same key/script prefixes as testnet but a
  * different bech32 HRP (`bcrt` not `tb`). @scure/btc-signer doesn't
@@ -56,7 +95,7 @@ const REGTEST_NETWORK = {
  * remaining testnet variants -> TEST_NETWORK (scure doesn't
  * distinguish testnet3 / testnet4 / signet at this layer).
  */
-export function toScureNetwork(network) {
+function toScureNetwork(network) {
     if (network === Network.Mainnet)
         return btc.NETWORK;
     if (network === Network.Regtest)
@@ -73,7 +112,7 @@ export function toScureNetwork(network) {
  * values match Xverse's mode strings exactly (one of the reasons
  * upgrading was worth doing).
  */
-export function toBitcoinNetworkType(network) {
+function toBitcoinNetworkType(network) {
     if (network === Network.Mainnet)
         return BitcoinNetworkType.Mainnet;
     if (network === Network.Testnet3)
@@ -99,7 +138,7 @@ export function toBitcoinNetworkType(network) {
  * accepts `'devnet'` for back-compat with dapps written against
  * the upstream-Leather contract.
  */
-export function toLeatherNetworkString(network) {
+function toLeatherNetworkString(network) {
     switch (network) {
         case Network.Mainnet: return 'mainnet';
         case Network.Signet: return 'signet';

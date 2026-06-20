@@ -1,13 +1,35 @@
-import { AddressPurpose } from 'sats-connect';
-import { KnownOrdinalWalletType, } from './wallet.service.types';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.leatherPaymentAddressType = exports.leatherOrdinalsAddressType = void 0;
+exports.isXverseInstalled = isXverseInstalled;
+exports.isLeatherInstalled = isLeatherInstalled;
+exports.isCat21WalletInstalled = isCat21WalletInstalled;
+exports.findCat21WalletProvider = findCat21WalletProvider;
+exports.isUnisatInstalled = isUnisatInstalled;
+exports.isWizzInstalled = isWizzInstalled;
+exports.isOkxInstalled = isOkxInstalled;
+exports.isPhantomInstalled = isPhantomInstalled;
+exports.isOylInstalled = isOylInstalled;
+exports.isAlbyInstalled = isAlbyInstalled;
+exports.isBinanceInstalled = isBinanceInstalled;
+exports.parseXverseAddressResponse = parseXverseAddressResponse;
+exports.parseLeatherAddressResponse = parseLeatherAddressResponse;
+exports.unisatBasicInfoToWalletInfo = unisatBasicInfoToWalletInfo;
+exports.wizzBasicInfoToWalletInfo = wizzBasicInfoToWalletInfo;
+exports.okxBasicInfoToWalletInfo = okxBasicInfoToWalletInfo;
+exports.binanceBasicInfoToWalletInfo = binanceBasicInfoToWalletInfo;
+exports.parseOylAddressResponse = parseOylAddressResponse;
+exports.parsePhantomAddressResponse = parsePhantomAddressResponse;
+const sats_connect_1 = require("sats-connect");
+const wallet_service_types_1 = require("./wallet.service.types");
 // CodeReview @ Leather
 // is this a correct    assumption? p2wpkh always for payments, p2tr always for ordinals?
-export const leatherOrdinalsAddressType = 'p2tr'; // Taproot
-export const leatherPaymentAddressType = 'p2wpkh'; // Native Segwit
-export function isXverseInstalled(win) {
+exports.leatherOrdinalsAddressType = 'p2tr'; // Taproot
+exports.leatherPaymentAddressType = 'p2wpkh'; // Native Segwit
+function isXverseInstalled(win) {
     return !!win?.XverseProviders;
 }
-export function isLeatherInstalled(win) {
+function isLeatherInstalled(win) {
     // `LeatherProvider` is the post-rebrand global; `HiroWalletProvider`
     // is the pre-rebrand one. Some users still have older versions.
     //
@@ -39,7 +61,7 @@ export function isLeatherInstalled(win) {
  * is present, so the LeatherProvider backfill is purely a courtesy
  * for dApps that key off `isLeather` and is not our discovery path.
  */
-export function isCat21WalletInstalled(win) {
+function isCat21WalletInstalled(win) {
     const direct = win?.Cat21Provider;
     if (direct?.isCat21)
         return true;
@@ -56,7 +78,7 @@ export function isCat21WalletInstalled(win) {
  * Used by `cat21walletConnector` / `cat21walletSigner` to find the
  * `.request(...)` entry point.
  */
-export function findCat21WalletProvider(win) {
+function findCat21WalletProvider(win) {
     const direct = win?.Cat21Provider;
     if (direct?.isCat21 && typeof direct.request === 'function')
         return direct;
@@ -72,7 +94,7 @@ export function findCat21WalletProvider(win) {
     }
     return undefined;
 }
-export function isUnisatInstalled(win) {
+function isUnisatInstalled(win) {
     return !!win?.unisat;
 }
 /**
@@ -82,7 +104,7 @@ export function isUnisatInstalled(win) {
  * unrelated extensions because Wizz's binding sets the property
  * non-writable.
  */
-export function isWizzInstalled(win) {
+function isWizzInstalled(win) {
     return !!(win?.wizz ?? win?.atom);
 }
 /**
@@ -91,7 +113,7 @@ export function isWizzInstalled(win) {
  * specifically; users with an OKX install but no BTC plugin
  * enabled won't get falsely listed as "OKX installed".
  */
-export function isOkxInstalled(win) {
+function isOkxInstalled(win) {
     const w = win?.okxwallet;
     return !!w?.bitcoin;
 }
@@ -110,7 +132,7 @@ export function isOkxInstalled(win) {
  * through there, the same check returns true and the connector
  * works without code changes.
  */
-export function isPhantomInstalled(win) {
+function isPhantomInstalled(win) {
     const p = win?.phantom;
     return !!p?.bitcoin;
 }
@@ -118,7 +140,7 @@ export function isPhantomInstalled(win) {
  * Oyl injects a single top-level `window.oyl` provider — no multi-
  * chain wrapper, no sub-namespace.
  */
-export function isOylInstalled(win) {
+function isOylInstalled(win) {
     return !!win?.oyl;
 }
 /**
@@ -126,7 +148,7 @@ export function isOylInstalled(win) {
  * focus). Also injects `window.webln` per the WebLN standard.
  * Detect either.
  */
-export function isAlbyInstalled(win) {
+function isAlbyInstalled(win) {
     return !!(win?.alby ?? win?.webln);
 }
 /**
@@ -142,7 +164,7 @@ export function isAlbyInstalled(win) {
  * If Binance ships the documented surface, this connector auto-
  * works without code changes.
  */
-export function isBinanceInstalled(win) {
+function isBinanceInstalled(win) {
     const b = win?.binancew3w;
     return !!b?.bitcoin;
 }
@@ -153,14 +175,14 @@ export function isBinanceInstalled(win) {
  * so failing here surfaces a clearly broken wallet state instead
  * of a partial WalletInfo that would crash later in the signer.
  */
-export function parseXverseAddressResponse(response) {
-    const ordinalsAddress = response.addresses.find(x => x.purpose === AddressPurpose.Ordinals);
-    const paymentAddress = response.addresses.find(x => x.purpose === AddressPurpose.Payment);
+function parseXverseAddressResponse(response) {
+    const ordinalsAddress = response.addresses.find(x => x.purpose === sats_connect_1.AddressPurpose.Ordinals);
+    const paymentAddress = response.addresses.find(x => x.purpose === sats_connect_1.AddressPurpose.Payment);
     if (!ordinalsAddress || !paymentAddress) {
         throw new Error('Required address not found?!');
     }
     return {
-        type: KnownOrdinalWalletType.xverse,
+        type: wallet_service_types_1.KnownOrdinalWalletType.xverse,
         ordinalsAddress: ordinalsAddress.address,
         ordinalsPublicKey: ordinalsAddress.publicKey,
         paymentAddress: paymentAddress.address,
@@ -196,15 +218,15 @@ function toXOnlyPubkeyHex(pubkey) {
  * missing. The taproot pubkey is normalised to x-only via
  * toXOnlyPubkeyHex (Leather v6 returns it compressed).
  */
-export function parseLeatherAddressResponse(response) {
+function parseLeatherAddressResponse(response) {
     const addresses = response.result.addresses;
-    const ordinalsAddress = addresses.find(x => x.type === leatherOrdinalsAddressType);
-    const paymentAddress = addresses.find(x => x.type === leatherPaymentAddressType);
+    const ordinalsAddress = addresses.find(x => x.type === exports.leatherOrdinalsAddressType);
+    const paymentAddress = addresses.find(x => x.type === exports.leatherPaymentAddressType);
     if (!ordinalsAddress || !paymentAddress) {
         throw new Error('Required address not found?!');
     }
     return {
-        type: KnownOrdinalWalletType.leather,
+        type: wallet_service_types_1.KnownOrdinalWalletType.leather,
         ordinalsAddress: ordinalsAddress.address,
         ordinalsPublicKey: toXOnlyPubkeyHex(ordinalsAddress.publicKey),
         paymentAddress: paymentAddress.address,
@@ -217,9 +239,9 @@ export function parseLeatherAddressResponse(response) {
  * for payments (the wallet stores everything on one address). Wrap
  * its `{ address, publicKey }` into the SDK's `WalletInfo` shape.
  */
-export function unisatBasicInfoToWalletInfo(address, publicKey) {
+function unisatBasicInfoToWalletInfo(address, publicKey) {
     return {
-        type: KnownOrdinalWalletType.unisat,
+        type: wallet_service_types_1.KnownOrdinalWalletType.unisat,
         ordinalsAddress: address,
         ordinalsPublicKey: publicKey,
         paymentAddress: address,
@@ -231,9 +253,9 @@ export function unisatBasicInfoToWalletInfo(address, publicKey) {
  * Wizz inherits Unisat's single-address contract — same `{ address,
  * publicKey }` shape, populated into both ordinals + payment lanes.
  */
-export function wizzBasicInfoToWalletInfo(address, publicKey) {
+function wizzBasicInfoToWalletInfo(address, publicKey) {
     return {
-        type: KnownOrdinalWalletType.wizz,
+        type: wallet_service_types_1.KnownOrdinalWalletType.wizz,
         ordinalsAddress: address,
         ordinalsPublicKey: publicKey,
         paymentAddress: address,
@@ -248,9 +270,9 @@ export function wizzBasicInfoToWalletInfo(address, publicKey) {
  * same shape as Unisat / Wizz; both ordinals and payment lanes
  * populated from the one address.
  */
-export function okxBasicInfoToWalletInfo(address, publicKey) {
+function okxBasicInfoToWalletInfo(address, publicKey) {
     return {
-        type: KnownOrdinalWalletType.okx,
+        type: wallet_service_types_1.KnownOrdinalWalletType.okx,
         ordinalsAddress: address,
         ordinalsPublicKey: publicKey,
         paymentAddress: address,
@@ -268,9 +290,9 @@ export function okxBasicInfoToWalletInfo(address, publicKey) {
  * wrong provider; detect-by-`window.binancew3w.bitcoin` is the
  * specific check.
  */
-export function binanceBasicInfoToWalletInfo(address, publicKey) {
+function binanceBasicInfoToWalletInfo(address, publicKey) {
     return {
-        type: KnownOrdinalWalletType.binance,
+        type: wallet_service_types_1.KnownOrdinalWalletType.binance,
         ordinalsAddress: address,
         ordinalsPublicKey: publicKey,
         paymentAddress: address,
@@ -288,14 +310,14 @@ export function binanceBasicInfoToWalletInfo(address, publicKey) {
  *
  * Throws if either lane can't be filled.
  */
-export function parseOylAddressResponse(r) {
+function parseOylAddressResponse(r) {
     const ordinals = r.taproot;
     const payment = r.nativeSegwit ?? r.nestedSegwit;
     if (!ordinals || !payment) {
         throw new Error('Required address not found?!');
     }
     return {
-        type: KnownOrdinalWalletType.oyl,
+        type: wallet_service_types_1.KnownOrdinalWalletType.oyl,
         ordinalsAddress: ordinals.address,
         // Same x-only normalisation as Leather / Phantom.
         ordinalsPublicKey: toXOnlyPubkeyHex(ordinals.publicKey),
@@ -320,14 +342,14 @@ export function parseOylAddressResponse(r) {
  * contract pin against the live wallet (the live desktop wallet
  * currently doesn't expose this API at all, see isPhantomInstalled).
  */
-export function parsePhantomAddressResponse(addresses) {
+function parsePhantomAddressResponse(addresses) {
     const ordinals = addresses.find(a => a.purpose === 'ordinals');
     const payment = addresses.find(a => a.purpose === 'payment');
     if (!ordinals || !payment) {
         throw new Error('Required address not found?!');
     }
     return {
-        type: KnownOrdinalWalletType.phantom,
+        type: wallet_service_types_1.KnownOrdinalWalletType.phantom,
         ordinalsAddress: ordinals.address,
         // Taproot pubkey from Phantom may come as full sec256k1
         // compressed (66 hex). Reuse the same normalisation as Leather

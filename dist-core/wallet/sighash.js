@@ -1,3 +1,6 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.BIP341_KEYPATH_SIGHASHES = void 0;
 /**
  * Sighash whitelist for Taproot key-path inputs.
  *
@@ -20,5 +23,5 @@
  * `cat21-transfer.helper.ts` / `cat21-offer.helper.ts`. This
  * constant is exclusively for Taproot-capable signing paths.
  */
-export const BIP341_KEYPATH_SIGHASHES = [0x00, 0x01];
+exports.BIP341_KEYPATH_SIGHASHES = [0x00, 0x01];
 //# sourceMappingURL=sighash.js.map

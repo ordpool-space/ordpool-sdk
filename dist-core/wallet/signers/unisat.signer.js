@@ -1,9 +1,12 @@
-import { hex } from '@scure/base';
-import { from, map, switchMap } from 'rxjs';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { KnownOrdinalWalletType, } from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { resolveSigningTargets } from './signing-targets.helper';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.unisatSigner = void 0;
+const base_1 = require("@scure/base");
+const rxjs_1 = require("rxjs");
+const psbt_extract_1 = require("../psbt-extract");
+const wallet_service_types_1 = require("../wallet.service.types");
+const operation_named_defaults_1 = require("./operation-named-defaults");
+const signing_targets_helper_1 = require("./signing-targets.helper");
 /**
  * Unisat — `window.unisat.signPsbt(hex, {autoFinalized: false})`.
  *
@@ -30,37 +33,37 @@ import { resolveSigningTargets } from './signing-targets.helper';
  */
 const legacy = {
     signAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const unisat = window.unisat;
-        return from(unisat.signPsbt(psbtHex, { autoFinalized: false })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
+        return (0, rxjs_1.from)(unisat.signPsbt(psbtHex, { autoFinalized: false })).pipe((0, rxjs_1.switchMap)(signedPsbtHex => (0, psbt_extract_1.broadcastSignedPsbt)(input, base_1.hex.decode(signedPsbtHex))));
     },
     signMultiInputAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const unisat = window.unisat;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const toSignInputs = [];
         for (const t of targets) {
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
             }
         }
-        return from(unisat.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
+        return (0, rxjs_1.from)(unisat.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe((0, rxjs_1.switchMap)(signedPsbtHex => (0, psbt_extract_1.broadcastSignedPsbt)(input, base_1.hex.decode(signedPsbtHex))));
     },
     signPsbtOnly(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const unisat = window.unisat;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const toSignInputs = [];
         for (const t of targets) {
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
             }
         }
-        return from(unisat.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(map((signedPsbtHex) => hex.decode(signedPsbtHex)));
+        return (0, rxjs_1.from)(unisat.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe((0, rxjs_1.map)((signedPsbtHex) => base_1.hex.decode(signedPsbtHex)));
     },
 };
-export const unisatSigner = {
-    providerId: KnownOrdinalWalletType.unisat,
-    ...operationNamedDefaults(legacy),
+exports.unisatSigner = {
+    providerId: wallet_service_types_1.KnownOrdinalWalletType.unisat,
+    ...(0, operation_named_defaults_1.operationNamedDefaults)(legacy),
 };
 //# sourceMappingURL=unisat.signer.js.map

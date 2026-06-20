@@ -1,4 +1,7 @@
-export var KnownOrdinalWalletType;
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.KnownOrdinalWallets = exports.KnownOrdinalWalletType = void 0;
+var KnownOrdinalWalletType;
 (function (KnownOrdinalWalletType) {
     KnownOrdinalWalletType["xverse"] = "xverse";
     KnownOrdinalWalletType["leather"] = "leather";
@@ -26,19 +29,19 @@ export var KnownOrdinalWalletType;
      * speaks PSBT and exports an xpub.
      */
     KnownOrdinalWalletType["xpub"] = "xpub";
-})(KnownOrdinalWalletType || (KnownOrdinalWalletType = {}));
-import { walletLogos } from './wallet-logos';
-export const KnownOrdinalWallets = {
+})(KnownOrdinalWalletType || (exports.KnownOrdinalWalletType = KnownOrdinalWalletType = {}));
+const wallet_logos_1 = require("./wallet-logos");
+exports.KnownOrdinalWallets = {
     [KnownOrdinalWalletType.xverse]: {
         type: KnownOrdinalWalletType.xverse,
         label: 'Xverse',
-        logo: walletLogos.xverse,
+        logo: wallet_logos_1.walletLogos.xverse,
         downloadLink: 'https://www.xverse.app/download'
     },
     [KnownOrdinalWalletType.leather]: {
         type: KnownOrdinalWalletType.leather,
         label: 'Leather',
-        logo: walletLogos.leather,
+        logo: wallet_logos_1.walletLogos.leather,
         // Was /install-extension, but that path now 404s — Leather archived it
         // (leather.io/install redirects to /old-page/install-extension).
         // Homepage is the stable CTA.
@@ -48,38 +51,38 @@ export const KnownOrdinalWallets = {
         type: KnownOrdinalWalletType.unisat,
         label: 'Unisat',
         // subLabel: '(not fully supported)',
-        logo: walletLogos.unisat,
+        logo: wallet_logos_1.walletLogos.unisat,
         downloadLink: 'https://unisat.io/download'
     },
     [KnownOrdinalWalletType.wizz]: {
         type: KnownOrdinalWalletType.wizz,
         label: 'Wizz',
-        logo: walletLogos.wizz,
+        logo: wallet_logos_1.walletLogos.wizz,
         downloadLink: 'https://wizzwallet.io/',
     },
     [KnownOrdinalWalletType.okx]: {
         type: KnownOrdinalWalletType.okx,
         label: 'OKX',
-        logo: walletLogos.okx,
+        logo: wallet_logos_1.walletLogos.okx,
         downloadLink: 'https://web3.okx.com/download',
     },
     [KnownOrdinalWalletType.phantom]: {
         type: KnownOrdinalWalletType.phantom,
         label: 'Phantom',
-        logo: walletLogos.phantom,
+        logo: wallet_logos_1.walletLogos.phantom,
         downloadLink: 'https://phantom.com/download',
     },
     [KnownOrdinalWalletType.oyl]: {
         type: KnownOrdinalWalletType.oyl,
         label: 'Oyl',
-        logo: walletLogos.oyl,
+        logo: wallet_logos_1.walletLogos.oyl,
         downloadLink: 'https://oyl.io/',
     },
     [KnownOrdinalWalletType.alby]: {
         type: KnownOrdinalWalletType.alby,
         label: 'Alby',
         subLabel: 'Lightning + Nostr (not on-chain ordinals)',
-        logo: walletLogos.alby,
+        logo: wallet_logos_1.walletLogos.alby,
         downloadLink: 'https://getalby.com/',
         onChainOrdinals: false,
     },
@@ -87,21 +90,21 @@ export const KnownOrdinalWallets = {
         type: KnownOrdinalWalletType.binance,
         label: 'Binance Wallet',
         subLabel: 'API documented but not exposed in v1.17.2 — surfaces only if Binance enables it',
-        logo: walletLogos.binance,
+        logo: wallet_logos_1.walletLogos.binance,
         downloadLink: 'https://www.binance.com/en/web3wallet',
     },
     [KnownOrdinalWalletType.cat21wallet]: {
         type: KnownOrdinalWalletType.cat21wallet,
         label: 'CAT-21 wallet',
         subLabel: 'Our own — hot wallet for active cat trading. BTC L1 mainnet.',
-        logo: walletLogos.cat21wallet,
+        logo: wallet_logos_1.walletLogos.cat21wallet,
         downloadLink: 'https://github.com/ordpool-space/cat21-wallet',
     },
     [KnownOrdinalWalletType.xpub]: {
         type: KnownOrdinalWalletType.xpub,
         label: 'Watch-only (xpub)',
         subLabel: 'Sparrow, Electrum, Coldcard, Ledger, Trezor, …',
-        logo: walletLogos.xpub,
+        logo: wallet_logos_1.walletLogos.xpub,
         downloadLink: '',
     },
 };

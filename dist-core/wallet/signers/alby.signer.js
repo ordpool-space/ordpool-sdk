@@ -1,8 +1,11 @@
-import { hex } from '@scure/base';
-import { from, map, Observable, switchMap } from 'rxjs';
-import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
-import { KnownOrdinalWalletType, } from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.albySigner = void 0;
+const base_1 = require("@scure/base");
+const rxjs_1 = require("rxjs");
+const sighash_1 = require("../sighash");
+const wallet_service_types_1 = require("../wallet.service.types");
+const operation_named_defaults_1 = require("./operation-named-defaults");
 /**
  * Alby — `window.alby.webbtc.signPsbt(psbtHex, { sighashTypes })`.
  *
@@ -37,21 +40,21 @@ import { operationNamedDefaults } from './operation-named-defaults';
  */
 const legacy = {
     signAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const alby = window.alby;
         const p = (async () => {
             await alby.enable();
             if (alby.webbtc.enable)
                 await alby.webbtc.enable();
             const { signed } = await alby.webbtc.signPsbt(psbtHex, {
-                sighashTypes: [...BIP341_KEYPATH_SIGHASHES],
+                sighashTypes: [...sighash_1.BIP341_KEYPATH_SIGHASHES],
             });
             return signed;
         })();
-        return from(p).pipe(
+        return (0, rxjs_1.from)(p).pipe(
         // Alby returns wire-tx hex (already finalised), not a signed
         // PSBT. Broadcast the hex directly — no extract step.
-        switchMap(txHex => input.broadcast(txHex)), map(txId => ({ txId })));
+        (0, rxjs_1.switchMap)(txHex => input.broadcast(txHex)), (0, rxjs_1.map)(txId => ({ txId })));
     },
     /**
      * Multi-input flows (transfer, offer-create, offer-accept) cannot
@@ -70,18 +73,18 @@ const legacy = {
      * surfaces an unambiguous "this wallet doesn't support that flow yet".
      */
     signMultiInputAndBroadcast(_input) {
-        return new Observable((observer) => {
+        return new rxjs_1.Observable((observer) => {
             observer.error(new Error('Alby does not support per-input signing yet (no toSignInputs / signInputs knob in current webbtc API). Use Xverse, Leather, Unisat, or CAT-21 wallet for transfer / offer flows.'));
         });
     },
     signPsbtOnly(_input) {
-        return new Observable((observer) => {
+        return new rxjs_1.Observable((observer) => {
             observer.error(new Error('Alby does not support per-input signing yet (no toSignInputs / signInputs knob in current webbtc API). Use Xverse, Leather, Unisat, or CAT-21 wallet for offer-create.'));
         });
     },
 };
-export const albySigner = {
-    providerId: KnownOrdinalWalletType.alby,
-    ...operationNamedDefaults(legacy),
+exports.albySigner = {
+    providerId: wallet_service_types_1.KnownOrdinalWalletType.alby,
+    ...(0, operation_named_defaults_1.operationNamedDefaults)(legacy),
 };
 //# sourceMappingURL=alby.signer.js.map

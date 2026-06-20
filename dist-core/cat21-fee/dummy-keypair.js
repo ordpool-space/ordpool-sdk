@@ -1,6 +1,43 @@
-import { secp256k1, schnorr } from '@noble/curves/secp256k1';
-import { hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getDummyKeypair = getDummyKeypair;
+exports.getDummyLegacyTransaction = getDummyLegacyTransaction;
+const secp256k1_1 = require("@noble/curves/secp256k1");
+const base_1 = require("@scure/base");
+const btc = __importStar(require("@scure/btc-signer"));
 /**
  * Dummy keypair + helper-transaction utilities used only during
  * fee-simulation passes. The private key is a well-known constant
@@ -26,12 +63,12 @@ const getDummyKeypairResult = {};
  * For Taproot inputs use `xOnlyDummyPublicKey`; the ECDSA
  * `dummyPublicKey` will not work.
  */
-export function getDummyKeypair(network) {
+function getDummyKeypair(network) {
     if (!getDummyKeypairResult[network.bech32]) {
-        const dummyPrivateKey = hex.decode('0101010101010101010101010101010101010101010101010101010101010101');
-        const dummyPublicKey = secp256k1.getPublicKey(dummyPrivateKey, true);
+        const dummyPrivateKey = base_1.hex.decode('0101010101010101010101010101010101010101010101010101010101010101');
+        const dummyPublicKey = secp256k1_1.secp256k1.getPublicKey(dummyPrivateKey, true);
         // see https://stackoverflow.com/a/72411600
-        const xOnlyDummyPublicKey = schnorr.getPublicKey(dummyPrivateKey);
+        const xOnlyDummyPublicKey = secp256k1_1.schnorr.getPublicKey(dummyPrivateKey);
         // Legacy address (P2PKH)
         // 1C6Rc3w25VHud3dLDamutaqfKWqhrLRTaD for mainnet
         // btc.getAddress + p2ret.address are typed `string | undefined`; the
@@ -69,7 +106,7 @@ export function getDummyKeypair(network) {
  * The transaction includes a number of outputs equal to the `vout`
  * of the provided `TxnOutput`, each output carrying the same value.
  */
-export function getDummyLegacyTransaction(txnOutput, network) {
+function getDummyLegacyTransaction(txnOutput, network) {
     const { dummyPrivateKey, dummyPublicKey, addressP2PKH } = getDummyKeypair(network);
     const tx = new btc.Transaction();
     // P2WPKH requires no damn nonWitnessUtxo which gives us a signable transaction

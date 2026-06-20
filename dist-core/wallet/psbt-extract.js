@@ -1,5 +1,42 @@
-import * as btc from '@scure/btc-signer';
-import { map } from 'rxjs';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.extractWireTxFromPsbt = extractWireTxFromPsbt;
+exports.broadcastSignedPsbt = broadcastSignedPsbt;
+const btc = __importStar(require("@scure/btc-signer"));
+const rxjs_1 = require("rxjs");
 /**
  * Finalize a signed PSBT (if needed) and extract the wire-format
  * raw transaction hex.
@@ -19,7 +56,7 @@ import { map } from 'rxjs';
  *     already in place. Re-throw anything else.
  *  3. `extract()` produces the wire-format bytes; we serialise to hex.
  */
-export function extractWireTxFromPsbt(signedPsbtBytes) {
+function extractWireTxFromPsbt(signedPsbtBytes) {
     const tx = btc.Transaction.fromPSBT(signedPsbtBytes);
     try {
         tx.finalize();
@@ -40,8 +77,8 @@ export function extractWireTxFromPsbt(signedPsbtBytes) {
  * the SDK's call, not the wallet's vendor backend. All three
  * production signers + the Pipeline B harness route through here.
  */
-export function broadcastSignedPsbt(input, signedPsbtBytes) {
+function broadcastSignedPsbt(input, signedPsbtBytes) {
     const txHex = extractWireTxFromPsbt(signedPsbtBytes);
-    return input.broadcast(txHex).pipe(map(txId => ({ txId })));
+    return input.broadcast(txHex).pipe((0, rxjs_1.map)(txId => ({ txId })));
 }
 //# sourceMappingURL=psbt-extract.js.map

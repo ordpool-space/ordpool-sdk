@@ -1,6 +1,44 @@
-import * as btc from '@scure/btc-signer';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { Network, toScureNetwork } from '../network';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CAT21_OFFER_INPUT_SEQUENCE = void 0;
+exports.buildCat21BuyOfferPsbt = buildCat21BuyOfferPsbt;
+exports.validateCat21BuyOfferPsbt = validateCat21BuyOfferPsbt;
+const btc = __importStar(require("@scure/btc-signer"));
+const cat21_postage_1 = require("../cat21-protocol/cat21-postage");
+const network_1 = require("../network");
 /**
  * Sequence number set on every input of a CAT-21 buy-offer PSBT.
  *
@@ -17,7 +55,7 @@ import { Network, toScureNetwork } from '../network';
  * off), so this MUST be set explicitly. Verified by reading the
  * scure source (`DEFAULT_SEQUENCE = 4294967295`).
  */
-export const CAT21_OFFER_INPUT_SEQUENCE = 0xfffffffd;
+exports.CAT21_OFFER_INPUT_SEQUENCE = 0xfffffffd;
 /**
  * Builds the buyer-initiated CAT-21 offer PSBT (ord-style,
  * SIGHASH_ALL on every input).
@@ -36,21 +74,21 @@ export const CAT21_OFFER_INPUT_SEQUENCE = 0xfffffffd;
  * every byte is committed by some signature — no half-signed PSBT
  * can be spliced into a sniping tx.
  */
-export function buildCat21BuyOfferPsbt(args) {
-    const postageSats = CAT21_POSTAGE_SATS;
+function buildCat21BuyOfferPsbt(args) {
+    const postageSats = cat21_postage_1.CAT21_POSTAGE_SATS;
     if (args.priceSats <= 0)
         throw new Error('priceSats must be positive');
     // HARD RULE: cat UTXO is always 546 sats. See SDK CLAUDE.md. Enforce
     // structurally so a caller can't smuggle a non-protocol-shaped UTXO
     // through the offer flow.
-    if (args.sellerInput.value !== CAT21_POSTAGE_SATS) {
-        throw new Error(`sellerInput.value must equal CAT21_POSTAGE_SATS (${CAT21_POSTAGE_SATS}); got ${args.sellerInput.value}`);
+    if (args.sellerInput.value !== cat21_postage_1.CAT21_POSTAGE_SATS) {
+        throw new Error(`sellerInput.value must equal CAT21_POSTAGE_SATS (${cat21_postage_1.CAT21_POSTAGE_SATS}); got ${args.sellerInput.value}`);
     }
     if (args.buyerInputs.length === 0)
         throw new Error('buyerInputs must be non-empty');
     if (args.feeSats < 0)
         throw new Error('feeSats must be non-negative');
-    const scureNetwork = toScureNetwork(args.network);
+    const scureNetwork = (0, network_1.toScureNetwork)(args.network);
     // lockTime = 21 makes the offer-acceptance tx a CAT-21 mint in addition
     // to a transfer: cat21-ord reads tx.lock_time structurally and mints a
     // fresh cat at output 0 (the buyer's receive output), onto the same
@@ -74,7 +112,7 @@ export function buildCat21BuyOfferPsbt(args) {
     const sellerInput = {
         txid: args.sellerInput.txid,
         index: args.sellerInput.vout,
-        sequence: CAT21_OFFER_INPUT_SEQUENCE,
+        sequence: exports.CAT21_OFFER_INPUT_SEQUENCE,
         witnessUtxo: {
             script: args.sellerInput.scriptPubKey,
             amount: BigInt(args.sellerInput.value),
@@ -93,7 +131,7 @@ export function buildCat21BuyOfferPsbt(args) {
             const legacyInput = {
                 txid: input.txid,
                 index: input.vout,
-                sequence: CAT21_OFFER_INPUT_SEQUENCE,
+                sequence: exports.CAT21_OFFER_INPUT_SEQUENCE,
                 nonWitnessUtxo: input.nonWitnessUtxo,
                 sighashType: btc.SigHash.ALL,
             };
@@ -107,7 +145,7 @@ export function buildCat21BuyOfferPsbt(args) {
         const base = {
             txid: input.txid,
             index: input.vout,
-            sequence: CAT21_OFFER_INPUT_SEQUENCE,
+            sequence: exports.CAT21_OFFER_INPUT_SEQUENCE,
             witnessUtxo: {
                 script: input.scriptPubKey,
                 amount: BigInt(input.value),
@@ -156,8 +194,8 @@ export function buildCat21BuyOfferPsbt(args) {
         if (!isTaproot && input.sighashType !== btc.SigHash.ALL) {
             throw new Error('Internal error: input sighashType drifted from SIGHASH_ALL');
         }
-        if (input.sequence !== CAT21_OFFER_INPUT_SEQUENCE) {
-            throw new Error(`Internal error: input ${i} sequence=${input.sequence}, expected ${CAT21_OFFER_INPUT_SEQUENCE}`);
+        if (input.sequence !== exports.CAT21_OFFER_INPUT_SEQUENCE) {
+            throw new Error(`Internal error: input ${i} sequence=${input.sequence}, expected ${exports.CAT21_OFFER_INPUT_SEQUENCE}`);
         }
     }
     if (tx.lockTime !== 21) {
@@ -187,7 +225,7 @@ export function buildCat21BuyOfferPsbt(args) {
  *      of truth and can't delegate to a UI layer that may or may
  *      not exist.
  */
-export function validateCat21BuyOfferPsbt(args) {
+function validateCat21BuyOfferPsbt(args) {
     const tx = btc.Transaction.fromPSBT(args.psbt);
     if (tx.inputsLength === 0) {
         return fail('missing-seller-input', 'tx has no inputs');
@@ -226,8 +264,8 @@ export function validateCat21BuyOfferPsbt(args) {
     //    RULE "cat UTXO is always 546 sats" in SDK CLAUDE.md.
     const catOutput = tx.getOutput(0);
     const postageSats = Number(catOutput.amount ?? 0n);
-    if (postageSats !== CAT21_POSTAGE_SATS) {
-        return fail('wrong-postage', `${postageSats} !== ${CAT21_POSTAGE_SATS}`);
+    if (postageSats !== cat21_postage_1.CAT21_POSTAGE_SATS) {
+        return fail('wrong-postage', `${postageSats} !== ${cat21_postage_1.CAT21_POSTAGE_SATS}`);
     }
     const paymentOutput = tx.getOutput(1);
     // 5. Seller payment address — decoded from Output 1's scriptPubKey and
@@ -241,7 +279,7 @@ export function validateCat21BuyOfferPsbt(args) {
     //    signer-side UI fails to notice, cat moves to buyer, payment never
     //    reaches the seller.
     if (args.expectedSellerPaymentAddress !== undefined) {
-        const scureNetwork = toScureNetwork(args.network ?? Network.Mainnet);
+        const scureNetwork = (0, network_1.toScureNetwork)(args.network ?? network_1.Network.Mainnet);
         let actualAddress;
         try {
             if (!paymentOutput.script) {

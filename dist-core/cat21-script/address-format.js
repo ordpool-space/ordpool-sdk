@@ -1,3 +1,4 @@
+"use strict";
 /**
  * Address-format detection and Bitcoin dust-floor helpers.
  *
@@ -9,6 +10,13 @@
  *
  * No CAT-21-specific semantics — pure Bitcoin address-format logic.
  */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getMinimumUtxoSize = getMinimumUtxoSize;
+exports.getAddressFormat = getAddressFormat;
+exports.isSegWit = isSegWit;
+exports.getAddressNetwork = getAddressNetwork;
+exports.isAddressCompatibleWithNetwork = isAddressCompatibleWithNetwork;
+exports.toXOnly = toXOnly;
 /**
  * Conservative dust-floor (in sats) per address type. P2SH could
  * be Nested SegWit (540) or full-witness-script wrap; we return 546
@@ -26,7 +34,7 @@
  *
  * @throws if the address prefix isn't recognised.
  */
-export function getMinimumUtxoSize(address) {
+function getMinimumUtxoSize(address) {
     // Mainnet addresses
     if (address.startsWith('1'))
         return 546; // P2PKH
@@ -65,7 +73,7 @@ export function getMinimumUtxoSize(address) {
  *
  * @throws if the prefix isn't recognised.
  */
-export function getAddressFormat(address) {
+function getAddressFormat(address) {
     // "Legacy" Pay-to-Public-Key-Hash
     if (address.startsWith('1') || address.startsWith('m') || address.startsWith('n')) {
         return 'P2PKH';
@@ -93,11 +101,11 @@ export function getAddressFormat(address) {
  * The determination of P2SH addresses as SegWit is based on the assumption that P2SH addresses
  * are being used for SegWit purposes, which may not always be the case.
  */
-export function isSegWit(address) {
+function isSegWit(address) {
     const addressFormat = getAddressFormat(address);
     return addressFormat !== 'P2PKH';
 }
-export function getAddressNetwork(address) {
+function getAddressNetwork(address) {
     if (address.startsWith('bcrt1'))
         return 'regtest';
     if (address.startsWith('bc1') || address.startsWith('1') || address.startsWith('3')) {
@@ -125,7 +133,7 @@ export function getAddressNetwork(address) {
  *   - `Network.Testnet3 / Testnet4 / Signet` → 'testnet' (also
  *                          accepts 'regtest' for the same reason)
  */
-export function isAddressCompatibleWithNetwork(address, expectedNetworkGroup) {
+function isAddressCompatibleWithNetwork(address, expectedNetworkGroup) {
     const actual = getAddressNetwork(address);
     if (actual === expectedNetworkGroup)
         return true;
@@ -155,7 +163,7 @@ export function isAddressCompatibleWithNetwork(address, expectedNetworkGroup) {
  * @param pubkey - The full public key, including the y-coordinate parity byte at the beginning.
  * @returns The x-only public key, with the y-coordinate parity byte removed.
  */
-export function toXOnly(pubkey) {
+function toXOnly(pubkey) {
     return pubkey.subarray(1, 33);
 }
 //# sourceMappingURL=address-format.js.map

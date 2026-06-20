@@ -1,7 +1,44 @@
-import * as btc from '@scure/btc-signer';
-import { schnorr } from '@noble/curves/secp256k1';
-import { toScureNetwork } from '../network';
-import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildInscribeRevealTx = buildInscribeRevealTx;
+exports.deriveRevealPubkeyXonly = deriveRevealPubkeyXonly;
+const btc = __importStar(require("@scure/btc-signer"));
+const secp256k1_1 = require("@noble/curves/secp256k1");
+const network_1 = require("../network");
+const inscription_commit_helper_1 = require("./inscription-commit.helper");
 /**
  * Signs the reveal via the envelope tapscript leaf, returns the
  * finalized reveal hex. The caller-supplied ephemeral private key
@@ -9,9 +46,9 @@ import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
  * same key on its result so the consumer can rebuild a different
  * reveal later under different parameters.
  */
-export function buildInscribeRevealTx(args) {
-    const scureNetwork = toScureNetwork(args.network);
-    const postageSats = INSCRIBE_POSTAGE_SATS;
+function buildInscribeRevealTx(args) {
+    const scureNetwork = (0, network_1.toScureNetwork)(args.network);
+    const postageSats = inscription_commit_helper_1.INSCRIBE_POSTAGE_SATS;
     const revealFeeReserveSats = args.commitOutputValueSats - postageSats;
     if (revealFeeReserveSats < 0) {
         throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats})`);
@@ -52,7 +89,7 @@ export function buildInscribeRevealTx(args) {
     const [cbStruct, leafScript] = args.taproot.tapLeafScript[0];
     const leafVersion = cbStruct.version ?? 0xc0;
     const sighash = tx.preimageWitnessV1(0, [args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(args.commitOutputValueSats)], undefined, leafScript, leafVersion);
-    const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
+    const signature = secp256k1_1.schnorr.sign(sighash, args.ephemeralPrivKey);
     const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
     tx.updateInput(0, {
         finalScriptWitness: [signature, leafScript, controlBlock],
@@ -73,7 +110,7 @@ export function buildInscribeRevealTx(args) {
  *
  * Returns the 32-byte x-only Schnorr pubkey.
  */
-export function deriveRevealPubkeyXonly(privKey) {
-    return schnorr.getPublicKey(privKey);
+function deriveRevealPubkeyXonly(privKey) {
+    return secp256k1_1.schnorr.getPublicKey(privKey);
 }
 //# sourceMappingURL=inscription-reveal.helper.js.map

@@ -1,10 +1,13 @@
-import { hex } from '@scure/base';
-import { from, map, switchMap } from 'rxjs';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
-import { KnownOrdinalWalletType, } from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { resolveSigningTargets } from './signing-targets.helper';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.binanceSigner = void 0;
+const base_1 = require("@scure/base");
+const rxjs_1 = require("rxjs");
+const psbt_extract_1 = require("../psbt-extract");
+const sighash_1 = require("../sighash");
+const wallet_service_types_1 = require("../wallet.service.types");
+const operation_named_defaults_1 = require("./operation-named-defaults");
+const signing_targets_helper_1 = require("./signing-targets.helper");
 /**
  * Binance Web3 Wallet — `window.binancew3w.bitcoin.signPsbt(hex,
  * {autoFinalized: false, toSignInputs: […]})`.
@@ -28,9 +31,9 @@ import { resolveSigningTargets } from './signing-targets.helper';
  */
 const legacy = {
     signAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const binanceBtc = window.binancew3w.bitcoin;
-        return from(binanceBtc.signPsbt(psbtHex, {
+        return (0, rxjs_1.from)(binanceBtc.signPsbt(psbtHex, {
             autoFinalized: false,
             toSignInputs: [{
                     index: 0,
@@ -39,37 +42,37 @@ const legacy = {
                     // identical wire bytes; accept either so the wallet's
                     // policy check passes regardless of which shape the SDK
                     // emits on the Taproot input.
-                    sighashTypes: [...BIP341_KEYPATH_SIGHASHES],
+                    sighashTypes: [...sighash_1.BIP341_KEYPATH_SIGHASHES],
                 }],
-        })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
+        })).pipe((0, rxjs_1.switchMap)(signedPsbtHex => (0, psbt_extract_1.broadcastSignedPsbt)(input, base_1.hex.decode(signedPsbtHex))));
     },
     signMultiInputAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const binanceBtc = window.binancew3w.bitcoin;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const toSignInputs = [];
         for (const t of targets) {
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
             }
         }
-        return from(binanceBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
+        return (0, rxjs_1.from)(binanceBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe((0, rxjs_1.switchMap)(signedPsbtHex => (0, psbt_extract_1.broadcastSignedPsbt)(input, base_1.hex.decode(signedPsbtHex))));
     },
     signPsbtOnly(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const binanceBtc = window.binancew3w.bitcoin;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const toSignInputs = [];
         for (const t of targets) {
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
             }
         }
-        return from(binanceBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(map((signedPsbtHex) => hex.decode(signedPsbtHex)));
+        return (0, rxjs_1.from)(binanceBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe((0, rxjs_1.map)((signedPsbtHex) => base_1.hex.decode(signedPsbtHex)));
     },
 };
-export const binanceSigner = {
-    providerId: KnownOrdinalWalletType.binance,
-    ...operationNamedDefaults(legacy),
+exports.binanceSigner = {
+    providerId: wallet_service_types_1.KnownOrdinalWalletType.binance,
+    ...(0, operation_named_defaults_1.operationNamedDefaults)(legacy),
 };
 //# sourceMappingURL=binance.signer.js.map

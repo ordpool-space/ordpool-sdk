@@ -1,8 +1,11 @@
-import { hex } from '@scure/base';
-import { toScureNetwork } from '../network';
-import { buildInputScript } from '../cat21-script/build-input-script';
-import { isSegWit } from '../cat21-script/address-format';
-import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.prepareMintInputForWallet = prepareMintInputForWallet;
+const base_1 = require("@scure/base");
+const network_1 = require("../network");
+const build_input_script_1 = require("../cat21-script/build-input-script");
+const address_format_1 = require("../cat21-script/address-format");
+const dummy_keypair_1 = require("../cat21-fee/dummy-keypair");
 /**
  * Layer-2 input adapter for the CAT-21 mint pipeline.
  *
@@ -15,9 +18,9 @@ import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
  *
  * Pure function. No I/O, no Angular.
  */
-export function prepareMintInputForWallet(paymentOutput, paymentPublicKey, paymentAddress, isSimulation, network) {
-    const scureNetwork = toScureNetwork(network);
-    const { scriptData, tapInternalKey } = buildInputScript({
+function prepareMintInputForWallet(paymentOutput, paymentPublicKey, paymentAddress, isSimulation, network) {
+    const scureNetwork = (0, network_1.toScureNetwork)(network);
+    const { scriptData, tapInternalKey } = (0, build_input_script_1.buildInputScript)({
         paymentAddress,
         paymentPublicKey,
         isSimulation,
@@ -35,16 +38,16 @@ export function prepareMintInputForWallet(paymentOutput, paymentPublicKey, payme
     if (tapInternalKey) {
         result.tapInternalKey = tapInternalKey;
     }
-    if (!isSegWit(paymentAddress)) {
+    if (!(0, address_format_1.isSegWit)(paymentAddress)) {
         // Legacy P2PKH path. Scure refuses witnessUtxo on legacy inputs;
         // the full previous-tx bytes go via nonWitnessUtxo.
         if (isSimulation) {
-            const dummyTx = getDummyLegacyTransaction(paymentOutput, scureNetwork);
+            const dummyTx = (0, dummy_keypair_1.getDummyLegacyTransaction)(paymentOutput, scureNetwork);
             result.txid = dummyTx.id;
-            result.nonWitnessUtxo = hex.decode(dummyTx.hex);
+            result.nonWitnessUtxo = base_1.hex.decode(dummyTx.hex);
         }
         else if (paymentOutput.transactionHex) {
-            result.nonWitnessUtxo = hex.decode(paymentOutput.transactionHex);
+            result.nonWitnessUtxo = base_1.hex.decode(paymentOutput.transactionHex);
         }
         else {
             throw new Error('Missing transaction hex for legacy UTXO input');

@@ -1,3 +1,7 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SLIPSTREAM_BODY_TX_FIELD = exports.SLIPSTREAM_SUBMIT_PATH = exports.SLIPSTREAM_DEFAULT_BASE_URL = void 0;
+exports.submitToSlipstream = submitToSlipstream;
 /**
  * # DORMANT — currently unused by any SDK consumer.
  *
@@ -65,11 +69,11 @@
  * Success response: `{ txid: string }` (frontend reads `(await Te.post
  * (Sl, e)).data.txid`).
  */
-export const SLIPSTREAM_DEFAULT_BASE_URL = 'https://slipstream.mara.com';
+exports.SLIPSTREAM_DEFAULT_BASE_URL = 'https://slipstream.mara.com';
 /** Path component appended to the base URL for the submit endpoint. */
-export const SLIPSTREAM_SUBMIT_PATH = '/api/transactions';
+exports.SLIPSTREAM_SUBMIT_PATH = '/api/transactions';
 /** JSON body field name carrying the raw tx hex. */
-export const SLIPSTREAM_BODY_TX_FIELD = 'tx_hex';
+exports.SLIPSTREAM_BODY_TX_FIELD = 'tx_hex';
 /**
  * Submit a single raw transaction (hex) to Slipstream. Returns the txid the
  * miner relay accepted, which is also the txid the network will see.
@@ -81,11 +85,11 @@ export const SLIPSTREAM_BODY_TX_FIELD = 'tx_hex';
  *
  * Uses `fetch + AbortController` (no axios per SDK convention).
  */
-export async function submitToSlipstream(rawTxHex, options = {}) {
+async function submitToSlipstream(rawTxHex, options = {}) {
     if (!rawTxHex || typeof rawTxHex !== 'string') {
         throw new Error('rawTxHex must be a non-empty string');
     }
-    const url = `${options.baseUrl ?? SLIPSTREAM_DEFAULT_BASE_URL}${SLIPSTREAM_SUBMIT_PATH}`;
+    const url = `${options.baseUrl ?? exports.SLIPSTREAM_DEFAULT_BASE_URL}${exports.SLIPSTREAM_SUBMIT_PATH}`;
     const fetchFn = options.fetchImpl ?? fetch;
     const headers = { 'Content-Type': 'application/json' };
     if (options.bearerToken) {
@@ -94,7 +98,7 @@ export async function submitToSlipstream(rawTxHex, options = {}) {
     const res = await fetchFn(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ [SLIPSTREAM_BODY_TX_FIELD]: rawTxHex }),
+        body: JSON.stringify({ [exports.SLIPSTREAM_BODY_TX_FIELD]: rawTxHex }),
         signal: options.signal,
     });
     if (!res.ok) {

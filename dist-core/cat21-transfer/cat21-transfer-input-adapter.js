@@ -1,17 +1,21 @@
-import { hex } from '@scure/base';
-import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
-import { toScureNetwork } from '../network';
-import { isSegWit } from '../cat21-script/address-format';
-import { buildInputScript } from '../cat21-script/build-input-script';
-export function prepareTransferCatInput(args) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.prepareTransferCatInput = prepareTransferCatInput;
+exports.prepareTransferFundingInput = prepareTransferFundingInput;
+const base_1 = require("@scure/base");
+const dummy_keypair_1 = require("../cat21-fee/dummy-keypair");
+const network_1 = require("../network");
+const address_format_1 = require("../cat21-script/address-format");
+const build_input_script_1 = require("../cat21-script/build-input-script");
+function prepareTransferCatInput(args) {
     return prepareInput(args);
 }
-export function prepareTransferFundingInput(args) {
+function prepareTransferFundingInput(args) {
     return prepareInput(args);
 }
 function prepareInput(args) {
-    const scureNetwork = toScureNetwork(args.network);
-    const { scriptData, tapInternalKey } = buildInputScript({
+    const scureNetwork = (0, network_1.toScureNetwork)(args.network);
+    const { scriptData, tapInternalKey } = (0, build_input_script_1.buildInputScript)({
         paymentAddress: args.paymentAddress,
         paymentPublicKey: args.paymentPublicKey,
         isSimulation: args.isSimulation,
@@ -29,14 +33,14 @@ function prepareInput(args) {
     if (tapInternalKey) {
         result.tapInternalKey = tapInternalKey;
     }
-    if (!isSegWit(args.paymentAddress)) {
+    if (!(0, address_format_1.isSegWit)(args.paymentAddress)) {
         if (args.isSimulation) {
-            const dummyTx = getDummyLegacyTransaction(args.utxo, scureNetwork);
+            const dummyTx = (0, dummy_keypair_1.getDummyLegacyTransaction)(args.utxo, scureNetwork);
             result.txid = dummyTx.id;
-            result.nonWitnessUtxo = hex.decode(dummyTx.hex);
+            result.nonWitnessUtxo = base_1.hex.decode(dummyTx.hex);
         }
         else if (args.utxo.transactionHex) {
-            result.nonWitnessUtxo = hex.decode(args.utxo.transactionHex);
+            result.nonWitnessUtxo = base_1.hex.decode(args.utxo.transactionHex);
         }
         else {
             throw new Error('Missing transaction hex for legacy UTXO input');

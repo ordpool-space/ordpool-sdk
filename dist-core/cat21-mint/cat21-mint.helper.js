@@ -1,18 +1,55 @@
-import * as btc from '@scure/btc-signer';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { toScureNetwork } from '../network';
-import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CAT21_MINT_CHANGE_DUST_LIMIT_SATS = exports.CAT21_MINT_POSTAGE_SATS = void 0;
+exports.buildCat21MintPsbt = buildCat21MintPsbt;
+const btc = __importStar(require("@scure/btc-signer"));
+const cat21_postage_1 = require("../cat21-protocol/cat21-postage");
+const network_1 = require("../network");
+const cat21_sequence_1 = require("../cat21-protocol/cat21-sequence");
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}. The canonical constant lives in
  * `cat21-postage.ts`; this re-export exists for legacy import paths.
  */
-export const CAT21_MINT_POSTAGE_SATS = CAT21_POSTAGE_SATS;
+exports.CAT21_MINT_POSTAGE_SATS = cat21_postage_1.CAT21_POSTAGE_SATS;
 /**
  * Dust threshold for the change output. 546 sats is the conservative
  * cross-address-type floor (taproot 330, segwit 294, p2sh 540 — 546
  * clears them all).
  */
-export const CAT21_MINT_CHANGE_DUST_LIMIT_SATS = 546;
+exports.CAT21_MINT_CHANGE_DUST_LIMIT_SATS = 546;
 /**
  * Builds the unsigned CAT-21 mint PSBT — the simplified wallet-friendly
  * shape parallel to `buildCat21TransferPsbt` and
@@ -34,19 +71,19 @@ export const CAT21_MINT_CHANGE_DUST_LIMIT_SATS = 546;
  *   2. Every input's sequence matches the per-wallet rule.
  *   3. Every input carries SIGHASH_ALL.
  */
-export function buildCat21MintPsbt(args) {
+function buildCat21MintPsbt(args) {
     // HARD RULE: cat output is always exactly 546 sats. The cat is born
     // at the first sat of output 0; uniform postage across mint /
     // transfer / offer means a cat UTXO is fungible across address types.
     // See SDK CLAUDE.md "cat UTXO is always 546 sats".
-    const postageSats = CAT21_POSTAGE_SATS;
+    const postageSats = cat21_postage_1.CAT21_POSTAGE_SATS;
     if (args.feeSats < 0)
         throw new Error('feeSats must be non-negative');
     const tipValueSats = args.destinations.tip?.valueSats ?? 0;
     if (tipValueSats < 0)
         throw new Error('tip.valueSats must be non-negative');
-    const scureNetwork = toScureNetwork(args.network);
-    const sequence = resolveCat21InputSequence(args.walletType);
+    const scureNetwork = (0, network_1.toScureNetwork)(args.network);
+    const sequence = (0, cat21_sequence_1.resolveCat21InputSequence)(args.walletType);
     const tx = new btc.Transaction({
         lockTime: 21,
         allowLegacyWitnessUtxo: true,
@@ -64,7 +101,7 @@ export function buildCat21MintPsbt(args) {
     // Change calculation. The dust threshold is the smaller of (a) the
     // builder default 546 and (b) the caller-supplied per-address-type
     // floor (cat21.space passes `getMinimumUtxoSize(paymentAddress)`).
-    const changeDustLimit = args.changeDustLimitSats ?? CAT21_MINT_CHANGE_DUST_LIMIT_SATS;
+    const changeDustLimit = args.changeDustLimitSats ?? exports.CAT21_MINT_CHANGE_DUST_LIMIT_SATS;
     const required = postageSats + tipValueSats + args.feeSats;
     const changeRaw = args.fundingInput.value - required;
     if (changeRaw < 0) {

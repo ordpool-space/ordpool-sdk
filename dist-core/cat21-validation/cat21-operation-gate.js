@@ -1,3 +1,4 @@
+"use strict";
 /**
  * Bulletproof validation gate for the four cat21 mutating operations.
  *
@@ -11,12 +12,47 @@
  * Spec coverage is exhaustive: every member of `Cat21GateRejectReason`
  * has a dedicated test in `cat21-operation-gate.spec.ts`.
  */
-import { base64, hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { Network, toScureNetwork } from '../network';
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.validateCat21Operation = validateCat21Operation;
+const base_1 = require("@scure/base");
+const btc = __importStar(require("@scure/btc-signer"));
+const cat21_postage_1 = require("../cat21-protocol/cat21-postage");
+const network_1 = require("../network");
 /* ──────────────────────────  Public entry  ────────────────────────── */
-export function validateCat21Operation(args) {
+function validateCat21Operation(args) {
     const { config, operation } = args;
     if (!isObject(operation) || typeof operation.kind !== 'string') {
         return reject('intent-not-an-object');
@@ -58,7 +94,7 @@ function validateMint(intent, config) {
     const recipient = validateAddress(intent.recipient, config, 'recipient');
     if (!recipient.ok)
         return recipient.result;
-    const targetNet = toScureNetwork(config.network);
+    const targetNet = (0, network_1.toScureNetwork)(config.network);
     if (config.allowedRecipients && config.allowedRecipients.length > 0) {
         if (!allowlistContainsAddress(intent.recipient, config.allowedRecipients, targetNet)) {
             return reject('recipient-not-allowed', intent.recipient);
@@ -87,7 +123,7 @@ function validateTransfer(intent, config) {
     const recipient = validateAddress(intent.recipient, config, 'recipient');
     if (!recipient.ok)
         return recipient.result;
-    const targetNet = toScureNetwork(config.network);
+    const targetNet = (0, network_1.toScureNetwork)(config.network);
     if (config.allowedRecipients && config.allowedRecipients.length > 0) {
         if (!allowlistContainsAddress(intent.recipient, config.allowedRecipients, targetNet)) {
             return reject('recipient-not-allowed', intent.recipient);
@@ -118,7 +154,7 @@ function validateCreateOffer(intent, config) {
     if (!payment.ok)
         return payment.result;
     if (config.allowedCounterparties && config.allowedCounterparties.length > 0) {
-        const targetNet = toScureNetwork(config.network);
+        const targetNet = (0, network_1.toScureNetwork)(config.network);
         if (!allowlistContainsAddress(intent.paymentAddress, config.allowedCounterparties, targetNet)) {
             return reject('payment-address-not-allowed', intent.paymentAddress);
         }
@@ -171,7 +207,7 @@ function validateInscribe(intent, config) {
     const recipient = validateAddress(intent.recipient, config, 'recipient');
     if (!recipient.ok)
         return recipient.result;
-    const targetNet = toScureNetwork(config.network);
+    const targetNet = (0, network_1.toScureNetwork)(config.network);
     if (config.allowedRecipients && config.allowedRecipients.length > 0) {
         if (!allowlistContainsAddress(intent.recipient, config.allowedRecipients, targetNet)) {
             return reject('recipient-not-allowed', intent.recipient);
@@ -257,7 +293,7 @@ function validateAddress(address, config, field) {
     if (typeof address !== 'string' || address.length === 0) {
         return { ok: false, result: reject(malformedReason(field), safeStringify(address)) };
     }
-    const targetNet = toScureNetwork(config.network);
+    const targetNet = (0, network_1.toScureNetwork)(config.network);
     // Try the target network first; record whether the address parsed on
     // the OTHER network so the failure can be 'wrong-network' instead of
     // 'malformed' for an otherwise valid string.
@@ -267,7 +303,7 @@ function validateAddress(address, config, field) {
         return { ok: true, script };
     }
     catch {
-        const otherNet = config.network === Network.Mainnet ? btc.TEST_NETWORK : btc.NETWORK;
+        const otherNet = config.network === network_1.Network.Mainnet ? btc.TEST_NETWORK : btc.NETWORK;
         try {
             btc.Address(otherNet).decode(address);
             return { ok: false, result: reject(wrongNetworkReason(field), address) };
@@ -328,10 +364,10 @@ function validatePrice(priceSats, config) {
     if (priceSats <= 0) {
         return { ok: false, result: reject('price-not-positive', safeStringify(priceSats)) };
     }
-    if (priceSats < CAT21_POSTAGE_SATS) {
+    if (priceSats < cat21_postage_1.CAT21_POSTAGE_SATS) {
         return {
             ok: false,
-            result: reject('price-below-postage-floor', `${priceSats} < ${CAT21_POSTAGE_SATS}`),
+            result: reject('price-below-postage-floor', `${priceSats} < ${cat21_postage_1.CAT21_POSTAGE_SATS}`),
         };
     }
     if (config.maxPriceSats != null && priceSats > config.maxPriceSats) {
@@ -410,7 +446,7 @@ function tryDecodePsbt(value) {
 }
 function tryHex(value) {
     try {
-        const decoded = hex.decode(value);
+        const decoded = base_1.hex.decode(value);
         return decoded.length > 0 ? decoded : undefined;
     }
     catch {
@@ -419,7 +455,7 @@ function tryHex(value) {
 }
 function tryBase64(value) {
     try {
-        const decoded = base64.decode(value);
+        const decoded = base_1.base64.decode(value);
         return decoded.length > 0 ? decoded : undefined;
     }
     catch {

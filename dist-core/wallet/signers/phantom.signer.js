@@ -1,8 +1,11 @@
-import { from, switchMap } from 'rxjs';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { KnownOrdinalWalletType, } from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { resolveSigningTargets } from './signing-targets.helper';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.phantomSigner = void 0;
+const rxjs_1 = require("rxjs");
+const psbt_extract_1 = require("../psbt-extract");
+const wallet_service_types_1 = require("../wallet.service.types");
+const operation_named_defaults_1 = require("./operation-named-defaults");
+const signing_targets_helper_1 = require("./signing-targets.helper");
 /**
  * Phantom — `window.phantom.bitcoin.signPSBT(psbtBytes,
  * {inputsToSign, finalize: false})`.
@@ -45,32 +48,32 @@ const legacy = {
             inputsToSign: [{ address: input.paymentAddress, signingIndexes: [0], sigHash: 0x01 }],
             finalize: false,
         });
-        return from(signPromise).pipe(switchMap((signedPsbtBytes) => broadcastSignedPsbt(input, signedPsbtBytes)));
+        return (0, rxjs_1.from)(signPromise).pipe((0, rxjs_1.switchMap)((signedPsbtBytes) => (0, psbt_extract_1.broadcastSignedPsbt)(input, signedPsbtBytes)));
     },
     signMultiInputAndBroadcast(input) {
         const phantomBtc = window.phantom.bitcoin;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const inputsToSign = targets.map((t) => ({
             address: t.address,
             signingIndexes: t.indexes,
             sigHash: t.sigHash,
         }));
         const signPromise = phantomBtc.signPSBT(input.psbtBytes, { inputsToSign, finalize: false });
-        return from(signPromise).pipe(switchMap((signedPsbtBytes) => broadcastSignedPsbt(input, signedPsbtBytes)));
+        return (0, rxjs_1.from)(signPromise).pipe((0, rxjs_1.switchMap)((signedPsbtBytes) => (0, psbt_extract_1.broadcastSignedPsbt)(input, signedPsbtBytes)));
     },
     signPsbtOnly(input) {
         const phantomBtc = window.phantom.bitcoin;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const inputsToSign = targets.map((t) => ({
             address: t.address,
             signingIndexes: t.indexes,
             sigHash: t.sigHash,
         }));
-        return from(phantomBtc.signPSBT(input.psbtBytes, { inputsToSign, finalize: false }));
+        return (0, rxjs_1.from)(phantomBtc.signPSBT(input.psbtBytes, { inputsToSign, finalize: false }));
     },
 };
-export const phantomSigner = {
-    providerId: KnownOrdinalWalletType.phantom,
-    ...operationNamedDefaults(legacy),
+exports.phantomSigner = {
+    providerId: wallet_service_types_1.KnownOrdinalWalletType.phantom,
+    ...(0, operation_named_defaults_1.operationNamedDefaults)(legacy),
 };
 //# sourceMappingURL=phantom.signer.js.map

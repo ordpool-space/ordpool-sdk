@@ -1,10 +1,13 @@
-import { hex } from '@scure/base';
-import { from, map, switchMap } from 'rxjs';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
-import { KnownOrdinalWalletType, } from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { resolveSigningTargets } from './signing-targets.helper';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.okxSigner = void 0;
+const base_1 = require("@scure/base");
+const rxjs_1 = require("rxjs");
+const psbt_extract_1 = require("../psbt-extract");
+const sighash_1 = require("../sighash");
+const wallet_service_types_1 = require("../wallet.service.types");
+const operation_named_defaults_1 = require("./operation-named-defaults");
+const signing_targets_helper_1 = require("./signing-targets.helper");
 /**
  * OKX — `window.okxwallet.bitcoin.signPsbt(hex, {autoFinalized:
  * false})`.
@@ -21,7 +24,7 @@ import { resolveSigningTargets } from './signing-targets.helper';
  */
 const legacy = {
     signAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const okxBtc = window.okxwallet.bitcoin;
         // OKX validates `toSignInputs[i].address` against its own wallet
         // address-set. Passing the input.paymentAddress lets the caller
@@ -29,7 +32,7 @@ const legacy = {
         // OKX exactly which address to sign with, instead of OKX trying
         // to infer from the PSBT's scriptPubKey (which won't match its
         // mainnet view on a regtest PSBT).
-        return from(okxBtc.signPsbt(psbtHex, {
+        return (0, rxjs_1.from)(okxBtc.signPsbt(psbtHex, {
             autoFinalized: false,
             toSignInputs: [{
                     index: 0,
@@ -37,37 +40,37 @@ const legacy = {
                     // BIP-341 key-path DEFAULT (0x00) and ALL (0x01) commit to
                     // identical wire bytes; accept either so OKX's policy check
                     // passes regardless of which shape the PSBT emits.
-                    sighashTypes: [...BIP341_KEYPATH_SIGHASHES],
+                    sighashTypes: [...sighash_1.BIP341_KEYPATH_SIGHASHES],
                 }],
-        })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
+        })).pipe((0, rxjs_1.switchMap)(signedPsbtHex => (0, psbt_extract_1.broadcastSignedPsbt)(input, base_1.hex.decode(signedPsbtHex))));
     },
     signMultiInputAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const okxBtc = window.okxwallet.bitcoin;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const toSignInputs = [];
         for (const t of targets) {
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
             }
         }
-        return from(okxBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
+        return (0, rxjs_1.from)(okxBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe((0, rxjs_1.switchMap)(signedPsbtHex => (0, psbt_extract_1.broadcastSignedPsbt)(input, base_1.hex.decode(signedPsbtHex))));
     },
     signPsbtOnly(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
+        const psbtHex = base_1.hex.encode(input.psbtBytes);
         const okxBtc = window.okxwallet.bitcoin;
-        const targets = resolveSigningTargets(input);
+        const targets = (0, signing_targets_helper_1.resolveSigningTargets)(input);
         const toSignInputs = [];
         for (const t of targets) {
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
             }
         }
-        return from(okxBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(map((signedPsbtHex) => hex.decode(signedPsbtHex)));
+        return (0, rxjs_1.from)(okxBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe((0, rxjs_1.map)((signedPsbtHex) => base_1.hex.decode(signedPsbtHex)));
     },
 };
-export const okxSigner = {
-    providerId: KnownOrdinalWalletType.okx,
-    ...operationNamedDefaults(legacy),
+exports.okxSigner = {
+    providerId: wallet_service_types_1.KnownOrdinalWalletType.okx,
+    ...(0, operation_named_defaults_1.operationNamedDefaults)(legacy),
 };
 //# sourceMappingURL=okx.signer.js.map

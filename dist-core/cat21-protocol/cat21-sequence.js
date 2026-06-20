@@ -1,4 +1,8 @@
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE = exports.CAT21_WALLET_INPUT_SEQUENCE = void 0;
+exports.resolveCat21InputSequence = resolveCat21InputSequence;
+const wallet_service_types_1 = require("../wallet/wallet.service.types");
 /**
  * RBF-signalling. Used by every CAT-21 tx Cat21 Wallet builds (mint,
  * transfer, and any future cat-flow). Our own accelerate code path is
@@ -6,7 +10,7 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
  * (cat21-wallet HARD RULE #1), so signalling RBF is safe AND useful —
  * users can bump a stuck fee without rebuilding the transaction.
  */
-export const CAT21_WALLET_INPUT_SEQUENCE = 0xfffffffd;
+exports.CAT21_WALLET_INPUT_SEQUENCE = 0xfffffffd;
 /**
  * Non-RBF. Used for every CAT-21 mint signed by a third-party wallet
  * (Xverse, Unisat, Leather, OKX, Oyl, Wizz, Phantom, Alby, …). Locks
@@ -16,7 +20,7 @@ export const CAT21_WALLET_INPUT_SEQUENCE = 0xfffffffd;
  * immutable once on chain and the worst third-party-RBF outcome is a
  * missed bonus mint, not a cat loss.)
  */
-export const CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE = 0xfffffffe;
+exports.CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE = 0xfffffffe;
 /**
  * Single source of truth for the per-wallet input sequence on any
  * cat-touching tx OUR code builds. The mint, transfer, and any future
@@ -31,9 +35,9 @@ export const CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE = 0xfffffffe;
  * wallets' fee-bump UI fires on the broadcast tx; that's the real
  * protection axis.
  */
-export function resolveCat21InputSequence(walletType) {
-    return walletType === KnownOrdinalWalletType.cat21wallet
-        ? CAT21_WALLET_INPUT_SEQUENCE
-        : CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE;
+function resolveCat21InputSequence(walletType) {
+    return walletType === wallet_service_types_1.KnownOrdinalWalletType.cat21wallet
+        ? exports.CAT21_WALLET_INPUT_SEQUENCE
+        : exports.CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE;
 }
 //# sourceMappingURL=cat21-sequence.js.map

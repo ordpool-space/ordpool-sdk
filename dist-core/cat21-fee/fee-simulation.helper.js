@@ -1,10 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.twoPassFeeSimulation = twoPassFeeSimulation;
 /**
  * Run the two-pass loop and return the final fee + vsize +
  * the pass-2 simulation result. The pass-2 simulation is the one
  * the caller should USE for display or broadcast metadata — it's
  * the simulation that matches the final fee.
  */
-export function twoPassFeeSimulation(args) {
+function twoPassFeeSimulation(args) {
     if (args.feeRatePerVbyte <= 0) {
         throw new Error('feeRatePerVbyte must be positive');
     }

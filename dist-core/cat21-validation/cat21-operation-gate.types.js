@@ -1,3 +1,4 @@
+"use strict";
 /**
  * Bulletproof gate types for the four cat21 mutating operations.
  *
@@ -21,5 +22,5 @@
  *     discriminated union return type, which is a runtime witness
  *     the gate produced.
  */
-export {};
+Object.defineProperty(exports, "__esModule", { value: true });
 //# sourceMappingURL=cat21-operation-gate.types.js.map

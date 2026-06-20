@@ -1,8 +1,44 @@
-import { base64, hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
-import { map, switchMap, throwError } from 'rxjs';
-import { KnownOrdinalWalletType, } from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.psbtExportSigner = void 0;
+const base_1 = require("@scure/base");
+const btc = __importStar(require("@scure/btc-signer"));
+const rxjs_1 = require("rxjs");
+const wallet_service_types_1 = require("../wallet.service.types");
+const operation_named_defaults_1 = require("./operation-named-defaults");
 /**
  * Decode a user-provided signed PSBT into raw bytes. Sparrow exports
  * base64 by default, Electrum and `bitcoin-cli` lean towards hex.
@@ -21,10 +57,10 @@ function decodeSignedPsbt(input) {
         throw new Error('Signed PSBT is empty');
     }
     if (trimmed.startsWith('cHNidP')) {
-        return base64.decode(trimmed);
+        return base_1.base64.decode(trimmed);
     }
     if (/^70736274ff/i.test(trimmed) && trimmed.length % 2 === 0) {
-        return hex.decode(trimmed.toLowerCase());
+        return base_1.hex.decode(trimmed.toLowerCase());
     }
     throw new Error('Signed PSBT must be base64 or hex (start: "cHNidP" or "70736274ff")');
 }
@@ -47,12 +83,12 @@ function decodeSignedPsbt(input) {
 const legacy = {
     signAndBroadcast(input) {
         if (!input.promptForSignedPsbt) {
-            return throwError(() => new Error('Watch-only signing requires a promptForSignedPsbt callback to be provided'));
+            return (0, rxjs_1.throwError)(() => new Error('Watch-only signing requires a promptForSignedPsbt callback to be provided'));
         }
         return input.promptForSignedPsbt({
-            base64: base64.encode(input.psbtBytes),
-            hex: hex.encode(input.psbtBytes),
-        }).pipe(switchMap(signedPsbt => {
+            base64: base_1.base64.encode(input.psbtBytes),
+            hex: base_1.hex.encode(input.psbtBytes),
+        }).pipe((0, rxjs_1.switchMap)(signedPsbt => {
             const signedBytes = decodeSignedPsbt(signedPsbt);
             const tx = btc.Transaction.fromPSBT(signedBytes);
             // External wallets may return either shape:
@@ -66,7 +102,7 @@ const legacy = {
             if (!tx.isFinal) {
                 tx.finalize();
             }
-            return input.broadcast(tx.hex).pipe(map(txId => ({ txId })));
+            return input.broadcast(tx.hex).pipe((0, rxjs_1.map)(txId => ({ txId })));
         }));
     },
     /**
@@ -79,17 +115,17 @@ const legacy = {
      */
     signMultiInputAndBroadcast(input) {
         if (!input.promptForSignedPsbt) {
-            return throwError(() => new Error('Watch-only signing requires a promptForSignedPsbt callback to be provided'));
+            return (0, rxjs_1.throwError)(() => new Error('Watch-only signing requires a promptForSignedPsbt callback to be provided'));
         }
         return input.promptForSignedPsbt({
-            base64: base64.encode(input.psbtBytes),
-            hex: hex.encode(input.psbtBytes),
-        }).pipe(switchMap((signedPsbt) => {
+            base64: base_1.base64.encode(input.psbtBytes),
+            hex: base_1.hex.encode(input.psbtBytes),
+        }).pipe((0, rxjs_1.switchMap)((signedPsbt) => {
             const signedBytes = decodeSignedPsbt(signedPsbt);
             const tx = btc.Transaction.fromPSBT(signedBytes);
             if (!tx.isFinal)
                 tx.finalize();
-            return input.broadcast(tx.hex).pipe(map((txId) => ({ txId })));
+            return input.broadcast(tx.hex).pipe((0, rxjs_1.map)((txId) => ({ txId })));
         }));
     },
     /**
@@ -100,16 +136,16 @@ const legacy = {
      */
     signPsbtOnly(input) {
         if (!input.promptForSignedPsbt) {
-            return throwError(() => new Error('Watch-only signing requires a promptForSignedPsbt callback to be provided'));
+            return (0, rxjs_1.throwError)(() => new Error('Watch-only signing requires a promptForSignedPsbt callback to be provided'));
         }
         return input.promptForSignedPsbt({
-            base64: base64.encode(input.psbtBytes),
-            hex: hex.encode(input.psbtBytes),
-        }).pipe(map((signedPsbt) => decodeSignedPsbt(signedPsbt)));
+            base64: base_1.base64.encode(input.psbtBytes),
+            hex: base_1.hex.encode(input.psbtBytes),
+        }).pipe((0, rxjs_1.map)((signedPsbt) => decodeSignedPsbt(signedPsbt)));
     },
 };
-export const psbtExportSigner = {
-    providerId: KnownOrdinalWalletType.xpub,
-    ...operationNamedDefaults(legacy),
+exports.psbtExportSigner = {
+    providerId: wallet_service_types_1.KnownOrdinalWalletType.xpub,
+    ...(0, operation_named_defaults_1.operationNamedDefaults)(legacy),
 };
 //# sourceMappingURL=psbt-export.signer.js.map

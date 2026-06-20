@@ -1,3 +1,4 @@
+"use strict";
 /**
  * `ordpool-sdk/core` — the SDK's pure-functional entry point.
  *
@@ -21,12 +22,28 @@
  * pins that all wallet imports of SDK symbols go through `'ordpool-
  * sdk/core'`, never through bare `'ordpool-sdk'`.
  */
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __exportStar = (this && this.__exportStar) || function(m, exports) {
+    for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.KnownOrdinalWallets = exports.KnownOrdinalWalletType = void 0;
 // --- Protocol-wide constants (postage, lockTime, per-wallet sequence) ---
-export * from './cat21-protocol';
+__exportStar(require("./cat21-protocol"), exports);
 // --- Bitcoin / per-wallet script construction (used by every flow) ---
-export * from './cat21-script';
+__exportStar(require("./cat21-script"), exports);
 // --- Network primitives ---
-export * from './network';
+__exportStar(require("./network"), exports);
 // --- Wallet types (KnownOrdinalWalletType enum and friends; pure) ---
 // Public types only. The bypass surface (WalletSigner, signingMap
 // types, per-method input types) intentionally NOT re-exported —
@@ -34,40 +51,42 @@ export * from './network';
 // orchestrators (cat21.service, *-orchestrator.service,
 // inscribeAndBroadcast). See HARD RULE "signingMap is BANNED" in
 // SDK CLAUDE.md.
-export { KnownOrdinalWalletType, KnownOrdinalWallets, } from './wallet/wallet.service.types';
+var wallet_service_types_1 = require("./wallet/wallet.service.types");
+Object.defineProperty(exports, "KnownOrdinalWalletType", { enumerable: true, get: function () { return wallet_service_types_1.KnownOrdinalWalletType; } });
+Object.defineProperty(exports, "KnownOrdinalWallets", { enumerable: true, get: function () { return wallet_service_types_1.KnownOrdinalWallets; } });
 // --- CAT-21 mint (PSBT-build helpers; the Angular Cat21Service that
 //     orchestrates is at the main entry only). ---
-export * from './cat21-mint/cat21.service.helper';
-export * from './cat21-mint/cat21.service.types';
-export * from './cat21-mint/cat21-mint.helper';
-export * from './cat21-mint/cat21-mint-input-adapter';
+__exportStar(require("./cat21-mint/cat21.service.helper"), exports);
+__exportStar(require("./cat21-mint/cat21.service.types"), exports);
+__exportStar(require("./cat21-mint/cat21-mint.helper"), exports);
+__exportStar(require("./cat21-mint/cat21-mint-input-adapter"), exports);
 // --- CAT-21 fee simulation + coin selection (shared across flows) ---
-export * from './cat21-fee/fee-simulation.helper';
-export * from './cat21-fee/coin-selection.helper';
-export * from './cat21-fee/dummy-keypair';
+__exportStar(require("./cat21-fee/fee-simulation.helper"), exports);
+__exportStar(require("./cat21-fee/coin-selection.helper"), exports);
+__exportStar(require("./cat21-fee/dummy-keypair"), exports);
 // --- CAT-21 transfer ---
-export * from './cat21-transfer/cat21-transfer.helper';
-export * from './cat21-transfer/cat21-transfer.types';
-export * from './cat21-transfer/cat21-transfer-input-adapter';
+__exportStar(require("./cat21-transfer/cat21-transfer.helper"), exports);
+__exportStar(require("./cat21-transfer/cat21-transfer.types"), exports);
+__exportStar(require("./cat21-transfer/cat21-transfer-input-adapter"), exports);
 // --- CAT-21 offer (ord-style buy-offer builder + seller validator) ---
-export * from './cat21-offer/cat21-offer.helper';
-export * from './cat21-offer/cat21-offer.types';
-export * from './cat21-offer/cat21-offer-input-adapter';
+__exportStar(require("./cat21-offer/cat21-offer.helper"), exports);
+__exportStar(require("./cat21-offer/cat21-offer.types"), exports);
+__exportStar(require("./cat21-offer/cat21-offer-input-adapter"), exports);
 // --- CAT-21 broadcast (mempool / Slipstream dispatcher) ---
-export * from './cat21-broadcast/broadcast.helper';
-export * from './cat21-broadcast/slipstream.helper';
+__exportStar(require("./cat21-broadcast/broadcast.helper"), exports);
+__exportStar(require("./cat21-broadcast/slipstream.helper"), exports);
 // --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
-export * from './inscribe/inscription-envelope';
-export * from './inscribe/inscription-commit.helper';
-export * from './inscribe/inscription-reveal.helper';
-export * from './inscribe/inscription-input-adapter';
-export * from './inscribe/inscription-fee.helper';
-export * from './inscribe/inscription.service.helper';
-export * from './inscribe/inscribe-broadcast.helper';
-export * from './inscribe/inscribe-orchestrator';
+__exportStar(require("./inscribe/inscription-envelope"), exports);
+__exportStar(require("./inscribe/inscription-commit.helper"), exports);
+__exportStar(require("./inscribe/inscription-reveal.helper"), exports);
+__exportStar(require("./inscribe/inscription-input-adapter"), exports);
+__exportStar(require("./inscribe/inscription-fee.helper"), exports);
+__exportStar(require("./inscribe/inscription.service.helper"), exports);
+__exportStar(require("./inscribe/inscribe-broadcast.helper"), exports);
+__exportStar(require("./inscribe/inscribe-orchestrator"), exports);
 // --- Agent-mode policy gate ---
-export * from './agent-mode/agent-policy.helper';
-export * from './agent-mode/agent-policy.types';
+__exportStar(require("./agent-mode/agent-policy.helper"), exports);
+__exportStar(require("./agent-mode/agent-policy.types"), exports);
 // --- Bulletproof operation validation gate ---
-export * from './cat21-validation';
+__exportStar(require("./cat21-validation"), exports);
 //# sourceMappingURL=core.js.map
