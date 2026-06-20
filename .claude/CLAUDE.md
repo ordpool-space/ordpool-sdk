@@ -309,31 +309,79 @@ There is no npm publish for this package. Consumers pin a git SHA:
 "ordpool-sdk": "github:ordpool-space/ordpool-sdk#<sha>"
 ```
 
-The `prepare` script in `package.json` runs `npm run build` automatically when a git ref is installed, so the consumer gets a fully-built `dist/` and `dist-commonjs/` without any extra step.
+## Shipped artifacts
+
+`dist/` (Angular fesm2022 bundle) and `dist-core/` (plain TS/ESM
+core entry) are **checked in to git** — every commit on `main`
+ships with pre-built artifacts. The previous `prepare` hook that
+ran `npm run build` during consumer install has been removed.
+
+Why: the global `ignore-scripts=true` posture blocks postinstall
+hooks (Shai-Hulud defence). The manual workaround documented in
+the workspace HQ — `cd node_modules/ordpool-sdk && npm install
+--ignore-scripts=false && npm run build` — does NOT actually work
+on this SDK because ng-packagr's tsc emits incomplete tmp-typings
+when run from inside a parent project's `node_modules/`. Same
+directory copied to `/tmp` builds clean; nested under a consumer's
+node_modules it fails on `Could not resolve "./cat21-protocol"
+from dist/tmp-typings/index.d.ts`. Root cause unresolved.
+
+Pre-built shipping bypasses the failure mode and gives every
+consumer the same SHA-pinned reproducibility:
+
+  - ordpool/frontend, cat21-indexer/frontend → import from
+    `ordpool-sdk` (Angular entry, dist/).
+  - cat21-wallet, cat21.space → import from
+    `ordpool-sdk/core` (Angular-free, dist-core/).
+
+Same SHA pin, same install behaviour, no per-consumer workaround.
+
+## HARD RULE: build before commit
+
+When you change any source file under `src/`, you MUST run
+`npm run build` and commit BOTH the source change AND the
+regenerated `dist/` + `dist-core/` in the same commit.
+
+Reason: consumers pin SHAs. If you push source-only, the next
+consumer install pulls stale artifacts and either runs the OLD
+behaviour silently OR fails to type-check because the runtime
+diverges from the .d.ts. Either way the consumer is left
+debugging an SDK that has source on disk that doesn't match the
+installed bytes.
+
+The CI workflow re-verifies this invariant: every push runs
+`npm run build` and `git diff --exit-code dist/ dist-core/` —
+if the committed artifacts don't match a fresh build, the push
+fails.
 
 To ship a change to a consumer:
-1. Commit + push to `main`.
-2. Bump the SHA in the consumer's `package.json`.
-3. `npm install` in the consumer (regenerates lockfile).
-4. Commit BOTH `package.json` and `package-lock.json` together — CI caches `node_modules` by lockfile hash, and a stale lockfile makes the cache restore the wrong build.
 
-For live local development (no commit needed):
-```bash
-# In ordpool-sdk/
-npm run build && cd dist && npm link
+1. Edit `src/`.
+2. `npm run build`.
+3. `npm test` (738 node + 819 browser unit tests).
+4. `git add src/ dist/ dist-core/` + commit + push to `main`.
+5. In the consumer: bump the SHA in `package.json`, run
+   `npm install --package-lock-only ordpool-sdk@github:ordpool-space/ordpool-sdk#<sha>`
+   to update the lockfile, commit BOTH `package.json` and
+   `package-lock.json` together (CI caches node_modules by
+   lockfile hash; a stale lockfile masks the bump).
 
-# In the consumer (e.g. ordpool/frontend/)
-npm link ordpool-sdk
-```
+For live local development (no commit needed), `npm link` still
+works — the consumer's link target is the locally-built `dist/`
+or `dist-core/`. Faster iteration than rebuilding + committing
+every keystroke. Just remember to `npm run build` in the SDK
+between iterations.
 
 ## Commands
 
 ```bash
-npm install                 # also runs `prepare` → builds dist/ + dist-commonjs/
 npm test                    # node + browser test suites
 npm run test:node           # node tests only
 npm run test:browser        # jsdom browser tests only
-npm run build               # ESM + CommonJS, one tsc invocation each
+npm run build               # Angular fesm2022 + plain TS/ESM core
+npm run build:angular       # ng-packagr → dist/ only
+npm run build:core          # tsc → dist-core/ only
+npm run clean               # rimraf dist/ dist-core/
 npm run create-link         # build + npm link (for local dev consumers)
 ```
 

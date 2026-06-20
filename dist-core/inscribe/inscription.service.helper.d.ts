@@ -1,0 +1,123 @@
+import { TxnOutput } from '../cat21-mint/cat21.service.types';
+import { Network } from '../network';
+import { type OrdEnvelopeField } from './inscription-envelope';
+import { type SimulateInscribeFeesResult } from './inscription-fee.helper';
+/**
+ * Layer-4 orchestration entry: ties the envelope encoder + per-
+ * wallet input adapter + commit/reveal builders + fee simulator
+ * into a single createTransaction-style entry point.
+ *
+ * Mirrors `createTransaction` from `cat21.service.helper.ts`. The
+ * caller hands in the funding UTXO + wallet payment context + the
+ * inscription content + feeRate; we hand back an unsigned commit
+ * PSBT + a default signed reveal hex + the **ephemeral key material**
+ * needed to build any other reveal shape (redirect, RBF, recover-
+ * to-self, bundle).
+ *
+ * # Lifecycle
+ *
+ *  1. Generate fresh ephemeral keypair (32 random bytes).
+ *  2. Derive Schnorr x-only pubkey — this doubles as the envelope's
+ *     `<pubkey> CHECKSIG` prefix AND the taproot internal key of the
+ *     commit output.
+ *  3. Build envelope with that pubkey + caller's content.
+ *  4. Simulate fees (Layer 3): commitFee, revealFee,
+ *     commitOutputValueSats, fundingRequirementSats.
+ *  5. Build the commit PSBT at the resolved commitFee.
+ *  6. Build a default reveal tx at the resolved revealFee using the
+ *     ephemeral private key (recipient = `args.recipientAddress`).
+ *  7. Return the ephemeral key material so the caller can re-build
+ *     the reveal under different parameters later if it wants to.
+ *
+ * # Bearer-key semantic
+ *
+ * `ephemeral.privKey` is a **bearer instrument**: anyone who holds
+ * it can spend the commit output (redirect the inscription, RBF the
+ * reveal, recover the postage to themselves, ...) until the commit
+ * output is spent on chain. Treat it with the same care as any
+ * other money-bearing key:
+ *
+ *   - Phase 1 storage: `localStorage` keyed by `commitTxid` is fine
+ *     for typical low-value inscriptions. The key lives only
+ *     between commit broadcast and reveal broadcast (seconds to
+ *     hours typically).
+ *   - For higher-value flows, encrypt at rest with the wallet
+ *     password — same posture as any other hot key.
+ *   - Lose the key with no reveal broadcast and the postage is
+ *     permanently locked. Save it before discarding the result.
+ *
+ * This is byte-equivalent to the `ord` reference client's design
+ * (`src/wallet/batch/plan.rs` lines 367-382 + 676-709) — ord
+ * persists the ephemeral key into Bitcoin Core's wallet under a
+ * `commit tx recovery key` label; we hand it to the consumer to
+ * persist however it wants.
+ */
+export interface CreateInscribeTransactionsArgs {
+    /** Funding UTXO. */
+    paymentOutput: TxnOutput;
+    /** Wallet's payment public key (33-byte compressed). */
+    paymentPublicKey: Uint8Array;
+    /** Wallet's payment address (where change returns). */
+    paymentAddress: string;
+    /** Where the inscription lands (P2TR recommended for ord theory). */
+    recipientAddress: string;
+    /** Inscription body bytes. */
+    body: Uint8Array;
+    /** MIME type. */
+    contentType?: string;
+    /** Optional extra ord tags (parent, metaprotocol, metadata...). */
+    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
+    /** sat/vB target. Applied identically to commit + reveal. */
+    feeRatePerVbyte: number;
+    /** Network. */
+    network: Network;
+}
+export interface CreateInscribeTransactionsResult {
+    /** Unsigned commit PSBT — hand to the user's wallet for signing. */
+    commitPsbt: Uint8Array;
+    /**
+     * Computed txid of the commit. SegWit txids are witness-independent,
+     * so this matches what the wallet-signed commit will produce.
+     */
+    commitTxid: string;
+    /** Signed, finalized reveal-tx hex. Self-contained; broadcast as-is. */
+    revealHex: string;
+    /** Computed txid of the reveal (lets consumers display/track before broadcast). */
+    revealTxid: string;
+    /** Commit-tx P2TR address (bech32m). */
+    commitAddress: string;
+    /** Final fees (sats), vsizes, and the funding requirement. */
+    fees: SimulateInscribeFeesResult;
+    /**
+     * Ephemeral bearer key for the commit output. Authorises any
+     * reveal-tx shape (default reveal, redirect, RBF, recover-to-
+     * self, bundle) until the commit output is spent. SAVE BEFORE
+     * DISCARDING THIS RESULT — losing the key with no reveal
+     * broadcast locks the postage forever.
+     */
+    ephemeral: {
+        /** 32-byte Schnorr private key. */
+        privKey: Uint8Array;
+        /** 32-byte x-only public key. Same key embedded in the envelope. */
+        pubkeyXonly: Uint8Array;
+    };
+    /** Material the caller needs to rebuild the reveal tx under different parameters. */
+    commit: {
+        /** Commit output scriptPubKey. */
+        outputScript: Uint8Array;
+        /** Postage + revealFeeReserve at the commit output. */
+        outputValueSats: number;
+        /** Envelope tapscript bytes (the leaf the reveal spends through). */
+        envelopeScript: Uint8Array;
+    };
+}
+/**
+ * Build the inscribe commit + reveal pair for the given content.
+ * Pure function modulo `randomPrivateKey`.
+ *
+ * The returned `ephemeral.privKey` is the bearer instrument for
+ * the commit output — see the module-level lifecycle note for the
+ * storage semantic.
+ */
+export declare function createInscribeTransactions(args: CreateInscribeTransactionsArgs): CreateInscribeTransactionsResult;
+//# sourceMappingURL=inscription.service.helper.d.ts.map

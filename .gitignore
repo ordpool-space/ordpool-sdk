@@ -1,7 +1,12 @@
 /node_modules/
-/dist
 /dist-commonjs
-/dist-core
+
+# dist/ + dist-core/ ARE checked in. Consumers (ordpool/frontend,
+# cat21-indexer/frontend, cat21-wallet, cat21.space) pin a SDK git
+# SHA and get pre-built artifacts from the tarball — no postinstall
+# build, no ng-packagr-in-node_modules failure mode. Rebuild +
+# commit BOTH alongside any source change. See the SDK CLAUDE.md
+# "Shipped artifacts" section for the workflow.
 
 # Playwright + Xverse: fetched fresh in CI, never committed
 /e2e/extensions/

@@ -1,0 +1,59 @@
+{
+  "name": "ordpool-sdk",
+  "version": "0.1.0",
+  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool — REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Angular library; built with ng-packagr.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ordpool-space/ordpool-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ordpool-space/ordpool-sdk/issues"
+  },
+  "main": "./dist/fesm2022/ordpool-sdk.mjs",
+  "module": "fesm2022/ordpool-sdk.mjs",
+  "typings": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./fesm2022/ordpool-sdk.mjs"
+    },
+    "./core": {
+      "types": "./dist-core/core.d.ts",
+      "default": "./dist-core/core.js"
+    },
+    "./package.json": {
+      "default": "./package.json"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "e2e",
+    "*.js",
+    "*.json"
+  ],
+  "keywords": [
+    "bitcoin",
+    "ordinals",
+    "ordpool",
+    "sdk",
+    "cat21",
+    "wallet",
+    "signing"
+  ],
+  "author": "HAUS HOPPE",
+  "license": "MIT",
+  "peerDependencies": {
+    "@angular/common": ">=20",
+    "@angular/core": ">=20",
+    "@noble/curves": ">=1",
+    "@scure/base": ">=1",
+    "@scure/btc-signer": "1.2.x",
+    "rxjs": ">=7",
+    "sats-connect": ">=4"
+  },
+  "sideEffects": false,
+  "dependencies": {
+    "tslib": "^2.3.0"
+  }
+}

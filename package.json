@@ -46,7 +46,6 @@
     "test:e2e:playwright": "playwright test --config=e2e/playwright/playwright.config.ts",
     "e2e:harness:build": "node e2e/playwright/build-harness.js",
     "e2e:harness:serve": "node e2e/playwright/fixtures-server.js",
-    "prepare": "npm run build",
     "create-link": "npm run build && cd dist && npm link"
   },
   "keywords": [
