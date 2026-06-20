@@ -34,7 +34,7 @@ function makeLeatherResponse(): { hex: string; expectedTxHex: string } {
 }
 
 
-describe('leatherSigner.signAndBroadcast', () => {
+describe('leatherSigner.signSingleFundingInput', () => {
 
   let requestMock: jest.Mock;
 
@@ -54,7 +54,7 @@ describe('leatherSigner.signAndBroadcast', () => {
     requestMock.mockResolvedValue({ result: { hex: leatherHex } } as never);
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff]); // psbt magic + 1 byte
 
-    await firstValueFrom(leatherSigner.signAndBroadcast({
+    await firstValueFrom(leatherSigner.signSingleFundingInput({
       psbtBytes: unsignedBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -73,7 +73,7 @@ describe('leatherSigner.signAndBroadcast', () => {
     requestMock.mockResolvedValue({ result: { hex: leatherHex } } as never);
 
     let broadcastedHex: string | undefined;
-    const result = await firstValueFrom(leatherSigner.signAndBroadcast({
+    const result = await firstValueFrom(leatherSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(64),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -88,7 +88,7 @@ describe('leatherSigner.signAndBroadcast', () => {
     const { hex: leatherHex } = makeLeatherResponse();
     requestMock.mockResolvedValue({ result: { hex: leatherHex } } as never);
 
-    await firstValueFrom(leatherSigner.signAndBroadcast({
+    await firstValueFrom(leatherSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(64),
       paymentAddress: 'tb1qpayment',
       network: Network.Testnet4,

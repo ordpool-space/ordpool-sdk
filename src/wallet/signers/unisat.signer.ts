@@ -99,6 +99,5 @@ const legacy = {
 
 export const unisatSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.unisat,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

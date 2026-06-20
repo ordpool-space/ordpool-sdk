@@ -121,6 +121,5 @@ const legacy = {
 
 export const cat21walletSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.cat21wallet,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

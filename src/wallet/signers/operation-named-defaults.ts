@@ -6,6 +6,7 @@ import {
   SignSingleFundingInputArgs,
   SignTransferArgs,
   WalletSigner,
+  WalletSignerInternalImpls,
 } from '../wallet.service.types';
 
 /**
@@ -25,7 +26,7 @@ import {
  * No signingMap, no off-by-one, no per-row sighash drift.
  */
 export function operationNamedDefaults(
-  legacy: Pick<WalletSigner, 'signAndBroadcast' | 'signMultiInputAndBroadcast' | 'signPsbtOnly'>,
+  legacy: WalletSignerInternalImpls,
 ): Pick<WalletSigner,
   | 'signSingleFundingInput'
   | 'signTransfer'

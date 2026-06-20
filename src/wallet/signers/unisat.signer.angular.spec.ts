@@ -13,7 +13,7 @@ import { broadcastSignedPsbt } from '../psbt-extract';
 import { unisatSigner } from './unisat.signer';
 
 
-describe('unisatSigner.signAndBroadcast', () => {
+describe('unisatSigner.signSingleFundingInput', () => {
 
   let signPsbtMock: jest.Mock;
   const broadcastSignedPsbtMock = broadcastSignedPsbt as unknown as jest.Mock;
@@ -41,7 +41,7 @@ describe('unisatSigner.signAndBroadcast', () => {
       network: Network.Mainnet,
       broadcast: ((_rawTxHex: string) => of('UNUSED')) as never,
     };
-    const result = await firstValueFrom(unisatSigner.signAndBroadcast(input));
+    const result = await firstValueFrom(unisatSigner.signSingleFundingInput(input));
 
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
     expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), { autoFinalized: false });
@@ -52,20 +52,19 @@ describe('unisatSigner.signAndBroadcast', () => {
     expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST' });
   });
 
-  it('signMultiInputAndBroadcast: maps the signingMap onto Unisat toSignInputs (cat at ordinals, funding at payment)', async () => {
+  it('signTransfer: cat input at ordinalsAddress (index 0) + N funding inputs at paymentAddress (indexes 1..N), all SIGHASH_ALL', async () => {
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
     signPsbtMock.mockResolvedValue('70736274ff01' as never);
 
     const input = {
       psbtBytes: unsignedBytes,
-      signingMap: [
-        { address: 'bc1pordinals', indexes: [0] },
-        { address: 'bc1qpayment', indexes: [1, 2] },
-      ],
+      ordinalsAddress: 'bc1pordinals',
+      paymentAddress: 'bc1qpayment',
+      fundingInputCount: 2,
       network: Network.Mainnet,
       broadcast: ((_rawTxHex: string) => of('UNUSED')) as never,
     };
-    await firstValueFrom(unisatSigner.signMultiInputAndBroadcast(input));
+    await firstValueFrom(unisatSigner.signTransfer(input));
 
     expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), {
       autoFinalized: false,
@@ -80,7 +79,7 @@ describe('unisatSigner.signAndBroadcast', () => {
   it('when signPsbt rejects, propagates the error and never reaches the broadcast helper', async () => {
     signPsbtMock.mockRejectedValue(new Error('user rejected') as never);
 
-    const result$ = unisatSigner.signAndBroadcast({
+    const result$ = unisatSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -95,7 +94,7 @@ describe('unisatSigner.signAndBroadcast', () => {
     signPsbtMock.mockResolvedValue('70736274ff01' as never);
     broadcastSignedPsbtMock.mockReturnValue(throwError(() => new Error('txn-mempool-conflict')));
 
-    const result$ = unisatSigner.signAndBroadcast({
+    const result$ = unisatSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,

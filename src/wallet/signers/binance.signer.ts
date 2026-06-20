@@ -105,6 +105,5 @@ const legacy = {
 
 export const binanceSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.binance,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

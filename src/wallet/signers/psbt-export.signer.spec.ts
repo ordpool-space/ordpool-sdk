@@ -41,12 +41,12 @@ function makeSignedPsbtAndExpectedTxHex(): { signedPsbtBase64: string; expectedT
 }
 
 
-describe('psbtExportSigner.signAndBroadcast', () => {
+describe('psbtExportSigner.signSingleFundingInput', () => {
 
   const unsignedPsbtBytes = new Uint8Array(64).fill(0xff); // shape doesn't matter — signer hands it to the prompt
 
   it('throws when no promptForSignedPsbt callback is provided', async () => {
-    const result$ = psbtExportSigner.signAndBroadcast({
+    const result$ = psbtExportSigner.signSingleFundingInput({
       psbtBytes: unsignedPsbtBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -63,7 +63,7 @@ describe('psbtExportSigner.signAndBroadcast', () => {
 
     let receivedBase64: string | undefined;
     let receivedHex: string | undefined;
-    await firstValueFrom(psbtExportSigner.signAndBroadcast({
+    await firstValueFrom(psbtExportSigner.signSingleFundingInput({
       psbtBytes: unsignedPsbtBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -83,7 +83,7 @@ describe('psbtExportSigner.signAndBroadcast', () => {
     const { signedPsbtBase64, expectedTxHex } = makeSignedPsbtAndExpectedTxHex();
 
     let broadcastedHex: string | undefined;
-    const result = await firstValueFrom(psbtExportSigner.signAndBroadcast({
+    const result = await firstValueFrom(psbtExportSigner.signSingleFundingInput({
       psbtBytes: unsignedPsbtBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -103,7 +103,7 @@ describe('psbtExportSigner.signAndBroadcast', () => {
     const signedPsbtHex = hex.encode(base64.decode(signedPsbtBase64));
 
     let broadcastedHex: string | undefined;
-    await firstValueFrom(psbtExportSigner.signAndBroadcast({
+    await firstValueFrom(psbtExportSigner.signSingleFundingInput({
       psbtBytes: unsignedPsbtBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -115,7 +115,7 @@ describe('psbtExportSigner.signAndBroadcast', () => {
   });
 
   it('rejects an empty signed-PSBT input', async () => {
-    const result$ = psbtExportSigner.signAndBroadcast({
+    const result$ = psbtExportSigner.signSingleFundingInput({
       psbtBytes: unsignedPsbtBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -127,7 +127,7 @@ describe('psbtExportSigner.signAndBroadcast', () => {
   });
 
   it('rejects garbage that is neither base64 PSBT nor hex PSBT', async () => {
-    const result$ = psbtExportSigner.signAndBroadcast({
+    const result$ = psbtExportSigner.signSingleFundingInput({
       psbtBytes: unsignedPsbtBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -151,7 +151,7 @@ describe('psbtExportSigner.signAndBroadcast', () => {
     const finalizedPsbtBase64 = base64.encode(partial.toPSBT(0));
 
     let broadcastedHex: string | undefined;
-    await firstValueFrom(psbtExportSigner.signAndBroadcast({
+    await firstValueFrom(psbtExportSigner.signSingleFundingInput({
       psbtBytes: unsignedPsbtBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -164,7 +164,7 @@ describe('psbtExportSigner.signAndBroadcast', () => {
 
   it('propagates an error from the prompt without touching broadcast', async () => {
     let broadcastCalled = false;
-    const result$ = psbtExportSigner.signAndBroadcast({
+    const result$ = psbtExportSigner.signSingleFundingInput({
       psbtBytes: unsignedPsbtBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,

@@ -135,6 +135,5 @@ const legacy = {
 
 export const psbtExportSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.xpub,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

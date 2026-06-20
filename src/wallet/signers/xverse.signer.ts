@@ -110,6 +110,5 @@ const legacy = {
 
 export const xverseSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.xverse,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

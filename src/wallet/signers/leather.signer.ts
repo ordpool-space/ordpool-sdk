@@ -122,6 +122,5 @@ const legacy = {
 
 export const leatherSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.leather,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

@@ -88,6 +88,5 @@ const legacy = {
 
 export const wizzSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.wizz,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

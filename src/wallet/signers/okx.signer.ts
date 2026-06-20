@@ -103,6 +103,5 @@ const legacy = {
 
 export const okxSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.okx,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

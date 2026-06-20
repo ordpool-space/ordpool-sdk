@@ -7,7 +7,7 @@ import { Network } from '../../network';
 import { albySigner } from './alby.signer';
 
 
-describe('albySigner.signAndBroadcast', () => {
+describe('albySigner.signSingleFundingInput', () => {
 
   let albyEnableMock: jest.Mock;
   let webbtcEnableMock: jest.Mock;
@@ -42,7 +42,7 @@ describe('albySigner.signAndBroadcast', () => {
       network: Network.Mainnet,
       broadcast: broadcastMock as never,
     };
-    const result = await firstValueFrom(albySigner.signAndBroadcast(input));
+    const result = await firstValueFrom(albySigner.signSingleFundingInput(input));
 
     expect(albyEnableMock).toHaveBeenCalledTimes(1);
     expect(webbtcEnableMock).toHaveBeenCalledTimes(1);
@@ -60,7 +60,7 @@ describe('albySigner.signAndBroadcast', () => {
     albyEnableMock.mockRejectedValue(new Error('user denied') as never);
     broadcastMock.mockReturnValue(of('UNUSED'));
 
-    const result$ = albySigner.signAndBroadcast({
+    const result$ = albySigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -76,7 +76,7 @@ describe('albySigner.signAndBroadcast', () => {
     signPsbtMock.mockRejectedValue(new Error('No bitcoin wallet connected to Alby account') as never);
     broadcastMock.mockReturnValue(of('UNUSED'));
 
-    const result$ = albySigner.signAndBroadcast({
+    const result$ = albySigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -91,7 +91,7 @@ describe('albySigner.signAndBroadcast', () => {
     signPsbtMock.mockResolvedValue({ signed: '0200000001abcd' } as never);
     broadcastMock.mockReturnValue(throwError(() => new Error('txn-mempool-conflict')));
 
-    const result$ = albySigner.signAndBroadcast({
+    const result$ = albySigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -109,7 +109,7 @@ describe('albySigner.signAndBroadcast', () => {
     signPsbtMock.mockResolvedValue({ signed: '0200000001abcd' } as never);
     broadcastMock.mockReturnValue(of('TXID-FROM-BROADCAST'));
 
-    const result = await firstValueFrom(albySigner.signAndBroadcast({
+    const result = await firstValueFrom(albySigner.signSingleFundingInput({
       psbtBytes: new Uint8Array([1, 2, 3]),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,

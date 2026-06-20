@@ -12,7 +12,7 @@ import { broadcastSignedPsbt } from '../psbt-extract';
 import { okxSigner } from './okx.signer';
 
 
-describe('okxSigner.signAndBroadcast', () => {
+describe('okxSigner.signSingleFundingInput', () => {
 
   let signPsbtMock: jest.Mock;
   const broadcastSignedPsbtMock = broadcastSignedPsbt as unknown as jest.Mock;
@@ -40,7 +40,7 @@ describe('okxSigner.signAndBroadcast', () => {
       network: Network.Mainnet,
       broadcast: ((_rawTxHex: string) => of('UNUSED')) as never,
     };
-    const result = await firstValueFrom(okxSigner.signAndBroadcast(input));
+    const result = await firstValueFrom(okxSigner.signSingleFundingInput(input));
 
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
     expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), {
@@ -63,7 +63,7 @@ describe('okxSigner.signAndBroadcast', () => {
   it('when signPsbt rejects, propagates the error and never reaches the broadcast helper', async () => {
     signPsbtMock.mockRejectedValue(new Error('user rejected') as never);
 
-    const result$ = okxSigner.signAndBroadcast({
+    const result$ = okxSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -78,7 +78,7 @@ describe('okxSigner.signAndBroadcast', () => {
     signPsbtMock.mockResolvedValue('70736274ff01' as never);
     broadcastSignedPsbtMock.mockReturnValue(throwError(() => new Error('txn-mempool-conflict')));
 
-    const result$ = okxSigner.signAndBroadcast({
+    const result$ = okxSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,

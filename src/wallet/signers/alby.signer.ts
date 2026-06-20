@@ -113,6 +113,5 @@ const legacy = {
 
 export const albySigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.alby,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

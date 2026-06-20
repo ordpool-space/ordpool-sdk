@@ -35,7 +35,7 @@ function makeCat21WalletResponse(): { hex: string; expectedTxHex: string } {
 }
 
 
-describe('cat21walletSigner.signAndBroadcast', () => {
+describe('cat21walletSigner.signSingleFundingInput', () => {
 
   let requestMock: jest.Mock;
 
@@ -56,7 +56,7 @@ describe('cat21walletSigner.signAndBroadcast', () => {
     requestMock.mockResolvedValue({ result: { hex: signedHex } } as never);
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff]);
 
-    await firstValueFrom(cat21walletSigner.signAndBroadcast({
+    await firstValueFrom(cat21walletSigner.signSingleFundingInput({
       psbtBytes: unsignedBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -77,7 +77,7 @@ describe('cat21walletSigner.signAndBroadcast', () => {
     requestMock.mockResolvedValue({ result: { hex: signedHex } } as never);
 
     let broadcastedHex: string | undefined;
-    const result = await firstValueFrom(cat21walletSigner.signAndBroadcast({
+    const result = await firstValueFrom(cat21walletSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(64),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -92,7 +92,7 @@ describe('cat21walletSigner.signAndBroadcast', () => {
     const { hex: signedHex } = makeCat21WalletResponse();
     requestMock.mockResolvedValue({ result: { hex: signedHex } } as never);
 
-    await firstValueFrom(cat21walletSigner.signAndBroadcast({
+    await firstValueFrom(cat21walletSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(64),
       paymentAddress: 'tb1qpayment',
       network: Network.Testnet4,

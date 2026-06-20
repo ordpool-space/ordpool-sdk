@@ -102,6 +102,5 @@ const legacy = {
 
 export const phantomSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.phantom,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

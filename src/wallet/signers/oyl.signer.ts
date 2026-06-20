@@ -117,6 +117,5 @@ const legacy = {
 
 export const oylSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.oyl,
-  ...legacy,
   ...operationNamedDefaults(legacy),
 };

@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { Network } from '../network';
 import { KnownOrdinalWalletType } from './wallet.service.types';
 
 /**
@@ -172,17 +173,17 @@ describe('Honest wallet coverage (audit gate)', () => {
     const originalWindow = (globalThis as { window?: unknown }).window;
     (globalThis as { window?: unknown }).window = {};
     try {
-      // signAndBroadcast dereferences window.binancew3w.bitcoin at
-      // call time; on an install without the surface this throws
+      // signSingleFundingInput dereferences window.binancew3w.bitcoin
+      // at call time; on an install without the surface this throws
       // synchronously rather than emitting a deferred error on the
       // Observable. Either shape is a clean failure (no silent
       // no-op, no broadcast attempt); pin the actual shape so
       // future refactors can't accidentally swallow the error.
       expect(() =>
-        binanceSigner.signAndBroadcast({
+        binanceSigner.signSingleFundingInput({
           psbtBytes: new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff]),
           paymentAddress: 'bc1qexample',
-          network: 'mainnet',
+          network: 'mainnet' as Network,
           broadcast: () => { throw new Error('should not be reached'); },
         }),
       ).toThrow(/binancew3w|bitcoin|undefined/i);

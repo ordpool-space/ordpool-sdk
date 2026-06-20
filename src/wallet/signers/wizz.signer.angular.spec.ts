@@ -12,7 +12,7 @@ import { broadcastSignedPsbt } from '../psbt-extract';
 import { wizzSigner } from './wizz.signer';
 
 
-describe('wizzSigner.signAndBroadcast', () => {
+describe('wizzSigner.signSingleFundingInput', () => {
 
   let signPsbtMock: jest.Mock;
   const broadcastSignedPsbtMock = broadcastSignedPsbt as unknown as jest.Mock;
@@ -40,7 +40,7 @@ describe('wizzSigner.signAndBroadcast', () => {
       network: Network.Mainnet,
       broadcast: ((_rawTxHex: string) => of('UNUSED')) as never,
     };
-    const result = await firstValueFrom(wizzSigner.signAndBroadcast(input));
+    const result = await firstValueFrom(wizzSigner.signSingleFundingInput(input));
 
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
     expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), { autoFinalized: false });
@@ -54,7 +54,7 @@ describe('wizzSigner.signAndBroadcast', () => {
   it('when signPsbt rejects, propagates the error and never reaches the broadcast helper', async () => {
     signPsbtMock.mockRejectedValue(new Error('user rejected') as never);
 
-    const result$ = wizzSigner.signAndBroadcast({
+    const result$ = wizzSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -69,7 +69,7 @@ describe('wizzSigner.signAndBroadcast', () => {
     signPsbtMock.mockResolvedValue('70736274ff01' as never);
     broadcastSignedPsbtMock.mockReturnValue(throwError(() => new Error('txn-mempool-conflict')));
 
-    const result$ = wizzSigner.signAndBroadcast({
+    const result$ = wizzSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,

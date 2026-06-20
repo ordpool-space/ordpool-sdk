@@ -23,7 +23,7 @@ import { broadcastSignedPsbt } from '../psbt-extract';
 import { xverseSigner } from './xverse.signer';
 
 
-describe('xverseSigner.signAndBroadcast', () => {
+describe('xverseSigner.signSingleFundingInput', () => {
 
   const signTransactionMock = signTransaction as unknown as jest.Mock;
   const broadcastSignedPsbtMock = broadcastSignedPsbt as unknown as jest.Mock;
@@ -50,7 +50,7 @@ describe('xverseSigner.signAndBroadcast', () => {
       network: Network.Mainnet,
       broadcast: broadcastCallback as never,
     };
-    const result = await firstValueFrom(xverseSigner.signAndBroadcast(input));
+    const result = await firstValueFrom(xverseSigner.signSingleFundingInput(input));
 
     expect(signTransactionMock).toHaveBeenCalledTimes(1);
     const args = signTransactionMock.mock.calls[0][0] as SignTransactionOptions;
@@ -76,7 +76,7 @@ describe('xverseSigner.signAndBroadcast', () => {
       args.onFinish({ psbtBase64: 'cHNidP8B' } as SignTransactionResponse);
     }) as never);
 
-    await firstValueFrom(xverseSigner.signAndBroadcast({
+    await firstValueFrom(xverseSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'tb1qpayment',
       network: Network.Testnet4,
@@ -92,7 +92,7 @@ describe('xverseSigner.signAndBroadcast', () => {
       args.onFinish({} as SignTransactionResponse);
     }) as never);
 
-    const result$ = xverseSigner.signAndBroadcast({
+    const result$ = xverseSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -107,7 +107,7 @@ describe('xverseSigner.signAndBroadcast', () => {
       args.onCancel();
     }) as never);
 
-    const result$ = xverseSigner.signAndBroadcast({
+    const result$ = xverseSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
@@ -125,7 +125,7 @@ describe('xverseSigner.signAndBroadcast', () => {
       throw new Error('mempool full');
     });
 
-    const result$ = xverseSigner.signAndBroadcast({
+    const result$ = xverseSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,

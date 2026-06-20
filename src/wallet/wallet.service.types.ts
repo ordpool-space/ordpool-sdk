@@ -279,15 +279,22 @@ export interface SignOfferCreatePsbtArgs {
 export interface WalletSigner {
   readonly providerId: KnownOrdinalWalletType;
 
-  // ── Operation-named topology methods (the safe public-via-orchestrator surface)
   signSingleFundingInput(input: SignSingleFundingInputArgs): Observable<{ txId: string }>;
   signTransfer(input: SignTransferArgs): Observable<{ txId: string }>;
   signOfferAccept(input: SignOfferAcceptArgs): Observable<{ txId: string }>;
   signOfferCreatePsbt(input: SignOfferCreatePsbtArgs): Observable<Uint8Array>;
+}
 
-  // ── Legacy generic methods (DEPRECATED, slated for removal in Phase 2).
-  //    Kept temporarily so existing orchestrators + 11 signer files stay
-  //    compiling during the migration window. Do not call from new code.
+/**
+ * Internal-only contract that `operationNamedDefaults` accepts.
+ * Each signer file holds a closure-scoped object satisfying this
+ * shape so the new operation-named methods can delegate to a single
+ * wallet-RPC implementation per topology. NEVER exported from
+ * `core.ts` / `index.ts`; NEVER spread onto the exported signer
+ * object — that's how we make the signingMap-shaped methods
+ * structurally impossible to reach from outside the file.
+ */
+export interface WalletSignerInternalImpls {
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }>;
   signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }>;
   signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array>;
