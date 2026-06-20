@@ -1,5 +1,5 @@
 import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals';
-import { base64 } from '@scure/base';
+import { base64, hex } from '@scure/base';
 import { firstValueFrom, of, throwError } from 'rxjs';
 
 import { Network } from '../../network';
@@ -28,7 +28,7 @@ describe('oylSigner.signAndBroadcast', () => {
     delete (window as unknown as { oyl?: unknown }).oyl;
   });
 
-  it('asks oyl.signPsbt with psbtBase64 + inputsToSign[0]=paymentAddress and hands the decoded result to broadcastSignedPsbt', async () => {
+  it('asks oyl.signPsbt with psbt (hex) + inputsToSign[0]=paymentAddress + broadcast:false + finalize:false and hands the decoded result to broadcastSignedPsbt', async () => {
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
     signPsbtMock.mockResolvedValue({ signedPsbt: 'cHNidP8B' } as never);
 
@@ -42,12 +42,14 @@ describe('oylSigner.signAndBroadcast', () => {
 
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
     expect(signPsbtMock).toHaveBeenCalledWith({
-      psbtBase64: base64.encode(unsignedBytes),
+      psbt: hex.encode(unsignedBytes),
       inputsToSign: [{
         address: 'bc1qpayment',
         signingIndexes: [0],
         sigHash: 0x01,
       }],
+      broadcast: false,
+      finalize: false,
     });
 
     expect(broadcastSignedPsbtMock).toHaveBeenCalledTimes(1);

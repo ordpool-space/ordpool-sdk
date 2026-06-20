@@ -30,7 +30,7 @@ describe('okxSigner.signAndBroadcast', () => {
     delete (window as unknown as { okxwallet?: unknown }).okxwallet;
   });
 
-  it('asks okxwallet.bitcoin.signPsbt with autoFinalized:false and hands the decoded PSBT to the shared broadcast helper', async () => {
+  it('asks okxwallet.bitcoin.signPsbt with autoFinalized:false + toSignInputs[0]=paymentAddress and hands the decoded PSBT to the shared broadcast helper', async () => {
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
     signPsbtMock.mockResolvedValue('70736274ff01' as never);
 
@@ -43,7 +43,16 @@ describe('okxSigner.signAndBroadcast', () => {
     const result = await firstValueFrom(okxSigner.signAndBroadcast(input));
 
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
-    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), { autoFinalized: false });
+    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), {
+      autoFinalized: false,
+      toSignInputs: [{
+        index: 0,
+        address: 'bc1qpayment',
+        // BIP-341 key-path DEFAULT (0x00) and ALL (0x01) commit to
+        // identical wire bytes; OKX accepts either.
+        sighashTypes: [0x00, 0x01],
+      }],
+    });
 
     expect(broadcastSignedPsbtMock).toHaveBeenCalledTimes(1);
     expect(broadcastSignedPsbtMock).toHaveBeenCalledWith(input, hex.decode('70736274ff01'));

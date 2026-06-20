@@ -1,4 +1,4 @@
-import { base64 } from '@scure/base';
+import { base64, hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
 import { broadcastSignedPsbt } from '../psbt-extract';
@@ -20,42 +20,63 @@ interface OylInputToSign {
 }
 
 interface OylRpc {
-  signPsbt(args: { psbtBase64: string; inputsToSign: OylInputToSign[] }): Promise<{ signedPsbt: string }>;
+  signPsbt(args: {
+    psbt: string;
+    inputsToSign?: OylInputToSign[];
+    broadcast?: boolean;
+    finalize?: boolean;
+  }): Promise<{ signedPsbt?: string; signedPsbtHex?: string; psbt?: string }>;
 }
 
 
 /**
- * Oyl — `window.oyl.signPsbt({psbtBase64, inputsToSign})`.
+ * Oyl — `window.oyl.signPsbt({psbt, inputsToSign, broadcast,
+ * finalize})`.
  *
  * Oyl exposes a single `window.oyl` provider whose methods route
  * via its relay-based messaging shim to the extension background.
- * Schema verified by grepping oylConnectProvider.baac0163.js +
- * static/background/index.js v1.17.1:
  *
- *   signPsbt({psbtBase64, inputsToSign}) → {signedPsbt: string}
+ * Schema verified by grepping v1.17.1's static/background/index.js
+ * (signPsbt handler at byte 4708500):
+ *   - `body.psbt` is a hex string. The error message
+ *     "A psbt hex is required" refers to the value TYPE, not the
+ *     field name; passing base64 here gets rejected.
+ *   - Response may use `signedPsbtHex` (hex), `signedPsbt` (base64),
+ *     or `psbt` (whichever shape Oyl emits for that version). The
+ *     signer normalises by sniffing.
  *
- * `signedPsbt` is returned as base64. Oyl also exposes `pushPsbt`
- * (skipped per the SDK-wide "WE broadcast" convention).
- *
- * The `inputsToSign` shape mirrors sats-connect's
- * `[{address, signingIndexes, sigHash}]`. SIGHASH_ALL = 0x01.
+ * Per the SDK-wide "WE broadcast" convention, we set
+ * `broadcast: false, finalize: false` so Oyl returns the
+ * partial-sig PSBT for us to finalize via scure +
+ * broadcastSignedPsbt.
  */
+function decodeOylResponse(r: { signedPsbt?: string; signedPsbtHex?: string; psbt?: string }): Uint8Array {
+  if (r.signedPsbtHex) return hex.decode(r.signedPsbtHex);
+  if (r.signedPsbt) return base64.decode(r.signedPsbt);
+  if (r.psbt) {
+    return /^[0-9a-f]+$/i.test(r.psbt) ? hex.decode(r.psbt) : base64.decode(r.psbt);
+  }
+  throw new Error('Oyl signPsbt response carried no signed-psbt field');
+}
+
 const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
-    const psbtBase64 = base64.encode(input.psbtBytes);
+    const psbtHex = hex.encode(input.psbtBytes);
     const oyl = (window as unknown as { oyl: OylRpc }).oyl;
     const signPromise = oyl.signPsbt({
-      psbtBase64,
+      psbt: psbtHex,
       inputsToSign: [{ address: input.paymentAddress, signingIndexes: [0], sigHash: 0x01 }],
+      broadcast: false,
+      finalize: false,
     });
     return from(signPromise).pipe(
-      switchMap(response => broadcastSignedPsbt(input, base64.decode(response.signedPsbt))),
+      switchMap(response => broadcastSignedPsbt(input, decodeOylResponse(response))),
     );
   },
 
   signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
-    const psbtBase64 = base64.encode(input.psbtBytes);
+    const psbtHex = hex.encode(input.psbtBytes);
     const oyl = (window as unknown as { oyl: OylRpc }).oyl;
     const targets = resolveSigningTargets(input);
     const inputsToSign = targets.map((t) => ({
@@ -63,14 +84,19 @@ const legacy = {
       signingIndexes: t.indexes,
       sigHash: t.sigHash,
     }));
-    const signPromise = oyl.signPsbt({ psbtBase64, inputsToSign });
+    const signPromise = oyl.signPsbt({
+      psbt: psbtHex,
+      inputsToSign,
+      broadcast: false,
+      finalize: false,
+    });
     return from(signPromise).pipe(
-      switchMap(response => broadcastSignedPsbt(input, base64.decode(response.signedPsbt))),
+      switchMap(response => broadcastSignedPsbt(input, decodeOylResponse(response))),
     );
   },
 
   signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
-    const psbtBase64 = base64.encode(input.psbtBytes);
+    const psbtHex = hex.encode(input.psbtBytes);
     const oyl = (window as unknown as { oyl: OylRpc }).oyl;
     const targets = resolveSigningTargets(input);
     const inputsToSign = targets.map((t) => ({
@@ -78,8 +104,13 @@ const legacy = {
       signingIndexes: t.indexes,
       sigHash: t.sigHash,
     }));
-    return from(oyl.signPsbt({ psbtBase64, inputsToSign })).pipe(
-      map((response) => base64.decode(response.signedPsbt)),
+    return from(oyl.signPsbt({
+      psbt: psbtHex,
+      inputsToSign,
+      broadcast: false,
+      finalize: false,
+    })).pipe(
+      map((response) => decodeOylResponse(response)),
     );
   },
 };
