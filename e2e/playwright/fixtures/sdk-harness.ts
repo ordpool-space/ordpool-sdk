@@ -34,12 +34,38 @@ import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper'
 import { createInscribeTransactions } from '../../../src/inscribe/inscription.service.helper';
 import { schnorr } from '@noble/curves/secp256k1';
 import { Network, toBitcoinNetworkType, toScureNetwork } from '../../../src/network';
+import { findSignerOrThrow } from '../../../src/wallet/signers';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import type { TxnOutput } from '../../../src/cat21-mint/cat21.service.types';
+import { of } from 'rxjs';
 
 declare global {
   interface Window {
     ordpoolSdkHarness: {
+      /**
+       * Generic operation dispatcher. Builds the operation's PSBT via
+       * the SDK, asks the wallet's signer for that operation
+       * (`signSingleFundingInput` for mint + inscribe-commit, future
+       * methods for RBF / CPFP / etc.), and returns the signed
+       * wire-tx bytes. Spec broadcasts.
+       *
+       * Wallet-specific test quirks (cross-network-keys "tell the
+       * mainnet-only wallet it's signing mainnet, hand it regtest
+       * PSBT bytes" trick used by Leather / Unisat / Wizz / OKX / Oyl
+       * / Phantom) are handled inside this method; specs stay
+       * wallet-agnostic.
+       *
+       * Alby has its own build-only entry (`buildInscribePsbtForAlby`
+       * + buildCat21MintPsbtForAlby`) because its public RPC is
+       * structurally unreachable from the harness origin — see
+       * `alby-mint-roundtrip.spec.ts` for the SW-bypass writeup.
+       * Phantom mint / inscribe specs assert connect-step rejection
+       * and never reach runOperation.
+       */
+      runOperation(input: RunOperationMintInput): Promise<RunOperationMintResult>;
+      runOperation(input: RunOperationInscribeInput): Promise<RunOperationInscribeResult>;
+      runOperation(input: RunOperationInput): Promise<RunOperationResult>;
+
       detectXverse(): boolean;
       connectXverse(network: 'mainnet' | 'testnet3' | 'testnet4' | 'regtest'): Promise<{
         type: KnownOrdinalWalletType;
@@ -222,6 +248,62 @@ export interface InscribeSignedResult {
   /** Ephemeral x-only pubkey as hex. */
   ephemeralPubkeyXonlyHex: string;
 }
+
+/* ──────────────────────────  Generic dispatch  ────────────────────────── */
+
+/**
+ * Common funding-input shape used by every operation. Same shape as
+ * `MintRequest.utxo` and `InscribeRequest.utxo`, hoisted for reuse.
+ */
+export interface RunOperationFundingInput {
+  utxo: { txid: string; vout: number; value: number };
+  paymentAddress: string;
+  paymentPublicKey: string; // hex
+}
+
+export interface RunOperationMintInput extends RunOperationFundingInput {
+  kind: 'mint';
+  /** Wallet identifier — string-equivalent to KnownOrdinalWalletType. */
+  walletType: `${KnownOrdinalWalletType}`;
+  recipientAddress: string;
+  feeSats: number;
+}
+
+export interface RunOperationInscribeInput extends RunOperationFundingInput {
+  kind: 'inscribe';
+  /** Wallet identifier — string-equivalent to KnownOrdinalWalletType. */
+  walletType: `${KnownOrdinalWalletType}`;
+  recipientAddress: string;
+  bodyHex: string;
+  contentType?: string;
+  feeRatePerVbyte: number;
+}
+
+export type RunOperationInput = RunOperationMintInput | RunOperationInscribeInput;
+
+export interface RunOperationMintResult {
+  kind: 'mint';
+  /** Wallet-signed, scure-finalized wire-tx hex. Spec broadcasts. */
+  txHex: string;
+}
+
+export interface RunOperationInscribeResult {
+  kind: 'inscribe';
+  /** Wallet-signed commit wire-tx hex. */
+  commitHex: string;
+  /** Ephemeral-key-signed reveal wire-tx hex. */
+  revealHex: string;
+  /** Computed commit txid (SegWit witness-independent). */
+  commitTxid: string;
+  /** Computed reveal txid. */
+  revealTxid: string;
+  /** Ephemeral bearer key as hex. */
+  ephemeralPrivKeyHex: string;
+  /** Ephemeral x-only pubkey as hex. */
+  ephemeralPubkeyXonlyHex: string;
+}
+
+export type RunOperationResult = RunOperationMintResult | RunOperationInscribeResult;
 
 const statusEl = () => document.getElementById('status')!;
 const outputEl = () => document.getElementById('output')!;
@@ -1461,4 +1543,159 @@ window.ordpoolSdkHarness.buildCat21MintPsbtForAlby = (input) => {
   const psbtHex = bytesToHex(result.tx.toPSBT());
   log('mint.psbt-built-for-alby', { bytes: psbtHex.length / 2, fee: input.feeSats });
   return { psbtHex };
+};
+
+/* ──────────────────────────  runOperation  ────────────────────────── */
+
+/**
+ * Wallets that natively support a regtest network argument on their
+ * sign RPC: Xverse (sats-connect `Regtest`), Cat21 Wallet (forked
+ * from Leather with `'regtest'` added), Alby (network-agnostic
+ * Taproot signing through its SW handler). Every other wallet binary
+ * is mainnet-only and we lie about the network to make them sign
+ * regtest-encoded PSBT bytes (the script bytes are HRP-independent
+ * so the wallet's "is this my address?" check passes against its
+ * mainnet view of the same key).
+ */
+function signerNetworkFor(walletType: KnownOrdinalWalletType): Network {
+  switch (walletType) {
+    case KnownOrdinalWalletType.xverse:
+    case KnownOrdinalWalletType.cat21wallet:
+    case KnownOrdinalWalletType.alby:
+      return Network.Regtest;
+    default:
+      return Network.Mainnet;
+  }
+}
+
+/**
+ * Wallet-side `paymentAddress` translation. The PSBT itself always
+ * encodes regtest semantics (bcrt1q / bcrt1p funding addresses);
+ * mainnet-only wallets that validate `toSignInputs[i].address`
+ * against their own address set need to see the equivalent mainnet
+ * address — which is structurally the same key, just with the
+ * mainnet HRP. We derive it here once per call.
+ */
+function walletSidePaymentAddressFor(
+  walletType: KnownOrdinalWalletType,
+  paymentAddress: string,
+  paymentPublicKey: Uint8Array,
+): string {
+  switch (walletType) {
+    case KnownOrdinalWalletType.xverse:
+    case KnownOrdinalWalletType.cat21wallet:
+    case KnownOrdinalWalletType.alby:
+      // Regtest-native wallets see the bcrt1* address as-is.
+      return paymentAddress;
+    case KnownOrdinalWalletType.okx: {
+      // OKX default = BIP-86 P2TR. Translate to mainnet bc1p.
+      const xonly = paymentPublicKey.slice(1, 33);
+      return p2tr(xonly, undefined, toScureNetwork(Network.Mainnet)).address!;
+    }
+    default: {
+      // All other mainnet-only wallets default to BIP-84 P2WPKH funding.
+      return p2wpkh(paymentPublicKey, toScureNetwork(Network.Mainnet)).address!;
+    }
+  }
+}
+
+window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promise<RunOperationResult> => {
+  if (input.walletType === KnownOrdinalWalletType.alby) {
+    throw new Error(
+      'runOperation: Alby requires the SW-bypass path. Use buildCat21MintPsbtForAlby / buildInscribePsbtForAlby and sign via seedPage.',
+    );
+  }
+  if (input.walletType === KnownOrdinalWalletType.phantom) {
+    throw new Error(
+      'runOperation: Phantom v26.x SW lacks btc_* handlers; the connect step fails before any sign happens. Specs assert connect rejection.',
+    );
+  }
+
+  const paymentPubkey = hexToBytes(input.paymentPublicKey);
+  const signer = findSignerOrThrow(input.walletType);
+  const sNetwork = signerNetworkFor(input.walletType);
+  const walletPaymentAddress = walletSidePaymentAddressFor(
+    input.walletType,
+    input.paymentAddress,
+    paymentPubkey,
+  );
+
+  if (input.kind === 'mint') {
+    const txnOutput: TxnOutput = {
+      txid:  input.utxo.txid,
+      vout:  input.utxo.vout,
+      value: input.utxo.value,
+    };
+    const built = createTransaction(
+      input.walletType,
+      input.recipientAddress,
+      txnOutput,
+      paymentPubkey,
+      input.paymentAddress,
+      BigInt(input.feeSats),
+      /* isSimulation = */ false,
+      Network.Regtest,
+    );
+    const psbtBytes = built.tx.toPSBT(0);
+
+    let capturedTxHex: string | undefined;
+    await firstValueFrom(signer.signSingleFundingInput({
+      psbtBytes,
+      paymentAddress: walletPaymentAddress,
+      network: sNetwork,
+      broadcast: (txHex: string) => {
+        capturedTxHex = txHex;
+        // Return a stable fake-txid so the signer's Observable can resolve.
+        // The real broadcast happens in the spec, against local electrs.
+        return of('0'.repeat(64));
+      },
+    }));
+    if (!capturedTxHex) {
+      throw new Error('runOperation(mint): signer never invoked the broadcast callback');
+    }
+    return { kind: 'mint', txHex: capturedTxHex };
+  }
+
+  // inscribe
+  const txnOutput: TxnOutput = {
+    txid:  input.utxo.txid,
+    vout:  input.utxo.vout,
+    value: input.utxo.value,
+    status: { confirmed: true },
+  };
+  const body = hexToBytes(input.bodyHex);
+  const inscribed = createInscribeTransactions({
+    paymentOutput: txnOutput,
+    paymentPublicKey: paymentPubkey,
+    paymentAddress: input.paymentAddress,
+    recipientAddress: input.recipientAddress,
+    body,
+    contentType: input.contentType,
+    feeRatePerVbyte: input.feeRatePerVbyte,
+    network: Network.Regtest,
+  });
+
+  let capturedCommitHex: string | undefined;
+  await firstValueFrom(signer.signSingleFundingInput({
+    psbtBytes: inscribed.commitPsbt,
+    paymentAddress: walletPaymentAddress,
+    network: sNetwork,
+    broadcast: (txHex: string) => {
+      capturedCommitHex = txHex;
+      return of('0'.repeat(64));
+    },
+  }));
+  if (!capturedCommitHex) {
+    throw new Error('runOperation(inscribe): signer never invoked the broadcast callback');
+  }
+
+  return {
+    kind: 'inscribe',
+    commitHex: capturedCommitHex,
+    revealHex: inscribed.revealHex,
+    commitTxid: inscribed.commitTxid,
+    revealTxid: inscribed.revealTxid,
+    ephemeralPrivKeyHex: bytesToHex(inscribed.ephemeral.privKey),
+    ephemeralPubkeyXonlyHex: bytesToHex(inscribed.ephemeral.pubkeyXonly),
+  };
 };

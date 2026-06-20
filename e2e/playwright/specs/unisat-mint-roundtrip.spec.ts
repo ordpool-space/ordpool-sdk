@@ -213,8 +213,10 @@ test('mint a cat21 on regtest via Unisat: build PSBT in SDK, sign in popup (main
   // ─── Build + sign mint PSBT via SDK + Unisat popup ─────────────
   const signKnownPages = new Set(context.pages());
   const signedHexPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignMintViaUnisat(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'mint' as const,
+      walletType: 'unisat' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: regtest.paymentAddress,
       paymentPublicKey: wallet.paymentPublicKey,

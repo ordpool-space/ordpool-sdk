@@ -222,8 +222,10 @@ test('mint a cat21 on regtest via Wizz: build PSBT in SDK, sign in popup (mainne
 
   const signKnownPages = new Set(context.pages());
   const signedHexPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignMintViaWizz(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'mint' as const,
+      walletType: 'wizz' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: regtest.paymentAddress,
       paymentPublicKey: wallet.paymentPublicKey,

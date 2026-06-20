@@ -157,8 +157,10 @@ test('inscribe an artifact on regtest via OKX: build commit+reveal in SDK, sign 
   const utxo = await waitForUtxoAt(paymentBcrt1p, Math.round(FUND_AMOUNT_BTC * 1e8));
 
   const signedPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignInscribeViaOkx(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'inscribe' as const,
+      walletType: 'okx' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: paymentBcrt1p,
       paymentPublicKey: wallet.paymentPublicKey,

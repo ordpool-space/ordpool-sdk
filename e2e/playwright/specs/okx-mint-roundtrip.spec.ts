@@ -245,8 +245,10 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
   console.log(`[okx-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
   const signedHexPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignMintViaOkx(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'mint' as const,
+      walletType: 'okx' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: paymentBcrt1p,
       paymentPublicKey: wallet.paymentPublicKey,

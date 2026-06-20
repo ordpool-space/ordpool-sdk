@@ -176,8 +176,10 @@ test('inscribe an artifact on regtest via Unisat: build commit+reveal in SDK, si
 
   const signKnownPages = new Set(context.pages());
   const signedPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignInscribeViaUnisat(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'inscribe' as const,
+      walletType: 'unisat' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: regtest.paymentAddress,
       paymentPublicKey: wallet.paymentPublicKey,

@@ -166,8 +166,10 @@ test('inscribe an artifact on regtest via Oyl: build commit+reveal in SDK, sign 
 
   const signKnownPages = new Set(context.pages());
   const signedPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignInscribeViaOyl(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'inscribe' as const,
+      walletType: 'oyl' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: regtest.paymentAddress,
       paymentPublicKey: wallet.paymentPublicKey,

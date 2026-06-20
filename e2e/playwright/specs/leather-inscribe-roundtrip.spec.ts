@@ -164,8 +164,10 @@ test('inscribe an artifact on regtest via Leather: build commit+reveal in SDK, s
 
   const signKnownPages = new Set(context.pages());
   const signedPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignInscribeViaLeather(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'inscribe' as const,
+      walletType: 'leather' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: regtest.paymentAddress,
       paymentPublicKey: wallet.paymentPublicKey,

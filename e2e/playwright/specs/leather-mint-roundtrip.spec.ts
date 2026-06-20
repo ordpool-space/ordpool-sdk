@@ -196,8 +196,10 @@ test('mint a cat21 on regtest via Leather: build PSBT in SDK, sign in popup (net
 
   const signKnownPages = new Set(context.pages());
   const signedHexPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignMintViaLeather(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'mint' as const,
+      walletType: 'leather' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: regtest.paymentAddress,
       paymentPublicKey: wallet.paymentPublicKey,

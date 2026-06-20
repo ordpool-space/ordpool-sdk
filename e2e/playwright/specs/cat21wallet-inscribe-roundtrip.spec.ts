@@ -157,8 +157,10 @@ test('inscribe an artifact on regtest via Cat21 Wallet: build commit+reveal in S
 
   const signKnownPages = new Set(context.pages());
   const signedPromise = harness.evaluate(
-    (args) => window.ordpoolSdkHarness.buildAndSignInscribeViaCat21Wallet(args),
+    (args) => window.ordpoolSdkHarness.runOperation(args),
     {
+      kind: 'inscribe' as const,
+      walletType: 'cat21wallet' as const,
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: regtest.paymentAddress,
       paymentPublicKey: wallet.paymentPublicKey,

@@ -178,7 +178,11 @@ test('inscribe an artifact on regtest via xverse: build commit+reveal in SDK, si
 
   // ─── Build commit+reveal + sign commit via Xverse popup ────────
   const knownPagesAtStart = new Set(context.pages());
-  const signedPromise = harness.evaluate((args) => window.ordpoolSdkHarness.buildAndSignInscribeViaXverse(args), {
+  const signedPromise = harness.evaluate((args) => window.ordpoolSdkHarness.runOperation(args), {
+    kind: 'inscribe' as const,
+    walletType: 'xverse' as const,
+    kind: 'inscribe' as const,
+    walletType: 'xverse' as const,
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
     paymentAddress: wallet.paymentAddress,
     paymentPublicKey: wallet.paymentPublicKey,

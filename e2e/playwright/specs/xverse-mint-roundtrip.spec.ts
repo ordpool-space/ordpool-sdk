@@ -180,7 +180,9 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   //     Xverse's own broadcast because the mempool/electrs HTTP
   //     server rejects axios's JSON content-type with HTTP 400.
   const knownPagesAtStart = new Set(context.pages());
-  const signedHexPromise = harness.evaluate((args) => window.ordpoolSdkHarness.buildAndSignMintViaXverse(args), {
+  const signedHexPromise = harness.evaluate((args) => window.ordpoolSdkHarness.runOperation(args), {
+    kind: 'mint' as const,
+    walletType: 'xverse' as const,
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
     paymentAddress: wallet.paymentAddress,
     paymentPublicKey: wallet.paymentPublicKey,
