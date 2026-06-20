@@ -9,6 +9,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -39,8 +40,7 @@ interface OylRpc {
  * The `inputsToSign` shape mirrors sats-connect's
  * `[{address, signingIndexes, sigHash}]`. SIGHASH_ALL = 0x01.
  */
-export const oylSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.oyl,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtBase64 = base64.encode(input.psbtBytes);
@@ -82,4 +82,10 @@ export const oylSigner: WalletSigner = {
       map((response) => base64.decode(response.signedPsbt)),
     );
   },
+};
+
+export const oylSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.oyl,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

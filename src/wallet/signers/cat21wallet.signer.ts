@@ -13,6 +13,7 @@ import {
   WalletSigner,
   WindowLike,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -71,8 +72,7 @@ function callCat21WalletSignPsbt(
     .then((resp) => resp.result.hex);
 }
 
-export const cat21walletSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.cat21wallet,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex = hex.encode(input.psbtBytes);
@@ -117,4 +117,10 @@ export const cat21walletSigner: WalletSigner = {
       return from(chain);
     }).pipe(map((finalHex) => hex.decode(finalHex)));
   },
+};
+
+export const cat21walletSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.cat21wallet,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

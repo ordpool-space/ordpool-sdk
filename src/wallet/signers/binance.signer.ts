@@ -10,6 +10,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -45,8 +46,7 @@ interface BinanceBtcRpc {
  * Ships as potential-support; lights up automatically when
  * Binance enables the documented surface.
  */
-export const binanceSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.binance,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex: string = hex.encode(input.psbtBytes);
@@ -101,4 +101,10 @@ export const binanceSigner: WalletSigner = {
       map((signedPsbtHex) => hex.decode(signedPsbtHex)),
     );
   },
+};
+
+export const binanceSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.binance,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

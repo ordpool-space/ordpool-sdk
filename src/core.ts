@@ -32,7 +32,25 @@ export * from './cat21-script';
 export * from './network';
 
 // --- Wallet types (KnownOrdinalWalletType enum and friends; pure) ---
-export * from './wallet/wallet.service.types';
+// Public types only. The bypass surface (WalletSigner, signingMap
+// types, per-method input types) intentionally NOT re-exported —
+// consumers reach Bitcoin operations via the operation-named
+// orchestrators (cat21.service, *-orchestrator.service,
+// inscribeAndBroadcast). See HARD RULE "signingMap is BANNED" in
+// SDK CLAUDE.md.
+export {
+  KnownOrdinalWalletType,
+  KnownOrdinalWallets,
+  type KnownOrdinalWallet,
+  type WalletInfo,
+  type WalletConnector,
+  type WindowLike,
+  type XverseAddressResponse,
+  type LeatherAddressResponse,
+  type LeatherAddress,
+  type LeatherBtcAddress,
+  type LeatherStxAddress,
+} from './wallet/wallet.service.types';
 
 // --- CAT-21 mint (PSBT-build helpers; the Angular Cat21Service that
 //     orchestrates is at the main entry only). ---
@@ -68,6 +86,7 @@ export * from './inscribe/inscription-input-adapter';
 export * from './inscribe/inscription-fee.helper';
 export * from './inscribe/inscription.service.helper';
 export * from './inscribe/inscribe-broadcast.helper';
+export * from './inscribe/inscribe-orchestrator';
 
 // --- Agent-mode policy gate ---
 export * from './agent-mode/agent-policy.helper';

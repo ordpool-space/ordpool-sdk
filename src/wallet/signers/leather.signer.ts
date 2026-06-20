@@ -11,6 +11,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -72,8 +73,7 @@ function callLeatherSignPsbt(
   return win.LeatherProvider.request('signPsbt', params).then((resp) => resp.result.hex);
 }
 
-export const leatherSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.leather,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex = hex.encode(input.psbtBytes);
@@ -118,4 +118,10 @@ export const leatherSigner: WalletSigner = {
       return from(chain);
     }).pipe(map((finalHex) => hex.decode(finalHex)));
   },
+};
+
+export const leatherSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.leather,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

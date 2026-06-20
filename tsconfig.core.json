@@ -51,7 +51,9 @@
     "src/inscribe/inscription-input-adapter.ts",
     "src/inscribe/inscription-fee.helper.ts",
     "src/inscribe/inscription.service.helper.ts",
-    "src/inscribe/inscribe-broadcast.helper.ts"
+    "src/inscribe/inscribe-broadcast.helper.ts",
+    "src/inscribe/inscribe-orchestrator.ts",
+    "src/wallet/signers/operation-named-defaults.ts"
   ],
   "exclude": [
     "node_modules",

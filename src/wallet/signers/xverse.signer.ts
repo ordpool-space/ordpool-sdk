@@ -12,6 +12,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -59,9 +60,7 @@ function callXverseSignTransaction(
   });
 }
 
-export const xverseSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.xverse,
-
+const legacy = {
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
     return callXverseSignTransaction(
@@ -107,4 +106,10 @@ export const xverseSigner: WalletSigner = {
       'Sign CAT-21 buy offer (no broadcast)',
     ).pipe(map((signedPsbtBase64) => base64.decode(signedPsbtBase64)));
   },
+};
+
+export const xverseSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.xverse,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

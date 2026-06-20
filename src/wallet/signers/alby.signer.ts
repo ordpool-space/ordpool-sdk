@@ -9,6 +9,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 
 
 interface WebBtcApi {
@@ -54,8 +55,7 @@ interface AlbyApi {
  * inject in-page providers — it uses NWC deeplinks, a completely
  * different integration model that this signer doesn't cover.
  */
-export const albySigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.alby,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex = hex.encode(input.psbtBytes);
@@ -109,4 +109,10 @@ export const albySigner: WalletSigner = {
       ));
     });
   },
+};
+
+export const albySigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.alby,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

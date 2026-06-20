@@ -238,7 +238,7 @@ export class Cat21Service {
     const psbtBytes = tx.toPSBT(0);
 
     const signer = findSignerOrThrow(walletType);
-    const result = signer.signAndBroadcast({
+    const result = signer.signSingleFundingInput({
       psbtBytes,
       paymentAddress,
       network: this.network,

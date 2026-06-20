@@ -9,6 +9,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 
 
 /**
@@ -54,8 +55,7 @@ function decodeSignedPsbt(input: string): Uint8Array {
  * One signer implementation, universal reach. PSBT is a spec
  * (BIP-174 / BIP-370); every desktop and hardware wallet speaks it.
  */
-export const psbtExportSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.xpub,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     if (!input.promptForSignedPsbt) {
@@ -131,4 +131,10 @@ export const psbtExportSigner: WalletSigner = {
       hex: hex.encode(input.psbtBytes),
     }).pipe(map((signedPsbt) => decodeSignedPsbt(signedPsbt)));
   },
+};
+
+export const psbtExportSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.xpub,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

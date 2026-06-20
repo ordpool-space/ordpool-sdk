@@ -239,9 +239,9 @@ export class Cat21AcceptOfferOrchestrator {
     try {
       const signer = findSignerOrThrow(wallet.type);
       return signer
-        .signMultiInputAndBroadcast({
+        .signOfferAccept({
           psbtBytes: offer.psbtBytes,
-          signingMap: [{ address: wallet.ordinalsAddress, indexes: [0] }],
+          ordinalsAddress: wallet.ordinalsAddress,
           network: this.network,
           broadcast: (txHex) => this.cat21.postTransaction(txHex),
         })

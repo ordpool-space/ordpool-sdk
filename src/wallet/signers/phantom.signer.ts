@@ -8,6 +8,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -57,8 +58,7 @@ interface PhantomBitcoinSigner {
  *
  * SIGHASH_ALL = 1.
  */
-export const phantomSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.phantom,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const phantomBtc = (window as unknown as { phantom: { bitcoin: PhantomBitcoinSigner } }).phantom.bitcoin;
@@ -98,4 +98,10 @@ export const phantomSigner: WalletSigner = {
     }));
     return from(phantomBtc.signPSBT(input.psbtBytes, { inputsToSign, finalize: false }));
   },
+};
+
+export const phantomSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.phantom,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

@@ -9,6 +9,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -50,8 +51,7 @@ interface UnisatRpc {
  * ordinals — easy to spend cat sats by accident. Mint flow surfaces
  * this in UI text. The signer itself can't help that.
  */
-export const unisatSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.unisat,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex = hex.encode(input.psbtBytes);
@@ -95,4 +95,10 @@ export const unisatSigner: WalletSigner = {
       map((signedPsbtHex) => hex.decode(signedPsbtHex)),
     );
   },
+};
+
+export const unisatSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.unisat,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

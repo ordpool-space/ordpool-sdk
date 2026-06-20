@@ -9,7 +9,20 @@ export * from './network-token';
 
 // --- wallet (Xverse / Leather / Unisat picker + connect flow) ---
 export * from './wallet/wallet.service';
-export * from './wallet/wallet.service.types';
+// Public types only — see core.ts for the rationale.
+export {
+  KnownOrdinalWalletType,
+  KnownOrdinalWallets,
+  type KnownOrdinalWallet,
+  type WalletInfo,
+  type WalletConnector,
+  type WindowLike,
+  type XverseAddressResponse,
+  type LeatherAddressResponse,
+  type LeatherAddress,
+  type LeatherBtcAddress,
+  type LeatherStxAddress,
+} from './wallet/wallet.service.types';
 
 // --- cat21 mint pipeline (PSBT builder, simulator, broadcaster) ---
 export * from './cat21-mint/cat21-sdk-config';
@@ -52,6 +65,7 @@ export * from './inscribe/inscription-input-adapter';
 export * from './inscribe/inscription-fee.helper';
 export * from './inscribe/inscription.service.helper';
 export * from './inscribe/inscribe-broadcast.helper';
+export * from './inscribe/inscribe-orchestrator';
 
 // --- agent-mode (autonomous-action policy gate) ---
 export * from './agent-mode/agent-policy.helper';

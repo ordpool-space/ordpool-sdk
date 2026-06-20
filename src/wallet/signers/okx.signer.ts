@@ -9,6 +9,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -40,8 +41,7 @@ interface OkxBtcRpc {
  * Multi-input signing: OKX follows the Unisat-derived
  * `toSignInputs` convention. Same mapping as the unisat signer.
  */
-export const okxSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.okx,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex = hex.encode(input.psbtBytes);
@@ -82,4 +82,10 @@ export const okxSigner: WalletSigner = {
       map((signedPsbtHex) => hex.decode(signedPsbtHex)),
     );
   },
+};
+
+export const okxSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.okx,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

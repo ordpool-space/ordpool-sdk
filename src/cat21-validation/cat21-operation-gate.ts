@@ -253,7 +253,7 @@ function validateInscribe(
   if (!fee.ok) return fee.result;
 
   // Content body.
-  if (!(intent.body instanceof Uint8Array)) {
+  if (!ArrayBuffer.isView(intent.body) || intent.body.constructor.name !== 'Uint8Array') {
     return reject('content-not-bytes', safeStringify(typeof intent.body));
   }
   const cap = config.maxInscribeContentBytes ?? DEFAULT_MAX_INSCRIBE_CONTENT_BYTES;

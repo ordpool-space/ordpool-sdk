@@ -302,12 +302,11 @@ export class Cat21TransferOrchestrator {
       const psbtBytes = this.buildTransferPsbt(wallet, cat, recipient, simulation);
       const signer = findSignerOrThrow(wallet.type);
 
-      return signer.signMultiInputAndBroadcast({
+      return signer.signTransfer({
         psbtBytes,
-        signingMap: [
-          { address: wallet.ordinalsAddress, indexes: [0] },
-          { address: wallet.paymentAddress, indexes: [1] },
-        ],
+        ordinalsAddress: wallet.ordinalsAddress,
+        paymentAddress: wallet.paymentAddress,
+        fundingInputCount: 1,
         network: this.network,
         broadcast: (txHex) => this.cat21.postTransaction(txHex),
       }).pipe(

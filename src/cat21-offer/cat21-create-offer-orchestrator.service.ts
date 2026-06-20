@@ -289,9 +289,10 @@ export class Cat21CreateOfferOrchestrator {
     const signer = findSignerOrThrow(wallet.type);
 
     return signer
-      .signPsbtOnly({
+      .signOfferCreatePsbt({
         psbtBytes,
-        signingMap: [{ address: wallet.paymentAddress, indexes: [1] }],
+        paymentAddress: wallet.paymentAddress,
+        fundingInputCount: 1,
         network: this.network,
       })
       .pipe(

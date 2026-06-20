@@ -123,6 +123,83 @@ edge cases are exactly the kind of comment a future reader cannot
 reconstruct from code alone. Full decision tree in the workspace
 `CLAUDE.md` HARD RULE "Keep useful comments (JSDoc AND inline 'why')".
 
+## HARD RULE: signingMap is BANNED — every Bitcoin operation ships as a typed triple
+
+**`signingMap` is a footgun, not a primitive.** The previous design exposed
+a `signingMap: ReadonlyArray<PsbtSigningTarget>` parameter on
+`signMultiInputAndBroadcast` / `signPsbtOnly`. A caller could pass an
+array that missed an input index; the wallet signed what was listed,
+auto-finalizing wallets emitted a partially-finalized PSBT, and
+broadcast landed at electrs with `mandatory-script-verify-flag-failed`
+AFTER the user clicked Sign. Worse: per-row `sigHash` overrides made
+"change the commitment topology" a silent typo.
+
+**Every on-chain Bitcoin operation ships as a TYPED TRIPLE:**
+
+1. **Builder** (internal): pure function that constructs the PSBT
+   bytes for that operation. Owns the input layout (cat at index 0,
+   funding inputs at 1..N, etc.). Lives in
+   `cat21-{mint,transfer,offer}/…helper.ts` /
+   `inscribe/inscription-commit.helper.ts`.
+
+2. **Signer method** (internal, on every `WalletSigner`): operation-
+   named method with a HARDCODED signing topology. The four shipping
+   methods today:
+
+   - `signSingleFundingInput` — 1 input at paymentAddress, SIGHASH_ALL
+     (mint, inscribe-commit, future RBF replacement, future CPFP child).
+   - `signTransfer` — input 0 = ordinalsAddress, inputs 1..N =
+     paymentAddress, all SIGHASH_ALL. Caller only states
+     `fundingInputCount`; positions are derived.
+   - `signOfferAccept` — input 0 = ordinalsAddress; nothing else
+     touched. Buyer's inputs come pre-signed.
+   - `signOfferCreatePsbt` — inputs 1..N = paymentAddress; returns
+     partial-sig PSBT bytes (no broadcast).
+
+   No method takes a `signingMap`. No method takes a `sigHash`
+   override. Topology is the method name.
+
+3. **Orchestrator** (PUBLIC API): operation-named entry point that
+   composes builder + signer + broadcast callback. The only Bitcoin-
+   operation surface a consumer sees. Examples:
+   `Cat21Service.createCat21Transaction` (mint),
+   `Cat21TransferOrchestrator.transfer`,
+   `Cat21CreateOfferOrchestrator.createOffer`,
+   `Cat21AcceptOfferOrchestrator.acceptOffer`,
+   `inscribeAndBroadcast`. Future RBF / CPFP / Bitcoin-send /
+   rune-etch operations get a sibling orchestrator following the
+   same pattern.
+
+**The signer interface (`WalletSigner`) and the per-method input
+shapes (`SignSingleFundingInputArgs`, `SignTransferArgs`,
+`SignOfferAcceptArgs`, `SignOfferCreatePsbtArgs`) are NOT exported
+through `core.ts` or `index.ts`.** Consumers can't reach them without
+a deep import that the package `exports` map blocks. The only public
+Bitcoin-operation surface is orchestrators.
+
+**When adding a new on-chain operation:**
+
+1. Write the builder under `src/<operation>/<operation>.helper.ts`.
+2. Add a sibling signer method to `WalletSigner` (operation-named,
+   hardcoded topology). Implement on every signer via the
+   `operationNamedDefaults` helper or inline.
+3. Add an orchestrator under `src/<operation>/<operation>-orchestrator.ts`
+   (pure function for non-Angular consumers) and/or a sibling
+   Angular `@Injectable` for Angular consumers. Export through
+   `core.ts` + `index.ts`.
+4. Per-signer specs pin the operation's invariants (positive-equality
+   asserts on the wire-tx bytes); orchestrator spec proves the full
+   build → sign → broadcast chain end-to-end.
+
+**Legacy state:** the internal `signAndBroadcast` /
+`signMultiInputAndBroadcast` / `signPsbtOnly` methods still exist on
+each signer for the `operationNamedDefaults` delegation, and remain
+on the `WalletSigner` interface for the delegation typing. The
+`WalletSigner` interface itself is NOT re-exported through `core.ts`
+or `index.ts`, so no public consumer can reach those methods. Future
+passes can inline the delegation and drop the legacy methods
+entirely from the interface.
+
 ## HARD RULE: cat UTXO is always 546 sats, FIFO (input 0 → output 0)
 
 **Every cat-bearing UTXO is exactly 546 sats. Every cat-touching tx

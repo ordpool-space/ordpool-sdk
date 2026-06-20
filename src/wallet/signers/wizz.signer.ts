@@ -9,6 +9,7 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -41,8 +42,7 @@ interface WizzRpc {
  * namespace) for backwards compatibility; both bindings reference
  * the same provider via Proxy. Prefer `window.wizz`.
  */
-export const wizzSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.wizz,
+const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex: string = hex.encode(input.psbtBytes);
@@ -84,4 +84,10 @@ export const wizzSigner: WalletSigner = {
       map((signedPsbtHex) => hex.decode(signedPsbtHex)),
     );
   },
+};
+
+export const wizzSigner: WalletSigner = {
+  providerId: KnownOrdinalWalletType.wizz,
+  ...legacy,
+  ...operationNamedDefaults(legacy),
 };

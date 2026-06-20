@@ -185,53 +185,111 @@ export interface SignPsbtOnlyInput {
 }
 
 /**
+ * Single-input mint / inscribe-commit / RBF / CPFP-child shape.
+ * The PSBT has exactly one input at `paymentAddress`, SIGHASH_ALL.
+ * The signer asks the wallet to sign that one input, finalizes,
+ * broadcasts via the caller's callback.
+ */
+export interface SignSingleFundingInputArgs {
+  psbtBytes: Uint8Array;
+  paymentAddress: string;
+  network: Network;
+  broadcast(txHex: string): Observable<string>;
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+/**
+ * Transfer shape — input 0 = cat UTXO at `ordinalsAddress`, inputs
+ * 1..`fundingInputCount` = funding UTXOs at `paymentAddress`, all
+ * SIGHASH_ALL. Topology is fixed by ordinal-theory FIFO + the
+ * cat-flow HARD RULE (cat at input 0). Caller (orchestrator) only
+ * states how many funding inputs the same builder put after the cat.
+ */
+export interface SignTransferArgs {
+  psbtBytes: Uint8Array;
+  ordinalsAddress: string;
+  paymentAddress: string;
+  /** Number of funding inputs at paymentAddress, positioned at indexes 1..count. */
+  fundingInputCount: number;
+  network: Network;
+  broadcast(txHex: string): Observable<string>;
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+/**
+ * Offer-accept (seller) shape — input 0 = the seller's cat UTXO at
+ * `ordinalsAddress`, SIGHASH_ALL. All other inputs are buyer-signed
+ * and MUST NOT be touched. The signer must restrict its own call to
+ * input 0 exactly.
+ */
+export interface SignOfferAcceptArgs {
+  psbtBytes: Uint8Array;
+  ordinalsAddress: string;
+  network: Network;
+  broadcast(txHex: string): Observable<string>;
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+/**
+ * Offer-create (buyer) shape — input 0 = seller's cat placeholder
+ * (untouched), inputs 1..`fundingInputCount` = buyer's funding UTXOs
+ * at `paymentAddress`, all SIGHASH_ALL. Returns the partial-sig
+ * PSBT bytes (the buy-offer artifact); no broadcast.
+ */
+export interface SignOfferCreatePsbtArgs {
+  psbtBytes: Uint8Array;
+  paymentAddress: string;
+  /** Number of buyer funding inputs at paymentAddress, positioned at indexes 1..count. */
+  fundingInputCount: number;
+  network: Network;
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+/**
  * A wallet signer handles the SIGN side of a wallet integration:
- * given an unsigned PSBT, ask the wallet to sign, and emit a txid
- * once it's broadcast. Sign roster is broad per CLAUDE.md
- * "Ship every signer we have code for" — detect-by-signature
- * gates surface visibility, so signer code that ships against a
- * wallet without a runtime API surface is just dormant rather
- * than harmful.
+ * given an unsigned PSBT for a known on-chain operation, ask the
+ * wallet to sign the inputs at the operation's fixed topology, and
+ * emit a txid (or partial-sig PSBT for offer-create) once broadcast.
  *
- * Generic against the PSBT (not cat21-specific). Used by
- * `Cat21Service` today; future inscription-creation / rune-etch /
- * generic-send features will share the same signer registry.
+ * # Topology is NOT configurable.
+ *
+ * Every method's signing positions are HARDCODED for one operation:
+ *
+ *   - `signSingleFundingInput`: 1 input at paymentAddress, SIGHASH_ALL
+ *     (mint, inscribe-commit, RBF replacement, CPFP child).
+ *   - `signTransfer`: input 0 = ordinalsAddress, inputs 1..N = paymentAddress.
+ *   - `signOfferAccept`: input 0 = ordinalsAddress; nothing else.
+ *   - `signOfferCreatePsbt`: inputs 1..N = paymentAddress; input 0 untouched.
+ *
+ * No caller can ask for a non-topology shape. No "signingMap"
+ * primitive exists anymore.
+ *
+ * Sign roster is broad per CLAUDE.md "Ship every signer we have
+ * code for" — detect-by-signature gates surface visibility, so
+ * signer code that ships against a wallet without a runtime API
+ * surface is just dormant rather than harmful.
+ *
+ * # `signOfferCreatePsbt` and watch-only signers.
+ *
+ * Buyer-side offer-create produces a sign-only-no-broadcast PSBT.
+ * Signers that can't do sign-without-broadcast throw with a clear
+ * message; the consumer steers the user to a compatible wallet
+ * (xverse / cat21-wallet / leather / unisat / psbt-export today).
  */
 export interface WalletSigner {
   readonly providerId: KnownOrdinalWalletType;
 
-  /**
-   * Single-input sign (mint flow). One input at the payment address,
-   * SIGHASH_ALL. The mint PSBT has exactly one input — the user's
-   * funding UTXO — so a dedicated method beats a generalised one.
-   */
+  // ── Operation-named topology methods (the safe public-via-orchestrator surface)
+  signSingleFundingInput(input: SignSingleFundingInputArgs): Observable<{ txId: string }>;
+  signTransfer(input: SignTransferArgs): Observable<{ txId: string }>;
+  signOfferAccept(input: SignOfferAcceptArgs): Observable<{ txId: string }>;
+  signOfferCreatePsbt(input: SignOfferCreatePsbtArgs): Observable<Uint8Array>;
+
+  // ── Legacy generic methods (DEPRECATED, slated for removal in Phase 2).
+  //    Kept temporarily so existing orchestrators + 11 signer files stay
+  //    compiling during the migration window. Do not call from new code.
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }>;
-
-  /**
-   * Multi-address sign (transfer, offer-accept). The caller drives
-   * the per-address, per-index breakdown explicitly via `signingMap`.
-   * See `SignMultiInputAndBroadcastInput` for the concrete shapes per
-   * cat-flow.
-   *
-   * Every shipping signer implements this method. We don't expose a
-   * "this wallet can't do multi" capability bit because flows that
-   * need it (transfer, offer) always reach for it, and signer-level
-   * support is sequence-of-single-sign for the wallets without
-   * native multi-input RPCs (Leather, cat21-wallet).
-   */
   signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }>;
-
-  /**
-   * Sign-only (buy-offer create). Used when the resulting PSBT is
-   * incomplete-by-design and broadcasting would fail at finalisation.
-   * Returns the signed partial-sig PSBT bytes. Today's only caller is
-   * buyer-side offer-create.
-   *
-   * Signers that have no in-wallet sign-without-broadcast path can
-   * throw with a clear message; the consumer will steer the user to a
-   * wallet that does (xverse / cat21-wallet / leather / unisat
-   * implement this today).
-   */
   signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array>;
 }
 
