@@ -181,10 +181,6 @@ test('inscribe an artifact on regtest via Wizz: build commit+reveal in SDK, sign
   expect(regtest.paymentAddress).toMatch(/^bcrt1q/);
   expect(regtest.ordinalsAddress).toMatch(/^bcrt1p/);
 
-  const paymentPubkeyXonly = wallet.paymentPublicKey.length === 66
-    ? wallet.paymentPublicKey.slice(2)
-    : wallet.paymentPublicKey;
-
   rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', regtest.paymentAddress, String(FUND_AMOUNT_BTC));
   await waitForElectrsSync(mineBlocks(1));
   const utxo = await waitForUtxoAt(regtest.paymentAddress, Math.round(FUND_AMOUNT_BTC * 1e8));
@@ -196,7 +192,6 @@ test('inscribe an artifact on regtest via Wizz: build commit+reveal in SDK, sign
       utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
       paymentAddress: regtest.paymentAddress,
       paymentPublicKey: wallet.paymentPublicKey,
-      paymentPubkeyXonly,
       recipientAddress: regtest.ordinalsAddress,
       bodyHex: utf8ToHex(INSCRIPTION_BODY_TEXT),
       contentType: INSCRIPTION_CONTENT_TYPE,

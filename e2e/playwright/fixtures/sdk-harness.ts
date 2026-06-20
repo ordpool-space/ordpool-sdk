@@ -145,7 +145,7 @@ declare global {
       }>;
       buildAndSignMintViaOyl(input: MintRequest): Promise<{ txHex: string }>;
       buildAndSignInscribeViaOyl(input: InscribeRequest): Promise<InscribeSignedResult>;
-      buildInscribePsbtForAlby(input: InscribeRequest): { commitPsbtHex: string; revealHex: string; commitTxid: string; revealTxid: string };
+      buildInscribePsbtForAlby(input: InscribeRequest): { commitPsbtHex: string; revealHex: string; commitTxid: string; revealTxid: string; ephemeralPrivKeyHex: string; ephemeralPubkeyXonlyHex: string };
       detectAlby(): boolean;
       connectAlby(): Promise<{
         type: KnownOrdinalWalletType;
@@ -182,24 +182,23 @@ export interface MintRequest {
 
 /**
  * Inscribe request shape. The wallet only signs the COMMIT — the
- * reveal is finalized inside `createInscribeTransactions` with the
- * ephemeral key (which the orchestrator zeroes before returning).
+ * reveal is finalized inside `createInscribeTransactions` with a
+ * fresh ephemeral key. That ephemeral key is then RETURNED on the
+ * result (`ephemeral.privKey`) so the consumer can rebuild
+ * alternate reveals later (redirect, RBF, recover-to-self, bundle).
+ * Consumers persist it the same way they persist any other
+ * money-bearing hot key.
  *
  * `bodyHex` and `contentType` define the inscription payload. The
  * `feeRatePerVbyte` is applied identically to commit + reveal per
  * the CPFP universal pattern; the orchestrator simulates fees.
- *
  * `recipientAddress` is where the inscription lands (P2TR
- * recommended for ord-theory clarity); `paymentPubkeyXonly` is the
- * wallet's x-only key that backs the 2-leaf recovery tapscript on
- * the commit output, so the user can recover the postage if the
- * reveal never broadcasts.
+ * recommended for ord-theory clarity).
  */
 export interface InscribeRequest {
   utxo: { txid: string; vout: number; value: number };
   paymentAddress: string;
   paymentPublicKey: string;       // hex (compressed 33-byte)
-  paymentPubkeyXonly: string;     // hex (32-byte) for the recovery leaf
   recipientAddress: string;
   bodyHex: string;                // inscription body bytes, hex
   contentType?: string;
@@ -215,6 +214,13 @@ export interface InscribeSignedResult {
   commitTxid: string;
   /** Reveal txid (already finalized). */
   revealTxid: string;
+  /**
+   * Ephemeral private key as hex (bearer instrument for the commit
+   * output). Consumers persist this; specs assert it's returned.
+   */
+  ephemeralPrivKeyHex: string;
+  /** Ephemeral x-only pubkey as hex. */
+  ephemeralPubkeyXonlyHex: string;
 }
 
 const statusEl = () => document.getElementById('status')!;
@@ -563,7 +569,6 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaXverse = async (input: InscribeR
   statusEl().textContent = `building inscribe (commit+reveal) via xverse…`;
 
   const paymentPubkey = hexToBytes(input.paymentPublicKey);
-  const paymentPubkeyXonly = hexToBytes(input.paymentPubkeyXonly);
   const body = hexToBytes(input.bodyHex);
   const txnOutput: TxnOutput = {
     txid:  input.utxo.txid,
@@ -573,13 +578,13 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaXverse = async (input: InscribeR
   };
 
   // Layer-4 orchestrator: builds the commit PSBT (unsigned, awaits
-  // the wallet) and the reveal hex (already finalized with a fresh
-  // ephemeral key that the orchestrator zeroes before returning).
+  // the wallet) + the default reveal (already finalized with the
+  // fresh ephemeral key). The ephemeral key is returned for the
+  // consumer to persist.
   const inscribed = createInscribeTransactions({
     paymentOutput: txnOutput,
     paymentPublicKey: paymentPubkey,
     paymentAddress: input.paymentAddress,
-    paymentPubkeyXonly,
     recipientAddress: input.recipientAddress,
     body,
     contentType: input.contentType,
@@ -630,6 +635,8 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaXverse = async (input: InscribeR
     revealHex: inscribed.revealHex,
     commitTxid: inscribed.commitTxid,
     revealTxid: inscribed.revealTxid,
+    ephemeralPrivKeyHex: bytesToHex(inscribed.ephemeral.privKey),
+    ephemeralPubkeyXonlyHex: bytesToHex(inscribed.ephemeral.pubkeyXonly),
   };
 };
 
@@ -734,7 +741,6 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaUnisat = async (input: InscribeR
   statusEl().textContent = `building inscribe (commit+reveal) via unisat…`;
 
   const paymentPubkey = hexToBytes(input.paymentPublicKey);
-  const paymentPubkeyXonly = hexToBytes(input.paymentPubkeyXonly);
   const body = hexToBytes(input.bodyHex);
   const txnOutput: TxnOutput = {
     txid:  input.utxo.txid,
@@ -747,18 +753,11 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaUnisat = async (input: InscribeR
     paymentOutput: txnOutput,
     paymentPublicKey: paymentPubkey,
     paymentAddress: input.paymentAddress,
-    paymentPubkeyXonly,
     recipientAddress: input.recipientAddress,
     body,
     contentType: input.contentType,
     feeRatePerVbyte: input.feeRatePerVbyte,
     network: Network.Regtest,
-  });
-  log('inscribe.built', {
-    commitPsbtBytes: inscribed.commitPsbt.length,
-    revealHexChars: inscribed.revealHex.length,
-    commitTxid: inscribed.commitTxid,
-    revealTxid: inscribed.revealTxid,
   });
 
   const unisat = (window as unknown as {
@@ -768,13 +767,14 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaUnisat = async (input: InscribeR
     autoFinalized: false,
   });
   const commitHex = extractWireTxFromPsbt(hexToBytes(signedCommitPsbtHex));
-  log('inscribe.commit-signed', { commitHex: commitHex.slice(0, 40) + '…', length: commitHex.length });
 
   return {
     commitHex,
     revealHex: inscribed.revealHex,
     commitTxid: inscribed.commitTxid,
     revealTxid: inscribed.revealTxid,
+    ephemeralPrivKeyHex: bytesToHex(inscribed.ephemeral.privKey),
+    ephemeralPubkeyXonlyHex: bytesToHex(inscribed.ephemeral.pubkeyXonly),
   };
 };
 
@@ -1200,17 +1200,19 @@ window.ordpoolSdkHarness.buildAndSignMintViaPhantom = async (input: MintRequest)
 /**
  * Shared inscribe orchestrator entry. All wallet-specific inscribe
  * harness methods call this first to get the unsigned commit PSBT
- * + the already-signed reveal hex, then they only differ in how
- * they ask the wallet to sign the commit's input 0.
+ * + the already-signed reveal hex + the ephemeral key, then they
+ * only differ in how they ask the wallet to sign the commit's
+ * input 0.
  */
 function orchestrateInscribe(input: InscribeRequest): {
   commitPsbt: Uint8Array;
   revealHex: string;
   commitTxid: string;
   revealTxid: string;
+  ephemeralPrivKeyHex: string;
+  ephemeralPubkeyXonlyHex: string;
 } {
   const paymentPubkey = hexToBytes(input.paymentPublicKey);
-  const paymentPubkeyXonly = hexToBytes(input.paymentPubkeyXonly);
   const body = hexToBytes(input.bodyHex);
   const txnOutput: TxnOutput = {
     txid:  input.utxo.txid,
@@ -1222,7 +1224,6 @@ function orchestrateInscribe(input: InscribeRequest): {
     paymentOutput: txnOutput,
     paymentPublicKey: paymentPubkey,
     paymentAddress: input.paymentAddress,
-    paymentPubkeyXonly,
     recipientAddress: input.recipientAddress,
     body,
     contentType: input.contentType,
@@ -1234,6 +1235,8 @@ function orchestrateInscribe(input: InscribeRequest): {
     revealHex: r.revealHex,
     commitTxid: r.commitTxid,
     revealTxid: r.revealTxid,
+    ephemeralPrivKeyHex: bytesToHex(r.ephemeral.privKey),
+    ephemeralPubkeyXonlyHex: bytesToHex(r.ephemeral.pubkeyXonly),
   };
 }
 
@@ -1264,7 +1267,7 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaLeather = async (input: Inscribe
   });
   const commitHex = extractWireTxFromPsbt(hexToBytes(response.result.hex));
   log('inscribe.commit-signed', { commitHex: commitHex.slice(0, 40) + '…' });
-  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid, ephemeralPrivKeyHex: o.ephemeralPrivKeyHex, ephemeralPubkeyXonlyHex: o.ephemeralPubkeyXonlyHex };
 };
 
 window.ordpoolSdkHarness.buildAndSignInscribeViaCat21Wallet = async (input: InscribeRequest) => {
@@ -1293,7 +1296,7 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaCat21Wallet = async (input: Insc
     broadcast: false,
   });
   const commitHex = extractWireTxFromPsbt(hexToBytes(response.result.hex));
-  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid, ephemeralPrivKeyHex: o.ephemeralPrivKeyHex, ephemeralPubkeyXonlyHex: o.ephemeralPubkeyXonlyHex };
 };
 
 window.ordpoolSdkHarness.buildAndSignInscribeViaWizz = async (input: InscribeRequest) => {
@@ -1308,7 +1311,7 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaWizz = async (input: InscribeReq
   }).wizz;
   const signedCommitHex = await wizz.signPsbt(bytesToHex(o.commitPsbt), { autoFinalized: false });
   const commitHex = extractWireTxFromPsbt(hexToBytes(signedCommitHex));
-  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid, ephemeralPrivKeyHex: o.ephemeralPrivKeyHex, ephemeralPubkeyXonlyHex: o.ephemeralPubkeyXonlyHex };
 };
 
 window.ordpoolSdkHarness.buildAndSignInscribeViaOkx = async (input: InscribeRequest) => {
@@ -1343,7 +1346,7 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaOkx = async (input: InscribeRequ
     }],
   });
   const commitHex = extractWireTxFromPsbt(hexToBytes(signedCommitHex));
-  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid, ephemeralPrivKeyHex: o.ephemeralPrivKeyHex, ephemeralPubkeyXonlyHex: o.ephemeralPubkeyXonlyHex };
 };
 
 window.ordpoolSdkHarness.buildAndSignInscribeViaOyl = async (input: InscribeRequest) => {
@@ -1375,7 +1378,7 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaOyl = async (input: InscribeRequ
     ? hexToBytes(signedHex)
     : base64.decode(response.signedPsbt ?? response.psbt ?? '');
   const commitHex = extractWireTxFromPsbt(signedBytes);
-  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid, ephemeralPrivKeyHex: o.ephemeralPrivKeyHex, ephemeralPubkeyXonlyHex: o.ephemeralPubkeyXonlyHex };
 };
 
 window.ordpoolSdkHarness.buildAndSignInscribeViaPhantom = async (input: InscribeRequest) => {
@@ -1409,7 +1412,7 @@ window.ordpoolSdkHarness.buildAndSignInscribeViaPhantom = async (input: Inscribe
     ],
   });
   const commitHex = extractWireTxFromPsbt(signedBytes);
-  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid };
+  return { commitHex, revealHex: o.revealHex, commitTxid: o.commitTxid, revealTxid: o.revealTxid, ephemeralPrivKeyHex: o.ephemeralPrivKeyHex, ephemeralPubkeyXonlyHex: o.ephemeralPubkeyXonlyHex };
 };
 
 window.ordpoolSdkHarness.buildInscribePsbtForAlby = (input: InscribeRequest) => {
@@ -1423,6 +1426,8 @@ window.ordpoolSdkHarness.buildInscribePsbtForAlby = (input: InscribeRequest) => 
     revealHex: o.revealHex,
     commitTxid: o.commitTxid,
     revealTxid: o.revealTxid,
+    ephemeralPrivKeyHex: o.ephemeralPrivKeyHex,
+    ephemeralPubkeyXonlyHex: o.ephemeralPubkeyXonlyHex,
   };
 };
 

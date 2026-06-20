@@ -8,17 +8,18 @@ import { Network, toScureNetwork } from '../network';
  *
  * Construction outline:
  *
- *   1. The reveal will spend a P2TR output whose taptree has TWO
- *      leaves:
- *        - Leaf 0 (envelope): the inscription tapscript built by
- *          `buildInscriptionEnvelope`. Signed by the ephemeral key
- *          during reveal. Used once, then irrelevant.
- *        - Leaf 1 (recovery): `<userPubkeyXOnly> OP_CHECKSIG`.
- *          Signed by the user's own wallet. Provides the
- *          "stuck-commit" sweep path documented in the plan.
- *      Internal key is the BIP-341 NUMS point
- *      (`btc.TAPROOT_UNSPENDABLE_KEY`) so the key-path spend is
- *      provably unspendable — both leaves are the only spend paths.
+ *   1. The reveal spends a P2TR output with a **single envelope leaf**.
+ *      The **ephemeral key** is the taproot internal key — so the
+ *      commit output has two equivalent spend paths:
+ *        a. Script-path via the envelope leaf (used by the standard
+ *           reveal — emits the inscription).
+ *        b. Key-path via the ephemeral key (used by any redirect /
+ *           RBF / recover / bundle reveal the consumer constructs
+ *           after `createInscribeTransactions` returns).
+ *      Same shape as Casey Rodarmor's `ord` reference client
+ *      (`src/wallet/batch/plan.rs` lines 367-382). The ephemeral key
+ *      doubles as a bearer instrument: whoever holds it can build
+ *      any reveal-tx shape until the commit output is spent.
  *
  *   2. The commit transaction has:
  *        - 1 funding input (caller-supplied UTXO; user's wallet
@@ -59,12 +60,15 @@ export interface InscribeCommitArgs {
   /** Tapscript bytes for the envelope leaf (output of `buildInscriptionEnvelope`). */
   envelopeScript: Uint8Array;
   /**
-   * 32-byte x-only public key of the user's payment-side wallet.
-   * Encoded into leaf-1 of the taptree as `<pubkey> OP_CHECKSIG` so
-   * the user can sweep the commit output back if the reveal never
-   * lands (lost reveal hex, page closed mid-flow, fee market spike).
+   * 32-byte x-only ephemeral public key. Doubles as:
+   *   - The first push inside the envelope script (`<pubkey>
+   *     CHECKSIG OP_FALSE OP_IF "ord" …`).
+   *   - The taproot internal key of the commit output.
+   * Holding the matching private key authorises any reveal-tx
+   * shape the consumer wants to build (default reveal, redirect,
+   * RBF, recover-to-self, bundle).
    */
-  userRecoveryPubkeyXonly: Uint8Array;
+  ephemeralPubkeyXonly: Uint8Array;
   /** Commit-tx fee in sats (built by the fee helper at Layer 3). */
   commitFeeSats: number;
   /** Reveal-tx fee in sats (reserved in commit output 0 for the reveal to pay). */
@@ -85,12 +89,12 @@ export interface InscribeCommitResult {
   commitOutputValueSats: number;
   /** Taptree metadata the reveal builder needs to construct its spending witness. */
   taproot: {
-    /** Internal key actually written to the output (always NUMS — provably unspendable). */
+    /** Taproot internal key actually written to the output (the ephemeral pubkey). */
     internalKey: Uint8Array;
     /**
-     * scure's tapLeafScript array, indexed by leaf. The envelope leaf is
-     * at index 0; the recovery leaf at index 1. The reveal builder passes
-     * `[tapLeafScript[0]]` to its input to spend via the envelope.
+     * scure's tapLeafScript array — single entry, for the envelope leaf.
+     * The reveal builder passes this straight to the script-path reveal;
+     * a key-path reveal doesn't need it.
      */
     tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
   };
@@ -98,37 +102,26 @@ export interface InscribeCommitResult {
   changeSats: number;
 }
 
-/**
- * Builds the leaf-1 recovery tapscript: `<userPubkeyXonly> OP_CHECKSIG`.
- * 34 bytes total (32-byte push + push prefix + opcode).
- */
-function buildRecoveryLeafScript(userPubkeyXonly: Uint8Array): Uint8Array {
-  if (userPubkeyXonly.length !== 32) {
-    throw new Error(`userRecoveryPubkeyXonly must be 32 bytes; got ${userPubkeyXonly.length}`);
-  }
-  return btc.Script.encode([userPubkeyXonly, 'CHECKSIG'] as never);
-}
-
 export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommitResult {
   if (args.commitFeeSats < 0) throw new Error('commitFeeSats must be non-negative');
   if (args.revealFeeReserveSats < 0) throw new Error('revealFeeReserveSats must be non-negative');
+  if (args.ephemeralPubkeyXonly.length !== 32) {
+    throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
+  }
 
   const scureNetwork = toScureNetwork(args.network);
   const postageSats = INSCRIBE_POSTAGE_SATS;
   const commitOutputValueSats = postageSats + args.revealFeeReserveSats;
 
-  // 2-leaf taptree: envelope leaf + recovery leaf.
-  const recoveryScript = buildRecoveryLeafScript(args.userRecoveryPubkeyXonly);
-  const tree: btc.TaprootScriptList = [
-    { script: args.envelopeScript },
-    { script: recoveryScript },
-  ];
-  // allowUnknownOutputs=true because the envelope tapscript isn't
-  // a pattern scure recognises (it's `<pubkey> CHECKSIG OP_FALSE
-  // OP_IF "ord" ... OP_ENDIF`, which is unique to ordinals). The
-  // recovery leaf would be recognised as p2pk-style but we set the
-  // flag once for both leaves.
-  const commitP2tr = btc.p2tr(btc.TAPROOT_UNSPENDABLE_KEY, tree, scureNetwork, true);
+  // Single envelope leaf; ephemeral key as the taproot internal key.
+  // Matches ord's `TaprootBuilder::new().add_leaf(0, reveal_script)
+  // .finalize(&secp256k1, public_key)` (plan.rs:378-382).
+  //
+  // allowUnknownOutputs=true because the envelope tapscript isn't a
+  // pattern scure recognises (`<pubkey> CHECKSIG OP_FALSE OP_IF
+  // "ord" ... OP_ENDIF` is ord-specific).
+  const tree: btc.TaprootScriptList = [{ script: args.envelopeScript }];
+  const commitP2tr = btc.p2tr(args.ephemeralPubkeyXonly, tree, scureNetwork, true);
 
   const commitAddress = commitP2tr.address;
   if (commitAddress === undefined) {
@@ -204,7 +197,7 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
     commitOutputScript: commitP2tr.script,
     commitOutputValueSats,
     taproot: {
-      internalKey: btc.TAPROOT_UNSPENDABLE_KEY,
+      internalKey: args.ephemeralPubkeyXonly,
       tapLeafScript: commitP2tr.tapLeafScript,
     },
     changeSats,

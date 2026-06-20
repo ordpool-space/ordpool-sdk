@@ -7,7 +7,7 @@
  * spec exercises both together to prove:
  *
  *   1. The commit P2TR address is bech32m-valid for each network.
- *   2. The reveal can SUCCESSFULLY spend the commit output via the
+ *   2. The reveal SUCCESSFULLY spends the commit output via the
  *      envelope leaf with the matching ephemeral key (proves
  *      taptree wiring + signature path are correct end-to-end).
  *   3. The reveal places the recipient at output 0 with postage
@@ -15,6 +15,9 @@
  *      first sat of the first output).
  *   4. ordpool-parser can reconstruct the inscription content from
  *      the broadcast reveal's witness (full round-trip).
+ *   5. The taproot internal key IS the ephemeral pubkey (matches
+ *      `ord` reference shape — `src/wallet/batch/plan.rs:367-382`).
+ *      Single envelope leaf in the taptree; no recovery leaf.
  */
 
 import { describe, expect, it } from '@jest/globals';
@@ -31,7 +34,7 @@ import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-re
 
 
 const FUNDING_PRIV = new Uint8Array(32).fill(0x11);
-const RECOVERY_PRIV = new Uint8Array(32).fill(0x22);
+const RECIPIENT_PRIV = new Uint8Array(32).fill(0x22);
 
 function makeFundingUtxo(scureNetwork: typeof btc.NETWORK, valueSats: number) {
   // P2WPKH funding for simplicity — the input-adapter spec
@@ -57,13 +60,12 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
   const scureNetwork = toScureNetwork(NETWORK);
 
   function makeRecipientP2tr() {
-    return btc.p2tr(schnorr.getPublicKey(RECOVERY_PRIV), undefined, scureNetwork, true);
+    return btc.p2tr(schnorr.getPublicKey(RECIPIENT_PRIV), undefined, scureNetwork, true);
   }
 
-  it('builds a valid commit P2TR address with the 2-leaf taptree (envelope + recovery)', () => {
+  it('builds a valid commit P2TR address with a single-leaf envelope taptree and ephemeral key as internal key', () => {
     const ephemeralPriv = new Uint8Array(32).fill(0x33);
     const ephemeralPubkey = deriveRevealPubkeyXonly(ephemeralPriv);
-    const recoveryPubkey = schnorr.getPublicKey(RECOVERY_PRIV);
 
     const envelope = buildInscriptionEnvelope({
       revealPubkeyXonly: ephemeralPubkey,
@@ -76,7 +78,7 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       fundingInput,
       senderChangeAddress: fundingAddress,
       envelopeScript: envelope,
-      userRecoveryPubkeyXonly: recoveryPubkey,
+      ephemeralPubkeyXonly: ephemeralPubkey,
       commitFeeSats: 1_000,
       revealFeeReserveSats: 2_000,
       network: NETWORK,
@@ -84,16 +86,14 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
 
     expect(result.commitAddress.startsWith('bc1p')).toBe(true);
     expect(result.commitOutputValueSats).toBe(INSCRIBE_POSTAGE_SATS + 2_000);
-    expect(result.taproot.internalKey).toEqual(btc.TAPROOT_UNSPENDABLE_KEY);
-    // tapLeafScript should carry both leaves (envelope + recovery).
+    expect(result.taproot.internalKey).toEqual(ephemeralPubkey);
     expect(Array.isArray(result.taproot.tapLeafScript)).toBe(true);
-    expect(result.taproot.tapLeafScript.length).toBe(2);
+    expect(result.taproot.tapLeafScript.length).toBe(1);
   });
 
   it('reveal can spend the commit output via the envelope leaf (finalize succeeds)', () => {
     const ephemeralPriv = new Uint8Array(32).fill(0x44);
     const ephemeralPubkey = deriveRevealPubkeyXonly(ephemeralPriv);
-    const recoveryPubkey = schnorr.getPublicKey(RECOVERY_PRIV);
     const recipient = makeRecipientP2tr();
 
     const body = new TextEncoder().encode('test inscription content');
@@ -108,17 +108,11 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       fundingInput,
       senderChangeAddress: fundingAddress,
       envelopeScript: envelope,
-      userRecoveryPubkeyXonly: recoveryPubkey,
+      ephemeralPubkeyXonly: ephemeralPubkey,
       commitFeeSats: 1_000,
       revealFeeReserveSats: 2_000,
       network: NETWORK,
     });
-
-    // Use the envelope leaf only (index 0). scure's tapLeafScript
-    // mapping carries both leaves; the reveal builder picks the one
-    // it needs by signing with the ephemeral key (which only matches
-    // leaf 0's pubkey, not the recovery leaf's pubkey).
-    const envelopeLeafOnly = [commit.taproot.tapLeafScript[0]] as typeof commit.taproot.tapLeafScript;
 
     const reveal = buildInscribeRevealTx({
       commitTxid: 'a'.repeat(64),
@@ -127,7 +121,7 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       commitOutputScript: commit.commitOutputScript,
       taproot: {
         internalKey: commit.taproot.internalKey,
-        tapLeafScript: envelopeLeafOnly,
+        tapLeafScript: commit.taproot.tapLeafScript,
       },
       ephemeralPrivKey: ephemeralPriv,
       recipientAddress: recipient.address!,
@@ -155,7 +149,7 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       fundingInput,
       senderChangeAddress: fundingAddress,
       envelopeScript: envelope,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: ephemeralPubkey,
       commitFeeSats: 1_000,
       revealFeeReserveSats: 2_000,
       network: NETWORK,
@@ -168,7 +162,7 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       commitOutputScript: commit.commitOutputScript,
       taproot: {
         internalKey: commit.taproot.internalKey,
-        tapLeafScript: [commit.taproot.tapLeafScript[0]] as typeof commit.taproot.tapLeafScript,
+        tapLeafScript: commit.taproot.tapLeafScript,
       },
       ephemeralPrivKey: ephemeralPriv,
       recipientAddress: recipient.address!,
@@ -198,7 +192,7 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       fundingInput,
       senderChangeAddress: fundingAddress,
       envelopeScript: envelope,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: ephemeralPubkey,
       commitFeeSats: 1_000,
       revealFeeReserveSats: 2_000,
       network: NETWORK,
@@ -211,34 +205,29 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       commitOutputScript: commit.commitOutputScript,
       taproot: {
         internalKey: commit.taproot.internalKey,
-        tapLeafScript: [commit.taproot.tapLeafScript[0]] as typeof commit.taproot.tapLeafScript,
+        tapLeafScript: commit.taproot.tapLeafScript,
       },
       ephemeralPrivKey: ephemeralPriv,
       recipientAddress: recipient.address!,
       network: NETWORK,
     });
 
-    // Parser walks the reveal's witness for the inscription mark.
-    // The envelope script (with our content) is in witness[1] of input 0.
     const decoded = btc.Transaction.fromRaw(hex.decode(reveal.revealHex));
     const witness = decoded.getInput(0).finalScriptWitness!.map(w => hex.encode(w));
-    const fakeTx = {
-      txid: reveal.revealTxid,
-      vin: [{ witness }],
-    };
+    const fakeTx = { txid: reveal.revealTxid, vin: [{ witness }] };
     const parsed = InscriptionParserService.parse(fakeTx);
     expect(parsed.length).toBe(1);
     expect(parsed[0].contentType).toBe('text/plain;charset=utf-8');
     expect(parsed[0].getDataRaw()).toEqual(body);
   });
 
-  it('rejects 33-byte recovery pubkey (must be x-only)', () => {
+  it('rejects 33-byte ephemeral pubkey (must be x-only)', () => {
     const { fundingInput, fundingAddress } = makeFundingUtxo(scureNetwork, 100_000);
     expect(() => buildInscribeCommitPsbt({
       fundingInput,
       senderChangeAddress: fundingAddress,
       envelopeScript: new Uint8Array(10),
-      userRecoveryPubkeyXonly: new Uint8Array(33), // wrong size
+      ephemeralPubkeyXonly: new Uint8Array(33), // wrong size
       commitFeeSats: 1_000,
       revealFeeReserveSats: 2_000,
       network: NETWORK,
@@ -252,12 +241,12 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       contentType: 'text/plain',
       body: new Uint8Array(0),
     });
-    const { fundingInput, fundingAddress } = makeFundingUtxo(scureNetwork, 100); // way too small
+    const { fundingInput, fundingAddress } = makeFundingUtxo(scureNetwork, 100);
     expect(() => buildInscribeCommitPsbt({
       fundingInput,
       senderChangeAddress: fundingAddress,
       envelopeScript: envelope,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: ephemeralPubkey,
       commitFeeSats: 1_000,
       revealFeeReserveSats: 2_000,
       network: NETWORK,
@@ -272,14 +261,13 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       body: new TextEncoder().encode('x'),
     });
 
-    // Tune funding so calculatedChange = 100 sats (below dust 294 for P2WPKH).
     const fundingValue = INSCRIBE_POSTAGE_SATS + 2_000 + 1_000 + 100;
     const { fundingInput, fundingAddress } = makeFundingUtxo(scureNetwork, fundingValue);
     const result = buildInscribeCommitPsbt({
       fundingInput,
       senderChangeAddress: fundingAddress,
       envelopeScript: envelope,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: ephemeralPubkey,
       commitFeeSats: 1_000,
       revealFeeReserveSats: 2_000,
       changeDustLimitSats: 294,

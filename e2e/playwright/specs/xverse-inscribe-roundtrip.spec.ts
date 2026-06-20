@@ -176,20 +176,12 @@ test('inscribe an artifact on regtest via xverse: build commit+reveal in SDK, si
   await waitForElectrsSync(mineBlocks(1));
   const utxo = await waitForUtxoAt(wallet.paymentAddress, Math.round(FUND_AMOUNT_BTC * 1e8));
 
-  // The ordinals public key on Xverse is the 33-byte compressed
-  // P2TR-derived pubkey; sats-connect prefixes the parity byte.
-  // For the recovery tapscript we want the 32-byte x-only.
-  const paymentPubkeyXonly = wallet.ordinalsPublicKey.length === 66
-    ? wallet.ordinalsPublicKey.slice(2)
-    : wallet.ordinalsPublicKey;
-
   // ─── Build commit+reveal + sign commit via Xverse popup ────────
   const knownPagesAtStart = new Set(context.pages());
   const signedPromise = harness.evaluate((args) => window.ordpoolSdkHarness.buildAndSignInscribeViaXverse(args), {
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
     paymentAddress: wallet.paymentAddress,
     paymentPublicKey: wallet.paymentPublicKey,
-    paymentPubkeyXonly,
     recipientAddress: wallet.ordinalsAddress,
     bodyHex: utf8ToHex(INSCRIPTION_BODY_TEXT),
     contentType: INSCRIPTION_CONTENT_TYPE,

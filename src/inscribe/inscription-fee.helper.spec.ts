@@ -12,7 +12,7 @@ const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);
 
 const FUNDING_PRIV = new Uint8Array(32).fill(0x77);
-const RECOVERY_PRIV = new Uint8Array(32).fill(0x88);
+const RECIPIENT_PRIV = new Uint8Array(32).fill(0x88);
 
 function makeFundingUtxo(valueSats: number) {
   const fundingPubkey = secp256k1.getPublicKey(FUNDING_PRIV, true);
@@ -40,7 +40,7 @@ function makeFundingUtxo(valueSats: number) {
 }
 
 function makeRecipientP2tr() {
-  return btc.p2tr(schnorr.getPublicKey(RECOVERY_PRIV), undefined, scureNetwork, true);
+  return btc.p2tr(schnorr.getPublicKey(RECIPIENT_PRIV), undefined, scureNetwork, true);
 }
 
 describe('simulateInscribeFees', () => {
@@ -54,7 +54,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     });
     expect(result.totalFeeSats).toBe(result.commitFeeSats + result.revealFeeSats);
@@ -71,7 +71,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     });
     expect(r.combinedVsize).toBe(r.commitVsize + r.revealVsize);
@@ -88,7 +88,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     });
     expect(r.commitOutputValueSats).toBe(INSCRIBE_POSTAGE_SATS + r.revealFeeSats);
@@ -103,7 +103,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     });
     expect(r.fundingRequirementSats).toBe(r.commitOutputValueSats + r.commitFeeSats);
@@ -120,7 +120,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     });
     const big = simulateInscribeFees({
@@ -130,7 +130,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     });
     expect(big.revealVsize).toBeGreaterThan(small.revealVsize);
@@ -145,7 +145,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     });
     const at10 = simulateInscribeFees({
@@ -155,7 +155,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     });
     // Ratios won't be exactly 2× because of ceil() rounding on
@@ -173,12 +173,12 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: schnorr.getPublicKey(RECOVERY_PRIV),
+      ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
       network: NETWORK,
     })).toThrow(/positive/);
   });
 
-  it('rejects 33-byte recovery pubkey', () => {
+  it('rejects 33-byte ephemeral pubkey', () => {
     const { fundingInput, fundingAddress } = makeFundingUtxo(100_000);
     expect(() => simulateInscribeFees({
       feeRatePerVbyte: 5,
@@ -186,7 +186,7 @@ describe('simulateInscribeFees', () => {
       fundingInput,
       senderChangeAddress: fundingAddress,
       recipientAddress: makeRecipientP2tr().address!,
-      userRecoveryPubkeyXonly: new Uint8Array(33),
+      ephemeralPubkeyXonly: new Uint8Array(33),
       network: NETWORK,
     })).toThrow(/32 bytes/);
   });

@@ -179,26 +179,24 @@ test('inscribe an artifact on regtest via Alby: build commit+reveal in SDK, sign
   await waitForElectrsSync(mineBlocks(1));
   const utxo = await waitForUtxoAt(connectInfo.address, Math.round(FUND_AMOUNT_BTC * 1e8));
 
-  // 33-byte compressed → 32-byte x-only.
-  const paymentPubkeyXonly = connectInfo.publicKey.length === 66
-    ? connectInfo.publicKey.slice(2)
-    : connectInfo.publicKey;
-
   // Build the commit + reveal via the SDK orchestrator. The reveal
   // is already finalized by the orchestrator; Alby only signs the
-  // commit's funding input.
+  // commit's funding input. The orchestrator returns the ephemeral
+  // key on `built.ephemeralPrivKeyHex` so the spec can rebuild
+  // alternate reveals if it wants (this happy-path test uses the
+  // default reveal as-is).
   const built = await harness.evaluate((args) => {
     return window.ordpoolSdkHarness.buildInscribePsbtForAlby(args);
   }, {
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
     paymentAddress: connectInfo.address,
     paymentPublicKey: connectInfo.publicKey,
-    paymentPubkeyXonly,
     recipientAddress: connectInfo.address,
     bodyHex: utf8ToHex(INSCRIPTION_BODY_TEXT),
     contentType: INSCRIPTION_CONTENT_TYPE,
     feeRatePerVbyte: 5,
   });
+  expect(built.ephemeralPrivKeyHex).toMatch(/^[0-9a-f]{64}$/);
   expect(built.commitTxid).toMatch(/^[0-9a-f]{64}$/);
   expect(built.revealTxid).toMatch(/^[0-9a-f]{64}$/);
 

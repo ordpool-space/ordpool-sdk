@@ -53,8 +53,13 @@ export interface SimulateInscribeFeesArgs {
   senderChangeAddress: string;
   /** Where the inscription lands. */
   recipientAddress: string;
-  /** User wallet's x-only payment pubkey for the recovery tapscript leaf. */
-  userRecoveryPubkeyXonly: Uint8Array;
+  /**
+   * 32-byte x-only ephemeral pubkey used as the taproot internal key
+   * AND embedded in the envelope's `<pubkey> CHECKSIG` prefix. Real
+   * orchestrator passes the freshly-generated key; specs may pass a
+   * deterministic dummy because vsizes don't depend on key bytes.
+   */
+  ephemeralPubkeyXonly: Uint8Array;
   /** Per-address-type dust limit for the commit change. */
   changeDustLimitSats?: number;
   network: Network;
@@ -88,20 +93,21 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
   }
-  if (args.userRecoveryPubkeyXonly.length !== 32) {
-    throw new Error(`userRecoveryPubkeyXonly must be 32 bytes; got ${args.userRecoveryPubkeyXonly.length}`);
+  if (args.ephemeralPubkeyXonly.length !== 32) {
+    throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
   }
 
-  // Deterministic dummy ephemeral key for the simulation. The key
-  // affects byte values (signature, pubkey embedded in envelope)
-  // but not vsizes — the Schnorr sig is always 64 bytes, the
-  // pubkey is always 32 bytes. Using a fixed dummy lets the
-  // simulator avoid touching the OS RNG.
+  // The simulator uses a deterministic dummy ephemeral private key
+  // for the reveal-signing step (the resulting Schnorr signature is
+  // always 64 bytes regardless of the key bytes, so vsize doesn't
+  // care). The pubkey embedded in the envelope + used as taproot
+  // internal key is whatever the caller passed (real orchestrator
+  // passes the freshly-generated ephemeral key; specs may pass a
+  // fixed dummy).
   const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);
-  const dummyEphemeralPubkey = deriveRevealPubkeyXonly(dummyEphemeralPriv);
 
   const envelope = buildInscriptionEnvelope({
-    revealPubkeyXonly: dummyEphemeralPubkey,
+    revealPubkeyXonly: args.ephemeralPubkeyXonly,
     contentType: args.contentType,
     body: args.body,
     fields: args.envelopeFields,
@@ -115,13 +121,12 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     fundingInput: args.fundingInput,
     senderChangeAddress: args.senderChangeAddress,
     envelopeScript: envelope,
-    userRecoveryPubkeyXonly: args.userRecoveryPubkeyXonly,
+    ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
     commitFeeSats: 0,
     revealFeeReserveSats: 0,
     changeDustLimitSats: args.changeDustLimitSats,
     network: args.network,
   });
-  const envelopeLeafOnly = [placeholderCommit.taproot.tapLeafScript[0]] as typeof placeholderCommit.taproot.tapLeafScript;
   const reveal = buildInscribeRevealTx({
     commitTxid: '0'.repeat(64),
     commitVout: 0,
@@ -129,7 +134,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     commitOutputScript: placeholderCommit.commitOutputScript,
     taproot: {
       internalKey: placeholderCommit.taproot.internalKey,
-      tapLeafScript: envelopeLeafOnly,
+      tapLeafScript: placeholderCommit.taproot.tapLeafScript,
     },
     ephemeralPrivKey: dummyEphemeralPriv,
     recipientAddress: args.recipientAddress,
@@ -147,7 +152,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         fundingInput: args.fundingInput,
         senderChangeAddress: args.senderChangeAddress,
         envelopeScript: envelope,
-        userRecoveryPubkeyXonly: args.userRecoveryPubkeyXonly,
+        ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
         commitFeeSats: feeSats,
         revealFeeReserveSats: revealFeeSats,
         changeDustLimitSats: args.changeDustLimitSats,

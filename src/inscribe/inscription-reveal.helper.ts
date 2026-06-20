@@ -16,10 +16,12 @@ import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
  *     Per ord theory, the inscription lands on the first sat of the
  *     first output.
  *
- * The ephemeral key is generated, used to sign, then **zeroed in
- * memory** before the function returns. No key material exits. The
- * returned `revealHex` is self-contained: replayable, idempotent,
- * broadcast-from-anywhere.
+ * The reveal hex is self-contained: signed under the ephemeral
+ * key, replayable, idempotent, broadcast-from-anywhere. The
+ * orchestrator passes the ephemeral key here AND returns it on
+ * `CreateInscribeTransactionsResult.ephemeral.privKey` so the
+ * consumer can rebuild a different reveal later (redirect, RBF,
+ * recover-to-self, bundle) without losing access.
  */
 
 /** Result of `buildInscribeRevealTx`. */
@@ -63,10 +65,9 @@ export interface InscribeRevealArgs {
 /**
  * Signs the reveal via the envelope tapscript leaf, returns the
  * finalized reveal hex. The caller-supplied ephemeral private key
- * is read and used; **caller is responsible for zeroing it** after
- * this function returns. (We don't zero it here because the caller
- * may want to inspect related fields like `revealVsize` before
- * destroying the orchestrator's state.)
+ * is used for the Schnorr signature; the orchestrator returns this
+ * same key on its result so the consumer can rebuild a different
+ * reveal later under different parameters.
  */
 export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealResult {
   const scureNetwork = toScureNetwork(args.network);

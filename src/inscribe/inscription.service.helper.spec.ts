@@ -2,12 +2,14 @@
  * Layer-4 orchestration spec: createInscribeTransactions ties the
  * full inscribe pipeline. The spec exercises the public contract:
  *
- *   - Returns { commitPsbt, revealHex, revealTxid, commitAddress,
- *     fees } shape.
+ *   - Returns the {commitPsbt, revealHex, revealTxid, commitAddress,
+ *     fees, ephemeral, commit} shape.
  *   - Reveal txid is consistent with the revealHex.
  *   - Commit PSBT decodes to a valid scure Transaction.
- *   - The ephemeral key is destroyed (no way to test directly —
- *     the function doesn't return it).
+ *   - The ephemeral key is returned (bearer instrument — consumer
+ *     persists it for redirect / RBF / recover use cases).
+ *   - The returned ephemeral pubkey matches the taproot internal
+ *     key of the commit output (ord-style single-leaf shape).
  *   - Insufficient funds throws with a clear message.
  *
  * Round-trip against ordpool-parser already lives in
@@ -36,7 +38,6 @@ function paymentContext() {
   const p2tr = btc.p2tr(schnorr.getPublicKey(PAYMENT_PRIV), undefined, scureNetwork, true);
   return {
     paymentPublicKey,
-    paymentPubkeyXonly: schnorr.getPublicKey(PAYMENT_PRIV),
     paymentAddress: p2tr.address!,
   };
 }
@@ -57,13 +58,12 @@ function paymentOutputAt(valueSats: number) {
 
 describe('createInscribeTransactions', () => {
 
-  it('returns the full {commitPsbt, revealHex, revealTxid, commitAddress, fees} shape', () => {
-    const { paymentPublicKey, paymentPubkeyXonly, paymentAddress } = paymentContext();
+  it('returns the full {commitPsbt, revealHex, revealTxid, commitAddress, fees, ephemeral, commit} shape', () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
     const result = createInscribeTransactions({
       paymentOutput: paymentOutputAt(100_000),
       paymentPublicKey,
       paymentAddress,
-      paymentPubkeyXonly,
       recipientAddress: recipientAddress(),
       body: new TextEncoder().encode('hello orchestrator'),
       contentType: 'text/plain',
@@ -76,15 +76,33 @@ describe('createInscribeTransactions', () => {
     expect(result.revealTxid.length).toBe(64);
     expect(result.commitAddress.startsWith('bc1p')).toBe(true);
     expect(result.fees.totalFeeSats).toBeGreaterThan(0);
+    expect(result.ephemeral.privKey.length).toBe(32);
+    expect(result.ephemeral.pubkeyXonly.length).toBe(32);
+    expect(result.commit.outputScript.length).toBeGreaterThan(0);
+    expect(result.commit.envelopeScript.length).toBeGreaterThan(0);
   });
 
-  it('reveal txid matches the computed id of the decoded revealHex', () => {
-    const { paymentPublicKey, paymentPubkeyXonly, paymentAddress } = paymentContext();
+  it('ephemeral.pubkeyXonly = Schnorr.getPublicKey(ephemeral.privKey) — the orchestrator returns a consistent keypair', () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
     const r = createInscribeTransactions({
       paymentOutput: paymentOutputAt(100_000),
       paymentPublicKey,
       paymentAddress,
-      paymentPubkeyXonly,
+      recipientAddress: recipientAddress(),
+      body: new TextEncoder().encode('keypair check'),
+      contentType: 'text/plain',
+      feeRatePerVbyte: 5,
+      network: NETWORK,
+    });
+    expect(schnorr.getPublicKey(r.ephemeral.privKey)).toEqual(r.ephemeral.pubkeyXonly);
+  });
+
+  it('reveal txid matches the computed id of the decoded revealHex', () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
+    const r = createInscribeTransactions({
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey,
+      paymentAddress,
       recipientAddress: recipientAddress(),
       body: new Uint8Array([0xde, 0xad, 0xbe, 0xef]),
       contentType: 'application/octet-stream',
@@ -97,12 +115,11 @@ describe('createInscribeTransactions', () => {
   });
 
   it('reveal references the commit txid (pre-signed) as its input 0 outpoint', () => {
-    const { paymentPublicKey, paymentPubkeyXonly, paymentAddress } = paymentContext();
+    const { paymentPublicKey, paymentAddress } = paymentContext();
     const r = createInscribeTransactions({
       paymentOutput: paymentOutputAt(100_000),
       paymentPublicKey,
       paymentAddress,
-      paymentPubkeyXonly,
       recipientAddress: recipientAddress(),
       body: new TextEncoder().encode('outpoint pin'),
       contentType: 'text/plain',
@@ -113,21 +130,17 @@ describe('createInscribeTransactions', () => {
     const decodedReveal = btc.Transaction.fromRaw(hex.decode(r.revealHex));
 
     expect(decodedReveal.getInput(0).index).toBe(0);
-    // txid bytes in the reveal input's outpoint match the orchestrator-
-    // computed commit txid (which equals what the wallet-signed commit
-    // will produce — segwit txid is witness-independent).
     const revealInputTxid = decodedReveal.getInput(0).txid;
     expect(hex.encode(revealInputTxid!)).toBe(r.commitTxid);
   });
 
   it('end-to-end: ordpool-parser reconstructs the original content from the broadcast reveal', () => {
-    const { paymentPublicKey, paymentPubkeyXonly, paymentAddress } = paymentContext();
+    const { paymentPublicKey, paymentAddress } = paymentContext();
     const body = new TextEncoder().encode('through the whole pipeline');
     const r = createInscribeTransactions({
       paymentOutput: paymentOutputAt(100_000),
       paymentPublicKey,
       paymentAddress,
-      paymentPubkeyXonly,
       recipientAddress: recipientAddress(),
       body,
       contentType: 'text/plain;charset=utf-8',
@@ -145,12 +158,11 @@ describe('createInscribeTransactions', () => {
   });
 
   it('throws "Insufficient funds for inscribe" when funding < requirement', () => {
-    const { paymentPublicKey, paymentPubkeyXonly, paymentAddress } = paymentContext();
+    const { paymentPublicKey, paymentAddress } = paymentContext();
     expect(() => createInscribeTransactions({
-      paymentOutput: paymentOutputAt(500), // way too small
+      paymentOutput: paymentOutputAt(500),
       paymentPublicKey,
       paymentAddress,
-      paymentPubkeyXonly,
       recipientAddress: recipientAddress(),
       body: new TextEncoder().encode('too poor'),
       contentType: 'text/plain',
@@ -160,12 +172,11 @@ describe('createInscribeTransactions', () => {
   });
 
   it('rejects feeRatePerVbyte <= 0', () => {
-    const { paymentPublicKey, paymentPubkeyXonly, paymentAddress } = paymentContext();
+    const { paymentPublicKey, paymentAddress } = paymentContext();
     expect(() => createInscribeTransactions({
       paymentOutput: paymentOutputAt(100_000),
       paymentPublicKey,
       paymentAddress,
-      paymentPubkeyXonly,
       recipientAddress: recipientAddress(),
       body: new Uint8Array(0),
       contentType: 'text/plain',
@@ -174,28 +185,12 @@ describe('createInscribeTransactions', () => {
     })).toThrow(/positive/);
   });
 
-  it('rejects 33-byte paymentPubkeyXonly', () => {
-    const { paymentPublicKey, paymentAddress } = paymentContext();
-    expect(() => createInscribeTransactions({
-      paymentOutput: paymentOutputAt(100_000),
-      paymentPublicKey,
-      paymentAddress,
-      paymentPubkeyXonly: new Uint8Array(33),
-      recipientAddress: recipientAddress(),
-      body: new Uint8Array(0),
-      contentType: 'text/plain',
-      feeRatePerVbyte: 8,
-      network: NETWORK,
-    })).toThrow(/32 bytes/);
-  });
-
   it('two consecutive calls produce DIFFERENT reveals (fresh ephemeral key each time)', () => {
-    const { paymentPublicKey, paymentPubkeyXonly, paymentAddress } = paymentContext();
+    const { paymentPublicKey, paymentAddress } = paymentContext();
     const args = {
       paymentOutput: paymentOutputAt(100_000),
       paymentPublicKey,
       paymentAddress,
-      paymentPubkeyXonly,
       recipientAddress: recipientAddress(),
       body: new TextEncoder().encode('determinism check'),
       contentType: 'text/plain',
@@ -204,9 +199,9 @@ describe('createInscribeTransactions', () => {
     };
     const a = createInscribeTransactions(args);
     const b = createInscribeTransactions(args);
-    // Different ephemeral keys → different commit addresses (envelope
-    // embeds the ephemeral pubkey, which goes into the script tree).
     expect(a.commitAddress).not.toBe(b.commitAddress);
     expect(a.revealHex).not.toBe(b.revealHex);
+    // And the ephemeral keys themselves are distinct.
+    expect(a.ephemeral.privKey).not.toEqual(b.ephemeral.privKey);
   });
 });

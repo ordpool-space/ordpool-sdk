@@ -63,7 +63,6 @@ describe('psbt-export signer inscribe-roundtrip on regtest (external offline wal
 
   let paymentAddress: string;
   let paymentPublicKey: Uint8Array;
-  let paymentPubkeyXonly: Uint8Array;
   let recipientTaprootAddress: string;
   let utxo: ElectrsUtxo;
 
@@ -74,10 +73,9 @@ describe('psbt-export signer inscribe-roundtrip on regtest (external offline wal
       throw new Error(`bitcoin-cli getaddressinfo did not return pubkey for ${paymentAddress}`);
     }
     paymentPublicKey = hex.decode(addrInfo.pubkey);
-    paymentPubkeyXonly = paymentPublicKey.subarray(1, 33);
 
     const scureRegtest = toScureNetwork(Network.Regtest);
-    const recipientRegtest = btc.p2tr(paymentPubkeyXonly, undefined, scureRegtest, true);
+    const recipientRegtest = btc.p2tr(paymentPublicKey.subarray(1, 33), undefined, scureRegtest, true);
     recipientTaprootAddress = recipientRegtest.address!;
 
     bitcoinCliPsbtWallet('sendtoaddress', paymentAddress, '1.0');
@@ -105,7 +103,6 @@ describe('psbt-export signer inscribe-roundtrip on regtest (external offline wal
       },
       paymentPublicKey,
       paymentAddress,
-      paymentPubkeyXonly,
       recipientAddress: recipientTaprootAddress,
       body,
       contentType: INSCRIPTION_CONTENT_TYPE,
