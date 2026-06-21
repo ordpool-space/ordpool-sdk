@@ -66,7 +66,7 @@ function validateInscribe(intent, config) {
     const recipient = validateAddress(intent.recipient, config);
     if (!recipient.ok)
         return recipient.result;
-    const targetNet = toScureNetwork(config.network);
+    const targetNet = (0, network_1.toScureNetwork)(config.network);
     if (config.allowedRecipients && config.allowedRecipients.length > 0) {
         if (!allowlistContainsAddress(intent.recipient, config.allowedRecipients, targetNet)) {
             return reject('recipient-not-allowed', intent.recipient);
@@ -99,14 +99,12 @@ function validateInscribe(intent, config) {
         // accidentally permits `application/javascript` (a JS XSS vector
         // inside inscribed HTML) still loses to the blocklist.
         if (config.blockedContentTypes && config.blockedContentTypes.length > 0) {
-            const blockedLower = config.blockedContentTypes.map(s => s.toLowerCase().trim());
-            if (blockedLower.includes(normalisedContentType)) {
+            if (config.blockedContentTypes.some(s => s.toLowerCase().trim() === normalisedContentType)) {
                 return reject('content-type-blocked', intent.contentType);
             }
         }
         if (config.allowedContentTypes && config.allowedContentTypes.length > 0) {
-            const allowedLower = config.allowedContentTypes.map(s => s.toLowerCase().trim());
-            if (!allowedLower.includes(normalisedContentType)) {
+            if (!config.allowedContentTypes.some(s => s.toLowerCase().trim() === normalisedContentType)) {
                 return reject('content-type-not-allowed', intent.contentType);
             }
         }
@@ -129,7 +127,7 @@ function validateAddress(address, config) {
     if (typeof address !== 'string' || address.length === 0) {
         return { ok: false, result: reject('recipient-not-a-bitcoin-address', safeStringify(address)) };
     }
-    const targetNet = toScureNetwork(config.network);
+    const targetNet = (0, network_1.toScureNetwork)(config.network);
     try {
         const decoded = btc.Address(targetNet).decode(address);
         const script = btc.OutScript.encode(decoded);
@@ -206,8 +204,5 @@ function reject(reason, detail) {
 }
 function success(resources) {
     return { ok: true, resources };
-}
-function toScureNetwork(n) {
-    return n === network_1.Network.Mainnet ? btc.NETWORK : btc.TEST_NETWORK;
 }
 //# sourceMappingURL=inscribe-operation-gate.js.map

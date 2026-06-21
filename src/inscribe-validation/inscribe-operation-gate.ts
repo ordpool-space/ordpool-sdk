@@ -7,7 +7,7 @@
 
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
+import { Network, toScureNetwork } from '../network';
 
 import {
   InscribeGateRejectReason,
@@ -90,14 +90,12 @@ function validateInscribe(
     // accidentally permits `application/javascript` (a JS XSS vector
     // inside inscribed HTML) still loses to the blocklist.
     if (config.blockedContentTypes && config.blockedContentTypes.length > 0) {
-      const blockedLower = config.blockedContentTypes.map(s => s.toLowerCase().trim());
-      if (blockedLower.includes(normalisedContentType)) {
+      if (config.blockedContentTypes.some(s => s.toLowerCase().trim() === normalisedContentType)) {
         return reject('content-type-blocked', intent.contentType);
       }
     }
     if (config.allowedContentTypes && config.allowedContentTypes.length > 0) {
-      const allowedLower = config.allowedContentTypes.map(s => s.toLowerCase().trim());
-      if (!allowedLower.includes(normalisedContentType)) {
+      if (!config.allowedContentTypes.some(s => s.toLowerCase().trim() === normalisedContentType)) {
         return reject('content-type-not-allowed', intent.contentType);
       }
     }
@@ -218,8 +216,4 @@ function reject(
 
 function success(resources: InscribeGateResources): InscribeOperationGateResult {
   return { ok: true, resources };
-}
-
-function toScureNetwork(n: Network): typeof btc.NETWORK {
-  return n === Network.Mainnet ? btc.NETWORK : btc.TEST_NETWORK;
 }
