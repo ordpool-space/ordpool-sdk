@@ -291,6 +291,7 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
 
   it('step 3: A builds a buy-offer to A; SDK PSBT is well-formed', () => {
     const result = buildCat21BuyOfferPsbt({
+      walletType: KnownOrdinalWalletType.cat21wallet,
       network: Network.Regtest,
       sellerInput: {
         txid: catUtxoAfterTransfer.txid,

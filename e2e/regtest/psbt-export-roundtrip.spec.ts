@@ -191,7 +191,7 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
     // here we wire it directly to regtest electrs via postTx, AND
     // capture the finalized hex on the side for independent decoding.
     let capturedTxHex: string | undefined;
-    const signerResult = await firstValueFrom(psbtExportSigner.signAndBroadcast({
+    const signerResult = await firstValueFrom(psbtExportSigner.signSingleFundingInput({
       psbtBytes: built.tx.toPSBT(0),
       paymentAddress,
       network: Network.Regtest,
