@@ -112,8 +112,12 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
       'finalize=true',
     ));
     expect(walletprocessed.complete).toBe(true);
-    const signedCommit = btc.Transaction.fromPSBT(base64.decode(walletprocessed.psbt));
-    if (!signedCommit.isFinal) signedCommit.finalize();
+    // Read the wire-tx from BC's `hex` field. Round-tripping a
+    // BC-finalized PSBT through scure's fromPSBT + tx.hex emits a
+    // wire-tx whose witness fails consensus on commit outputs that
+    // carry a non-standard taproot tree (envelope leaf). BC's
+    // extracted hex is authoritative.
+    const signedCommit = btc.Transaction.fromRaw(hex.decode(walletprocessed.hex));
 
     // Pin the commit's lockTime ON THE WIRE to 21 — proves the
     // free-cat behaviour survives wallet signing.
@@ -252,8 +256,8 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
       'finalize=true',
     ));
     expect(walletprocessed.complete).toBe(true);
-    const signedCommit = btc.Transaction.fromPSBT(base64.decode(walletprocessed.psbt));
-    if (!signedCommit.isFinal) signedCommit.finalize();
+    // See above for why we use walletprocessed.hex directly.
+    const signedCommit = btc.Transaction.fromRaw(hex.decode(walletprocessed.hex));
     const commitTxid = await postTx(signedCommit.hex);
     expect(commitTxid).toBe(inscribed.commitTxid);
     await waitForElectrsSync(mineBlocks(1));

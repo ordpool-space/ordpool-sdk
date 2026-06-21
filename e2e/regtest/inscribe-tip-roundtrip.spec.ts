@@ -141,8 +141,10 @@ describe('inscribe → tip output → ord-indexing roundtrip on regtest', () => 
       'finalize=true',
     ));
     expect(walletprocessed.complete).toBe(true);
-    const signedCommit = btc.Transaction.fromPSBT(base64.decode(walletprocessed.psbt));
-    if (!signedCommit.isFinal) signedCommit.finalize();
+    // BC's `hex` field is the authoritative wire-tx; a scure
+    // fromPSBT + tx.hex round-trip on a BC-finalized PSBT corrupts
+    // the witness on commit outputs with an envelope tap leaf.
+    const signedCommit = btc.Transaction.fromRaw(hex.decode(walletprocessed.hex));
     const commitTxid = await postTx(signedCommit.hex);
     expect(commitTxid).toBe(inscribed.commitTxid);
 
