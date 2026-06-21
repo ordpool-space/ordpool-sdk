@@ -1,26 +1,26 @@
 /**
- * Inscribe → real-ord-indexing roundtrip on regtest with the three
+ * Inscribe → cat21-ord-indexing roundtrip on regtest with the three
  * "day-one feature" additions:
  *
- *   1. nLockTime=21 on the commit → cat21-ord should see a cat at
- *      the inscription recipient (free cat for every inscriber).
- *   2. Tag::Note (0x0f) → ordpool-parser should surface the watermark
- *      via the witness on the reveal tx.
- *   3. Brotli `content_encoding: br` → stock ord should serve the
- *      compressed body as-is (it's the consumer's job to decompress).
+ *   1. nLockTime=21 on BOTH the commit AND the reveal → cat21-ord
+ *      should see TWO cats stacked on the SAME satpoint (the
+ *      inscription's UTXO).
+ *   2. Tag::Note (0x0f) → ordpool-parser surfaces the watermark via
+ *      the witness on the reveal tx.
+ *   3. Brotli `content_encoding: br` → the witness carries the
+ *      compressed body verbatim; `brotliDecompressSync` recovers
+ *      the original.
  *
- * Two ord instances:
- *   - stock ord (port 8081, --index-cat21 OFF) → indexes the
- *     inscription. Used to verify content + content-type + length.
- *   - cat21-ord (port 8080, --index-cat21 ON) → indexes the cat that
- *     fell out of nLockTime=21 on the commit. Used to verify the
- *     cat lands at the inscription's recipient address (ord-theory
- *     FIFO — cat on first sat of commit vout[0] → reveal spends
- *     vout[0] → cat moves to reveal vout[0] = recipient).
+ * Only cat21-ord is needed here — the cat records prove the reveal
+ * landed and its vout[0] is the recipient at 546 sats, and
+ * ordpool-parser handles the inscription-bytes side. The "does real
+ * upstream ord index our inscriptions" question is covered in a
+ * separate spec (`inscribe-ord-indexing-roundtrip`); duplicating it
+ * here would just add stock-ord startup time to every features run.
  *
- * Requires both ord profiles in the regtest stack:
+ * Requires the cat21-ord profile in the regtest stack:
  *   docker compose -f e2e/docker-compose.regtest.yml \
- *     --profile cat21-ord --profile ord-stock up -d
+ *     --profile cat21-ord up -d
  */
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
@@ -37,21 +37,14 @@ import {
   catInscriptionId,
   ElectrsUtxo,
   EsploraTx,
-  getOrdInscription,
-  getStockOrdContent,
-  getStockOrdInscription,
   getTxStatus,
   getUtxos,
-  inscriptionId,
   mineBlocks,
   postTx,
   rpc,
   waitForCatAtAddress,
   waitForElectrsSync,
   waitForOrdReady,
-  waitForOrdStockReady,
-  waitForOrdStockSync,
-  waitForOrdStockInscription,
   waitForOrdSync,
   waitForTxConfirmed,
 } from './regtest-helpers';
@@ -70,8 +63,7 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
   const scureRegtest = toScureNetwork(Network.Regtest);
 
   beforeAll(async () => {
-    await waitForOrdReady(60_000);       // cat21-ord
-    await waitForOrdStockReady(60_000);  // stock ord
+    await waitForOrdReady(60_000);
   }, 90_000);
 
   it('nLockTime=21 lands a cat at the inscription recipient + note tag round-trips via parser', async () => {
@@ -141,19 +133,12 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     const revealTx: EsploraTx = await waitForTxConfirmed(revealTxid);
     expect(revealTx.status.block_hash).toBeTruthy();
 
-    // Phase 4: stock ord indexes the inscription (sanity).
-    await waitForOrdStockSync(revealTip);
-    const id = inscriptionId(revealTxid, 0);
-    const insc = await waitForOrdStockInscription(id);
-    expect(insc.address).toBe(recipientAddress);
-    expect(insc.content_type).toBe(INSCRIPTION_CONTENT_TYPE);
-
-    // Phase 5a: pin the reveal also carries lockTime=21 on the wire —
+    // Phase 4: pin the reveal also carries lockTime=21 on the wire —
     // the SECOND-cat behaviour. Both commit AND reveal qualify as
     // CAT-21 mints under cat21-ord's --index-cat21 rule.
     expect(revealTx.locktime).toBe(21);
 
-    // Phase 5b: cat21-ord must surface TWO cats:
+    // Phase 5: cat21-ord must surface TWO cats:
     //
     //   Cat A: id <commitTxid>i0 — fell out of nLockTime=21 on the
     //     commit. Currently at the first sat of vout[0] of the commit,
@@ -184,17 +169,16 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     if (catA.sat != null && catB.sat != null) {
       expect(catB.sat).toBe(catA.sat);
     }
-    // Stock ord's inscription record points at the same UTXO too —
-    // the inscription, cat A, and cat B all share one 546-sat output.
-    expect(insc.output).toBe(expectedOutput);
-
     // Distinct cat numbers — they're different cats, even on the
     // same sat. Cat A was minted in an earlier block (commit tip),
     // cat B in a later block (reveal tip), so cat A's number < cat B's.
     expect(catA.number).not.toBe(catB.number);
     expect(catB.number).toBeGreaterThan(catA.number);
 
-    // Phase 6: note tag round-trip via ordpool-parser.
+    // Phase 6: inscription bytes round-trip via ordpool-parser. The
+    // cat21-ord checks above already prove the reveal landed and its
+    // vout[0] is the recipient; the parser closes the loop on the
+    // inscription envelope.
     const witnessHex = (revealTx as unknown as { vin: { witness: string[] }[] }).vin[0].witness;
     const parsed = InscriptionParserService.parse({
       txid: revealTxid,
@@ -202,6 +186,8 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     });
     expect(parsed.length).toBe(1);
     expect(parsed[0].contentType).toBe(INSCRIPTION_CONTENT_TYPE);
+    const recoveredBody = new TextDecoder().decode(parsed[0].getDataRaw());
+    expect(recoveredBody).toBe(bodyText);
     // The parser surfaces all known ord tags. Tag 0x0f (note) is
     // exposed on the parsed inscription object via its fields map.
     const fields = (parsed[0] as unknown as { fields?: Map<number, Uint8Array> }).fields;
@@ -217,7 +203,7 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     expect(allWitnessHex).toContain(noteHex);
   }, 240_000);
 
-  it('brotli-compressed body round-trips through ord (compressed bytes on chain, content_encoding: br tag)', async () => {
+  it('brotli-compressed body round-trips on chain (compressed bytes in the witness, content_encoding: br tag)', async () => {
     const recipientKey = secp256k1.utils.randomPrivateKey();
     const recipientAddress = btc.p2tr(schnorr.getPublicKey(recipientKey), undefined, scureRegtest, true).address!;
 
@@ -276,27 +262,44 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     const revealTxid = await postTx(inscribed.revealHex);
     const revealTip = mineBlocks(1);
     await waitForElectrsSync(revealTip);
-    await waitForTxConfirmed(revealTxid);
+    const revealTx: EsploraTx = await waitForTxConfirmed(revealTxid);
 
-    // Phase 4: stock ord indexes it. The body is the COMPRESSED
-    // bytes — ord serves whatever's on chain, byte-for-byte.
-    await waitForOrdStockSync(revealTip);
-    const id = inscriptionId(revealTxid, 0);
-    const insc = await waitForOrdStockInscription(id);
-    expect(insc.content_type).toBe('text/html');
-    expect(insc.content_length).toBe(compressed.length);
-
-    // Phase 5: pull /content/<id> — should be the compressed bytes.
-    const ordContent = await getStockOrdContent(id);
-    expect(ordContent.bytes.length).toBe(compressed.length);
+    // Phase 4: parse the inscription out of the reveal's witness.
+    // ordpool-parser sees the body as the on-chain bytes, which is
+    // the COMPRESSED brotli output we built with.
+    const witnessHex = (revealTx as unknown as { vin: { witness: string[] }[] }).vin[0].witness;
+    const parsed = InscriptionParserService.parse({
+      txid: revealTxid,
+      vin: [{ witness: witnessHex }],
+    });
+    expect(parsed.length).toBe(1);
+    expect(parsed[0].contentType).toBe('text/html');
+    const onChainBody = parsed[0].getDataRaw();
+    expect(onChainBody.length).toBe(compressed.length);
     for (let i = 0; i < compressed.length; i++) {
-      expect(ordContent.bytes[i]).toBe(compressed[i]);
+      expect(onChainBody[i]).toBe(compressed[i]);
     }
 
-    // Phase 6: decompress what ord served. Equal to the original
-    // body bytes — proves the brotli envelope tag is honoured by
-    // any consumer that does its own decompression.
-    const decompressed = brotliDecompressSync(ordContent.bytes);
+    // Phase 5: the witness must also carry the `content_encoding: br`
+    // envelope tag. Tag 0x09 encodes as OP_9 (0x59); the value is a
+    // 2-byte push of UTF-8 'br' (0x62 0x72).
+    const allWitnessHex = witnessHex.join('');
+    expect(allWitnessHex).toContain('5902' + '6272');
+
+    // Phase 6: decompress the on-chain bytes — equal to the original
+    // body. Proves the brotli envelope tag is honoured by any
+    // consumer that does its own decompression.
+    const decompressed = brotliDecompressSync(onChainBody);
     expect(decompressed).toEqual(Buffer.from(original));
+
+    // Phase 7: cat21-ord saw two cats on this inscription too — the
+    // nLockTime=21-on-both-txs behaviour applies whatever the body
+    // content. Confirm both at the recipient's UTXO.
+    await waitForOrdSync(revealTip);
+    const catA = await waitForCatAtAddress(catInscriptionId(commitTxid), recipientAddress, 30_000);
+    const catB = await waitForCatAtAddress(catInscriptionId(revealTxid), recipientAddress, 30_000);
+    const expectedOutput = `${revealTxid}:0`;
+    expect(catA.output).toBe(expectedOutput);
+    expect(catB.output).toBe(expectedOutput);
   }, 240_000);
 });
