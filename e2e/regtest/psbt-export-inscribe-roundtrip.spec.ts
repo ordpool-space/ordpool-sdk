@@ -17,7 +17,7 @@
  *   5. Sign the commit PSBT via `bitcoin-cli walletprocesspsbt`
  *      with `finalize=true` — the external offline sign step.
  *   6. Feed the signed PSBT base64 into `psbtExportSigner
- *      .signAndBroadcast` with a stubbed `promptForSignedPsbt`.
+ *      .signSingleFundingInput` with a stubbed `promptForSignedPsbt`.
  *   7. Broadcast the signed commit, mine 1 block (so the commit
  *      UTXO is mature), broadcast the reveal, mine 1 block.
  *   8. Verify on-chain: reveal locktime, witness round-trip via

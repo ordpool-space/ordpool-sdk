@@ -26,7 +26,7 @@
  *   5. Sign via `bitcoin-cli walletprocesspsbt` — the external
  *      offline sign step.
  *   6. Feed the signed PSBT base64 into
- *      `psbtExportSigner.signAndBroadcast` with a stubbed
+ *      `psbtExportSigner.signSingleFundingInput` with a stubbed
  *      `promptForSignedPsbt` that emits the signed payload
  *      directly (no UI in the test loop).
  *   7. The signer finalizes via scure and broadcasts via
