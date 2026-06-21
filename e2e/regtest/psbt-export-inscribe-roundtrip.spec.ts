@@ -15,7 +15,9 @@
  *   4. Call `createInscribeTransactions` to build the commit PSBT
  *      and the ephemeral-signed reveal hex.
  *   5. Sign the commit PSBT via `bitcoin-cli walletprocesspsbt`
- *      with `finalize=true` — the external offline sign step.
+ *      with `finalize=false` (partial-sig PSBT — the shape every
+ *      real-world desktop signer emits) — the external offline
+ *      sign step.
  *   6. Feed the signed PSBT base64 into `psbtExportSigner
  *      .signSingleFundingInput` with a stubbed `promptForSignedPsbt`.
  *   7. Broadcast the signed commit, mine 1 block (so the commit
