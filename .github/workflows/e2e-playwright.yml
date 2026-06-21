@@ -167,8 +167,8 @@ jobs:
       - name: Compute cat21-wallet HEAD SHA (for cache invalidation)
         id: cat21wallet-rev
         run: |
-          REV=$(git ls-remote https://github.com/ordpool-space/cat21-wallet.git refs/heads/dev | cut -f1)
-          echo "Cat21 Wallet dev HEAD = $REV"
+          REV=$(git ls-remote https://github.com/ordpool-space/cat21-wallet.git refs/heads/main | cut -f1)
+          echo "Cat21 Wallet main HEAD = $REV"
           echo "rev=$REV" >> "$GITHUB_OUTPUT"
 
       - name: Cache cat21-wallet source + build
