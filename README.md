@@ -313,7 +313,9 @@ browser, SQLite in a bot); SDK just evaluates.
 - `signers/*.signer.ts` — per-wallet adapter (Xverse, Leather, Unisat,
   OKX, Oyl, Wizz, Phantom, Alby, Binance, Cat21Wallet). Detect by
   signature; only wallets whose `window.<wallet>` is live at runtime
-  surface in the picker.
+  surface in the picker. (Binance is the one exception — the connector
+  + signer ship but are intentionally NOT in the picker registry; see
+  "Potentially supported, untested" below.)
 - `connectors/` — wallet-side connect-flow handling.
 - `wallet.service.ts` — top-level wallet API.
 - `psbt-extract.ts` — pull signed input data out of a returned PSBT.
@@ -353,7 +355,7 @@ unsubscribe?.();
 | Unisat | ✅ | `window.unisat.on('accountsChanged' \| 'networkChanged', cb)` | |
 | Wizz | ✅ | `window.wizz.on(...)` | Unisat-fork shape |
 | OKX | ✅ | `window.okxwallet.bitcoin.on('accountChanged' \| 'networkChanged', cb)` | Singular `accountChanged` (vs Unisat's plural); fan-in handles it. LaserEyes skips OKX events; we wire them. |
-| Binance | ✅ | `window.binancew3w.bitcoin.on(...)` | Documented but the v1.17.2 binary doesn't inject the `.bitcoin` surface yet; subscription is a no-op until it does |
+| Binance | ✅ | `window.binancew3w.bitcoin.on(...)` | Documented but the v1.17.2 binary doesn't inject the `.bitcoin` surface yet; subscription is a no-op until it does. Connector is currently excluded from the picker registry — see "Potentially supported, untested" below |
 | Xverse | ✅ | sats-connect `addListener('accountChange' \| 'networkChange' \| 'disconnect', cb)` | Includes `disconnect` — fan-in treats all three as "cache stale" |
 | Phantom | ✅ | `window.phantom.bitcoin.on(...)` | Desktop ships btc.js dormant so `detect` already returns false on desktop; mobile in-app browser is documented to expose the events. Safe no-op when surface absent. |
 | Cat21Wallet | (none) | Leather-forked API — no documented event surface | Use polling fallback |
@@ -428,7 +430,7 @@ doesn't isn't shown.
 | Oyl | ✅ |
 | Alby | ✅ (full mint roundtrip — see `alby-mint-roundtrip.spec.ts` for the workaround: bypass Alby's confirm-popup UI by hitting the internal `webbtc/signPsbt` SW route directly from an extension-origin page) |
 | Phantom | **Untested — see note below** |
-| Binance Wallet | **Untested — see note below** |
+| Binance Wallet | **Code ships but excluded from picker — see note below** |
 | Watch-only (xpub) | ✅ (Sparrow, Electrum, Coldcard, Ledger, Trezor, Specter, Bitcoin Core via PSBT paste) |
 
 ### Potentially supported, untested
@@ -456,9 +458,44 @@ can't be exercised end-to-end yet:
   v1.17.2 (current Chrome Web Store) shows the binary injects
   `window.binancew3w.{wallet, ethereum, solana, tron, sui, tonconnect}`
   — the `.bitcoin` namespace is documented but not actually shipped.
-  Same situation as Phantom: detect returns false, wallet doesn't
-  surface, signer ready to activate the moment Binance enables the
-  documented API.
+
+  Different from Phantom: even with detect-by-signature in place
+  (gate on `window.binancew3w.bitcoin`), there's no released binary
+  in which detect can succeed, so no end-user can exercise the
+  signer and produce real signal. Listing it as "click to download"
+  is a broken promise — the user installs the extension, the
+  picker still shows Binance as "not installed" because the
+  documented sub-provider is absent.
+
+  As of f106cd2 (2026-06-21), `binanceConnector` is intentionally
+  removed from the `walletConnectors` registry in
+  [`src/wallet/connectors/index.ts`](src/wallet/connectors/index.ts).
+  The connector + signer files (`binance.connector.ts`,
+  `binance.signer.ts`), the `KnownOrdinalWalletType.binance` enum
+  value, and the `KnownOrdinalWallets.binance` metadata entry all
+  stay on disk. To re-enable:
+
+  ```ts
+  // src/wallet/connectors/index.ts
+  import { binanceConnector } from './binance.connector';
+  // ...
+  export const walletConnectors: readonly WalletConnector[] = [
+    cat21walletConnector,
+    xverseConnector,
+    leatherConnector,
+    unisatConnector,
+    wizzConnector,
+    okxConnector,
+    phantomConnector,
+    oylConnector,
+    albyConnector,
+    binanceConnector,  // ← add back
+  ];
+  ```
+
+  Plus restore the asserts in `src/wallet/connectors/connectors.spec.ts`
+  that the f106cd2 commit inverted. Build + ship a new SHA; the
+  picker entry comes back across every consumer.
 
 Adapter shape for Binance is matched against
 [LaserEyes' production-deployed `binance.ts` provider](https://github.com/omnisat/lasereyes-mono/blob/main/packages/core/src/client/providers/binance.ts),
