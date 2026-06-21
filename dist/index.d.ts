@@ -1418,7 +1418,7 @@ interface Cat21OfferDestinations {
     buyerChangeAddress: string;
 }
 /** Reasons a seller-side validator may reject an inbound offer PSBT. */
-type Cat21OfferRejectionReason = 'missing-seller-input' | 'wrong-postage' | 'wrong-price' | 'wrong-seller-input-value' | 'sighash-not-all' | 'sighash-flag-byte-not-all' | 'buyer-input-unsigned' | 'missing-seller-payment-output' | 'payment-output-wrong-address' | 'cat-output-not-spendable' | 'lock-time-not-21';
+type Cat21OfferRejectionReason = 'missing-seller-input' | 'wrong-postage' | 'wrong-price' | 'wrong-seller-input-value' | 'sighash-not-all' | 'sighash-flag-byte-not-all' | 'buyer-input-unsigned' | 'missing-seller-payment-output' | 'payment-output-wrong-address' | 'cat-output-not-spendable';
 interface Cat21OfferValidationResult {
     ok: true;
     pricePaidSats: number;
@@ -1564,6 +1564,14 @@ interface ValidateCat21BuyOfferArgs {
 }
 /**
  * Validates the on-the-wire shape of an inbound buy-offer PSBT.
+ *
+ * **Scope rule — read this before adding a check:** this validator
+ * protects the SELLER. "Whose loss is this?" — gate ONLY on things
+ * that hurt the seller. Buyer-side optimization losses (no bonus-mint
+ * cat from a missing `lockTime=21`, SIGHASH_DEFAULT-on-Taproot when
+ * the buyer wanted SIGHASH_ALL, …) are NOT the seller's problem and
+ * MUST NOT be grounds for rejection — a rejected offer is a lost sale.
+ * See `feedback_validator_audience_check` memory.
  *
  *   1. Input 0 references the seller's cat UTXO.
  *   2. Every input has `sighashType === SIGHASH_ALL` (or undefined

@@ -234,6 +234,14 @@ exports.MAX_BUY_OFFER_PSBT_BYTES = 128 * 1024;
 /**
  * Validates the on-the-wire shape of an inbound buy-offer PSBT.
  *
+ * **Scope rule — read this before adding a check:** this validator
+ * protects the SELLER. "Whose loss is this?" — gate ONLY on things
+ * that hurt the seller. Buyer-side optimization losses (no bonus-mint
+ * cat from a missing `lockTime=21`, SIGHASH_DEFAULT-on-Taproot when
+ * the buyer wanted SIGHASH_ALL, …) are NOT the seller's problem and
+ * MUST NOT be grounds for rejection — a rejected offer is a lost sale.
+ * See `feedback_validator_audience_check` memory.
+ *
  *   1. Input 0 references the seller's cat UTXO.
  *   2. Every input has `sighashType === SIGHASH_ALL` (or undefined
  *      for already-finalised inputs — the embedded signature itself
@@ -279,13 +287,20 @@ function validateCat21BuyOfferPsbt(args) {
     if (tx.outputsLength < 2) {
         return fail('missing-seller-payment-output', 'tx has fewer than 2 outputs');
     }
-    // 0c. lockTime must be 21 (the CAT-21 marker). The seller signing a
-    //     lockTime=0 PSBT still transfers the cat, but the cherry-on-top
-    //     bonus-mint is silently dropped — a strict loss vs the ord-style
-    //     offer contract. Per audit finding M2.
-    if (tx.lockTime !== 21) {
-        return fail('lock-time-not-21', `tx.lockTime = ${tx.lockTime}, expected 21`);
-    }
+    // DELIBERATELY NOT CHECKED: tx.lockTime !== 21.
+    // The validator's job is to protect the SELLER. lockTime=21 is a
+    // BUYER-side optimization — it triggers cat21-ord's bonus-mint at
+    // output 0 (a free fresh cat on the same ordinal). If the buyer
+    // shipped lockTime=0, the cat still transfers, the seller still
+    // gets paid, the tx broadcasts cleanly; the only loss is the
+    // buyer's bonus-mint cat — entirely their own.
+    //
+    // Rejecting a valid sale here would kill liquidity: a buyer using
+    // ord.cat21.space's `wallet offer create` (or any other CAT-21-aware
+    // tool) gets lockTime=21 automatically; a buyer using vanilla ord
+    // gets lockTime=0; both are legitimate sales from the seller's
+    // perspective. Whose-loss-is-this filter, see memory feedback file
+    // `validator-audience-check`.
     // 1. Seller's input on index 0.
     const sellerInput = tx.getInput(0);
     const sellerTxidBytes = sellerInput.txid;

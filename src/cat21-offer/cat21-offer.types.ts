@@ -67,8 +67,7 @@ export type Cat21OfferRejectionReason =
   | 'buyer-input-unsigned'
   | 'missing-seller-payment-output'
   | 'payment-output-wrong-address'
-  | 'cat-output-not-spendable'
-  | 'lock-time-not-21';
+  | 'cat-output-not-spendable';
 
 export interface Cat21OfferValidationResult {
   ok: true;
