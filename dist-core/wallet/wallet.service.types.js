@@ -96,7 +96,7 @@ exports.KnownOrdinalWallets = {
     [KnownOrdinalWalletType.cat21wallet]: {
         type: KnownOrdinalWalletType.cat21wallet,
         label: 'CAT-21 wallet',
-        subLabel: 'Our own — hot wallet for active cat trading. BTC L1 mainnet.',
+        subLabel: 'Our own hot wallet for active cat trading.',
         logo: wallet_logos_1.walletLogos.cat21wallet,
         downloadLink: 'https://github.com/ordpool-space/cat21-wallet',
     },

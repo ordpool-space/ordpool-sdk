@@ -415,7 +415,7 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
   [KnownOrdinalWalletType.cat21wallet]: {
     type: KnownOrdinalWalletType.cat21wallet,
     label: 'CAT-21 wallet',
-    subLabel: 'Our own — hot wallet for active cat trading. BTC L1 mainnet.',
+    subLabel: 'Our own hot wallet for active cat trading.',
     logo: walletLogos.cat21wallet,
     downloadLink: 'https://github.com/ordpool-space/cat21-wallet',
   },
