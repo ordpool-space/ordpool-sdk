@@ -3,6 +3,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   BuildCat21BuyOfferArgs,
   buildCat21BuyOfferPsbt,
@@ -17,6 +18,7 @@ const p2wpkhTestnet = btc.p2wpkh(publicKey, btc.TEST_NETWORK);
 
 function makeBaseArgs(overrides: Partial<BuildCat21BuyOfferArgs> = {}): BuildCat21BuyOfferArgs {
   return {
+    walletType: KnownOrdinalWalletType.cat21wallet,
     network: Network.Testnet3,
     sellerInput: {
       txid: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -181,6 +183,8 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: psbtWithSig,
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_000,
+      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      network: Network.Testnet3,
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -196,6 +200,8 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: built.psbt,
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: 99 },
       floorPriceSats: 21_000,
+      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('missing-seller-input');
@@ -212,6 +218,8 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: tx.toPSBT(),
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_001,
+      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('wrong-price');
@@ -224,6 +232,8 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: built.psbt,
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_000,
+      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('buyer-input-unsigned');
@@ -256,17 +266,21 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: tx.toPSBT(),
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_000,
+      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('wrong-postage');
   });
 
   it('rejects a PSBT with no inputs', () => {
-    const empty = new btc.Transaction({ allowUnknownInputs: true }).toPSBT();
+    const empty = new btc.Transaction({ allowUnknownInputs: true, lockTime: 21 }).toPSBT();
     const result = validateCat21BuyOfferPsbt({
       psbt: empty,
       expectedSellerUtxo: { txid: '00'.repeat(32), vout: 0 },
       floorPriceSats: 1,
+      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('missing-seller-input');
@@ -332,6 +346,8 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: attachBuyerSig(built.psbt),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        network: Network.Testnet3,
       });
       expect(result.ok).toBe(true);
     });
@@ -424,7 +440,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       // Decode → mutate Output 1 → re-encode by writing raw PSBT bytes is
       // out of scope. Easier: construct from scratch with no partialSig,
       // then add the sig via updateInput AFTER addOutput.
-      const tx = new btc.Transaction({
+      const tx = new btc.Transaction({ lockTime: 21,
         allowUnknownInputs: true,
         allowUnknownOutputs: true,
       });
@@ -462,7 +478,7 @@ describe('validateCat21BuyOfferPsbt', () => {
 
     it('rejects with detail "scriptPubKey not decodable to address" when Output 1 carries an unaddressable script (OP_RETURN)', () => {
       const args = makeBaseArgs();
-      const tx = new btc.Transaction({
+      const tx = new btc.Transaction({ lockTime: 21,
         allowUnknownInputs: true,
         allowUnknownOutputs: true,
       });
@@ -616,6 +632,8 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
+        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toBe('sighash-not-all');
@@ -626,7 +644,7 @@ describe('validateCat21BuyOfferPsbt', () => {
 
     it('rejects a PSBT with fewer than 2 outputs', () => {
       const args = makeBaseArgs();
-      const tx = new btc.Transaction({ allowUnknownInputs: true });
+      const tx = new btc.Transaction({ allowUnknownInputs: true, lockTime: 21 });
       tx.addInput({
         txid: args.sellerInput.txid,
         index: args.sellerInput.vout,
@@ -638,6 +656,8 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 1,
+        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toBe('missing-seller-payment-output');
@@ -653,7 +673,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       // and fails loudly.
       const args = makeBaseArgs();
       const wrongTxid = '0000000000000000000000000000000000000000000000000000000000000099';
-      const tx = new btc.Transaction({ allowUnknownInputs: true });
+      const tx = new btc.Transaction({ allowUnknownInputs: true, lockTime: 21 });
       tx.addInput({
         txid: wrongTxid,
         index: 99,
@@ -665,6 +685,8 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 1,
+        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.reason).toBe('missing-seller-payment-output');

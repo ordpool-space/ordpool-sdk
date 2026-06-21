@@ -91,14 +91,13 @@ describe('resolveCat21InputSequence (single source of truth)', () => {
       return tx.getInput(0).sequence!;
     }
 
-    function offerSellerSequence(): number {
-      // buildCat21BuyOfferPsbt doesn't take a walletType — its sequence
-      // is fixed at CAT21_OFFER_INPUT_SEQUENCE (0xfffffffd), the RBF-on
-      // value the buyer chooses on behalf of all parties. Cross-check
-      // here so a future "use resolveCat21InputSequence on the offer
-      // too" refactor stays consistent with the per-wallet path.
+    function offerSellerSequence(walletType: KnownOrdinalWalletType): number {
+      // The offer builder applies `resolveCat21InputSequence(walletType)`
+      // per the unified per-wallet RBF policy (audit M4) — same shape as
+      // mint and transfer. cat21wallet → RBF on; everyone else → RBF off.
       const tx = btc.Transaction.fromPSBT(
         buildCat21BuyOfferPsbt({
+          walletType,
           network: Network.Mainnet,
           sellerInput: {
             txid: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
@@ -158,15 +157,12 @@ describe('resolveCat21InputSequence (single source of truth)', () => {
       KnownOrdinalWalletType.xverse,
       KnownOrdinalWalletType.unisat,
       KnownOrdinalWalletType.leather,
-    ])('mint, transfer, AND createTransaction agree on sequence for %s', wallet => {
+    ])('mint, transfer, offer, AND createTransaction agree on sequence for %s', wallet => {
       const expected = resolveCat21InputSequence(wallet);
       expect(mintSequence(wallet)).toBe(expected);
       expect(transferSequence(wallet)).toBe(expected);
+      expect(offerSellerSequence(wallet)).toBe(expected);
       expect(createTransactionSequence(wallet)).toBe(expected);
-    });
-
-    it('buy-offer seller-input sequence is the same 0xfffffffd as cat21wallet mint/transfer', () => {
-      expect(offerSellerSequence()).toBe(CAT21_WALLET_INPUT_SEQUENCE);
     });
   });
 });

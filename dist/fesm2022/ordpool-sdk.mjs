@@ -3895,6 +3895,12 @@ function listFundingUtxosThatCover(args) {
  * off), so this MUST be set explicitly. Verified by reading the
  * scure source (`DEFAULT_SEQUENCE = 4294967295`).
  */
+/**
+ * @deprecated Use `resolveCat21InputSequence(walletType)` per the
+ * per-wallet RBF policy unified across mint / transfer / offer flows
+ * (audit M4). Left exported for spec backwards-compat; new callers
+ * should not consume this constant directly.
+ */
 const CAT21_OFFER_INPUT_SEQUENCE = 0xfffffffd;
 /**
  * Builds the buyer-initiated CAT-21 offer PSBT (ord-style,
@@ -3929,20 +3935,21 @@ function buildCat21BuyOfferPsbt(args) {
     if (args.feeSats < 0)
         throw new Error('feeSats must be non-negative');
     const scureNetwork = toScureNetwork(args.network);
+    // Per-wallet RBF sequence — same policy as mint and transfer (audit M4).
+    // cat21-wallet → 0xfffffffd (RBF on; our accelerate flow preserves
+    // lockTime=21). All other wallets → 0xfffffffe (RBF off; third-party
+    // accelerate UIs can't fire and drop the marker, which would cost the
+    // buyer the bonus-mint cat). The @scure default sequence is 0xffffffff
+    // (final); we override explicitly so a future scure change can't drift
+    // the behaviour.
+    const sequenceNumber = resolveCat21InputSequence(args.walletType);
     // lockTime = 21 makes the offer-acceptance tx a CAT-21 mint in addition
     // to a transfer: cat21-ord reads tx.lock_time structurally and mints a
     // fresh cat at output 0 (the buyer's receive output), onto the same
-    // satoshi the existing cat ordinal travels to via FIFO. Per cat21/
-    // README.md a single CAT-21 ordinal can carry multiple cats through
-    // repeated minting. The value is pure data — block 21 was mined in
-    // 2009, so the field has no consensus meaning.
+    // satoshi the existing cat ordinal travels to via FIFO.
     const tx = new btc.Transaction({ lockTime: 21, allowUnknownInputs: true });
-    // Input 0: seller's cat UTXO, unsigned, sighash ALL pinned, RBF-signalling.
-    // The @scure default sequence is 0xffffffff (final, RBF off); we set
-    // 0xfffffffd explicitly so the buyer keeps the option to fee-bump if
-    // the mempool congests after broadcast. Per cat21-wallet HARD RULE #1,
-    // non-mint cat-flows allow RBF — third-party accelerators that drop
-    // lockTime=21 cost the user a missed bonus mint, not a cat.
+    // Input 0: seller's cat UTXO, unsigned, sighash ALL pinned, sequence
+    // per the per-wallet policy resolved above.
     // Detect Taproot from the scriptPubKey shape (OP_1 + 0x20-prefixed
     // 32-byte push = 34 bytes total, starts with 0x51). On Taproot
     // inputs we OMIT sighashType — same BIP-341 rationale as in
@@ -3952,7 +3959,7 @@ function buildCat21BuyOfferPsbt(args) {
     const sellerInput = {
         txid: args.sellerInput.txid,
         index: args.sellerInput.vout,
-        sequence: CAT21_OFFER_INPUT_SEQUENCE,
+        sequence: sequenceNumber,
         witnessUtxo: {
             script: args.sellerInput.scriptPubKey,
             amount: BigInt(args.sellerInput.value),
@@ -3971,7 +3978,7 @@ function buildCat21BuyOfferPsbt(args) {
             const legacyInput = {
                 txid: input.txid,
                 index: input.vout,
-                sequence: CAT21_OFFER_INPUT_SEQUENCE,
+                sequence: sequenceNumber,
                 nonWitnessUtxo: input.nonWitnessUtxo,
                 sighashType: btc.SigHash.ALL,
             };
@@ -3985,7 +3992,7 @@ function buildCat21BuyOfferPsbt(args) {
         const base = {
             txid: input.txid,
             index: input.vout,
-            sequence: CAT21_OFFER_INPUT_SEQUENCE,
+            sequence: sequenceNumber,
             witnessUtxo: {
                 script: input.scriptPubKey,
                 amount: BigInt(input.value),
@@ -4034,8 +4041,8 @@ function buildCat21BuyOfferPsbt(args) {
         if (!isTaproot && input.sighashType !== btc.SigHash.ALL) {
             throw new Error('Internal error: input sighashType drifted from SIGHASH_ALL');
         }
-        if (input.sequence !== CAT21_OFFER_INPUT_SEQUENCE) {
-            throw new Error(`Internal error: input ${i} sequence=${input.sequence}, expected ${CAT21_OFFER_INPUT_SEQUENCE}`);
+        if (input.sequence !== sequenceNumber) {
+            throw new Error(`Internal error: input ${i} sequence=${input.sequence}, expected ${sequenceNumber}`);
         }
     }
     if (tx.lockTime !== 21) {
@@ -4048,6 +4055,21 @@ function buildCat21BuyOfferPsbt(args) {
         changeSats: changeSats >= 546 ? changeSats : 0,
     };
 }
+/**
+ * Arguments for `validateCat21BuyOfferPsbt` (seller-side).
+ *
+ * Before the seller signs an inbound buy-offer PSBT, the structure is checked
+ * against the deal the seller actually agreed to. Any mismatch surfaces as a
+ * typed `Cat21OfferRejectionReason` so the UI can render a precise reason
+ * without leaking unrelated PSBT details.
+ */
+/**
+ * Hard cap on the raw PSBT bytes passed to the validator. Mirrors the
+ * `Cat21OperationGate`'s cap so non-Angular callers (cat21-wallet,
+ * scripts) get the same protection. A real CAT-21 buy-offer is <1 KB;
+ * 128 KiB is generous headroom while still blocking adversarial blobs.
+ */
+const MAX_BUY_OFFER_PSBT_BYTES = 128 * 1024;
 /**
  * Validates the on-the-wire shape of an inbound buy-offer PSBT.
  *
@@ -4066,12 +4088,42 @@ function buildCat21BuyOfferPsbt(args) {
  *      not exist.
  */
 function validateCat21BuyOfferPsbt(args) {
-    const tx = btc.Transaction.fromPSBT(args.psbt);
+    // 0a. Size cap. Mirrors Cat21OperationGate.MAX_OFFER_PSBT_BYTES so
+    //     direct callers (cat21-wallet, scripts) get the same DoS guard.
+    if (args.psbt.byteLength > MAX_BUY_OFFER_PSBT_BYTES) {
+        return fail('missing-seller-input', `psbt too large: ${args.psbt.byteLength} > ${MAX_BUY_OFFER_PSBT_BYTES}`);
+    }
+    // 0b. Magic bytes. PSBT magic is 0x70 0x73 0x62 0x74 0xff. Reject
+    //     anything else before scure tries to parse — keeps a cheap
+    //     adversarial blob from reaching the heavier parser.
+    if (args.psbt.byteLength < 5
+        || args.psbt[0] !== 0x70
+        || args.psbt[1] !== 0x73
+        || args.psbt[2] !== 0x62
+        || args.psbt[3] !== 0x74
+        || args.psbt[4] !== 0xff) {
+        return fail('missing-seller-input', 'not a PSBT (magic bytes mismatch)');
+    }
+    let tx;
+    try {
+        tx = btc.Transaction.fromPSBT(args.psbt);
+    }
+    catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        return fail('missing-seller-input', `PSBT parse failed: ${detail}`);
+    }
     if (tx.inputsLength === 0) {
         return fail('missing-seller-input', 'tx has no inputs');
     }
     if (tx.outputsLength < 2) {
         return fail('missing-seller-payment-output', 'tx has fewer than 2 outputs');
+    }
+    // 0c. lockTime must be 21 (the CAT-21 marker). The seller signing a
+    //     lockTime=0 PSBT still transfers the cat, but the cherry-on-top
+    //     bonus-mint is silently dropped — a strict loss vs the ord-style
+    //     offer contract. Per audit finding M2.
+    if (tx.lockTime !== 21) {
+        return fail('lock-time-not-21', `tx.lockTime = ${tx.lockTime}, expected 21`);
     }
     // 1. Seller's input on index 0.
     const sellerInput = tx.getInput(0);
@@ -4081,14 +4133,53 @@ function validateCat21BuyOfferPsbt(args) {
         sellerInput.index !== args.expectedSellerUtxo.vout) {
         return fail('missing-seller-input', `got ${sellerTxid}:${sellerInput.index}`);
     }
-    // 2. SIGHASH_ALL on every input. Already-finalised inputs may have
-    //    sighashType undefined (stripped post-finalize); accept those because
-    //    the signature itself commits to a specific sighash.
+    // 1b. Seller's input value MUST be 546 sats (the CAT-21 postage
+    //     invariant). Without this assert, a lying `witnessUtxo.amount`
+    //     would skew the `pricePaidSats` calculation below — mempool
+    //     would reject the signed tx (sig-verify-flag-failed against the
+    //     lied amount), so this isn't theft, but it's worse UX than
+    //     stopping the validator here.
+    const sellerInputValueSats = Number(sellerInput.witnessUtxo?.amount ?? 0n);
+    if (sellerInputValueSats !== CAT21_POSTAGE_SATS) {
+        return fail('wrong-seller-input-value', `seller input witnessUtxo.amount = ${sellerInputValueSats}, expected ${CAT21_POSTAGE_SATS}`);
+    }
+    // 2a. SIGHASH_ALL on every input (PSBT field check). Already-finalised
+    //     inputs may have sighashType undefined; for those see 2b below.
     for (let i = 0; i < tx.inputsLength; i++) {
         const input = tx.getInput(i);
         if (input.sighashType !== undefined && input.sighashType !== btc.SigHash.ALL) {
             return fail('sighash-not-all', `input ${i} sighashType=${input.sighashType}`);
         }
+    }
+    // 2b. Actual signature-byte sighash flag. A malicious buyer could
+    //     leave the PSBT sighashType field unset (or ALL) while signing
+    //     with SIGHASH_SINGLE|ANYONECANPAY — the validator's promise of
+    //     "all inputs committed under SIGHASH_ALL" is weaker than the
+    //     field-only check claims. Read the trailing byte of partialSig
+    //     (ECDSA) and assert it's 0x01. Schnorr signatures (Taproot key-
+    //     path) omit the flag when sighash is DEFAULT (= ALL); a 65-byte
+    //     Schnorr sig carries the flag in its last byte. Both shapes are
+    //     wire-equivalent to SIGHASH_ALL when the flag is absent or 0x01.
+    for (let i = 1; i < tx.inputsLength; i++) {
+        const input = tx.getInput(i);
+        if (input.partialSig && input.partialSig.length > 0) {
+            for (const entry of input.partialSig) {
+                // partialSig entries are [pubkey, sig] tuples per BIP-174.
+                const sig = entry[1];
+                const flagByte = sig[sig.length - 1];
+                if (flagByte !== btc.SigHash.ALL) {
+                    return fail('sighash-flag-byte-not-all', `input ${i} ECDSA sig sighash flag byte = 0x${flagByte.toString(16)}, expected 0x01`);
+                }
+            }
+        }
+        if (input.tapKeySig && input.tapKeySig.length === 65) {
+            // 65-byte Schnorr sig: last byte is the sighash flag.
+            const flagByte = input.tapKeySig[64];
+            if (flagByte !== btc.SigHash.ALL) {
+                return fail('sighash-flag-byte-not-all', `input ${i} Schnorr sig sighash flag byte = 0x${flagByte.toString(16)}, expected 0x01`);
+            }
+        }
+        // 64-byte Schnorr sig = SIGHASH_DEFAULT = wire-equivalent to ALL ✓
     }
     // 3. Buyer inputs (1..N) must be signed.
     for (let i = 1; i < tx.inputsLength; i++) {
@@ -4107,44 +4198,77 @@ function validateCat21BuyOfferPsbt(args) {
     if (postageSats !== CAT21_POSTAGE_SATS) {
         return fail('wrong-postage', `${postageSats} !== ${CAT21_POSTAGE_SATS}`);
     }
+    // 4b. Cat output script must decode to a spendable address on the
+    //     configured network. Without this check a malicious buyer could
+    //     route Output 0 to an OP_RETURN, burning the cat after the seller
+    //     signs. Buyer gets nothing either, but the cat is destroyed.
+    const scureNetwork = toScureNetwork(args.network ?? Network.Mainnet);
+    if (!catOutput.script) {
+        return fail('cat-output-not-spendable', 'cat output has no scriptPubKey');
+    }
+    try {
+        btc.Address(scureNetwork).encode(btc.OutScript.decode(catOutput.script));
+    }
+    catch {
+        return fail('cat-output-not-spendable', 'cat output scriptPubKey not a real address');
+    }
     const paymentOutput = tx.getOutput(1);
-    // 5. Seller payment address — decoded from Output 1's scriptPubKey and
-    //    compared against the caller-supplied expectation. Skipped when the
-    //    expectation is absent (backwards-compat); strongly recommended
-    //    whenever a human eventually signs. Runs BEFORE the price check so
-    //    that a PSBT which is both underpriced AND points at the wrong
-    //    address surfaces the more dangerous reason — the address attack —
-    //    not the cheaper wrong-price one. Without this gate a malicious
-    //    buyer can construct a PSBT where Output 1 pays a third address;
-    //    signer-side UI fails to notice, cat moves to buyer, payment never
-    //    reaches the seller.
-    if (args.expectedSellerPaymentAddress !== undefined) {
-        const scureNetwork = toScureNetwork(args.network ?? Network.Mainnet);
-        let actualAddress;
-        try {
-            if (!paymentOutput.script) {
-                return fail('payment-output-wrong-address', 'scriptPubKey not decodable to address');
-            }
-            actualAddress = btc.Address(scureNetwork).encode(btc.OutScript.decode(paymentOutput.script));
-        }
-        catch {
+    // 5. Seller payment address — decoded from Output 1's scriptPubKey
+    //    and compared against the caller's expectation. **REQUIRED** as
+    //    of audit C1; mandatory in the args type so a caller cannot
+    //    accidentally omit it. Runs BEFORE the price check so an under-
+    //    priced AND mis-addressed PSBT surfaces the address attack first.
+    let actualAddress;
+    try {
+        if (!paymentOutput.script) {
             return fail('payment-output-wrong-address', 'scriptPubKey not decodable to address');
         }
-        if (actualAddress !== args.expectedSellerPaymentAddress) {
-            return fail('payment-output-wrong-address', `expected ${args.expectedSellerPaymentAddress}, got ${actualAddress}`);
-        }
+        actualAddress = btc.Address(scureNetwork).encode(btc.OutScript.decode(paymentOutput.script));
+    }
+    catch {
+        return fail('payment-output-wrong-address', 'scriptPubKey not decodable to address');
+    }
+    if (!addressesEquivalent(actualAddress, args.expectedSellerPaymentAddress, args.network ?? Network.Mainnet)) {
+        return fail('payment-output-wrong-address', `expected ${args.expectedSellerPaymentAddress}, got ${actualAddress}`);
     }
     // 6. Seller payment amount. Output 1's value is `priceSats + postageSats`
     //    (ord-parity). The seller's net is what's left after their own input
     //    flows back into the same output — `output1 - sellerInputValue`.
     //    Compare net-to-seller against the caller's floor.
-    const sellerInputValueSats = Number(sellerInput.witnessUtxo?.amount ?? 0n);
     const paymentOutputValue = Number(paymentOutput.amount ?? 0n);
     const pricePaidSats = paymentOutputValue - sellerInputValueSats;
     if (pricePaidSats < args.floorPriceSats) {
         return fail('wrong-price', `${pricePaidSats} < ${args.floorPriceSats}`);
     }
     return { ok: true, pricePaidSats, postageSats };
+}
+/**
+ * Compare two address strings by re-decoding both to script bytes on
+ * the configured network. Tolerant of bech32 case differences (BIP173
+ * allows mixed but typically all-lowercase or all-uppercase) and
+ * defeats Latin/Cyrillic homoglyph attacks because non-ASCII bytes
+ * fail bech32 decoding.
+ */
+function addressesEquivalent(a, b, network) {
+    if (a === b)
+        return true;
+    try {
+        const scureNetwork = toScureNetwork(network);
+        const decodeA = btc.Address(scureNetwork).decode(a);
+        const decodeB = btc.Address(scureNetwork).decode(b);
+        const scriptA = btc.OutScript.encode(decodeA);
+        const scriptB = btc.OutScript.encode(decodeB);
+        if (scriptA.length !== scriptB.length)
+            return false;
+        for (let i = 0; i < scriptA.length; i++) {
+            if (scriptA[i] !== scriptB[i])
+                return false;
+        }
+        return true;
+    }
+    catch {
+        return false;
+    }
 }
 function fail(reason, detail) {
     return { ok: false, reason, detail };
@@ -4488,6 +4612,7 @@ class Cat21CreateOfferOrchestrator {
             network: this.network,
         });
         const built = buildCat21BuyOfferPsbt({
+            walletType: wallet.type,
             network: this.network,
             sellerInput,
             buyerInputs: [buyerInput],
@@ -4517,6 +4642,7 @@ class Cat21CreateOfferOrchestrator {
             network: this.network,
         });
         const built = buildCat21BuyOfferPsbt({
+            walletType: wallet.type,
             network: this.network,
             sellerInput,
             buyerInputs: [buyerInput],
@@ -4554,11 +4680,12 @@ class Cat21AcceptOfferOrchestrator {
     /** Offer artifact pasted by the seller (base64 or hex). */
     pastedOffer = signal(null, ...(ngDevMode ? [{ debugName: "pastedOffer" }] : []));
     /**
-     * Minimum price the seller is willing to accept. The validator rejects
-     * offers below this floor before any signing happens. UI typically
-     * shows the floor next to the price and warns when a paste falls below.
+     * Minimum price the seller is willing to accept. The orchestrator
+     * REFUSES to validate until the consumer sets this explicitly — a
+     * forgotten value would let any 1-sat offer pass the floor check.
+     * No default. Use `setFloorPriceSats(0)` if you genuinely mean zero.
      */
-    floorPriceSats = signal(0, ...(ngDevMode ? [{ debugName: "floorPriceSats" }] : []));
+    floorPriceSats = signal(null, ...(ngDevMode ? [{ debugName: "floorPriceSats" }] : []));
     /**
      * The cat the seller is selling (txid + vout). When set, validation
      * checks input 0 against this UTXO and rejects offers for the wrong
@@ -4608,9 +4735,24 @@ class Cat21AcceptOfferOrchestrator {
     });
     // --- Commands -----------------------------------------------------------
     /**
+     * Maximum acceptable paste size in bytes. PSBTs above this are rejected
+     * before decoding to prevent OOM / tab-crash attacks via a malicious
+     * `?offer=…` link. The on-chain shape of a real CAT-21 buy-offer is
+     * <1 KB; 256 KiB is generous headroom for future protocol extensions
+     * while still blocking DoS payloads.
+     */
+    static MAX_PASTED_OFFER_BYTES = 256 * 1024;
+    /**
      * Decode + validate the pasted offer. Sets `parsedOffer` + `validationResult`
      * + transitions `state` to `parsed` or `invalid`. Pure transition — no
      * wallet calls. Safe to call repeatedly as the user edits the paste.
+     *
+     * **Hardening:**
+     * - Paste length capped at MAX_PASTED_OFFER_BYTES (audit finding C2).
+     * - Validator only runs when `expectedSellerPaymentAddress` AND
+     *   `floorPriceSats` are set (audit findings H1, H2). Without them
+     *   the orchestrator stays in `idle` so the UI prompts the seller to
+     *   complete the form before any wallet interaction.
      */
     setPastedOffer(paste) {
         const trimmed = paste && paste.trim() ? paste.trim() : null;
@@ -4619,6 +4761,14 @@ class Cat21AcceptOfferOrchestrator {
             this.parsedOffer.set(null);
             this.validationResult.set(null);
             this.state.set('idle');
+            return;
+        }
+        if (trimmed.length > Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES) {
+            const msg = `Pasted offer too large: ${trimmed.length} bytes > ${Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES} cap`;
+            this.errorMessage.set(msg);
+            this.validationResult.set({ ok: false, reason: 'missing-seller-input', detail: msg });
+            this.parsedOffer.set(null);
+            this.state.set('invalid');
             return;
         }
         let psbtBytes;
@@ -4634,10 +4784,13 @@ class Cat21AcceptOfferOrchestrator {
             return;
         }
         const expectedCat = this.expectedCatUtxo();
-        if (!expectedCat) {
-            // Without an expected cat the validator has nothing to compare;
-            // the UI is incomplete. Stay in idle until the seller selects which
-            // cat they're selling.
+        const expectedAddr = this.expectedSellerPaymentAddress();
+        const floor = this.floorPriceSats();
+        if (!expectedCat || !expectedAddr || floor === null) {
+            // Form incomplete — never run the validator. Without an expected
+            // cat the validator has no UTXO to pin; without an expected seller
+            // address the buyer can redirect payment to themselves; without a
+            // floor every 1-sat offer passes. Stay idle.
             this.state.set('idle');
             return;
         }
@@ -4646,8 +4799,8 @@ class Cat21AcceptOfferOrchestrator {
             validation = validateCat21BuyOfferPsbt({
                 psbt: psbtBytes,
                 expectedSellerUtxo: expectedCat,
-                floorPriceSats: this.floorPriceSats(),
-                expectedSellerPaymentAddress: this.expectedSellerPaymentAddress() ?? undefined,
+                floorPriceSats: floor,
+                expectedSellerPaymentAddress: expectedAddr,
                 network: this.network,
             });
         }
@@ -4680,6 +4833,12 @@ class Cat21AcceptOfferOrchestrator {
         if (paste)
             this.setPastedOffer(paste);
     }
+    /**
+     * MAX_PASTED_OFFER_BYTES exposed for the UI's pre-paste textarea
+     * `maxlength` attribute. Mirrors the static class field so consumers
+     * don't need to reach for the constructor.
+     */
+    maxPastedOfferBytes = Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES;
     setExpectedCatUtxo(utxo) {
         this.expectedCatUtxo.set(utxo);
         const paste = this.pastedOffer();
@@ -6404,5 +6563,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
 //# sourceMappingURL=ordpool-sdk.mjs.map

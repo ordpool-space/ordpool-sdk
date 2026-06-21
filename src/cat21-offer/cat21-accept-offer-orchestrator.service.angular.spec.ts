@@ -103,14 +103,18 @@ describe('Cat21AcceptOfferOrchestrator', () => {
       expect(afterFloor?.ok).toBe(false); // still invalid (decode); but re-ran
     });
 
-    it('a paste that decodes but has no expectedCat stays idle; setting expectedCat re-runs validation', () => {
+    it('a paste that decodes but has no expectedCat stays idle; setting all expected-* fields runs validation', () => {
       const { orchestrator } = buildOrchestrator();
       // Decode-succeeds-but-validate-fails paste (just enough magic bytes
       // to pass the sniff in `decodePastedPsbt`; will fail validation).
       orchestrator.setPastedOffer('cHNidP8BAA=='); // base64 of magic only
       expect(orchestrator.state()).toBe('idle');
       orchestrator.setExpectedCatUtxo({ txid: 'b'.repeat(64), vout: 0 });
-      // Now validation runs on a minimal PSBT shape that lacks inputs → invalid.
+      // Still idle — orchestrator demands floor + expected seller address before validating.
+      expect(orchestrator.state()).toBe('idle');
+      orchestrator.setFloorPriceSats(1);
+      orchestrator.setExpectedSellerPaymentAddress('bc1qSellerExpected');
+      // Now validation runs on the minimal PSBT shape → invalid.
       expect(orchestrator.state()).toBe('invalid');
     });
   });

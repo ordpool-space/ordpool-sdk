@@ -1418,7 +1418,7 @@ interface Cat21OfferDestinations {
     buyerChangeAddress: string;
 }
 /** Reasons a seller-side validator may reject an inbound offer PSBT. */
-type Cat21OfferRejectionReason = 'missing-seller-input' | 'wrong-postage' | 'wrong-price' | 'sighash-not-all' | 'buyer-input-unsigned' | 'missing-seller-payment-output' | 'payment-output-wrong-address';
+type Cat21OfferRejectionReason = 'missing-seller-input' | 'wrong-postage' | 'wrong-price' | 'wrong-seller-input-value' | 'sighash-not-all' | 'sighash-flag-byte-not-all' | 'buyer-input-unsigned' | 'missing-seller-payment-output' | 'payment-output-wrong-address' | 'cat-output-not-spendable' | 'lock-time-not-21';
 interface Cat21OfferValidationResult {
     ok: true;
     pricePaidSats: number;
@@ -1447,6 +1447,12 @@ type Cat21OfferValidation = Cat21OfferValidationResult | Cat21OfferValidationFai
  * off), so this MUST be set explicitly. Verified by reading the
  * scure source (`DEFAULT_SEQUENCE = 4294967295`).
  */
+/**
+ * @deprecated Use `resolveCat21InputSequence(walletType)` per the
+ * per-wallet RBF policy unified across mint / transfer / offer flows
+ * (audit M4). Left exported for spec backwards-compat; new callers
+ * should not consume this constant directly.
+ */
 declare const CAT21_OFFER_INPUT_SEQUENCE = 4294967293;
 /**
  * Arguments for `buildCat21BuyOfferPsbt`.
@@ -1457,6 +1463,19 @@ declare const CAT21_OFFER_INPUT_SEQUENCE = 4294967293;
  * compute fees.
  */
 interface BuildCat21BuyOfferArgs {
+    /**
+     * The BUYER's wallet type. Determines the input sequence number per
+     * the unified per-wallet RBF policy (`resolveCat21InputSequence`):
+     *   - `cat21wallet`: sequence = 0xfffffffd (RBF on; our accelerate
+     *     flow preserves lockTime=21 through replacement, so signalling
+     *     RBF is safe AND useful).
+     *   - any other wallet: sequence = 0xfffffffe (RBF off; third-party
+     *     accelerate UIs can't fire on this tx and accidentally drop the
+     *     lockTime=21 marker, which would cost the buyer the cherry-on-
+     *     top bonus mint cat).
+     * Matches the mint/transfer flows.
+     */
+    walletType: KnownOrdinalWalletType;
     network: Network;
     sellerInput: Cat21OfferSellerInput;
     buyerInputs: Cat21OfferBuyerInput[];
@@ -1514,22 +1533,29 @@ declare function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat2
  * typed `Cat21OfferRejectionReason` so the UI can render a precise reason
  * without leaking unrelated PSBT details.
  */
+/**
+ * Hard cap on the raw PSBT bytes passed to the validator. Mirrors the
+ * `Cat21OperationGate`'s cap so non-Angular callers (cat21-wallet,
+ * scripts) get the same protection. A real CAT-21 buy-offer is <1 KB;
+ * 128 KiB is generous headroom while still blocking adversarial blobs.
+ */
+declare const MAX_BUY_OFFER_PSBT_BYTES: number;
 interface ValidateCat21BuyOfferArgs {
     psbt: Uint8Array;
     expectedSellerUtxo: {
         txid: string;
         vout: number;
     };
-    /** Minimum acceptable price in sats. */
+    /** Minimum acceptable price in sats. Must be supplied; 0 is legal but the caller has to type it. */
     floorPriceSats: number;
     /**
-     * Strongly recommended whenever a human eventually signs. When set, the
-     * validator decodes Output 1's `scriptPubKey` back to an address string
-     * and compares it against this value; mismatch returns
-     * `'payment-output-wrong-address'`. Omitting it leaves the address
-     * un-checked (pre-2026-06 behaviour, retained for backwards-compat).
+     * REQUIRED. Without this, a malicious buyer can build a PSBT whose
+     * Output 1 pays anywhere (including the buyer's own change), and the
+     * validator only checks the amount, not the destination. The seller
+     * would sign, the cat would move, and the payment would never arrive.
+     * Made mandatory as of audit C1.
      */
-    expectedSellerPaymentAddress?: string;
+    expectedSellerPaymentAddress: string;
     /**
      * Network used to decode Output 1's `scriptPubKey` back to an address.
      * Defaults to mainnet. Callers signing on testnet/regtest must pass it.
@@ -1757,9 +1783,10 @@ declare class Cat21AcceptOfferOrchestrator {
     /** Offer artifact pasted by the seller (base64 or hex). */
     readonly pastedOffer: _angular_core.WritableSignal<string>;
     /**
-     * Minimum price the seller is willing to accept. The validator rejects
-     * offers below this floor before any signing happens. UI typically
-     * shows the floor next to the price and warns when a paste falls below.
+     * Minimum price the seller is willing to accept. The orchestrator
+     * REFUSES to validate until the consumer sets this explicitly — a
+     * forgotten value would let any 1-sat offer pass the floor check.
+     * No default. Use `setFloorPriceSats(0)` if you genuinely mean zero.
      */
     readonly floorPriceSats: _angular_core.WritableSignal<number>;
     /**
@@ -1798,12 +1825,33 @@ declare class Cat21AcceptOfferOrchestrator {
      */
     private readonly walletChangeSub;
     /**
+     * Maximum acceptable paste size in bytes. PSBTs above this are rejected
+     * before decoding to prevent OOM / tab-crash attacks via a malicious
+     * `?offer=…` link. The on-chain shape of a real CAT-21 buy-offer is
+     * <1 KB; 256 KiB is generous headroom for future protocol extensions
+     * while still blocking DoS payloads.
+     */
+    static readonly MAX_PASTED_OFFER_BYTES: number;
+    /**
      * Decode + validate the pasted offer. Sets `parsedOffer` + `validationResult`
      * + transitions `state` to `parsed` or `invalid`. Pure transition — no
      * wallet calls. Safe to call repeatedly as the user edits the paste.
+     *
+     * **Hardening:**
+     * - Paste length capped at MAX_PASTED_OFFER_BYTES (audit finding C2).
+     * - Validator only runs when `expectedSellerPaymentAddress` AND
+     *   `floorPriceSats` are set (audit findings H1, H2). Without them
+     *   the orchestrator stays in `idle` so the UI prompts the seller to
+     *   complete the form before any wallet interaction.
      */
     setPastedOffer(paste: string | null): void;
     setFloorPriceSats(sats: number): void;
+    /**
+     * MAX_PASTED_OFFER_BYTES exposed for the UI's pre-paste textarea
+     * `maxlength` attribute. Mirrors the static class field so consumers
+     * don't need to reach for the constructor.
+     */
+    readonly maxPastedOfferBytes: number;
     setExpectedCatUtxo(utxo: {
         txid: string;
         vout: number;
@@ -3138,5 +3186,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
 export type { AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeFundingInput, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, ParsedOffer, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };

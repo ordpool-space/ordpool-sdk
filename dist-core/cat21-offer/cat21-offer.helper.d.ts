@@ -1,4 +1,5 @@
 import { Network } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferSellerInput, Cat21OfferValidation } from './cat21-offer.types';
 /**
  * Sequence number set on every input of a CAT-21 buy-offer PSBT.
@@ -16,6 +17,12 @@ import { Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferSellerInput, Ca
  * off), so this MUST be set explicitly. Verified by reading the
  * scure source (`DEFAULT_SEQUENCE = 4294967295`).
  */
+/**
+ * @deprecated Use `resolveCat21InputSequence(walletType)` per the
+ * per-wallet RBF policy unified across mint / transfer / offer flows
+ * (audit M4). Left exported for spec backwards-compat; new callers
+ * should not consume this constant directly.
+ */
 export declare const CAT21_OFFER_INPUT_SEQUENCE = 4294967293;
 /**
  * Arguments for `buildCat21BuyOfferPsbt`.
@@ -26,6 +33,19 @@ export declare const CAT21_OFFER_INPUT_SEQUENCE = 4294967293;
  * compute fees.
  */
 export interface BuildCat21BuyOfferArgs {
+    /**
+     * The BUYER's wallet type. Determines the input sequence number per
+     * the unified per-wallet RBF policy (`resolveCat21InputSequence`):
+     *   - `cat21wallet`: sequence = 0xfffffffd (RBF on; our accelerate
+     *     flow preserves lockTime=21 through replacement, so signalling
+     *     RBF is safe AND useful).
+     *   - any other wallet: sequence = 0xfffffffe (RBF off; third-party
+     *     accelerate UIs can't fire on this tx and accidentally drop the
+     *     lockTime=21 marker, which would cost the buyer the cherry-on-
+     *     top bonus mint cat).
+     * Matches the mint/transfer flows.
+     */
+    walletType: KnownOrdinalWalletType;
     network: Network;
     sellerInput: Cat21OfferSellerInput;
     buyerInputs: Cat21OfferBuyerInput[];
@@ -83,22 +103,29 @@ export declare function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): Bu
  * typed `Cat21OfferRejectionReason` so the UI can render a precise reason
  * without leaking unrelated PSBT details.
  */
+/**
+ * Hard cap on the raw PSBT bytes passed to the validator. Mirrors the
+ * `Cat21OperationGate`'s cap so non-Angular callers (cat21-wallet,
+ * scripts) get the same protection. A real CAT-21 buy-offer is <1 KB;
+ * 128 KiB is generous headroom while still blocking adversarial blobs.
+ */
+export declare const MAX_BUY_OFFER_PSBT_BYTES: number;
 export interface ValidateCat21BuyOfferArgs {
     psbt: Uint8Array;
     expectedSellerUtxo: {
         txid: string;
         vout: number;
     };
-    /** Minimum acceptable price in sats. */
+    /** Minimum acceptable price in sats. Must be supplied; 0 is legal but the caller has to type it. */
     floorPriceSats: number;
     /**
-     * Strongly recommended whenever a human eventually signs. When set, the
-     * validator decodes Output 1's `scriptPubKey` back to an address string
-     * and compares it against this value; mismatch returns
-     * `'payment-output-wrong-address'`. Omitting it leaves the address
-     * un-checked (pre-2026-06 behaviour, retained for backwards-compat).
+     * REQUIRED. Without this, a malicious buyer can build a PSBT whose
+     * Output 1 pays anywhere (including the buyer's own change), and the
+     * validator only checks the amount, not the destination. The seller
+     * would sign, the cat would move, and the payment would never arrive.
+     * Made mandatory as of audit C1.
      */
-    expectedSellerPaymentAddress?: string;
+    expectedSellerPaymentAddress: string;
     /**
      * Network used to decode Output 1's `scriptPubKey` back to an address.
      * Defaults to mainnet. Callers signing on testnet/regtest must pass it.

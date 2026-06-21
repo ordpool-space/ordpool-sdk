@@ -68,11 +68,12 @@ export class Cat21AcceptOfferOrchestrator {
   readonly pastedOffer = signal<string | null>(null);
 
   /**
-   * Minimum price the seller is willing to accept. The validator rejects
-   * offers below this floor before any signing happens. UI typically
-   * shows the floor next to the price and warns when a paste falls below.
+   * Minimum price the seller is willing to accept. The orchestrator
+   * REFUSES to validate until the consumer sets this explicitly — a
+   * forgotten value would let any 1-sat offer pass the floor check.
+   * No default. Use `setFloorPriceSats(0)` if you genuinely mean zero.
    */
-  readonly floorPriceSats = signal<number>(0);
+  readonly floorPriceSats = signal<number | null>(null);
 
   /**
    * The cat the seller is selling (txid + vout). When set, validation
@@ -134,9 +135,25 @@ export class Cat21AcceptOfferOrchestrator {
   // --- Commands -----------------------------------------------------------
 
   /**
+   * Maximum acceptable paste size in bytes. PSBTs above this are rejected
+   * before decoding to prevent OOM / tab-crash attacks via a malicious
+   * `?offer=…` link. The on-chain shape of a real CAT-21 buy-offer is
+   * <1 KB; 256 KiB is generous headroom for future protocol extensions
+   * while still blocking DoS payloads.
+   */
+  static readonly MAX_PASTED_OFFER_BYTES = 256 * 1024;
+
+  /**
    * Decode + validate the pasted offer. Sets `parsedOffer` + `validationResult`
    * + transitions `state` to `parsed` or `invalid`. Pure transition — no
    * wallet calls. Safe to call repeatedly as the user edits the paste.
+   *
+   * **Hardening:**
+   * - Paste length capped at MAX_PASTED_OFFER_BYTES (audit finding C2).
+   * - Validator only runs when `expectedSellerPaymentAddress` AND
+   *   `floorPriceSats` are set (audit findings H1, H2). Without them
+   *   the orchestrator stays in `idle` so the UI prompts the seller to
+   *   complete the form before any wallet interaction.
    */
   setPastedOffer(paste: string | null): void {
     const trimmed = paste && paste.trim() ? paste.trim() : null;
@@ -145,6 +162,15 @@ export class Cat21AcceptOfferOrchestrator {
       this.parsedOffer.set(null);
       this.validationResult.set(null);
       this.state.set('idle');
+      return;
+    }
+
+    if (trimmed.length > Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES) {
+      const msg = `Pasted offer too large: ${trimmed.length} bytes > ${Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES} cap`;
+      this.errorMessage.set(msg);
+      this.validationResult.set({ ok: false, reason: 'missing-seller-input', detail: msg });
+      this.parsedOffer.set(null);
+      this.state.set('invalid');
       return;
     }
 
@@ -161,10 +187,13 @@ export class Cat21AcceptOfferOrchestrator {
     }
 
     const expectedCat = this.expectedCatUtxo();
-    if (!expectedCat) {
-      // Without an expected cat the validator has nothing to compare;
-      // the UI is incomplete. Stay in idle until the seller selects which
-      // cat they're selling.
+    const expectedAddr = this.expectedSellerPaymentAddress();
+    const floor = this.floorPriceSats();
+    if (!expectedCat || !expectedAddr || floor === null) {
+      // Form incomplete — never run the validator. Without an expected
+      // cat the validator has no UTXO to pin; without an expected seller
+      // address the buyer can redirect payment to themselves; without a
+      // floor every 1-sat offer passes. Stay idle.
       this.state.set('idle');
       return;
     }
@@ -174,8 +203,8 @@ export class Cat21AcceptOfferOrchestrator {
       validation = validateCat21BuyOfferPsbt({
         psbt: psbtBytes,
         expectedSellerUtxo: expectedCat,
-        floorPriceSats: this.floorPriceSats(),
-        expectedSellerPaymentAddress: this.expectedSellerPaymentAddress() ?? undefined,
+        floorPriceSats: floor,
+        expectedSellerPaymentAddress: expectedAddr,
         network: this.network as Network,
       });
     } catch (err: unknown) {
@@ -206,6 +235,13 @@ export class Cat21AcceptOfferOrchestrator {
     const paste = this.pastedOffer();
     if (paste) this.setPastedOffer(paste);
   }
+
+  /**
+   * MAX_PASTED_OFFER_BYTES exposed for the UI's pre-paste textarea
+   * `maxlength` attribute. Mirrors the static class field so consumers
+   * don't need to reach for the constructor.
+   */
+  readonly maxPastedOfferBytes = Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES;
 
   setExpectedCatUtxo(utxo: { txid: string; vout: number } | null): void {
     this.expectedCatUtxo.set(utxo);

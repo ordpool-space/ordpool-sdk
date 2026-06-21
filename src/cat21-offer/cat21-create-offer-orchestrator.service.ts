@@ -429,6 +429,7 @@ export class Cat21CreateOfferOrchestrator {
       network: this.network as Network,
     });
     const built = buildCat21BuyOfferPsbt({
+      walletType: wallet.type,
       network: this.network as Network,
       sellerInput,
       buyerInputs: [buyerInput],
@@ -466,6 +467,7 @@ export class Cat21CreateOfferOrchestrator {
       network: this.network as Network,
     });
     const built = buildCat21BuyOfferPsbt({
+      walletType: wallet.type,
       network: this.network as Network,
       sellerInput,
       buyerInputs: [buyerInput],
