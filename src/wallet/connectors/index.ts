@@ -4,7 +4,6 @@ import {
   WindowLike,
 } from '../wallet.service.types';
 import { albyConnector } from './alby.connector';
-import { binanceConnector } from './binance.connector';
 import { cat21walletConnector } from './cat21wallet.connector';
 import { leatherConnector } from './leather.connector';
 import { okxConnector } from './okx.connector';
@@ -24,6 +23,16 @@ import { xverseConnector } from './xverse.connector';
  * maintainer ships this one). Xverse follows as the headline
  * external recommendation. Everything else by installed-base
  * heuristic.
+ *
+ * Binance is NOT in this list. The connector + signer files stay on
+ * disk because Binance's developer docs document `window.binancew3w
+ * .bitcoin` with a Unisat-shaped API, but the v1.17.2 binary never
+ * actually exposes that surface — detect-by-`binancew3w.bitcoin`
+ * returns false for every real install, AND no user-side smoke test
+ * is possible because the API doesn't ship. The picker entry would
+ * be a broken promise. If Binance ever ships the documented surface,
+ * re-add `binanceConnector` to this list, the existing connector +
+ * signer auto-activates.
  */
 export const walletConnectors: readonly WalletConnector[] = [
   cat21walletConnector,
@@ -35,7 +44,6 @@ export const walletConnectors: readonly WalletConnector[] = [
   phantomConnector,
   oylConnector,
   albyConnector,
-  binanceConnector,
 ];
 
 /**

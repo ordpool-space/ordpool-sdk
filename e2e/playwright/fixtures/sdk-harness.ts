@@ -11,7 +11,8 @@
  */
 
 import { firstValueFrom, of } from 'rxjs';
-import { p2wpkh, p2tr } from '@scure/btc-signer';
+import { p2wpkh, p2tr, Transaction } from '@scure/btc-signer';
+import { sha256 } from '@noble/hashes/sha2';
 
 import { xverseConnector } from '../../../src/wallet/connectors/xverse.connector';
 import { unisatConnector } from '../../../src/wallet/connectors/unisat.connector';
@@ -25,6 +26,8 @@ import { albyConnector } from '../../../src/wallet/connectors/alby.connector';
 import { findSignerOrThrow } from '../../../src/wallet/signers';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
 import { createInscribeTransactions } from '../../../src/inscribe/inscription.service.helper';
+import { buildCat21TransferPsbt } from '../../../src/cat21-transfer/cat21-transfer.helper';
+import { buildCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { Network, toScureNetwork } from '../../../src/network';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import type { TxnOutput } from '../../../src/cat21-mint/cat21.service.types';
@@ -54,6 +57,9 @@ declare global {
        */
       runOperation(input: RunOperationMintInput): Promise<RunOperationMintResult>;
       runOperation(input: RunOperationInscribeInput): Promise<RunOperationInscribeResult>;
+      runOperation(input: RunOperationTransferInput): Promise<RunOperationTransferResult>;
+      runOperation(input: RunOperationCreateOfferInput): Promise<RunOperationCreateOfferResult>;
+      runOperation(input: RunOperationAcceptOfferInput): Promise<RunOperationAcceptOfferResult>;
       runOperation(input: RunOperationInput): Promise<RunOperationResult>;
 
       detectXverse(): boolean;
@@ -102,6 +108,26 @@ declare global {
       }>;
       detectCat21Wallet(): boolean;
       connectCat21Wallet(): Promise<{
+        type: KnownOrdinalWalletType;
+        ordinalsAddress: string;
+        ordinalsPublicKey: string;
+        paymentAddress: string;
+        paymentPublicKey: string;
+        signingSupported: boolean;
+      }>;
+      /**
+       * Cat21 Wallet supports a `devnet` (=regtest) network on its
+       * `getAddresses` JSON-RPC. This variant calls connect with
+       * `Network.Regtest` so the wallet returns its own bcrt1q +
+       * bcrt1p addresses directly (BIP-84 / BIP-86 from its own seed),
+       * sidestepping the cross-network-keys derivation trick the
+       * other mainnet-only wallets need. Specs that drive transfer
+       * / offer flows MUST use this connect path because the cat
+       * UTXO lives at the wallet's ACTUAL ordinals key — only the
+       * wallet knows the matching private key to sign Taproot input
+       * 0 on a transfer or offer-accept tx.
+       */
+      connectCat21WalletRegtest(): Promise<{
         type: KnownOrdinalWalletType;
         ordinalsAddress: string;
         ordinalsPublicKey: string;
@@ -253,12 +279,156 @@ export interface RunOperationInscribeInput extends RunOperationFundingInput {
   feeRatePerVbyte: number;
 }
 
-export type RunOperationInput = RunOperationMintInput | RunOperationInscribeInput;
+/**
+ * Cat21 transfer — the wallet currently owns a cat at its ordinals
+ * (Taproot) address; this operation moves the cat to `recipientAddress`
+ * and returns change to `senderChangeAddress`. The signer drives a
+ * multi-input flow: input 0 (Taproot cat at ordinalsAddress) plus N
+ * funding inputs (P2WPKH at paymentAddress). Every input is signed
+ * SIGHASH_ALL.
+ *
+ * `catInput` and `fundingInputs` carry the on-the-wire UTXO bytes the
+ * builder needs (scriptPubKey, tapInternalKey for the Taproot cat).
+ * The harness assembles the PSBT via `buildCat21TransferPsbt`,
+ * dispatches `signer.signTransfer`, captures the finalized wire-tx
+ * hex via the broadcast callback (the spec broadcasts via electrs).
+ */
+export interface RunOperationTransferInput {
+  kind: 'transfer';
+  walletType: `${KnownOrdinalWalletType}`;
+  /** The cat UTXO (Taproot at ordinalsAddress). Value must equal CAT21_POSTAGE_SATS=546. */
+  catInput: {
+    txid: string;
+    vout: number;
+    value: number;
+    /** Hex-encoded scriptPubKey of the cat UTXO (Taproot v1 = OP_1 || 0x20 || x-only-pubkey). */
+    scriptPubKeyHex: string;
+    /** Hex-encoded x-only internal key required for BIP-341 key-path spends. */
+    tapInternalKeyHex: string;
+  };
+  /** Funding UTXOs at paymentAddress (P2WPKH bcrt1q). */
+  fundingInputs: ReadonlyArray<{
+    txid: string;
+    vout: number;
+    value: number;
+    /** Hex-encoded scriptPubKey of the funding UTXO. */
+    scriptPubKeyHex: string;
+  }>;
+  /** The wallet's ordinals (Taproot) address — where input 0 lives. */
+  ordinalsAddress: string;
+  /** The wallet's payment (P2WPKH) address — where inputs 1..N live. */
+  paymentAddress: string;
+  recipientAddress: string;
+  senderChangeAddress: string;
+  feeSats: number;
+}
+
+export interface RunOperationTransferResult {
+  kind: 'transfer';
+  /** Finalized wire-tx hex captured from the signer's broadcast callback. */
+  txHex: string;
+  /** Txid computed from the UNSIGNED PSBT; see RunOperationMintResult.expectedTxid. */
+  expectedTxid: string;
+}
+
+/**
+ * Cat21 buy-offer create (wallet is the BUYER). The seller already
+ * owns a cat at `sellerInput`; the wallet supplies the buyer funding
+ * UTXOs and signs them — input 0 (the seller's cat) stays UNSIGNED
+ * so the seller can sign it later (SIGHASH_ALL → no byte can change).
+ *
+ * The harness builds the PSBT via `buildCat21BuyOfferPsbt`,
+ * dispatches `signer.signOfferCreatePsbt` (which signs inputs 1..N
+ * at paymentAddress only, returns the partial-sig PSBT bytes; no
+ * broadcast). The spec finishes the PSBT off-band — seller signs
+ * input 0 with their own key, finalize, broadcast.
+ */
+export interface RunOperationCreateOfferInput {
+  kind: 'createOffer';
+  walletType: `${KnownOrdinalWalletType}`;
+  /** Seller's cat UTXO (value=546). Stays unsigned on emit. */
+  sellerInput: {
+    txid: string;
+    vout: number;
+    value: number;
+    scriptPubKeyHex: string;
+  };
+  /** Buyer (wallet) funding UTXOs at paymentAddress (P2WPKH). */
+  buyerInputs: ReadonlyArray<{
+    txid: string;
+    vout: number;
+    value: number;
+    scriptPubKeyHex: string;
+  }>;
+  /** The wallet's payment address — where buyer inputs live. */
+  paymentAddress: string;
+  buyerReceiveAddress: string;
+  sellerPaymentAddress: string;
+  buyerChangeAddress: string;
+  priceSats: number;
+  feeSats: number;
+}
+
+export interface RunOperationCreateOfferResult {
+  kind: 'createOffer';
+  /** Partial-sig PSBT hex: buyer inputs are signed; input 0 (seller) is not. */
+  signedPsbtHex: string;
+  /**
+   * Txid computed from the UNSIGNED PSBT BEFORE either party signed
+   * (buyer-pre-signed PSBT is what the wallet emits; the unsigned
+   * underlying tx is what determines the final txid because SegWit
+   * txid is witness-independent). The on-chain txid after the seller
+   * signs and broadcasts MUST equal this. See
+   * RunOperationMintResult.expectedTxid for the full rationale.
+   */
+  expectedTxid: string;
+}
+
+/**
+ * Cat21 buy-offer accept (wallet is the SELLER). The buyer already
+ * built and pre-signed a buy-offer PSBT against the wallet's cat
+ * UTXO at input 0. The wallet signs input 0 with its ordinals key
+ * (SIGHASH_ALL), the signer finalizes the now-complete PSBT and
+ * emits the wire-tx via the broadcast callback. The spec broadcasts.
+ */
+export interface RunOperationAcceptOfferInput {
+  kind: 'acceptOffer';
+  walletType: `${KnownOrdinalWalletType}`;
+  /** Buyer-pre-signed PSBT bytes, hex. */
+  psbtHex: string;
+  /** The wallet's ordinals (Taproot) address — where the cat (input 0) lives. */
+  ordinalsAddress: string;
+}
+
+export interface RunOperationAcceptOfferResult {
+  kind: 'acceptOffer';
+  txHex: string;
+  /** Txid computed from the UNSIGNED PSBT; see RunOperationMintResult.expectedTxid. */
+  expectedTxid: string;
+}
+
+export type RunOperationInput =
+  | RunOperationMintInput
+  | RunOperationInscribeInput
+  | RunOperationTransferInput
+  | RunOperationCreateOfferInput
+  | RunOperationAcceptOfferInput;
 
 export interface RunOperationMintResult {
   kind: 'mint';
   /** Wallet-signed, scure-finalized wire-tx hex. Spec broadcasts. */
   txHex: string;
+  /**
+   * Txid computed from the UNSIGNED PSBT BEFORE the wallet sees it.
+   * The on-chain txid MUST equal this value (SegWit txid is
+   * witness-independent — non-witness bytes determine it, and SIGHASH_ALL
+   * commits to those non-witness bytes). A mismatch means the wallet
+   * tampered with inputs/outputs/locktime/sequence between unsigned and
+   * broadcast. Pin to catch any "wallet quietly dropped lockTime=21
+   * before signing" regression — the property HARD RULE #1 in
+   * cat21-wallet's CLAUDE.md depends on.
+   */
+  expectedTxid: string;
 }
 
 export interface RunOperationInscribeResult {
@@ -277,7 +447,12 @@ export interface RunOperationInscribeResult {
   ephemeralPubkeyXonlyHex: string;
 }
 
-export type RunOperationResult = RunOperationMintResult | RunOperationInscribeResult;
+export type RunOperationResult =
+  | RunOperationMintResult
+  | RunOperationInscribeResult
+  | RunOperationTransferResult
+  | RunOperationCreateOfferResult
+  | RunOperationAcceptOfferResult;
 
 const statusEl = () => document.getElementById('status')!;
 const outputEl = () => document.getElementById('output')!;
@@ -440,6 +615,22 @@ window.ordpoolSdkHarness = {
     return info;
   },
 
+  async connectCat21WalletRegtest() {
+    const start = Date.now();
+    while (Date.now() - start < 15_000) {
+      if (cat21walletConnector.detect(window)) break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    if (!cat21walletConnector.detect(window)) {
+      throw new Error('Cat21 Wallet provider not injected on the harness page within 15s');
+    }
+    statusEl().textContent = `connecting to cat21-wallet (regtest)…`;
+    const info = await firstValueFrom(cat21walletConnector.connect(Network.Regtest));
+    statusEl().textContent = `connected: ${info.paymentAddress}`;
+    log('connectCat21WalletRegtest.result', info);
+    return info;
+  },
+
   detectWizz(): boolean {
     return wizzConnector.detect(window);
   },
@@ -575,6 +766,58 @@ function bytesToHex(b: Uint8Array): string {
   let out = '';
   for (let i = 0; i < b.length; i++) out += b[i].toString(16).padStart(2, '0');
   return out;
+}
+
+/**
+ * Compute the real txid from a finalized wire-tx hex. Used by the
+ * broadcast-callback shim so any signer code that branches on the
+ * returned txid sees the actual value instead of a stub. The spec's
+ * later `postTx` against electrs broadcasts the same bytes and gets
+ * the same txid back, so the harness and the chain agree.
+ *
+ * Scure's `Transaction.fromRaw(bytes, opts)` strips witness data for
+ * txid computation per BIP-141 (txid = hash256 of non-witness
+ * serialization, little-endian hex). `.id` is exactly that.
+ *
+ * `allowUnknownOutputs: true` makes the parser tolerant of OP_RETURNs
+ * and other non-standard scripts the SDK may emit in future operations
+ * (alkanes, runes etch, etc.); without it scure rejects them on parse.
+ */
+function computeTxidFromHex(txHex: string): string {
+  return Transaction.fromRaw(hexToBytes(txHex), { allowUnknownOutputs: true }).id;
+}
+
+/**
+ * Compute the expected txid from a PSBT's unsigned non-witness bytes.
+ * Used by the operation dispatchers to pin "wallet didn't tamper with
+ * the non-witness PSBT" — see RunOperationMintResult.expectedTxid.
+ *
+ * Strategy: parse the PSBT into a scure Transaction, serialize as the
+ * unsigned wire form (no witness), then take its txid. SegWit txid is
+ * witness-independent (BIP-141), so the unsigned form and the
+ * finalized signed form share the same txid as long as the
+ * non-witness bytes are identical.
+ *
+ * `allowUnknownOutputs: true` matches buildCat21BuyOfferPsbt's lenient
+ * mode for future SDK operations that may emit non-standard scripts.
+ */
+function expectedTxidFromUnsignedPsbt(psbtBytes: Uint8Array): string {
+  // scure's `.unsignedTx` returns the BIP-141 non-witness serialization
+  // (version || inputs || outputs || locktime, no witness marker/flag/
+  // data). For SegWit, the txid is sha256(sha256(this serialization))
+  // reversed to little-endian — wallet-side signing only adds witness
+  // bytes, which don't enter the txid. We compute hash256 directly
+  // because scure's `.id` getter throws "Transaction is not finalized"
+  // on unfinalized inputs (the partialSig/finalScriptWitness fields
+  // are empty before signing). The unsigned-tx bytes themselves are
+  // valid; we just hash them ourselves.
+  const tx = Transaction.fromPSBT(psbtBytes, { allowUnknownOutputs: true });
+  const h1 = sha256(tx.unsignedTx);
+  const h2 = sha256(h1);
+  // Bitcoin txids are little-endian hex of double-sha256.
+  const reversed = new Uint8Array(h2.length);
+  for (let i = 0; i < h2.length; i++) reversed[i] = h2[h2.length - 1 - i];
+  return bytesToHex(reversed);
 }
 
 /**
@@ -836,6 +1079,20 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     );
   }
 
+  // Transfer / createOffer / acceptOffer paths do NOT carry the legacy
+  // RunOperationFundingInput fields (paymentPublicKey, etc.) — those
+  // are mint+inscribe-only. The new operations carry their own
+  // structured inputs. Branch before the shared paymentPublicKey decode.
+  if (input.kind === 'transfer') {
+    return await runTransferOperation(input);
+  }
+  if (input.kind === 'createOffer') {
+    return await runCreateOfferOperation(input);
+  }
+  if (input.kind === 'acceptOffer') {
+    return await runAcceptOfferOperation(input);
+  }
+
   const paymentPubkey = hexToBytes(input.paymentPublicKey);
   const signer = findSignerOrThrow(input.walletType);
   const sNetwork = signerNetworkFor(input.walletType);
@@ -870,15 +1127,22 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
       network: sNetwork,
       broadcast: (txHex: string) => {
         capturedTxHex = txHex;
-        // Return a stable fake-txid so the signer's Observable can resolve.
-        // The real broadcast happens in the spec, against local electrs.
-        return of('0'.repeat(64));
+        // Compute the REAL txid from the finalized wire-tx bytes — any
+        // signer code that branches on the returned txid sees the
+        // actual value, not a stub. The spec's subsequent `postTx`
+        // against electrs broadcasts the same bytes and gets the same
+        // txid back, so the harness and the chain agree.
+        return of(computeTxidFromHex(txHex));
       },
     }));
     if (!capturedTxHex) {
       throw new Error('runOperation(mint): signer never invoked the broadcast callback');
     }
-    return { kind: 'mint', txHex: capturedTxHex };
+    return {
+      kind: 'mint',
+      txHex: capturedTxHex,
+      expectedTxid: expectedTxidFromUnsignedPsbt(psbtBytes),
+    };
   }
 
   // inscribe
@@ -907,7 +1171,7 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     network: sNetwork,
     broadcast: (txHex: string) => {
       capturedCommitHex = txHex;
-      return of('0'.repeat(64));
+      return of(computeTxidFromHex(txHex));
     },
   }));
   if (!capturedCommitHex) {
@@ -924,3 +1188,191 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     ephemeralPubkeyXonlyHex: bytesToHex(inscribed.ephemeral.pubkeyXonly),
   };
 };
+
+/* ──────────────  transfer / createOffer / acceptOffer  ────────────── */
+
+/**
+ * Build the unsigned transfer PSBT, dispatch `signer.signTransfer`,
+ * and capture the finalized wire-tx hex via the broadcast callback.
+ *
+ * Topology pinned by `signTransfer`: input 0 = ordinalsAddress
+ * (Taproot cat), inputs 1..N = paymentAddress (P2WPKH funding).
+ * Each signed input commits SIGHASH_ALL across the whole tx, so
+ * the `lockTime=21` marker AND the per-wallet RBF sequence are
+ * cryptographically locked.
+ */
+async function runTransferOperation(
+  input: RunOperationTransferInput,
+): Promise<RunOperationTransferResult> {
+  const signer = findSignerOrThrow(input.walletType);
+  const built = buildCat21TransferPsbt({
+    walletType: input.walletType as KnownOrdinalWalletType,
+    network: Network.Regtest,
+    catUtxo: {
+      txid:        input.catInput.txid,
+      vout:        input.catInput.vout,
+      value:       input.catInput.value,
+      scriptPubKey: hexToBytes(input.catInput.scriptPubKeyHex),
+      tapInternalKey: hexToBytes(input.catInput.tapInternalKeyHex),
+    },
+    fundingInputs: input.fundingInputs.map(f => ({
+      txid:        f.txid,
+      vout:        f.vout,
+      value:       f.value,
+      scriptPubKey: hexToBytes(f.scriptPubKeyHex),
+    })),
+    destinations: {
+      recipientAddress:    input.recipientAddress,
+      senderChangeAddress: input.senderChangeAddress,
+    },
+    feeSats: input.feeSats,
+  });
+
+  log('transfer.psbt-built', {
+    bytes: built.psbt.byteLength,
+    fundingInputCount: input.fundingInputs.length,
+    fee: input.feeSats,
+  });
+
+  // Cat21 Wallet inherits Leather's keychain. For BIP-84 P2WPKH the
+  // wallet derives the same private key regardless of the signPsbt
+  // `network` argument (the mint roundtrip's regtest path proves this).
+  // For BIP-86 Taproot the wallet's derivation differs by network on
+  // the shipping binary, so signing the Taproot cat at input 0 with
+  // `network: 'regtest'` produces a signature that doesn't verify
+  // against our PSBT's tapInternalKey (derived from the wallet's
+  // MAINNET BIP-86 pubkey). Pass `network: 'mainnet'` for cat21wallet
+  // so the wallet picks the matching mainnet BIP-86 key on input 0.
+  // Schnorr commits to script bytes, not bech32 HRP — the regtest
+  // PSBT bytes verify against the mainnet-derived signature.
+  const walletSignNetwork = input.walletType === KnownOrdinalWalletType.cat21wallet
+    ? Network.Mainnet
+    : Network.Regtest;
+
+  let capturedTxHex: string | undefined;
+  await firstValueFrom(signer.signTransfer({
+    psbtBytes:         built.psbt,
+    ordinalsAddress:   input.ordinalsAddress,
+    paymentAddress:    input.paymentAddress,
+    fundingInputCount: input.fundingInputs.length,
+    network:           walletSignNetwork,
+    broadcast: (txHex: string) => {
+      capturedTxHex = txHex;
+      return of(computeTxidFromHex(txHex));
+    },
+  }));
+  if (!capturedTxHex) {
+    throw new Error('runOperation(transfer): signer never invoked the broadcast callback');
+  }
+  return {
+    kind: 'transfer',
+    txHex: capturedTxHex,
+    expectedTxid: expectedTxidFromUnsignedPsbt(built.psbt),
+  };
+}
+
+/**
+ * Build the unsigned buy-offer PSBT (wallet is the BUYER), dispatch
+ * `signer.signOfferCreatePsbt`, return the partial-sig PSBT bytes.
+ *
+ * `signOfferCreatePsbt` signs inputs 1..N at paymentAddress only —
+ * input 0 (the seller's cat) stays unsigned so the seller can sign
+ * it later. The signer's promise resolves with the signed PSBT bytes
+ * directly; there is no broadcast on this path.
+ */
+async function runCreateOfferOperation(
+  input: RunOperationCreateOfferInput,
+): Promise<RunOperationCreateOfferResult> {
+  const signer = findSignerOrThrow(input.walletType);
+  const built = buildCat21BuyOfferPsbt({
+    walletType: input.walletType as KnownOrdinalWalletType,
+    network:    Network.Regtest,
+    sellerInput: {
+      txid:        input.sellerInput.txid,
+      vout:        input.sellerInput.vout,
+      value:       input.sellerInput.value,
+      scriptPubKey: hexToBytes(input.sellerInput.scriptPubKeyHex),
+    },
+    buyerInputs: input.buyerInputs.map(b => ({
+      txid:        b.txid,
+      vout:        b.vout,
+      value:       b.value,
+      scriptPubKey: hexToBytes(b.scriptPubKeyHex),
+    })),
+    destinations: {
+      buyerReceiveAddress:  input.buyerReceiveAddress,
+      sellerPaymentAddress: input.sellerPaymentAddress,
+      buyerChangeAddress:   input.buyerChangeAddress,
+    },
+    priceSats: input.priceSats,
+    feeSats:   input.feeSats,
+  });
+
+  log('createOffer.psbt-built', {
+    bytes: built.psbt.byteLength,
+    buyerInputCount: input.buyerInputs.length,
+    price: input.priceSats,
+    fee: input.feeSats,
+  });
+
+  // Same network-uniform-keys reasoning as `runTransferOperation`.
+  // BIP-84 funding inputs sign correctly under any network argument,
+  // but we keep the cat21wallet path uniform with the other operations
+  // for predictability.
+  const walletSignNetwork = input.walletType === KnownOrdinalWalletType.cat21wallet
+    ? Network.Mainnet
+    : Network.Regtest;
+  const signedPsbt = await firstValueFrom(signer.signOfferCreatePsbt({
+    psbtBytes:         built.psbt,
+    paymentAddress:    input.paymentAddress,
+    fundingInputCount: input.buyerInputs.length,
+    network:           walletSignNetwork,
+  }));
+  return {
+    kind: 'createOffer',
+    signedPsbtHex: bytesToHex(signedPsbt),
+    expectedTxid: expectedTxidFromUnsignedPsbt(built.psbt),
+  };
+}
+
+/**
+ * Accept a buyer-pre-signed buy-offer PSBT (wallet is the SELLER).
+ *
+ * `signOfferAccept` signs ONLY input 0 (the seller's cat UTXO at
+ * ordinalsAddress) and finalizes the now-complete PSBT. Captures
+ * the wire-tx via the broadcast callback; the spec broadcasts via
+ * local electrs.
+ */
+async function runAcceptOfferOperation(
+  input: RunOperationAcceptOfferInput,
+): Promise<RunOperationAcceptOfferResult> {
+  const signer = findSignerOrThrow(input.walletType);
+  const psbtBytes = hexToBytes(input.psbtHex);
+
+  // Same network-uniform-keys reasoning as `runTransferOperation`:
+  // the wallet's BIP-86 ordinals key differs by network argument, so
+  // for cat21wallet pass `network: 'mainnet'` so the wallet selects
+  // the same key our PSBT's tapInternalKey was derived from.
+  const walletSignNetwork = input.walletType === KnownOrdinalWalletType.cat21wallet
+    ? Network.Mainnet
+    : Network.Regtest;
+
+  let capturedTxHex: string | undefined;
+  await firstValueFrom(signer.signOfferAccept({
+    psbtBytes,
+    ordinalsAddress: input.ordinalsAddress,
+    network:         walletSignNetwork,
+    broadcast: (txHex: string) => {
+      capturedTxHex = txHex;
+      return of(computeTxidFromHex(txHex));
+    },
+  }));
+  if (!capturedTxHex) {
+    throw new Error('runOperation(acceptOffer): signer never invoked the broadcast callback');
+  }
+  return {
+    kind: 'acceptOffer',
+    txHex: capturedTxHex,
+    expectedTxid: expectedTxidFromUnsignedPsbt(psbtBytes),
+  };
+}

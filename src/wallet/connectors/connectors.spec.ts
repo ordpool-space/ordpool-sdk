@@ -7,7 +7,11 @@ import { detectInstalledWallets, walletConnectors } from './index';
 describe('walletConnectors registry', () => {
 
   it('lists CAT-21 wallet first (our own wallet), then Xverse + the rest in detection order', () => {
-    expect(walletConnectors.map(c => c.providerId)).toEqual(['cat21wallet', 'xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby', 'binance']);
+    expect(walletConnectors.map(c => c.providerId)).toEqual(['cat21wallet', 'xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'oyl', 'alby']);
+  });
+
+  it('omits Binance from the registry — the documented .bitcoin sub-provider isn\'t shipped in any released binary, so a picker entry would be a broken promise', () => {
+    expect(walletConnectors.map(c => c.providerId)).not.toContain('binance');
   });
 
   it('marks every wallet as signing-supported at the SDK level (runtime detect-by-signature gates surface visibility — see CLAUDE.md "Ship every signer we have code for")', () => {
@@ -18,7 +22,7 @@ describe('walletConnectors registry', () => {
 
 describe('detectInstalledWallets', () => {
 
-  it('returns all ten as not-installed when window is undefined', () => {
+  it('returns all nine as not-installed when window is undefined', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
     expect(installedWallets).toEqual([]);
     expect(notInstalledWallets).toEqual([
@@ -31,11 +35,10 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
       KnownOrdinalWallets.alby,
-      KnownOrdinalWallets.binance,
     ]);
   });
 
-  it('returns all ten as installed when every extension is present', () => {
+  it('returns all nine as installed when every extension is present', () => {
     const win = { Cat21Provider: { isCat21: true }, XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, oyl: {}, alby: {}, binancew3w: { bitcoin: {} } };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([
@@ -48,7 +51,6 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
       KnownOrdinalWallets.alby,
-      KnownOrdinalWallets.binance,
     ]);
     expect(notInstalledWallets).toEqual([]);
   });
@@ -65,7 +67,6 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.oyl,
       KnownOrdinalWallets.alby,
-      KnownOrdinalWallets.binance,
     ]);
   });
 
@@ -81,7 +82,6 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.phantom.label,
       KnownOrdinalWallets.oyl.label,
       KnownOrdinalWallets.alby.label,
-      KnownOrdinalWallets.binance.label,
     ]);
   });
 
@@ -111,15 +111,9 @@ describe('detectInstalledWallets', () => {
     expect(forBtc).toEqual([KnownOrdinalWallets.okx]);
   });
 
-  it('requires window.binancew3w.bitcoin (the BTC sub-provider) — bare binancew3w without it is NOT considered installed', () => {
-    // Binance Web3 Wallet is multi-chain (wallet / ethereum / solana
-    // / tron / sui / tonconnect on current v1.17.2 binaries). The
-    // documented .bitcoin sub-provider isn't injected yet; this
-    // assertion captures the "ready when Binance exposes it" state.
-    const { installedWallets: notForBtc } = detectInstalledWallets({ binancew3w: {} });
-    expect(notForBtc).toEqual([]);
-    const { installedWallets: forBtc } = detectInstalledWallets({ binancew3w: { bitcoin: {} } });
-    expect(forBtc).toEqual([KnownOrdinalWallets.binance]);
+  it('does not surface Binance even when window.binancew3w.bitcoin is present (removed from the picker — the .bitcoin sub-provider doesn\'t ship in any released binary, see walletConnectors comment)', () => {
+    const { installedWallets } = detectInstalledWallets({ binancew3w: { bitcoin: {} } });
+    expect(installedWallets).toEqual([]);
   });
 
   it('accepts the legacy HiroWalletProvider global for Leather detection', () => {
