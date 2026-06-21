@@ -46,12 +46,21 @@ jobs:
         working-directory: ordpool-sdk
         run: npm run build
 
-      - name: Start bitcoind + electrs + cat21-ord (regtest)
+      - name: Start bitcoind + electrs + cat21-ord + ord-stock (regtest)
         # --wait would block on electrs's wget healthcheck which the
         # mempool/electrs image lacks; regtest-bootstrap.sh polls the
         # actual readiness check itself.
+        #
+        # Two ord variants:
+        #   cat21-ord (port 8080) — with --index-cat21, used by
+        #     cat21-mint + cat21-flow specs as the authoritative cat view.
+        #   ord-stock (port 8081) — without --index-cat21 (= stock ord),
+        #     used by inscribe-ord-indexing-roundtrip to prove the SDK's
+        #     inscriptions are recognised by an upstream-style ord.
+        # Both build from the same cat21-ord image — one build, two
+        # containers.
         working-directory: ordpool-sdk
-        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord --profile ord-stock up -d
 
       - name: Bootstrap regtest funds (101 blocks, emit funder keypair)
         id: bootstrap
@@ -76,8 +85,10 @@ jobs:
           docker logs ordpool-e2e-electrs || true
           echo "=== cat21-ord ==="
           docker logs ordpool-e2e-cat21-ord || true
+          echo "=== ord-stock ==="
+          docker logs ordpool-e2e-ord-stock || true
 
       - name: Tear down
         if: always()
         working-directory: ordpool-sdk
-        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord down -v
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord --profile ord-stock down -v

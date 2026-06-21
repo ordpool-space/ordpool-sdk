@@ -8,6 +8,10 @@ import { execFileSync } from 'node:child_process';
 
 const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ?? 'http://localhost:3000';
 const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
+// Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
+// service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`
+// spec to verify a real upstream-ord recognises the SDK's inscriptions.
+const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
 
 export interface FundedAccount {
   address: string;
@@ -448,4 +452,120 @@ export function assertAllInputsSighashAll(tx: EsploraTx): void {
       if (flag !== '01') throw new Error(`Input ${i}: Legacy sighash flag 0x${flag} (expected 0x01 = SIGHASH_ALL)`);
     }
   }
+}
+
+// ─── stock-ord helpers (no --index-cat21) ────────────────────────────
+//
+// Used by `inscribe-ord-indexing-roundtrip.spec.ts` to verify that
+// a real upstream-style ord recognises the SDK's inscriptions. The
+// cat21-ord container above runs with --index-cat21 which filters
+// out regular inscriptions; stock ord indexes them like upstream.
+
+/** Build an inscription id from txid + output index (`<txid>i<index>`). */
+export function inscriptionId(txid: string, index = 0): string {
+  return `${txid}i${index}`;
+}
+
+/**
+ * Poll stock ord's HTTP server until it answers `/status` with a
+ * 2xx. Same warm-up rationale as `waitForOrdReady`.
+ */
+export async function waitForOrdStockReady(timeoutMs = 60_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ok = await fetch(`${ORD_STOCK_URL}/status`).then(r => r.ok).catch(() => false);
+    if (ok) return;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error(`stock ord didn't respond on /status within ${timeoutMs}ms (is the ord-stock profile up?)`);
+}
+
+/**
+ * Block until stock ord has indexed up to (at least) `targetHeight`.
+ * ord's indexer lags bitcoind by a few hundred ms; without this gate
+ * the inscription-lookup assertions race the indexer.
+ */
+export async function waitForOrdStockSync(targetHeight: number, timeoutMs = 30_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await fetch(`${ORD_STOCK_URL}/status`, {
+      headers: { Accept: 'application/json' },
+    }).then(r => r.ok ? r.json() : null).catch(() => null) as { height?: number } | null;
+    if (status && typeof status.height === 'number' && status.height >= targetHeight) return;
+    await new Promise(r => setTimeout(r, 300));
+  }
+  throw new Error(`stock ord didn't reach height ${targetHeight} within ${timeoutMs}ms`);
+}
+
+export interface StockOrdInscription {
+  /** Address currently holding the inscription. */
+  address: string;
+  /** UTXO carrying the inscription, `<txid>:<vout>` form. */
+  output: string;
+  /** Sats locked in the inscription's UTXO. */
+  value: number;
+  /** ord's inscription number (sequential per stock-ord index). */
+  number: number;
+  /** The inscription id, `<txid>i<index>`. */
+  id: string;
+  /** Content-type recorded in the envelope (e.g. 'text/plain;charset=utf-8'). */
+  content_type?: string | null;
+  /** Body length in bytes — useful for size assertions. */
+  content_length?: number | null;
+}
+
+/**
+ * Fetch an inscription record from stock ord. Throws on any non-2xx;
+ * callers wrap in `waitForOrdStockInscription` if they need to poll.
+ */
+export async function getStockOrdInscription(id: string): Promise<StockOrdInscription> {
+  const res = await fetch(`${ORD_STOCK_URL}/inscription/${id}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`stock ord /inscription/${id} returned ${res.status}: ${await res.text()}`);
+  }
+  return res.json() as Promise<StockOrdInscription>;
+}
+
+/**
+ * Fetch the raw body bytes of an inscription from stock ord's
+ * `/content/<id>` endpoint. ord returns the bytes verbatim with the
+ * envelope's content-type as the response Content-Type header — same
+ * shape every recursive-inscription consumer sees.
+ */
+export async function getStockOrdContent(
+  id: string,
+): Promise<{ bytes: Uint8Array; contentType: string | null }> {
+  const res = await fetch(`${ORD_STOCK_URL}/content/${id}`);
+  if (!res.ok) {
+    throw new Error(`stock ord /content/${id} returned ${res.status}: ${await res.text()}`);
+  }
+  const buf = new Uint8Array(await res.arrayBuffer());
+  return { bytes: buf, contentType: res.headers.get('content-type') };
+}
+
+/**
+ * Poll until stock ord serves the inscription. ord indexes inscriptions
+ * one or two blocks after the reveal lands; this helper hides the
+ * polling boilerplate.
+ */
+export async function waitForOrdStockInscription(
+  id: string,
+  timeoutMs = 30_000,
+): Promise<StockOrdInscription> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      return await getStockOrdInscription(id);
+    } catch (e) {
+      lastError = e;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  throw new Error(
+    `stock ord did not surface inscription ${id} within ${timeoutMs}ms; ` +
+    `last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
 }

@@ -124,5 +124,49 @@ services:
     # openssl; wget and curl aren't installed. The test bootstrap polls
     # the host-exposed :8080/status via `waitForOrdReady` instead.
 
+  # Stock ord — same cat21-ord binary, WITHOUT the --index-cat21 flag,
+  # so it behaves 100% like upstream ord. Used to prove the inscriptions
+  # the SDK builds (commit + reveal via `createInscribeTransactions`)
+  # are recognised + indexed by a real ord. The cat21-ord container above
+  # cannot serve this purpose — with --index-cat21 it filters out every
+  # tx that isn't a CAT-21 mint, so regular inscriptions never reach its
+  # index.
+  #
+  # Profile-gated `ord-stock` so the default stack stays lean. Bring it
+  # up with:
+  #     docker compose --profile ord-stock up -d
+  ord-stock:
+    profiles:
+      - ord-stock
+    image: ordpool-e2e-cat21-ord:local
+    build:
+      context: ../../cat21-ord
+      dockerfile: ../ordpool-sdk/e2e/cat21-ord.Dockerfile
+    container_name: ordpool-e2e-ord-stock
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+    command:
+      - ord
+      - --regtest
+      - --index-sats
+      - --index-addresses
+      - --bitcoin-rpc-url=bitcoind:18443
+      - --bitcoin-rpc-username=ordpool
+      - --bitcoin-rpc-password=ordpool
+      - --data-dir=/data
+      - server
+      - --http
+      - --http-port=8080
+      - --address=0.0.0.0
+    ports:
+      - "8081:8080"     # host :8081 → container :8080 to coexist with cat21-ord
+    volumes:
+      - ord-stock-data:/data
+
 volumes:
   ord-data:
+  ord-stock-data:
