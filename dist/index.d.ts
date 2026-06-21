@@ -2489,11 +2489,28 @@ declare function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): U
  *
  *   2. The commit transaction has:
  *        - 1 funding input (caller-supplied UTXO; user's wallet
- *          signs)
+ *          signs). Sequence is wallet-specific via
+ *          `resolveCat21InputSequence(walletType)`: 0xfffffffd for
+ *          cat21wallet (RBF allowed; our wallet preserves
+ *          lockTime=21 through replacement), 0xfffffffe for every
+ *          third-party wallet (RBF disabled; locks accelerate UIs
+ *          out, the 2024 Xverse incident defence).
  *        - Output 0: the commit P2TR address holding
- *          `postage + revealFeeReserve`. The reveal spends this.
+ *          `postage + revealFeeReserve + tipValueSats` (the last
+ *          term only when `tipValueSats > 0` on the reveal). The
+ *          reveal spends this.
  *        - Output 1 (optional): change back to the user, if the
  *          funding input has surplus above commit fee + output 0.
+ *
+ *   3. `nLockTime=21`: the commit qualifies as a CAT-21 mint under
+ *      cat21-ord's `--index-cat21` rule. The first sat of vout[0]
+ *      becomes Cat A (`<commitTxid>i0`). The reveal then spends
+ *      vout[0] FIFO-style, moving Cat A to the inscription's UTXO,
+ *      and the reveal itself (also `nLockTime=21`) mints Cat B
+ *      (`<revealTxid>i0`) at the same satpoint. Net: two cats per
+ *      inscribe, stacked on the inscription's 546-sat UTXO. The
+ *      maintainer's design: "we gift the cats for free. because
+ *      why not."
  *
  * Returns the unsigned commit PSBT bytes + the metadata the
  * reveal builder needs to construct the spending witness.
@@ -2574,7 +2591,12 @@ interface InscribeCommitResult {
     commitAddress: string;
     /** scriptPubKey bytes of the commit output (same script the reveal references). */
     commitOutputScript: Uint8Array;
-    /** Sat value the commit places at output 0 (postage + revealFeeReserve). */
+    /**
+     * Sat value the commit places at output 0. Equals
+     * `postage + revealFeeReserveSats + (tipValueSats ?? 0)`. Funds
+     * the reveal's recipient output + optional tip output + reveal
+     * miner fee in a single P2TR commit.
+     */
     commitOutputValueSats: number;
     /** Taptree metadata the reveal builder needs to construct its spending witness. */
     taproot: {
@@ -2599,9 +2621,15 @@ declare function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeComm
  *   - Spends the commit's P2TR output (built by the commit helper)
  *     via the envelope tapscript leaf.
  *   - Witness shape: `[ephemeralSig, envelopeScript, controlBlock]`.
- *   - Has one output at index 0: `recipientAddress` for postage sats.
- *     Per ord theory, the inscription lands on the first sat of the
- *     first output.
+ *   - Output 0: `recipientAddress` for postage sats. Per ord theory,
+ *     the inscription lands on the first sat of the first output.
+ *   - Output 1 (optional): tip address for `tip.value` sats. Skipped
+ *     when `tip` is omitted or `tip.value === 0`.
+ *   - `nLockTime=21`: the reveal qualifies as a CAT-21 mint under
+ *     cat21-ord's `--index-cat21` rule. Combined with the commit
+ *     (which also sets `nLockTime=21`), every inscription mints two
+ *     cats stacked at the inscription's satpoint. See the commit
+ *     helper's module doc for the cat-mint semantic.
  *
  * The reveal hex is self-contained: signed under the ephemeral
  * key, replayable, idempotent, broadcast-from-anywhere. The
@@ -2624,7 +2652,12 @@ interface InscribeRevealArgs {
     commitTxid: string;
     /** Commit output index — always 0 for the inscriber. */
     commitVout: number;
-    /** Sat value at the commit output (postage + revealFeeReserve). */
+    /**
+     * Sat value at the commit output. Equals
+     * `postage + revealFeeReserve + (tip.value ?? 0)`; the orchestrator
+     * threads this through the fee simulator so the reveal has the sats
+     * to fund recipient + tip + miner fee.
+     */
     commitOutputValueSats: number;
     /** scriptPubKey bytes of the commit output (output of commit helper). */
     commitOutputScript: Uint8Array;
@@ -2647,7 +2680,8 @@ interface InscribeRevealArgs {
      * Optional tip output appended at vout[1] of the reveal. The
      * inscription MUST stay at vout[0] (ord's "first sat of first
      * output" rule), so the tip lives one slot below. When omitted,
-     * the reveal has its single recipient output as before.
+     * or when `tip.value === 0`, no tip output is appended and the
+     * reveal has its recipient output at vout[0] only.
      *
      * Caller is responsible for ensuring `commitOutputValueSats`
      * carries enough sats to fund postage + reveal fee + tip.value;
@@ -2723,10 +2757,11 @@ declare function prepareInscribeFundingInput(args: PrepareInscribeFundingInputAr
  *   commit_fee = ceil(commitVsize × feeRate)
  *   reveal_fee = ceil(revealVsize × feeRate)
  *
- * The reveal's vsize is **deterministic given the envelope** (input
- * = commit output, output = recipient at postage, witness =
- * envelope script + Schnorr sig + control block) so we compute it
- * once via a one-shot simulation. The commit's vsize depends on
+ * The reveal's vsize is **deterministic given the envelope and
+ * the tip presence** (input = commit output; outputs = recipient
+ * at postage + optional tip at `tip.value`; witness = envelope
+ * script + Schnorr sig + control block) so we compute it once via
+ * a one-shot simulation. The commit's vsize depends on
  * whether the change output crosses the dust limit at the
  * resolved fee, so we run the cat21-style two-pass loop on the
  * commit alone, passing `revealFeeReserveSats = reveal_fee`.
@@ -2797,7 +2832,11 @@ interface SimulateInscribeFeesResult {
     revealVsize: number;
     /** commitVsize + revealVsize. Useful for package-feerate math. */
     combinedVsize: number;
-    /** Amount the commit output 0 holds = postage + revealFeeSats. */
+    /**
+     * Amount the commit output 0 holds = postage + revealFeeSats +
+     * (tip.value ?? 0) — sized to fund the reveal's recipient
+     * + optional tip + miner fee in one P2TR output.
+     */
     commitOutputValueSats: number;
     /** Total sats the funding UTXO must cover: commitOutputValueSats + commitFeeSats. */
     fundingRequirementSats: number;
@@ -2821,18 +2860,37 @@ declare function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateI
  * needed to build any other reveal shape (redirect, RBF, recover-
  * to-self, bundle).
  *
+ * # Free cats (the "ordpool inscribers get cats" design)
+ *
+ * Both the commit AND the reveal carry `nLockTime=21`, so cat21-ord
+ * mints TWO cats per inscription:
+ *   - Cat A: `<commitTxid>i0` — minted by the commit; ends up at
+ *     the inscription's UTXO via FIFO transitivity through the
+ *     reveal's input.
+ *   - Cat B: `<revealTxid>i0` — minted by the reveal at the same
+ *     satpoint. Post-jubilee chains tag Cat B with the `Vindicated`
+ *     charm; it's otherwise a normal cat with a positive number.
+ * Both cats stack on the inscription's 546-sat UTXO at the
+ * recipient's address. No opt-out. See the commit helper's module
+ * doc for the cat21-ord index mechanics.
+ *
  * # Lifecycle
  *
  *  1. Generate fresh ephemeral keypair (32 random bytes).
  *  2. Derive Schnorr x-only pubkey — this doubles as the envelope's
  *     `<pubkey> CHECKSIG` prefix AND the taproot internal key of the
  *     commit output.
- *  3. Build envelope with that pubkey + caller's content.
+ *  3. Build envelope with caller's content + auto-prepended fields
+ *     (note → tag 0x0f UTF-8; contentEncoding='br' → tag 0x09 "br")
+ *     + any caller-supplied `envelopeFields`.
  *  4. Simulate fees (Layer 3): commitFee, revealFee,
- *     commitOutputValueSats, fundingRequirementSats.
- *  5. Build the commit PSBT at the resolved commitFee.
+ *     commitOutputValueSats (= postage + revealFee + tip.value),
+ *     fundingRequirementSats.
+ *  5. Build the commit PSBT at the resolved commitFee with
+ *     `nLockTime=21` and the per-wallet sequence.
  *  6. Build a default reveal tx at the resolved revealFee using the
- *     ephemeral private key (recipient = `args.recipientAddress`).
+ *     ephemeral private key (recipient = `args.recipientAddress`,
+ *     optional tip at vout[1], also `nLockTime=21`).
  *  7. Return the ephemeral key material so the caller can re-build
  *     the reveal under different parameters later if it wants to.
  *

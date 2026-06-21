@@ -12,9 +12,15 @@ import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
  *   - Spends the commit's P2TR output (built by the commit helper)
  *     via the envelope tapscript leaf.
  *   - Witness shape: `[ephemeralSig, envelopeScript, controlBlock]`.
- *   - Has one output at index 0: `recipientAddress` for postage sats.
- *     Per ord theory, the inscription lands on the first sat of the
- *     first output.
+ *   - Output 0: `recipientAddress` for postage sats. Per ord theory,
+ *     the inscription lands on the first sat of the first output.
+ *   - Output 1 (optional): tip address for `tip.value` sats. Skipped
+ *     when `tip` is omitted or `tip.value === 0`.
+ *   - `nLockTime=21`: the reveal qualifies as a CAT-21 mint under
+ *     cat21-ord's `--index-cat21` rule. Combined with the commit
+ *     (which also sets `nLockTime=21`), every inscription mints two
+ *     cats stacked at the inscription's satpoint. See the commit
+ *     helper's module doc for the cat-mint semantic.
  *
  * The reveal hex is self-contained: signed under the ephemeral
  * key, replayable, idempotent, broadcast-from-anywhere. The
@@ -39,7 +45,12 @@ export interface InscribeRevealArgs {
   commitTxid: string;
   /** Commit output index — always 0 for the inscriber. */
   commitVout: number;
-  /** Sat value at the commit output (postage + revealFeeReserve). */
+  /**
+   * Sat value at the commit output. Equals
+   * `postage + revealFeeReserve + (tip.value ?? 0)`; the orchestrator
+   * threads this through the fee simulator so the reveal has the sats
+   * to fund recipient + tip + miner fee.
+   */
   commitOutputValueSats: number;
   /** scriptPubKey bytes of the commit output (output of commit helper). */
   commitOutputScript: Uint8Array;
@@ -62,7 +73,8 @@ export interface InscribeRevealArgs {
    * Optional tip output appended at vout[1] of the reveal. The
    * inscription MUST stay at vout[0] (ord's "first sat of first
    * output" rule), so the tip lives one slot below. When omitted,
-   * the reveal has its single recipient output as before.
+   * or when `tip.value === 0`, no tip output is appended and the
+   * reveal has its recipient output at vout[0] only.
    *
    * Caller is responsible for ensuring `commitOutputValueSats`
    * carries enough sats to fund postage + reveal fee + tip.value;

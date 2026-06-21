@@ -10,10 +10,11 @@ import { type OrdEnvelopeField } from './inscription-envelope';
  *   commit_fee = ceil(commitVsize × feeRate)
  *   reveal_fee = ceil(revealVsize × feeRate)
  *
- * The reveal's vsize is **deterministic given the envelope** (input
- * = commit output, output = recipient at postage, witness =
- * envelope script + Schnorr sig + control block) so we compute it
- * once via a one-shot simulation. The commit's vsize depends on
+ * The reveal's vsize is **deterministic given the envelope and
+ * the tip presence** (input = commit output; outputs = recipient
+ * at postage + optional tip at `tip.value`; witness = envelope
+ * script + Schnorr sig + control block) so we compute it once via
+ * a one-shot simulation. The commit's vsize depends on
  * whether the change output crosses the dust limit at the
  * resolved fee, so we run the cat21-style two-pass loop on the
  * commit alone, passing `revealFeeReserveSats = reveal_fee`.
@@ -84,7 +85,11 @@ export interface SimulateInscribeFeesResult {
     revealVsize: number;
     /** commitVsize + revealVsize. Useful for package-feerate math. */
     combinedVsize: number;
-    /** Amount the commit output 0 holds = postage + revealFeeSats. */
+    /**
+     * Amount the commit output 0 holds = postage + revealFeeSats +
+     * (tip.value ?? 0) — sized to fund the reveal's recipient
+     * + optional tip + miner fee in one P2TR output.
+     */
     commitOutputValueSats: number;
     /** Total sats the funding UTXO must cover: commitOutputValueSats + commitFeeSats. */
     fundingRequirementSats: number;

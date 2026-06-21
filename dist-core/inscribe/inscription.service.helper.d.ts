@@ -15,18 +15,37 @@ import { type SimulateInscribeFeesResult } from './inscription-fee.helper';
  * needed to build any other reveal shape (redirect, RBF, recover-
  * to-self, bundle).
  *
+ * # Free cats (the "ordpool inscribers get cats" design)
+ *
+ * Both the commit AND the reveal carry `nLockTime=21`, so cat21-ord
+ * mints TWO cats per inscription:
+ *   - Cat A: `<commitTxid>i0` — minted by the commit; ends up at
+ *     the inscription's UTXO via FIFO transitivity through the
+ *     reveal's input.
+ *   - Cat B: `<revealTxid>i0` — minted by the reveal at the same
+ *     satpoint. Post-jubilee chains tag Cat B with the `Vindicated`
+ *     charm; it's otherwise a normal cat with a positive number.
+ * Both cats stack on the inscription's 546-sat UTXO at the
+ * recipient's address. No opt-out. See the commit helper's module
+ * doc for the cat21-ord index mechanics.
+ *
  * # Lifecycle
  *
  *  1. Generate fresh ephemeral keypair (32 random bytes).
  *  2. Derive Schnorr x-only pubkey — this doubles as the envelope's
  *     `<pubkey> CHECKSIG` prefix AND the taproot internal key of the
  *     commit output.
- *  3. Build envelope with that pubkey + caller's content.
+ *  3. Build envelope with caller's content + auto-prepended fields
+ *     (note → tag 0x0f UTF-8; contentEncoding='br' → tag 0x09 "br")
+ *     + any caller-supplied `envelopeFields`.
  *  4. Simulate fees (Layer 3): commitFee, revealFee,
- *     commitOutputValueSats, fundingRequirementSats.
- *  5. Build the commit PSBT at the resolved commitFee.
+ *     commitOutputValueSats (= postage + revealFee + tip.value),
+ *     fundingRequirementSats.
+ *  5. Build the commit PSBT at the resolved commitFee with
+ *     `nLockTime=21` and the per-wallet sequence.
  *  6. Build a default reveal tx at the resolved revealFee using the
- *     ephemeral private key (recipient = `args.recipientAddress`).
+ *     ephemeral private key (recipient = `args.recipientAddress`,
+ *     optional tip at vout[1], also `nLockTime=21`).
  *  7. Return the ephemeral key material so the caller can re-build
  *     the reveal under different parameters later if it wants to.
  *

@@ -25,11 +25,28 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
  *
  *   2. The commit transaction has:
  *        - 1 funding input (caller-supplied UTXO; user's wallet
- *          signs)
+ *          signs). Sequence is wallet-specific via
+ *          `resolveCat21InputSequence(walletType)`: 0xfffffffd for
+ *          cat21wallet (RBF allowed; our wallet preserves
+ *          lockTime=21 through replacement), 0xfffffffe for every
+ *          third-party wallet (RBF disabled; locks accelerate UIs
+ *          out, the 2024 Xverse incident defence).
  *        - Output 0: the commit P2TR address holding
- *          `postage + revealFeeReserve`. The reveal spends this.
+ *          `postage + revealFeeReserve + tipValueSats` (the last
+ *          term only when `tipValueSats > 0` on the reveal). The
+ *          reveal spends this.
  *        - Output 1 (optional): change back to the user, if the
  *          funding input has surplus above commit fee + output 0.
+ *
+ *   3. `nLockTime=21`: the commit qualifies as a CAT-21 mint under
+ *      cat21-ord's `--index-cat21` rule. The first sat of vout[0]
+ *      becomes Cat A (`<commitTxid>i0`). The reveal then spends
+ *      vout[0] FIFO-style, moving Cat A to the inscription's UTXO,
+ *      and the reveal itself (also `nLockTime=21`) mints Cat B
+ *      (`<revealTxid>i0`) at the same satpoint. Net: two cats per
+ *      inscribe, stacked on the inscription's 546-sat UTXO. The
+ *      maintainer's design: "we gift the cats for free. because
+ *      why not."
  *
  * Returns the unsigned commit PSBT bytes + the metadata the
  * reveal builder needs to construct the spending witness.
@@ -113,7 +130,12 @@ export interface InscribeCommitResult {
   commitAddress: string;
   /** scriptPubKey bytes of the commit output (same script the reveal references). */
   commitOutputScript: Uint8Array;
-  /** Sat value the commit places at output 0 (postage + revealFeeReserve). */
+  /**
+   * Sat value the commit places at output 0. Equals
+   * `postage + revealFeeReserveSats + (tipValueSats ?? 0)`. Funds
+   * the reveal's recipient output + optional tip output + reveal
+   * miner fee in a single P2TR commit.
+   */
   commitOutputValueSats: number;
   /** Taptree metadata the reveal builder needs to construct its spending witness. */
   taproot: {

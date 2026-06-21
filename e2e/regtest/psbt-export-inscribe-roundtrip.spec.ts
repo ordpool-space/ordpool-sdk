@@ -170,8 +170,11 @@ describe('psbt-export signer inscribe-roundtrip on regtest (external offline wal
     const recovered = new TextDecoder().decode(parsed[0].getDataRaw());
     expect(recovered).toBe(INSCRIPTION_BODY_TEXT);
 
-    // Final on-chain shape sanity.
+    // Final on-chain shape sanity. Both commit AND reveal carry
+    // lockTime=21 — the inscribe pipeline mints two cats per
+    // inscription (commit cat + reveal cat) under cat21-ord's
+    // --index-cat21 rule.
     const esploraReveal = await getTx(revealTxid);
-    expect(esploraReveal.locktime).toBe(0); // reveal carries no special locktime
+    expect(esploraReveal.locktime).toBe(21);
   });
 });
