@@ -87,6 +87,7 @@ __exportStar(require("./inscribe/inscribe-orchestrator"), exports);
 // --- Agent-mode policy gate ---
 __exportStar(require("./agent-mode/agent-policy.helper"), exports);
 __exportStar(require("./agent-mode/agent-policy.types"), exports);
-// --- Bulletproof operation validation gate ---
+// --- Bulletproof operation validation gates ---
 __exportStar(require("./cat21-validation"), exports);
+__exportStar(require("./inscribe-validation"), exports);
 //# sourceMappingURL=core.js.map

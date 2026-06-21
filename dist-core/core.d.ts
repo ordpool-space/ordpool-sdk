@@ -51,4 +51,5 @@ export * from './inscribe/inscribe-orchestrator';
 export * from './agent-mode/agent-policy.helper';
 export * from './agent-mode/agent-policy.types';
 export * from './cat21-validation';
+export * from './inscribe-validation';
 //# sourceMappingURL=core.d.ts.map

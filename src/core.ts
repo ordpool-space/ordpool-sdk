@@ -92,5 +92,6 @@ export * from './inscribe/inscribe-orchestrator';
 export * from './agent-mode/agent-policy.helper';
 export * from './agent-mode/agent-policy.types';
 
-// --- Bulletproof operation validation gate ---
+// --- Bulletproof operation validation gates ---
 export * from './cat21-validation';
+export * from './inscribe-validation';

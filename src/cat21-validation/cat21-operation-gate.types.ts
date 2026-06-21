@@ -80,42 +80,21 @@ export interface Cat21AcceptOfferIntent {
 }
 
 /**
- * Intent shape for `inscribe`. The user/agent declares the content
- * to inscribe + the recipient + the fee rate; the SDK builds commit
- * + reveal via `createInscribeTransactions`. The gate enforces a
- * content-size cap, a content-type allowlist + blocklist, and the
- * usual address / fee-rate constraints.
- */
-export interface Cat21InscribeIntent {
-  /** Where the inscription lands (P2TR recommended). */
-  recipient: string;
-  /** sat/vB target (applied identically to commit + reveal). */
-  feeRate: number;
-  /**
-   * Body bytes. The cap is `maxInscribeContentBytes` from config
-   * (default 350_000 — keeps the reveal under standard relay).
-   */
-  body: Uint8Array;
-  /**
-   * MIME type embedded in the envelope. The gate enforces the
-   * `allowedContentTypes` allowlist (when configured) and the
-   * `blockedContentTypes` blocklist defensive filter.
-   */
-  contentType?: string;
-}
-
-/**
- * Discriminated union over the five operations the gate validates.
- * The `kind` field is the same string the wallet's RPC method name
- * uses (cat21_mint → 'mint', etc.) so consumer-side dispatch is
- * one switch.
+ * Discriminated union over the four cat21 mutating operations the
+ * gate validates. The `kind` field is the same string the wallet's
+ * RPC method name uses (cat21_mint → 'mint', etc.) so consumer-side
+ * dispatch is one switch.
+ *
+ * Inscribe is a DIFFERENT protocol (ord envelope, lockTime=0, no
+ * `nLockTime=21` marker) and lives in `inscribe-validation/` as
+ * `validateInscribeOperation`. Do not extend this union with an
+ * inscribe variant; the protocols are validated separately.
  */
 export type Cat21Operation =
   | { kind: 'mint'; intent: Cat21MintIntent }
   | { kind: 'transfer'; intent: Cat21TransferIntent }
   | { kind: 'create_offer'; intent: Cat21CreateOfferIntent }
-  | { kind: 'accept_offer'; intent: Cat21AcceptOfferIntent }
-  | { kind: 'inscribe'; intent: Cat21InscribeIntent };
+  | { kind: 'accept_offer'; intent: Cat21AcceptOfferIntent };
 
 /* ──────────────────────────  Config shapes  ────────────────────────── */
 
@@ -195,39 +174,7 @@ export interface Cat21OperationGateConfig {
    * When unset or empty array → all four kinds accepted (default
    * permissive).
    */
-  allowedOperations?: ReadonlyArray<'mint' | 'transfer' | 'create_offer' | 'accept_offer' | 'inscribe'>;
-
-  /**
-   * Maximum inscription body size in bytes. Default 350_000 — keeps
-   * the reveal witness under standard relay policy
-   * (`STANDARD_TX_WEIGHT_LIMIT` from cat21-broadcast). Larger
-   * inscriptions are a Phase-3 Slipstream concern; Phase 1 fails
-   * closed.
-   */
-  maxInscribeContentBytes?: number;
-
-  /**
-   * Positive content-type allowlist. When set and non-empty, the
-   * inscription's `contentType` MUST match one of the entries
-   * (exact case-insensitive string match on the MIME type, e.g.
-   * 'image/png'). When unset or empty → any well-formed contentType
-   * is permitted.
-   *
-   * Recommended day-one allowlist: image/png, image/jpeg,
-   * image/svg+xml, image/webp, image/gif, text/plain, text/html,
-   * application/json, application/cbor.
-   */
-  allowedContentTypes?: ReadonlyArray<string>;
-
-  /**
-   * Defensive content-type blocklist. Entries are case-insensitive
-   * exact matches. When the inscription's `contentType` matches a
-   * blocklist entry, the gate rejects regardless of the allowlist.
-   *
-   * Recommended day-one blocklist: 'application/javascript',
-   * 'text/javascript' (XSS-flavoured inscribers).
-   */
-  blockedContentTypes?: ReadonlyArray<string>;
+  allowedOperations?: ReadonlyArray<'mint' | 'transfer' | 'create_offer' | 'accept_offer'>;
 }
 
 /* ──────────────────────────  Result shapes  ────────────────────────── */
@@ -284,14 +231,7 @@ export type Cat21GateRejectReason =
   | 'expected-seller-utxo-malformed'
   | 'offer-psbt-malformed'
   | 'offer-psbt-missing-magic-bytes'
-  | 'offer-psbt-too-large'
-
-  // Inscribe specifics
-  | 'content-not-bytes'
-  | 'content-too-large'
-  | 'content-type-not-string'
-  | 'content-type-not-allowed'
-  | 'content-type-blocked';
+  | 'offer-psbt-too-large';
 
 /**
  * Pre-decoded resources the gate hands the downstream caller on
@@ -322,14 +262,6 @@ export type Cat21GateResources =
       offerPsbtBytes: Uint8Array;
       catTxid: string;
       catIndex: number;
-    }
-  | {
-      kind: 'inscribe';
-      recipientScript: Uint8Array;
-      /** Validated content bytes — same object the caller passed. */
-      contentBytes: Uint8Array;
-      /** Normalised contentType (lowercased) when present. */
-      contentType: string | undefined;
     };
 
 export type Cat21OperationGateResult =

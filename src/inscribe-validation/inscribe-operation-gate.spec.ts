@@ -1,28 +1,25 @@
 /**
- * Inscribe-specific gate spec. Mirrors the per-operation block style
- * used by the other operations in `cat21-operation-gate.spec.ts` but
- * splits to its own file so the inscribe specs stay easy to find.
- *
- * Every named `Cat21GateRejectReason` introduced by inscribe gets at
- * least one positive-equality test:
+ * Inscribe gate spec. Each `InscribeGateRejectReason` gets at least
+ * one positive-equality test:
  *
  *   content-not-bytes, content-too-large,
  *   content-type-not-string, content-type-not-allowed,
- *   content-type-blocked.
+ *   content-type-blocked, plus the shared recipient / fee-rate /
+ *   intent-not-an-object cases.
  *
- * Plus happy-path checks for the success resources (recipientScript,
- * contentBytes, normalised contentType) and the standard recipient /
- * fee-rate / kind-allowlist reuse paths.
+ * Parallel to `cat21-validation/cat21-operation-gate.spec.ts` —
+ * separate module by design (different protocol). See the gate's
+ * types-file module doc for the rationale.
  */
 import { describe, expect, it } from '@jest/globals';
 
 import { Network } from '../network';
 
-import { validateCat21Operation } from './cat21-operation-gate';
+import { validateInscribeOperation } from './inscribe-operation-gate';
 import type {
-  Cat21InscribeIntent,
-  Cat21OperationGateConfig,
-} from './cat21-operation-gate.types';
+  InscribeIntent,
+  InscribeOperationGateConfig,
+} from './inscribe-operation-gate.types';
 
 const MAINNET_TAPROOT =
   'bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0';
@@ -30,9 +27,9 @@ const ANOTHER_MAINNET_TAPROOT =
   'bc1pdkz7m4d57mtprhckl54zsd62cwhcmw6gj8jx32t99cwt3l6yj7msvvfn0w';
 const TESTNET_ADDR = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
 
-const mainnetConfig: Cat21OperationGateConfig = { network: Network.Mainnet };
+const mainnetConfig: InscribeOperationGateConfig = { network: Network.Mainnet };
 
-function inscribeIntent(over: Partial<Cat21InscribeIntent> = {}): Cat21InscribeIntent {
+function inscribeIntent(over: Partial<InscribeIntent> = {}): InscribeIntent {
   return {
     recipient: MAINNET_TAPROOT,
     feeRate: 5,
@@ -42,10 +39,10 @@ function inscribeIntent(over: Partial<Cat21InscribeIntent> = {}): Cat21InscribeI
   };
 }
 
-describe('validateCat21Operation — inscribe happy paths', () => {
+describe('validateInscribeOperation — inscribe happy paths', () => {
   it('accepts a minimal inscribe and returns recipientScript + contentBytes + normalised contentType', () => {
     const body = new TextEncoder().encode('happy');
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: { kind: 'inscribe', intent: inscribeIntent({ body, contentType: 'TEXT/PLAIN' }) },
     });
@@ -59,7 +56,7 @@ describe('validateCat21Operation — inscribe happy paths', () => {
   });
 
   it('accepts an inscribe without contentType (omitted in the envelope)', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: { kind: 'inscribe', intent: inscribeIntent({ contentType: undefined }) },
     });
@@ -70,7 +67,7 @@ describe('validateCat21Operation — inscribe happy paths', () => {
   });
 
   it('accepts an empty body (zero-byte inscription)', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: { kind: 'inscribe', intent: inscribeIntent({ body: new Uint8Array(0) }) },
     });
@@ -78,9 +75,9 @@ describe('validateCat21Operation — inscribe happy paths', () => {
   });
 });
 
-describe('validateCat21Operation — inscribe recipient + fee-rate rejections (reuses shared helpers)', () => {
+describe('validateInscribeOperation — inscribe recipient + fee-rate rejections (reuses shared helpers)', () => {
   it('rejects a non-address recipient with recipient-not-a-bitcoin-address', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: { kind: 'inscribe', intent: inscribeIntent({ recipient: 'not-an-address' }) },
     });
@@ -92,7 +89,7 @@ describe('validateCat21Operation — inscribe recipient + fee-rate rejections (r
   });
 
   it('rejects a recipient on the wrong network with recipient-wrong-network', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: { kind: 'inscribe', intent: inscribeIntent({ recipient: TESTNET_ADDR }) },
     });
@@ -101,7 +98,7 @@ describe('validateCat21Operation — inscribe recipient + fee-rate rejections (r
   });
 
   it('rejects a recipient outside allowedRecipients with recipient-not-allowed', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: { ...mainnetConfig, allowedRecipients: [ANOTHER_MAINNET_TAPROOT] },
       operation: { kind: 'inscribe', intent: inscribeIntent() },
     });
@@ -110,7 +107,7 @@ describe('validateCat21Operation — inscribe recipient + fee-rate rejections (r
   });
 
   it('rejects a self-send (recipient === ownPaymentAddress) with self-send', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: { ...mainnetConfig, ownPaymentAddress: MAINNET_TAPROOT },
       operation: { kind: 'inscribe', intent: inscribeIntent() },
     });
@@ -119,7 +116,7 @@ describe('validateCat21Operation — inscribe recipient + fee-rate rejections (r
   });
 
   it('rejects feeRate <= 0 with fee-rate-not-positive', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: { kind: 'inscribe', intent: inscribeIntent({ feeRate: 0 }) },
     });
@@ -128,7 +125,7 @@ describe('validateCat21Operation — inscribe recipient + fee-rate rejections (r
   });
 
   it('rejects feeRate above maxFeeRatePerVbyte cap', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: { ...mainnetConfig, maxFeeRatePerVbyte: 100 },
       operation: { kind: 'inscribe', intent: inscribeIntent({ feeRate: 1000 }) },
     });
@@ -137,9 +134,9 @@ describe('validateCat21Operation — inscribe recipient + fee-rate rejections (r
   });
 });
 
-describe('validateCat21Operation — inscribe body rejections', () => {
+describe('validateInscribeOperation — inscribe body rejections', () => {
   it('rejects a non-Uint8Array body with content-not-bytes', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: {
         kind: 'inscribe',
@@ -152,7 +149,7 @@ describe('validateCat21Operation — inscribe body rejections', () => {
 
   it('rejects a body that exceeds the default 350KB cap with content-too-large', () => {
     const big = new Uint8Array(350_001);
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: { kind: 'inscribe', intent: inscribeIntent({ body: big }) },
     });
@@ -160,9 +157,9 @@ describe('validateCat21Operation — inscribe body rejections', () => {
     if (!result.ok) expect(result.reason).toBe('content-too-large');
   });
 
-  it('rejects a body that exceeds a custom maxInscribeContentBytes', () => {
-    const result = validateCat21Operation({
-      config: { ...mainnetConfig, maxInscribeContentBytes: 100 },
+  it('rejects a body that exceeds a custom maxContentBytes', () => {
+    const result = validateInscribeOperation({
+      config: { ...mainnetConfig, maxContentBytes: 100 },
       operation: { kind: 'inscribe', intent: inscribeIntent({ body: new Uint8Array(101) }) },
     });
     expect(result.ok).toBe(false);
@@ -170,17 +167,17 @@ describe('validateCat21Operation — inscribe body rejections', () => {
   });
 
   it('accepts a body exactly at the cap (boundary)', () => {
-    const result = validateCat21Operation({
-      config: { ...mainnetConfig, maxInscribeContentBytes: 100 },
+    const result = validateInscribeOperation({
+      config: { ...mainnetConfig, maxContentBytes: 100 },
       operation: { kind: 'inscribe', intent: inscribeIntent({ body: new Uint8Array(100) }) },
     });
     expect(result.ok).toBe(true);
   });
 });
 
-describe('validateCat21Operation — inscribe contentType rejections', () => {
+describe('validateInscribeOperation — inscribe contentType rejections', () => {
   it('rejects a non-string contentType with content-type-not-string', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: mainnetConfig,
       operation: {
         kind: 'inscribe',
@@ -192,7 +189,7 @@ describe('validateCat21Operation — inscribe contentType rejections', () => {
   });
 
   it('rejects a contentType outside allowedContentTypes with content-type-not-allowed', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: { ...mainnetConfig, allowedContentTypes: ['image/png', 'text/plain'] },
       operation: { kind: 'inscribe', intent: inscribeIntent({ contentType: 'image/jpeg' }) },
     });
@@ -201,7 +198,7 @@ describe('validateCat21Operation — inscribe contentType rejections', () => {
   });
 
   it('matches allowedContentTypes case-insensitively', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: { ...mainnetConfig, allowedContentTypes: ['image/png'] },
       operation: { kind: 'inscribe', intent: inscribeIntent({ contentType: 'Image/PNG' }) },
     });
@@ -212,7 +209,7 @@ describe('validateCat21Operation — inscribe contentType rejections', () => {
   });
 
   it('rejects a blocked contentType with content-type-blocked', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: {
         ...mainnetConfig,
         blockedContentTypes: ['application/javascript', 'text/javascript'],
@@ -224,7 +221,7 @@ describe('validateCat21Operation — inscribe contentType rejections', () => {
   });
 
   it('blocklist wins over allowlist (defence-in-depth)', () => {
-    const result = validateCat21Operation({
+    const result = validateInscribeOperation({
       config: {
         ...mainnetConfig,
         allowedContentTypes: ['application/javascript'], // mistakenly permits
@@ -237,21 +234,12 @@ describe('validateCat21Operation — inscribe contentType rejections', () => {
   });
 });
 
-describe('validateCat21Operation — inscribe kind-allowlist', () => {
-  it('rejects inscribe when allowedOperations does not include it', () => {
-    const result = validateCat21Operation({
-      config: { ...mainnetConfig, allowedOperations: ['mint'] },
-      operation: { kind: 'inscribe', intent: inscribeIntent() },
+describe('validateInscribeOperation — entry-level guards', () => {
+  it('rejects a non-object intent', () => {
+    const result = validateInscribeOperation({
+      config: mainnetConfig,
+      operation: { kind: 'inscribe', intent: 'oops' as unknown as InscribeIntent },
     });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe('operation-kind-not-allowed');
-  });
-
-  it('accepts inscribe when allowedOperations includes it', () => {
-    const result = validateCat21Operation({
-      config: { ...mainnetConfig, allowedOperations: ['inscribe'] },
-      operation: { kind: 'inscribe', intent: inscribeIntent() },
-    });
-    expect(result.ok).toBe(true);
+    expect(result).toEqual({ ok: false, reason: 'intent-not-an-object', detail: undefined });
   });
 });
