@@ -69,6 +69,21 @@ export interface CreateInscribeTransactionsArgs {
     envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
     /** sat/vB target. Applied identically to commit + reveal. */
     feeRatePerVbyte: number;
+    /**
+     * Optional tip output appended at vout[1] of the reveal tx. The
+     * inscription stays at vout[0] per ord's first-sat-of-first-output
+     * rule. The commit's funding requirement grows by `tip.value` so
+     * the reveal has the sats to fund the extra output.
+     *
+     * The SDK ships no default tip address — consumers (ordpool.space,
+     * cat21.space, future inscribers) wire their own default. Pattern
+     * mirrors `0xFlicker/ordinals`' `feeDestinations`, simplified to
+     * one recipient and a fixed sats amount.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
     /** Network. */
     network: Network;
 }

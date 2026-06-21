@@ -79,12 +79,16 @@ function buildInscribeCommitPsbt(args) {
         throw new Error('commitFeeSats must be non-negative');
     if (args.revealFeeReserveSats < 0)
         throw new Error('revealFeeReserveSats must be non-negative');
+    if (args.tipValueSats !== undefined && args.tipValueSats < 0) {
+        throw new Error('tipValueSats must be non-negative');
+    }
     if (args.ephemeralPubkeyXonly.length !== 32) {
         throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
     }
     const scureNetwork = (0, network_1.toScureNetwork)(args.network);
     const postageSats = exports.INSCRIBE_POSTAGE_SATS;
-    const commitOutputValueSats = postageSats + args.revealFeeReserveSats;
+    const tipValueSats = args.tipValueSats ?? 0;
+    const commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
     // Single envelope leaf; ephemeral key as the taproot internal key.
     // Matches ord's `TaprootBuilder::new().add_leaf(0, reveal_script)
     // .finalize(&secp256k1, public_key)` (plan.rs:378-382).

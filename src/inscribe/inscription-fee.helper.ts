@@ -60,6 +60,12 @@ export interface SimulateInscribeFeesArgs {
    * deterministic dummy because vsizes don't depend on key bytes.
    */
   ephemeralPubkeyXonly: Uint8Array;
+  /**
+   * Optional reveal-tx tip output. Threads through to the reveal
+   * vsize estimate (extra output bytes) AND the commit's
+   * `tipValueSats` so the commit funds postage + revealFee + tip.
+   */
+  tip?: { address: string; value: number };
   /** Per-address-type dust limit for the commit change. */
   changeDustLimitSats?: number;
   network: Network;
@@ -124,13 +130,21 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
     commitFeeSats: 0,
     revealFeeReserveSats: 0,
+    tipValueSats: args.tip?.value,
     changeDustLimitSats: args.changeDustLimitSats,
     network: args.network,
   });
+  const tipValueSats = args.tip?.value ?? 0;
   const reveal = buildInscribeRevealTx({
     commitTxid: '0'.repeat(64),
     commitVout: 0,
-    commitOutputValueSats: INSCRIBE_POSTAGE_SATS,
+    // postage + tip; the placeholder commit has revealFeeReserveSats=0
+    // so the commit output is sized exactly to cover the reveal's two
+    // outputs (recipient at postage, tip at tip.value). Setting it
+    // higher would leave change inside the reveal which the helper
+    // doesn't model — instead we measure vsize at zero reveal fee and
+    // compute the fee separately.
+    commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
     commitOutputScript: placeholderCommit.commitOutputScript,
     taproot: {
       internalKey: placeholderCommit.taproot.internalKey,
@@ -138,6 +152,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     },
     ephemeralPrivKey: dummyEphemeralPriv,
     recipientAddress: args.recipientAddress,
+    tip: args.tip,
     network: args.network,
   });
   const revealVsize = reveal.revealVsize;
@@ -155,6 +170,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
         commitFeeSats: feeSats,
         revealFeeReserveSats: revealFeeSats,
+        tipValueSats: args.tip?.value,
         changeDustLimitSats: args.changeDustLimitSats,
         network: args.network,
       });

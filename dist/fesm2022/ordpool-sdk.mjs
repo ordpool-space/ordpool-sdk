@@ -5880,12 +5880,16 @@ function buildInscribeCommitPsbt(args) {
         throw new Error('commitFeeSats must be non-negative');
     if (args.revealFeeReserveSats < 0)
         throw new Error('revealFeeReserveSats must be non-negative');
+    if (args.tipValueSats !== undefined && args.tipValueSats < 0) {
+        throw new Error('tipValueSats must be non-negative');
+    }
     if (args.ephemeralPubkeyXonly.length !== 32) {
         throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
     }
     const scureNetwork = toScureNetwork(args.network);
     const postageSats = INSCRIBE_POSTAGE_SATS;
-    const commitOutputValueSats = postageSats + args.revealFeeReserveSats;
+    const tipValueSats = args.tipValueSats ?? 0;
+    const commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
     // Single envelope leaf; ephemeral key as the taproot internal key.
     // Matches ord's `TaprootBuilder::new().add_leaf(0, reveal_script)
     // .finalize(&secp256k1, public_key)` (plan.rs:378-382).
@@ -5978,9 +5982,17 @@ function buildInscribeCommitPsbt(args) {
 function buildInscribeRevealTx(args) {
     const scureNetwork = toScureNetwork(args.network);
     const postageSats = INSCRIBE_POSTAGE_SATS;
-    const revealFeeReserveSats = args.commitOutputValueSats - postageSats;
+    const tipValueSats = args.tip?.value ?? 0;
+    if (tipValueSats < 0)
+        throw new Error('tip.value must be non-negative');
+    if (!Number.isInteger(tipValueSats))
+        throw new Error('tip.value must be an integer');
+    // The reveal's miner fee equals the leftover: commit output sats
+    // minus the postage going to the recipient minus any tip output
+    // going to the tip address.
+    const revealFeeReserveSats = args.commitOutputValueSats - postageSats - tipValueSats;
     if (revealFeeReserveSats < 0) {
-        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats})`);
+        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`);
     }
     if (args.ephemeralPrivKey.length !== 32) {
         throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
@@ -6001,6 +6013,15 @@ function buildInscribeRevealTx(args) {
     // Output 0: recipient address, postage sats. The inscription
     // lands on the first sat of this output (ord-theory FIFO).
     tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+    // Output 1 (optional): tip output. ord's first-sat-of-first-output
+    // rule pins the inscription to vout[0]; the tip lives at vout[1].
+    // Pattern matches `0xFlicker/ordinals` packages/inscriptions/src/
+    // reveal.ts (the only OSS inscriber with a tip primitive — see
+    // /Work/ordpool/OSS-INSCRIBERS.md). We diverge in that we ship a
+    // single fixed-sats tip, not a weighted multi-recipient split.
+    if (args.tip !== undefined && tipValueSats > 0) {
+        tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+    }
     // Manual taproot tapscript-path finalization.
     //
     // scure 1.2.x's automatic finalize rejects our envelope tapscript
@@ -6118,13 +6139,21 @@ function simulateInscribeFees(args) {
         ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
         commitFeeSats: 0,
         revealFeeReserveSats: 0,
+        tipValueSats: args.tip?.value,
         changeDustLimitSats: args.changeDustLimitSats,
         network: args.network,
     });
+    const tipValueSats = args.tip?.value ?? 0;
     const reveal = buildInscribeRevealTx({
         commitTxid: '0'.repeat(64),
         commitVout: 0,
-        commitOutputValueSats: INSCRIBE_POSTAGE_SATS,
+        // postage + tip; the placeholder commit has revealFeeReserveSats=0
+        // so the commit output is sized exactly to cover the reveal's two
+        // outputs (recipient at postage, tip at tip.value). Setting it
+        // higher would leave change inside the reveal which the helper
+        // doesn't model — instead we measure vsize at zero reveal fee and
+        // compute the fee separately.
+        commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
         commitOutputScript: placeholderCommit.commitOutputScript,
         taproot: {
             internalKey: placeholderCommit.taproot.internalKey,
@@ -6132,6 +6161,7 @@ function simulateInscribeFees(args) {
         },
         ephemeralPrivKey: dummyEphemeralPriv,
         recipientAddress: args.recipientAddress,
+        tip: args.tip,
         network: args.network,
     });
     const revealVsize = reveal.revealVsize;
@@ -6148,6 +6178,7 @@ function simulateInscribeFees(args) {
                 ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
                 commitFeeSats: feeSats,
                 revealFeeReserveSats: revealFeeSats,
+                tipValueSats: args.tip?.value,
                 changeDustLimitSats: args.changeDustLimitSats,
                 network: args.network,
             });
@@ -6189,6 +6220,14 @@ function createInscribeTransactions(args) {
     if (args.feeRatePerVbyte <= 0) {
         throw new Error('feeRatePerVbyte must be positive');
     }
+    if (args.tip !== undefined) {
+        if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
+            throw new Error('tip.value must be a non-negative integer');
+        }
+        if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
+            throw new Error('tip.address must be a non-empty string');
+        }
+    }
     const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
     const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
     const envelope = buildInscriptionEnvelope({
@@ -6227,6 +6266,7 @@ function createInscribeTransactions(args) {
             senderChangeAddress: args.paymentAddress,
             recipientAddress: args.recipientAddress,
             ephemeralPubkeyXonly,
+            tip: args.tip,
             network: args.network,
         });
     }
@@ -6255,6 +6295,7 @@ function createInscribeTransactions(args) {
         ephemeralPubkeyXonly,
         commitFeeSats: fees.commitFeeSats,
         revealFeeReserveSats: fees.revealFeeSats,
+        tipValueSats: args.tip?.value,
         changeDustLimitSats,
         network: args.network,
     });
@@ -6273,6 +6314,7 @@ function createInscribeTransactions(args) {
         ephemeralPubkeyXonly,
         commitFeeSats: fees.commitFeeSats,
         revealFeeReserveSats: fees.revealFeeSats,
+        tipValueSats: args.tip?.value,
         changeDustLimitSats,
         network: args.network,
     });
@@ -6292,6 +6334,7 @@ function createInscribeTransactions(args) {
         },
         ephemeralPrivKey,
         recipientAddress: args.recipientAddress,
+        tip: args.tip,
         network: args.network,
     });
     return {
@@ -6476,6 +6519,7 @@ function inscribeAndBroadcast(args) {
                 contentType: args.contentType,
                 envelopeFields: args.envelopeFields,
                 feeRatePerVbyte: args.feeRatePerVbyte,
+                tip: args.tip,
                 network: args.network,
             });
         }

@@ -17,6 +17,7 @@ function inscribeAndBroadcast(args) {
                 contentType: args.contentType,
                 envelopeFields: args.envelopeFields,
                 feeRatePerVbyte: args.feeRatePerVbyte,
+                tip: args.tip,
                 network: args.network,
             });
         }

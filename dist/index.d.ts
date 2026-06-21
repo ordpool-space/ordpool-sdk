@@ -2537,6 +2537,17 @@ interface InscribeCommitArgs {
     commitFeeSats: number;
     /** Reveal-tx fee in sats (reserved in commit output 0 for the reveal to pay). */
     revealFeeReserveSats: number;
+    /**
+     * Optional tip-output amount in sats reserved on the commit output
+     * (in addition to postage + revealFeeReserve). The tip output itself
+     * lives on the reveal tx at vout[1]; this is just the bookkeeping
+     * the commit needs to fund it.
+     *
+     * When set, `commitOutputValueSats = postage + revealFeeReserve +
+     * tipValueSats`; when omitted the commit output sizes exactly as
+     * before. Must be a non-negative integer.
+     */
+    tipValueSats?: number;
     /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
     changeDustLimitSats?: number;
     network: Network;
@@ -2617,6 +2628,20 @@ interface InscribeRevealArgs {
     ephemeralPrivKey: Uint8Array;
     /** Address the inscription lands on (P2TR recommended). */
     recipientAddress: string;
+    /**
+     * Optional tip output appended at vout[1] of the reveal. The
+     * inscription MUST stay at vout[0] (ord's "first sat of first
+     * output" rule), so the tip lives one slot below. When omitted,
+     * the reveal has its single recipient output as before.
+     *
+     * Caller is responsible for ensuring `commitOutputValueSats`
+     * carries enough sats to fund postage + reveal fee + tip.value;
+     * the fee simulator's `tip` param threads that through.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
     /** Network. */
     network: Network;
 }
@@ -2725,6 +2750,15 @@ interface SimulateInscribeFeesArgs {
      * deterministic dummy because vsizes don't depend on key bytes.
      */
     ephemeralPubkeyXonly: Uint8Array;
+    /**
+     * Optional reveal-tx tip output. Threads through to the reveal
+     * vsize estimate (extra output bytes) AND the commit's
+     * `tipValueSats` so the commit funds postage + revealFee + tip.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
     /** Per-address-type dust limit for the commit change. */
     changeDustLimitSats?: number;
     network: Network;
@@ -2821,6 +2855,21 @@ interface CreateInscribeTransactionsArgs {
     envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
     /** sat/vB target. Applied identically to commit + reveal. */
     feeRatePerVbyte: number;
+    /**
+     * Optional tip output appended at vout[1] of the reveal tx. The
+     * inscription stays at vout[0] per ord's first-sat-of-first-output
+     * rule. The commit's funding requirement grows by `tip.value` so
+     * the reveal has the sats to fund the extra output.
+     *
+     * The SDK ships no default tip address — consumers (ordpool.space,
+     * cat21.space, future inscribers) wire their own default. Pattern
+     * mirrors `0xFlicker/ordinals`' `feeDestinations`, simplified to
+     * one recipient and a fixed sats amount.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
     /** Network. */
     network: Network;
 }
@@ -3039,6 +3088,15 @@ interface InscribeAndBroadcastArgs {
     contentType?: string;
     envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
     feeRatePerVbyte: number;
+    /**
+     * Optional tip output appended at vout[1] of the reveal. SDK
+     * ships no default address — consumers wire their own. See
+     * `createInscribeTransactions` for the full semantic.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
     network: Network;
     /**
      * Broadcasts a wire-format tx hex; returns the resulting txid.

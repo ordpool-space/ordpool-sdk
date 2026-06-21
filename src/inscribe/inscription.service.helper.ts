@@ -93,6 +93,18 @@ export interface CreateInscribeTransactionsArgs {
   envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
   /** sat/vB target. Applied identically to commit + reveal. */
   feeRatePerVbyte: number;
+  /**
+   * Optional tip output appended at vout[1] of the reveal tx. The
+   * inscription stays at vout[0] per ord's first-sat-of-first-output
+   * rule. The commit's funding requirement grows by `tip.value` so
+   * the reveal has the sats to fund the extra output.
+   *
+   * The SDK ships no default tip address — consumers (ordpool.space,
+   * cat21.space, future inscribers) wire their own default. Pattern
+   * mirrors `0xFlicker/ordinals`' `feeDestinations`, simplified to
+   * one recipient and a fixed sats amount.
+   */
+  tip?: { address: string; value: number };
   /** Network. */
   network: Network;
 }
@@ -151,6 +163,14 @@ export function createInscribeTransactions(
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
   }
+  if (args.tip !== undefined) {
+    if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
+      throw new Error('tip.value must be a non-negative integer');
+    }
+    if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
+      throw new Error('tip.address must be a non-empty string');
+    }
+  }
 
   const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
   const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
@@ -193,6 +213,7 @@ export function createInscribeTransactions(
       senderChangeAddress: args.paymentAddress,
       recipientAddress: args.recipientAddress,
       ephemeralPubkeyXonly,
+      tip: args.tip,
       network: args.network,
     });
   } catch (err) {
@@ -224,6 +245,7 @@ export function createInscribeTransactions(
     ephemeralPubkeyXonly,
     commitFeeSats: fees.commitFeeSats,
     revealFeeReserveSats: fees.revealFeeSats,
+    tipValueSats: args.tip?.value,
     changeDustLimitSats,
     network: args.network,
   });
@@ -243,6 +265,7 @@ export function createInscribeTransactions(
     ephemeralPubkeyXonly,
     commitFeeSats: fees.commitFeeSats,
     revealFeeReserveSats: fees.revealFeeSats,
+    tipValueSats: args.tip?.value,
     changeDustLimitSats,
     network: args.network,
   });
@@ -263,6 +286,7 @@ export function createInscribeTransactions(
     },
     ephemeralPrivKey,
     recipientAddress: args.recipientAddress,
+    tip: args.tip,
     network: args.network,
   });
 

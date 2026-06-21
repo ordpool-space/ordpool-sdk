@@ -51,6 +51,15 @@ export interface SimulateInscribeFeesArgs {
      * deterministic dummy because vsizes don't depend on key bytes.
      */
     ephemeralPubkeyXonly: Uint8Array;
+    /**
+     * Optional reveal-tx tip output. Threads through to the reveal
+     * vsize estimate (extra output bytes) AND the commit's
+     * `tipValueSats` so the commit funds postage + revealFee + tip.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
     /** Per-address-type dust limit for the commit change. */
     changeDustLimitSats?: number;
     network: Network;

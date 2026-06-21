@@ -49,9 +49,17 @@ const inscription_commit_helper_1 = require("./inscription-commit.helper");
 function buildInscribeRevealTx(args) {
     const scureNetwork = (0, network_1.toScureNetwork)(args.network);
     const postageSats = inscription_commit_helper_1.INSCRIBE_POSTAGE_SATS;
-    const revealFeeReserveSats = args.commitOutputValueSats - postageSats;
+    const tipValueSats = args.tip?.value ?? 0;
+    if (tipValueSats < 0)
+        throw new Error('tip.value must be non-negative');
+    if (!Number.isInteger(tipValueSats))
+        throw new Error('tip.value must be an integer');
+    // The reveal's miner fee equals the leftover: commit output sats
+    // minus the postage going to the recipient minus any tip output
+    // going to the tip address.
+    const revealFeeReserveSats = args.commitOutputValueSats - postageSats - tipValueSats;
     if (revealFeeReserveSats < 0) {
-        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats})`);
+        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`);
     }
     if (args.ephemeralPrivKey.length !== 32) {
         throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
@@ -72,6 +80,15 @@ function buildInscribeRevealTx(args) {
     // Output 0: recipient address, postage sats. The inscription
     // lands on the first sat of this output (ord-theory FIFO).
     tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+    // Output 1 (optional): tip output. ord's first-sat-of-first-output
+    // rule pins the inscription to vout[0]; the tip lives at vout[1].
+    // Pattern matches `0xFlicker/ordinals` packages/inscriptions/src/
+    // reveal.ts (the only OSS inscriber with a tip primitive — see
+    // /Work/ordpool/OSS-INSCRIBERS.md). We diverge in that we ship a
+    // single fixed-sats tip, not a weighted multi-recipient split.
+    if (args.tip !== undefined && tipValueSats > 0) {
+        tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+    }
     // Manual taproot tapscript-path finalization.
     //
     // scure 1.2.x's automatic finalize rejects our envelope tapscript

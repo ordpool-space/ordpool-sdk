@@ -73,6 +73,17 @@ export interface InscribeCommitArgs {
   commitFeeSats: number;
   /** Reveal-tx fee in sats (reserved in commit output 0 for the reveal to pay). */
   revealFeeReserveSats: number;
+  /**
+   * Optional tip-output amount in sats reserved on the commit output
+   * (in addition to postage + revealFeeReserve). The tip output itself
+   * lives on the reveal tx at vout[1]; this is just the bookkeeping
+   * the commit needs to fund it.
+   *
+   * When set, `commitOutputValueSats = postage + revealFeeReserve +
+   * tipValueSats`; when omitted the commit output sizes exactly as
+   * before. Must be a non-negative integer.
+   */
+  tipValueSats?: number;
   /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
   changeDustLimitSats?: number;
   network: Network;
@@ -105,13 +116,17 @@ export interface InscribeCommitResult {
 export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommitResult {
   if (args.commitFeeSats < 0) throw new Error('commitFeeSats must be non-negative');
   if (args.revealFeeReserveSats < 0) throw new Error('revealFeeReserveSats must be non-negative');
+  if (args.tipValueSats !== undefined && args.tipValueSats < 0) {
+    throw new Error('tipValueSats must be non-negative');
+  }
   if (args.ephemeralPubkeyXonly.length !== 32) {
     throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
   }
 
   const scureNetwork = toScureNetwork(args.network);
   const postageSats = INSCRIBE_POSTAGE_SATS;
-  const commitOutputValueSats = postageSats + args.revealFeeReserveSats;
+  const tipValueSats = args.tipValueSats ?? 0;
+  const commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
 
   // Single envelope leaf; ephemeral key as the taproot internal key.
   // Matches ord's `TaprootBuilder::new().add_leaf(0, reveal_script)

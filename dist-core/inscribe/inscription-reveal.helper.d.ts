@@ -51,6 +51,20 @@ export interface InscribeRevealArgs {
     ephemeralPrivKey: Uint8Array;
     /** Address the inscription lands on (P2TR recommended). */
     recipientAddress: string;
+    /**
+     * Optional tip output appended at vout[1] of the reveal. The
+     * inscription MUST stay at vout[0] (ord's "first sat of first
+     * output" rule), so the tip lives one slot below. When omitted,
+     * the reveal has its single recipient output as before.
+     *
+     * Caller is responsible for ensuring `commitOutputValueSats`
+     * carries enough sats to fund postage + reveal fee + tip.value;
+     * the fee simulator's `tip` param threads that through.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
     /** Network. */
     network: Network;
 }

@@ -56,6 +56,14 @@ function createInscribeTransactions(args) {
     if (args.feeRatePerVbyte <= 0) {
         throw new Error('feeRatePerVbyte must be positive');
     }
+    if (args.tip !== undefined) {
+        if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
+            throw new Error('tip.value must be a non-negative integer');
+        }
+        if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
+            throw new Error('tip.address must be a non-empty string');
+        }
+    }
     const ephemeralPrivKey = secp256k1_1.secp256k1.utils.randomPrivateKey();
     const ephemeralPubkeyXonly = (0, inscription_reveal_helper_1.deriveRevealPubkeyXonly)(ephemeralPrivKey);
     const envelope = (0, inscription_envelope_1.buildInscriptionEnvelope)({
@@ -94,6 +102,7 @@ function createInscribeTransactions(args) {
             senderChangeAddress: args.paymentAddress,
             recipientAddress: args.recipientAddress,
             ephemeralPubkeyXonly,
+            tip: args.tip,
             network: args.network,
         });
     }
@@ -122,6 +131,7 @@ function createInscribeTransactions(args) {
         ephemeralPubkeyXonly,
         commitFeeSats: fees.commitFeeSats,
         revealFeeReserveSats: fees.revealFeeSats,
+        tipValueSats: args.tip?.value,
         changeDustLimitSats,
         network: args.network,
     });
@@ -140,6 +150,7 @@ function createInscribeTransactions(args) {
         ephemeralPubkeyXonly,
         commitFeeSats: fees.commitFeeSats,
         revealFeeReserveSats: fees.revealFeeSats,
+        tipValueSats: args.tip?.value,
         changeDustLimitSats,
         network: args.network,
     });
@@ -159,6 +170,7 @@ function createInscribeTransactions(args) {
         },
         ephemeralPrivKey,
         recipientAddress: args.recipientAddress,
+        tip: args.tip,
         network: args.network,
     });
     return {

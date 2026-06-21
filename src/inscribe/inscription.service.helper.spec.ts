@@ -185,6 +185,121 @@ describe('createInscribeTransactions', () => {
     })).toThrow(/positive/);
   });
 
+  describe('optional reveal-tx tip output', () => {
+    const TIP_PRIV = new Uint8Array(32).fill(0x7e);
+    const tipAddress = () => btc.p2tr(schnorr.getPublicKey(TIP_PRIV), undefined, scureNetwork, true).address!;
+
+    it('no tip → reveal has exactly one output, commit output sized to postage + revealFee', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('no tip baseline'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        network: NETWORK,
+      });
+      const revealTx = btc.Transaction.fromRaw(hex.decode(result.revealHex));
+      expect(revealTx.outputsLength).toBe(1);
+      expect(result.commit.outputValueSats).toBe(546 + result.fees.revealFeeSats);
+    });
+
+    it('with tip → reveal has 2 outputs, tip at vout[1] with exact tip sats, commit output grows by tip.value', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const TIP_SATS = 5_000;
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('tipped inscription'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        tip: { address: tipAddress(), value: TIP_SATS },
+        network: NETWORK,
+      });
+      const revealTx = btc.Transaction.fromRaw(hex.decode(result.revealHex));
+      expect(revealTx.outputsLength).toBe(2);
+      expect(revealTx.getOutput(0).amount).toBe(BigInt(546));
+      expect(revealTx.getOutput(1).amount).toBe(BigInt(TIP_SATS));
+      expect(result.commit.outputValueSats).toBe(546 + result.fees.revealFeeSats + TIP_SATS);
+    });
+
+    it('reveal vout[0] is the recipient and vout[1] is the tip address (ord first-sat rule preserved)', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const recipient = recipientAddress();
+      const tipAddr = tipAddress();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipient,
+        body: new TextEncoder().encode('vout ordering'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        tip: { address: tipAddr, value: 1234 },
+        network: NETWORK,
+      });
+      const revealTx = btc.Transaction.fromRaw(hex.decode(result.revealHex));
+      const out0Script = revealTx.getOutput(0).script!;
+      const out1Script = revealTx.getOutput(1).script!;
+      const recipientScript = btc.OutScript.encode(btc.Address(scureNetwork).decode(recipient));
+      const tipScript = btc.OutScript.encode(btc.Address(scureNetwork).decode(tipAddr));
+      expect(Buffer.from(out0Script).equals(Buffer.from(recipientScript))).toBe(true);
+      expect(Buffer.from(out1Script).equals(Buffer.from(tipScript))).toBe(true);
+    });
+
+    it('tip.value = 0 → no tip output is appended (zero is the skip sentinel)', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('zero tip'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        tip: { address: tipAddress(), value: 0 },
+        network: NETWORK,
+      });
+      const revealTx = btc.Transaction.fromRaw(hex.decode(result.revealHex));
+      expect(revealTx.outputsLength).toBe(1);
+      expect(result.commit.outputValueSats).toBe(546 + result.fees.revealFeeSats);
+    });
+
+    it('rejects a non-integer tip.value', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('bad tip'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        tip: { address: tipAddress(), value: 1.5 },
+        network: NETWORK,
+      })).toThrow(/integer/);
+    });
+
+    it('rejects a negative tip.value', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('bad tip'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        tip: { address: tipAddress(), value: -1 },
+        network: NETWORK,
+      })).toThrow(/non-negative/);
+    });
+  });
+
   it('two consecutive calls produce DIFFERENT reveals (fresh ephemeral key each time)', () => {
     const { paymentPublicKey, paymentAddress } = paymentContext();
     const args = {

@@ -79,13 +79,21 @@ function simulateInscribeFees(args) {
         ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
         commitFeeSats: 0,
         revealFeeReserveSats: 0,
+        tipValueSats: args.tip?.value,
         changeDustLimitSats: args.changeDustLimitSats,
         network: args.network,
     });
+    const tipValueSats = args.tip?.value ?? 0;
     const reveal = (0, inscription_reveal_helper_1.buildInscribeRevealTx)({
         commitTxid: '0'.repeat(64),
         commitVout: 0,
-        commitOutputValueSats: inscription_commit_helper_1.INSCRIBE_POSTAGE_SATS,
+        // postage + tip; the placeholder commit has revealFeeReserveSats=0
+        // so the commit output is sized exactly to cover the reveal's two
+        // outputs (recipient at postage, tip at tip.value). Setting it
+        // higher would leave change inside the reveal which the helper
+        // doesn't model — instead we measure vsize at zero reveal fee and
+        // compute the fee separately.
+        commitOutputValueSats: inscription_commit_helper_1.INSCRIBE_POSTAGE_SATS + tipValueSats,
         commitOutputScript: placeholderCommit.commitOutputScript,
         taproot: {
             internalKey: placeholderCommit.taproot.internalKey,
@@ -93,6 +101,7 @@ function simulateInscribeFees(args) {
         },
         ephemeralPrivKey: dummyEphemeralPriv,
         recipientAddress: args.recipientAddress,
+        tip: args.tip,
         network: args.network,
     });
     const revealVsize = reveal.revealVsize;
@@ -109,6 +118,7 @@ function simulateInscribeFees(args) {
                 ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
                 commitFeeSats: feeSats,
                 revealFeeReserveSats: revealFeeSats,
+                tipValueSats: args.tip?.value,
                 changeDustLimitSats: args.changeDustLimitSats,
                 network: args.network,
             });

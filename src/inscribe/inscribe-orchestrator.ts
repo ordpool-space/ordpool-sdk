@@ -58,6 +58,12 @@ export interface InscribeAndBroadcastArgs {
   contentType?: string;
   envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
   feeRatePerVbyte: number;
+  /**
+   * Optional tip output appended at vout[1] of the reveal. SDK
+   * ships no default address — consumers wire their own. See
+   * `createInscribeTransactions` for the full semantic.
+   */
+  tip?: { address: string; value: number };
   network: Network;
   /**
    * Broadcasts a wire-format tx hex; returns the resulting txid.
@@ -104,6 +110,7 @@ export function inscribeAndBroadcast(
         contentType: args.contentType,
         envelopeFields: args.envelopeFields,
         feeRatePerVbyte: args.feeRatePerVbyte,
+        tip: args.tip,
         network: args.network,
       });
     } catch (err) {

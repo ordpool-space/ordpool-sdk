@@ -68,6 +68,17 @@ export interface InscribeCommitArgs {
     commitFeeSats: number;
     /** Reveal-tx fee in sats (reserved in commit output 0 for the reveal to pay). */
     revealFeeReserveSats: number;
+    /**
+     * Optional tip-output amount in sats reserved on the commit output
+     * (in addition to postage + revealFeeReserve). The tip output itself
+     * lives on the reveal tx at vout[1]; this is just the bookkeeping
+     * the commit needs to fund it.
+     *
+     * When set, `commitOutputValueSats = postage + revealFeeReserve +
+     * tipValueSats`; when omitted the commit output sizes exactly as
+     * before. Must be a non-negative integer.
+     */
+    tipValueSats?: number;
     /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
     changeDustLimitSats?: number;
     network: Network;
