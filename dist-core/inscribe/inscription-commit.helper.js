@@ -37,7 +37,9 @@ exports.INSCRIBE_POSTAGE_SATS = void 0;
 exports.buildInscribeCommitPsbt = buildInscribeCommitPsbt;
 const btc = __importStar(require("@scure/btc-signer"));
 const cat21_postage_1 = require("../cat21-protocol/cat21-postage");
+const cat21_sequence_1 = require("../cat21-protocol/cat21-sequence");
 const network_1 = require("../network");
+const wallet_service_types_1 = require("../wallet/wallet.service.types");
 /**
  * Layer-1 builder for the inscribe **commit** transaction.
  *
@@ -105,14 +107,30 @@ function buildInscribeCommitPsbt(args) {
     if (commitP2tr.tapLeafScript === undefined) {
         throw new Error('Internal error: p2tr returned no tapLeafScript for the constructed tree');
     }
-    // Build the PSBT.
-    const tx = new btc.Transaction({ allowUnknownOutputs: false });
+    // Build the PSBT with `lockTime=21`. Every ordpool inscription is
+    // ALSO a CAT-21 mint — we gift the cat for free to anyone using
+    // the inscribe pipeline. cat21-ord reads `nLockTime` structurally
+    // and assigns a cat to the first sat of the first output (the
+    // commit's P2TR envelope output). The reveal then spends that
+    // output FIFO-style, moving the cat to the inscription recipient
+    // — so the cat and the inscription end up on the same sat at the
+    // same address, with no extra cost to the user.
+    //
+    // Block 21 was mined in 2009, so the lockTime constraint is
+    // trivially satisfied no matter when the tx lands. The field is
+    // repurposed protocol-marker data; cat21-ord reads it structurally.
+    const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: 21 });
+    // Default to a non-cat21wallet sentinel so the sequence resolves to
+    // the safer non-RBF value (0xfffffffe). Standalone callers get the
+    // correct behaviour without having to learn the per-wallet rule.
+    const sequence = (0, cat21_sequence_1.resolveCat21InputSequence)(args.walletType ?? wallet_service_types_1.KnownOrdinalWalletType.xverse);
     // Funding input shape mirrors the cat21 mint adapter: witnessUtxo
     // for SegWit, nonWitnessUtxo for P2PKH legacy, plus per-address-
     // type optional fields.
     const inputBase = {
         txid: args.fundingInput.txid,
         index: args.fundingInput.vout,
+        sequence,
         witnessUtxo: {
             script: args.fundingInput.scriptPubKey,
             amount: BigInt(args.fundingInput.value),
@@ -157,6 +175,12 @@ function buildInscribeCommitPsbt(args) {
     }
     if (tx.getOutput(0).amount !== BigInt(commitOutputValueSats)) {
         throw new Error('Internal error: commit output 0 amount drifted');
+    }
+    if (tx.lockTime !== 21) {
+        throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
+    }
+    if (tx.getInput(0).sequence !== sequence) {
+        throw new Error(`Internal error: input 0 sequence=${tx.getInput(0).sequence}, expected ${sequence}`);
     }
     return {
         commitPsbt: tx.toPSBT(0),

@@ -59,6 +59,13 @@ export interface InscribeAndBroadcastArgs {
         address: string;
         value: number;
     };
+    /** Optional Tag::Note (0x0f) watermark string. */
+    note?: string;
+    /**
+     * Optional body-encoding hint ('br' for brotli). Body must
+     * already be compressed; this flag only emits the envelope tag.
+     */
+    contentEncoding?: 'br';
     network: Network;
     /**
      * Broadcasts a wire-format tx hex; returns the resulting txid.

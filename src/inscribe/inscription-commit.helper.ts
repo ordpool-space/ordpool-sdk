@@ -1,7 +1,9 @@
 import * as btc from '@scure/btc-signer';
 
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
+import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
 import { Network, toScureNetwork } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 /**
  * Layer-1 builder for the inscribe **commit** transaction.
@@ -84,6 +86,21 @@ export interface InscribeCommitArgs {
    * before. Must be a non-negative integer.
    */
   tipValueSats?: number;
+  /**
+   * Which wallet will sign the commit PSBT. Drives the funding
+   * input's sequence number via `resolveCat21InputSequence`:
+   *   - `cat21wallet`: 0xfffffffd (RBF-allowed; our wallet preserves
+   *     `lockTime=21` through any replacement).
+   *   - any other wallet (default): 0xfffffffe (non-RBF; locks
+   *     third-party accelerate UIs out of touching the marker,
+   *     defending against the 2024 Xverse incident where an
+   *     accelerator dropped `lockTime=21` and burned a CAT-21 mint).
+   *
+   * Defaults to a non-cat21wallet sentinel so any standalone caller
+   * (regtest specs, third-party SDK consumers) gets the safer
+   * non-RBF sequence without having to know about the rule.
+   */
+  walletType?: KnownOrdinalWalletType;
   /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
   changeDustLimitSats?: number;
   network: Network;
@@ -146,8 +163,23 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
     throw new Error('Internal error: p2tr returned no tapLeafScript for the constructed tree');
   }
 
-  // Build the PSBT.
-  const tx = new btc.Transaction({ allowUnknownOutputs: false });
+  // Build the PSBT with `lockTime=21`. Every ordpool inscription is
+  // ALSO a CAT-21 mint — we gift the cat for free to anyone using
+  // the inscribe pipeline. cat21-ord reads `nLockTime` structurally
+  // and assigns a cat to the first sat of the first output (the
+  // commit's P2TR envelope output). The reveal then spends that
+  // output FIFO-style, moving the cat to the inscription recipient
+  // — so the cat and the inscription end up on the same sat at the
+  // same address, with no extra cost to the user.
+  //
+  // Block 21 was mined in 2009, so the lockTime constraint is
+  // trivially satisfied no matter when the tx lands. The field is
+  // repurposed protocol-marker data; cat21-ord reads it structurally.
+  const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: 21 });
+  // Default to a non-cat21wallet sentinel so the sequence resolves to
+  // the safer non-RBF value (0xfffffffe). Standalone callers get the
+  // correct behaviour without having to learn the per-wallet rule.
+  const sequence = resolveCat21InputSequence(args.walletType ?? KnownOrdinalWalletType.xverse);
 
   // Funding input shape mirrors the cat21 mint adapter: witnessUtxo
   // for SegWit, nonWitnessUtxo for P2PKH legacy, plus per-address-
@@ -155,6 +187,7 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   const inputBase: btc.TransactionInputUpdate = {
     txid: args.fundingInput.txid,
     index: args.fundingInput.vout,
+    sequence,
     witnessUtxo: {
       script: args.fundingInput.scriptPubKey,
       amount: BigInt(args.fundingInput.value),
@@ -204,6 +237,14 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   }
   if (tx.getOutput(0).amount !== BigInt(commitOutputValueSats)) {
     throw new Error('Internal error: commit output 0 amount drifted');
+  }
+  if (tx.lockTime !== 21) {
+    throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
+  }
+  if (tx.getInput(0).sequence !== sequence) {
+    throw new Error(
+      `Internal error: input 0 sequence=${tx.getInput(0).sequence}, expected ${sequence}`
+    );
   }
 
   return {

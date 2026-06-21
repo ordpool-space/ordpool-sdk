@@ -5906,14 +5906,30 @@ function buildInscribeCommitPsbt(args) {
     if (commitP2tr.tapLeafScript === undefined) {
         throw new Error('Internal error: p2tr returned no tapLeafScript for the constructed tree');
     }
-    // Build the PSBT.
-    const tx = new btc.Transaction({ allowUnknownOutputs: false });
+    // Build the PSBT with `lockTime=21`. Every ordpool inscription is
+    // ALSO a CAT-21 mint — we gift the cat for free to anyone using
+    // the inscribe pipeline. cat21-ord reads `nLockTime` structurally
+    // and assigns a cat to the first sat of the first output (the
+    // commit's P2TR envelope output). The reveal then spends that
+    // output FIFO-style, moving the cat to the inscription recipient
+    // — so the cat and the inscription end up on the same sat at the
+    // same address, with no extra cost to the user.
+    //
+    // Block 21 was mined in 2009, so the lockTime constraint is
+    // trivially satisfied no matter when the tx lands. The field is
+    // repurposed protocol-marker data; cat21-ord reads it structurally.
+    const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: 21 });
+    // Default to a non-cat21wallet sentinel so the sequence resolves to
+    // the safer non-RBF value (0xfffffffe). Standalone callers get the
+    // correct behaviour without having to learn the per-wallet rule.
+    const sequence = resolveCat21InputSequence(args.walletType ?? KnownOrdinalWalletType.xverse);
     // Funding input shape mirrors the cat21 mint adapter: witnessUtxo
     // for SegWit, nonWitnessUtxo for P2PKH legacy, plus per-address-
     // type optional fields.
     const inputBase = {
         txid: args.fundingInput.txid,
         index: args.fundingInput.vout,
+        sequence,
         witnessUtxo: {
             script: args.fundingInput.scriptPubKey,
             amount: BigInt(args.fundingInput.value),
@@ -5958,6 +5974,12 @@ function buildInscribeCommitPsbt(args) {
     }
     if (tx.getOutput(0).amount !== BigInt(commitOutputValueSats)) {
         throw new Error('Internal error: commit output 0 amount drifted');
+    }
+    if (tx.lockTime !== 21) {
+        throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
+    }
+    if (tx.getInput(0).sequence !== sequence) {
+        throw new Error(`Internal error: input 0 sequence=${tx.getInput(0).sequence}, expected ${sequence}`);
     }
     return {
         commitPsbt: tx.toPSBT(0),
@@ -6140,6 +6162,7 @@ function simulateInscribeFees(args) {
         commitFeeSats: 0,
         revealFeeReserveSats: 0,
         tipValueSats: args.tip?.value,
+        walletType: args.walletType,
         changeDustLimitSats: args.changeDustLimitSats,
         network: args.network,
     });
@@ -6179,6 +6202,7 @@ function simulateInscribeFees(args) {
                 commitFeeSats: feeSats,
                 revealFeeReserveSats: revealFeeSats,
                 tipValueSats: args.tip?.value,
+                walletType: args.walletType,
                 changeDustLimitSats: args.changeDustLimitSats,
                 network: args.network,
             });
@@ -6230,11 +6254,25 @@ function createInscribeTransactions(args) {
     }
     const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
     const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
+    // Synthesise envelope fields from the convenience args (note,
+    // contentEncoding) and prepend to the caller-supplied list. The
+    // caller's own envelopeFields entries always win on duplicate
+    // tags (preserved order, ord decoder indexes by tag occurrence).
+    const autoFields = [];
+    if (args.note !== undefined) {
+        autoFields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
+    }
+    if (args.contentEncoding === 'br') {
+        autoFields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') });
+    }
+    const mergedFields = autoFields.length === 0
+        ? (args.envelopeFields ?? [])
+        : [...autoFields, ...(args.envelopeFields ?? [])];
     const envelope = buildInscriptionEnvelope({
         revealPubkeyXonly: ephemeralPubkeyXonly,
         contentType: args.contentType,
         body: args.body,
-        fields: args.envelopeFields,
+        fields: mergedFields,
     });
     // Layer-2: convert raw UTXO into the funding-input shape the
     // commit helper expects. Real-mode (not simulation) so the
@@ -6261,12 +6299,13 @@ function createInscribeTransactions(args) {
             feeRatePerVbyte: args.feeRatePerVbyte,
             body: args.body,
             contentType: args.contentType,
-            envelopeFields: args.envelopeFields,
+            envelopeFields: mergedFields,
             fundingInput: simulationFundingInput,
             senderChangeAddress: args.paymentAddress,
             recipientAddress: args.recipientAddress,
             ephemeralPubkeyXonly,
             tip: args.tip,
+            walletType: args.walletType,
             network: args.network,
         });
     }
@@ -6296,6 +6335,7 @@ function createInscribeTransactions(args) {
         commitFeeSats: fees.commitFeeSats,
         revealFeeReserveSats: fees.revealFeeSats,
         tipValueSats: args.tip?.value,
+        walletType: args.walletType,
         changeDustLimitSats,
         network: args.network,
     });
@@ -6315,6 +6355,7 @@ function createInscribeTransactions(args) {
         commitFeeSats: fees.commitFeeSats,
         revealFeeReserveSats: fees.revealFeeSats,
         tipValueSats: args.tip?.value,
+        walletType: args.walletType,
         changeDustLimitSats,
         network: args.network,
     });
@@ -6519,7 +6560,10 @@ function inscribeAndBroadcast(args) {
                 contentType: args.contentType,
                 envelopeFields: args.envelopeFields,
                 feeRatePerVbyte: args.feeRatePerVbyte,
+                walletType: args.walletType,
                 tip: args.tip,
+                note: args.note,
+                contentEncoding: args.contentEncoding,
                 network: args.network,
             });
         }
@@ -6554,6 +6598,62 @@ function inscribeAndBroadcast(args) {
             fees: built.fees,
         })))));
     });
+}
+
+/**
+ * Brotli compression helper for inscribe bodies.
+ *
+ * Inscription bytes go on-chain at ~~32 sat/vB during congestion;
+ * brotli typically shrinks HTML / JSON / text content by 30-70%, so
+ * compressing before inscribing is a direct fee win. ord recognises
+ * brotli-encoded bodies via the `content_encoding: br` envelope tag
+ * (tag 0x09) — the `compressBrotli` output is paired with
+ * `createInscribeTransactions({ contentEncoding: 'br', body })` at
+ * the call site.
+ *
+ * # Environment matrix
+ *
+ * Brotli encoding is NOT part of the standardised web Compression
+ * Streams API (`CompressionStream` accepts `gzip`, `deflate`,
+ * `deflate-raw` per the WHATWG spec; `'br'` is not in it). So the
+ * approach splits by environment:
+ *
+ *   - **Node 12+ (this helper)**: uses `zlib.brotliCompressSync`,
+ *     synchronous, no dependencies.
+ *   - **Browser** consumers must pre-compress before calling
+ *     `createInscribeTransactions`. Practical options: a WASM
+ *     encoder (e.g. `brotli-wasm` npm), a server-side endpoint,
+ *     or already-brotli-encoded source content. The SDK's
+ *     `contentEncoding: 'br'` flag only emits the envelope tag;
+ *     it does not require this helper to have produced the bytes.
+ *
+ * Sync API on purpose: keeps the inscribe builder's overall flow
+ * sync end-to-end, matching `createInscribeTransactions`.
+ */
+/**
+ * Compress `body` with brotli (quality 11, mode generic) on Node.
+ * Throws on non-Node runtimes with a pointer at the browser-side
+ * alternative.
+ */
+function compressBrotli(body) {
+    if (!ArrayBuffer.isView(body)) {
+        throw new Error('compressBrotli: body must be a Uint8Array');
+    }
+    let zlib;
+    try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        zlib = require('node:zlib');
+    }
+    catch {
+        throw new Error('compressBrotli: node:zlib is not available in this runtime. ' +
+            'For browsers, pre-compress with a WASM brotli encoder (e.g. brotli-wasm) ' +
+            'and pass the result + `contentEncoding: \'br\'` to createInscribeTransactions.');
+    }
+    const result = zlib.brotliCompressSync(body);
+    // zlib returns a Node Buffer (which is a Uint8Array subclass); copy
+    // into a fresh Uint8Array so cross-realm callers don't accidentally
+    // depend on Buffer-only methods.
+    return new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
 }
 
 /**
@@ -6622,5 +6722,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
 //# sourceMappingURL=ordpool-sdk.mjs.map

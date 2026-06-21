@@ -17,7 +17,10 @@ function inscribeAndBroadcast(args) {
                 contentType: args.contentType,
                 envelopeFields: args.envelopeFields,
                 feeRatePerVbyte: args.feeRatePerVbyte,
+                walletType: args.walletType,
                 tip: args.tip,
+                note: args.note,
+                contentEncoding: args.contentEncoding,
                 network: args.network,
             });
         }

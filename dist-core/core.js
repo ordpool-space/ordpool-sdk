@@ -84,6 +84,7 @@ __exportStar(require("./inscribe/inscription-fee.helper"), exports);
 __exportStar(require("./inscribe/inscription.service.helper"), exports);
 __exportStar(require("./inscribe/inscribe-broadcast.helper"), exports);
 __exportStar(require("./inscribe/inscribe-orchestrator"), exports);
+__exportStar(require("./inscribe/inscribe-brotli.helper"), exports);
 // --- Agent-mode policy gate ---
 __exportStar(require("./agent-mode/agent-policy.helper"), exports);
 __exportStar(require("./agent-mode/agent-policy.types"), exports);

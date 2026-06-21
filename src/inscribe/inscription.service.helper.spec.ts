@@ -300,6 +300,123 @@ describe('createInscribeTransactions', () => {
     });
   });
 
+  describe('nLockTime=21 free-cat behaviour', () => {
+    it('commit PSBT always carries lockTime=21 (free cat for every inscriber)', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('free cat'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        network: NETWORK,
+      });
+      const commitTx = btc.Transaction.fromPSBT(result.commitPsbt);
+      expect(commitTx.lockTime).toBe(21);
+    });
+
+    it('non-cat21wallet sets sequence = 0xfffffffe on the funding input (RBF disabled)', async () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('xverse seq'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        walletType: KnownOrdinalWalletType.xverse,
+        network: NETWORK,
+      });
+      const commitTx = btc.Transaction.fromPSBT(result.commitPsbt);
+      expect(commitTx.getInput(0).sequence).toBe(0xfffffffe);
+    });
+
+    it('cat21wallet sets sequence = 0xfffffffd on the funding input (RBF allowed, our wallet preserves lockTime=21)', async () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('cat21wallet seq'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        walletType: KnownOrdinalWalletType.cat21wallet,
+        network: NETWORK,
+      });
+      const commitTx = btc.Transaction.fromPSBT(result.commitPsbt);
+      expect(commitTx.getInput(0).sequence).toBe(0xfffffffd);
+    });
+
+    it('default walletType (omitted) falls through to the non-RBF sequence', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('default seq'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        network: NETWORK,
+      });
+      const commitTx = btc.Transaction.fromPSBT(result.commitPsbt);
+      expect(commitTx.getInput(0).sequence).toBe(0xfffffffe);
+    });
+  });
+
+  describe('optional note tag (0x0f)', () => {
+    it('note → envelope carries tag 0x0f with UTF-8 bytes of the note', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('with note'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        note: 'minted via ordpool.space',
+        network: NETWORK,
+      });
+      // The envelope script bytes contain the note value. Tag 0x0f
+      // encodes as opcode OP_15 (0x5f) and the UTF-8 push follows.
+      const envelopeHex = Array.from(result.commit.envelopeScript)
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      const noteHex = Array.from(new TextEncoder().encode('minted via ordpool.space'))
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      expect(envelopeHex).toContain(noteHex);
+      // OP_15 = 0x5f, immediately preceding the note push prefix.
+      expect(envelopeHex).toMatch(/5f[0-9a-f]{2}[0-9a-f]*/);
+    });
+  });
+
+  describe('optional contentEncoding hint', () => {
+    it('contentEncoding=br → envelope carries tag 0x09 (OP_9) with UTF-8 "br"', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new Uint8Array([0x1f, 0x8b]),
+        contentType: 'text/html',
+        feeRatePerVbyte: 8,
+        contentEncoding: 'br',
+        network: NETWORK,
+      });
+      const envelopeHex = Array.from(result.commit.envelopeScript)
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      // OP_9 = 0x59 followed by a 2-byte push (0x02) of UTF-8 "br" = 0x62 0x72.
+      expect(envelopeHex).toContain('5902' + '6272');
+    });
+  });
+
   it('two consecutive calls produce DIFFERENT reveals (fresh ephemeral key each time)', () => {
     const { paymentPublicKey, paymentAddress } = paymentContext();
     const args = {

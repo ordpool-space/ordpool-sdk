@@ -5,11 +5,13 @@ import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
 import { getAddressFormat } from '../cat21-script/address-format';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { Network, toScureNetwork } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 import {
   buildInscribeCommitPsbt,
 } from './inscription-commit.helper';
 import {
+  ORD_TAGS,
   buildInscriptionEnvelope,
   type OrdEnvelopeField,
 } from './inscription-envelope';
@@ -94,6 +96,18 @@ export interface CreateInscribeTransactionsArgs {
   /** sat/vB target. Applied identically to commit + reveal. */
   feeRatePerVbyte: number;
   /**
+   * Which wallet will sign the commit. Drives the funding-input
+   * sequence number on the commit (cat21wallet → RBF allowed; every
+   * other wallet → RBF disabled). Optional; the safer non-RBF
+   * sequence applies when omitted, which is what every third-party
+   * wallet should ship anyway.
+   *
+   * Ordpool inscriptions ALWAYS build the commit with
+   * `nLockTime=21` regardless of wallet — see the module-level
+   * docstring for the "free cat for inscribers" design.
+   */
+  walletType?: KnownOrdinalWalletType;
+  /**
    * Optional tip output appended at vout[1] of the reveal tx. The
    * inscription stays at vout[0] per ord's first-sat-of-first-output
    * rule. The commit's funding requirement grows by `tip.value` so
@@ -105,6 +119,28 @@ export interface CreateInscribeTransactionsArgs {
    * one recipient and a fixed sats amount.
    */
   tip?: { address: string; value: number };
+  /**
+   * Optional Tag::Note (0x0f) string. Emitted as a UTF-8 envelope
+   * field; ordpool-parser surfaces it on the inscription record.
+   * The de-facto inscriber-tool watermark slot.
+   *
+   * When set, the SDK auto-builds the `{ tag: 0x0f, value: utf8(note) }`
+   * field and prepends it to `envelopeFields`.
+   */
+  note?: string;
+  /**
+   * Optional body-encoding hint. When set to `'br'`, the SDK emits
+   * the `content_encoding: br` envelope tag — signalling to indexers
+   * that the body is brotli-compressed. The body must already be
+   * brotli-compressed by the caller (use `compressBrotli` from
+   * `inscribe-brotli.helper.ts`); this flag only emits the tag.
+   *
+   * Split between caller-side compression and SDK-side tag emission
+   * because brotli encoders are environment-specific (Node `zlib`
+   * vs browser `CompressionStream`) and benefit from being async,
+   * but the inscribe builder is sync.
+   */
+  contentEncoding?: 'br';
   /** Network. */
   network: Network;
 }
@@ -175,11 +211,26 @@ export function createInscribeTransactions(
   const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
   const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
 
+  // Synthesise envelope fields from the convenience args (note,
+  // contentEncoding) and prepend to the caller-supplied list. The
+  // caller's own envelopeFields entries always win on duplicate
+  // tags (preserved order, ord decoder indexes by tag occurrence).
+  const autoFields: OrdEnvelopeField[] = [];
+  if (args.note !== undefined) {
+    autoFields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
+  }
+  if (args.contentEncoding === 'br') {
+    autoFields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') });
+  }
+  const mergedFields: ReadonlyArray<OrdEnvelopeField> = autoFields.length === 0
+    ? (args.envelopeFields ?? [])
+    : [...autoFields, ...(args.envelopeFields ?? [])];
+
   const envelope = buildInscriptionEnvelope({
     revealPubkeyXonly: ephemeralPubkeyXonly,
     contentType: args.contentType,
     body: args.body,
-    fields: args.envelopeFields,
+    fields: mergedFields,
   });
 
   // Layer-2: convert raw UTXO into the funding-input shape the
@@ -208,12 +259,13 @@ export function createInscribeTransactions(
       feeRatePerVbyte: args.feeRatePerVbyte,
       body: args.body,
       contentType: args.contentType,
-      envelopeFields: args.envelopeFields,
+      envelopeFields: mergedFields,
       fundingInput: simulationFundingInput,
       senderChangeAddress: args.paymentAddress,
       recipientAddress: args.recipientAddress,
       ephemeralPubkeyXonly,
       tip: args.tip,
+      walletType: args.walletType,
       network: args.network,
     });
   } catch (err) {
@@ -246,6 +298,7 @@ export function createInscribeTransactions(
     commitFeeSats: fees.commitFeeSats,
     revealFeeReserveSats: fees.revealFeeSats,
     tipValueSats: args.tip?.value,
+    walletType: args.walletType,
     changeDustLimitSats,
     network: args.network,
   });
@@ -266,6 +319,7 @@ export function createInscribeTransactions(
     commitFeeSats: fees.commitFeeSats,
     revealFeeReserveSats: fees.revealFeeSats,
     tipValueSats: args.tip?.value,
+    walletType: args.walletType,
     changeDustLimitSats,
     network: args.network,
   });

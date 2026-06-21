@@ -2548,6 +2548,21 @@ interface InscribeCommitArgs {
      * before. Must be a non-negative integer.
      */
     tipValueSats?: number;
+    /**
+     * Which wallet will sign the commit PSBT. Drives the funding
+     * input's sequence number via `resolveCat21InputSequence`:
+     *   - `cat21wallet`: 0xfffffffd (RBF-allowed; our wallet preserves
+     *     `lockTime=21` through any replacement).
+     *   - any other wallet (default): 0xfffffffe (non-RBF; locks
+     *     third-party accelerate UIs out of touching the marker,
+     *     defending against the 2024 Xverse incident where an
+     *     accelerator dropped `lockTime=21` and burned a CAT-21 mint).
+     *
+     * Defaults to a non-cat21wallet sentinel so any standalone caller
+     * (regtest specs, third-party SDK consumers) gets the safer
+     * non-RBF sequence without having to know about the rule.
+     */
+    walletType?: KnownOrdinalWalletType;
     /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
     changeDustLimitSats?: number;
     network: Network;
@@ -2759,6 +2774,12 @@ interface SimulateInscribeFeesArgs {
         address: string;
         value: number;
     };
+    /**
+     * Wallet whose signature topology drives the commit's funding-
+     * input sequence. Threaded through to `buildInscribeCommitPsbt`.
+     * Optional; defaults to the safer non-RBF sequence when omitted.
+     */
+    walletType?: KnownOrdinalWalletType;
     /** Per-address-type dust limit for the commit change. */
     changeDustLimitSats?: number;
     network: Network;
@@ -2856,6 +2877,18 @@ interface CreateInscribeTransactionsArgs {
     /** sat/vB target. Applied identically to commit + reveal. */
     feeRatePerVbyte: number;
     /**
+     * Which wallet will sign the commit. Drives the funding-input
+     * sequence number on the commit (cat21wallet → RBF allowed; every
+     * other wallet → RBF disabled). Optional; the safer non-RBF
+     * sequence applies when omitted, which is what every third-party
+     * wallet should ship anyway.
+     *
+     * Ordpool inscriptions ALWAYS build the commit with
+     * `nLockTime=21` regardless of wallet — see the module-level
+     * docstring for the "free cat for inscribers" design.
+     */
+    walletType?: KnownOrdinalWalletType;
+    /**
      * Optional tip output appended at vout[1] of the reveal tx. The
      * inscription stays at vout[0] per ord's first-sat-of-first-output
      * rule. The commit's funding requirement grows by `tip.value` so
@@ -2870,6 +2903,28 @@ interface CreateInscribeTransactionsArgs {
         address: string;
         value: number;
     };
+    /**
+     * Optional Tag::Note (0x0f) string. Emitted as a UTF-8 envelope
+     * field; ordpool-parser surfaces it on the inscription record.
+     * The de-facto inscriber-tool watermark slot.
+     *
+     * When set, the SDK auto-builds the `{ tag: 0x0f, value: utf8(note) }`
+     * field and prepends it to `envelopeFields`.
+     */
+    note?: string;
+    /**
+     * Optional body-encoding hint. When set to `'br'`, the SDK emits
+     * the `content_encoding: br` envelope tag — signalling to indexers
+     * that the body is brotli-compressed. The body must already be
+     * brotli-compressed by the caller (use `compressBrotli` from
+     * `inscribe-brotli.helper.ts`); this flag only emits the tag.
+     *
+     * Split between caller-side compression and SDK-side tag emission
+     * because brotli encoders are environment-specific (Node `zlib`
+     * vs browser `CompressionStream`) and benefit from being async,
+     * but the inscribe builder is sync.
+     */
+    contentEncoding?: 'br';
     /** Network. */
     network: Network;
 }
@@ -3097,6 +3152,13 @@ interface InscribeAndBroadcastArgs {
         address: string;
         value: number;
     };
+    /** Optional Tag::Note (0x0f) watermark string. */
+    note?: string;
+    /**
+     * Optional body-encoding hint ('br' for brotli). Body must
+     * already be compressed; this flag only emits the envelope tag.
+     */
+    contentEncoding?: 'br';
     network: Network;
     /**
      * Broadcasts a wire-format tx hex; returns the resulting txid.
@@ -3130,6 +3192,43 @@ interface InscribeAndBroadcastResult {
     fees: CreateInscribeTransactionsResult['fees'];
 }
 declare function inscribeAndBroadcast(args: InscribeAndBroadcastArgs): Observable<InscribeAndBroadcastResult>;
+
+/**
+ * Brotli compression helper for inscribe bodies.
+ *
+ * Inscription bytes go on-chain at ~~32 sat/vB during congestion;
+ * brotli typically shrinks HTML / JSON / text content by 30-70%, so
+ * compressing before inscribing is a direct fee win. ord recognises
+ * brotli-encoded bodies via the `content_encoding: br` envelope tag
+ * (tag 0x09) — the `compressBrotli` output is paired with
+ * `createInscribeTransactions({ contentEncoding: 'br', body })` at
+ * the call site.
+ *
+ * # Environment matrix
+ *
+ * Brotli encoding is NOT part of the standardised web Compression
+ * Streams API (`CompressionStream` accepts `gzip`, `deflate`,
+ * `deflate-raw` per the WHATWG spec; `'br'` is not in it). So the
+ * approach splits by environment:
+ *
+ *   - **Node 12+ (this helper)**: uses `zlib.brotliCompressSync`,
+ *     synchronous, no dependencies.
+ *   - **Browser** consumers must pre-compress before calling
+ *     `createInscribeTransactions`. Practical options: a WASM
+ *     encoder (e.g. `brotli-wasm` npm), a server-side endpoint,
+ *     or already-brotli-encoded source content. The SDK's
+ *     `contentEncoding: 'br'` flag only emits the envelope tag;
+ *     it does not require this helper to have produced the bytes.
+ *
+ * Sync API on purpose: keeps the inscribe builder's overall flow
+ * sync end-to-end, matching `createInscribeTransactions`.
+ */
+/**
+ * Compress `body` with brotli (quality 11, mode generic) on Node.
+ * Throws on non-Node runtimes with a pointer at the browser-side
+ * alternative.
+ */
+declare function compressBrotli(body: Uint8Array): Uint8Array;
 
 /**
  * User-configured policy that every autonomous CAT-21 action must satisfy
@@ -3252,5 +3351,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
 export type { AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeFundingInput, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, ParsedOffer, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };

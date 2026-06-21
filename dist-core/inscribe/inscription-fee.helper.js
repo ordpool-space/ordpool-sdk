@@ -80,6 +80,7 @@ function simulateInscribeFees(args) {
         commitFeeSats: 0,
         revealFeeReserveSats: 0,
         tipValueSats: args.tip?.value,
+        walletType: args.walletType,
         changeDustLimitSats: args.changeDustLimitSats,
         network: args.network,
     });
@@ -119,6 +120,7 @@ function simulateInscribeFees(args) {
                 commitFeeSats: feeSats,
                 revealFeeReserveSats: revealFeeSats,
                 tipValueSats: args.tip?.value,
+                walletType: args.walletType,
                 changeDustLimitSats: args.changeDustLimitSats,
                 network: args.network,
             });

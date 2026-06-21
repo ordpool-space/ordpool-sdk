@@ -4,6 +4,7 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { Network, toScureNetwork } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 import { INSCRIBE_POSTAGE_SATS, buildInscribeCommitPsbt, type InscribeCommitArgs } from './inscription-commit.helper';
 import { buildInscriptionEnvelope, type OrdEnvelopeField } from './inscription-envelope';
@@ -66,6 +67,12 @@ export interface SimulateInscribeFeesArgs {
    * `tipValueSats` so the commit funds postage + revealFee + tip.
    */
   tip?: { address: string; value: number };
+  /**
+   * Wallet whose signature topology drives the commit's funding-
+   * input sequence. Threaded through to `buildInscribeCommitPsbt`.
+   * Optional; defaults to the safer non-RBF sequence when omitted.
+   */
+  walletType?: KnownOrdinalWalletType;
   /** Per-address-type dust limit for the commit change. */
   changeDustLimitSats?: number;
   network: Network;
@@ -131,6 +138,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     commitFeeSats: 0,
     revealFeeReserveSats: 0,
     tipValueSats: args.tip?.value,
+    walletType: args.walletType,
     changeDustLimitSats: args.changeDustLimitSats,
     network: args.network,
   });
@@ -171,6 +179,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         commitFeeSats: feeSats,
         revealFeeReserveSats: revealFeeSats,
         tipValueSats: args.tip?.value,
+        walletType: args.walletType,
         changeDustLimitSats: args.changeDustLimitSats,
         network: args.network,
       });

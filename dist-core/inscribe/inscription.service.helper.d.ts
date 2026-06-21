@@ -1,5 +1,6 @@
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { Network } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { type OrdEnvelopeField } from './inscription-envelope';
 import { type SimulateInscribeFeesResult } from './inscription-fee.helper';
 /**
@@ -70,6 +71,18 @@ export interface CreateInscribeTransactionsArgs {
     /** sat/vB target. Applied identically to commit + reveal. */
     feeRatePerVbyte: number;
     /**
+     * Which wallet will sign the commit. Drives the funding-input
+     * sequence number on the commit (cat21wallet → RBF allowed; every
+     * other wallet → RBF disabled). Optional; the safer non-RBF
+     * sequence applies when omitted, which is what every third-party
+     * wallet should ship anyway.
+     *
+     * Ordpool inscriptions ALWAYS build the commit with
+     * `nLockTime=21` regardless of wallet — see the module-level
+     * docstring for the "free cat for inscribers" design.
+     */
+    walletType?: KnownOrdinalWalletType;
+    /**
      * Optional tip output appended at vout[1] of the reveal tx. The
      * inscription stays at vout[0] per ord's first-sat-of-first-output
      * rule. The commit's funding requirement grows by `tip.value` so
@@ -84,6 +97,28 @@ export interface CreateInscribeTransactionsArgs {
         address: string;
         value: number;
     };
+    /**
+     * Optional Tag::Note (0x0f) string. Emitted as a UTF-8 envelope
+     * field; ordpool-parser surfaces it on the inscription record.
+     * The de-facto inscriber-tool watermark slot.
+     *
+     * When set, the SDK auto-builds the `{ tag: 0x0f, value: utf8(note) }`
+     * field and prepends it to `envelopeFields`.
+     */
+    note?: string;
+    /**
+     * Optional body-encoding hint. When set to `'br'`, the SDK emits
+     * the `content_encoding: br` envelope tag — signalling to indexers
+     * that the body is brotli-compressed. The body must already be
+     * brotli-compressed by the caller (use `compressBrotli` from
+     * `inscribe-brotli.helper.ts`); this flag only emits the tag.
+     *
+     * Split between caller-side compression and SDK-side tag emission
+     * because brotli encoders are environment-specific (Node `zlib`
+     * vs browser `CompressionStream`) and benefit from being async,
+     * but the inscribe builder is sync.
+     */
+    contentEncoding?: 'br';
     /** Network. */
     network: Network;
 }

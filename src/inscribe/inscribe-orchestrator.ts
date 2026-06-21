@@ -64,6 +64,13 @@ export interface InscribeAndBroadcastArgs {
    * `createInscribeTransactions` for the full semantic.
    */
   tip?: { address: string; value: number };
+  /** Optional Tag::Note (0x0f) watermark string. */
+  note?: string;
+  /**
+   * Optional body-encoding hint ('br' for brotli). Body must
+   * already be compressed; this flag only emits the envelope tag.
+   */
+  contentEncoding?: 'br';
   network: Network;
   /**
    * Broadcasts a wire-format tx hex; returns the resulting txid.
@@ -110,7 +117,10 @@ export function inscribeAndBroadcast(
         contentType: args.contentType,
         envelopeFields: args.envelopeFields,
         feeRatePerVbyte: args.feeRatePerVbyte,
+        walletType: args.walletType,
         tip: args.tip,
+        note: args.note,
+        contentEncoding: args.contentEncoding,
         network: args.network,
       });
     } catch (err) {

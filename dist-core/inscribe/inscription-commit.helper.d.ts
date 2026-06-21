@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 import { Network } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 /**
  * Layer-1 builder for the inscribe **commit** transaction.
  *
@@ -79,6 +80,21 @@ export interface InscribeCommitArgs {
      * before. Must be a non-negative integer.
      */
     tipValueSats?: number;
+    /**
+     * Which wallet will sign the commit PSBT. Drives the funding
+     * input's sequence number via `resolveCat21InputSequence`:
+     *   - `cat21wallet`: 0xfffffffd (RBF-allowed; our wallet preserves
+     *     `lockTime=21` through any replacement).
+     *   - any other wallet (default): 0xfffffffe (non-RBF; locks
+     *     third-party accelerate UIs out of touching the marker,
+     *     defending against the 2024 Xverse incident where an
+     *     accelerator dropped `lockTime=21` and burned a CAT-21 mint).
+     *
+     * Defaults to a non-cat21wallet sentinel so any standalone caller
+     * (regtest specs, third-party SDK consumers) gets the safer
+     * non-RBF sequence without having to know about the rule.
+     */
+    walletType?: KnownOrdinalWalletType;
     /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
     changeDustLimitSats?: number;
     network: Network;

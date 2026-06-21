@@ -1,4 +1,5 @@
 import { Network } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { type InscribeCommitArgs } from './inscription-commit.helper';
 import { type OrdEnvelopeField } from './inscription-envelope';
 /**
@@ -60,6 +61,12 @@ export interface SimulateInscribeFeesArgs {
         address: string;
         value: number;
     };
+    /**
+     * Wallet whose signature topology drives the commit's funding-
+     * input sequence. Threaded through to `buildInscribeCommitPsbt`.
+     * Optional; defaults to the safer non-RBF sequence when omitted.
+     */
+    walletType?: KnownOrdinalWalletType;
     /** Per-address-type dust limit for the commit change. */
     changeDustLimitSats?: number;
     network: Network;

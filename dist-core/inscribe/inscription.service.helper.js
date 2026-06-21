@@ -66,11 +66,25 @@ function createInscribeTransactions(args) {
     }
     const ephemeralPrivKey = secp256k1_1.secp256k1.utils.randomPrivateKey();
     const ephemeralPubkeyXonly = (0, inscription_reveal_helper_1.deriveRevealPubkeyXonly)(ephemeralPrivKey);
+    // Synthesise envelope fields from the convenience args (note,
+    // contentEncoding) and prepend to the caller-supplied list. The
+    // caller's own envelopeFields entries always win on duplicate
+    // tags (preserved order, ord decoder indexes by tag occurrence).
+    const autoFields = [];
+    if (args.note !== undefined) {
+        autoFields.push({ tag: inscription_envelope_1.ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
+    }
+    if (args.contentEncoding === 'br') {
+        autoFields.push({ tag: inscription_envelope_1.ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') });
+    }
+    const mergedFields = autoFields.length === 0
+        ? (args.envelopeFields ?? [])
+        : [...autoFields, ...(args.envelopeFields ?? [])];
     const envelope = (0, inscription_envelope_1.buildInscriptionEnvelope)({
         revealPubkeyXonly: ephemeralPubkeyXonly,
         contentType: args.contentType,
         body: args.body,
-        fields: args.envelopeFields,
+        fields: mergedFields,
     });
     // Layer-2: convert raw UTXO into the funding-input shape the
     // commit helper expects. Real-mode (not simulation) so the
@@ -97,12 +111,13 @@ function createInscribeTransactions(args) {
             feeRatePerVbyte: args.feeRatePerVbyte,
             body: args.body,
             contentType: args.contentType,
-            envelopeFields: args.envelopeFields,
+            envelopeFields: mergedFields,
             fundingInput: simulationFundingInput,
             senderChangeAddress: args.paymentAddress,
             recipientAddress: args.recipientAddress,
             ephemeralPubkeyXonly,
             tip: args.tip,
+            walletType: args.walletType,
             network: args.network,
         });
     }
@@ -132,6 +147,7 @@ function createInscribeTransactions(args) {
         commitFeeSats: fees.commitFeeSats,
         revealFeeReserveSats: fees.revealFeeSats,
         tipValueSats: args.tip?.value,
+        walletType: args.walletType,
         changeDustLimitSats,
         network: args.network,
     });
@@ -151,6 +167,7 @@ function createInscribeTransactions(args) {
         commitFeeSats: fees.commitFeeSats,
         revealFeeReserveSats: fees.revealFeeSats,
         tipValueSats: args.tip?.value,
+        walletType: args.walletType,
         changeDustLimitSats,
         network: args.network,
     });
