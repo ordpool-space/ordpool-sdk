@@ -148,15 +148,51 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     expect(insc.address).toBe(recipientAddress);
     expect(insc.content_type).toBe(INSCRIPTION_CONTENT_TYPE);
 
-    // Phase 5: cat21-ord sees a cat that fell out of nLockTime=21
-    // on the commit. The cat lives on the first sat of vout[0] of
-    // the commit tx — which the reveal spent FIFO into the
-    // inscription recipient. So `getOrdInscription(<commitTxid>i0)`
-    // should return the recipient as the owner.
+    // Phase 5a: pin the reveal also carries lockTime=21 on the wire —
+    // the SECOND-cat behaviour. Both commit AND reveal qualify as
+    // CAT-21 mints under cat21-ord's --index-cat21 rule.
+    expect(revealTx.locktime).toBe(21);
+
+    // Phase 5b: cat21-ord must surface TWO cats:
+    //
+    //   Cat A: id <commitTxid>i0 — fell out of nLockTime=21 on the
+    //     commit. Currently at the first sat of vout[0] of the commit,
+    //     which the reveal spent FIFO-style → moves to the reveal's
+    //     vout[0] = inscription recipient at 546 sats.
+    //
+    //   Cat B: id <revealTxid>i0 — fell out of nLockTime=21 on the
+    //     reveal. Minted on the first sat of vout[0] of the reveal —
+    //     the SAME sat as cat A. Post-jubilee (regtest block ≥ 110)
+    //     it carries the Vindicated charm but is a fully normal cat.
+    //
+    // Both must report the inscription recipient as their owner, and
+    // both must point at the same satpoint (the reveal's vout[0]).
     await waitForOrdSync(revealTip);
-    const catId = catInscriptionId(commitTxid);
-    const cat = await waitForCatAtAddress(catId, recipientAddress, 30_000);
-    expect(cat.address).toBe(recipientAddress);
+    const catAId = catInscriptionId(commitTxid);   // <commitTxid>i0
+    const catBId = catInscriptionId(revealTxid);   // <revealTxid>i0
+    const catA = await waitForCatAtAddress(catAId, recipientAddress, 30_000);
+    const catB = await waitForCatAtAddress(catBId, recipientAddress, 30_000);
+    expect(catA.address).toBe(recipientAddress);
+    expect(catB.address).toBe(recipientAddress);
+    // Same UTXO: ord's `output` field is `<txid>:<vout>`. Both cats
+    // live at the reveal's vout[0] which is also the inscription's UTXO.
+    const expectedOutput = `${revealTxid}:0`;
+    expect(catA.output).toBe(expectedOutput);
+    expect(catB.output).toBe(expectedOutput);
+    // Same sat: cat21-ord exposes the sat number on each cat record;
+    // if both are on the same sat the values match.
+    if (catA.sat != null && catB.sat != null) {
+      expect(catB.sat).toBe(catA.sat);
+    }
+    // Stock ord's inscription record points at the same UTXO too —
+    // the inscription, cat A, and cat B all share one 546-sat output.
+    expect(insc.output).toBe(expectedOutput);
+
+    // Distinct cat numbers — they're different cats, even on the
+    // same sat. Cat A was minted in an earlier block (commit tip),
+    // cat B in a later block (reveal tip), so cat A's number < cat B's.
+    expect(catA.number).not.toBe(catB.number);
+    expect(catB.number).toBeGreaterThan(catA.number);
 
     // Phase 6: note tag round-trip via ordpool-parser.
     const witnessHex = (revealTx as unknown as { vin: { witness: string[] }[] }).vin[0].witness;

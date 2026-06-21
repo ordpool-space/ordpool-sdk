@@ -317,6 +317,22 @@ describe('createInscribeTransactions', () => {
       expect(commitTx.lockTime).toBe(21);
     });
 
+    it('reveal tx also carries lockTime=21 (the SECOND cat — there are never enough)', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('second cat too'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        network: NETWORK,
+      });
+      const revealTx = btc.Transaction.fromRaw(hex.decode(result.revealHex));
+      expect(revealTx.lockTime).toBe(21);
+    });
+
     it('non-cat21wallet sets sequence = 0xfffffffe on the funding input (RBF disabled)', async () => {
       const { paymentPublicKey, paymentAddress } = paymentContext();
       const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');

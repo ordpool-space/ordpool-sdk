@@ -99,7 +99,26 @@ export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealR
     throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
   }
 
-  const tx = new btc.Transaction({ disableScriptCheck: true });
+  // `lockTime: 21` on the reveal too — both the commit AND the reveal
+  // qualify as CAT-21 mints under cat21-ord's `--index-cat21` rule
+  // (`nLockTime === 21`). That mints TWO cats per inscription:
+  //
+  //   1. Cat from the commit (id `<commitTxid>i0`) at the first sat
+  //      of commit's vout[0]. The reveal spends commit's vout[0]
+  //      FIFO-style, so this cat moves to the inscription recipient's
+  //      UTXO (vout[0] of the reveal at 546 sats).
+  //   2. Cat from the reveal (id `<revealTxid>i0`) at the first sat
+  //      of reveal's vout[0] — the same UTXO and the same sat as
+  //      cat #1. Post-jubilee chains (regtest above block 110;
+  //      mainnet above 824544) tag this cat with the `Vindicated`
+  //      charm because it's technically a reinscription on the same
+  //      sat. The charm is metadata; the cat is fully real, has a
+  //      positive cat number, and indexes normally.
+  //
+  // Net: one inscription, two cats stacked on the same 546-sat UTXO
+  // at the inscription recipient. The maintainer's call: "there are
+  // never enough cats".
+  const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: 21 });
 
   // Input 0: commit P2TR output, spent via the envelope leaf.
   // Envelope leaf is index 0 of the args.taproot.tapLeafScript array.
@@ -158,6 +177,10 @@ export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealR
   tx.updateInput(0, {
     finalScriptWitness: [signature, leafScript, controlBlock],
   }, true);
+
+  if (tx.lockTime !== 21) {
+    throw new Error(`Internal error: reveal lockTime=${tx.lockTime}, expected 21`);
+  }
 
   return {
     revealHex: tx.hex,
