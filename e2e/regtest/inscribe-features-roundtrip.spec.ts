@@ -195,12 +195,12 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     expect(parsed[0].contentType).toBe(INSCRIPTION_CONTENT_TYPE);
     const recoveredBody = new TextDecoder().decode(parsed[0].getDataRaw());
     expect(recoveredBody).toBe(bodyText);
-    // The parser surfaces all known ord tags. Tag 0x0f (note) is
-    // exposed on the parsed inscription object via its fields map.
-    const fields = (parsed[0] as unknown as { fields?: Map<number, Uint8Array> }).fields;
-    const noteBytes = fields?.get(0x0f);
-    if (noteBytes !== undefined) {
-      expect(new TextDecoder().decode(noteBytes)).toBe(NOTE);
+    // The parser surfaces all known ord tags via `fields: { tag, value }[]`.
+    // Tag 0x0f is the note tag.
+    const fields = (parsed[0] as unknown as { fields: { tag: number; value: Uint8Array }[] }).fields;
+    const noteField = fields.find(f => f.tag === 0x0f);
+    if (noteField !== undefined) {
+      expect(new TextDecoder().decode(noteField.value)).toBe(NOTE);
     }
     // Even if the parser doesn't expose the raw fields map, the
     // witness must contain the note bytes — check the raw witness.
