@@ -6109,13 +6109,23 @@ function buildInscribeRevealTx(args) {
     // as the witness, write it via updateInput. The output is
     // byte-identical to what a scure-2.x customScripts handler
     // would produce.
-    const [cbStruct, leafScript] = args.taproot.tapLeafScript[0];
-    const leafVersion = cbStruct.version ?? 0xc0;
-    const sighash = tx.preimageWitnessV1(0, [args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(args.commitOutputValueSats)], undefined, leafScript, leafVersion);
+    //
+    // scure stores each `tapLeafScript[i]` value as the BIP-371
+    // concatenation `<bareScript><leafVersionByte>` (see scure
+    // `index.js:1280-1283`: `concat(l.script, [l.version || TAP_LEAF_VERSION])`).
+    // The trailing version byte MUST be stripped before the script
+    // is used in the BIP-341 sighash AND before it goes into the
+    // witness — both validators reconstruct the leaf hash from the
+    // bare-script bytes only. scure's own sign path strips it the
+    // same way (`index.js:2352`: `_script.subarray(0, -1)`).
+    const [cbStruct, leafScriptWithVersion] = args.taproot.tapLeafScript[0];
+    const bareLeafScript = leafScriptWithVersion.subarray(0, -1);
+    const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
+    const sighash = tx.preimageWitnessV1(0, [args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(args.commitOutputValueSats)], undefined, bareLeafScript, leafVersion);
     const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
     const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
     tx.updateInput(0, {
-        finalScriptWitness: [signature, leafScript, controlBlock],
+        finalScriptWitness: [signature, bareLeafScript, controlBlock],
     }, true);
     if (tx.lockTime !== 21) {
         throw new Error(`Internal error: reveal lockTime=${tx.lockTime}, expected 21`);

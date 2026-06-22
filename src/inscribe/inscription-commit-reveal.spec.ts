@@ -175,6 +175,59 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
     expect(decoded.getOutput(0).script).toEqual(recipient.script);
   });
 
+  it('reveal witness script equals the BARE envelope (no trailing leaf-version byte) — regression pin for the 2026-06-22 consensus-reject bug', () => {
+    // Failing input that previously made the reveal `script-verify-flag-failed`
+    // (witness program hash mismatch) at live Bitcoin Core consensus
+    // validation: the reveal helper was passing scure's BIP-371
+    // `tapLeafScript[i]` value (which is `<script><leafVersionByte>`)
+    // straight into both the BIP-341 sighash AND the witness slot.
+    // The trailing 0xc0 made the on-chain tapleaf hash differ from
+    // the one the commit P2TR committed to → validator rejected.
+    // Bare-script-only is the contract; pin it here.
+    const ephemeralPriv = new Uint8Array(32).fill(0x55);
+    const ephemeralPubkey = deriveRevealPubkeyXonly(ephemeralPriv);
+    const recipient = makeRecipientP2tr();
+    const envelope = buildInscriptionEnvelope({
+      revealPubkeyXonly: ephemeralPubkey,
+      contentType: 'text/plain',
+      body: new TextEncoder().encode('regression pin'),
+    });
+    const { fundingInput, fundingAddress } = makeFundingUtxo(scureNetwork, 100_000);
+    const commit = buildInscribeCommitPsbt({
+      fundingInput,
+      senderChangeAddress: fundingAddress,
+      envelopeScript: envelope,
+      ephemeralPubkeyXonly: ephemeralPubkey,
+      commitFeeSats: 1_000,
+      revealFeeReserveSats: 2_000,
+      network: NETWORK,
+    });
+    const reveal = buildInscribeRevealTx({
+      commitTxid: 'd'.repeat(64),
+      commitVout: 0,
+      commitOutputValueSats: commit.commitOutputValueSats,
+      commitOutputScript: commit.commitOutputScript,
+      taproot: {
+        internalKey: commit.taproot.internalKey,
+        tapLeafScript: commit.taproot.tapLeafScript,
+      },
+      ephemeralPrivKey: ephemeralPriv,
+      recipientAddress: recipient.address!,
+      network: NETWORK,
+    });
+    const decoded = btc.Transaction.fromRaw(hex.decode(reveal.revealHex));
+    const witness = decoded.getInput(0).finalScriptWitness!;
+    expect(witness.length).toBe(3); // [sig, script, controlBlock]
+    expect(witness[1]).toEqual(envelope);
+    // Negative pin: the witness script MUST NOT carry the trailing
+    // leaf-version byte. scure's tapLeafScript value is
+    // `<bareScript><leafVerByte>`; the witness wants the bare half.
+    const scureLeafValue = commit.taproot.tapLeafScript[0][1];
+    expect(scureLeafValue.length).toBe(envelope.length + 1);
+    expect(scureLeafValue[scureLeafValue.length - 1]).toBe(0xc0);
+    expect(witness[1].length).toBe(envelope.length);
+  });
+
   it('ordpool-parser reconstructs the original inscription content from the broadcast reveal witness', () => {
     const ephemeralPriv = new Uint8Array(32).fill(0x66);
     const ephemeralPubkey = deriveRevealPubkeyXonly(ephemeralPriv);
