@@ -165,9 +165,12 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     expect(catB.address).toBe(recipientAddress);
     // Same UTXO: ord's `output` field is `<txid>:<vout>`. Both cats
     // live at the reveal's vout[0] which is also the inscription's UTXO.
-    const expectedOutput = `${revealTxid}:0`;
-    expect(catA.output).toBe(expectedOutput);
-    expect(catB.output).toBe(expectedOutput);
+    // Both cats live at the SAME satpoint: the first sat (offset 0)
+    // of the reveal's vout[0]. ord's `/inscription/<id>` JSON exposes
+    // this as `satpoint = <txid>:<vout>:<offset>`.
+    const expectedSatpoint = `${revealTxid}:0:0`;
+    expect(catA.satpoint).toBe(expectedSatpoint);
+    expect(catB.satpoint).toBe(expectedSatpoint);
     // Same sat: cat21-ord exposes the sat number on each cat record;
     // if both are on the same sat the values match.
     if (catA.sat != null && catB.sat != null) {
@@ -302,8 +305,11 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     await waitForOrdSync(revealTip);
     const catA = await waitForCatAtAddress(catInscriptionId(commitTxid), recipientAddress, 30_000);
     const catB = await waitForCatAtAddress(catInscriptionId(revealTxid), recipientAddress, 30_000);
-    const expectedOutput = `${revealTxid}:0`;
-    expect(catA.output).toBe(expectedOutput);
-    expect(catB.output).toBe(expectedOutput);
+    // Both cats live at the SAME satpoint: the first sat (offset 0)
+    // of the reveal's vout[0]. ord's `/inscription/<id>` JSON exposes
+    // this as `satpoint = <txid>:<vout>:<offset>`.
+    const expectedSatpoint = `${revealTxid}:0:0`;
+    expect(catA.satpoint).toBe(expectedSatpoint);
+    expect(catB.satpoint).toBe(expectedSatpoint);
   }, 240_000);
 });

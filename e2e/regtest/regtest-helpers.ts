@@ -263,8 +263,18 @@ export async function waitForOrdSync(targetHeight: number, timeoutMs = 30_000): 
 export interface OrdInscription {
   /** Address currently holding the inscription (the "owner"). */
   address: string;
-  /** UTXO carrying the inscription, `<txid>:<vout>` form. */
-  output: string;
+  /**
+   * Where the inscription sits, in `<txid>:<vout>:<offset>` form
+   * (ord's `SatPoint` serialisation). The `<txid>:<vout>` prefix
+   * IS the UTXO; the `<offset>` is the sat offset inside that UTXO
+   * (always `0` for cats since they sit on the first sat of vout[0]).
+   *
+   * Note: ord's `/inscription/<id>` JSON has NO `output` field —
+   * `satpoint` is the canonical location identifier. The HTML page
+   * rendering shows an `output` field as `<txid>:<vout>` for human
+   * readability; it's not in the API response.
+   */
+  satpoint: string;
   /** Sat number on which the inscription sits. */
   sat?: number | null;
   /** Sats locked in the inscription's UTXO. */
