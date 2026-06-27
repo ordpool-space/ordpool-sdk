@@ -182,9 +182,11 @@ test('onAccountChange fires when window.unisat.switchNetwork("testnet") is calle
   if (popupOrCallSettled.kind === 'popup') {
     await shot(popupOrCallSettled.page, '03a-switch-approval');
     // Unisat's switch-network approval also renders Connect/Confirm
-    // as styled <div>s. Match by text — both `Confirm` and `Connect`
-    // appear across versions; click whichever is visible.
-    const confirmBtn = popupOrCallSettled.page.getByText(/^(Confirm|Connect|Switch)$/).first();
+    // as styled <div>s. Match by text — `Confirm`, `Connect`,
+    // `Switch`, and `Switch Network` all appear across versions
+    // (the network-switch dialog was relabeled "Switch Network"
+    // around Unisat v1.7.x — see screenshot 03a-switch-approval).
+    const confirmBtn = popupOrCallSettled.page.getByText(/^(Confirm|Connect|Switch( Network)?)$/).first();
     await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
     await confirmBtn.click();
     await shot(popupOrCallSettled.page, '03b-switch-approved');
