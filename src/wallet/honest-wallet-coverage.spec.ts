@@ -93,14 +93,27 @@ describe('Honest wallet coverage (audit gate)', () => {
     // e2e/regtest/psbt-export-inscribe-roundtrip.spec.ts) and binance
     // (the v1.17.2 binary doesn't inject window.binancew3w.bitcoin
     // — see the mint coverage carve-out for the full rationale).
+    //
+    // A wallet may also ship `<wallet>-inscribe-connect-blocked.spec.ts`
+    // when the wallet's SW currently can't even reach the inscribe
+    // path (Phantom v26.x — its SW has no `btc_*` handlers, so the
+    // dapp's `connect` call rejects before any PSBT can be built).
+    // The blocked-spec asserts the rejection path; when the wallet
+    // adds the missing surface, the rename flips back to
+    // `-inscribe-roundtrip.spec.ts` and the assertion is upgraded.
     const WALLETS_WITHOUT_PIPELINE_B = new Set(['xpub', 'binance']);
     const variants = (Object.values(KnownOrdinalWalletType) as string[])
       .filter(v => !WALLETS_WITHOUT_PIPELINE_B.has(v));
     const specs = fs.readdirSync(SPECS_DIR);
-    const missing = variants.filter(v => !specs.includes(`${v}-inscribe-roundtrip.spec.ts`));
+    const missing = variants.filter(
+      v =>
+        !specs.includes(`${v}-inscribe-roundtrip.spec.ts`) &&
+        !specs.includes(`${v}-inscribe-connect-blocked.spec.ts`),
+    );
     if (missing.length > 0) {
       throw new Error(
-        `Pipeline-B-drivable wallets in KnownOrdinalWalletType with NO inscribe-roundtrip spec: ${missing.join(', ')}.\n` +
+        `Pipeline-B-drivable wallets in KnownOrdinalWalletType with NO inscribe-roundtrip ` +
+        `(or inscribe-connect-blocked) spec: ${missing.join(', ')}.\n` +
         `Add the matching <wallet>-inscribe-roundtrip.spec.ts in e2e/playwright/specs/.`,
       );
     }
@@ -142,14 +155,26 @@ describe('Honest wallet coverage (audit gate)', () => {
     //     against — there is no surface in the binary. When Binance
     //     enables the documented `bitcoin` provider, this carve-out
     //     comes out and a real spec lands.
+    //
+    // Connect-blocked variant: a wallet may instead ship
+    // `<wallet>-mint-connect-blocked.spec.ts` when its SW currently
+    // rejects the connect step before any PSBT can be built (Phantom
+    // v26.x). That spec asserts the rejection path; when the wallet
+    // exposes the missing surface, the rename flips back to
+    // `-mint-roundtrip.spec.ts` and the assertion is upgraded.
     const WALLETS_WITHOUT_PIPELINE_B = new Set(['xpub', 'binance']);
     const variants = (Object.values(KnownOrdinalWalletType) as string[])
       .filter(v => !WALLETS_WITHOUT_PIPELINE_B.has(v));
     const specs = fs.readdirSync(SPECS_DIR);
-    const missing = variants.filter(v => !specs.includes(`${v}-mint-roundtrip.spec.ts`));
+    const missing = variants.filter(
+      v =>
+        !specs.includes(`${v}-mint-roundtrip.spec.ts`) &&
+        !specs.includes(`${v}-mint-connect-blocked.spec.ts`),
+    );
     if (missing.length > 0) {
       throw new Error(
-        `Pipeline-B-drivable wallets in KnownOrdinalWalletType with NO mint-roundtrip spec: ${missing.join(', ')}.\n` +
+        `Pipeline-B-drivable wallets in KnownOrdinalWalletType with NO mint-roundtrip ` +
+        `(or mint-connect-blocked) spec: ${missing.join(', ')}.\n` +
         `Add the matching <wallet>-mint-roundtrip.spec.ts in e2e/playwright/specs/.`,
       );
     }
