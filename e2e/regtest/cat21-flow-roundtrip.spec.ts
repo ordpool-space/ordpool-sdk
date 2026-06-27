@@ -58,6 +58,7 @@ import {
   waitForOrdSync,
   waitForTxConfirmed,
   waitForUtxoAt,
+  waitForUtxoMatching,
 } from './regtest-helpers';
 
 const FEE_SATS = 1_000;
@@ -234,9 +235,11 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     // A's UTXOs after the mint: a 546-sat cat output (vout 0) and a
     // change output (vout 1). Funding input for the fee comes from the
     // change.
-    const aUtxos = await getUtxos(aAddress);
-    const change = aUtxos.find(u => u.txid === mintTxid && u.value > CAT21_POSTAGE_SATS);
-    if (!change) throw new Error(`no change utxo from mint tx ${mintTxid} at A`);
+    const change = await waitForUtxoMatching(
+      aAddress,
+      u => u.txid === mintTxid && u.value > CAT21_POSTAGE_SATS,
+      `txid=${mintTxid} value>${CAT21_POSTAGE_SATS}`,
+    );
 
     const result = buildCat21TransferPsbt({
       walletType: KnownOrdinalWalletType.cat21wallet,
@@ -281,12 +284,16 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
 
     // A's change output from the transfer is at vout 1 (transfer's
     // output 0 was the cat to B; vout 1 is the change back to A).
-    const aUtxosAfter = await getUtxos(aAddress);
-    const cat = aUtxosAfter.find(u => u.txid === transferTxid && u.vout === 0);
-    if (cat) throw new Error('cat utxo still at A after transfer'); // sanity
-    const fresh = aUtxosAfter.find(u => u.txid === transferTxid);
-    if (!fresh) throw new Error('A has no change from transfer tx');
-    aChangeUtxoAfterTransfer = fresh;
+    // Poll for the change vout; once it's indexed the same address-
+    // history pass has also retired vout 0 (now at B), so the sanity
+    // check below is race-free.
+    aChangeUtxoAfterTransfer = await waitForUtxoMatching(
+      aAddress,
+      u => u.txid === transferTxid && u.vout !== 0,
+      `txid=${transferTxid} vout!=0 (post-transfer change)`,
+    );
+    const stillAtA = await getUtxos(aAddress);
+    expect(stillAtA.find(u => u.txid === transferTxid && u.vout === 0)).toBeUndefined();
   });
 
   it('step 3: A builds a buy-offer to A; SDK PSBT is well-formed', () => {

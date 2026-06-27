@@ -31,10 +31,8 @@ import { createInscribeTransactions } from '../../src/inscribe/inscription.servi
 import { INSCRIBE_POSTAGE_SATS } from '../../src/inscribe/inscription-commit.helper';
 import { Network, toScureNetwork } from '../../src/network';
 import {
-  ElectrsUtxo,
   EsploraTx,
   getTxStatus,
-  getUtxos,
   inscriptionId,
   mineBlocks,
   postTx,
@@ -45,6 +43,7 @@ import {
   waitForOrdStockInscription,
   getStockOrdContent,
   waitForTxConfirmed,
+  waitForUtxoAt,
 } from './regtest-helpers';
 
 const FUND_AMOUNT_SATS = 100_000_000; // 1 BTC
@@ -99,9 +98,7 @@ describe('inscribe → tip output → ord-indexing roundtrip on regtest', () => 
 
     bitcoinCliPsbtWallet('sendtoaddress', fundingPaymentAddress, '1.0');
     await waitForElectrsSync(mineBlocks(1));
-    const utxos = await getUtxos(fundingPaymentAddress);
-    const utxo: ElectrsUtxo | undefined = utxos.find(u => u.value === FUND_AMOUNT_SATS);
-    if (!utxo) throw new Error(`Funding UTXO not found at ${fundingPaymentAddress}`);
+    const utxo = await waitForUtxoAt(fundingPaymentAddress, FUND_AMOUNT_SATS);
 
     // Per-case body so the inscription content is unique across runs
     // and ord-side caching can't mask a regression.

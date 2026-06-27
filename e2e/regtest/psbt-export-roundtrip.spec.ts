@@ -52,11 +52,11 @@ import {
   getTx,
   getTxHex,
   getTxStatus,
-  getUtxos,
   mineBlocks,
   postTx,
   rpc,
   waitForElectrsSync,
+  waitForUtxoAt,
 } from './regtest-helpers';
 
 
@@ -128,14 +128,7 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
     bitcoinCliPsbtWallet('sendtoaddress', paymentAddress, '1.0');
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
-
-    // Pull the UTXO from electrs.
-    const utxos = await getUtxos(paymentAddress);
-    const found = utxos.find(u => u.value === FUND_AMOUNT_SATS);
-    if (!found) {
-      throw new Error(`Funding UTXO of ${FUND_AMOUNT_SATS} sats not found at ${paymentAddress}; saw ${JSON.stringify(utxos)}`);
-    }
-    utxo = found;
+    utxo = await waitForUtxoAt(paymentAddress, FUND_AMOUNT_SATS);
   });
 
 

@@ -36,7 +36,6 @@ import { Network, toScureNetwork } from '../../src/network';
 import {
   ElectrsUtxo,
   getTxStatus,
-  getUtxos,
   inscriptionId,
   mineBlocks,
   postTx,
@@ -47,6 +46,7 @@ import {
   waitForOrdStockInscription,
   getStockOrdContent,
   waitForTxConfirmed,
+  waitForUtxoAt,
 } from './regtest-helpers';
 
 const FUND_AMOUNT_SATS = 100_000_000; // 1 BTC
@@ -83,11 +83,7 @@ describe('inscribe → real-ord indexing roundtrip on regtest', () => {
     bitcoinCliPsbtWallet('sendtoaddress', fundingPaymentAddress, '1.0');
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
-
-    const utxos = await getUtxos(fundingPaymentAddress);
-    const found = utxos.find(u => u.value === FUND_AMOUNT_SATS);
-    if (!found) throw new Error(`Funding UTXO not found at ${fundingPaymentAddress}`);
-    utxo = found;
+    utxo = await waitForUtxoAt(fundingPaymentAddress, FUND_AMOUNT_SATS);
   }, 90_000);
 
   it('SDK-built inscription is indexed by stock ord with matching content + recipient', async () => {

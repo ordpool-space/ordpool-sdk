@@ -43,12 +43,12 @@ import {
   ElectrsUtxo,
   getTx,
   getTxStatus,
-  getUtxos,
   mineBlocks,
   postTx,
   rpc,
   waitForElectrsSync,
   waitForTxConfirmed,
+  waitForUtxoAt,
 } from './regtest-helpers';
 
 const FUND_AMOUNT_SATS = 100_000_000; // 1 BTC
@@ -83,13 +83,7 @@ describe('psbt-export signer inscribe-roundtrip on regtest (external offline wal
     bitcoinCliPsbtWallet('sendtoaddress', paymentAddress, '1.0');
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
-
-    const utxos = await getUtxos(paymentAddress);
-    const found = utxos.find(u => u.value === FUND_AMOUNT_SATS);
-    if (!found) {
-      throw new Error(`Funding UTXO of ${FUND_AMOUNT_SATS} sats not found at ${paymentAddress}; saw ${JSON.stringify(utxos)}`);
-    }
-    utxo = found;
+    utxo = await waitForUtxoAt(paymentAddress, FUND_AMOUNT_SATS);
   });
 
   it('builds via SDK → signs the commit via bitcoin-cli walletprocesspsbt → finalizes + broadcasts via psbtExportSigner → broadcasts reveal → confirms on chain as a valid inscription', async () => {

@@ -61,27 +61,72 @@ export async function waitForElectrsSync(targetHeight: number, timeoutMs = 15_00
 }
 
 /**
- * Wait for at least one UTXO to appear at `address` worth exactly
- * `expectedSats`. `waitForElectrsSync` only guarantees the block
- * tip is at the target height — electrs still needs additional
- * time to index that block's transactions into per-address UTXO
- * sets. The xverse / wizz / okx mint specs all hit this race
- * intermittently before this helper landed.
+ * Wait for a UTXO matching `predicate` to appear at `address`.
+ * `waitForElectrsSync` only guarantees the block tip is at the
+ * target height — electrs still needs additional time to index
+ * that block's transactions into per-address UTXO sets. Any
+ * spec that calls `getUtxos(addr)` immediately after
+ * `mineBlocks(1)` + `waitForElectrsSync(tip)` is racing the
+ * address-history pass.
+ *
+ * `description` is a short human-readable label of what the
+ * predicate matches (e.g. `value=100_000_000`,
+ * `txid=abc… value=100_000_000`). It surfaces in the timeout
+ * error so the failure tells you which UTXO didn't show up.
  */
-export async function waitForUtxoAt(
+export async function waitForUtxoMatching(
   address: string,
-  expectedSats: number,
+  predicate: (u: ElectrsUtxo) => boolean,
+  description: string,
   timeoutMs = 15_000,
 ): Promise<ElectrsUtxo> {
   const deadline = Date.now() + timeoutMs;
   let lastUtxos: ElectrsUtxo[] = [];
   while (Date.now() < deadline) {
     lastUtxos = await getUtxos(address);
-    const hit = lastUtxos.find(u => u.value === expectedSats);
+    const hit = lastUtxos.find(predicate);
     if (hit) return hit;
     await new Promise(r => setTimeout(r, 200));
   }
-  throw new Error(`UTXO of ${expectedSats} sats at ${address} didn't appear within ${timeoutMs}ms; got ${JSON.stringify(lastUtxos)}`);
+  throw new Error(
+    `UTXO matching "${description}" at ${address} didn't appear within ${timeoutMs}ms; got ${JSON.stringify(lastUtxos)}`,
+  );
+}
+
+/** Common case: poll for a UTXO of exactly `expectedSats`. */
+export async function waitForUtxoAt(
+  address: string,
+  expectedSats: number,
+  timeoutMs = 15_000,
+): Promise<ElectrsUtxo> {
+  return waitForUtxoMatching(
+    address,
+    u => u.value === expectedSats,
+    `value=${expectedSats}`,
+    timeoutMs,
+  );
+}
+
+/**
+ * Wait until electrs's address-history index lists `expectedTxid`
+ * against `address` (in either the spending or receiving slot).
+ * Use this when you need to assert on the SAME tx from multiple
+ * addresses' perspectives (e.g. confirm a redirect inscription
+ * landed at B and NOT at A) — once the recipient sees the txid,
+ * the sender's view is reliably up-to-date from the same
+ * electrs.
+ */
+export async function waitForAddressTxIndexed(
+  address: string,
+  expectedTxid: string,
+  timeoutMs = 15_000,
+): Promise<void> {
+  await waitForUtxoMatching(
+    address,
+    u => u.txid === expectedTxid,
+    `txid=${expectedTxid}`,
+    timeoutMs,
+  );
 }
 
 export interface ElectrsUtxo {

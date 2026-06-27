@@ -12,17 +12,17 @@ import { TxnOutput } from '../../src/cat21-mint/cat21.service.types';
 import { Network, toScureNetwork } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import {
-  ElectrsUtxo,
   FundedAccount,
   getFundedAccount,
   getTx,
   getTxHex,
   getTxStatus,
-  getUtxos,
   mineBlocks,
   postTx,
   rpc,
   waitForElectrsSync,
+  waitForUtxoAt,
+  waitForUtxoMatching,
 } from './regtest-helpers';
 
 
@@ -251,9 +251,11 @@ describe('cat21 mint roundtrip on regtest', () => {
       // same value, Unisat-Legacy reuses the bootstrap coinbase
       // address, Leather also holds a dust UTXO for the dust-absorb
       // test. Source-txid is unambiguous.
-      const utxos: ElectrsUtxo[] = await getUtxos(paymentAddress);
-      const utxo = utxos.find(u => u.txid === fundingTxid && u.value === 100_000_000)!;
-      expect(utxo).toBeDefined();
+      const utxo = await waitForUtxoMatching(
+        paymentAddress,
+        u => u.txid === fundingTxid && u.value === 100_000_000,
+        `txid=${fundingTxid} value=100_000_000`,
+      );
       const inputValue = BigInt(utxo.value);
 
       const paymentOutput: TxnOutput = {
@@ -394,9 +396,7 @@ describe('cat21 mint roundtrip on regtest', () => {
 
     it('emits a single 546-sat recipient output and zero change', async () => {
 
-      const utxos = await getUtxos(dustPaymentAddress);
-      const dustUtxo = utxos.find(u => u.value === DUST_AMOUNT_SATS)!;
-      expect(dustUtxo).toBeDefined();
+      const dustUtxo = await waitForUtxoAt(dustPaymentAddress, DUST_AMOUNT_SATS);
 
       const inputValue = BigInt(dustUtxo.value);   // 1000 sats
       const FEE_INPUT  = BigInt(300);

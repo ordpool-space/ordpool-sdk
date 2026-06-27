@@ -53,8 +53,10 @@ import {
   mineBlocks,
   postTx,
   rpc,
+  waitForAddressTxIndexed,
   waitForElectrsSync,
   waitForTxConfirmed,
+  waitForUtxoAt,
 } from './regtest-helpers';
 
 const FUND_AMOUNT_SATS = 100_000_000; // 1 BTC
@@ -95,11 +97,7 @@ describe('inscribe redirect-via-ephemeral-key roundtrip on regtest', () => {
     bitcoinCliPsbtWallet('sendtoaddress', fundingPaymentAddress, '1.0');
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
-
-    const utxos = await getUtxos(fundingPaymentAddress);
-    const found = utxos.find(u => u.value === FUND_AMOUNT_SATS);
-    if (!found) throw new Error(`Funding UTXO not found at ${fundingPaymentAddress}`);
-    utxo = found;
+    utxo = await waitForUtxoAt(fundingPaymentAddress, FUND_AMOUNT_SATS);
   });
 
   it('builds commit → broadcasts → uses ephemeral key to redirect reveal to a NEW recipient → confirms on chain', async () => {
@@ -190,9 +188,10 @@ describe('inscribe redirect-via-ephemeral-key roundtrip on regtest', () => {
     expect(revealTx.status.block_hash).toBeTruthy();
 
     // Phase 5: confirm the inscription landed at B (not A).
-    const recipientUtxos = await getUtxos(redirectRecipientAddress);
-    expect(recipientUtxos.find(u => u.txid === revealTxid)).toBeDefined();
-
+    // Poll for B's address-history pass to surface the reveal txid;
+    // once it does, A's view from the same electrs instance is
+    // reliably up-to-date for the absence assertion.
+    await waitForAddressTxIndexed(redirectRecipientAddress, revealTxid);
     const aUtxos = await getUtxos(originalRecipientAddress);
     expect(aUtxos.find(u => u.txid === revealTxid)).toBeUndefined();
 
