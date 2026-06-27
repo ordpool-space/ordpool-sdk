@@ -108,21 +108,20 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   await shot(page, '06-password-typed');
 
-  // Terms checkbox: the actual <input type="checkbox"> is
-  // aria-hidden + tabindex="-1" (CI 26597193687 error-context proved
-  // this). React 16+ tracks `checked` via the prototype's native
-  // setter, so a plain `cb.checked = true` is reverted on next
-  // render; a synthetic label click was intermittently failing to
-  // propagate the state transition. Use the native setter + input +
-  // change events so React sees a real state transition.
-  await page.evaluate(() => {
-    const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
-    if (!cb) throw new Error('terms checkbox not found on the password screen');
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set;
-    setter?.call(cb, true);
-    cb.dispatchEvent(new Event('input', { bubbles: true }));
-    cb.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  // Terms checkbox: Oyl uses a Radix UI Checkbox primitive. The
+  // page renders TWO elements for it:
+  //   - <button role="checkbox" data-state="unchecked">  ← the state
+  //   - <input type="checkbox" aria-hidden tabindex="-1">  ← form submit only
+  // Radix tracks the checked state on the <button>'s `data-state`
+  // attribute, NOT on the hidden <input>. Previous attempts (label
+  // click → cb.click() → native-setter on the input) all targeted
+  // the wrong element. The deterministic primitive is
+  // `getByRole('checkbox').click()` — Playwright knows to find the
+  // role="checkbox" and the click toggles Radix's internal state.
+  const termsCheckbox = page.getByRole('checkbox').first();
+  await expect(termsCheckbox).toBeVisible({ timeout: 10_000 });
+  await termsCheckbox.click();
+  await expect(termsCheckbox).toHaveAttribute('data-state', 'checked', { timeout: 5_000 });
   await shot(page, '07-terms-checked');
 
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();

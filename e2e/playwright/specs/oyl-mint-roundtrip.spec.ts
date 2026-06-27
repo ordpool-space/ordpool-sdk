@@ -63,17 +63,13 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
-  // Deterministic terms-checkbox toggle. See oyl-inscribe-roundtrip
-  // for the full rationale: visible label click flakes because the
-  // hidden <input> isn't getting React's native-setter update.
-  await page.evaluate(() => {
-    const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
-    if (!cb) throw new Error('terms checkbox not found on the password screen');
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set;
-    setter?.call(cb, true);
-    cb.dispatchEvent(new Event('input', { bubbles: true }));
-    cb.dispatchEvent(new Event('change', { bubbles: true }));
-  });
+  // Terms checkbox: Radix UI Checkbox — state lives on the
+  // <button role="checkbox" data-state="...">, NOT the hidden
+  // form-submit <input>. See oyl-onboard for the full rationale.
+  const termsCheckbox = page.getByRole('checkbox').first();
+  await expect(termsCheckbox).toBeVisible({ timeout: 10_000 });
+  await termsCheckbox.click();
+  await expect(termsCheckbox).toHaveAttribute('data-state', 'checked', { timeout: 5_000 });
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
   await expect(pwContinue).toBeEnabled({ timeout: 15_000 });
   await pwContinue.click();
