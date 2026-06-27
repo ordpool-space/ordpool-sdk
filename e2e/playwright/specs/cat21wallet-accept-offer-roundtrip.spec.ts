@@ -137,7 +137,7 @@ async function approveSignPopup(
   ).toBeVisible({ timeout: 15_000 });
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
   await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  await confirmBtn.click();
+  await confirmBtn.click({ noWaitAfter: true }); // popup self-closes — see create-offer spec's HACK comment
   knownPages.add(approval);
 }
 

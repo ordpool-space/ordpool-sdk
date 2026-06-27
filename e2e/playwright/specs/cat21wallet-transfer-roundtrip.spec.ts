@@ -164,7 +164,7 @@ async function approveSignPopup(
 
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
   await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  await confirmBtn.click();
+  await confirmBtn.click({ noWaitAfter: true }); // popup self-closes — see create-offer spec's HACK comment
   // After approving, the popup closes; add it to the knownPages so the
   // NEXT sign approval doesn't try to match against this same (closed)
   // page.

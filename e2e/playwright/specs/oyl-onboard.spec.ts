@@ -110,32 +110,23 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
 
   // Terms checkbox: the actual <input type="checkbox"> is
   // aria-hidden + tabindex="-1" (CI 26597193687 error-context proved
-  // this — checkbox.check() resolved to the hidden input and the
-  // click did not change state). The visible click target is the
-  // label wrapping it. Click the label by its visible text.
-  const termsLabel = page.locator('label').filter({ hasText: /Terms.*Privacy Policy/i }).first();
-  await expect(termsLabel).toBeVisible({ timeout: 10_000 });
-  await termsLabel.click();
+  // this). React 16+ tracks `checked` via the prototype's native
+  // setter, so a plain `cb.checked = true` is reverted on next
+  // render; a synthetic label click was intermittently failing to
+  // propagate the state transition. Use the native setter + input +
+  // change events so React sees a real state transition.
+  await page.evaluate(() => {
+    const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+    if (!cb) throw new Error('terms checkbox not found on the password screen');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set;
+    setter?.call(cb, true);
+    cb.dispatchEvent(new Event('input', { bubbles: true }));
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+  });
   await shot(page, '07-terms-checked');
 
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
-  // Intermittent flake (iter 117 dispatch rerun): the label click
-  // doesn't always propagate to React state in time. If Continue
-  // is still disabled, re-click + fall through to a direct
-  // checkbox dispatch.
-  try {
-    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-  } catch {
-    await termsLabel.click({ force: true }).catch(() => undefined);
-    await page.evaluate(() => {
-      const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
-      if (cb && !cb.checked) {
-        cb.click();
-        cb.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
-    await expect(pwContinue).toBeEnabled({ timeout: 20_000 });
-  }
+  await expect(pwContinue).toBeEnabled({ timeout: 15_000 });
   await pwContinue.click();
   await shot(page, '08-after-password-submit');
 

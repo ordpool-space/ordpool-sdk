@@ -138,7 +138,13 @@ async function approveSignPopup(
   ).toBeVisible({ timeout: 15_000 });
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
   await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  await confirmBtn.click();
+  // The wallet self-closes its sign-psbt popup as soon as the confirm
+  // dispatch reaches the SW. Playwright's default click awaits
+  // post-click stability — that race causes "Target page, context or
+  // browser has been closed" when the popup tears down mid-click.
+  // `noWaitAfter: true` skips the post-click wait; the close IS the
+  // success signal here.
+  await confirmBtn.click({ noWaitAfter: true });
   knownPages.add(approval);
 }
 

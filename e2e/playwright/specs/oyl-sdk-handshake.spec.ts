@@ -61,32 +61,24 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
-  // The visible click target is the label, not the aria-hidden
-  // input (confirmed by oyl-onboard CI 26597193687). Intermittent
-  // flake (iter 117 dispatch rerun): the label click doesn't always
-  // propagate to the React state in time. If Continue is still
-  // disabled after a short wait, re-click and fall through to a
-  // direct checkbox dispatch.
-  const termsLabel = page.locator('label').filter({ hasText: /Terms.*Privacy Policy/i }).first();
-  await expect(termsLabel).toBeVisible({ timeout: 10_000 });
-  await termsLabel.click();
+  // Deterministic terms-checkbox toggle. The visible <label> click
+  // intermittently fails to propagate to React state (the actual
+  // <input type="checkbox"> is aria-hidden + tabindex="-1", and
+  // React 16+ tracks the input's `checked` value via the prototype's
+  // native setter — a plain `cb.checked = true` is reverted on next
+  // render). Use the native setter + input + change events so React
+  // sees a real state transition. Covers Radix UI's animated-state
+  // case where pointer events fire before the input's onChange.
+  await page.evaluate(() => {
+    const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+    if (!cb) throw new Error('terms checkbox not found on the password screen');
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'checked')?.set;
+    setter?.call(cb, true);
+    cb.dispatchEvent(new Event('input', { bubbles: true }));
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+  });
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
-  try {
-    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-  } catch {
-    // Re-click the label, then escalate to ticking the underlying
-    // checkbox programmatically (covers Radix UI's animated-state
-    // case where pointer events fire before the input's onChange).
-    await termsLabel.click({ force: true }).catch(() => undefined);
-    await page.evaluate(() => {
-      const cb = document.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
-      if (cb && !cb.checked) {
-        cb.click();
-        cb.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    });
-    await expect(pwContinue).toBeEnabled({ timeout: 20_000 });
-  }
+  await expect(pwContinue).toBeEnabled({ timeout: 15_000 });
   await pwContinue.click();
 
   // Step 05/05 profile-setup page — Skip it with force.
