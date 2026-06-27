@@ -30,7 +30,13 @@ permissions:
 jobs:
   playwright:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 45 min: was 30, but adding the cat21-ord container image build
+    # (~3-5 min on cold cache) and the 9-wallet spec matrix's growing
+    # roster of cat21wallet specs (mint+inscribe+transfer+offer pair +
+    # handshake + loads + onboard = 7) pushed the total wall-clock
+    # past 30 min consistently. Recent run 28297743062 finished its
+    # last spec at 30m20s before the cap hit.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
 
