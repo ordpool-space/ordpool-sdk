@@ -220,15 +220,21 @@ jobs:
       # below builds the ord image from this checkout. Specs that
       # poll `/status` on ord (cat21wallet-transfer-roundtrip,
       # cat21wallet-create-offer-roundtrip, cat21wallet-accept-
-      # offer-roundtrip) need it running; specs that only mint
-      # (cat21wallet-mint-roundtrip) don't, but it's cheap to keep
-      # ord up across the suite.
+      # offer-roundtrip) need it running.
+      #
+      # actions/checkout v5 rejects paths outside $GITHUB_WORKSPACE,
+      # but the compose's build context is `../../cat21-ord` (relative
+      # to e2e/docker-compose.regtest.yml → resolves to the workspace's
+      # PARENT directory). So we check out under the workspace, then
+      # symlink at the parent for compose's resolution to land.
       - name: Checkout cat21-ord source (for the cat21-ord container)
         uses: actions/checkout@v5
         with:
           repository: ordpool-space/cat21-ord
           ref: index-cat21
-          path: ../cat21-ord
+          path: _cat21-ord-src
+      - name: Symlink cat21-ord at compose's expected location
+        run: ln -s "$GITHUB_WORKSPACE/_cat21-ord-src" "$(dirname "$GITHUB_WORKSPACE")/cat21-ord"
 
       # Pipeline B's mint roundtrip spec funds, broadcasts and
       # mines against this regtest stack. bitcoind + mempool/electrs
