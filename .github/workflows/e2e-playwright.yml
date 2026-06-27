@@ -216,14 +216,29 @@ jobs:
       - name: Build SDK harness bundle for the fixtures server
         run: npm run e2e:harness:build
 
+      # cat21-ord source — `docker compose --profile cat21-ord up`
+      # below builds the ord image from this checkout. Specs that
+      # poll `/status` on ord (cat21wallet-transfer-roundtrip,
+      # cat21wallet-create-offer-roundtrip, cat21wallet-accept-
+      # offer-roundtrip) need it running; specs that only mint
+      # (cat21wallet-mint-roundtrip) don't, but it's cheap to keep
+      # ord up across the suite.
+      - name: Checkout cat21-ord source (for the cat21-ord container)
+        uses: actions/checkout@v5
+        with:
+          repository: ordpool-space/cat21-ord
+          ref: index-cat21
+          path: ../cat21-ord
+
       # Pipeline B's mint roundtrip spec funds, broadcasts and
       # mines against this regtest stack. bitcoind + mempool/electrs
-      # come up on localhost:18443 / :3000 respectively.
-      - name: Start regtest stack (bitcoind + electrs)
+      # come up on localhost:18443 / :3000 respectively; cat21-ord
+      # (profile-gated) on :8080.
+      - name: Start regtest stack (bitcoind + electrs + cat21-ord)
         # --wait would block on electrs's wget healthcheck which the
-        # mempool/electrs image lacks; the curl poll below handles
-        # the actual readiness check.
-        run: docker compose -f e2e/docker-compose.regtest.yml up -d
+        # mempool/electrs image lacks; the curl polls below handle
+        # the actual readiness checks.
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d --build
 
       - name: Mine 101 blocks (coinbase maturity) + verify electrs is indexing
         env:
@@ -234,12 +249,27 @@ jobs:
           for i in {1..60}; do
             if curl -fsS http://localhost:3000/blocks/tip/height >/dev/null; then
               echo "electrs ready"
+              break
+            fi
+            sleep 1
+            if [ "$i" = "60" ]; then
+              echo "electrs never came up"
+              docker compose -f e2e/docker-compose.regtest.yml logs --tail 80
+              exit 1
+            fi
+          done
+
+      - name: Wait for cat21-ord to be ready on :8080/status
+        run: |
+          for i in {1..120}; do
+            if curl -fsS http://localhost:8080/status >/dev/null; then
+              echo "cat21-ord ready"
               exit 0
             fi
             sleep 1
           done
-          echo "electrs never came up"
-          docker compose -f e2e/docker-compose.regtest.yml logs --tail 80
+          echo "cat21-ord never came up"
+          docker compose -f e2e/docker-compose.regtest.yml logs --tail 80 ord
           exit 1
 
       - name: Run Playwright tests under xvfb
