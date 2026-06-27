@@ -177,7 +177,7 @@ test.afterAll(async () => {
 // signal that pins the wallet's current state. If Phantom enables
 // the SW handlers, this test flips red and we know to rewrite
 // the spec as a full mint roundtrip.
-test('phantom v26.16: mint roundtrip blocked at connect step (SW lacks btc_* handlers)', async () => {
+test('phantom v26.16: mint cannot proceed — connect step rejects because the SW has no btc_* handlers', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();

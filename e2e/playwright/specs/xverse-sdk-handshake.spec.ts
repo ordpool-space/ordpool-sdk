@@ -285,7 +285,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('xverseConnector.connect via the harness page returns the expected BIP-84/BIP-86 testnet addresses for the test seed', async () => {
+test('xverseConnector.connect via the harness page returns the expected BIP-84/BIP-86 regtest addresses for the test seed', async () => {
   // Prime the wallet popup. Wallet boots from the cloned
   // user-data-dir into an UNLOCK screen (vault is encrypted at
   // rest, in-memory key is wiped on context restart). Type the

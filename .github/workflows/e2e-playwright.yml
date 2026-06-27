@@ -1,4 +1,4 @@
-name: E2E (playwright + xverse)
+name: E2E (wallet matrix)
 
 # Iteration 1: prove we can load the published Xverse .crx in
 # headed Chromium under xvfb in CI. Onboarding flow + mint

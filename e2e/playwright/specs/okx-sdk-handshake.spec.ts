@@ -228,7 +228,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('okxConnector.connect via the harness page returns the BIP-84 mainnet address for the test seed', async () => {
+test('okxConnector.connect via the harness page returns the BIP-86 mainnet Taproot address for the test seed', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();
