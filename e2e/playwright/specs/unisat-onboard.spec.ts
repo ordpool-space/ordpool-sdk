@@ -92,7 +92,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
+test('restores a wallet from the BIP-39 test seed and reaches a screen mentioning send/receive/balance/account/bitcoin', async () => {
   const page = await context.newPage();
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/index.html`, {

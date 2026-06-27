@@ -103,7 +103,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('restores a wallet from the BIP-39 test seed and lands on the dashboard with the expected addresses', async () => {
+test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restored" confirmation, then a screen showing "Account 1"', async () => {
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/options.html`, {
     waitUntil: 'domcontentloaded',

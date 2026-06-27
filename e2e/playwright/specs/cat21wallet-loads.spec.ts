@@ -64,7 +64,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('Cat21 Wallet loads in Chromium, exposes a service worker, and renders its index entry point', async () => {
+test('Cat21 Wallet loads in Chromium with a service worker registered; navigates to its index entry point with non-empty body text', async () => {
   expect(extensionId).toMatch(/^[a-p]{32}$/);
 
   const startupPages = context.pages();

@@ -78,7 +78,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
+test('restores a wallet from the BIP-39 test seed and reaches a screen mentioning send/receive/balance/account/bitcoin', async () => {
   test.setTimeout(180_000);
 
   // eslint-disable-next-line prefer-const

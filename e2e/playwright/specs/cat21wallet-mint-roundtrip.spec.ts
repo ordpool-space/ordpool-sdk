@@ -144,7 +144,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('mint a cat21 on regtest via Cat21 Wallet: build PSBT in SDK, sign in popup (network=devnet), broadcast via local electrs', async () => {
+test('mint a cat21 on regtest via Cat21 Wallet: build PSBT in SDK, sign in popup, broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();

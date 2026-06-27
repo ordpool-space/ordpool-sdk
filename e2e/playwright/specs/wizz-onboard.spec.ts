@@ -75,7 +75,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('restores a wallet from the BIP-39 test seed and lands on the dashboard', async () => {
+test('restores a wallet from the BIP-39 test seed and reaches a screen mentioning send/receive/balance/account/bitcoin', async () => {
   // Wizz's onboard is slow (multi-step + an address-derivation scan
   // on Step 3). The default 60s test timeout (playwright.config.ts)
   // is not enough to traverse every phase AND wait for the scan.

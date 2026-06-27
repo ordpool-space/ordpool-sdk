@@ -61,7 +61,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('Unisat loads in Chromium, exposes a service worker, and renders its index entry point', async () => {
+test('Unisat loads in Chromium with a service worker registered; navigates to its index entry point with non-empty body text', async () => {
   expect(extensionId).toMatch(/^[a-p]{32}$/); // chromium extension IDs are 32 lowercase a-p chars
 
   // Many extensions auto-open a tab on first install. Capture

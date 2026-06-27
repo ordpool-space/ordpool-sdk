@@ -123,7 +123,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('phantom v26.x: inscribe cannot proceed — connect step rejects because the SW has no btc_* handlers', async () => {
+test('phantom v26.x: phantomConnector.connect rejects (SW has no btc_* handlers); inscribe flow has no entry point', async () => {
   test.setTimeout(180_000);
 
   const harness = await context.newPage();

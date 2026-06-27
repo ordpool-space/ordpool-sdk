@@ -55,7 +55,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('Okx loads in Chromium, exposes a service worker, and renders its entry point', async () => {
+test('Okx loads in Chromium with a service worker registered; navigates to its entry point with non-empty body text', async () => {
   expect(extensionId).toMatch(/^[a-p]{32}$/);
 
   const startupPages = context.pages();
