@@ -20,7 +20,7 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
-import { approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
+import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
@@ -94,20 +94,6 @@ async function onboardCat21Wallet(page: Page): Promise<void> {
   }, undefined, { timeout: 30_000, polling: 250 });
 }
 
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByTestId('get-addresses-approve-button')
-        .waitFor({ state: 'visible', timeout: 60_000 });
-      return true;
-    },
-  });
-  await approval.getByTestId('get-addresses-approve-button').click();
-}
-
 async function approveSignPopup(
   ctx: BrowserContext,
   knownPages: Set<Page>,
@@ -168,7 +154,7 @@ test('accept a CAT-21 buy offer on regtest via Cat21 Wallet: mint, buyer builds 
   // on the wallet's `network: 'regtest'` argument to getAddresses.
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectCat21Wallet());
-  await approveConnectPopup(context, connectKnownPages);
+  await approveCat21WalletConnectPopup(context, connectKnownPages);
   const walletMainnet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
   const regtestPaymentAddress = btc.p2wpkh(hexBytes(walletMainnet.paymentPublicKey), regtestNetwork).address!;

@@ -22,7 +22,7 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
-import { approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
+import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 
 /**
  * Cat21 Wallet TRANSFER roundtrip on regtest — full popup-driven path.
@@ -96,20 +96,6 @@ async function onboardCat21Wallet(page: Page): Promise<void> {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('bitcoin');
   }, undefined, { timeout: 30_000, polling: 250 });
-}
-
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByTestId('get-addresses-approve-button')
-        .waitFor({ state: 'visible', timeout: 60_000 });
-      return true;
-    },
-  });
-  await approval.getByTestId('get-addresses-approve-button').click();
 }
 
 /**
@@ -201,7 +187,7 @@ test('transfer a cat21 on regtest via Cat21 Wallet: mint via popup, transfer via
   // network='regtest'.
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectCat21Wallet());
-  await approveConnectPopup(context, connectKnownPages);
+  await approveCat21WalletConnectPopup(context, connectKnownPages);
   const walletMainnet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
   const regtestNetwork = toScureNetwork(Network.Regtest);

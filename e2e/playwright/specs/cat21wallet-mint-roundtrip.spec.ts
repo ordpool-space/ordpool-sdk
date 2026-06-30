@@ -6,7 +6,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
-import { approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
+import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 
 /**
  * Iteration 4 — full cat21 mint roundtrip with the real Cat21 Wallet
@@ -78,20 +78,6 @@ async function onboardCat21Wallet(page: Page): Promise<void> {
   }, undefined, { timeout: 30_000, polling: 250 });
 }
 
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByTestId('get-addresses-approve-button')
-        .waitFor({ state: 'visible', timeout: 60_000 });
-      return true;
-    },
-  });
-  await approval.getByTestId('get-addresses-approve-button').click();
-}
-
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
   await approveCat21WalletSignPopup({
     context: ctx,
@@ -145,7 +131,7 @@ test('mint a cat21 on regtest via Cat21 Wallet: build PSBT in SDK, sign in popup
 
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectCat21Wallet());
-  await approveConnectPopup(context, connectKnownPages);
+  await approveCat21WalletConnectPopup(context, connectKnownPages);
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
   // eslint-disable-next-line no-console

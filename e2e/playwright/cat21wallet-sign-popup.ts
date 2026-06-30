@@ -2,6 +2,33 @@ import { expect, type BrowserContext, type Page } from '@playwright/test';
 
 import { waitForApprovalPopup } from './approval-popup';
 
+/**
+ * Wait for the Cat21 Wallet's getAddresses approval popup to open
+ * in `context`, then click the approve button.
+ *
+ * Identified by the `get-addresses-approve-button` testid on a
+ * chrome-extension:// page (see the wallet's OnboardingSelectors
+ * bundle). Every cat21wallet spec that connects to the dapp goes
+ * through this surface.
+ */
+export async function approveCat21WalletConnectPopup(
+  context: BrowserContext,
+  knownPages: Set<Page>,
+): Promise<void> {
+  const approval = await waitForApprovalPopup({
+    context,
+    knownPages,
+    isApproval: async p => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      await p
+        .getByTestId('get-addresses-approve-button')
+        .waitFor({ state: 'visible', timeout: 60_000 });
+      return true;
+    },
+  });
+  await approval.getByTestId('get-addresses-approve-button').click();
+}
+
 interface ApproveCat21WalletSignPopupArgs {
   context: BrowserContext;
   /** Pages already known before the operation that opens the popup. */
