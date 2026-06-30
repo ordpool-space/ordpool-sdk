@@ -22,6 +22,7 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 
 /**
  * Cat21 Wallet TRANSFER roundtrip on regtest — full popup-driven path.
@@ -136,39 +137,12 @@ async function approveSignPopup(
   screenshotTag: string,
   expectedSignAtIndex: number,
 ): Promise<void> {
-  const approval = await waitForApprovalPopup({
+  await approveCat21WalletSignPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      if (!p.url().includes('sign-psbt')) return false;
-      await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 90_000 });
-      return true;
-    },
+    screenshot: p => shot(p, screenshotTag),
+    expectedSignAtIndex,
   });
-  await shot(approval, screenshotTag);
-
-  // Content gate 1: URL carries the expected signAtIndex. URL form:
-  // `popup.html#/sign-psbt?...&signAtIndex=N&...`
-  const url = approval.url();
-  expect(url, 'sign popup URL must encode the route').toContain('sign-psbt');
-  expect(url, `sign popup URL must carry signAtIndex=${expectedSignAtIndex}`).toContain(
-    `signAtIndex=${expectedSignAtIndex}`,
-  );
-  // Content gate 2: the psbt-signer-card UI rendered (vs. error/blank).
-  await expect(approval.getByTestId('psbt-signer-card'),
-    'psbt-signer-card must be visible in the sign popup',
-  ).toBeVisible({ timeout: 15_000 });
-
-  const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
-  await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  await confirmBtn.click({ noWaitAfter: true }); // popup self-closes — see create-offer spec's HACK comment
-  // After approving, the popup closes; add it to the knownPages so the
-  // NEXT sign approval doesn't try to match against this same (closed)
-  // page.
-  knownPages.add(approval);
 }
 
 test.beforeAll(async () => {

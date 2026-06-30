@@ -8,6 +8,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { clickRadixCheckbox } from '../radix-checkbox';
+
 /**
  * Iteration 2 of the OKX E2E pipeline: restore from the BIP-39 test
  * seed and confirm the dashboard renders. First-pass speculation —
@@ -108,20 +110,9 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   await shot(page, '06-password-typed');
 
-  // Terms checkbox: Oyl uses a Radix UI Checkbox primitive. The
-  // page renders TWO elements for it:
-  //   - <button role="checkbox" data-state="unchecked">  ← the state
-  //   - <input type="checkbox" aria-hidden tabindex="-1">  ← form submit only
-  // Radix tracks the checked state on the <button>'s `data-state`
-  // attribute, NOT on the hidden <input>. Previous attempts (label
-  // click → cb.click() → native-setter on the input) all targeted
-  // the wrong element. The deterministic primitive is
-  // `getByRole('checkbox').click()` — Playwright knows to find the
-  // role="checkbox" and the click toggles Radix's internal state.
-  const termsCheckbox = page.getByRole('checkbox').first();
-  await expect(termsCheckbox).toBeVisible({ timeout: 10_000 });
-  await termsCheckbox.click();
-  await expect(termsCheckbox).toHaveAttribute('data-state', 'checked', { timeout: 5_000 });
+  // Terms checkbox: see clickRadixCheckbox JSDoc for the
+  // Radix-UI <button role=checkbox> rationale.
+  await clickRadixCheckbox(page);
   await shot(page, '07-terms-checked');
 
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();

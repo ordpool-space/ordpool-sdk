@@ -20,6 +20,7 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21MintPsbt } from '../../../src/cat21-mint/cat21-mint.helper';
 import { validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
@@ -108,44 +109,18 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
   await approval.getByTestId('get-addresses-approve-button').click();
 }
 
-/** See cat21wallet-transfer-roundtrip.spec.ts for the full content-gate rationale. */
 async function approveSignPopup(
   ctx: BrowserContext,
   knownPages: Set<Page>,
   screenshotTag: string,
   expectedSignAtIndex: number,
 ): Promise<void> {
-  const approval = await waitForApprovalPopup({
+  await approveCat21WalletSignPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      if (!p.url().includes('sign-psbt')) return false;
-      await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 90_000 });
-      return true;
-    },
+    screenshot: p => shot(p, screenshotTag),
+    expectedSignAtIndex,
   });
-  await shot(approval, screenshotTag);
-  const url = approval.url();
-  expect(url, 'sign popup URL must encode the sign-psbt route').toContain('sign-psbt');
-  expect(url, `sign popup URL must carry signAtIndex=${expectedSignAtIndex}`).toContain(
-    `signAtIndex=${expectedSignAtIndex}`,
-  );
-  await expect(approval.getByTestId('psbt-signer-card'),
-    'psbt-signer-card must render in the sign popup',
-  ).toBeVisible({ timeout: 15_000 });
-  const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
-  await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  // The wallet self-closes its sign-psbt popup as soon as the confirm
-  // dispatch reaches the SW. Playwright's default click awaits
-  // post-click stability — that race causes "Target page, context or
-  // browser has been closed" when the popup tears down mid-click.
-  // `noWaitAfter: true` skips the post-click wait; the close IS the
-  // success signal here.
-  await confirmBtn.click({ noWaitAfter: true });
-  knownPages.add(approval);
 }
 
 test.beforeAll(async () => {

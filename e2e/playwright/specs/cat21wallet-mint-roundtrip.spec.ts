@@ -6,6 +6,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 
 /**
  * Iteration 4 — full cat21 mint roundtrip with the real Cat21 Wallet
@@ -92,25 +93,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  // Cat21 Wallet's sign-PSBT surface doesn't ship a stable testid yet;
-  // match by the visible Confirm/Sign/Approve button's role + name.
-  const approval = await waitForApprovalPopup({
+  await approveCat21WalletSignPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 90_000 });
-      return true;
-    },
+    screenshot: p => shot(p, '03a-sign-approval'),
   });
-  await shot(approval, '03a-sign-approval');
-  // Best-effort selector: text "Confirm" or a primary action button.
-  // Will tighten once we see the actual sign-popup DOM in CI.
-  const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
-  await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  await confirmBtn.click({ noWaitAfter: true }); // popup self-closes — see create-offer spec's HACK comment
 }
 
 test.beforeAll(async () => {

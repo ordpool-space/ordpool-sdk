@@ -13,6 +13,7 @@ import {
   postTx,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { clickRadixCheckbox } from '../radix-checkbox';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/oyl');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
@@ -59,13 +60,9 @@ async function onboardOyl(page: Page): Promise<void> {
   await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
-  // Terms checkbox: Radix UI Checkbox — state lives on the
-  // <button role="checkbox" data-state="...">, NOT the hidden
-  // form-submit <input>. See oyl-onboard for the full rationale.
-  const termsCheckbox = page.getByRole('checkbox').first();
-  await expect(termsCheckbox).toBeVisible({ timeout: 10_000 });
-  await termsCheckbox.click();
-  await expect(termsCheckbox).toHaveAttribute('data-state', 'checked', { timeout: 5_000 });
+  // Terms checkbox: see clickRadixCheckbox JSDoc for the
+  // Radix-UI <button role=checkbox> rationale.
+  await clickRadixCheckbox(page);
   const pwContinue = page.getByRole('button', { name: /^(continue|create|finish|done)$/i }).first();
   await expect(pwContinue).toBeEnabled({ timeout: 15_000 });
   await pwContinue.click();

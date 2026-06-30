@@ -13,6 +13,7 @@ import {
   postTx,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/cat21wallet');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
@@ -79,21 +80,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
+  await approveCat21WalletSignPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 90_000 });
-      return true;
-    },
+    screenshot: p => shot(p, 'sign-approval'),
   });
-  await shot(approval, 'sign-approval');
-  const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
-  await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  await confirmBtn.click({ noWaitAfter: true }); // popup self-closes — see create-offer spec's HACK comment
 }
 
 test.beforeAll(async () => {
