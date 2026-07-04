@@ -7,6 +7,8 @@
 
 import * as btc from '@scure/btc-signer';
 
+import { INSCRIBE_POSTAGE_SATS } from '../inscribe/inscription-commit.helper';
+import { encodeParentInscriptionId } from '../inscribe/inscription-envelope';
 import { Network, toScureNetwork } from '../network';
 
 import {
@@ -101,13 +103,131 @@ function validateInscribe(
     }
   }
 
+  // Tip — optional, validated when present.
+  let tipResource: { address: string; tipScript: Uint8Array; tipValueSats: number } | undefined;
+  if (intent.tip !== undefined) {
+    const tipResult = validateTip(intent.tip, config);
+    if (!tipResult.ok) return tipResult.result;
+    tipResource = tipResult.resource;
+  }
+
+  // Note — optional, validated when present.
+  let noteBytes: Uint8Array | undefined;
+  if (intent.note !== undefined) {
+    if (typeof intent.note !== 'string') {
+      return reject('note-not-a-string', safeStringify(typeof intent.note));
+    }
+    const encoded = new TextEncoder().encode(intent.note);
+    const noteCap = config.maxNoteBytes ?? DEFAULT_MAX_NOTE_BYTES;
+    if (encoded.length > noteCap) {
+      return reject('note-too-large', `note=${encoded.length} cap=${noteCap}`);
+    }
+    noteBytes = encoded;
+  }
+
+  // Parent inscription id — optional, encoder throws on bad input.
+  let parentBytes: Uint8Array | undefined;
+  if (intent.parent !== undefined) {
+    try {
+      parentBytes = encodeParentInscriptionId(intent.parent);
+    } catch (e) {
+      return reject('parent-malformed', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // Content encoding — only 'br' is supported.
+  let contentEncoding: 'br' | undefined;
+  if (intent.contentEncoding !== undefined) {
+    if (intent.contentEncoding !== 'br') {
+      return reject('content-encoding-invalid', safeStringify(intent.contentEncoding));
+    }
+    contentEncoding = 'br';
+  }
+
   return success({
     kind: 'inscribe',
     recipientScript: recipient.script,
     contentBytes: intent.body,
     contentType: normalisedContentType,
+    tip: tipResource,
+    noteBytes,
+    parentBytes,
+    contentEncoding,
   });
 }
+
+/**
+ * Validate the optional reveal-tx tip output.
+ *
+ * A tip is either absent OR fully valid — no partial passes. `value=0`
+ * is allowed as a no-op (matches the reveal builder's zero-skip
+ * sentinel); the resource is only produced when `value > 0`.
+ */
+function validateTip(
+  tip: unknown,
+  config: InscribeOperationGateConfig,
+):
+  | { ok: true; resource: { address: string; tipScript: Uint8Array; tipValueSats: number } | undefined }
+  | { ok: false; result: InscribeOperationGateResult } {
+  if (!isObject(tip)) {
+    return { ok: false, result: reject('tip-not-an-object', safeStringify(typeof tip)) };
+  }
+  const t = tip as { address?: unknown; value?: unknown };
+
+  // Value first — cheaper to reject.
+  if (typeof t.value !== 'number' || !Number.isFinite(t.value)) {
+    return { ok: false, result: reject('tip-value-not-finite-number', safeStringify(t.value)) };
+  }
+  if (!Number.isInteger(t.value)) {
+    return { ok: false, result: reject('tip-value-not-integer', safeStringify(t.value)) };
+  }
+  if (t.value < 0) {
+    return { ok: false, result: reject('tip-value-negative', String(t.value)) };
+  }
+  if (t.value === 0) {
+    // Documented no-op: the reveal builder skips the output for value=0.
+    // We still require the address to be well-formed so a policy allowlist
+    // can't be bypassed by "just send 0".
+  }
+  if (t.value > 0 && t.value < INSCRIBE_POSTAGE_SATS) {
+    return { ok: false, result: reject('tip-value-below-dust', `value=${t.value} dust=${INSCRIBE_POSTAGE_SATS}`) };
+  }
+  if (config.maxTipValueSats != null && t.value > config.maxTipValueSats) {
+    return { ok: false, result: reject('tip-value-above-cap', `${t.value} > ${config.maxTipValueSats}`) };
+  }
+
+  // Address validation runs even at value=0 so an allowlist bypass isn't possible.
+  if (typeof t.address !== 'string' || t.address.length === 0) {
+    return { ok: false, result: reject('tip-address-not-a-bitcoin-address', safeStringify(t.address)) };
+  }
+  const scureTarget = toScureNetwork(config.network);
+  let tipScript: Uint8Array;
+  try {
+    const decoded = btc.Address(scureTarget).decode(t.address);
+    tipScript = btc.OutScript.encode(decoded);
+  } catch {
+    const otherNet = config.network === Network.Mainnet ? btc.TEST_NETWORK : btc.NETWORK;
+    try {
+      btc.Address(otherNet).decode(t.address);
+      return { ok: false, result: reject('tip-address-wrong-network', t.address) };
+    } catch {
+      return { ok: false, result: reject('tip-address-not-a-bitcoin-address', t.address) };
+    }
+  }
+  if (config.allowedTipAddresses && config.allowedTipAddresses.length > 0) {
+    if (!allowlistContainsAddress(t.address, config.allowedTipAddresses, scureTarget)) {
+      return { ok: false, result: reject('tip-address-not-allowed', t.address) };
+    }
+  }
+
+  return {
+    ok: true,
+    resource: t.value > 0 ? { address: t.address, tipScript, tipValueSats: t.value } : undefined,
+  };
+}
+
+/** Default note cap (bytes). 128 is enough for "inscribed via ordpool.space" + a URL. */
+const DEFAULT_MAX_NOTE_BYTES = 128;
 
 /**
  * 350 KB default cap on inscription body bytes. Phase-1 hard

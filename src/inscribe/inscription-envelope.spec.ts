@@ -20,6 +20,7 @@ import { InscriptionParserService } from 'ordpool-parser';
 
 import {
   buildInscriptionEnvelope,
+  encodeParentInscriptionId,
   ORD_TAGS,
   type OrdEnvelopeField,
 } from './inscription-envelope';
@@ -192,5 +193,96 @@ describe('buildInscriptionEnvelope — reversibility against ordpool-parser', ()
     expect(ORD_TAGS.note).toBe(0x0f);
     expect(ORD_TAGS.properties).toBe(0x11);
     expect(ORD_TAGS.property_encoding).toBe(0x13);
+  });
+});
+
+describe('encodeParentInscriptionId — round-trip vs ordpool-parser', () => {
+
+  // parser's `extractInscriptionId` is what ordpool actually renders
+  // parents from, so anything the SDK encodes must round-trip through
+  // it byte-for-byte.
+  const { extractInscriptionId } = require('ordpool-parser') as {
+    extractInscriptionId: (v: Uint8Array) => string | null;
+  };
+
+  it('encodes index=0 as 32 bytes (reversed txid, no trailing index bytes)', () => {
+    const id = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0';
+    const bytes = encodeParentInscriptionId(id);
+    expect(bytes.length).toBe(32);
+    expect(extractInscriptionId(bytes)).toBe(id);
+  });
+
+  it('encodes index=1 as 33 bytes (one trailing 0x01)', () => {
+    const id = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i1';
+    const bytes = encodeParentInscriptionId(id);
+    expect(bytes.length).toBe(33);
+    expect(bytes[32]).toBe(0x01);
+    expect(extractInscriptionId(bytes)).toBe(id);
+  });
+
+  it('encodes index=256 as 34 bytes (LE bytes [0x00, 0x01], no trailing zeros trimmed inside)', () => {
+    const id = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i256';
+    const bytes = encodeParentInscriptionId(id);
+    expect(bytes.length).toBe(34);
+    expect(bytes[32]).toBe(0x00);
+    expect(bytes[33]).toBe(0x01);
+    expect(extractInscriptionId(bytes)).toBe(id);
+  });
+
+  it('encodes u32-max index as 36 bytes (four 0xFF trailing bytes)', () => {
+    // No parser round-trip here: ordpool-parser's
+    // `littleEndianBytesToNumber` uses JS `|` ops, which treat the
+    // 4-byte LE input as signed i32 (0xFFFFFFFF → -1). ord itself
+    // decodes u32 correctly, so the byte shape below is the wire
+    // format ord will accept. Pin only the bytes.
+    const id = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i4294967295';
+    const bytes = encodeParentInscriptionId(id);
+    expect(bytes.length).toBe(36);
+    expect(bytes[32]).toBe(0xff);
+    expect(bytes[33]).toBe(0xff);
+    expect(bytes[34]).toBe(0xff);
+    expect(bytes[35]).toBe(0xff);
+  });
+
+  it('encodes i32-max index as 36 bytes and round-trips through parser (parser signed-int ceiling)', () => {
+    const id = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i2147483647';
+    const bytes = encodeParentInscriptionId(id);
+    expect(bytes.length).toBe(36);
+    expect(extractInscriptionId(bytes)).toBe(id);
+  });
+
+  it('reverses the txid bytes (byte 0 of output = byte 31 of the hex-decoded txid)', () => {
+    // txid where the first hex byte differs from the last — proves reversal.
+    const id = 'aa000000000000000000000000000000000000000000000000000000000000bbi0';
+    const bytes = encodeParentInscriptionId(id);
+    expect(bytes[0]).toBe(0xbb);
+    expect(bytes[31]).toBe(0xaa);
+  });
+
+  it('rejects wrong-length txid', () => {
+    expect(() => encodeParentInscriptionId('abci0')).toThrow(/Invalid inscription id/);
+  });
+
+  it('rejects uppercase hex (parser expects canonical lowercase)', () => {
+    const id = 'FFB976AB49DCEC017F1E201E84395983204AE1A7C2ABF7CED0A85D692E442799i0';
+    expect(() => encodeParentInscriptionId(id)).toThrow(/Invalid inscription id/);
+  });
+
+  it('rejects missing i-separator', () => {
+    expect(() =>
+      encodeParentInscriptionId('6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e4427990'),
+    ).toThrow(/Invalid inscription id/);
+  });
+
+  it('rejects index with leading zero (non-canonical)', () => {
+    expect(() =>
+      encodeParentInscriptionId('6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i01'),
+    ).toThrow(/canonical form/);
+  });
+
+  it('rejects index above u32 max', () => {
+    expect(() =>
+      encodeParentInscriptionId('6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i4294967296'),
+    ).toThrow(/u32 range/);
   });
 });

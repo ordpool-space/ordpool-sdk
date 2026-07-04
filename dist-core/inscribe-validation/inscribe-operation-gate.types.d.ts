@@ -56,6 +56,24 @@ export interface InscribeIntent {
      * `blockedContentTypes` blocklist defensive filter.
      */
     contentType?: string;
+    /**
+     * Optional reveal-tx tip output. The gate validates the address on
+     * the configured network and the value against the dust floor +
+     * `maxTipValueSats` cap. Zero is treated as "no tip".
+     *
+     * The most policy-sensitive optional — an autonomous agent path
+     * without a cap could drain a wallet by inflating `tip.value`.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
+    /** Optional Tag::Note (0x0f) UTF-8 watermark; capped at `maxNoteBytes`. */
+    note?: string;
+    /** Optional parent inscription id (`<txid>i<index>`). */
+    parent?: string;
+    /** Optional body-encoding hint (must be `'br'` if present). */
+    contentEncoding?: 'br';
 }
 /**
  * Discriminated union over the inscribe-side operations the gate
@@ -109,8 +127,22 @@ export interface InscribeOperationGateConfig {
      * inscribers).
      */
     blockedContentTypes?: ReadonlyArray<string>;
+    /**
+     * Hard ceiling on `tip.value` in sats. Recommended for autonomous
+     * flows (drain protection). When unset, only the dust-floor + integer
+     * checks apply.
+     */
+    maxTipValueSats?: number;
+    /**
+     * Positive tip-address allowlist. When set and non-empty, the tip
+     * MUST go to a listed address. Practical for automated flows where
+     * the tip beneficiary is fixed.
+     */
+    allowedTipAddresses?: ReadonlyArray<string>;
+    /** Maximum note bytes (UTF-8). Default 128. */
+    maxNoteBytes?: number;
 }
-export type InscribeGateRejectReason = 'intent-not-an-object' | 'unsupported-operation-kind' | 'recipient-not-a-bitcoin-address' | 'recipient-wrong-network' | 'recipient-not-allowed' | 'self-send' | 'fee-rate-not-finite-number' | 'fee-rate-not-positive' | 'fee-rate-not-integer' | 'fee-rate-above-cap' | 'content-not-bytes' | 'content-too-large' | 'content-type-not-string' | 'content-type-not-allowed' | 'content-type-blocked';
+export type InscribeGateRejectReason = 'intent-not-an-object' | 'unsupported-operation-kind' | 'recipient-not-a-bitcoin-address' | 'recipient-wrong-network' | 'recipient-not-allowed' | 'self-send' | 'fee-rate-not-finite-number' | 'fee-rate-not-positive' | 'fee-rate-not-integer' | 'fee-rate-above-cap' | 'content-not-bytes' | 'content-too-large' | 'content-type-not-string' | 'content-type-not-allowed' | 'content-type-blocked' | 'tip-not-an-object' | 'tip-address-not-a-bitcoin-address' | 'tip-address-wrong-network' | 'tip-address-not-allowed' | 'tip-value-not-finite-number' | 'tip-value-not-integer' | 'tip-value-negative' | 'tip-value-below-dust' | 'tip-value-above-cap' | 'note-not-a-string' | 'note-too-large' | 'parent-malformed' | 'content-encoding-invalid';
 export type InscribeGateResources = {
     kind: 'inscribe';
     recipientScript: Uint8Array;
@@ -118,6 +150,22 @@ export type InscribeGateResources = {
     contentBytes: Uint8Array;
     /** Normalised contentType (lowercased) when present. */
     contentType: string | undefined;
+    /**
+     * Pre-decoded tip when supplied and non-zero. Downstream builders
+     * pass `tipScript`/`tipValueSats` straight into the reveal builder
+     * without re-decoding the address.
+     */
+    tip?: {
+        address: string;
+        tipScript: Uint8Array;
+        tipValueSats: number;
+    };
+    /** Validated + length-checked note UTF-8 bytes, when supplied. */
+    noteBytes?: Uint8Array;
+    /** Pre-encoded parent tag value (reversed txid + LE-trimmed index), when supplied. */
+    parentBytes?: Uint8Array;
+    /** Validated content encoding when supplied. Only `'br'` today. */
+    contentEncoding?: 'br';
 };
 export type InscribeOperationGateResult = {
     ok: true;

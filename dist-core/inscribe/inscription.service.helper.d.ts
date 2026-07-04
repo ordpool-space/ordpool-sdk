@@ -126,6 +126,20 @@ export interface CreateInscribeTransactionsArgs {
      */
     note?: string;
     /**
+     * Optional parent inscription id (`<txid>i<index>`) for provenance
+     * chains. Emitted as a Tag::Parent (0x03) envelope field.
+     *
+     * IMPORTANT: setting this ONLY emits the envelope tag. Ord treats
+     * an inscription as a genuine child only when the reveal tx ALSO
+     * spends the parent's UTXO as an input — which requires the
+     * parent owner co-signing the reveal, a topology change this
+     * builder does not model. Consumers using `parent` today get the
+     * annotation (ordpool-parser surfaces the parent id), not the
+     * provenance link. Full parent/child support needs its own
+     * orchestrator.
+     */
+    parent?: string;
+    /**
      * Optional body-encoding hint. When set to `'br'`, the SDK emits
      * the `content_encoding: br` envelope tag — signalling to indexers
      * that the body is brotli-compressed. The body must already be

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ORD_TAGS = void 0;
 exports.buildInscriptionEnvelope = buildInscriptionEnvelope;
+exports.encodeParentInscriptionId = encodeParentInscriptionId;
 const btc_signer_1 = require("@scure/btc-signer");
 /**
  * Inscription envelope encoder — the inverse of `ordpool-parser`'s
@@ -148,5 +149,52 @@ function buildInscriptionEnvelope(args) {
     // Envelope close.
     items.push('ENDIF');
     return btc_signer_1.Script.encode(items);
+}
+/**
+ * Encode a parent inscription id (`<txid>i<index>`) into the byte
+ * form ord expects on tag 0x03 (`parent`) values:
+ *
+ *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
+ *
+ * Zero-index gets no trailing bytes; index 256 encodes as `[0x00, 0x01]`;
+ * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
+ *
+ * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
+ * which is what ordpool renders inscriptions from. If the round-trip
+ * doesn't match, the parser drops the parent silently (ord's
+ * `filter_map` semantics), so the caller MUST hand us a canonical id
+ * form.
+ */
+function encodeParentInscriptionId(inscriptionId) {
+    const m = inscriptionId.match(/^([0-9a-f]{64})i(\d+)$/);
+    if (!m) {
+        throw new Error(`Invalid inscription id "${inscriptionId}"; expected 64 lowercase hex + "i" + non-negative integer.`);
+    }
+    const txidHex = m[1];
+    const indexStr = m[2];
+    if (indexStr.length > 1 && indexStr.startsWith('0')) {
+        throw new Error(`Invalid inscription index "${indexStr}"; canonical form has no leading zeros.`);
+    }
+    const index = Number(indexStr);
+    if (!Number.isSafeInteger(index) || index < 0 || index > 0xffffffff) {
+        throw new Error(`Inscription index out of u32 range: ${indexStr}`);
+    }
+    const txidBytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+        txidBytes[i] = parseInt(txidHex.substr(i * 2, 2), 16);
+    }
+    txidBytes.reverse();
+    if (index === 0) {
+        return txidBytes;
+    }
+    const indexBytes = new Uint8Array(4);
+    new DataView(indexBytes.buffer).setUint32(0, index, true);
+    let end = 4;
+    while (end > 0 && indexBytes[end - 1] === 0)
+        end--;
+    const out = new Uint8Array(32 + end);
+    out.set(txidBytes);
+    out.set(indexBytes.subarray(0, end), 32);
+    return out;
 }
 //# sourceMappingURL=inscription-envelope.js.map

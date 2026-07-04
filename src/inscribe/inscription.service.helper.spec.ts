@@ -412,6 +412,45 @@ describe('createInscribeTransactions', () => {
     });
   });
 
+  describe('optional parent inscription id (0x03)', () => {
+    it('parent → envelope carries tag 0x03 (OP_3) with the reversed-txid encoding', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const PARENT_ID = 'aa000000000000000000000000000000000000000000000000000000000000bbi0';
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('with parent'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        parent: PARENT_ID,
+        network: NETWORK,
+      });
+      const envelopeHex = Array.from(result.commit.envelopeScript)
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      // OP_3 = 0x53, followed by a 32-byte push (0x20). Then bb00...aa
+      // (reversed txid — proves the byte-order flip landed).
+      const reversedTxidHex = 'bb' + '00'.repeat(30) + 'aa';
+      expect(envelopeHex).toContain('5320' + reversedTxidHex);
+    });
+
+    it('rejects a malformed parent id', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new TextEncoder().encode('bad parent'),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        parent: 'not-a-valid-id',
+        network: NETWORK,
+      })).toThrow(/Invalid inscription id/);
+    });
+  });
+
   describe('optional contentEncoding hint', () => {
     it('contentEncoding=br → envelope carries tag 0x09 (OP_9) with UTF-8 "br"', () => {
       const { paymentPublicKey, paymentAddress } = paymentContext();

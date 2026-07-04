@@ -71,6 +71,9 @@ function createInscribeTransactions(args) {
     // caller's own envelopeFields entries always win on duplicate
     // tags (preserved order, ord decoder indexes by tag occurrence).
     const autoFields = [];
+    if (args.parent !== undefined) {
+        autoFields.push({ tag: inscription_envelope_1.ORD_TAGS.parent, value: (0, inscription_envelope_1.encodeParentInscriptionId)(args.parent) });
+    }
     if (args.note !== undefined) {
         autoFields.push({ tag: inscription_envelope_1.ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
     }

@@ -20,6 +20,7 @@ function inscribeAndBroadcast(args) {
                 walletType: args.walletType,
                 tip: args.tip,
                 note: args.note,
+                parent: args.parent,
                 contentEncoding: args.contentEncoding,
                 network: args.network,
             });

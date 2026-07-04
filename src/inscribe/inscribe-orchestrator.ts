@@ -67,6 +67,13 @@ export interface InscribeAndBroadcastArgs {
   /** Optional Tag::Note (0x0f) watermark string. */
   note?: string;
   /**
+   * Optional parent inscription id (`<txid>i<index>`); emits Tag::Parent
+   * (0x03). Annotation only — full parent/child provenance also
+   * requires spending the parent's UTXO in the reveal (not modelled
+   * here). See `createInscribeTransactions` for the caveat.
+   */
+  parent?: string;
+  /**
    * Optional body-encoding hint ('br' for brotli). Body must
    * already be compressed; this flag only emits the envelope tag.
    */
@@ -120,6 +127,7 @@ export function inscribeAndBroadcast(
         walletType: args.walletType,
         tip: args.tip,
         note: args.note,
+        parent: args.parent,
         contentEncoding: args.contentEncoding,
         network: args.network,
       });

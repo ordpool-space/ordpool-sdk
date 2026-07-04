@@ -96,4 +96,20 @@ export interface BuildInscriptionEnvelopeArgs {
  * inclusion via `btc.p2tr(..., { script, leafVersion: 0xc0 })`.
  */
 export declare function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Uint8Array;
+/**
+ * Encode a parent inscription id (`<txid>i<index>`) into the byte
+ * form ord expects on tag 0x03 (`parent`) values:
+ *
+ *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
+ *
+ * Zero-index gets no trailing bytes; index 256 encodes as `[0x00, 0x01]`;
+ * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
+ *
+ * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
+ * which is what ordpool renders inscriptions from. If the round-trip
+ * doesn't match, the parser drops the parent silently (ord's
+ * `filter_map` semantics), so the caller MUST hand us a canonical id
+ * form.
+ */
+export declare function encodeParentInscriptionId(inscriptionId: string): Uint8Array;
 //# sourceMappingURL=inscription-envelope.d.ts.map
