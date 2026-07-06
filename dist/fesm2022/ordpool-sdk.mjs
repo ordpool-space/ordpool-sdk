@@ -5358,7 +5358,9 @@ class Cat21TransferOrchestrator {
                 insufficient: false,
             };
         }
-        catch {
+        catch (err) {
+            // eslint-disable-next-line no-console
+            console.error('[cat21-transfer-sim-error]', err);
             return { simulation: null, insufficient: true };
         }
     }
