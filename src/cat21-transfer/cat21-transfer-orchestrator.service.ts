@@ -369,7 +369,12 @@ export class Cat21TransferOrchestrator {
     cat: Cat21Holding | null,
     feeRate: number | null,
   ): TransferSimulationOutcome {
+    // eslint-disable-next-line no-console
+    console.log('[cat21-transfer-sim] enter fundingUtxos.length=', fundingUtxos.length,
+      'walletType=', wallet?.type, 'catTxid=', cat?.txid, 'feeRate=', feeRate);
     if (!wallet || !cat || !feeRate || fundingUtxos.length === 0) {
+      // eslint-disable-next-line no-console
+      console.log('[cat21-transfer-sim] guard hit — returning insufficient=false');
       return { simulation: null, insufficient: false };
     }
     // The transfer needs `postage (546) + fee` covered by the funding
@@ -382,7 +387,12 @@ export class Cat21TransferOrchestrator {
       utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
       targetSpendSats: target,
     });
+    // eslint-disable-next-line no-console
+    console.log('[cat21-transfer-sim] target=', target, 'pick=', pick
+      ? `${pick.txid}:${pick.vout} value=${pick.value}` : 'null');
     if (!pick) {
+      // eslint-disable-next-line no-console
+      console.log('[cat21-transfer-sim] pick=null — returning insufficient=true');
       return { simulation: null, insufficient: true };
     }
 
