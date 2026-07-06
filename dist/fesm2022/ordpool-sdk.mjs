@@ -5283,6 +5283,8 @@ class Cat21TransferOrchestrator {
                 this.state.set('success');
             }), catchError((err) => {
                 const msg = err instanceof Error ? err.message : String(err);
+                // eslint-disable-next-line no-console
+                console.error('[cat21-transfer-flow-error]', msg, err);
                 this.errorMessage.set(msg);
                 this.state.set('error');
                 return throwError(() => err);
