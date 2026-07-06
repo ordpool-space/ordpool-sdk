@@ -5405,11 +5405,18 @@ class Cat21TransferOrchestrator {
             },
             feeSats,
         });
-        // Dummy-finalize to get a measurable vsize. We can't actually
-        // produce signatures for the simulation, but the PSBT-level
-        // witness placeholders for known script types are enough to
-        // estimate vsize within < 1 vB tolerance.
+        // Dummy-sign every input and finalise so tx.vsize is observable.
+        // scure refuses `.vsize` on an unfinalised transaction ("Transaction
+        // is not finalized"). We swap in the SDK dummy key (schnorr for the
+        // Taproot cat input, ECDSA for P2WPKH funding inputs) so signatures
+        // are structurally valid at the right length — vsize matches what a
+        // real-signed tx would have within < 1 vB tolerance.
         const tx = btc.Transaction.fromPSBT(built.psbt);
+        const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(this.network));
+        // sign() applies to every input the key can sign; SIGHASH_DEFAULT
+        // covers taproot key-path, SIGHASH_ALL covers non-taproot.
+        tx.sign(dummyPrivateKey, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+        tx.finalize();
         return { vsize: tx.vsize };
     }
     /**
