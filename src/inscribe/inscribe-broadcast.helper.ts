@@ -177,6 +177,11 @@ async function postPackage(
 ): Promise<InscribePackageEndpointResult> {
   const url = `${endpoint.replace(/\/+$/, '')}/txs/package`;
   const controller = new AbortController();
+  // If the caller handed us an already-aborted signal, propagate
+  // immediately. `addEventListener('abort', …)` does NOT fire for
+  // already-past events, so without this check the fetch would run
+  // to completion (or timeout) despite the caller having cancelled.
+  if (outerSignal?.aborted) controller.abort();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const onOuterAbort = () => controller.abort();
   outerSignal?.addEventListener('abort', onOuterAbort);

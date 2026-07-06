@@ -65,32 +65,6 @@ export class Cat21ApiService {
   private baseUrl = this.config.cat21ApiUrl;
   private http = inject(HttpClient);
 
-  /*
-  getStatus(): Observable<StatusResult> {
-    return this.http.get<StatusResult>(`${this.baseUrl}/api/status`);
-  }
-
-  getCats(itemsPerPage: number, currentPage: number): Observable<Cat21PaginatedResult> {
-    return this.http.get<Cat21PaginatedResult>(`${this.baseUrl}/api/cats/${itemsPerPage}/${currentPage}`);
-  }
-
-  getCat(transactionId: string): Observable<Cat21SingleResult> {
-    return this.http.get<Cat21SingleResult>(`${this.baseUrl}/api/cat/${transactionId}`);
-  }
-
-  getCatsByBlockId(blockId: string): Observable<Cat21[]> {
-    return this.http.get<Cat21[]>(`${this.baseUrl}/api/cats/by-block-id/${blockId}`);
-  }
-
-  getCatsBySatRanges(body: any): Observable<Cat21[]> {
-    return this.http.post<Cat21[]>(`${this.baseUrl}/api/cats/by-sat-ranges`, body);
-  }
-
-  getCatsByUtxos(body: any): Observable<Cat21[]> {
-    return this.http.post<Cat21[]>(`${this.baseUrl}/api/cats/by-utxos`, body);
-  }
-  */
-
   getStatus(): Observable<StatusResult> {
     return this.http.get<StatusResult>(buildStatusUrl(this.baseUrl)).pipe(
       shareReplay({ bufferSize: 1, refCount: true })

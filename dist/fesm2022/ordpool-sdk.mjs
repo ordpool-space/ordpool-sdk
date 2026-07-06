@@ -3303,31 +3303,6 @@ class Cat21ApiService {
     config = inject(cat21Config);
     baseUrl = this.config.cat21ApiUrl;
     http = inject(HttpClient);
-    /*
-    getStatus(): Observable<StatusResult> {
-      return this.http.get<StatusResult>(`${this.baseUrl}/api/status`);
-    }
-  
-    getCats(itemsPerPage: number, currentPage: number): Observable<Cat21PaginatedResult> {
-      return this.http.get<Cat21PaginatedResult>(`${this.baseUrl}/api/cats/${itemsPerPage}/${currentPage}`);
-    }
-  
-    getCat(transactionId: string): Observable<Cat21SingleResult> {
-      return this.http.get<Cat21SingleResult>(`${this.baseUrl}/api/cat/${transactionId}`);
-    }
-  
-    getCatsByBlockId(blockId: string): Observable<Cat21[]> {
-      return this.http.get<Cat21[]>(`${this.baseUrl}/api/cats/by-block-id/${blockId}`);
-    }
-  
-    getCatsBySatRanges(body: any): Observable<Cat21[]> {
-      return this.http.post<Cat21[]>(`${this.baseUrl}/api/cats/by-sat-ranges`, body);
-    }
-  
-    getCatsByUtxos(body: any): Observable<Cat21[]> {
-      return this.http.post<Cat21[]>(`${this.baseUrl}/api/cats/by-utxos`, body);
-    }
-    */
     getStatus() {
         return this.http.get(buildStatusUrl(this.baseUrl)).pipe(shareReplay({ bufferSize: 1, refCount: true }));
     }
@@ -3894,29 +3869,6 @@ function listFundingUtxosThatCover(args) {
         .sort((a, b) => b.value - a.value);
 }
 
-/**
- * Sequence number set on every input of a CAT-21 buy-offer PSBT.
- *
- * `0xfffffffd` signals BIP-125 RBF — the buyer (or any party with the
- * authority to rebuild the tx) can submit a higher-fee replacement if
- * the mempool congests after broadcast. This is the SDK default for
- * non-mint cat-flows per the cat21-wallet HARD RULE #1: offers and
- * transfers allow RBF; the only flow that disables RBF is the mint
- * (and only for third-party wallets that can't be trusted to preserve
- * `lockTime=21` through a replacement — see
- * `cat21-mint/cat21.service.helper.ts:CAT21_MINT_INPUT_SEQUENCE`).
- *
- * `@scure/btc-signer`'s default sequence is `0xffffffff` (final, RBF
- * off), so this MUST be set explicitly. Verified by reading the
- * scure source (`DEFAULT_SEQUENCE = 4294967295`).
- */
-/**
- * @deprecated Use `resolveCat21InputSequence(walletType)` per the
- * per-wallet RBF policy unified across mint / transfer / offer flows
- * (audit M4). Left exported for spec backwards-compat; new callers
- * should not consume this constant directly.
- */
-const CAT21_OFFER_INPUT_SEQUENCE = 0xfffffffd;
 /**
  * Builds the buyer-initiated CAT-21 offer PSBT (ord-style,
  * SIGHASH_ALL on every input).
@@ -6365,10 +6317,16 @@ function createInscribeTransactions(args) {
     }
     const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
     const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
-    // Synthesise envelope fields from the convenience args (note,
-    // contentEncoding) and prepend to the caller-supplied list. The
-    // caller's own envelopeFields entries always win on duplicate
-    // tags (preserved order, ord decoder indexes by tag occurrence).
+    // Synthesise envelope fields from the convenience args (parent,
+    // note, contentEncoding) and prepend to the caller-supplied
+    // envelopeFields. On duplicate tags (e.g. caller also supplies a
+    // parent entry) BOTH entries are emitted in order — ord's decoder
+    // handles multiple instances per tag according to that tag's
+    // semantics: `parent` accumulates (multi-parent inscriptions are
+    // valid), `content_type` / `content_encoding` first-wins (so
+    // caller-supplied values behind an auto-field are ignored by
+    // downstream indexers). Caller-side dedup is the consumer's
+    // responsibility.
     const autoFields = [];
     if (args.parent !== undefined) {
         autoFields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });
@@ -6629,6 +6587,12 @@ async function broadcastInscribePackage(input, options = {}) {
 async function postPackage(endpoint, body, fetchImpl, timeoutMs, outerSignal) {
     const url = `${endpoint.replace(/\/+$/, '')}/txs/package`;
     const controller = new AbortController();
+    // If the caller handed us an already-aborted signal, propagate
+    // immediately. `addEventListener('abort', …)` does NOT fire for
+    // already-past events, so without this check the fetch would run
+    // to completion (or timeout) despite the caller having cancelled.
+    if (outerSignal?.aborted)
+        controller.abort();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     const onOuterAbort = () => controller.abort();
     outerSignal?.addEventListener('abort', onOuterAbort);
@@ -6837,5 +6801,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_INPUT_SEQUENCE, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
 //# sourceMappingURL=ordpool-sdk.mjs.map

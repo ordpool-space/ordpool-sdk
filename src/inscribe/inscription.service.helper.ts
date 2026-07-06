@@ -245,10 +245,16 @@ export function createInscribeTransactions(
   const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
   const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
 
-  // Synthesise envelope fields from the convenience args (note,
-  // contentEncoding) and prepend to the caller-supplied list. The
-  // caller's own envelopeFields entries always win on duplicate
-  // tags (preserved order, ord decoder indexes by tag occurrence).
+  // Synthesise envelope fields from the convenience args (parent,
+  // note, contentEncoding) and prepend to the caller-supplied
+  // envelopeFields. On duplicate tags (e.g. caller also supplies a
+  // parent entry) BOTH entries are emitted in order — ord's decoder
+  // handles multiple instances per tag according to that tag's
+  // semantics: `parent` accumulates (multi-parent inscriptions are
+  // valid), `content_type` / `content_encoding` first-wins (so
+  // caller-supplied values behind an auto-field are ignored by
+  // downstream indexers). Caller-side dedup is the consumer's
+  // responsibility.
   const autoFields: OrdEnvelopeField[] = [];
   if (args.parent !== undefined) {
     autoFields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });

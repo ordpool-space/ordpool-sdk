@@ -33,36 +33,13 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MAX_BUY_OFFER_PSBT_BYTES = exports.CAT21_OFFER_INPUT_SEQUENCE = void 0;
+exports.MAX_BUY_OFFER_PSBT_BYTES = void 0;
 exports.buildCat21BuyOfferPsbt = buildCat21BuyOfferPsbt;
 exports.validateCat21BuyOfferPsbt = validateCat21BuyOfferPsbt;
 const btc = __importStar(require("@scure/btc-signer"));
 const cat21_postage_1 = require("../cat21-protocol/cat21-postage");
 const cat21_sequence_1 = require("../cat21-protocol/cat21-sequence");
 const network_1 = require("../network");
-/**
- * Sequence number set on every input of a CAT-21 buy-offer PSBT.
- *
- * `0xfffffffd` signals BIP-125 RBF — the buyer (or any party with the
- * authority to rebuild the tx) can submit a higher-fee replacement if
- * the mempool congests after broadcast. This is the SDK default for
- * non-mint cat-flows per the cat21-wallet HARD RULE #1: offers and
- * transfers allow RBF; the only flow that disables RBF is the mint
- * (and only for third-party wallets that can't be trusted to preserve
- * `lockTime=21` through a replacement — see
- * `cat21-mint/cat21.service.helper.ts:CAT21_MINT_INPUT_SEQUENCE`).
- *
- * `@scure/btc-signer`'s default sequence is `0xffffffff` (final, RBF
- * off), so this MUST be set explicitly. Verified by reading the
- * scure source (`DEFAULT_SEQUENCE = 4294967295`).
- */
-/**
- * @deprecated Use `resolveCat21InputSequence(walletType)` per the
- * per-wallet RBF policy unified across mint / transfer / offer flows
- * (audit M4). Left exported for spec backwards-compat; new callers
- * should not consume this constant directly.
- */
-exports.CAT21_OFFER_INPUT_SEQUENCE = 0xfffffffd;
 /**
  * Builds the buyer-initiated CAT-21 offer PSBT (ord-style,
  * SIGHASH_ALL on every input).
