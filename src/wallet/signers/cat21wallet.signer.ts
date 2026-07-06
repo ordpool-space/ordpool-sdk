@@ -24,7 +24,16 @@ interface Cat21WalletPSBTResponse {
 interface Cat21WalletSignPsbtParams {
   hex: string;
   allowedSighash: number[];
-  signAtIndex: number;
+  /**
+   * Which input indexes to sign. Cat21-wallet accepts either a single
+   * number or an array — see
+   * `apps/extension/src/background/messaging/rpc-methods/sign-psbt.ts`
+   * (ensureArray). Passing an array lets the wallet sign multiple
+   * inputs in a SINGLE approval popup, which is essential for the
+   * transfer flow (cat input at ordinalsAddress + funding input at
+   * paymentAddress).
+   */
+  signAtIndex: number | number[];
   network: 'mainnet' | 'testnet' | 'signet' | 'sbtcDevenv' | 'devnet' | 'regtest';
   broadcast: false;
 }
@@ -45,16 +54,18 @@ interface Cat21WalletSignPsbtParams {
  * sighash whitelist is `[SigHash.ALL]` — same as Leather, same as
  * the rest of the SDK's cat-flow path.
  *
- * Multi-input signing: the wallet's `signPsbt` JSON-RPC takes a
- * single `signAtIndex`. For flows that need multiple inputs signed
- * (transfer, offer-accept) the multi method iterates the flat
- * index list, threading the partially-signed PSBT hex through each
- * call. Each call shows a confirmation dialog so the user sees and
- * approves every signature.
+ * Multi-input signing: the wallet's `signPsbt` JSON-RPC accepts
+ * `signAtIndex` as EITHER a single number or an array. Prefer the
+ * array form for multi-input flows (transfer, offer-accept) — the
+ * wallet then signs every listed index inside ONE approval popup
+ * (see `apps/extension/src/background/messaging/rpc-methods/sign-psbt.ts`
+ * → ensureArray). The previous per-index chain fired one popup per
+ * signature which cat21-wallet couldn't route reliably: after the
+ * first popup closed, subsequent calls hung silently.
  */
 function callCat21WalletSignPsbt(
   psbtHex: string,
-  signAtIndex: number,
+  signAtIndex: number | number[],
   network: Cat21WalletSignPsbtParams['network'],
 ): Promise<string> {
   const provider = findCat21WalletProvider(window as unknown as WindowLike);
@@ -89,14 +100,9 @@ const legacy = {
       for (const i of t.indexes) flatIndexes.push(i);
     }
     const network = toLeatherNetworkString(input.network);
+    const psbtHex = hex.encode(input.psbtBytes);
 
-    return defer(() => {
-      let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));
-      for (const i of flatIndexes) {
-        chain = chain.then((currentHex) => callCat21WalletSignPsbt(currentHex, i, network));
-      }
-      return from(chain);
-    }).pipe(
+    return defer(() => from(callCat21WalletSignPsbt(psbtHex, flatIndexes, network))).pipe(
       switchMap((finalHex) => broadcastSignedPsbt(input, hex.decode(finalHex))),
     );
   },
@@ -108,14 +114,11 @@ const legacy = {
       for (const i of t.indexes) flatIndexes.push(i);
     }
     const network = toLeatherNetworkString(input.network);
+    const psbtHex = hex.encode(input.psbtBytes);
 
-    return defer(() => {
-      let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));
-      for (const i of flatIndexes) {
-        chain = chain.then((currentHex) => callCat21WalletSignPsbt(currentHex, i, network));
-      }
-      return from(chain);
-    }).pipe(map((finalHex) => hex.decode(finalHex)));
+    return defer(() => from(callCat21WalletSignPsbt(psbtHex, flatIndexes, network))).pipe(
+      map((finalHex) => hex.decode(finalHex)),
+    );
   },
 };
 

@@ -2033,12 +2033,14 @@ const binanceSigner = {
  * sighash whitelist is `[SigHash.ALL]` — same as Leather, same as
  * the rest of the SDK's cat-flow path.
  *
- * Multi-input signing: the wallet's `signPsbt` JSON-RPC takes a
- * single `signAtIndex`. For flows that need multiple inputs signed
- * (transfer, offer-accept) the multi method iterates the flat
- * index list, threading the partially-signed PSBT hex through each
- * call. Each call shows a confirmation dialog so the user sees and
- * approves every signature.
+ * Multi-input signing: the wallet's `signPsbt` JSON-RPC accepts
+ * `signAtIndex` as EITHER a single number or an array. Prefer the
+ * array form for multi-input flows (transfer, offer-accept) — the
+ * wallet then signs every listed index inside ONE approval popup
+ * (see `apps/extension/src/background/messaging/rpc-methods/sign-psbt.ts`
+ * → ensureArray). The previous per-index chain fired one popup per
+ * signature which cat21-wallet couldn't route reliably: after the
+ * first popup closed, subsequent calls hung silently.
  */
 function callCat21WalletSignPsbt(psbtHex, signAtIndex, network) {
     const provider = findCat21WalletProvider(window);
@@ -2069,13 +2071,8 @@ const legacy$8 = {
                 flatIndexes.push(i);
         }
         const network = toLeatherNetworkString(input.network);
-        return defer(() => {
-            let chain = Promise.resolve(hex.encode(input.psbtBytes));
-            for (const i of flatIndexes) {
-                chain = chain.then((currentHex) => callCat21WalletSignPsbt(currentHex, i, network));
-            }
-            return from(chain);
-        }).pipe(switchMap((finalHex) => broadcastSignedPsbt(input, hex.decode(finalHex))));
+        const psbtHex = hex.encode(input.psbtBytes);
+        return defer(() => from(callCat21WalletSignPsbt(psbtHex, flatIndexes, network))).pipe(switchMap((finalHex) => broadcastSignedPsbt(input, hex.decode(finalHex))));
     },
     signPsbtOnly(input) {
         const targets = resolveSigningTargets(input);
@@ -2085,13 +2082,8 @@ const legacy$8 = {
                 flatIndexes.push(i);
         }
         const network = toLeatherNetworkString(input.network);
-        return defer(() => {
-            let chain = Promise.resolve(hex.encode(input.psbtBytes));
-            for (const i of flatIndexes) {
-                chain = chain.then((currentHex) => callCat21WalletSignPsbt(currentHex, i, network));
-            }
-            return from(chain);
-        }).pipe(map((finalHex) => hex.decode(finalHex)));
+        const psbtHex = hex.encode(input.psbtBytes);
+        return defer(() => from(callCat21WalletSignPsbt(psbtHex, flatIndexes, network))).pipe(map((finalHex) => hex.decode(finalHex)));
     },
 };
 const cat21walletSigner = {
