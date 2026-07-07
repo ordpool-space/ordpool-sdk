@@ -2348,6 +2348,111 @@ interface SubmitToSlipstreamOptions {
 declare function submitToSlipstream(rawTxHex: string, options?: SubmitToSlipstreamOptions): Promise<SlipstreamSubmitResponse>;
 
 /**
+ * Permalink helpers for the three cat21-flow surfaces that ship a URL:
+ *
+ *   - **Ask permalink** — a seller publishes "I want to sell cat #N for X sats"
+ *     as `/cat/N?ask=X`. Rendered by the cat detail page; anyone can view.
+ *   - **Buy permalink** — a buyer clicks an ask link and lands on the
+ *     make-offer surface prefilled with `catNumber` + `askPrice`. The
+ *     `fromAsk` flag surfaces a "responding to an ask" banner so the
+ *     buyer knows the price came from the seller, not their own guess.
+ *   - **Accept-offer permalink** — after the buyer signs the offer PSBT
+ *     they hand the seller a one-click link:
+ *     `/dashboard/trade/accept?offer=<base64>&catTxid=<txid>&catVout=<n>`.
+ *     Seller opens it, floor is auto-set to 0 (they consented by
+ *     clicking the link), signs, cat moves on-chain.
+ *
+ * The SDK owns the QUERY shape (param names + encoding), consumers own
+ * the URL PATH. Two consumers today — cat21.space (Path 1 via
+ * cat21-indexer/frontend) and cat21-wallet manual/agent UIs (Path 2/3)
+ * — share the same query names so a permalink minted by one is
+ * consumable by the other.
+ *
+ * See workspace HARD RULE "Offers can be shared in the wild" in
+ * `/Work/ordpool/CLAUDE.md` and its SDK companion. Distribution is
+ * *not* the security boundary; the sniping-proof PSBT structure is.
+ *
+ * Pure functions. No Angular, no I/O.
+ */
+/** Query param keys — single source of truth. */
+declare const CAT21_QUERY_KEYS: {
+    /** `/cat/N?ask=<sats>` — seller advertises a price. */
+    readonly ask: "ask";
+    /** `?catNumber=<n>` — pre-fill for make-offer or transfer. */
+    readonly catNumber: "catNumber";
+    /** `?askPrice=<sats>` — buyer-side landing knows what the seller asked. */
+    readonly askPrice: "askPrice";
+    /** `?fromAsk=1` — buyer-side banner "responding to an ask". */
+    readonly fromAsk: "fromAsk";
+    /** `?offer=<base64>` — the buyer-signed PSBT bytes to hand the seller. */
+    readonly offer: "offer";
+    /** `?catTxid=<64-hex>` — one half of the cat outpoint (matches offer input 0). */
+    readonly catTxid: "catTxid";
+    /** `?catVout=<uint>` — other half of the cat outpoint. */
+    readonly catVout: "catVout";
+};
+/** Cat outpoint carried in URLs (accept-offer, transfer). */
+interface CatOutpoint {
+    /** Lowercase 64-hex txid. */
+    txid: string;
+    /** Zero-based vout index. */
+    vout: number;
+}
+interface AskQueryArgs {
+    /** Price the seller is asking, in sats. Must be a positive integer. */
+    askSats: number;
+}
+/**
+ * Build the query params for an ask permalink. Consumer concatenates
+ * with its own detail path, e.g. `${origin}/cat/${n}?${new URLSearchParams(query)}`.
+ */
+declare function buildAskQueryParams(args: AskQueryArgs): Record<string, string>;
+/**
+ * Parse an ask-query. Returns `askSats` when the `ask` param is a
+ * positive integer; `null` when missing or malformed (defence-in-depth
+ * against tampered links).
+ */
+declare function parseAskQueryParams(query: URLSearchParams | Record<string, string | null>): {
+    askSats: number | null;
+};
+interface BuyOfferQueryArgs {
+    /** Cat the buyer wants to bid on. */
+    catNumber: number;
+    /** Ask price from the seller's link, in sats. Optional — a plain
+     *  "make me an offer" link is fine too. */
+    askSats?: number;
+}
+declare function buildBuyOfferQueryParams(args: BuyOfferQueryArgs): Record<string, string>;
+declare function parseBuyOfferQueryParams(query: URLSearchParams | Record<string, string | null>): {
+    catNumber: number | null;
+    askSats: number | null;
+    fromAsk: boolean;
+};
+interface AcceptOfferQueryArgs {
+    /** Buyer-signed PSBT bytes, already base64-encoded. */
+    offerBase64: string;
+    /** Cat outpoint the offer targets (matches offer input 0). */
+    catOutpoint: CatOutpoint;
+}
+declare function buildAcceptOfferQueryParams(args: AcceptOfferQueryArgs): Record<string, string>;
+declare function parseAcceptOfferQueryParams(query: URLSearchParams | Record<string, string | null>): {
+    offerBase64: string | null;
+    catOutpoint: CatOutpoint | null;
+    bundleComplete: boolean;
+};
+interface TransferQueryArgs {
+    /** Cat the sender is transferring. */
+    catNumber: number;
+    /** Cat outpoint. Optional — the transfer page falls back to picker if omitted. */
+    catOutpoint?: CatOutpoint;
+}
+declare function buildTransferQueryParams(args: TransferQueryArgs): Record<string, string>;
+declare function parseTransferQueryParams(query: URLSearchParams | Record<string, string | null>): {
+    catNumber: number | null;
+    catOutpoint: CatOutpoint | null;
+};
+
+/**
  * Ord-protocol field tags. Mirrors ordpool-parser's `knownFields`
  * value-for-value. See https://docs.ordinals.com/inscriptions.html
  * for the canonical reference.
@@ -3423,5 +3528,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
-export type { AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeFundingInput, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, ParsedOffer, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeFundingInput, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, ParsedOffer, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
