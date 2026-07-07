@@ -25,6 +25,7 @@ import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
+import { CatOutpoint } from '../cat21-share/cat-outpoint';
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { findSignerOrThrow } from '../wallet/signers';
@@ -43,10 +44,8 @@ import { Cat21OfferBuyerInput, Cat21OfferSellerInput } from './cat21-offer.types
  * the seller can sign offline without a round-trip — that's the
  * "buyer-initiated, sniping-proof" property of ord-style offers.
  */
-export interface BuyOfferTargetCat {
+export interface BuyOfferTargetCat extends CatOutpoint {
   catNumber: number;
-  txid: string;
-  vout: number;
   /** Always 546 sats for a CAT-21 cat UTXO; carried on the type for safety. */
   value: number;
   /** scriptPubKey of the seller's cat UTXO, raw bytes. */

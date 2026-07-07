@@ -78,10 +78,11 @@ export * from './cat21-offer/cat21-offer-input-adapter';
 export * from './cat21-broadcast/broadcast.helper';
 export * from './cat21-broadcast/slipstream.helper';
 
-// --- CAT-21 share (permalink query builders + parsers for ask, buy,
-//     accept-offer, transfer — single source of truth for URL params
-//     across cat21.space, cat21-wallet, and any future consumer). ---
-export * from './cat21-share/permalink.helper';
+// --- CAT-21 share (canonical CatOutpoint type + permalink query
+//     builders/parsers for ask, buy, accept-offer, transfer — single
+//     source of truth for URL params and outpoint shape across
+//     cat21.space, cat21-wallet, and any future consumer). ---
+export * from './cat21-share';
 
 // --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
 export * from './inscribe/inscription-envelope';

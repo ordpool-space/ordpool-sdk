@@ -40,7 +40,7 @@ export * from './cat21-offer/cat21-offer.types';
 export * from './cat21-offer/cat21-offer-input-adapter';
 export * from './cat21-broadcast/broadcast.helper';
 export * from './cat21-broadcast/slipstream.helper';
-export * from './cat21-share/permalink.helper';
+export * from './cat21-share';
 export * from './inscribe/inscription-envelope';
 export * from './inscribe/inscription-commit.helper';
 export * from './inscribe/inscription-reveal.helper';

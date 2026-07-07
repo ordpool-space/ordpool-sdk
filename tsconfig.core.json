@@ -40,6 +40,8 @@
     "src/cat21-offer/cat21-offer-input-adapter.ts",
     "src/cat21-broadcast/broadcast.helper.ts",
     "src/cat21-broadcast/slipstream.helper.ts",
+    "src/cat21-share/index.ts",
+    "src/cat21-share/cat-outpoint.ts",
     "src/cat21-share/permalink.helper.ts",
     "src/agent-mode/agent-policy.helper.ts",
     "src/agent-mode/agent-policy.types.ts",

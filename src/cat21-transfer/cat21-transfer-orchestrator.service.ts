@@ -21,6 +21,7 @@ import {
   pickLargestFundingUtxoThatCovers,
   type FundingUtxo,
 } from '../cat21-fee/coin-selection.helper';
+import { CatOutpoint } from '../cat21-share/cat-outpoint';
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { Cat21Service } from '../cat21-mint/cat21.service';
@@ -52,10 +53,8 @@ import {
  * contained and a future protocol change wouldn't break the call
  * shape silently.
  */
-export interface Cat21Holding {
+export interface Cat21Holding extends CatOutpoint {
   catNumber: number;
-  txid: string;
-  vout: number;
   /** Always 546 sats for a CAT-21 cat UTXO. */
   value: number;
 }

@@ -4655,7 +4655,10 @@ class Cat21AcceptOfferOrchestrator {
      * Minimum price the seller is willing to accept. The orchestrator
      * REFUSES to validate until the consumer sets this explicitly — a
      * forgotten value would let any 1-sat offer pass the floor check.
-     * No default. Use `setFloorPriceSats(0)` if you genuinely mean zero.
+     * No default. Human UI consumers that show the price in a summary
+     * panel before signing (where the human IS the floor check) should
+     * call `disableFloorGate()` at construction; headless / bot
+     * consumers must set it programmatically via `setFloorPriceSats(n)`.
      */
     floorPriceSats = signal(null, ...(ngDevMode ? [{ debugName: "floorPriceSats" }] : []));
     /**
@@ -4806,6 +4809,28 @@ class Cat21AcceptOfferOrchestrator {
             this.setPastedOffer(paste);
     }
     /**
+     * Human-UI opt-out for the floor safety-net.
+     *
+     * Sets floor to 0 AND keeps it there across resets — the seller
+     * sees `pricePaidSats` in the validated summary before clicking
+     * sign; the human is the check. Under the hood, this flips
+     * `resetFormFields()` so `floorPriceSats` no longer wipes back to
+     * `null` on wallet-swap / reset.
+     *
+     * Call once at construction / ngOnInit. `setFloorPriceSats(n)`
+     * still works after — the seller can raise the floor to enable the
+     * auto-reject-lowballs behaviour without touching this flag.
+     *
+     * Bot / headless consumers should NOT call this — they must set a
+     * floor explicitly per-run so a forgotten value doesn't silently
+     * pass a 1-sat offer. See audit finding H2 for the rationale.
+     */
+    disableFloorGate() {
+        this.humanUiOptOut = true;
+        this.floorPriceSats.set(0);
+    }
+    humanUiOptOut = false;
+    /**
      * MAX_PASTED_OFFER_BYTES exposed for the UI's pre-paste textarea
      * `maxlength` attribute. Mirrors the static class field so consumers
      * don't need to reach for the constructor.
@@ -4876,11 +4901,12 @@ class Cat21AcceptOfferOrchestrator {
         this.pastedOffer.set(null);
         this.parsedOffer.set(null);
         this.validationResult.set(null);
-        // Back to `null` (not `0`) so the audit-H2 gate — "orchestrator
-        // refuses to leave idle without an explicit floor" — fires again on
-        // the next paste. Consumers that want a one-click flow re-set 0
-        // explicitly (accept-offer.ts's URL-bundle ngOnInit does this).
-        this.floorPriceSats.set(null);
+        // Reset floor to `null` so the audit-H2 gate — "orchestrator
+        // refuses to leave idle without an explicit floor" — fires again
+        // on the next paste. Human UI consumers that opted out via
+        // `disableFloorGate()` keep the 0 across resets; bot / headless
+        // consumers get the null-required behaviour back.
+        this.floorPriceSats.set(this.humanUiOptOut ? 0 : null);
         this.expectedCatUtxo.set(null);
         this.expectedSellerPaymentAddress.set(null);
     }

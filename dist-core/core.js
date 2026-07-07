@@ -75,10 +75,11 @@ __exportStar(require("./cat21-offer/cat21-offer-input-adapter"), exports);
 // --- CAT-21 broadcast (mempool / Slipstream dispatcher) ---
 __exportStar(require("./cat21-broadcast/broadcast.helper"), exports);
 __exportStar(require("./cat21-broadcast/slipstream.helper"), exports);
-// --- CAT-21 share (permalink query builders + parsers for ask, buy,
-//     accept-offer, transfer — single source of truth for URL params
-//     across cat21.space, cat21-wallet, and any future consumer). ---
-__exportStar(require("./cat21-share/permalink.helper"), exports);
+// --- CAT-21 share (canonical CatOutpoint type + permalink query
+//     builders/parsers for ask, buy, accept-offer, transfer — single
+//     source of truth for URL params and outpoint shape across
+//     cat21.space, cat21-wallet, and any future consumer). ---
+__exportStar(require("./cat21-share"), exports);
 // --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
 __exportStar(require("./inscribe/inscription-envelope"), exports);
 __exportStar(require("./inscribe/inscription-commit.helper"), exports);

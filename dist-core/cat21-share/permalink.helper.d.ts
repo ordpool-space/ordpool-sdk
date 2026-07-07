@@ -25,6 +25,7 @@
  *
  * Pure functions. No Angular, no I/O.
  */
+import { CatOutpoint } from './cat-outpoint';
 /** Query param keys — single source of truth. */
 export declare const CAT21_QUERY_KEYS: {
     /** `/cat/N?ask=<sats>` — seller advertises a price. */
@@ -42,13 +43,6 @@ export declare const CAT21_QUERY_KEYS: {
     /** `?catVout=<uint>` — other half of the cat outpoint. */
     readonly catVout: "catVout";
 };
-/** Cat outpoint carried in URLs (accept-offer, transfer). */
-export interface CatOutpoint {
-    /** Lowercase 64-hex txid. */
-    txid: string;
-    /** Zero-based vout index. */
-    vout: number;
-}
 export interface AskQueryArgs {
     /** Price the seller is asking, in sats. Must be a positive integer. */
     askSats: number;

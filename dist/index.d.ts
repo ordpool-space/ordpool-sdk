@@ -1591,6 +1591,25 @@ interface PrepareBuyOfferBuyerInputArgs {
 declare function prepareBuyOfferBuyerInput(args: PrepareBuyOfferBuyerInputArgs): Cat21OfferBuyerInput;
 
 /**
+ * Bare cat UTXO outpoint — `{ txid, vout }` — the minimum a caller
+ * needs to reference a specific cat on chain. Enriched siblings live
+ * alongside their orchestrators and extend this shape:
+ *
+ *   - `Cat21Holding` (transfer): `CatOutpoint & { catNumber; value }`
+ *   - `BuyOfferTargetCat` (offer-create): `CatOutpoint & { catNumber; value; scriptPubKey }`
+ *   - `ParsedOffer.catUtxo` (offer-accept): re-uses `CatOutpoint`
+ *
+ * The URL-permalink layer (`permalink.helper.ts`) uses only the
+ * bare shape — cat number + value are consumer-side enrichments.
+ */
+interface CatOutpoint {
+    /** Lowercase 64-hex txid. */
+    txid: string;
+    /** Zero-based output index. */
+    vout: number;
+}
+
+/**
  * What the buyer needs to know about the cat they want to bid on.
  * Caller (typically a frontend) fetches this from ord: cat number →
  * inscription → current UTXO at the seller's address.
@@ -1599,10 +1618,8 @@ declare function prepareBuyOfferBuyerInput(args: PrepareBuyOfferBuyerInputArgs):
  * the seller can sign offline without a round-trip — that's the
  * "buyer-initiated, sniping-proof" property of ord-style offers.
  */
-interface BuyOfferTargetCat {
+interface BuyOfferTargetCat extends CatOutpoint {
     catNumber: number;
-    txid: string;
-    vout: number;
     /** Always 546 sats for a CAT-21 cat UTXO; carried on the type for safety. */
     value: number;
     /** scriptPubKey of the seller's cat UTXO, raw bytes. */
@@ -1733,11 +1750,8 @@ declare class Cat21CreateOfferOrchestrator {
 interface ParsedOffer {
     /** Raw bytes of the (still buyer-signed-only) PSBT. */
     psbtBytes: Uint8Array;
-    /** Cat being sold (txid:vout — sat 0 of this UTXO is the cat sat). */
-    catUtxo: {
-        txid: string;
-        vout: number;
-    };
+    /** Cat being sold — sat 0 of this UTXO is the cat sat. */
+    catUtxo: CatOutpoint;
     /** Buyer's payout — sats arriving at the seller's address. */
     pricePaidSats: number;
     /** 546 cat-postage that comes back to the seller's payout output. */
@@ -1771,7 +1785,10 @@ declare class Cat21AcceptOfferOrchestrator {
      * Minimum price the seller is willing to accept. The orchestrator
      * REFUSES to validate until the consumer sets this explicitly — a
      * forgotten value would let any 1-sat offer pass the floor check.
-     * No default. Use `setFloorPriceSats(0)` if you genuinely mean zero.
+     * No default. Human UI consumers that show the price in a summary
+     * panel before signing (where the human IS the floor check) should
+     * call `disableFloorGate()` at construction; headless / bot
+     * consumers must set it programmatically via `setFloorPriceSats(n)`.
      */
     readonly floorPriceSats: _angular_core.WritableSignal<number>;
     /**
@@ -1779,10 +1796,7 @@ declare class Cat21AcceptOfferOrchestrator {
      * checks input 0 against this UTXO and rejects offers for the wrong
      * cat. UI typically derives this from the seller's selected cat-to-sell.
      */
-    readonly expectedCatUtxo: _angular_core.WritableSignal<{
-        txid: string;
-        vout: number;
-    }>;
+    readonly expectedCatUtxo: _angular_core.WritableSignal<CatOutpoint>;
     /**
      * The address the seller wants the payment to land at. When set,
      * validation rejects offers whose Output 1 (seller payment) doesn't
@@ -1832,15 +1846,31 @@ declare class Cat21AcceptOfferOrchestrator {
     setPastedOffer(paste: string | null): void;
     setFloorPriceSats(sats: number): void;
     /**
+     * Human-UI opt-out for the floor safety-net.
+     *
+     * Sets floor to 0 AND keeps it there across resets — the seller
+     * sees `pricePaidSats` in the validated summary before clicking
+     * sign; the human is the check. Under the hood, this flips
+     * `resetFormFields()` so `floorPriceSats` no longer wipes back to
+     * `null` on wallet-swap / reset.
+     *
+     * Call once at construction / ngOnInit. `setFloorPriceSats(n)`
+     * still works after — the seller can raise the floor to enable the
+     * auto-reject-lowballs behaviour without touching this flag.
+     *
+     * Bot / headless consumers should NOT call this — they must set a
+     * floor explicitly per-run so a forgotten value doesn't silently
+     * pass a 1-sat offer. See audit finding H2 for the rationale.
+     */
+    disableFloorGate(): void;
+    private humanUiOptOut;
+    /**
      * MAX_PASTED_OFFER_BYTES exposed for the UI's pre-paste textarea
      * `maxlength` attribute. Mirrors the static class field so consumers
      * don't need to reach for the constructor.
      */
     readonly maxPastedOfferBytes: number;
-    setExpectedCatUtxo(utxo: {
-        txid: string;
-        vout: number;
-    } | null): void;
+    setExpectedCatUtxo(utxo: CatOutpoint | null): void;
     setExpectedSellerPaymentAddress(address: string | null): void;
     /**
      * Sign input 0 (the seller's cat UTXO) at the ordinals address and
@@ -2013,10 +2043,8 @@ declare function prepareTransferFundingInput(args: PrepareTransferInputArgs): Ca
  * contained and a future protocol change wouldn't break the call
  * shape silently.
  */
-interface Cat21Holding {
+interface Cat21Holding extends CatOutpoint {
     catNumber: number;
-    txid: string;
-    vout: number;
     /** Always 546 sats for a CAT-21 cat UTXO. */
     value: number;
 }
@@ -2374,6 +2402,7 @@ declare function submitToSlipstream(rawTxHex: string, options?: SubmitToSlipstre
  *
  * Pure functions. No Angular, no I/O.
  */
+
 /** Query param keys — single source of truth. */
 declare const CAT21_QUERY_KEYS: {
     /** `/cat/N?ask=<sats>` — seller advertises a price. */
@@ -2391,13 +2420,6 @@ declare const CAT21_QUERY_KEYS: {
     /** `?catVout=<uint>` — other half of the cat outpoint. */
     readonly catVout: "catVout";
 };
-/** Cat outpoint carried in URLs (accept-offer, transfer). */
-interface CatOutpoint {
-    /** Lowercase 64-hex txid. */
-    txid: string;
-    /** Zero-based vout index. */
-    vout: number;
-}
 interface AskQueryArgs {
     /** Price the seller is asking, in sats. Must be a positive integer. */
     askSats: number;

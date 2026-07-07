@@ -57,9 +57,10 @@ export * from './cat21-transfer/cat21-transfer-orchestrator.service';
 export * from './cat21-broadcast/broadcast.helper';
 export * from './cat21-broadcast/slipstream.helper';
 
-// --- cat21 share (permalink query builders + parsers — single source
-//     of truth for ask / buy / accept / transfer URL params). ---
-export * from './cat21-share/permalink.helper';
+// --- cat21 share (canonical CatOutpoint type + permalink query
+//     builders/parsers — single source of truth for URL params and
+//     outpoint shape). ---
+export * from './cat21-share';
 
 // --- inscribe (commit + reveal pipeline; ord-compatible envelope) ---
 export * from './inscribe/inscription-envelope';
