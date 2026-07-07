@@ -6869,6 +6869,274 @@ function inscribeAndBroadcast(args) {
 }
 
 /**
+ * High-level inscribe flow. Wraps `Cat21Service` (UTXOs, broadcast) +
+ * `WalletService` (connected wallet) + the pure `simulateInscribeFees`
+ * / `inscribeAndBroadcast` helpers into one cohesive surface, so
+ * consumers drive the same state machine + reactive pipelines with
+ * thin templates. Sibling of `Cat21MintOrchestrator`.
+ *
+ * Singleton (`providedIn: 'root'`) — state persists across route
+ * navigations within a session. Auto-resets `feeRate`, `selectedUtxo`,
+ * `content`, and the success/error fields when the connected wallet
+ * changes (old UTXO is gone; the user picks fresh for the new wallet).
+ *
+ * # Two-tx model
+ *
+ * Every inscribe produces a commit + reveal pair. Simulations show
+ * the sum of both fees + the funding requirement. `mint()` calls
+ * `inscribeAndBroadcast` which signs commit via the wallet, broadcasts
+ * both txs sequentially via `Cat21Service.postTransaction`, and returns
+ * the pair of txids + the ephemeral bearer key.
+ *
+ * # Bearer key
+ *
+ * The ephemeral private key that controls the commit output is
+ * returned in `successResult().ephemeral`. Between commit broadcast
+ * and reveal broadcast (a few seconds) losing this key means the
+ * commit output is unrecoverable. The orchestrator does not persist
+ * it — that is a consumer concern.
+ */
+class InscribeMintOrchestrator {
+    wallet = inject(WalletService);
+    cat21 = inject(Cat21Service);
+    network = inject(bitcoinNetwork);
+    // --- Writable inputs ----------------------------------------------------
+    /** sat/vB the user picked (from the fee picker or manually). null until set. */
+    feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
+    /** Which UTXO from the list the user picked (consumers wire auto-select). */
+    selectedUtxo = signal(null, ...(ngDevMode ? [{ debugName: "selectedUtxo" }] : []));
+    /** The inscription payload. Simulations only fire when this is set. */
+    content = signal(null, ...(ngDevMode ? [{ debugName: "content" }] : []));
+    // --- Internals ----------------------------------------------------------
+    lastWalletAddress = null;
+    feeRateSubject = new BehaviorSubject(null);
+    contentSubject = new BehaviorSubject(null);
+    // --- Output state -------------------------------------------------------
+    state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
+    errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
+    successResult = signal(null, ...(ngDevMode ? [{ debugName: "successResult" }] : []));
+    /** Currently connected wallet bridged to a signal for template reads. */
+    connectedWallet = toSignal(this.wallet.connectedWallet$, { initialValue: null });
+    /** Convenience computed for `state() === 'ready'` gating. */
+    isReady = computed(() => this.state() === 'ready', ...(ngDevMode ? [{ debugName: "isReady" }] : []));
+    // --- Derived streams ----------------------------------------------------
+    /**
+     * UTXOs for the connected wallet's payment address. Re-fetches on
+     * wallet change. Errors are mapped to an empty list and an error
+     * state. Shared between subscribers via `shareReplay` so the side
+     * effects on `state` only fire once per emission.
+     *
+     * `startWith(null)` keeps the chain hot before any wallet connects;
+     * downstream `simulations$` then emits `[]` instead of stalling.
+     */
+    utxos$ = this.wallet.connectedWallet$.pipe(startWith(null), switchMap((w) => {
+        if (!w) {
+            this.state.set('idle');
+            return of([]);
+        }
+        this.state.set('loading-utxos');
+        return this.cat21.getUtxos(w.paymentAddress).pipe(tap(() => this.state.set('ready')), catchError((err) => {
+            this.errorMessage.set(`Failed to load UTXOs: ${err instanceof Error ? err.message : String(err)}`);
+            this.state.set('error');
+            return of([]);
+        }));
+    }), shareReplay({ bufferSize: 1, refCount: true }));
+    /**
+     * For each UTXO + current fee rate + set content, run
+     * `simulateInscribeFees` to produce the commit + reveal fee
+     * breakdown. UTXOs that can't cover `fundingRequirementSats` come
+     * through with `insufficient: true` rather than poisoning the whole
+     * stream.
+     *
+     * Re-emits whenever utxos$, wallet, feeRate, or content changes.
+     * Emits `[]` when content is null (consumer hasn't wired the
+     * inscription payload yet).
+     */
+    simulations$ = combineLatest([
+        this.utxos$,
+        this.wallet.connectedWallet$.pipe(startWith(null)),
+        // BehaviorSubject mirrors of the writable signals, fed by
+        // `setFeeRate` / `setContent`. Signals stay as canonical writables
+        // for template reads; these subjects bridge to the RxJS pipeline
+        // without needing the Angular signal-effect runtime (which
+        // toObservable depends on and isn't available in plain Injector
+        // contexts the SDK tests use).
+        this.feeRateSubject,
+        this.contentSubject,
+    ]).pipe(map(([utxos, wallet, feeRate, content]) => this.computeSimulations(utxos, wallet, feeRate, content)), shareReplay({ bufferSize: 1, refCount: true }));
+    /** Pass-through of the SDK's polled fee tiers. */
+    recommendedFees$ = this.cat21.recommendedFees$;
+    // --- Setup --------------------------------------------------------------
+    constructor() {
+        // Auto-reset writables when the wallet changes — the old UTXO is
+        // no longer in the new wallet's list, and stale fee / content
+        // state must not leak across sessions. Subscription leak is fine:
+        // the service is providedIn:'root' so its lifetime is the app's.
+        this.walletChangeSub = this.wallet.connectedWallet$.subscribe((w) => {
+            if (!w) {
+                this.lastWalletAddress = null;
+                this.resetFormState();
+                return;
+            }
+            if (this.lastWalletAddress === w.ordinalsAddress)
+                return;
+            this.lastWalletAddress = w.ordinalsAddress;
+            this.resetFormState();
+        });
+    }
+    walletChangeSub;
+    // --- Commands -----------------------------------------------------------
+    setFeeRate(rate) {
+        if (!Number.isFinite(rate) || rate <= 0)
+            return;
+        this.feeRate.set(rate);
+        this.feeRateSubject.next(rate);
+    }
+    setSelectedUtxo(utxo) {
+        this.selectedUtxo.set(utxo);
+    }
+    setContent(content) {
+        this.content.set(content);
+        this.contentSubject.next(content);
+    }
+    /**
+     * Trigger the inscribe. Requires a connected wallet, a feeRate set,
+     * a selectedUtxo, and content set. Composes:
+     *   1. `simulateInscribeFees` for the picked UTXO to derive the
+     *      exact commit / reveal fee at broadcast time.
+     *   2. `inscribeAndBroadcast` — signs the commit input via the
+     *      wallet, broadcasts commit, signs reveal internally,
+     *      broadcasts reveal — via `Cat21Service.postTransaction`.
+     *
+     * Transitions state to `minting` → `success` (with `successResult`)
+     * or `error` (with `errorMessage`).
+     */
+    mint() {
+        const wallet = this.connectedWallet();
+        const feeRate = this.feeRate();
+        const selected = this.selectedUtxo();
+        const content = this.content();
+        if (!wallet)
+            return throwError(() => new Error('No wallet connected'));
+        if (!feeRate)
+            return throwError(() => new Error('No fee rate set'));
+        if (!selected)
+            return throwError(() => new Error('No UTXO selected'));
+        if (!content)
+            return throwError(() => new Error('No inscription content set'));
+        const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
+        const recipient = content.recipient ?? wallet.ordinalsAddress;
+        this.state.set('minting');
+        this.errorMessage.set(null);
+        this.successResult.set(null);
+        return inscribeAndBroadcast({
+            walletType: wallet.type,
+            paymentOutput: selected,
+            paymentPublicKey,
+            paymentAddress: wallet.paymentAddress,
+            recipientAddress: recipient,
+            body: content.body,
+            contentType: content.contentType,
+            envelopeFields: content.envelopeFields,
+            feeRatePerVbyte: feeRate,
+            tip: content.tip,
+            note: content.note,
+            parent: content.parent,
+            contentEncoding: content.contentEncoding,
+            network: this.network,
+            broadcast: (txHex) => this.cat21.postTransaction(txHex),
+        }).pipe(tap((result) => {
+            this.successResult.set(result);
+            this.state.set('success');
+        }), catchError((err) => {
+            const msg = err instanceof Error ? err.message : String(err);
+            this.errorMessage.set(msg);
+            this.state.set('error');
+            return throwError(() => err);
+        }));
+    }
+    /**
+     * Wipe form state back to a fresh mint (typically the "Mint another"
+     * button on the success screen). Keeps the wallet connected.
+     */
+    reset() {
+        this.resetFormState();
+        this.state.set(this.connectedWallet() ? 'ready' : 'idle');
+    }
+    // --- Internals ----------------------------------------------------------
+    resetFormState() {
+        this.feeRate.set(null);
+        this.feeRateSubject.next(null);
+        this.selectedUtxo.set(null);
+        this.content.set(null);
+        this.contentSubject.next(null);
+        this.errorMessage.set(null);
+        this.successResult.set(null);
+    }
+    computeSimulations(utxos, wallet, feeRate, content) {
+        if (!wallet || !feeRate || !content || utxos.length === 0)
+            return [];
+        const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
+        const recipient = content.recipient ?? wallet.ordinalsAddress;
+        // Deterministic dummy x-only pubkey; simulateInscribeFees only
+        // uses it to size the envelope (all 32-byte pubkeys produce the
+        // same envelope byte count). The real ephemeral key is generated
+        // inside `inscribeAndBroadcast` at mint time.
+        const dummyPubkeyXonly = new Uint8Array(32).fill(0x02);
+        const out = [];
+        for (const utxo of utxos) {
+            try {
+                const fundingInput = prepareInscribeFundingInput({
+                    utxo,
+                    paymentPublicKey,
+                    paymentAddress: wallet.paymentAddress,
+                    isSimulation: true,
+                    network: this.network,
+                });
+                const simulation = simulateInscribeFees({
+                    feeRatePerVbyte: feeRate,
+                    body: content.body,
+                    contentType: content.contentType,
+                    envelopeFields: content.envelopeFields,
+                    fundingInput,
+                    senderChangeAddress: wallet.paymentAddress,
+                    recipientAddress: recipient,
+                    ephemeralPubkeyXonly: dummyPubkeyXonly,
+                    tip: content.tip,
+                    walletType: wallet.type,
+                    network: this.network,
+                });
+                // Second gate: the UTXO must fund the whole commit
+                // (commitOutputValueSats + commitFeeSats). `simulateInscribeFees`
+                // itself doesn't reject on insufficient — it just reports the
+                // requirement. The commit builder would throw at real mint
+                // time on inputs < requirement; flag here so the picker
+                // greys out unusable rows.
+                if (utxo.value < simulation.fundingRequirementSats) {
+                    out.push({ utxo, simulation, insufficient: true });
+                }
+                else {
+                    out.push({ utxo, simulation, insufficient: false });
+                }
+            }
+            catch {
+                // Layer-1 / Layer-2 refused this UTXO (e.g., legacy P2PKH
+                // without transactionHex, or address adapter rejection).
+                // Surface as insufficient so the picker greys it out.
+                out.push({ utxo, simulation: null, insufficient: true });
+            }
+        }
+        return out;
+    }
+    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: InscribeMintOrchestrator, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
+    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: InscribeMintOrchestrator, providedIn: 'root' });
+}
+i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: InscribeMintOrchestrator, decorators: [{
+            type: Injectable,
+            args: [{ providedIn: 'root' }]
+        }], ctorParameters: () => [] });
+
+/**
  * Brotli compression helper for inscribe bodies.
  *
  * Inscription bytes go on-chain at ~~32 sat/vB during congestion;
@@ -6990,5 +7258,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
 //# sourceMappingURL=ordpool-sdk.mjs.map

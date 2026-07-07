@@ -71,6 +71,7 @@ export * from './inscribe/inscription-fee.helper';
 export * from './inscribe/inscription.service.helper';
 export * from './inscribe/inscribe-broadcast.helper';
 export * from './inscribe/inscribe-orchestrator';
+export * from './inscribe/inscribe-mint-orchestrator.service';
 export * from './inscribe/inscribe-brotli.helper';
 
 // --- agent-mode (autonomous-action policy gate) ---

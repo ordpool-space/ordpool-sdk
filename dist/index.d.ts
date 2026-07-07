@@ -3396,6 +3396,148 @@ interface InscribeAndBroadcastResult {
 declare function inscribeAndBroadcast(args: InscribeAndBroadcastArgs): Observable<InscribeAndBroadcastResult>;
 
 /**
+ * The per-mint payload the consumer wires into the orchestrator via
+ * `setContent`. `body` and `contentType` land in the inscription
+ * envelope; `tip` becomes the reveal's vout[1] output; the rest are
+ * optional ord envelope tags. Recipient is optional — when unset the
+ * inscription lands on the connected wallet's ordinals address.
+ */
+interface InscribeContent {
+    body: Uint8Array;
+    contentType?: string;
+    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
+    /** Optional reveal vout[1] tip. Cubes-frontend pins its donation address here. */
+    tip?: {
+        address: string;
+        value: number;
+    };
+    note?: string;
+    parent?: string;
+    contentEncoding?: 'br';
+    /** Override for the inscription's recipient. Defaults to wallet.ordinalsAddress. */
+    recipient?: string;
+}
+/**
+ * One row in the orchestrator's `simulations$` stream. Same shape
+ * as the cat21 sibling but with the inscribe-specific fee result:
+ * - `insufficient: true` — UTXO can't cover
+ *   `commitOutputValueSats + commitFeeSats` at the current rate.
+ * - `insufficient: false` — UTXO is viable; `simulation` carries the
+ *   commit + reveal vsize / fee breakdown for the "this is what'll
+ *   happen" panel.
+ */
+interface InscribeUtxoSimulation {
+    utxo: TxnOutput;
+    simulation: SimulateInscribeFeesResult | null;
+    insufficient: boolean;
+}
+/**
+ * State machine the consumer's template branches on. Same six-state
+ * shape as the cat21 mint orchestrator.
+ */
+type InscribeMintState = 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
+/**
+ * High-level inscribe flow. Wraps `Cat21Service` (UTXOs, broadcast) +
+ * `WalletService` (connected wallet) + the pure `simulateInscribeFees`
+ * / `inscribeAndBroadcast` helpers into one cohesive surface, so
+ * consumers drive the same state machine + reactive pipelines with
+ * thin templates. Sibling of `Cat21MintOrchestrator`.
+ *
+ * Singleton (`providedIn: 'root'`) — state persists across route
+ * navigations within a session. Auto-resets `feeRate`, `selectedUtxo`,
+ * `content`, and the success/error fields when the connected wallet
+ * changes (old UTXO is gone; the user picks fresh for the new wallet).
+ *
+ * # Two-tx model
+ *
+ * Every inscribe produces a commit + reveal pair. Simulations show
+ * the sum of both fees + the funding requirement. `mint()` calls
+ * `inscribeAndBroadcast` which signs commit via the wallet, broadcasts
+ * both txs sequentially via `Cat21Service.postTransaction`, and returns
+ * the pair of txids + the ephemeral bearer key.
+ *
+ * # Bearer key
+ *
+ * The ephemeral private key that controls the commit output is
+ * returned in `successResult().ephemeral`. Between commit broadcast
+ * and reveal broadcast (a few seconds) losing this key means the
+ * commit output is unrecoverable. The orchestrator does not persist
+ * it — that is a consumer concern.
+ */
+declare class InscribeMintOrchestrator {
+    private wallet;
+    private cat21;
+    private network;
+    /** sat/vB the user picked (from the fee picker or manually). null until set. */
+    readonly feeRate: _angular_core.WritableSignal<number>;
+    /** Which UTXO from the list the user picked (consumers wire auto-select). */
+    readonly selectedUtxo: _angular_core.WritableSignal<TxnOutput>;
+    /** The inscription payload. Simulations only fire when this is set. */
+    readonly content: _angular_core.WritableSignal<InscribeContent>;
+    private lastWalletAddress;
+    private readonly feeRateSubject;
+    private readonly contentSubject;
+    readonly state: _angular_core.WritableSignal<InscribeMintState>;
+    readonly errorMessage: _angular_core.WritableSignal<string>;
+    readonly successResult: _angular_core.WritableSignal<InscribeAndBroadcastResult>;
+    /** Currently connected wallet bridged to a signal for template reads. */
+    readonly connectedWallet: _angular_core.Signal<WalletInfo>;
+    /** Convenience computed for `state() === 'ready'` gating. */
+    readonly isReady: _angular_core.Signal<boolean>;
+    /**
+     * UTXOs for the connected wallet's payment address. Re-fetches on
+     * wallet change. Errors are mapped to an empty list and an error
+     * state. Shared between subscribers via `shareReplay` so the side
+     * effects on `state` only fire once per emission.
+     *
+     * `startWith(null)` keeps the chain hot before any wallet connects;
+     * downstream `simulations$` then emits `[]` instead of stalling.
+     */
+    readonly utxos$: Observable<TxnOutput[]>;
+    /**
+     * For each UTXO + current fee rate + set content, run
+     * `simulateInscribeFees` to produce the commit + reveal fee
+     * breakdown. UTXOs that can't cover `fundingRequirementSats` come
+     * through with `insufficient: true` rather than poisoning the whole
+     * stream.
+     *
+     * Re-emits whenever utxos$, wallet, feeRate, or content changes.
+     * Emits `[]` when content is null (consumer hasn't wired the
+     * inscription payload yet).
+     */
+    readonly simulations$: Observable<InscribeUtxoSimulation[]>;
+    /** Pass-through of the SDK's polled fee tiers. */
+    readonly recommendedFees$: Observable<RecommendedFees>;
+    constructor();
+    private readonly walletChangeSub;
+    setFeeRate(rate: number): void;
+    setSelectedUtxo(utxo: TxnOutput | null): void;
+    setContent(content: InscribeContent | null): void;
+    /**
+     * Trigger the inscribe. Requires a connected wallet, a feeRate set,
+     * a selectedUtxo, and content set. Composes:
+     *   1. `simulateInscribeFees` for the picked UTXO to derive the
+     *      exact commit / reveal fee at broadcast time.
+     *   2. `inscribeAndBroadcast` — signs the commit input via the
+     *      wallet, broadcasts commit, signs reveal internally,
+     *      broadcasts reveal — via `Cat21Service.postTransaction`.
+     *
+     * Transitions state to `minting` → `success` (with `successResult`)
+     * or `error` (with `errorMessage`).
+     */
+    mint(): Observable<InscribeAndBroadcastResult>;
+    /**
+     * Wipe form state back to a fresh mint (typically the "Mint another"
+     * button on the success screen). Keeps the wallet connected.
+     */
+    reset(): void;
+    private resetFormState;
+    private computeSimulations;
+    static ɵfac: _angular_core.ɵɵFactoryDeclaration<InscribeMintOrchestrator, never>;
+    static ɵprov: _angular_core.ɵɵInjectableDeclaration<InscribeMintOrchestrator>;
+}
+
+/**
  * Brotli compression helper for inscribe bodies.
  *
  * Inscription bytes go on-chain at ~~32 sat/vB during congestion;
@@ -3553,5 +3695,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
-export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeFundingInput, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, ParsedOffer, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeMintState, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, ParsedOffer, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
