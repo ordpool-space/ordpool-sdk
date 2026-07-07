@@ -155,7 +155,7 @@ describe('Cat21AcceptOfferOrchestrator', () => {
       expect(orchestrator.pastedOffer()).toBeNull();
       expect(orchestrator.parsedOffer()).toBeNull();
       expect(orchestrator.validationResult()).toBeNull();
-      expect(orchestrator.floorPriceSats()).toBe(0);
+      expect(orchestrator.floorPriceSats()).toBeNull();
       expect(orchestrator.expectedCatUtxo()).toBeNull();
     });
   });

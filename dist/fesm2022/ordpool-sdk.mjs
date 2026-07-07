@@ -2034,13 +2034,11 @@ const binanceSigner = {
  * the rest of the SDK's cat-flow path.
  *
  * Multi-input signing: the wallet's `signPsbt` JSON-RPC accepts
- * `signAtIndex` as EITHER a single number or an array. Prefer the
+ * `signAtIndex` as EITHER a single number or an array. Send the
  * array form for multi-input flows (transfer, offer-accept) — the
- * wallet then signs every listed index inside ONE approval popup
+ * wallet signs every listed index inside ONE approval popup
  * (see `apps/extension/src/background/messaging/rpc-methods/sign-psbt.ts`
- * → ensureArray). The previous per-index chain fired one popup per
- * signature which cat21-wallet couldn't route reliably: after the
- * first popup closed, subsequent calls hung silently.
+ * → ensureArray).
  */
 function callCat21WalletSignPsbt(psbtHex, signAtIndex, network) {
     const provider = findCat21WalletProvider(window);
@@ -4878,7 +4876,11 @@ class Cat21AcceptOfferOrchestrator {
         this.pastedOffer.set(null);
         this.parsedOffer.set(null);
         this.validationResult.set(null);
-        this.floorPriceSats.set(0);
+        // Back to `null` (not `0`) so the audit-H2 gate — "orchestrator
+        // refuses to leave idle without an explicit floor" — fires again on
+        // the next paste. Consumers that want a one-click flow re-set 0
+        // explicitly (accept-offer.ts's URL-bundle ngOnInit does this).
+        this.floorPriceSats.set(null);
         this.expectedCatUtxo.set(null);
         this.expectedSellerPaymentAddress.set(null);
     }

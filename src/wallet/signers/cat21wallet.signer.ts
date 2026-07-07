@@ -55,13 +55,11 @@ interface Cat21WalletSignPsbtParams {
  * the rest of the SDK's cat-flow path.
  *
  * Multi-input signing: the wallet's `signPsbt` JSON-RPC accepts
- * `signAtIndex` as EITHER a single number or an array. Prefer the
+ * `signAtIndex` as EITHER a single number or an array. Send the
  * array form for multi-input flows (transfer, offer-accept) — the
- * wallet then signs every listed index inside ONE approval popup
+ * wallet signs every listed index inside ONE approval popup
  * (see `apps/extension/src/background/messaging/rpc-methods/sign-psbt.ts`
- * → ensureArray). The previous per-index chain fired one popup per
- * signature which cat21-wallet couldn't route reliably: after the
- * first popup closed, subsequent calls hung silently.
+ * → ensureArray).
  */
 function callCat21WalletSignPsbt(
   psbtHex: string,

@@ -315,7 +315,11 @@ export class Cat21AcceptOfferOrchestrator {
     this.pastedOffer.set(null);
     this.parsedOffer.set(null);
     this.validationResult.set(null);
-    this.floorPriceSats.set(0);
+    // Back to `null` (not `0`) so the audit-H2 gate — "orchestrator
+    // refuses to leave idle without an explicit floor" — fires again on
+    // the next paste. Consumers that want a one-click flow re-set 0
+    // explicitly (accept-offer.ts's URL-bundle ngOnInit does this).
+    this.floorPriceSats.set(null);
     this.expectedCatUtxo.set(null);
     this.expectedSellerPaymentAddress.set(null);
   }
