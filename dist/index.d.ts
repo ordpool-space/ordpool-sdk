@@ -2408,13 +2408,11 @@ interface AskQueryArgs {
  */
 declare function buildAskQueryParams(args: AskQueryArgs): Record<string, string>;
 /**
- * Parse an ask-query. Returns `askSats` when the `ask` param is a
- * positive integer; `null` when missing or malformed (defence-in-depth
- * against tampered links).
+ * Parse an ask-query. Returns the ask value in sats when the `ask`
+ * param is a positive integer; `null` when missing or malformed
+ * (defence-in-depth against tampered links).
  */
-declare function parseAskQueryParams(query: URLSearchParams | Record<string, string | null>): {
-    askSats: number | null;
-};
+declare function parseAskQueryParams(query: URLSearchParams | Record<string, string | null>): number | null;
 interface BuyOfferQueryArgs {
     /** Cat the buyer wants to bid on. */
     catNumber: number;
@@ -2431,8 +2429,13 @@ declare function parseBuyOfferQueryParams(query: URLSearchParams | Record<string
 interface AcceptOfferQueryArgs {
     /** Buyer-signed PSBT bytes, already base64-encoded. */
     offerBase64: string;
-    /** Cat outpoint the offer targets (matches offer input 0). */
-    catOutpoint: CatOutpoint;
+    /**
+     * Cat outpoint the offer targets (matches offer input 0). Optional
+     * — without it the accept page falls back to the seller's cat-picker.
+     * Include it whenever the buyer knows the outpoint (typical for the
+     * make-offer success flow) so the seller gets a true one-click accept.
+     */
+    catOutpoint?: CatOutpoint;
 }
 declare function buildAcceptOfferQueryParams(args: AcceptOfferQueryArgs): Record<string, string>;
 declare function parseAcceptOfferQueryParams(query: URLSearchParams | Record<string, string | null>): {

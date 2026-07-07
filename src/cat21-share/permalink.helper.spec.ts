@@ -16,7 +16,7 @@ describe('permalink helpers', () => {
     it('builds and parses a valid ask query', () => {
       const params = buildAskQueryParams({ askSats: 21000 });
       expect(params).toEqual({ ask: '21000' });
-      expect(parseAskQueryParams(new URLSearchParams(params))).toEqual({ askSats: 21000 });
+      expect(parseAskQueryParams(new URLSearchParams(params))).toBe(21000);
     });
 
     it('rejects non-positive askSats at build time', () => {
@@ -25,19 +25,19 @@ describe('permalink helpers', () => {
       expect(() => buildAskQueryParams({ askSats: 1.5 })).toThrow(/positive integer/);
     });
 
-    it('parse returns askSats=null when the param is missing', () => {
-      expect(parseAskQueryParams(new URLSearchParams())).toEqual({ askSats: null });
+    it('parse returns null when the param is missing', () => {
+      expect(parseAskQueryParams(new URLSearchParams())).toBeNull();
     });
 
     it('parse rejects tampered ask values', () => {
       for (const bad of ['abc', '-100', '0', '1.5', '1000 ', ' 1000', '1e5']) {
-        expect(parseAskQueryParams({ ask: bad })).toEqual({ askSats: null });
+        expect(parseAskQueryParams({ ask: bad })).toBeNull();
       }
     });
 
     it('parses ask values that survive a round-trip through URLSearchParams', () => {
       const url = new URL('https://cat21.space/cat/42?ask=99999');
-      expect(parseAskQueryParams(url.searchParams)).toEqual({ askSats: 99999 });
+      expect(parseAskQueryParams(url.searchParams)).toBe(99999);
     });
   });
 
@@ -104,6 +104,15 @@ describe('permalink helpers', () => {
       expect(parsed.offerBase64).toBe('cHNidP8B==');
       expect(parsed.catOutpoint).toEqual({ txid: REAL_TXID, vout: 0 });
       expect(parsed.bundleComplete).toBe(true);
+    });
+
+    it('builds an offer-only bundle when catOutpoint is omitted (seller picks in the UI)', () => {
+      const params = buildAcceptOfferQueryParams({ offerBase64: 'cHNidP8B==' });
+      expect(params).toEqual({ offer: 'cHNidP8B==' });
+      const parsed = parseAcceptOfferQueryParams(new URLSearchParams(params));
+      expect(parsed.offerBase64).toBe('cHNidP8B==');
+      expect(parsed.catOutpoint).toBeNull();
+      expect(parsed.bundleComplete).toBe(false);
     });
 
     it('rejects uppercase-hex txid by lowercasing on build (invariant: URL is canonical lowercase)', () => {

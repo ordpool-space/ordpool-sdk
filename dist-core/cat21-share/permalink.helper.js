@@ -65,12 +65,12 @@ function buildAskQueryParams(args) {
     return { [exports.CAT21_QUERY_KEYS.ask]: String(args.askSats) };
 }
 /**
- * Parse an ask-query. Returns `askSats` when the `ask` param is a
- * positive integer; `null` when missing or malformed (defence-in-depth
- * against tampered links).
+ * Parse an ask-query. Returns the ask value in sats when the `ask`
+ * param is a positive integer; `null` when missing or malformed
+ * (defence-in-depth against tampered links).
  */
 function parseAskQueryParams(query) {
-    return { askSats: parseIntParam(readParam(query, exports.CAT21_QUERY_KEYS.ask), (n) => n > 0) };
+    return parseIntParam(readParam(query, exports.CAT21_QUERY_KEYS.ask), (n) => n > 0);
 }
 function buildBuyOfferQueryParams(args) {
     if (!Number.isInteger(args.catNumber) || args.catNumber < 0) {
@@ -98,12 +98,15 @@ function buildAcceptOfferQueryParams(args) {
     if (!args.offerBase64 || typeof args.offerBase64 !== 'string') {
         throw new Error('offerBase64 must be a non-empty string');
     }
-    assertCatOutpoint(args.catOutpoint);
-    return {
+    const params = {
         [exports.CAT21_QUERY_KEYS.offer]: args.offerBase64,
-        [exports.CAT21_QUERY_KEYS.catTxid]: args.catOutpoint.txid.toLowerCase(),
-        [exports.CAT21_QUERY_KEYS.catVout]: String(args.catOutpoint.vout),
     };
+    if (args.catOutpoint) {
+        assertCatOutpoint(args.catOutpoint);
+        params[exports.CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
+        params[exports.CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
+    }
+    return params;
 }
 function parseAcceptOfferQueryParams(query) {
     const offerBase64 = readParam(query, exports.CAT21_QUERY_KEYS.offer);
@@ -136,11 +139,7 @@ function parseTransferQueryParams(query) {
 }
 // ---------- Internals ----------
 function readParam(query, key) {
-    if (query instanceof URLSearchParams) {
-        return query.get(key);
-    }
-    const v = query[key];
-    return v === undefined ? null : v;
+    return query instanceof URLSearchParams ? query.get(key) : query[key] ?? null;
 }
 function parseIntParam(raw, guard) {
     if (raw === null)

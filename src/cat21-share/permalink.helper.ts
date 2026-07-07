@@ -73,14 +73,14 @@ export function buildAskQueryParams(args: AskQueryArgs): Record<string, string> 
 }
 
 /**
- * Parse an ask-query. Returns `askSats` when the `ask` param is a
- * positive integer; `null` when missing or malformed (defence-in-depth
- * against tampered links).
+ * Parse an ask-query. Returns the ask value in sats when the `ask`
+ * param is a positive integer; `null` when missing or malformed
+ * (defence-in-depth against tampered links).
  */
-export function parseAskQueryParams(query: URLSearchParams | Record<string, string | null>): {
-  askSats: number | null;
-} {
-  return { askSats: parseIntParam(readParam(query, CAT21_QUERY_KEYS.ask), (n) => n > 0) };
+export function parseAskQueryParams(
+  query: URLSearchParams | Record<string, string | null>,
+): number | null {
+  return parseIntParam(readParam(query, CAT21_QUERY_KEYS.ask), (n) => n > 0);
 }
 
 // ---------- Buy-offer permalink (ask → make-offer landing) ----------
@@ -124,20 +124,28 @@ export function parseBuyOfferQueryParams(
 export interface AcceptOfferQueryArgs {
   /** Buyer-signed PSBT bytes, already base64-encoded. */
   offerBase64: string;
-  /** Cat outpoint the offer targets (matches offer input 0). */
-  catOutpoint: CatOutpoint;
+  /**
+   * Cat outpoint the offer targets (matches offer input 0). Optional
+   * — without it the accept page falls back to the seller's cat-picker.
+   * Include it whenever the buyer knows the outpoint (typical for the
+   * make-offer success flow) so the seller gets a true one-click accept.
+   */
+  catOutpoint?: CatOutpoint;
 }
 
 export function buildAcceptOfferQueryParams(args: AcceptOfferQueryArgs): Record<string, string> {
   if (!args.offerBase64 || typeof args.offerBase64 !== 'string') {
     throw new Error('offerBase64 must be a non-empty string');
   }
-  assertCatOutpoint(args.catOutpoint);
-  return {
+  const params: Record<string, string> = {
     [CAT21_QUERY_KEYS.offer]: args.offerBase64,
-    [CAT21_QUERY_KEYS.catTxid]: args.catOutpoint.txid.toLowerCase(),
-    [CAT21_QUERY_KEYS.catVout]: String(args.catOutpoint.vout),
   };
+  if (args.catOutpoint) {
+    assertCatOutpoint(args.catOutpoint);
+    params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
+    params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
+  }
+  return params;
 }
 
 export function parseAcceptOfferQueryParams(
@@ -191,11 +199,7 @@ function readParam(
   query: URLSearchParams | Record<string, string | null>,
   key: string,
 ): string | null {
-  if (query instanceof URLSearchParams) {
-    return query.get(key);
-  }
-  const v = query[key];
-  return v === undefined ? null : v;
+  return query instanceof URLSearchParams ? query.get(key) : query[key] ?? null;
 }
 
 function parseIntParam(raw: string | null, guard: (n: number) => boolean): number | null {
