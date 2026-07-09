@@ -1,4 +1,20 @@
 import { LeatherAddressResponse, WalletInfo, WindowLike, XverseAddressResponse } from './wallet.service.types';
+/**
+ * Xverse's regtest getAddress bug: the wallet encodes the taproot
+ * address with `tb` HRP (testnet), then string-swaps `tb` -> `bcrt` in
+ * the response. The checksum stays computed against `tb`, so the
+ * emitted `bcrt1p…` is unparseable — every bech32/bech32m decoder
+ * rejects it with an "Invalid checksum" error, and every downstream
+ * consumer that touches the address (fee simulator, PSBT builder,
+ * broadcast) throws.
+ *
+ * When we see a `bcrt1p…` that fails bech32m decode, try re-encoding
+ * the `tb`-prefixed variant with the same data words but the `bcrt`
+ * HRP. If that succeeds, return the re-encoded address; every
+ * downstream layer accepts it. Mainnet / testnet / signet paths
+ * short-circuit and return the input unchanged.
+ */
+export declare function repairXverseRegtestTaproot(address: string): string;
 export declare const leatherOrdinalsAddressType = "p2tr";
 export declare const leatherPaymentAddressType = "p2wpkh";
 export declare function isXverseInstalled(win: WindowLike | undefined): boolean;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
+import { bech32m } from '@scure/base';
 import { AddressPurpose } from 'sats-connect';
 
 import {
@@ -11,6 +12,7 @@ import {
   parseOylAddressResponse,
   parsePhantomAddressResponse,
   parseXverseAddressResponse,
+  repairXverseRegtestTaproot,
   unisatBasicInfoToWalletInfo,
 } from './wallet.service.helper';
 import {
@@ -106,6 +108,49 @@ describe('parseXverseAddressResponse', () => {
 
   it('throws when both are missing', () => {
     expect(() => parseXverseAddressResponse({ addresses: [] })).toThrow('Required address not found?!');
+  });
+});
+
+
+describe('repairXverseRegtestTaproot', () => {
+
+  it('passes through mainnet taproot addresses unchanged', () => {
+    const mainnet = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
+    expect(repairXverseRegtestTaproot(mainnet)).toBe(mainnet);
+  });
+
+  it('passes through testnet taproot addresses unchanged', () => {
+    const testnet = 'tb1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqp3mvzv';
+    expect(repairXverseRegtestTaproot(testnet)).toBe(testnet);
+  });
+
+  it('passes through a valid bcrt1p… taproot address unchanged', () => {
+    // Compute a valid regtest taproot by re-encoding the tb variant with bcrt HRP.
+    // (This is exactly the repair path, so this exercises the "no-op if already valid" branch.)
+    const tbAddr = 'tb1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqp3mvzv';
+    const valid = repairXverseRegtestTaproot(tbAddr.replace(/^tb/, 'bcrt'));
+    expect(repairXverseRegtestTaproot(valid)).toBe(valid);
+  });
+
+  it('repairs Xverse\'s broken bcrt1p… address (tb-computed checksum) to a valid bech32m bcrt address', () => {
+    // From CI diagnostic 29045576493 — Xverse returned this address, both bech32
+    // and bech32m rejected it, but replacing bcrt->tb round-tripped as bech32m.
+    const broken = 'bcrt1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqp3mvzv';
+    const repaired = repairXverseRegtestTaproot(broken);
+    expect(repaired).not.toBe(broken);
+    expect(repaired).toMatch(/^bcrt1p/);
+    // Repaired address decodes as valid bech32m under bcrt HRP.
+    expect(() => bech32m.decode(repaired as `${string}1${string}`)).not.toThrow();
+    // Same words as the tb equivalent — repair is HRP-swap, not data change.
+    const tbEquivalent = ('tb' + broken.slice(4)) as `${string}1${string}`;
+    const tbWords = bech32m.decode(tbEquivalent).words;
+    expect(bech32m.decode(repaired as `${string}1${string}`).words).toEqual(tbWords);
+  });
+
+  it('returns input unchanged if neither bcrt nor tb variant decodes (genuinely broken address)', () => {
+    // Random 63-char bcrt1p prefix with no valid checksum under any HRP.
+    const bogus = 'bcrt1p' + 'q'.repeat(58);
+    expect(repairXverseRegtestTaproot(bogus)).toBe(bogus);
   });
 });
 

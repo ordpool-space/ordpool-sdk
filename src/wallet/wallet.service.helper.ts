@@ -1,3 +1,4 @@
+import { bech32m } from '@scure/base';
 import { AddressPurpose } from 'sats-connect';
 
 import {
@@ -8,6 +9,38 @@ import {
   WindowLike,
   XverseAddressResponse,
 } from './wallet.service.types';
+
+/**
+ * Xverse's regtest getAddress bug: the wallet encodes the taproot
+ * address with `tb` HRP (testnet), then string-swaps `tb` -> `bcrt` in
+ * the response. The checksum stays computed against `tb`, so the
+ * emitted `bcrt1p…` is unparseable — every bech32/bech32m decoder
+ * rejects it with an "Invalid checksum" error, and every downstream
+ * consumer that touches the address (fee simulator, PSBT builder,
+ * broadcast) throws.
+ *
+ * When we see a `bcrt1p…` that fails bech32m decode, try re-encoding
+ * the `tb`-prefixed variant with the same data words but the `bcrt`
+ * HRP. If that succeeds, return the re-encoded address; every
+ * downstream layer accepts it. Mainnet / testnet / signet paths
+ * short-circuit and return the input unchanged.
+ */
+export function repairXverseRegtestTaproot(address: string): string {
+  if (!address.startsWith('bcrt1p')) return address;
+  try {
+    bech32m.decode(address as `${string}1${string}`);
+    return address;
+  } catch {
+    // Try the "same words under tb" interpretation.
+    try {
+      const tbCandidate = ('tb' + address.slice(4)) as `${string}1${string}`;
+      const decoded = bech32m.decode(tbCandidate);
+      return bech32m.encode('bcrt', decoded.words);
+    } catch {
+      return address;
+    }
+  }
+}
 
 
 // CodeReview @ Leather
@@ -186,7 +219,7 @@ export function parseXverseAddressResponse(response: XverseAddressResponse): Wal
 
   return {
     type: KnownOrdinalWalletType.xverse,
-    ordinalsAddress:   ordinalsAddress.address,
+    ordinalsAddress:   repairXverseRegtestTaproot(ordinalsAddress.address),
     ordinalsPublicKey: ordinalsAddress.publicKey,
     paymentAddress:    paymentAddress.address,
     paymentPublicKey:  paymentAddress.publicKey,

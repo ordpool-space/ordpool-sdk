@@ -1,7 +1,7 @@
 import * as btc from '@scure/btc-signer';
 import { Script } from '@scure/btc-signer';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
-import { hex, base64 } from '@scure/base';
+import { hex, bech32m, base64 } from '@scure/base';
 import * as i0 from '@angular/core';
 import { InjectionToken, inject, Injectable, signal, computed } from '@angular/core';
 import { from, map, Observable, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, switchMap, defer, throwError, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
@@ -696,6 +696,40 @@ function toLeatherNetworkString(network) {
  */
 const bitcoinNetwork = new InjectionToken('bitcoinNetwork');
 
+/**
+ * Xverse's regtest getAddress bug: the wallet encodes the taproot
+ * address with `tb` HRP (testnet), then string-swaps `tb` -> `bcrt` in
+ * the response. The checksum stays computed against `tb`, so the
+ * emitted `bcrt1p…` is unparseable — every bech32/bech32m decoder
+ * rejects it with an "Invalid checksum" error, and every downstream
+ * consumer that touches the address (fee simulator, PSBT builder,
+ * broadcast) throws.
+ *
+ * When we see a `bcrt1p…` that fails bech32m decode, try re-encoding
+ * the `tb`-prefixed variant with the same data words but the `bcrt`
+ * HRP. If that succeeds, return the re-encoded address; every
+ * downstream layer accepts it. Mainnet / testnet / signet paths
+ * short-circuit and return the input unchanged.
+ */
+function repairXverseRegtestTaproot(address) {
+    if (!address.startsWith('bcrt1p'))
+        return address;
+    try {
+        bech32m.decode(address);
+        return address;
+    }
+    catch {
+        // Try the "same words under tb" interpretation.
+        try {
+            const tbCandidate = ('tb' + address.slice(4));
+            const decoded = bech32m.decode(tbCandidate);
+            return bech32m.encode('bcrt', decoded.words);
+        }
+        catch {
+            return address;
+        }
+    }
+}
 // CodeReview @ Leather
 // is this a correct    assumption? p2wpkh always for payments, p2tr always for ordinals?
 const leatherOrdinalsAddressType = 'p2tr'; // Taproot
@@ -857,7 +891,7 @@ function parseXverseAddressResponse(response) {
     }
     return {
         type: KnownOrdinalWalletType.xverse,
-        ordinalsAddress: ordinalsAddress.address,
+        ordinalsAddress: repairXverseRegtestTaproot(ordinalsAddress.address),
         ordinalsPublicKey: ordinalsAddress.publicKey,
         paymentAddress: paymentAddress.address,
         paymentPublicKey: paymentAddress.publicKey,
