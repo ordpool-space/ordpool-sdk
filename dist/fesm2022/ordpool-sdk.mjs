@@ -3445,7 +3445,10 @@ class Cat21MintOrchestrator {
      */
     simulations$ = combineLatest([
         this.utxos$,
-        this.wallet.connectedWallet$.pipe(startWith(null)),
+        // Same distinctUntilChanged guard as utxos$: connectedWallet$ can
+        // re-emit the same wallet repeatedly, which would otherwise re-fire
+        // simulations$ downstream.
+        this.wallet.connectedWallet$.pipe(startWith(null), distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null))),
         // BehaviorSubject mirror of the writable feeRate signal, fed by
         // `setFeeRate`. The signal stays as the canonical writable for
         // template reads; this subject just bridges to the RxJS pipeline
@@ -7261,7 +7264,13 @@ class InscribeMintOrchestrator {
      */
     simulations$ = combineLatest([
         this.utxos$,
-        this.wallet.connectedWallet$.pipe(startWith(null)),
+        // Same distinctUntilChanged guard as utxos$: connectedWallet$ can
+        // re-emit the same wallet repeatedly (localStorage rehydrate +
+        // Xverse's onAccountChange firing continuously), which would
+        // otherwise re-fire simulations$ on every emission — producing
+        // fresh output arrays that flip the downstream paymentOutputs$
+        // signal fast enough to prevent it from settling.
+        this.wallet.connectedWallet$.pipe(startWith(null), distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null))),
         // BehaviorSubject mirrors of the writable signals, fed by
         // `setFeeRate` / `setContent`. Signals stay as canonical writables
         // for template reads; these subjects bridge to the RxJS pipeline

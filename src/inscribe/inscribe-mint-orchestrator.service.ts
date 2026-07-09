@@ -189,7 +189,16 @@ export class InscribeMintOrchestrator {
    */
   readonly simulations$: Observable<InscribeUtxoSimulation[]> = combineLatest([
     this.utxos$,
-    this.wallet.connectedWallet$.pipe(startWith(null as WalletInfo | null)),
+    // Same distinctUntilChanged guard as utxos$: connectedWallet$ can
+    // re-emit the same wallet repeatedly (localStorage rehydrate +
+    // Xverse's onAccountChange firing continuously), which would
+    // otherwise re-fire simulations$ on every emission — producing
+    // fresh output arrays that flip the downstream paymentOutputs$
+    // signal fast enough to prevent it from settling.
+    this.wallet.connectedWallet$.pipe(
+      startWith(null as WalletInfo | null),
+      distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null)),
+    ),
     // BehaviorSubject mirrors of the writable signals, fed by
     // `setFeeRate` / `setContent`. Signals stay as canonical writables
     // for template reads; these subjects bridge to the RxJS pipeline

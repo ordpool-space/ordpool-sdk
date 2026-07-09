@@ -149,7 +149,13 @@ export class Cat21MintOrchestrator {
    */
   readonly simulations$: Observable<UtxoSimulation[]> = combineLatest([
     this.utxos$,
-    this.wallet.connectedWallet$.pipe(startWith(null as WalletInfo | null)),
+    // Same distinctUntilChanged guard as utxos$: connectedWallet$ can
+    // re-emit the same wallet repeatedly, which would otherwise re-fire
+    // simulations$ downstream.
+    this.wallet.connectedWallet$.pipe(
+      startWith(null as WalletInfo | null),
+      distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null)),
+    ),
     // BehaviorSubject mirror of the writable feeRate signal, fed by
     // `setFeeRate`. The signal stays as the canonical writable for
     // template reads; this subject just bridges to the RxJS pipeline
