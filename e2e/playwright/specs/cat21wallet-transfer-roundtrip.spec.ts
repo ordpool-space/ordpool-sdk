@@ -121,7 +121,7 @@ async function approveSignPopup(
   ctx: BrowserContext,
   knownPages: Set<Page>,
   screenshotTag: string,
-  expectedSignAtIndex: number,
+  expectedSignAtIndex: number | number[],
 ): Promise<void> {
   await approveCat21WalletSignPopup({
     context: ctx,
@@ -162,7 +162,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('transfer a cat21 on regtest via Cat21 Wallet: mint via popup, transfer via popup (2 sign approvals), broadcast', async () => {
+test('transfer a cat21 on regtest via Cat21 Wallet: mint via popup, transfer via popup (one signAtIndex-array approval), broadcast', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();
@@ -304,11 +304,11 @@ test('transfer a cat21 on regtest via Cat21 Wallet: mint via popup, transfer via
   const payP2 = btc.p2wpkh(payPubBytes, toScureNetwork(Network.Regtest));
   const fundingScriptPubKeyHex = bytesHex(payP2.script);
 
-  // ── Step 5: TRANSFER via the wallet (2 sign popups: cat-input then funding) ──
-  // The cat21wallet signer's signMultiInputAndBroadcast iterates over
-  // signing-map indices, calling Cat21Provider.request('signPsbt') once
-  // per index — each call shows a popup. Queue both approvals before
-  // awaiting the promise.
+  // ── Step 5: TRANSFER via the wallet (ONE sign popup covering both inputs) ──
+  // The cat21wallet signer's signMultiInputAndBroadcast sends a single
+  // `signPsbt` RPC with `signAtIndex: [0, 1]` (array form); cat21-wallet's
+  // ensureArray handling signs every listed index inside one approval
+  // popup. Queue the single approval before awaiting the promise.
   const transferSignKnown = new Set(context.pages());
   const transferSignedPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
@@ -335,14 +335,13 @@ test('transfer a cat21 on regtest via Cat21 Wallet: mint via popup, transfer via
       feeSats: TRANSFER_FEE_SATS,
     },
   );
-  // Transfer fires TWO sign popups — one per input. The harness's
-  // signMultiInputAndBroadcast iterates [0, 1] and calls signPsbt
-  // with `signAtIndex: i` each time. We assert the popup URL carries
-  // the expected index, so a wallet bug that double-signed the same
-  // input (or skipped one) would be caught HERE rather than indirectly
-  // via "broadcast failed". Closes audit points 3 + 14.
-  await approveSignPopup(context, transferSignKnown, '03a-transfer-sign-cat-input',     /* signAtIndex */ 0);
-  await approveSignPopup(context, transferSignKnown, '03b-transfer-sign-funding-input', /* signAtIndex */ 1);
+  // Transfer fires ONE sign popup covering both inputs. The harness's
+  // signMultiInputAndBroadcast calls signPsbt with `signAtIndex: [0, 1]`
+  // and cat21-wallet's `ensureArray` signs each listed index inside the
+  // single popup. Assert the popup URL carries both signAtIndex values
+  // so a wallet bug that dropped one silently is caught here rather
+  // than indirectly via "broadcast failed". Closes audit points 3 + 14.
+  await approveSignPopup(context, transferSignKnown, '03-transfer-sign', /* signAtIndex */ [0, 1]);
   const transferred = await transferSignedPromise;
   if (transferred.kind !== 'transfer') throw new Error('expected transfer result');
 

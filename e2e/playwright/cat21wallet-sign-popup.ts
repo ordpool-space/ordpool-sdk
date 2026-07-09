@@ -37,13 +37,17 @@ interface ApproveCat21WalletSignPopupArgs {
   screenshot?: (page: Page) => Promise<void>;
   /**
    * Optional content gate. When provided, the helper asserts that the
-   * popup URL contains both `sign-psbt` and `signAtIndex=<value>` and
-   * that the `psbt-signer-card` testid is visible before clicking
-   * confirm. Used by the offer + transfer specs to pin WHICH input
-   * the wallet is about to sign; mint + inscribe (single signing
-   * input, no externally-driven index) omit it.
+   * popup URL contains `sign-psbt` and one `signAtIndex=<n>` param
+   * per listed index; the `psbt-signer-card` testid must be visible
+   * before the confirm click. Used by the offer + transfer specs to
+   * pin WHICH inputs the wallet is about to sign; mint + inscribe
+   * (single signing input, no externally-driven index) omit it.
+   *
+   * Pass an array (e.g. `[0, 1]`) for the transfer flow where cat21-
+   * wallet signs both inputs in ONE popup via the signAtIndex-array
+   * RPC shape. Pass a single number when only one index is signed.
    */
-  expectedSignAtIndex?: number;
+  expectedSignAtIndex?: number | number[];
 }
 
 /**
@@ -88,9 +92,12 @@ export async function approveCat21WalletSignPopup(
   if (expectedSignAtIndex !== undefined) {
     const url = approval.url();
     expect(url, 'sign popup URL must encode the sign-psbt route').toContain('sign-psbt');
-    expect(url, `sign popup URL must carry signAtIndex=${expectedSignAtIndex}`).toContain(
-      `signAtIndex=${expectedSignAtIndex}`,
-    );
+    const expected = Array.isArray(expectedSignAtIndex) ? expectedSignAtIndex : [expectedSignAtIndex];
+    for (const idx of expected) {
+      expect(url, `sign popup URL must carry signAtIndex=${idx}`).toContain(
+        `signAtIndex=${idx}`,
+      );
+    }
     await expect(
       approval.getByTestId('psbt-signer-card'),
       'psbt-signer-card must render in the sign popup',
