@@ -167,7 +167,19 @@ export class WalletService {
           this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info));
           this.connectedWallet$.next(info);
         },
-        error: () => this.disconnectWallet(),
+        // Don't disconnect on a transient reconnect error. Xverse fires
+        // onAccountChange repeatedly on regtest (and on hot chain-changes
+        // in general); each fire re-calls `connect()`, which triggers a
+        // fresh sats-connect popup. If that popup doesn't complete before
+        // the observable errors, disconnecting drops LAST_CONNECTED_WALLET
+        // and next(null)s — then the next onAccountChange fires connect
+        // again → next(wallet), causing downstream utxos$/simulations$ to
+        // flap between idle/ready fast enough that consumer UIs never
+        // settle their found-funds banner. Keep the cached wallet in
+        // place; the user can explicitly Disconnect if they want.
+        error: (err) => {
+          console.warn('[wallet.service] onAccountChange reconnect failed; keeping cached wallet', err);
+        },
       });
     });
   }
