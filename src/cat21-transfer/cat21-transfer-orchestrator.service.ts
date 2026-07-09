@@ -117,11 +117,21 @@ export class Cat21TransferOrchestrator {
   /** sat/vB from the fee picker or manual input. */
   readonly feeRate = signal<number | null>(null);
 
+  /**
+   * User's explicit funding-UTXO pick from the picker. When null the
+   * orchestrator auto-picks the largest covering UTXO (backwards-
+   * compatible with the pre-picker behaviour). Set this from the UI's
+   * scanner-annotated row selection so the user can reject an
+   * asset-carrying UTXO the auto-picker would happily spend.
+   */
+  readonly selectedFundingUtxo = signal<TxnOutput | null>(null);
+
   // --- Internals (declared up here because instance-field initialisers
   // below depend on them at class-construction time).
   private lastWalletAddress: string | null = null;
   private readonly catUtxoSubject = new BehaviorSubject<Cat21Holding | null>(null);
   private readonly feeRateSubject = new BehaviorSubject<number | null>(null);
+  private readonly selectedFundingUtxoSubject = new BehaviorSubject<TxnOutput | null>(null);
 
   // --- Output state -------------------------------------------------------
 
@@ -221,9 +231,10 @@ export class Cat21TransferOrchestrator {
     this.wallet.connectedWallet$.pipe(startWith(null as WalletInfo | null)),
     this.catUtxoSubject,
     this.feeRateSubject,
+    this.selectedFundingUtxoSubject,
   ]).pipe(
-    map(([fundingUtxos, wallet, cat, feeRate]) =>
-      this.computeSimulation(fundingUtxos, wallet, cat, feeRate),
+    map(([fundingUtxos, wallet, cat, feeRate, selected]) =>
+      this.computeSimulation(fundingUtxos, wallet, cat, feeRate, selected),
     ),
     shareReplay({ bufferSize: 1, refCount: true }),
   );
@@ -243,6 +254,16 @@ export class Cat21TransferOrchestrator {
     if (!Number.isFinite(rate) || rate <= 0) return;
     this.feeRate.set(rate);
     this.feeRateSubject.next(rate);
+  }
+
+  /**
+   * Push the user's funding-UTXO pick (or null to fall back to
+   * auto-pick). The picker UI calls this every time the seller clicks
+   * a row in the scanner-annotated funding list.
+   */
+  setSelectedFundingUtxo(utxo: TxnOutput | null): void {
+    this.selectedFundingUtxo.set(utxo);
+    this.selectedFundingUtxoSubject.next(utxo);
   }
 
   /**
@@ -277,6 +298,7 @@ export class Cat21TransferOrchestrator {
         wallet,
         cat,
         feeRate,
+        this.selectedFundingUtxo(),
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -361,6 +383,8 @@ export class Cat21TransferOrchestrator {
     this.recipientAddress.set(null);
     this.feeRate.set(null);
     this.feeRateSubject.next(null);
+    this.selectedFundingUtxo.set(null);
+    this.selectedFundingUtxoSubject.next(null);
   }
 
   private computeSimulation(
@@ -368,6 +392,7 @@ export class Cat21TransferOrchestrator {
     wallet: WalletInfo | null,
     cat: Cat21Holding | null,
     feeRate: number | null,
+    selected: TxnOutput | null = null,
   ): TransferSimulationOutcome {
     if (!wallet || !cat || !feeRate || fundingUtxos.length === 0) {
       return { simulation: null, insufficient: false };
@@ -378,10 +403,19 @@ export class Cat21TransferOrchestrator {
     // Use a generous over-estimate for fee+postage in the pick stage;
     // the two-pass simulation below tightens it.
     const target = CAT21_POSTAGE_SATS + Math.ceil(feeRate * 200); // ~200 vB ceiling for transfer
-    const pick = pickLargestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
-      utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
-      targetSpendSats: target,
-    });
+    // User's explicit pick wins when it's still in the funding list
+    // AND covers the target. Otherwise fall back to auto-pick (largest
+    // covering UTXO). This lets the picker UI reject asset-carrying
+    // rows the auto-picker would happily spend.
+    const selectedStillPresent = selected
+      ? fundingUtxos.find((u) => u.txid === selected.txid && u.vout === selected.vout)
+      : undefined;
+    const pick = selectedStillPresent && selectedStillPresent.value >= target
+      ? selectedStillPresent
+      : pickLargestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
+          utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
+          targetSpendSats: target,
+        });
     if (!pick) {
       return { simulation: null, insufficient: true };
     }

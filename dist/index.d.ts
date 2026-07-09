@@ -1025,27 +1025,103 @@ interface Cat21MintFundingInput {
 declare function prepareMintInputForWallet(paymentOutput: TxnOutput, paymentPublicKey: Uint8Array, paymentAddress: string, isSimulation: boolean, network: Network): Cat21MintFundingInput;
 
 /**
+ * Ordinal-theory sat rarity math. Pure functions, no I/O — every
+ * classification is derived from the sat number alone.
+ *
+ * Categories (highest rarity wins when multiple apply):
+ *   - `mythic`     — sat 0 (the very first sat of Bitcoin, block 0).
+ *   - `legendary`  — first sat of a cycle (every 6 halvings = 1_260_000 blocks).
+ *   - `epic`       — first sat of a halving block (every 210_000 blocks).
+ *   - `rare`       — first sat of a difficulty adjustment block (every 2016 blocks).
+ *   - `uncommon`   — first sat of any other block.
+ *   - `common`     — every non-first sat.
+ *
+ * Halving epochs shrink block subsidy by half every 210_000 blocks:
+ *   e=0 (blocks 0..209_999):        50 BTC =           5_000_000_000 sat
+ *   e=1 (blocks 210k..419_999):     25 BTC =           2_500_000_000 sat
+ *   e=2 (blocks 420k..629_999):     12.5 BTC =         1_250_000_000 sat
+ *   e=3 (blocks 630k..839_999):     6.25 BTC =           625_000_000 sat
+ *   ...
+ *   e=32 approximately mines the last sat; subsidy becomes 0 sat at e=33.
+ *
+ * We use bigint throughout because the total sat supply (~21e14 sats)
+ * exceeds `Number.MAX_SAFE_INTEGER` (~9e15 fits, but midway math needs
+ * safety) and range-endpoint math is easier without precision loss.
+ */
+type SatRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
+/** Rarity of the FIRST sat of a given block. Non-first sats are always `common`. */
+declare function rarityOfBlockFirstSat(block: number): SatRarity;
+/**
+ * Given a sat number, return the block it was mined in AND the first
+ * sat of that block. If `sat === firstSatOfBlock`, the sat is the
+ * uncommon (or higher) block-first-sat; otherwise it's common.
+ */
+declare function locateSat(sat: bigint): {
+    block: number;
+    firstSatOfBlock: bigint;
+    subsidy: bigint;
+};
+/** Rarity of an individual sat. */
+declare function rarityOfSat(sat: bigint): SatRarity;
+/**
+ * Find the highest-rarity sat inside a half-open range `[start, end)`.
+ *
+ * O(1) in the range width: given the block containing `start` and the
+ * block containing `end-1`, we ask "does this block interval contain
+ * any multiple of X" for each rarity threshold (cycle, halving,
+ * difficulty adjustment). The rarest positive answer wins. No
+ * block-by-block iteration.
+ *
+ * That matters because `sat_ranges` returned by ord can span millions
+ * of blocks for wide UTXO ranges; a walker would be prohibitive.
+ */
+declare function findRareSatInRange(start: bigint, end: bigint): {
+    sat: bigint;
+    block: number;
+    rarity: SatRarity;
+} | null;
+/**
+ * Highest-rarity sat across every `[start, end)` range on a UTXO,
+ * as ord returns them on `/output/{outpoint}` (`sat_ranges`). Returns
+ * null when every range is entirely common — the fast path.
+ */
+declare function findRareSatInRanges(ranges: ReadonlyArray<readonly [bigint, bigint]>): {
+    sat: bigint;
+    block: number;
+    rarity: SatRarity;
+} | null;
+
+/**
  * Asset-detection types for the mint flow's UTXO scanner. We query
  * BOTH our ord instance (`ord.ordpool.space`, returns regular
  * inscriptions + runes) AND our cat21-ord (`ord.cat21.space`, returns
  * CAT-21 cats) per outpoint, merging the answers into one
- * `UtxoContent`.
+ * `UtxoContent`. Rare-sat classification is derived client-side from
+ * ord's `sat_ranges` via `sat-rarity.helper.ts`.
  *
  * The detection is content-safety, not fee-math: an inscription at the
  * dust limit (546 sat) reads as "tiny UTXO" to the picker but carries
  * arbitrary off-chain value. On single-address wallets, spending such
- * a UTXO as a mint input sends the asset to the miner as fee.
+ * a UTXO as a mint input sends the asset to the miner as fee. The same
+ * risk applies to a UTXO carrying a rare sat.
  */
+
 /**
  * Raw `/output/{outpoint}` shape returned by ord with the JSON API
- * enabled. The subset we read here; ord ships more fields (address,
- * sat_ranges, script_pubkey, etc.) that we ignore.
+ * enabled. The subset we read here.
+ *
+ * `sat_ranges` — array of `[start, end)` tuples of sat numbers this
+ *   output holds. Can be enormous for wide / mixed UTXOs (thousands
+ *   of tuples, MBs of payload). The scanner gates rare-sat detection
+ *   behind a small-UTXO threshold + range-count cap so the naive
+ *   "fetch everything, scan all ranges" cost doesn't dominate.
  */
 interface OrdOutputResponse {
     inscriptions?: string[];
     runes?: {
         [runeName: string]: unknown;
     } | null;
+    sat_ranges?: ReadonlyArray<readonly [number, number]>;
 }
 /**
  * Same shape from cat21-ord. The fork swaps the `inscriptions` field
@@ -1077,7 +1153,31 @@ interface UtxoContent {
     } | null;
     /** CAT-21 cat IDs at this outpoint, also in `{txid}i{index}` format. */
     catIds: string[];
+    /**
+     * Rarest sat inside the UTXO's `sat_ranges`, when the scanner ran
+     * the rare-sat check (small-UTXO gate — see `RARE_SAT_SCAN_MAX_VALUE_SAT`).
+     * `null` when no rare sat was found OR when the check was skipped
+     * for cost reasons (large UTXO, pathological range count).
+     */
+    rareSat: {
+        sat: string;
+        block: number;
+        rarity: SatRarity;
+    } | null;
 }
+/**
+ * Skip rare-sat detection when ord returns more than this many
+ * `sat_ranges` tuples on a UTXO. Mixed / heavily-recycled UTXOs can
+ * carry thousands — parsing them all would dominate the scanner's
+ * per-UTXO cost budget. The bandwidth cost of receiving those tuples
+ * is already sunk (ord doesn't let us opt out of `sat_ranges`), but
+ * we can at least skip the parse.
+ *
+ * Below the cap: rarity math is O(1) per tuple, so bounded work.
+ * Above the cap: `rareSat` on `UtxoContent` stays null; the picker
+ * treats the UTXO as "rarity unchecked" rather than "clean".
+ */
+declare const RARE_SAT_MAX_RANGES = 500;
 /**
  * Per-UTXO scan state — drives the bucket-and-badge UI in both
  * frontends.
@@ -1678,9 +1778,18 @@ declare class Cat21CreateOfferOrchestrator {
     /** Where the cat lands after the seller signs + broadcasts. Default = connected wallet's ordinals address. */
     readonly buyerReceiveAddress: _angular_core.WritableSignal<string>;
     readonly feeRate: _angular_core.WritableSignal<number>;
+    /**
+     * User's explicit funding-UTXO pick from the buyer-side picker.
+     * When null the orchestrator auto-picks the largest covering UTXO.
+     * Set from the UI so the buyer can reject an asset-carrying UTXO
+     * (inscription / rune / cat / rare sat) the auto-picker would
+     * happily spend.
+     */
+    readonly selectedFundingUtxo: _angular_core.WritableSignal<TxnOutput>;
     private lastWalletAddress;
     private readonly priceSatsSubject;
     private readonly feeRateSubject;
+    private readonly selectedFundingUtxoSubject;
     readonly state: _angular_core.WritableSignal<CreateOfferState>;
     readonly errorMessage: _angular_core.WritableSignal<string>;
     /**
@@ -1716,6 +1825,12 @@ declare class Cat21CreateOfferOrchestrator {
     setPriceSats(price: number): void;
     setBuyerReceiveAddress(address: string | null): void;
     setFeeRate(rate: number): void;
+    /**
+     * Push the buyer's funding-UTXO pick (or null to auto-pick). Called
+     * from the picker UI whenever the buyer clicks a row in the
+     * scanner-annotated funding list.
+     */
+    setSelectedFundingUtxo(utxo: TxnOutput | null): void;
     /**
      * Build the buy-offer PSBT, ask the connected wallet to sign all
      * buyer inputs (1..N), and expose the result as `offerArtifact()`.
@@ -2096,9 +2211,18 @@ declare class Cat21TransferOrchestrator {
     readonly recipientAddress: _angular_core.WritableSignal<string>;
     /** sat/vB from the fee picker or manual input. */
     readonly feeRate: _angular_core.WritableSignal<number>;
+    /**
+     * User's explicit funding-UTXO pick from the picker. When null the
+     * orchestrator auto-picks the largest covering UTXO (backwards-
+     * compatible with the pre-picker behaviour). Set this from the UI's
+     * scanner-annotated row selection so the user can reject an
+     * asset-carrying UTXO the auto-picker would happily spend.
+     */
+    readonly selectedFundingUtxo: _angular_core.WritableSignal<TxnOutput>;
     private lastWalletAddress;
     private readonly catUtxoSubject;
     private readonly feeRateSubject;
+    private readonly selectedFundingUtxoSubject;
     readonly state: _angular_core.WritableSignal<TransferState>;
     readonly errorMessage: _angular_core.WritableSignal<string>;
     readonly successTxId: _angular_core.WritableSignal<string>;
@@ -2140,6 +2264,12 @@ declare class Cat21TransferOrchestrator {
     setCatUtxo(cat: Cat21Holding | null): void;
     setRecipientAddress(address: string | null): void;
     setFeeRate(rate: number): void;
+    /**
+     * Push the user's funding-UTXO pick (or null to fall back to
+     * auto-pick). The picker UI calls this every time the seller clicks
+     * a row in the scanner-annotated funding list.
+     */
+    setSelectedFundingUtxo(utxo: TxnOutput | null): void;
     /**
      * Trigger the transfer. Requires a connected wallet, a selected cat,
      * a recipient address, a fee rate, and a fundable funding UTXO.
@@ -3695,5 +3825,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
-export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeMintState, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, ParsedOffer, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeMintState, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, ParsedOffer, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };

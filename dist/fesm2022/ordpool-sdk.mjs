@@ -3554,13 +3554,28 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
  * BOTH our ord instance (`ord.ordpool.space`, returns regular
  * inscriptions + runes) AND our cat21-ord (`ord.cat21.space`, returns
  * CAT-21 cats) per outpoint, merging the answers into one
- * `UtxoContent`.
+ * `UtxoContent`. Rare-sat classification is derived client-side from
+ * ord's `sat_ranges` via `sat-rarity.helper.ts`.
  *
  * The detection is content-safety, not fee-math: an inscription at the
  * dust limit (546 sat) reads as "tiny UTXO" to the picker but carries
  * arbitrary off-chain value. On single-address wallets, spending such
- * a UTXO as a mint input sends the asset to the miner as fee.
+ * a UTXO as a mint input sends the asset to the miner as fee. The same
+ * risk applies to a UTXO carrying a rare sat.
  */
+/**
+ * Skip rare-sat detection when ord returns more than this many
+ * `sat_ranges` tuples on a UTXO. Mixed / heavily-recycled UTXOs can
+ * carry thousands — parsing them all would dominate the scanner's
+ * per-UTXO cost budget. The bandwidth cost of receiving those tuples
+ * is already sunk (ord doesn't let us opt out of `sat_ranges`), but
+ * we can at least skip the parse.
+ *
+ * Below the cap: rarity math is O(1) per tuple, so bounded work.
+ * Above the cap: `rareSat` on `UtxoContent` stays null; the picker
+ * treats the UTXO as "rarity unchecked" rather than "clean".
+ */
+const RARE_SAT_MAX_RANGES = 500;
 /**
  * Helper for templates — true iff the state name describes a completed
  * scan (clean, with-assets, or failed). Lets the UI distinguish "we
@@ -3630,6 +3645,168 @@ const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10_000;
  */
 function calculateRecommendedFundingSats(feeRatePerVb) {
     return Math.ceil((546 + 200 * feeRatePerVb) / 100) * 100;
+}
+
+/**
+ * Ordinal-theory sat rarity math. Pure functions, no I/O — every
+ * classification is derived from the sat number alone.
+ *
+ * Categories (highest rarity wins when multiple apply):
+ *   - `mythic`     — sat 0 (the very first sat of Bitcoin, block 0).
+ *   - `legendary`  — first sat of a cycle (every 6 halvings = 1_260_000 blocks).
+ *   - `epic`       — first sat of a halving block (every 210_000 blocks).
+ *   - `rare`       — first sat of a difficulty adjustment block (every 2016 blocks).
+ *   - `uncommon`   — first sat of any other block.
+ *   - `common`     — every non-first sat.
+ *
+ * Halving epochs shrink block subsidy by half every 210_000 blocks:
+ *   e=0 (blocks 0..209_999):        50 BTC =           5_000_000_000 sat
+ *   e=1 (blocks 210k..419_999):     25 BTC =           2_500_000_000 sat
+ *   e=2 (blocks 420k..629_999):     12.5 BTC =         1_250_000_000 sat
+ *   e=3 (blocks 630k..839_999):     6.25 BTC =           625_000_000 sat
+ *   ...
+ *   e=32 approximately mines the last sat; subsidy becomes 0 sat at e=33.
+ *
+ * We use bigint throughout because the total sat supply (~21e14 sats)
+ * exceeds `Number.MAX_SAFE_INTEGER` (~9e15 fits, but midway math needs
+ * safety) and range-endpoint math is easier without precision loss.
+ */
+const SUBSIDY_EPOCH_0 = 50n * 100000000n;
+const BLOCKS_PER_HALVING = 210_000;
+const DIFFICULTY_ADJUSTMENT_INTERVAL = 2016;
+const BLOCKS_PER_CYCLE = 6 * BLOCKS_PER_HALVING; // 1_260_000
+/** Rarity of the FIRST sat of a given block. Non-first sats are always `common`. */
+function rarityOfBlockFirstSat(block) {
+    if (block === 0)
+        return 'mythic';
+    if (block % BLOCKS_PER_CYCLE === 0)
+        return 'legendary';
+    if (block % BLOCKS_PER_HALVING === 0)
+        return 'epic';
+    if (block % DIFFICULTY_ADJUSTMENT_INTERVAL === 0)
+        return 'rare';
+    return 'uncommon';
+}
+/**
+ * Given a sat number, return the block it was mined in AND the first
+ * sat of that block. If `sat === firstSatOfBlock`, the sat is the
+ * uncommon (or higher) block-first-sat; otherwise it's common.
+ */
+function locateSat(sat) {
+    if (sat < 0n)
+        throw new Error(`sat must be non-negative; got ${sat}`);
+    let epoch = 0;
+    let cumStart = 0n;
+    while (epoch < 33) {
+        const subsidy = SUBSIDY_EPOCH_0 >> BigInt(epoch);
+        if (subsidy === 0n)
+            break;
+        const epochSats = BigInt(BLOCKS_PER_HALVING) * subsidy;
+        if (sat < cumStart + epochSats) {
+            const blockInEpoch = Number((sat - cumStart) / subsidy);
+            const block = epoch * BLOCKS_PER_HALVING + blockInEpoch;
+            const firstSatOfBlock = cumStart + BigInt(blockInEpoch) * subsidy;
+            return { block, firstSatOfBlock, subsidy };
+        }
+        cumStart += epochSats;
+        epoch++;
+    }
+    throw new Error(`sat ${sat} is beyond the maximum supply`);
+}
+/** Rarity of an individual sat. */
+function rarityOfSat(sat) {
+    const { block, firstSatOfBlock } = locateSat(sat);
+    if (sat === firstSatOfBlock)
+        return rarityOfBlockFirstSat(block);
+    return 'common';
+}
+/**
+ * Find the highest-rarity sat inside a half-open range `[start, end)`.
+ *
+ * O(1) in the range width: given the block containing `start` and the
+ * block containing `end-1`, we ask "does this block interval contain
+ * any multiple of X" for each rarity threshold (cycle, halving,
+ * difficulty adjustment). The rarest positive answer wins. No
+ * block-by-block iteration.
+ *
+ * That matters because `sat_ranges` returned by ord can span millions
+ * of blocks for wide UTXO ranges; a walker would be prohibitive.
+ */
+function findRareSatInRange(start, end) {
+    if (end <= start)
+        return null;
+    const startInfo = locateSat(start);
+    const endInfo = locateSat(end - 1n);
+    // Block range that overlaps [start, end). The FIRST-sat of a block
+    // is inside [start, end) iff (a) `start` equals it, OR (b) it belongs
+    // to a block after `startInfo.block`.
+    const startIsBlockFirstSat = start === startInfo.firstSatOfBlock;
+    const firstBlockContributing = startIsBlockFirstSat ? startInfo.block : startInfo.block + 1;
+    const lastBlockContributing = endInfo.block;
+    if (firstBlockContributing > lastBlockContributing)
+        return null;
+    // Walk the rarity ladder top-down and short-circuit.
+    const b1 = firstBlockContributing;
+    const b2 = lastBlockContributing;
+    if (b1 === 0) {
+        return { sat: 0n, block: 0, rarity: 'mythic' };
+    }
+    const legendary = firstMultipleInRange(b1, b2, BLOCKS_PER_CYCLE);
+    if (legendary !== null) {
+        return { sat: firstSatOfBlock(legendary), block: legendary, rarity: 'legendary' };
+    }
+    const epic = firstMultipleInRange(b1, b2, BLOCKS_PER_HALVING);
+    if (epic !== null) {
+        return { sat: firstSatOfBlock(epic), block: epic, rarity: 'epic' };
+    }
+    const rare = firstMultipleInRange(b1, b2, DIFFICULTY_ADJUSTMENT_INTERVAL);
+    if (rare !== null) {
+        return { sat: firstSatOfBlock(rare), block: rare, rarity: 'rare' };
+    }
+    // Any remaining block first-sat is uncommon.
+    return {
+        sat: firstSatOfBlock(b1),
+        block: b1,
+        rarity: 'uncommon',
+    };
+}
+/** Smallest multiple of `step` in `[low, high]` (inclusive), or null. */
+function firstMultipleInRange(low, high, step) {
+    const m = Math.ceil(low / step) * step;
+    return m <= high ? m : null;
+}
+/** First sat of a block, O(1) via epoch arithmetic. */
+function firstSatOfBlock(block) {
+    const epoch = Math.floor(block / BLOCKS_PER_HALVING);
+    // Sum of subsidies of every full prior epoch.
+    let cum = 0n;
+    for (let e = 0; e < epoch; e++) {
+        const s = SUBSIDY_EPOCH_0 >> BigInt(e);
+        cum += BigInt(BLOCKS_PER_HALVING) * s;
+    }
+    const subsidyThisEpoch = SUBSIDY_EPOCH_0 >> BigInt(epoch);
+    const blockInEpoch = block - epoch * BLOCKS_PER_HALVING;
+    return cum + BigInt(blockInEpoch) * subsidyThisEpoch;
+}
+/**
+ * Highest-rarity sat across every `[start, end)` range on a UTXO,
+ * as ord returns them on `/output/{outpoint}` (`sat_ranges`). Returns
+ * null when every range is entirely common — the fast path.
+ */
+function findRareSatInRanges(ranges) {
+    const rarityRank = {
+        common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 5,
+    };
+    let rarest = null;
+    for (const [start, end] of ranges) {
+        const hit = findRareSatInRange(start, end);
+        if (hit && (rarest === null || rarityRank[hit.rarity] > rarityRank[rarest.rarity])) {
+            rarest = hit;
+            if (hit.rarity === 'mythic')
+                return rarest;
+        }
+    }
+    return rarest;
 }
 
 /**
@@ -3707,10 +3884,11 @@ class UtxoContentScanner {
             const inscriptionIds = ord.inscriptions ?? [];
             const runes = ord.runes && Object.keys(ord.runes).length > 0 ? ord.runes : null;
             const catIds = cat21Ord.cats ?? [];
-            if (inscriptionIds.length === 0 && !runes && catIds.length === 0) {
+            const rareSat = detectRareSat(ord.sat_ranges);
+            if (inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat) {
                 return { kind: 'scanned-clean' };
             }
-            const content = { outpoint, inscriptionIds, runes, catIds };
+            const content = { outpoint, inscriptionIds, runes, catIds, rareSat };
             return { kind: 'scanned-with-assets', content };
         }), catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -3780,6 +3958,21 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
         }] });
 function trimSlash(url) {
     return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+/**
+ * Turn ord's `sat_ranges` into a rare-sat finding if one exists.
+ * Skips the scan when the range count exceeds `RARE_SAT_MAX_RANGES`
+ * — pathological UTXOs with thousands of ranges would dominate the
+ * per-UTXO cost budget.
+ */
+function detectRareSat(ranges) {
+    if (!ranges || ranges.length === 0 || ranges.length > RARE_SAT_MAX_RANGES)
+        return null;
+    const bigints = ranges.map(([start, end]) => [BigInt(start), BigInt(end)]);
+    const hit = findRareSatInRanges(bigints);
+    if (!hit)
+        return null;
+    return { sat: hit.sat.toString(), block: hit.block, rarity: hit.rarity };
 }
 
 /**
@@ -4328,10 +4521,19 @@ class Cat21CreateOfferOrchestrator {
     /** Where the cat lands after the seller signs + broadcasts. Default = connected wallet's ordinals address. */
     buyerReceiveAddress = signal(null, ...(ngDevMode ? [{ debugName: "buyerReceiveAddress" }] : []));
     feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
+    /**
+     * User's explicit funding-UTXO pick from the buyer-side picker.
+     * When null the orchestrator auto-picks the largest covering UTXO.
+     * Set from the UI so the buyer can reject an asset-carrying UTXO
+     * (inscription / rune / cat / rare sat) the auto-picker would
+     * happily spend.
+     */
+    selectedFundingUtxo = signal(null, ...(ngDevMode ? [{ debugName: "selectedFundingUtxo" }] : []));
     // --- Internals (declared above derived streams to control field-init order) ---
     lastWalletAddress = null;
     priceSatsSubject = new BehaviorSubject(null);
     feeRateSubject = new BehaviorSubject(null);
+    selectedFundingUtxoSubject = new BehaviorSubject(null);
     // --- Output state -------------------------------------------------------
     state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
     errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
@@ -4393,7 +4595,8 @@ class Cat21CreateOfferOrchestrator {
         this.wallet.connectedWallet$.pipe(startWith(null)),
         this.priceSatsSubject,
         this.feeRateSubject,
-    ]).pipe(map(([fundingUtxos, wallet, priceSats, feeRate]) => this.computeSimulation(fundingUtxos, wallet, priceSats, feeRate)), shareReplay({ bufferSize: 1, refCount: true }));
+        this.selectedFundingUtxoSubject,
+    ]).pipe(map(([fundingUtxos, wallet, priceSats, feeRate, selected]) => this.computeSimulation(fundingUtxos, wallet, priceSats, feeRate, selected)), shareReplay({ bufferSize: 1, refCount: true }));
     // --- Commands -----------------------------------------------------------
     setTargetCat(cat) {
         this.targetCat.set(cat);
@@ -4416,6 +4619,15 @@ class Cat21CreateOfferOrchestrator {
             return;
         this.feeRate.set(rate);
         this.feeRateSubject.next(rate);
+    }
+    /**
+     * Push the buyer's funding-UTXO pick (or null to auto-pick). Called
+     * from the picker UI whenever the buyer clicks a row in the
+     * scanner-annotated funding list.
+     */
+    setSelectedFundingUtxo(utxo) {
+        this.selectedFundingUtxo.set(utxo);
+        this.selectedFundingUtxoSubject.next(utxo);
     }
     /**
      * Build the buy-offer PSBT, ask the connected wallet to sign all
@@ -4442,7 +4654,7 @@ class Cat21CreateOfferOrchestrator {
             return throwError(() => new Error('No buyer receive address'));
         if (!feeRate)
             return throwError(() => new Error('No fee rate set'));
-        const sim = this.computeSimulation(this.lastFundingUtxosSnapshot, wallet, priceSats, feeRate);
+        const sim = this.computeSimulation(this.lastFundingUtxosSnapshot, wallet, priceSats, feeRate, this.selectedFundingUtxo());
         if (sim.insufficient || !sim.simulation) {
             const msg = 'Insufficient funds for buy-offer at the current price + fee rate';
             this.errorMessage.set(msg);
@@ -4523,8 +4735,10 @@ class Cat21CreateOfferOrchestrator {
         // restores it to the new wallet's ordinals address anyway.
         this.feeRate.set(null);
         this.feeRateSubject.next(null);
+        this.selectedFundingUtxo.set(null);
+        this.selectedFundingUtxoSubject.next(null);
     }
-    computeSimulation(fundingUtxos, wallet, priceSats, feeRate) {
+    computeSimulation(fundingUtxos, wallet, priceSats, feeRate, selected = null) {
         const target = this.targetCat();
         const sellerAddress = this.sellerPaymentAddress();
         const buyerReceive = this.buyerReceiveAddress();
@@ -4536,10 +4750,17 @@ class Cat21CreateOfferOrchestrator {
         // through to the seller in output 1 (priceSats + postage), so it
         // doesn't reduce the buyer's funding requirement.
         const targetSpend = priceSats + CAT21_POSTAGE_SATS + Math.ceil(feeRate * 220); // ~220 vB ceiling for offer
-        const pick = pickLargestFundingUtxoThatCovers({
-            utxos: fundingUtxos,
-            targetSpendSats: targetSpend,
-        });
+        // Buyer's explicit pick wins when still in the list AND covers.
+        // Fallback to auto-pick for the pre-picker path.
+        const selectedStillPresent = selected
+            ? fundingUtxos.find((u) => u.txid === selected.txid && u.vout === selected.vout)
+            : undefined;
+        const pick = selectedStillPresent && selectedStillPresent.value >= targetSpend
+            ? selectedStillPresent
+            : pickLargestFundingUtxoThatCovers({
+                utxos: fundingUtxos,
+                targetSpendSats: targetSpend,
+            });
         if (!pick) {
             return { simulation: null, insufficient: true };
         }
@@ -5138,11 +5359,20 @@ class Cat21TransferOrchestrator {
     recipientAddress = signal(null, ...(ngDevMode ? [{ debugName: "recipientAddress" }] : []));
     /** sat/vB from the fee picker or manual input. */
     feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
+    /**
+     * User's explicit funding-UTXO pick from the picker. When null the
+     * orchestrator auto-picks the largest covering UTXO (backwards-
+     * compatible with the pre-picker behaviour). Set this from the UI's
+     * scanner-annotated row selection so the user can reject an
+     * asset-carrying UTXO the auto-picker would happily spend.
+     */
+    selectedFundingUtxo = signal(null, ...(ngDevMode ? [{ debugName: "selectedFundingUtxo" }] : []));
     // --- Internals (declared up here because instance-field initialisers
     // below depend on them at class-construction time).
     lastWalletAddress = null;
     catUtxoSubject = new BehaviorSubject(null);
     feeRateSubject = new BehaviorSubject(null);
+    selectedFundingUtxoSubject = new BehaviorSubject(null);
     // --- Output state -------------------------------------------------------
     state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
     errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
@@ -5225,7 +5455,8 @@ class Cat21TransferOrchestrator {
         this.wallet.connectedWallet$.pipe(startWith(null)),
         this.catUtxoSubject,
         this.feeRateSubject,
-    ]).pipe(map(([fundingUtxos, wallet, cat, feeRate]) => this.computeSimulation(fundingUtxos, wallet, cat, feeRate)), shareReplay({ bufferSize: 1, refCount: true }));
+        this.selectedFundingUtxoSubject,
+    ]).pipe(map(([fundingUtxos, wallet, cat, feeRate, selected]) => this.computeSimulation(fundingUtxos, wallet, cat, feeRate, selected)), shareReplay({ bufferSize: 1, refCount: true }));
     // --- Commands -----------------------------------------------------------
     setCatUtxo(cat) {
         this.catUtxo.set(cat);
@@ -5239,6 +5470,15 @@ class Cat21TransferOrchestrator {
             return;
         this.feeRate.set(rate);
         this.feeRateSubject.next(rate);
+    }
+    /**
+     * Push the user's funding-UTXO pick (or null to fall back to
+     * auto-pick). The picker UI calls this every time the seller clicks
+     * a row in the scanner-annotated funding list.
+     */
+    setSelectedFundingUtxo(utxo) {
+        this.selectedFundingUtxo.set(utxo);
+        this.selectedFundingUtxoSubject.next(utxo);
     }
     /**
      * Trigger the transfer. Requires a connected wallet, a selected cat,
@@ -5270,7 +5510,7 @@ class Cat21TransferOrchestrator {
             // here. The simulation stream already pre-computes — reuse it
             // by re-running the calc against a sync snapshot of the
             // funding UTXOs).
-            this.lastFundingUtxosSnapshot, wallet, cat, feeRate);
+            this.lastFundingUtxosSnapshot, wallet, cat, feeRate, this.selectedFundingUtxo());
         }
         catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -5343,8 +5583,10 @@ class Cat21TransferOrchestrator {
         this.recipientAddress.set(null);
         this.feeRate.set(null);
         this.feeRateSubject.next(null);
+        this.selectedFundingUtxo.set(null);
+        this.selectedFundingUtxoSubject.next(null);
     }
-    computeSimulation(fundingUtxos, wallet, cat, feeRate) {
+    computeSimulation(fundingUtxos, wallet, cat, feeRate, selected = null) {
         if (!wallet || !cat || !feeRate || fundingUtxos.length === 0) {
             return { simulation: null, insufficient: false };
         }
@@ -5354,10 +5596,19 @@ class Cat21TransferOrchestrator {
         // Use a generous over-estimate for fee+postage in the pick stage;
         // the two-pass simulation below tightens it.
         const target = CAT21_POSTAGE_SATS + Math.ceil(feeRate * 200); // ~200 vB ceiling for transfer
-        const pick = pickLargestFundingUtxoThatCovers({
-            utxos: fundingUtxos,
-            targetSpendSats: target,
-        });
+        // User's explicit pick wins when it's still in the funding list
+        // AND covers the target. Otherwise fall back to auto-pick (largest
+        // covering UTXO). This lets the picker UI reject asset-carrying
+        // rows the auto-picker would happily spend.
+        const selectedStillPresent = selected
+            ? fundingUtxos.find((u) => u.txid === selected.txid && u.vout === selected.vout)
+            : undefined;
+        const pick = selectedStillPresent && selectedStillPresent.value >= target
+            ? selectedStillPresent
+            : pickLargestFundingUtxoThatCovers({
+                utxos: fundingUtxos,
+                targetSpendSats: target,
+            });
         if (!pick) {
             return { simulation: null, insufficient: true };
         }
@@ -7258,5 +7509,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
 //# sourceMappingURL=ordpool-sdk.mjs.map

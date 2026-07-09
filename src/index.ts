@@ -34,6 +34,7 @@ export * from './cat21-mint/cat21-mint-orchestrator.service';
 export * from './cat21-mint/cat21-mint-input-adapter';
 export * from './cat21-mint/utxo-content.types';
 export * from './cat21-mint/utxo-content-scanner.service';
+export * from './cat21-mint/sat-rarity.helper';
 
 // --- cat21 fee simulation + coin selection (Layer 3, shared) ---
 export * from './cat21-fee/fee-simulation.helper';

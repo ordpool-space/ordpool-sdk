@@ -3,9 +3,11 @@ import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Observable, catchError, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
 
 import { cat21Config } from './cat21-sdk-config';
+import { findRareSatInRanges, SatRarity } from './sat-rarity.helper';
 import {
   Cat21OrdOutputResponse,
   OrdOutputResponse,
+  RARE_SAT_MAX_RANGES,
   UtxoContent,
   UtxoScanState,
 } from './utxo-content.types';
@@ -96,11 +98,12 @@ export class UtxoContentScanner {
         const inscriptionIds = ord.inscriptions ?? [];
         const runes = ord.runes && Object.keys(ord.runes).length > 0 ? ord.runes : null;
         const catIds = cat21Ord.cats ?? [];
+        const rareSat = detectRareSat(ord.sat_ranges);
 
-        if (inscriptionIds.length === 0 && !runes && catIds.length === 0) {
+        if (inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat) {
           return { kind: 'scanned-clean' };
         }
-        const content: UtxoContent = { outpoint, inscriptionIds, runes, catIds };
+        const content: UtxoContent = { outpoint, inscriptionIds, runes, catIds, rareSat };
         return { kind: 'scanned-with-assets', content };
       }),
       catchError((err: unknown): Observable<UtxoScanState> => {
@@ -175,4 +178,20 @@ export class UtxoContentScanner {
 
 function trimSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+/**
+ * Turn ord's `sat_ranges` into a rare-sat finding if one exists.
+ * Skips the scan when the range count exceeds `RARE_SAT_MAX_RANGES`
+ * — pathological UTXOs with thousands of ranges would dominate the
+ * per-UTXO cost budget.
+ */
+function detectRareSat(
+  ranges: ReadonlyArray<readonly [number, number]> | undefined,
+): { sat: string; block: number; rarity: SatRarity } | null {
+  if (!ranges || ranges.length === 0 || ranges.length > RARE_SAT_MAX_RANGES) return null;
+  const bigints = ranges.map(([start, end]) => [BigInt(start), BigInt(end)] as [bigint, bigint]);
+  const hit = findRareSatInRanges(bigints);
+  if (!hit) return null;
+  return { sat: hit.sat.toString(), block: hit.block, rarity: hit.rarity };
 }

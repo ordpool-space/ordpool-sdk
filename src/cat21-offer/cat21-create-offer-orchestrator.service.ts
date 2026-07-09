@@ -123,10 +123,20 @@ export class Cat21CreateOfferOrchestrator {
 
   readonly feeRate = signal<number | null>(null);
 
+  /**
+   * User's explicit funding-UTXO pick from the buyer-side picker.
+   * When null the orchestrator auto-picks the largest covering UTXO.
+   * Set from the UI so the buyer can reject an asset-carrying UTXO
+   * (inscription / rune / cat / rare sat) the auto-picker would
+   * happily spend.
+   */
+  readonly selectedFundingUtxo = signal<TxnOutput | null>(null);
+
   // --- Internals (declared above derived streams to control field-init order) ---
   private lastWalletAddress: string | null = null;
   private readonly priceSatsSubject = new BehaviorSubject<number | null>(null);
   private readonly feeRateSubject = new BehaviorSubject<number | null>(null);
+  private readonly selectedFundingUtxoSubject = new BehaviorSubject<TxnOutput | null>(null);
 
   // --- Output state -------------------------------------------------------
 
@@ -204,9 +214,10 @@ export class Cat21CreateOfferOrchestrator {
     this.wallet.connectedWallet$.pipe(startWith(null as WalletInfo | null)),
     this.priceSatsSubject,
     this.feeRateSubject,
+    this.selectedFundingUtxoSubject,
   ]).pipe(
-    map(([fundingUtxos, wallet, priceSats, feeRate]) =>
-      this.computeSimulation(fundingUtxos, wallet, priceSats, feeRate),
+    map(([fundingUtxos, wallet, priceSats, feeRate, selected]) =>
+      this.computeSimulation(fundingUtxos, wallet, priceSats, feeRate, selected),
     ),
     shareReplay({ bufferSize: 1, refCount: true }),
   );
@@ -239,6 +250,16 @@ export class Cat21CreateOfferOrchestrator {
   }
 
   /**
+   * Push the buyer's funding-UTXO pick (or null to auto-pick). Called
+   * from the picker UI whenever the buyer clicks a row in the
+   * scanner-annotated funding list.
+   */
+  setSelectedFundingUtxo(utxo: TxnOutput | null): void {
+    this.selectedFundingUtxo.set(utxo);
+    this.selectedFundingUtxoSubject.next(utxo);
+  }
+
+  /**
    * Build the buy-offer PSBT, ask the connected wallet to sign all
    * buyer inputs (1..N), and expose the result as `offerArtifact()`.
    * **Does NOT broadcast** — the offer is incomplete until the seller
@@ -259,7 +280,13 @@ export class Cat21CreateOfferOrchestrator {
     if (!buyerReceive) return throwError(() => new Error('No buyer receive address'));
     if (!feeRate) return throwError(() => new Error('No fee rate set'));
 
-    const sim = this.computeSimulation(this.lastFundingUtxosSnapshot, wallet, priceSats, feeRate);
+    const sim = this.computeSimulation(
+      this.lastFundingUtxosSnapshot,
+      wallet,
+      priceSats,
+      feeRate,
+      this.selectedFundingUtxo(),
+    );
     if (sim.insufficient || !sim.simulation) {
       const msg = 'Insufficient funds for buy-offer at the current price + fee rate';
       this.errorMessage.set(msg);
@@ -351,6 +378,8 @@ export class Cat21CreateOfferOrchestrator {
     // restores it to the new wallet's ordinals address anyway.
     this.feeRate.set(null);
     this.feeRateSubject.next(null);
+    this.selectedFundingUtxo.set(null);
+    this.selectedFundingUtxoSubject.next(null);
   }
 
   private computeSimulation(
@@ -358,6 +387,7 @@ export class Cat21CreateOfferOrchestrator {
     wallet: WalletInfo | null,
     priceSats: number | null,
     feeRate: number | null,
+    selected: TxnOutput | null = null,
   ): CreateOfferSimulationOutcome {
     const target = this.targetCat();
     const sellerAddress = this.sellerPaymentAddress();
@@ -370,10 +400,17 @@ export class Cat21CreateOfferOrchestrator {
     // through to the seller in output 1 (priceSats + postage), so it
     // doesn't reduce the buyer's funding requirement.
     const targetSpend = priceSats + CAT21_POSTAGE_SATS + Math.ceil(feeRate * 220); // ~220 vB ceiling for offer
-    const pick = pickLargestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
-      utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
-      targetSpendSats: targetSpend,
-    });
+    // Buyer's explicit pick wins when still in the list AND covers.
+    // Fallback to auto-pick for the pre-picker path.
+    const selectedStillPresent = selected
+      ? fundingUtxos.find((u) => u.txid === selected.txid && u.vout === selected.vout)
+      : undefined;
+    const pick = selectedStillPresent && selectedStillPresent.value >= targetSpend
+      ? selectedStillPresent
+      : pickLargestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
+          utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
+          targetSpendSats: targetSpend,
+        });
     if (!pick) {
       return { simulation: null, insufficient: true };
     }

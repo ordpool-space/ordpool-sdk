@@ -60,6 +60,14 @@ __exportStar(require("./cat21-mint/cat21.service.helper"), exports);
 __exportStar(require("./cat21-mint/cat21.service.types"), exports);
 __exportStar(require("./cat21-mint/cat21-mint.helper"), exports);
 __exportStar(require("./cat21-mint/cat21-mint-input-adapter"), exports);
+// --- UTXO content-safety scanner: pure types + auto-pick helpers.
+//     The Angular @Injectable `UtxoContentScanner` service stays in
+//     the main entry only; the pure detection primitives (bucketOf,
+//     findAutoPickCandidate, rune-name extraction, thresholds, all
+//     type aliases) belong at core so non-Angular consumers — bots,
+//     cat21-wallet autonomous flows, CLIs — can reach them.
+__exportStar(require("./cat21-mint/utxo-content.types"), exports);
+__exportStar(require("./cat21-mint/sat-rarity.helper"), exports);
 // --- CAT-21 fee simulation + coin selection (shared across flows) ---
 __exportStar(require("./cat21-fee/fee-simulation.helper"), exports);
 __exportStar(require("./cat21-fee/coin-selection.helper"), exports);

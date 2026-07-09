@@ -29,6 +29,8 @@
     "src/cat21-mint/cat21.service.types.ts",
     "src/cat21-mint/cat21-mint.helper.ts",
     "src/cat21-mint/cat21-mint-input-adapter.ts",
+    "src/cat21-mint/utxo-content.types.ts",
+    "src/cat21-mint/sat-rarity.helper.ts",
     "src/cat21-fee/fee-simulation.helper.ts",
     "src/cat21-fee/coin-selection.helper.ts",
     "src/cat21-fee/dummy-keypair.ts",
