@@ -374,10 +374,11 @@ export class InscribeMintOrchestrator {
         } else {
           out.push({ utxo, simulation, insufficient: false });
         }
-      } catch {
+      } catch (err) {
         // Layer-1 / Layer-2 refused this UTXO (e.g., legacy P2PKH
         // without transactionHex, or address adapter rejection).
         // Surface as insufficient so the picker greys it out.
+        console.error('[inscribe-mint-orchestrator] simulation threw for utxo', utxo.txid, ':', err);
         out.push({ utxo, simulation: null, insufficient: true });
       }
     }
