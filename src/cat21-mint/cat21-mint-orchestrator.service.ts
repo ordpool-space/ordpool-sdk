@@ -7,6 +7,7 @@ import {
   Subscription,
   catchError,
   combineLatest,
+  distinctUntilChanged,
   map,
   of,
   shareReplay,
@@ -108,6 +109,17 @@ export class Cat21MintOrchestrator {
    */
   readonly utxos$: Observable<TxnOutput[]> = this.wallet.connectedWallet$.pipe(
     startWith(null as WalletInfo | null),
+    // Guard against `connectedWallet$` re-emitting the same wallet.
+    // WalletService fires `.next(info)` on service construction (rehydrate
+    // from localStorage) AND on every connector `onAccountChange` event —
+    // and connectors like Xverse fire that event repeatedly after a
+    // reload. Without this guard, `switchMap` re-cancels the in-flight
+    // getUtxos + resets `state` to 'loading-utxos' faster than downstream
+    // consumers (paymentOutputs$/auto-pick) can settle, and the mint
+    // form's "found funds" banner never surfaces. Key by paymentAddress
+    // — the sole input to `getUtxos` — so a genuine wallet switch still
+    // re-fetches.
+    distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null)),
     switchMap((w) => {
       if (!w) {
         this.state.set('idle');
