@@ -1704,6 +1704,8 @@ class WalletService {
         this.connectedWallet$.next(walletInfo);
     }
     disconnectWallet() {
+        // eslint-disable-next-line no-console
+        console.error('[wallet.service] disconnectWallet called from:', new Error().stack);
         this.tearDownAccountChangeSubscription();
         this.storageService.removeItem(LAST_CONNECTED_WALLET);
         this.connectedWallet$.next(null);
