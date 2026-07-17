@@ -32,7 +32,6 @@ import { INSCRIBE_POSTAGE_SATS } from '../../src/inscribe/inscription-commit.hel
 import { Network, toScureNetwork } from '../../src/network';
 import {
   EsploraTx,
-  getTxStatus,
   inscriptionId,
   mineBlocks,
   postTx,
@@ -145,10 +144,13 @@ describe('inscribe → tip output → ord-indexing roundtrip on regtest', () => 
     const commitTxid = await postTx(signedCommit.hex);
     expect(commitTxid).toBe(inscribed.commitTxid);
 
-    const commitTip = mineBlocks(1);
-    await waitForElectrsSync(commitTip);
-    const commitStatus = await getTxStatus(commitTxid);
-    expect(commitStatus.confirmed).toBe(true);
+    // `waitForElectrsSync` + `getTxStatus` is racy: the block-tip
+    // header can be ingested before per-tx status catches up. Same
+    // race the wallet session generalised waitForUtxoAt for; this
+    // call site was missed. Use `waitForTxConfirmed` which polls
+    // per-tx directly.
+    mineBlocks(1);
+    await waitForTxConfirmed(commitTxid);
 
     // Phase 3: broadcast the reveal + confirm.
     const revealTxid = await postTx(inscribed.revealHex);

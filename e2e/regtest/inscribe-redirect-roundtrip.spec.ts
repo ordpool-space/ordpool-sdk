@@ -48,7 +48,6 @@ import { Network, toScureNetwork } from '../../src/network';
 import {
   ElectrsUtxo,
   getTx,
-  getTxStatus,
   getUtxos,
   mineBlocks,
   postTx,
@@ -139,10 +138,11 @@ describe('inscribe redirect-via-ephemeral-key roundtrip on regtest', () => {
     const commitTxid = await postTx(signedCommit.hex);
     expect(commitTxid).toBe(inscribed.commitTxid);
 
-    const commitTip = mineBlocks(1);
-    await waitForElectrsSync(commitTip);
-    const commitStatus = await getTxStatus(commitTxid);
-    expect(commitStatus.confirmed).toBe(true);
+    // waitForElectrsSync + getTxStatus is racy (block header ingested
+    // before per-tx status catches up). waitForTxConfirmed polls
+    // per-tx directly.
+    mineBlocks(1);
+    await waitForTxConfirmed(commitTxid);
 
     // Phase 3: rebuild the reveal targeting B instead of A. We
     // construct the taptree the same way the commit helper did

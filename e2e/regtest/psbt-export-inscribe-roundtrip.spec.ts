@@ -42,7 +42,6 @@ import { psbtExportSigner } from '../../src/wallet/signers/psbt-export.signer';
 import {
   ElectrsUtxo,
   getTx,
-  getTxStatus,
   mineBlocks,
   postTx,
   rpc,
@@ -149,10 +148,11 @@ describe('psbt-export signer inscribe-roundtrip on regtest (external offline wal
     expect(signerResult.txId).toBe(inscribed.commitTxid);
 
     // Phase 4: commit confirmation.
-    const commitTip = mineBlocks(1);
-    await waitForElectrsSync(commitTip);
-    const commitStatus = await getTxStatus(signerResult.txId);
-    expect(commitStatus.confirmed).toBe(true);
+    // waitForElectrsSync + getTxStatus is racy (block header ingested
+    // before per-tx status catches up). waitForTxConfirmed polls
+    // per-tx directly.
+    mineBlocks(1);
+    await waitForTxConfirmed(signerResult.txId);
 
     // Phase 5: broadcast reveal (already signed via the orchestrator's
     // ephemeral key).

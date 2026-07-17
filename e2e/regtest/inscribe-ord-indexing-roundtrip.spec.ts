@@ -35,7 +35,6 @@ import { createInscribeTransactions } from '../../src/inscribe/inscription.servi
 import { Network, toScureNetwork } from '../../src/network';
 import {
   ElectrsUtxo,
-  getTxStatus,
   inscriptionId,
   mineBlocks,
   postTx,
@@ -121,10 +120,11 @@ describe('inscribe → real-ord indexing roundtrip on regtest', () => {
     const commitTxid = await postTx(signedCommit.hex);
     expect(commitTxid).toBe(inscribed.commitTxid);
 
-    const commitTip = mineBlocks(1);
-    await waitForElectrsSync(commitTip);
-    const commitStatus = await getTxStatus(commitTxid);
-    expect(commitStatus.confirmed).toBe(true);
+    // waitForElectrsSync + getTxStatus is racy (block header ingested
+    // before per-tx status catches up). waitForTxConfirmed polls
+    // per-tx directly.
+    mineBlocks(1);
+    await waitForTxConfirmed(commitTxid);
 
     // Phase 3: broadcast the reveal + confirm.
     const revealTxid = await postTx(inscribed.revealHex);

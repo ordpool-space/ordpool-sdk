@@ -36,7 +36,6 @@ import { Network, toScureNetwork } from '../../src/network';
 import {
   catInscriptionId,
   EsploraTx,
-  getTxStatus,
   mineBlocks,
   postTx,
   rpc,
@@ -122,10 +121,11 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
 
     const commitTxid = await postTx(signedCommit.hex);
     expect(commitTxid).toBe(inscribed.commitTxid);
-    const commitTip = mineBlocks(1);
-    await waitForElectrsSync(commitTip);
-    const commitStatus = await getTxStatus(commitTxid);
-    expect(commitStatus.confirmed).toBe(true);
+    // waitForElectrsSync + getTxStatus is racy (block header ingested
+    // before per-tx status catches up). waitForTxConfirmed polls
+    // per-tx directly.
+    mineBlocks(1);
+    await waitForTxConfirmed(commitTxid);
 
     // Phase 3: broadcast reveal + confirm.
     const revealTxid = await postTx(inscribed.revealHex);
