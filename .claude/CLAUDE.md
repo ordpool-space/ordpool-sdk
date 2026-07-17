@@ -311,55 +311,71 @@ There is no npm publish for this package. Consumers pin a git SHA:
 
 ## Shipped artifacts
 
-`dist/` (Angular fesm2022 bundle) and `dist-core/` (plain TS/ESM
-core entry) are **checked in to git** — every commit on `main`
-ships with pre-built artifacts. The previous `prepare` hook that
-ran `npm run build` during consumer install has been removed.
+Split posture:
 
-Why: the global `ignore-scripts=true` posture blocks postinstall
-hooks (Shai-Hulud defence). The manual workaround documented in
-the workspace HQ — `cd node_modules/ordpool-sdk && npm install
---ignore-scripts=false && npm run build` — does NOT actually work
-on this SDK because ng-packagr's tsc emits incomplete tmp-typings
-when run from inside a parent project's `node_modules/`. Same
-directory copied to `/tmp` builds clean; nested under a consumer's
-node_modules it fails on `Could not resolve "./cat21-protocol"
-from dist/tmp-typings/index.d.ts`. Root cause unresolved.
+  - **`dist/`** (Angular ng-packagr fesm2022 bundle) — **checked
+    in to git**. Every commit on `main` ships with the pre-built
+    Angular bundle.
+  - **`dist-core/`** (plain TS/ESM core entry, CommonJS) — **NOT
+    checked in**. Regenerated at consumer-install time by the
+    `prepare` script (`npm run build:core`, plain tsc — unaffected
+    by the ng-packagr-in-node_modules bug).
 
-Pre-built shipping bypasses the failure mode and gives every
-consumer the same SHA-pinned reproducibility:
+Why the split:
 
-  - ordpool/frontend, cat21-indexer/frontend → import from
-    `ordpool-sdk` (Angular entry, dist/).
-  - cat21-wallet, cat21.space → import from
-    `ordpool-sdk/core` (Angular-free, dist-core/).
+1. The global `ignore-scripts=true` posture on the maintainer's
+   `~/.npmrc` blocks any `prepare` / `postinstall` hook (Shai-Hulud
+   defence). We used to ship BOTH artifacts in git to bypass this.
+2. ng-packagr's tsc has an unresolved bug: run from inside a
+   parent's `node_modules/`, it emits incomplete tmp-typings and
+   fails with `Could not resolve "./cat21-protocol" from
+   dist/tmp-typings/index.d.ts`. Same directory copied to `/tmp`
+   builds clean. Root cause unknown. So `build:angular` genuinely
+   cannot run in the prepare hook.
+3. `build:core` (plain tsc, no ng-packagr) DOES work from inside
+   `node_modules/`. So the Angular-free entry can be prepared.
 
-Same SHA pin, same install behaviour, no per-consumer workaround.
+Consumer contract:
+
+  - **Angular consumers** (ordpool/frontend, cat21-indexer/frontend)
+    import from `ordpool-sdk` (main entry, `dist/`). The shipped
+    tarball bytes are what they get. No `.npmrc` change required.
+  - **Non-Angular consumers** (cat21-wallet, cat21.space core code)
+    import from `ordpool-sdk/core` (`dist-core/`). These consumers
+    MUST have `ignore-scripts=false` in their `.npmrc` so the
+    `prepare` script actually runs. Without it, `dist-core/` is
+    missing after install and every `ordpool-sdk/core` import
+    fails at resolve time.
+
+Trade-off accepted: any consumer with `ignore-scripts=false` has
+Shai-Hulud attack surface reopened for its entire dep tree, not
+just for ordpool-sdk (npm's `ignore-scripts` is a global switch,
+no per-package whitelist). Consumers that need `/core` accept this
+trade-off; consumers that only need the Angular entry don't touch
+their `.npmrc`.
 
 ## HARD RULE: build before commit
 
 When you change any source file under `src/`, you MUST run
-`npm run build` and commit BOTH the source change AND the
-regenerated `dist/` + `dist-core/` in the same commit.
+`npm run build:angular` and commit the regenerated `dist/`
+alongside the source change in the same commit. `dist-core/` is
+generated per-install by the `prepare` hook — do not commit it.
 
 Reason: consumers pin SHAs. If you push source-only, the next
-consumer install pulls stale artifacts and either runs the OLD
-behaviour silently OR fails to type-check because the runtime
-diverges from the .d.ts. Either way the consumer is left
-debugging an SDK that has source on disk that doesn't match the
-installed bytes.
+Angular consumer install pulls the STALE `dist/` from the tarball
+and runs the old behaviour silently.
 
 The CI workflow re-verifies this invariant: every push runs
-`npm run build` and `git diff --exit-code dist/ dist-core/` —
-if the committed artifacts don't match a fresh build, the push
-fails.
+`npm run build:angular` and `git diff --exit-code dist/` — if the
+committed `dist/` doesn't match a fresh build, the push fails.
 
 To ship a change to a consumer:
 
 1. Edit `src/`.
-2. `npm run build`.
-3. `npm test` (738 node + 819 browser unit tests).
-4. `git add src/ dist/ dist-core/` + commit + push to `main`.
+2. `npm run build:angular` (regenerates `dist/`).
+3. `npm test` (node + browser unit tests).
+4. `git add src/ dist/` + commit + push to `main`. **DO NOT** add
+   `dist-core/` — it's gitignored.
 5. In the consumer: bump the SHA in `package.json`, run
    `npm install --package-lock-only ordpool-sdk@github:ordpool-space/ordpool-sdk#<sha>`
    to update the lockfile, commit BOTH `package.json` and

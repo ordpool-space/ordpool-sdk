@@ -24,7 +24,6 @@
   },
   "files": [
     "dist",
-    "dist-core",
     "src",
     "e2e",
     "*.js",
@@ -35,6 +34,7 @@
     "build": "npm run build:angular && npm run build:core",
     "build:angular": "ng-packagr -p ng-package.json",
     "build:core": "tsc -p tsconfig.core.json && node -e \"require('fs').writeFileSync('dist-core/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
+    "prepare": "npm run build:core",
     "start": "npm run test",
     "test": "npm run test:node && npm run test:browser",
     "test:node": "jest --config jest.config.node.js",

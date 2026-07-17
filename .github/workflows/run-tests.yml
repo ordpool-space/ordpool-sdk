@@ -19,3 +19,13 @@ jobs:
 
     - run: npm install
     - run: npm run test
+
+    # Enforce the "build before commit" HARD RULE from
+    # .claude/CLAUDE.md: rebuild dist/ (Angular fesm2022) and fail
+    # if it drifts from what was committed. dist-core/ is NOT
+    # checked in — regenerated per-install via the prepare hook —
+    # so we only diff dist/.
+    - name: Verify committed dist/ matches a fresh build
+      run: |
+        npm run build:angular
+        git diff --exit-code dist/

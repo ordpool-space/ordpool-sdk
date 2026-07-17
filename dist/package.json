@@ -27,7 +27,6 @@
   },
   "files": [
     "dist",
-    "dist-core",
     "src",
     "e2e",
     "*.js",
