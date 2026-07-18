@@ -4,6 +4,7 @@ import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
 import { attachDummyBuyerSig } from '../testing/fixtures';
+import { toPaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   buildCat21BuyOfferPsbt,
@@ -38,7 +39,7 @@ const buyerPaymentScript = btc.p2wpkh(BUYER_KEY, btc.TEST_NETWORK);
 const buyerOrdinalsScript = btc.p2tr(BUYER_KEY.slice(1, 33), undefined, btc.TEST_NETWORK);
 
 const SELLER_ORDINALS_ADDRESS = sellerOrdinalsScript.address!;
-const SELLER_PAYMENT_ADDRESS = sellerPaymentScript.address!;
+const SELLER_PAYMENT_ADDRESS = toPaymentAddress(sellerPaymentScript.address!);
 const BUYER_PAYMENT_ADDRESS = buyerPaymentScript.address!;
 const BUYER_ORDINALS_ADDRESS = buyerOrdinalsScript.address!;
 

@@ -8,6 +8,7 @@ import { Cat21Service } from '../cat21-mint/cat21.service';
 import { CatOutpoint } from '../cat21-share/cat-outpoint';
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
+import { PaymentAddress } from '../wallet/address-types';
 import { findSignerOrThrow } from '../wallet/signers';
 import { WalletService } from '../wallet/wallet.service';
 import {
@@ -92,7 +93,7 @@ export class Cat21AcceptOfferOrchestrator {
    * decode to this exact address. Strongly recommended; matches
    * `validateCat21BuyOfferPsbt`'s `expectedSellerPaymentAddress` arg.
    */
-  readonly expectedSellerPaymentAddress = signal<string | null>(null);
+  readonly expectedSellerPaymentAddress = signal<PaymentAddress | null>(null);
 
   // --- Output state -------------------------------------------------------
 
@@ -277,10 +278,16 @@ export class Cat21AcceptOfferOrchestrator {
     if (paste) this.setPastedOffer(paste);
   }
 
-  setExpectedSellerPaymentAddress(address: string | null): void {
-    this.expectedSellerPaymentAddress.set(
-      address && address.trim() ? address.trim() : null,
-    );
+  /**
+   * Set the address the seller expects the payment output to land at.
+   * Symmetric with `Cat21CreateOfferOrchestrator.setSellerPaymentAddress`
+   * — branded for the same reason (SDK HARD RULE "Never derive a
+   * payment address from an on-chain lookup"). Value must be
+   * constructed via `toPaymentAddress()` or come pre-branded from the
+   * URL parser / wallet fixture.
+   */
+  setExpectedSellerPaymentAddress(address: PaymentAddress | null): void {
+    this.expectedSellerPaymentAddress.set(address);
     const paste = this.pastedOffer();
     if (paste) this.setPastedOffer(paste);
   }

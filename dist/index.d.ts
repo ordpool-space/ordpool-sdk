@@ -1716,7 +1716,7 @@ interface ValidateCat21BuyOfferArgs {
      * would sign, the cat would move, and the payment would never arrive.
      * Made mandatory as of audit C1.
      */
-    expectedSellerPaymentAddress: string;
+    expectedSellerPaymentAddress: PaymentAddress;
     /**
      * Network used to decode Output 1's `scriptPubKey` back to an address.
      * Defaults to mainnet. Callers signing on testnet/regtest must pass it.
@@ -1906,18 +1906,13 @@ declare class Cat21CreateOfferOrchestrator {
     readonly simulation$: Observable<CreateOfferSimulationOutcome>;
     setTargetCat(cat: BuyOfferTargetCat | null): void;
     /**
-     * Set the seller's PAYMENT address (where sale proceeds land).
-     *
-     * Requires a branded `PaymentAddress` — the caller MUST have used
-     * `toPaymentAddress(str)` to construct it. That forced conversion
-     * is the whole point: it makes the "wait — is this really a payment
-     * address, or did I just paste an on-chain owner lookup's ordinals
-     * address?" question un-skippable at every callsite. See SDK HARD
-     * RULE "Never derive a payment address from an on-chain lookup".
-     *
-     * Shape / whitespace validation lives in `toPaymentAddress` — by
-     * the time an address reaches this setter it is already well-formed,
-     * so no defensive trim/null-collapse here.
+     * Set the seller's PAYMENT address (where sale proceeds land). The
+     * branded `PaymentAddress` type makes the "is this really a payment
+     * address, not an ordinals one?" question un-skippable at every
+     * callsite — either the value came from `parseBuyOfferQueryParams`
+     * (which brands the URL `payTo=` param at ingress) or the caller
+     * used `toPaymentAddress()` on a raw string. See SDK HARD RULE
+     * "Never derive a payment address from an on-chain lookup".
      */
     setSellerPaymentAddress(address: PaymentAddress | null): void;
     setPriceSats(price: number): void;
@@ -2016,7 +2011,7 @@ declare class Cat21AcceptOfferOrchestrator {
      * decode to this exact address. Strongly recommended; matches
      * `validateCat21BuyOfferPsbt`'s `expectedSellerPaymentAddress` arg.
      */
-    readonly expectedSellerPaymentAddress: _angular_core.WritableSignal<string>;
+    readonly expectedSellerPaymentAddress: _angular_core.WritableSignal<PaymentAddress>;
     readonly state: _angular_core.WritableSignal<AcceptOfferState>;
     readonly errorMessage: _angular_core.WritableSignal<string>;
     readonly successTxId: _angular_core.WritableSignal<string>;
@@ -2084,7 +2079,15 @@ declare class Cat21AcceptOfferOrchestrator {
      */
     readonly maxPastedOfferBytes: number;
     setExpectedCatUtxo(utxo: CatOutpoint | null): void;
-    setExpectedSellerPaymentAddress(address: string | null): void;
+    /**
+     * Set the address the seller expects the payment output to land at.
+     * Symmetric with `Cat21CreateOfferOrchestrator.setSellerPaymentAddress`
+     * — branded for the same reason (SDK HARD RULE "Never derive a
+     * payment address from an on-chain lookup"). Value must be
+     * constructed via `toPaymentAddress()` or come pre-branded from the
+     * URL parser / wallet fixture.
+     */
+    setExpectedSellerPaymentAddress(address: PaymentAddress | null): void;
     /**
      * Sign input 0 (the seller's cat UTXO) at the ordinals address and
      * broadcast. Requires a validated paste (`state === 'parsed'`) and

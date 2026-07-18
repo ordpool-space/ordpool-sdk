@@ -3,6 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
 import { Network, toScureNetwork } from '../network';
+import { PaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   CAT21_OFFER_POSTAGE_SATS,
@@ -269,7 +270,7 @@ export interface ValidateCat21BuyOfferArgs {
    * would sign, the cat would move, and the payment would never arrive.
    * Made mandatory as of audit C1.
    */
-  expectedSellerPaymentAddress: string;
+  expectedSellerPaymentAddress: PaymentAddress;
   /**
    * Network used to decode Output 1's `scriptPubKey` back to an address.
    * Defaults to mainnet. Callers signing on testnet/regtest must pass it.

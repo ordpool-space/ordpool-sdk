@@ -4,6 +4,7 @@ import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
 import { attachDummyBuyerSig } from '../testing/fixtures';
+import { toPaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   BuildCat21BuyOfferArgs,
@@ -184,7 +185,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: psbtWithSig,
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_000,
-      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
       network: Network.Testnet3,
     });
     expect(result.ok).toBe(true);
@@ -201,7 +202,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: built.psbt,
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: 99 },
       floorPriceSats: 21_000,
-      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
       network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
@@ -219,7 +220,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: tx.toPSBT(),
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_001,
-      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
       network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
@@ -233,7 +234,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: built.psbt,
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_000,
-      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
       network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
@@ -267,7 +268,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: tx.toPSBT(),
       expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
       floorPriceSats: 21_000,
-      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
       network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
@@ -280,7 +281,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       psbt: empty,
       expectedSellerUtxo: { txid: '00'.repeat(32), vout: 0 },
       floorPriceSats: 1,
-      expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
       network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
@@ -303,7 +304,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: attachBuyerSig(built.psbt),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(true);
@@ -324,7 +325,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: attachBuyerSig(built.psbt),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: taproot.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(taproot.address!),
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
@@ -343,7 +344,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: attachBuyerSig(built.psbt),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(true);
@@ -375,7 +376,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: attachBuyerSig(built.psbt),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: mainPay.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(mainPay.address!),
         network: Network.Mainnet,
       });
       expect(result.ok).toBe(true);
@@ -406,7 +407,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: attachBuyerSig(built.psbt),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: taproot.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(taproot.address!),
         network: Network.Mainnet,
       });
       expect(result.ok).toBe(true);
@@ -420,7 +421,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: attachBuyerSig(built.psbt),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: p2wpkh.address!, // mainnet bc1q…
+        expectedSellerPaymentAddress: toPaymentAddress(p2wpkh.address!), // mainnet bc1q…
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
@@ -462,7 +463,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
@@ -502,7 +503,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
@@ -540,7 +541,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: p2sh.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(p2sh.address!),
         network: Network.Mainnet,
       });
       expect(result.ok).toBe(true);
@@ -578,7 +579,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: regtestPay.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(regtestPay.address!),
         network: Network.Regtest,
       });
       expect(result.ok).toBe(true);
@@ -596,7 +597,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 1_000_000, // PSBT pays only 21k, would trip wrong-price.
-        expectedSellerPaymentAddress: taproot.address!, // also wrong address.
+        expectedSellerPaymentAddress: toPaymentAddress(taproot.address!), // also wrong address.
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
@@ -629,7 +630,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 21_000,
-        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
@@ -653,7 +654,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 1,
-        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);
@@ -682,7 +683,7 @@ describe('validateCat21BuyOfferPsbt', () => {
         psbt: tx.toPSBT(),
         expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
         floorPriceSats: 1,
-        expectedSellerPaymentAddress: p2wpkhTestnet.address!,
+        expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
         network: Network.Testnet3,
       });
       expect(result.ok).toBe(false);

@@ -4789,18 +4789,13 @@ class Cat21CreateOfferOrchestrator {
         this.targetCat.set(cat);
     }
     /**
-     * Set the seller's PAYMENT address (where sale proceeds land).
-     *
-     * Requires a branded `PaymentAddress` — the caller MUST have used
-     * `toPaymentAddress(str)` to construct it. That forced conversion
-     * is the whole point: it makes the "wait — is this really a payment
-     * address, or did I just paste an on-chain owner lookup's ordinals
-     * address?" question un-skippable at every callsite. See SDK HARD
-     * RULE "Never derive a payment address from an on-chain lookup".
-     *
-     * Shape / whitespace validation lives in `toPaymentAddress` — by
-     * the time an address reaches this setter it is already well-formed,
-     * so no defensive trim/null-collapse here.
+     * Set the seller's PAYMENT address (where sale proceeds land). The
+     * branded `PaymentAddress` type makes the "is this really a payment
+     * address, not an ordinals one?" question un-skippable at every
+     * callsite — either the value came from `parseBuyOfferQueryParams`
+     * (which brands the URL `payTo=` param at ingress) or the caller
+     * used `toPaymentAddress()` on a raw string. See SDK HARD RULE
+     * "Never derive a payment address from an on-chain lookup".
      */
     setSellerPaymentAddress(address) {
         this.sellerPaymentAddress.set(address);
@@ -5282,8 +5277,16 @@ class Cat21AcceptOfferOrchestrator {
         if (paste)
             this.setPastedOffer(paste);
     }
+    /**
+     * Set the address the seller expects the payment output to land at.
+     * Symmetric with `Cat21CreateOfferOrchestrator.setSellerPaymentAddress`
+     * — branded for the same reason (SDK HARD RULE "Never derive a
+     * payment address from an on-chain lookup"). Value must be
+     * constructed via `toPaymentAddress()` or come pre-branded from the
+     * URL parser / wallet fixture.
+     */
     setExpectedSellerPaymentAddress(address) {
-        this.expectedSellerPaymentAddress.set(address && address.trim() ? address.trim() : null);
+        this.expectedSellerPaymentAddress.set(address);
         const paste = this.pastedOffer();
         if (paste)
             this.setPastedOffer(paste);
@@ -6203,10 +6206,6 @@ const CAT21_QUERY_KEYS = {
     catVout: 'catVout',
 };
 const TXID_RE = /^[0-9a-f]{64}$/i;
-// Minimal bech32/base58 sanity — full address validation belongs at
-// the consumer via `@scure/btc-signer` Address decoder; this just
-// stops obvious garbage from being percent-encoded into the URL.
-const ADDRESS_RE = /^(bc|tb|bcrt)1[0-9a-z]{25,87}$|^[13mn2][a-km-zA-HJ-NP-Z1-9]{25,60}$/;
 /**
  * Build the query params for an ask permalink. Consumer concatenates
  * with its own detail path, e.g. `${origin}/cat/${n}?${new URLSearchParams(query)}`.
@@ -6217,8 +6216,8 @@ function buildAskQueryParams(args) {
     }
     const out = { [CAT21_QUERY_KEYS.ask]: String(args.askSats) };
     if (args.sellerPaymentAddress !== undefined) {
-        assertBitcoinAddress(args.sellerPaymentAddress, 'sellerPaymentAddress');
-        out[CAT21_QUERY_KEYS.payTo] = args.sellerPaymentAddress;
+        // Validate via the canonical shape check (throws on garbage).
+        out[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
     }
     return out;
 }
@@ -6251,8 +6250,7 @@ function buildBuyOfferQueryParams(args) {
         params[CAT21_QUERY_KEYS.fromAsk] = '1';
     }
     if (args.sellerPaymentAddress !== undefined) {
-        assertBitcoinAddress(args.sellerPaymentAddress, 'sellerPaymentAddress');
-        params[CAT21_QUERY_KEYS.payTo] = args.sellerPaymentAddress;
+        params[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
     }
     return params;
 }
@@ -6340,26 +6338,30 @@ function assertCatOutpoint(o) {
         throw new Error(`catOutpoint.vout must be a non-negative integer; got ${o.vout}`);
     }
 }
-function assertBitcoinAddress(addr, fieldName) {
-    if (typeof addr !== 'string' || !ADDRESS_RE.test(addr)) {
-        throw new Error(`${fieldName} must be a valid Bitcoin address; got ${JSON.stringify(addr)}`);
-    }
-}
 /**
- * Parser-side counterpart. Malformed values silently return null so a
- * tampered link degrades to "field missing" rather than crashing the
- * page. The consumer's own address decoder (scure `btc.Address(...)`
- * .decode) runs before signing anyway, so this is defence-in-depth.
+ * Parser-side counterpart to `toPaymentAddress`. Malformed values
+ * silently return null so a tampered link degrades to "field missing"
+ * rather than crashing the page. The consumer's own address decoder
+ * (scure `btc.Address(...).decode`) runs before signing anyway, so
+ * this is defence-in-depth.
  *
  * The return type is `PaymentAddress | null` because the ONLY place
  * this parser is used is `payTo=` — the URL param defined as the
  * seller's payment address. Branding at ingress means downstream
  * consumers don't repeat the `toPaymentAddress()` cast at every hop.
+ *
+ * Routes through `toPaymentAddress` (single source of truth for the
+ * shape check); swallows its throw and returns null on invalid input.
  */
 function parseAddressParam(raw) {
     if (raw === null)
         return null;
-    return ADDRESS_RE.test(raw) ? raw : null;
+    try {
+        return toPaymentAddress(raw);
+    }
+    catch {
+        return null;
+    }
 }
 
 /**

@@ -5,6 +5,7 @@ import { BehaviorSubject, Subject, of } from 'rxjs';
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
+import { toPaymentAddress } from '../wallet/address-types';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletInfo } from '../wallet/wallet.service.types';
 import { Cat21Service } from '../cat21-mint/cat21.service';
@@ -104,7 +105,7 @@ describe('Cat21AcceptOfferOrchestrator', () => {
       // Still idle — orchestrator demands floor + expected seller address before validating.
       expect(orchestrator.state()).toBe('idle');
       orchestrator.setFloorPriceSats(1);
-      orchestrator.setExpectedSellerPaymentAddress('bc1qSellerExpected');
+      orchestrator.setExpectedSellerPaymentAddress(toPaymentAddress('bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx'));
       // Now validation runs on the minimal PSBT shape → invalid.
       expect(orchestrator.state()).toBe('invalid');
     });
