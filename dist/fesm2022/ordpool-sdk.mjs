@@ -8,6 +8,7 @@ import { from, map, Observable, Subject, BehaviorSubject, timer, take, distinctU
 import { AddressPurpose, addListener, getAddress, signTransaction } from 'sats-connect';
 import { HttpClient } from '@angular/common/http';
 import { toSignal } from '@angular/core/rxjs-interop';
+import { sha256 } from '@noble/hashes/sha2';
 
 /**
  * Canonical CAT-21 postage. Every cat-bearing UTXO across the protocol is
@@ -6377,6 +6378,334 @@ function parseAddressParam(raw) {
 }
 
 /**
+ * Canonical listing-message format version. Bump when the field set,
+ * order, or separator changes so old signatures don't accidentally
+ * verify against a new-shape message (or vice versa).
+ */
+const CAT21_LISTING_MESSAGE_VERSION = 'v1';
+/**
+ * Build the canonical human-readable message the seller signs with
+ * their ordinals wallet. Multi-line by design — the wallet's
+ * signature prompt renders this as-is, and the seller reads it
+ * before approving. Fixed order, fixed separator, fixed prefix.
+ *
+ * Any drift between the seller's version and the verifier's version
+ * (added field, reordered line, changed separator) breaks the
+ * signature. The version prefix (`cat21-ask:v1`) is the escape
+ * hatch: bump when the schema changes so old + new signatures don't
+ * confuse the verifier.
+ *
+ * Example message the seller sees in their wallet:
+ *
+ * ```
+ * cat21-ask:v1
+ * catNumber=42
+ * askSats=21000
+ * payTo=bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx
+ * catTxid=ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df
+ * catVout=0
+ * ordinalsAddress=bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxq7pkrz9
+ * signedAt=1700000000
+ * ```
+ */
+function buildListingMessage(fields) {
+    assertPositiveInt(fields.catNumber, 'catNumber');
+    assertPositiveInt(fields.askSats, 'askSats');
+    assertNonNegativeInt(fields.catVout, 'catVout');
+    assertPositiveInt(fields.signedAt, 'signedAt');
+    if (!fields.payTo || typeof fields.payTo !== 'string') {
+        throw new Error('payTo must be a non-empty string');
+    }
+    if (!fields.ordinalsAddress || typeof fields.ordinalsAddress !== 'string') {
+        throw new Error('ordinalsAddress must be a non-empty string');
+    }
+    if (!/^[0-9a-f]{64}$/.test(fields.catTxid)) {
+        throw new Error(`catTxid must be 64-char lowercase hex; got ${JSON.stringify(fields.catTxid)}`);
+    }
+    return [
+        `cat21-ask:${CAT21_LISTING_MESSAGE_VERSION}`,
+        `catNumber=${fields.catNumber}`,
+        `askSats=${fields.askSats}`,
+        `payTo=${fields.payTo}`,
+        `catTxid=${fields.catTxid}`,
+        `catVout=${fields.catVout}`,
+        `ordinalsAddress=${fields.ordinalsAddress}`,
+        `signedAt=${fields.signedAt}`,
+    ].join('\n');
+}
+function assertPositiveInt(n, name) {
+    if (!Number.isInteger(n) || n <= 0) {
+        throw new Error(`${name} must be a positive integer; got ${n}`);
+    }
+}
+function assertNonNegativeInt(n, name) {
+    if (!Number.isInteger(n) || n < 0) {
+        throw new Error(`${name} must be a non-negative integer; got ${n}`);
+    }
+}
+
+/**
+ * Verify a BIP-322 "simple" signature over the canonical listing
+ * message, for a P2TR ordinals address.
+ *
+ * P2TR is the only address type supported in v1 — every wallet the
+ * SDK integrates today puts ordinals on taproot, so the caller can
+ * always match. If a future wallet ever stores cats on a non-taproot
+ * address, add a P2WPKH branch here (BIP-322 for P2WPKH is
+ * mechanically similar; only the sighash + verify function change).
+ *
+ * ### The BIP-322 "simple" verification recipe
+ *
+ * BIP-322 defines two virtual transactions the signature commits to:
+ *
+ *   `to_spend`: a synthetic tx with input from an all-zeros outpoint
+ *   whose scriptSig is `OP_0 PUSH32 tagged_hash("BIP0322-signed-
+ *   message", message)`, and output paying to the signer's address.
+ *
+ *   `to_sign`: a synthetic tx spending `to_spend[0]`, with a single
+ *   `OP_RETURN` output and a witness holding the wallet's signature.
+ *
+ * For a P2TR key-path spend, the witness stack is a single 64- or
+ * 65-byte schnorr signature. The verifier:
+ *
+ *   1. Rebuilds `to_spend` from the message + signer's script.
+ *   2. Rebuilds `to_sign` referencing `to_spend[0]`.
+ *   3. Computes the BIP-341 taproot sighash for `to_sign` spending
+ *      `to_spend[0]` under the wallet-supplied sighash byte.
+ *   4. Runs `schnorr.verify(sig, sighash, xonly_pubkey)` where
+ *      `xonly_pubkey` comes from decoding the P2TR address's
+ *      witness program (bytes 2..34 of the scriptPubKey).
+ *
+ * See https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki
+ * for the full spec.
+ */
+function verifyListingSignature(args) {
+    const { fields, signatureBase64 } = args;
+    const message = buildListingMessage(fields);
+    const ordinalsAddress = fields.ordinalsAddress;
+    // --- Decode the ordinals address to its scriptPubKey -----------------
+    // Two SDK-supported networks (mainnet + testnet3); regtest is
+    // ops-only. The address's HRP (`bc`/`tb`/`bcrt`) implies the
+    // network, so we try mainnet then testnet.
+    let scriptPubKey;
+    let xOnlyPubkey;
+    try {
+        const decoded = decodeP2TRAddress(ordinalsAddress);
+        scriptPubKey = decoded.scriptPubKey;
+        xOnlyPubkey = decoded.xOnlyPubkey;
+    }
+    catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        // Distinguish "not a valid Bitcoin address" from "valid but not P2TR"
+        // so the caller can surface the right message.
+        if (/not p2tr|witness program|witness version/i.test(detail)) {
+            return { ok: false, reason: 'unsupported-address-type', detail };
+        }
+        return { ok: false, reason: 'invalid-address', detail };
+    }
+    // --- Decode the base64 signature witness -----------------------------
+    let signatureBytes;
+    try {
+        signatureBytes = base64.decode(signatureBase64);
+    }
+    catch (err) {
+        return {
+            ok: false,
+            reason: 'malformed-signature',
+            detail: `base64 decode failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
+    // Extract the schnorr signature from the wallet-returned bytes.
+    // Wallets serialize BIP-322 witness stacks in two shapes:
+    //   1. Raw witness: [64-byte or 65-byte sig]. Length is exactly 64
+    //      (SIGHASH_DEFAULT) or 65 (explicit sighash byte suffix).
+    //   2. Full BIP-322 witness serialization: [numItems=1, sigLen, sigBytes].
+    //      Xverse + Leather use this shape; length starts with 0x01 (numItems),
+    //      then 0x40 or 0x41 (sig length), then the sig bytes.
+    let sig;
+    let sighashType;
+    const isRawSig = signatureBytes.length === 64 || signatureBytes.length === 65;
+    const isSerializedWitness = signatureBytes.length >= 3 &&
+        signatureBytes[0] === 0x01 &&
+        (signatureBytes[1] === 0x40 || signatureBytes[1] === 0x41);
+    if (isRawSig) {
+        sig = signatureBytes.slice(0, 64);
+        sighashType = signatureBytes.length === 65 ? signatureBytes[64] : 0x00;
+    }
+    else if (isSerializedWitness) {
+        const sigLen = signatureBytes[1]; // 0x40 or 0x41
+        if (signatureBytes.length !== 2 + sigLen) {
+            return {
+                ok: false,
+                reason: 'malformed-signature',
+                detail: `serialized-witness length mismatch: declared ${sigLen}, got ${signatureBytes.length - 2}`,
+            };
+        }
+        sig = signatureBytes.slice(2, 2 + 64);
+        sighashType = sigLen === 0x41 ? signatureBytes[2 + 64] : 0x00;
+    }
+    else {
+        return {
+            ok: false,
+            reason: 'malformed-signature',
+            detail: `unrecognized signature payload shape (length=${signatureBytes.length})`,
+        };
+    }
+    // --- Build the BIP-322 virtual transactions --------------------------
+    const messageHash = bip322TaggedHash('BIP0322-signed-message', new TextEncoder().encode(message));
+    const toSpend = buildToSpend(messageHash, scriptPubKey);
+    const toSpendTxid = doubleSha256(toSpend);
+    // to_sign taproot sighash. sighashType 0x00 = SIGHASH_DEFAULT (BIP-341
+    // spec: default is behaviourally SIGHASH_ALL for key-path).
+    const sighash = computeToSignTaprootSighash({
+        toSpendTxid,
+        prevScriptPubKey: scriptPubKey,
+        sighashType,
+    });
+    // --- Verify --------------------------------------------------------
+    const verified = schnorr.verify(sig, sighash, xOnlyPubkey);
+    if (!verified) {
+        return { ok: false, reason: 'signature-does-not-verify' };
+    }
+    return { ok: true };
+}
+// ---------- Internals ------------------------------------------------
+function decodeP2TRAddress(address) {
+    // Try mainnet first, then testnet3. scure throws on mismatch; we
+    // catch and retry the other network. bcrt addresses (regtest) fall
+    // through — cats are mainnet-only in production, and regtest
+    // wallets don't produce shareable listings.
+    let scriptPubKey;
+    for (const network of [btc.NETWORK, btc.TEST_NETWORK]) {
+        try {
+            const decoded = btc.Address(network).decode(address);
+            scriptPubKey = btc.OutScript.encode(decoded);
+            break;
+        }
+        catch {
+            // try next network
+        }
+    }
+    if (!scriptPubKey) {
+        throw new Error(`address ${JSON.stringify(address)} does not decode against mainnet or testnet3`);
+    }
+    // A P2TR scriptPubKey is exactly 34 bytes: OP_1 (0x51) + PUSH32 (0x20) + 32-byte xonly.
+    if (scriptPubKey.length !== 34 || scriptPubKey[0] !== 0x51 || scriptPubKey[1] !== 0x20) {
+        throw new Error(`not p2tr: scriptPubKey is not a taproot witness program`);
+    }
+    return { scriptPubKey, xOnlyPubkey: scriptPubKey.slice(2, 34) };
+}
+/**
+ * BIP-322 tagged hash: `SHA256(SHA256(tag) || SHA256(tag) || data)`.
+ * BIP-322 uses the tag `"BIP0322-signed-message"`.
+ */
+function bip322TaggedHash(tag, data) {
+    const tagHash = sha256(new TextEncoder().encode(tag));
+    const buf = new Uint8Array(tagHash.length * 2 + data.length);
+    buf.set(tagHash, 0);
+    buf.set(tagHash, tagHash.length);
+    buf.set(data, tagHash.length * 2);
+    return sha256(buf);
+}
+function doubleSha256(data) {
+    return sha256(sha256(data));
+}
+/**
+ * Serialize the BIP-322 `to_spend` virtual transaction (no witnesses).
+ * The serialized bytes get double-SHA256'd to produce the txid that
+ * `to_sign` references as its input.
+ *
+ * Layout per the BIP:
+ *   version=0 (4 bytes LE)
+ *   input count=1 (1 byte)
+ *   input[0].outpoint.txid=0x00 * 32 (32 bytes)
+ *   input[0].outpoint.vout=0xFFFFFFFF (4 bytes LE)
+ *   input[0].scriptSig=varint(len) || OP_0 || PUSH32 || messageHash
+ *   input[0].sequence=0 (4 bytes LE)
+ *   output count=1 (1 byte)
+ *   output[0].value=0 (8 bytes LE)
+ *   output[0].scriptPubKey=varint(len) || scriptPubKey
+ *   locktime=0 (4 bytes LE)
+ */
+function buildToSpend(messageHash, scriptPubKey) {
+    // scriptSig = OP_0 (0x00) + PUSH32 (0x20) + 32-byte messageHash = 34 bytes total
+    const scriptSig = new Uint8Array(34);
+    scriptSig[0] = 0x00; // OP_0
+    scriptSig[1] = 0x20; // PUSH 32 bytes
+    scriptSig.set(messageHash, 2);
+    const scriptSigVarInt = writeVarInt(scriptSig.length);
+    const scriptPubKeyVarInt = writeVarInt(scriptPubKey.length);
+    const parts = [
+        new Uint8Array([0x00, 0x00, 0x00, 0x00]), // version=0
+        new Uint8Array([0x01]), // 1 input
+        new Uint8Array(32), // input[0] txid = 32 zero bytes
+        new Uint8Array([0xff, 0xff, 0xff, 0xff]), // input[0] vout = 0xFFFFFFFF
+        scriptSigVarInt, // scriptSig length
+        scriptSig, // scriptSig bytes
+        new Uint8Array([0x00, 0x00, 0x00, 0x00]), // input[0] sequence = 0
+        new Uint8Array([0x01]), // 1 output
+        new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0]), // output[0] value = 0
+        scriptPubKeyVarInt, // scriptPubKey length
+        scriptPubKey, // scriptPubKey bytes
+        new Uint8Array([0x00, 0x00, 0x00, 0x00]), // locktime = 0
+    ];
+    return concatBytes(parts);
+}
+/**
+ * BIP-341 taproot key-path sighash for `to_sign` spending
+ * `to_spend[0]`. We delegate to scure's `preimageWitnessV1` — the
+ * same helper the SDK's other taproot flows use — but need to hand-
+ * build a scure `Transaction` shape that mirrors `to_sign`.
+ *
+ * `to_sign` layout per BIP-322:
+ *   version=0, locktime=0
+ *   input[0]: prevOut=(to_spend_txid, 0), sequence=0, value=0
+ *   output[0]: value=0, scriptPubKey=OP_RETURN
+ */
+function computeToSignTaprootSighash(args) {
+    const tx = new btc.Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true, version: 0, lockTime: 0 });
+    tx.addInput({
+        txid: args.toSpendTxid,
+        index: 0,
+        sequence: 0,
+        witnessUtxo: { script: args.prevScriptPubKey, amount: BigInt(0) },
+    });
+    // OP_RETURN scriptPubKey (single 0x6a byte).
+    tx.addOutput({ script: new Uint8Array([0x6a]), amount: BigInt(0) });
+    // preimageWitnessV1 args:
+    //   idx, prevOutScripts[], hashType, amounts[], ...
+    return tx.preimageWitnessV1(0, [args.prevScriptPubKey], args.sighashType, [BigInt(0)]);
+}
+function writeVarInt(n) {
+    if (n < 0xfd)
+        return new Uint8Array([n]);
+    if (n <= 0xffff)
+        return new Uint8Array([0xfd, n & 0xff, (n >> 8) & 0xff]);
+    if (n <= 0xffffffff) {
+        return new Uint8Array([
+            0xfe,
+            n & 0xff,
+            (n >> 8) & 0xff,
+            (n >> 16) & 0xff,
+            (n >> 24) & 0xff,
+        ]);
+    }
+    throw new Error(`varint too large for the tiny writer: ${n}`);
+}
+function concatBytes(parts) {
+    let total = 0;
+    for (const p of parts)
+        total += p.length;
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const p of parts) {
+        out.set(p, offset);
+        offset += p.length;
+    }
+    return out;
+}
+
+/**
  * Inscription envelope encoder — the inverse of `ordpool-parser`'s
  * `InscriptionParserService`. Produces the tapscript bytes that
  * commit to inscription content under the ord protocol.
@@ -7806,5 +8135,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

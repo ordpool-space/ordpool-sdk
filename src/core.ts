@@ -99,6 +99,13 @@ export * from './cat21-broadcast/slipstream.helper';
 //     cat21.space, cat21-wallet, and any future consumer). ---
 export * from './cat21-share';
 
+// --- CAT-21 listing (public "cat orderbook" listing shape +
+//     BIP-322 signature verify — anti-fraud layer for the
+//     orderbook. Pure functions, no Angular. ---
+export * from './cat21-listing/cat21-listing.types';
+export * from './cat21-listing/build-listing-message';
+export * from './cat21-listing/verify-listing-signature';
+
 // --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
 export * from './inscribe/inscription-envelope';
 export * from './inscribe/inscription-commit.helper';

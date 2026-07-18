@@ -65,6 +65,12 @@ export * from './cat21-broadcast/slipstream.helper';
 //     outpoint shape). ---
 export * from './cat21-share';
 
+// --- cat21 listing (public "cat orderbook" listing shape + BIP-322
+//     signature verify — the anti-fraud layer for the orderbook). ---
+export * from './cat21-listing/cat21-listing.types';
+export * from './cat21-listing/build-listing-message';
+export * from './cat21-listing/verify-listing-signature';
+
 // --- inscribe (commit + reveal pipeline; ord-compatible envelope) ---
 export * from './inscribe/inscription-envelope';
 export * from './inscribe/inscription-commit.helper';

@@ -2787,6 +2787,154 @@ declare function parseTransferQueryParams(query: URLSearchParams | Record<string
 };
 
 /**
+ * A CAT-21 sell listing — the seller's advertised intent to sell a
+ * specific cat UTXO at a specific price. Sits between the private
+ * "share-a-URL" flow (workspace HARD RULE "Offers can be shared in
+ * the wild") and the on-chain buy-offer PSBT flow — a listing is a
+ * public advertisement, not a signed transaction.
+ *
+ * Every field is required so anyone (frontend, backend, mirror,
+ * third-party crawler) can reconstruct the canonical signed message
+ * from the row alone and re-verify the BIP-322 signature. No trust
+ * in cat21-indexer.
+ */
+interface Cat21Listing {
+    /** Cat number the listing covers. */
+    catNumber: number;
+    /** Price the seller is asking, in sats. Positive integer. */
+    askSats: number;
+    /**
+     * Where the seller's sale proceeds should land. Branded — same
+     * "never derived from an on-chain lookup" guardrail the create-
+     * offer orchestrator carries; see the SDK HARD RULE.
+     */
+    payTo: PaymentAddress;
+    /** Cat UTXO the listing is pinned to (intent-lock). Lowercase hex. */
+    catTxid: string;
+    /** vout of the cat UTXO. */
+    catVout: number;
+    /**
+     * The seller's ordinals address at signing time. This IS the
+     * address whose ownership of the cat UTXO the BIP-322 signature
+     * proves — the verifier decodes the P2TR script from here to
+     * check the schnorr signature. Branded for the same reason as
+     * `payTo`: address category is load-bearing.
+     */
+    ordinalsAddress: OrdinalsAddress;
+    /**
+     * Unix seconds at signing time. Anti-replay hint — the backend
+     * MAY reject listings whose `signedAt` is older than a window
+     * (e.g. > 24h in the past) or too far in the future. Also lets
+     * the pruner sort by age for eviction ties.
+     */
+    signedAt: number;
+    /**
+     * Base64-encoded BIP-322 "simple" signature witness. For P2TR
+     * ordinals addresses (the only kind cats live on today) this is
+     * the serialized witness stack containing a single 64- or 65-byte
+     * schnorr signature. Wallet-generated: Xverse's `signMessage`,
+     * Leather's `signMessage`, cat21-wallet's `signMessage`, etc.
+     */
+    signature: string;
+}
+
+/**
+ * Canonical listing-message format version. Bump when the field set,
+ * order, or separator changes so old signatures don't accidentally
+ * verify against a new-shape message (or vice versa).
+ */
+declare const CAT21_LISTING_MESSAGE_VERSION = "v1";
+/**
+ * The fields the listing message covers, in the fixed canonical
+ * order. Every consumer (seller's wallet during signing, backend
+ * during verification, external mirror during re-verification)
+ * builds the message via `buildListingMessage()` — never
+ * concatenates fields directly.
+ */
+type ListingMessageFields = Pick<Cat21Listing, 'catNumber' | 'askSats' | 'payTo' | 'catTxid' | 'catVout' | 'ordinalsAddress' | 'signedAt'>;
+/**
+ * Build the canonical human-readable message the seller signs with
+ * their ordinals wallet. Multi-line by design — the wallet's
+ * signature prompt renders this as-is, and the seller reads it
+ * before approving. Fixed order, fixed separator, fixed prefix.
+ *
+ * Any drift between the seller's version and the verifier's version
+ * (added field, reordered line, changed separator) breaks the
+ * signature. The version prefix (`cat21-ask:v1`) is the escape
+ * hatch: bump when the schema changes so old + new signatures don't
+ * confuse the verifier.
+ *
+ * Example message the seller sees in their wallet:
+ *
+ * ```
+ * cat21-ask:v1
+ * catNumber=42
+ * askSats=21000
+ * payTo=bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx
+ * catTxid=ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df
+ * catVout=0
+ * ordinalsAddress=bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxq7pkrz9
+ * signedAt=1700000000
+ * ```
+ */
+declare function buildListingMessage(fields: ListingMessageFields): string;
+
+/**
+ * Result of `verifyListingSignature`. On success, `ok: true` — the
+ * BIP-322 signature is valid for the given ordinals address AND the
+ * message it commits to matches the listing fields byte-for-byte.
+ * On failure, `ok: false` with a `reason` code the caller (backend
+ * insert path, frontend re-verifier) can log / show.
+ */
+type VerifyListingSignatureResult = {
+    ok: true;
+} | {
+    ok: false;
+    reason: VerifyListingRejectionReason;
+    detail?: string;
+};
+type VerifyListingRejectionReason = 'malformed-signature' | 'unsupported-address-type' | 'invalid-address' | 'signature-does-not-verify';
+/**
+ * Verify a BIP-322 "simple" signature over the canonical listing
+ * message, for a P2TR ordinals address.
+ *
+ * P2TR is the only address type supported in v1 — every wallet the
+ * SDK integrates today puts ordinals on taproot, so the caller can
+ * always match. If a future wallet ever stores cats on a non-taproot
+ * address, add a P2WPKH branch here (BIP-322 for P2WPKH is
+ * mechanically similar; only the sighash + verify function change).
+ *
+ * ### The BIP-322 "simple" verification recipe
+ *
+ * BIP-322 defines two virtual transactions the signature commits to:
+ *
+ *   `to_spend`: a synthetic tx with input from an all-zeros outpoint
+ *   whose scriptSig is `OP_0 PUSH32 tagged_hash("BIP0322-signed-
+ *   message", message)`, and output paying to the signer's address.
+ *
+ *   `to_sign`: a synthetic tx spending `to_spend[0]`, with a single
+ *   `OP_RETURN` output and a witness holding the wallet's signature.
+ *
+ * For a P2TR key-path spend, the witness stack is a single 64- or
+ * 65-byte schnorr signature. The verifier:
+ *
+ *   1. Rebuilds `to_spend` from the message + signer's script.
+ *   2. Rebuilds `to_sign` referencing `to_spend[0]`.
+ *   3. Computes the BIP-341 taproot sighash for `to_sign` spending
+ *      `to_spend[0]` under the wallet-supplied sighash byte.
+ *   4. Runs `schnorr.verify(sig, sighash, xonly_pubkey)` where
+ *      `xonly_pubkey` comes from decoding the P2TR address's
+ *      witness program (bytes 2..34 of the scriptPubKey).
+ *
+ * See https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki
+ * for the full spec.
+ */
+declare function verifyListingSignature(args: {
+    fields: ListingMessageFields;
+    signatureBase64: string;
+}): VerifyListingSignatureResult;
+
+/**
  * Ord-protocol field tags. Mirrors ordpool-parser's `knownFields`
  * value-for-value. See https://docs.ordinals.com/inscriptions.html
  * for the canonical reference.
@@ -4004,5 +4152,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt };
-export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeMintState, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyListingSignature };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeMintState, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
