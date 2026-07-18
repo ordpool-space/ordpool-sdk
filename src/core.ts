@@ -52,6 +52,12 @@ export {
   type LeatherStxAddress,
 } from './wallet/wallet.service.types';
 
+// --- Branded Bitcoin address types (compile-time separation of
+//     OrdinalsAddress vs PaymentAddress). Belongs at core so any
+//     consumer — Angular or plain-Node bot — can opt into the
+//     compile-time protection at critical boundaries.
+export * from './wallet/address-types';
+
 // --- CAT-21 mint (PSBT-build helpers; the Angular Cat21Service that
 //     orchestrates is at the main entry only). ---
 export * from './cat21-mint/cat21.service.helper';

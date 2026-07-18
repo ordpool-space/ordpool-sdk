@@ -427,7 +427,17 @@ export class Cat21CreateOfferOrchestrator {
       });
       const totalIn = pick.value + CAT21_POSTAGE_SATS;
       const requiredOut = (priceSats + CAT21_POSTAGE_SATS) + CAT21_POSTAGE_SATS + finalFeeSats; // seller-pay + cat-postage-to-buyer + fee
-      const changeSats = Math.max(0, totalIn - requiredOut);
+      // The pre-pick used a 220 vB fee ceiling; twoPassFeeSimulation
+      // may return a higher `finalFeeSats` for wider inputs (multi-
+      // input P2SH-P2WPKH, legacy). If the real total-in doesn't
+      // cover the real requirement, surface insufficient EXPLICITLY
+      // rather than silently clamping change to 0 and letting the
+      // build step throw at sign time. The UI's "insufficient"
+      // branch renders a clear message; the raw-error path did not.
+      if (totalIn < requiredOut) {
+        return { simulation: null, insufficient: true };
+      }
+      const changeSats = totalIn - requiredOut;
       return {
         simulation: {
           vsize,

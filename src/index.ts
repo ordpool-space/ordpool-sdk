@@ -23,6 +23,8 @@ export {
   type LeatherBtcAddress,
   type LeatherStxAddress,
 } from './wallet/wallet.service.types';
+// Branded Bitcoin address types — see core.ts for the rationale.
+export * from './wallet/address-types';
 
 // --- cat21 mint pipeline (PSBT builder, simulator, broadcaster) ---
 export * from './cat21-mint/cat21-sdk-config';
