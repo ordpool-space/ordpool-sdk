@@ -41,6 +41,18 @@ const SELLER_PAYMENT_ADDRESS = sellerPaymentScript.address!;
 const BUYER_PAYMENT_ADDRESS = buyerPaymentScript.address!;
 const BUYER_ORDINALS_ADDRESS = buyerOrdinalsScript.address!;
 
+/**
+ * Attach a dummy buyer signature at input 1 so the validator's
+ * "buyer-input-unsigned" gate doesn't fire on our synthetic PSBT.
+ * The 71-byte fill is a stand-in for a real ECDSA signature; the
+ * validator only checks presence, not verifiability.
+ */
+function attachBuyerSig(psbtBytes: Uint8Array): Uint8Array {
+  const tx = btc.Transaction.fromPSBT(psbtBytes);
+  tx.updateInput(1, { partialSig: [[BUYER_KEY, new Uint8Array(71).fill(1)]] });
+  return tx.toPSBT();
+}
+
 // Sanity: the three addresses must be structurally different so the
 // round-trip test isn't accidentally passing on address equality.
 describe('trade-flow-roundtrip — fixture sanity', () => {
@@ -130,14 +142,6 @@ describe('trade-flow-roundtrip — URL → PSBT → validator, addresses survive
       feeSats: 1_000,
     });
 
-    // Attach a dummy buyer signature at input 1 so the validator's
-    // "buyer-input-unsigned" gate doesn't fire on our synthetic PSBT.
-    const attachBuyerSig = (psbtBytes: Uint8Array): Uint8Array => {
-      const tx = btc.Transaction.fromPSBT(psbtBytes);
-      tx.updateInput(1, { partialSig: [[BUYER_KEY, new Uint8Array(71).fill(1)]] });
-      return tx.toPSBT();
-    };
-
     // ------- Stage 4: seller's device validates the offer -----------
     // Cat21AcceptOfferOrchestrator.validateOffer() calls this with
     // expectedSellerPaymentAddress = wallet.paymentAddress from the
@@ -199,12 +203,8 @@ describe('trade-flow-roundtrip — URL → PSBT → validator, addresses survive
       priceSats: 21_000,
       feeSats: 1_000,
     });
-    const tx = btc.Transaction.fromPSBT(built.psbt);
-    tx.updateInput(1, { partialSig: [[BUYER_KEY, new Uint8Array(71).fill(1)]] });
-    const psbtWithSig = tx.toPSBT();
-
     const result = validateCat21BuyOfferPsbt({
-      psbt: psbtWithSig,
+      psbt: attachBuyerSig(built.psbt),
       expectedSellerUtxo: {
         txid: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
         vout: 0,

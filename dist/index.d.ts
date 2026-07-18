@@ -1905,7 +1905,21 @@ declare class Cat21CreateOfferOrchestrator {
      */
     readonly simulation$: Observable<CreateOfferSimulationOutcome>;
     setTargetCat(cat: BuyOfferTargetCat | null): void;
-    setSellerPaymentAddress(address: string | null): void;
+    /**
+     * Set the seller's PAYMENT address (where sale proceeds land).
+     *
+     * Requires a branded `PaymentAddress` — the caller MUST have used
+     * `toPaymentAddress(str)` to construct it. That forced conversion
+     * is the whole point: it makes the "wait — is this really a payment
+     * address, or did I just paste an on-chain owner lookup's ordinals
+     * address?" question un-skippable at every callsite. See SDK HARD
+     * RULE "Never derive a payment address from an on-chain lookup".
+     *
+     * Shape / whitespace validation lives in `toPaymentAddress` — by
+     * the time an address reaches this setter it is already well-formed,
+     * so no defensive trim/null-collapse here.
+     */
+    setSellerPaymentAddress(address: PaymentAddress | null): void;
     setPriceSats(price: number): void;
     setBuyerReceiveAddress(address: string | null): void;
     setFeeRate(rate: number): void;

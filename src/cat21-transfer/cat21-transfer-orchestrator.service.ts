@@ -1,7 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
 import {
   BehaviorSubject,
   Observable,
@@ -22,7 +21,7 @@ import {
   type FundingUtxo,
 } from '../cat21-fee/coin-selection.helper';
 import { CatOutpoint } from '../cat21-share/cat-outpoint';
-import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
+import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
@@ -480,19 +479,12 @@ export class Cat21TransferOrchestrator {
       feeSats,
     });
 
-    // Dummy-sign every input and finalise so tx.vsize is observable.
-    // scure refuses `.vsize` on an unfinalised transaction ("Transaction
-    // is not finalized"). We swap in the SDK dummy key (schnorr for the
-    // Taproot cat input, ECDSA for P2WPKH funding inputs) so signatures
-    // are structurally valid at the right length — vsize matches what a
-    // real-signed tx would have within < 1 vB tolerance.
-    const tx = btc.Transaction.fromPSBT(built.psbt);
-    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(this.network as Network));
-    // sign() applies to every input the key can sign; SIGHASH_DEFAULT
-    // covers taproot key-path, SIGHASH_ALL covers non-taproot.
-    tx.sign(dummyPrivateKey, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-    tx.finalize();
-    return { vsize: tx.vsize };
+    return {
+      vsize: computePsbtVsize({
+        psbt: built.psbt,
+        network: toScureNetwork(this.network as Network),
+      }),
+    };
   }
 
   /**

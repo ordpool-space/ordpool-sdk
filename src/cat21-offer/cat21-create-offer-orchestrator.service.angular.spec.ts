@@ -12,6 +12,7 @@ import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.typ
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { cat21Config } from '../cat21-mint/cat21-sdk-config';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
+import { toPaymentAddress } from '../wallet/address-types';
 import {
   BuyOfferTargetCat,
   Cat21CreateOfferOrchestrator,
@@ -23,22 +24,24 @@ import {
 // hides what we're really testing). Pubkey is the well-known test key
 // used across cat21-offer.helper.spec.ts.
 // ---------------------------------------------------------------------------
-const PUBKEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
-const XONLY = PUBKEY.slice(1, 33);
-const P2WPKH = btc.p2wpkh(PUBKEY, btc.NETWORK);
-const P2TR = btc.p2tr(XONLY, undefined, btc.NETWORK);
+const BUYER_KEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
+const SELLER_KEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000002');
+const BUYER_P2WPKH = btc.p2wpkh(BUYER_KEY, btc.NETWORK);
+const BUYER_P2TR = btc.p2tr(BUYER_KEY.slice(1, 33), undefined, btc.NETWORK);
+const SELLER_P2WPKH = btc.p2wpkh(SELLER_KEY, btc.NETWORK);
+const SELLER_P2TR = btc.p2tr(SELLER_KEY.slice(1, 33), undefined, btc.NETWORK);
 
-const BUYER_PAYMENT = P2WPKH.address!;
-const BUYER_ORDINALS = P2TR.address!;
-const SELLER_PAYMENT = P2WPKH.address!; // same shape; distinctness comes at the wallet-object level
-const SELLER_CAT_SCRIPT = P2TR.script;   // seller's cat sits at a P2TR (typical)
+const BUYER_PAYMENT = BUYER_P2WPKH.address!;
+const BUYER_ORDINALS = BUYER_P2TR.address!;
+const SELLER_PAYMENT = toPaymentAddress(SELLER_P2WPKH.address!);
+const SELLER_CAT_SCRIPT = SELLER_P2TR.script; // seller's cat sits at a P2TR (typical)
 
 const wallet = (over: Partial<WalletInfo> = {}): WalletInfo => ({
   type: KnownOrdinalWalletType.cat21wallet,
   ordinalsAddress: BUYER_ORDINALS,
-  ordinalsPublicKey: hex.encode(XONLY),
+  ordinalsPublicKey: hex.encode(BUYER_KEY.slice(1, 33)),
   paymentAddress: BUYER_PAYMENT,
-  paymentPublicKey: hex.encode(PUBKEY),
+  paymentPublicKey: hex.encode(BUYER_KEY),
   signingSupported: true,
   ...over,
 });
@@ -52,23 +55,18 @@ const target = (over: Partial<BuyOfferTargetCat> = {}): BuyOfferTargetCat => ({
   ...over,
 });
 
-type MockCat21Service = {
-  getUtxos: jest.MockedFunction<Cat21Service['getUtxos']>;
-  recommendedFees$: Cat21Service['recommendedFees$'];
-};
-
 const buildOrchestrator = (opts: {
   utxos?: TxnOutput[];
   utxosError?: Error;
 } = {}) => {
   const walletSubject = new BehaviorSubject<WalletInfo | null>(null);
-  const cat21: MockCat21Service = {
-    getUtxos: jest.fn(() =>
+  const cat21 = {
+    getUtxos: jest.fn((_address: string) =>
       opts.utxosError
         ? throwError(() => opts.utxosError!)
         : of(opts.utxos ?? ([] as TxnOutput[])),
     ),
-    recommendedFees$: new Subject<RecommendedFees>() as unknown as Cat21Service['recommendedFees$'],
+    recommendedFees$: new Subject<RecommendedFees>(),
   };
   const injector = Injector.create({
     providers: [
@@ -107,16 +105,21 @@ describe('Cat21CreateOfferOrchestrator', () => {
 
   describe('setters', () => {
 
-    it('setSellerPaymentAddress trims + rejects empty/whitespace', () => {
+    it('setSellerPaymentAddress persists a branded PaymentAddress and accepts null', () => {
       const { orchestrator } = buildOrchestrator();
-      orchestrator.setSellerPaymentAddress('  ' + SELLER_PAYMENT + '  ');
+      orchestrator.setSellerPaymentAddress(SELLER_PAYMENT);
       expect(orchestrator.sellerPaymentAddress()).toBe(SELLER_PAYMENT);
-
-      orchestrator.setSellerPaymentAddress('   ');
-      expect(orchestrator.sellerPaymentAddress()).toBeNull();
-
       orchestrator.setSellerPaymentAddress(null);
       expect(orchestrator.sellerPaymentAddress()).toBeNull();
+    });
+
+    it('toPaymentAddress upstream of the setter rejects garbage', () => {
+      // Shape validation is the branded constructor's job; the setter
+      // only sees well-formed values. Pinning the constructor's
+      // rejection here documents the contract seam.
+      expect(() => toPaymentAddress('   ')).toThrow();
+      expect(() => toPaymentAddress('not-an-address')).toThrow();
+      expect(() => toPaymentAddress('  ' + SELLER_PAYMENT + '  ')).toThrow();
     });
 
     it('setPriceSats floors + rejects non-positive/NaN', () => {
@@ -255,39 +258,36 @@ describe('Cat21CreateOfferOrchestrator', () => {
   });
 
   describe('createOffer() guards', () => {
-    it('rejects when no wallet is connected', async () => {
-      const { orchestrator } = buildOrchestrator();
+
+    // Subscribe synchronously — createOffer's guard paths return via
+    // `throwError(...)`, which emits inline on subscribe. If a guard
+    // doesn't fire, `caught` stays null and the caller asserts against
+    // that. Kept simple: no async, no timeouts.
+    const captureError = (o$: ReturnType<Cat21CreateOfferOrchestrator['createOffer']>): Error => {
       let caught: Error | null = null;
-      orchestrator.createOffer().subscribe({
-        error: (e: Error) => { caught = e; },
-      });
-      expect(caught).not.toBeNull();
-      expect((caught as unknown as Error).message).toContain('No wallet connected');
+      o$.subscribe({ error: (e: Error) => { caught = e; } });
+      if (caught === null) throw new Error('expected createOffer() to error, but it did not');
+      return caught as unknown as Error;
+    };
+
+    it('rejects when no wallet is connected', () => {
+      const { orchestrator } = buildOrchestrator();
+      expect(captureError(orchestrator.createOffer()).message).toContain('No wallet connected');
     });
 
-    it('rejects when target cat is missing', async () => {
+    it('rejects when target cat is missing', () => {
       const { orchestrator, walletSubject } = buildOrchestrator();
       walletSubject.next(wallet());
-      let caught: Error | null = null;
-      orchestrator.createOffer().subscribe({
-        error: (e: Error) => { caught = e; },
-      });
-      expect(caught).not.toBeNull();
-      expect((caught as unknown as Error).message).toContain('No target cat');
+      expect(captureError(orchestrator.createOffer()).message).toContain('No target cat');
     });
 
-    it('rejects when seller payment address is missing (regression sentinel)', async () => {
+    it('rejects when seller payment address is missing (regression sentinel)', () => {
       const { orchestrator, walletSubject } = buildOrchestrator();
       walletSubject.next(wallet());
       orchestrator.setTargetCat(target());
       orchestrator.setPriceSats(21_000);
       orchestrator.setFeeRate(5);
-      let caught: Error | null = null;
-      orchestrator.createOffer().subscribe({
-        error: (e: Error) => { caught = e; },
-      });
-      expect(caught).not.toBeNull();
-      expect((caught as unknown as Error).message).toContain('No seller payment address');
+      expect(captureError(orchestrator.createOffer()).message).toContain('No seller payment address');
     });
 
     it('rejects insufficient funds (the layer-2 fix) with the specific error message', async () => {
@@ -308,12 +308,7 @@ describe('Cat21CreateOfferOrchestrator', () => {
       // Re-await simulation with full inputs so the snapshot is up-to-date.
       await firstValueFrom(orchestrator.simulation$);
 
-      let caught: Error | null = null;
-      orchestrator.createOffer().subscribe({
-        error: (e: Error) => { caught = e; },
-      });
-      expect(caught).not.toBeNull();
-      expect((caught as unknown as Error).message).toContain('Insufficient funds');
+      expect(captureError(orchestrator.createOffer()).message).toContain('Insufficient funds');
       expect(orchestrator.state()).toBe('error');
     });
   });

@@ -1,7 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { base64, hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
 import {
   BehaviorSubject,
   Observable,
@@ -21,7 +20,7 @@ import {
   pickLargestFundingUtxoThatCovers,
   type FundingUtxo,
 } from '../cat21-fee/coin-selection.helper';
-import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
+import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
@@ -29,6 +28,7 @@ import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { CatOutpoint } from '../cat21-share/cat-outpoint';
 import { Network, toScureNetwork } from '../network';
 import { bitcoinNetwork } from '../network-token';
+import { PaymentAddress } from '../wallet/address-types';
 import { findSignerOrThrow } from '../wallet/signers';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletInfo } from '../wallet/wallet.service.types';
@@ -229,8 +229,22 @@ export class Cat21CreateOfferOrchestrator {
     this.targetCat.set(cat);
   }
 
-  setSellerPaymentAddress(address: string | null): void {
-    this.sellerPaymentAddress.set(address && address.trim() ? address.trim() : null);
+  /**
+   * Set the seller's PAYMENT address (where sale proceeds land).
+   *
+   * Requires a branded `PaymentAddress` — the caller MUST have used
+   * `toPaymentAddress(str)` to construct it. That forced conversion
+   * is the whole point: it makes the "wait — is this really a payment
+   * address, or did I just paste an on-chain owner lookup's ordinals
+   * address?" question un-skippable at every callsite. See SDK HARD
+   * RULE "Never derive a payment address from an on-chain lookup".
+   *
+   * Shape / whitespace validation lives in `toPaymentAddress` — by
+   * the time an address reaches this setter it is already well-formed,
+   * so no defensive trim/null-collapse here.
+   */
+  setSellerPaymentAddress(address: PaymentAddress | null): void {
+    this.sellerPaymentAddress.set(address);
   }
 
   setPriceSats(price: number): void {
@@ -488,21 +502,16 @@ export class Cat21CreateOfferOrchestrator {
       priceSats,
       feeSats,
     });
-    // Dummy-sign the BUYER inputs (1..N) so tx.vsize is observable.
-    // scure refuses `.vsize` on an unfinalised transaction. Input 0
-    // is the seller's cat UTXO — the seller signs it later, so we
-    // attach a schnorr dummy sig directly to that input's finalScriptWitness
-    // (a 64-byte zero-fill; taproot key-path witness is exactly one
-    // 64/65-byte signature). vsize matches a real-signed tx within < 1 vB.
-    const tx = btc.Transaction.fromPSBT(built.psbt);
-    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(this.network as Network));
-    for (let i = 1; i < tx.inputsLength; i++) {
-      tx.signIdx(dummyPrivateKey, i, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-      tx.finalizeIdx(i);
-    }
-    // Seller's input 0: fake taproot key-path witness (64-byte schnorr sig).
-    tx.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] });
-    return { vsize: tx.vsize };
+    // Input 0 is the seller's cat UTXO — they sign it later, so we
+    // tell computePsbtVsize to fake a taproot key-path witness there
+    // instead of trying to sign with our dummy key.
+    return {
+      vsize: computePsbtVsize({
+        psbt: built.psbt,
+        network: toScureNetwork(this.network as Network),
+        nonSignableInputs: [0],
+      }),
+    };
   }
 
   private buildOfferPsbt(
