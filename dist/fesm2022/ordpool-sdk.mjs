@@ -4982,7 +4982,20 @@ class Cat21CreateOfferOrchestrator {
             priceSats,
             feeSats,
         });
+        // Dummy-sign the BUYER inputs (1..N) so tx.vsize is observable.
+        // scure refuses `.vsize` on an unfinalised transaction. Input 0
+        // is the seller's cat UTXO — the seller signs it later, so we
+        // attach a schnorr dummy sig directly to that input's finalScriptWitness
+        // (a 64-byte zero-fill; taproot key-path witness is exactly one
+        // 64/65-byte signature). vsize matches a real-signed tx within < 1 vB.
         const tx = btc.Transaction.fromPSBT(built.psbt);
+        const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(this.network));
+        for (let i = 1; i < tx.inputsLength; i++) {
+            tx.signIdx(dummyPrivateKey, i, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+            tx.finalizeIdx(i);
+        }
+        // Seller's input 0: fake taproot key-path witness (64-byte schnorr sig).
+        tx.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] });
         return { vsize: tx.vsize };
     }
     buildOfferPsbt(wallet, target, sellerAddress, priceSats, buyerReceive, simulation) {
