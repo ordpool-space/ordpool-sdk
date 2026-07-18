@@ -8,11 +8,12 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { WalletService } from '../wallet/wallet.service';
-import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types';
+import { WalletInfo } from '../wallet/wallet.service.types';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { cat21Config } from '../cat21-mint/cat21-sdk-config';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
 import { toPaymentAddress } from '../wallet/address-types';
+import { makeWallet } from '../testing/fixtures';
 import {
   BuyOfferTargetCat,
   Cat21CreateOfferOrchestrator,
@@ -36,15 +37,14 @@ const BUYER_ORDINALS = BUYER_P2TR.address!;
 const SELLER_PAYMENT = toPaymentAddress(SELLER_P2WPKH.address!);
 const SELLER_CAT_SCRIPT = SELLER_P2TR.script; // seller's cat sits at a P2TR (typical)
 
-const wallet = (over: Partial<WalletInfo> = {}): WalletInfo => ({
-  type: KnownOrdinalWalletType.cat21wallet,
-  ordinalsAddress: BUYER_ORDINALS,
-  ordinalsPublicKey: hex.encode(BUYER_KEY.slice(1, 33)),
-  paymentAddress: BUYER_PAYMENT,
-  paymentPublicKey: hex.encode(BUYER_KEY),
-  signingSupported: true,
-  ...over,
-});
+const wallet = (over: Partial<WalletInfo> = {}): WalletInfo =>
+  makeWallet({
+    ordinalsAddress: BUYER_ORDINALS,
+    ordinalsPublicKey: hex.encode(BUYER_KEY.slice(1, 33)),
+    paymentAddress: BUYER_PAYMENT,
+    paymentPublicKey: hex.encode(BUYER_KEY),
+    ...over,
+  });
 
 const target = (over: Partial<BuyOfferTargetCat> = {}): BuyOfferTargetCat => ({
   catNumber: 42,
@@ -259,35 +259,24 @@ describe('Cat21CreateOfferOrchestrator', () => {
 
   describe('createOffer() guards', () => {
 
-    // Subscribe synchronously — createOffer's guard paths return via
-    // `throwError(...)`, which emits inline on subscribe. If a guard
-    // doesn't fire, `caught` stays null and the caller asserts against
-    // that. Kept simple: no async, no timeouts.
-    const captureError = (o$: ReturnType<Cat21CreateOfferOrchestrator['createOffer']>): Error => {
-      let caught: Error | null = null;
-      o$.subscribe({ error: (e: Error) => { caught = e; } });
-      if (caught === null) throw new Error('expected createOffer() to error, but it did not');
-      return caught as unknown as Error;
-    };
-
-    it('rejects when no wallet is connected', () => {
+    it('rejects when no wallet is connected', async () => {
       const { orchestrator } = buildOrchestrator();
-      expect(captureError(orchestrator.createOffer()).message).toContain('No wallet connected');
+      await expect(firstValueFrom(orchestrator.createOffer())).rejects.toThrow('No wallet connected');
     });
 
-    it('rejects when target cat is missing', () => {
+    it('rejects when target cat is missing', async () => {
       const { orchestrator, walletSubject } = buildOrchestrator();
       walletSubject.next(wallet());
-      expect(captureError(orchestrator.createOffer()).message).toContain('No target cat');
+      await expect(firstValueFrom(orchestrator.createOffer())).rejects.toThrow('No target cat');
     });
 
-    it('rejects when seller payment address is missing (regression sentinel)', () => {
+    it('rejects when seller payment address is missing (regression sentinel)', async () => {
       const { orchestrator, walletSubject } = buildOrchestrator();
       walletSubject.next(wallet());
       orchestrator.setTargetCat(target());
       orchestrator.setPriceSats(21_000);
       orchestrator.setFeeRate(5);
-      expect(captureError(orchestrator.createOffer()).message).toContain('No seller payment address');
+      await expect(firstValueFrom(orchestrator.createOffer())).rejects.toThrow('No seller payment address');
     });
 
     it('rejects insufficient funds (the layer-2 fix) with the specific error message', async () => {
@@ -308,7 +297,7 @@ describe('Cat21CreateOfferOrchestrator', () => {
       // Re-await simulation with full inputs so the snapshot is up-to-date.
       await firstValueFrom(orchestrator.simulation$);
 
-      expect(captureError(orchestrator.createOffer()).message).toContain('Insufficient funds');
+      await expect(firstValueFrom(orchestrator.createOffer())).rejects.toThrow('Insufficient funds');
       expect(orchestrator.state()).toBe('error');
     });
   });

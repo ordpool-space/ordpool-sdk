@@ -26,6 +26,15 @@ export function makeWallet(over: Partial<WalletInfo> = {}): WalletInfo {
 }
 
 /**
+ * Convenience wrapper: same shape as `makeWallet` but flips the default
+ * `type` to `xverse`. Mint / inscribe specs use this because their
+ * signer path is the xverse adapter, not cat21wallet's.
+ */
+export function makeXverseWallet(over: Partial<WalletInfo> = {}): WalletInfo {
+  return makeWallet({ type: KnownOrdinalWalletType.xverse, ...over });
+}
+
+/**
  * Attach a dummy buyer signature to a PSBT so the buy-offer validator's
  * "buyer-input-unsigned" gate doesn't fire on a synthetic test PSBT.
  * The 71-byte fill is a stand-in for a real ECDSA signature; the

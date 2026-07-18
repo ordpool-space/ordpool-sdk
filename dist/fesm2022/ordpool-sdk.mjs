@@ -6350,6 +6350,11 @@ function assertBitcoinAddress(addr, fieldName) {
  * tampered link degrades to "field missing" rather than crashing the
  * page. The consumer's own address decoder (scure `btc.Address(...)`
  * .decode) runs before signing anyway, so this is defence-in-depth.
+ *
+ * The return type is `PaymentAddress | null` because the ONLY place
+ * this parser is used is `payTo=` — the URL param defined as the
+ * seller's payment address. Branding at ingress means downstream
+ * consumers don't repeat the `toPaymentAddress()` cast at every hop.
  */
 function parseAddressParam(raw) {
     if (raw === null)

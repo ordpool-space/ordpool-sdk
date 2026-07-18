@@ -1856,7 +1856,7 @@ declare class Cat21CreateOfferOrchestrator {
     /** Which cat the buyer wants to bid on. */
     readonly targetCat: _angular_core.WritableSignal<BuyOfferTargetCat>;
     /** Where the seller wants payment (their own address; usually the seller's payment address). */
-    readonly sellerPaymentAddress: _angular_core.WritableSignal<string>;
+    readonly sellerPaymentAddress: _angular_core.WritableSignal<PaymentAddress>;
     /** Sats the buyer offers (this is the "ask" the seller's eventual payout output carries — `priceSats + CAT21_POSTAGE_SATS`). */
     readonly priceSats: _angular_core.WritableSignal<number>;
     /** Where the cat lands after the seller signs + broadcasts. Default = connected wallet's ordinals address. */
@@ -2678,7 +2678,13 @@ interface AskQueryArgs {
 }
 interface ParsedAskQuery {
     askSats: number | null;
-    sellerPaymentAddress: string | null;
+    /**
+     * Branded because the `payTo=` URL param IS the seller's payment
+     * address by construction — the seller's own wallet emitted it at
+     * sell-modal time. The parser has enough context to hand it back
+     * pre-branded so consumers don't have to re-cast at every callsite.
+     */
+    sellerPaymentAddress: PaymentAddress | null;
 }
 /**
  * Build the query params for an ask permalink. Consumer concatenates
@@ -2710,7 +2716,8 @@ interface ParsedBuyOfferQuery {
     catNumber: number | null;
     askSats: number | null;
     fromAsk: boolean;
-    sellerPaymentAddress: string | null;
+    /** Branded — see `ParsedAskQuery.sellerPaymentAddress`. */
+    sellerPaymentAddress: PaymentAddress | null;
 }
 declare function buildBuyOfferQueryParams(args: BuyOfferQueryArgs): Record<string, string>;
 declare function parseBuyOfferQueryParams(query: URLSearchParams | Record<string, string | null>): ParsedBuyOfferQuery;

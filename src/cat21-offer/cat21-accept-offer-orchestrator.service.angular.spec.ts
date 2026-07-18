@@ -12,8 +12,6 @@ import { cat21Config } from '../cat21-mint/cat21-sdk-config';
 import { makeWallet } from '../testing/fixtures';
 import { Cat21AcceptOfferOrchestrator } from './cat21-accept-offer-orchestrator.service';
 
-const wallet = makeWallet;
-
 type MockWalletService = {
   connectedWallet$: BehaviorSubject<WalletInfo | null>;
 };
@@ -126,7 +124,7 @@ describe('Cat21AcceptOfferOrchestrator', () => {
 
     it('errors when no validated offer is in hand', async () => {
       const { orchestrator, walletSubject } = buildOrchestrator();
-      walletSubject.next(wallet());
+      walletSubject.next(makeWallet());
       let caught: Error | null = null;
       orchestrator.acceptOffer().subscribe({
         error: (e: Error) => { caught = e; },

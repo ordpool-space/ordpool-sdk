@@ -9,8 +9,8 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { WalletService } from '../wallet/wallet.service';
-import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types';
-import { makeWallet } from '../testing/fixtures';
+import { WalletInfo } from '../wallet/wallet.service.types';
+import { makeXverseWallet } from '../testing/fixtures';
 
 import {
   InscribeContent,
@@ -18,15 +18,10 @@ import {
 } from './inscribe-mint-orchestrator.service';
 import { InscribeAndBroadcastResult } from './inscribe-orchestrator';
 
-// This spec uses a specific bech32 payment address the wallet-swap
-// tests re-assert on, so we override the shared default explicitly.
-const INSCRIBE_PAYMENT_ADDRESS = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
+// Wallet-swap tests below re-assert on this specific payment address,
+// so the fixture bakes it in as the default.
 const wallet = (overrides: Partial<WalletInfo> = {}): WalletInfo =>
-  makeWallet({
-    type: KnownOrdinalWalletType.xverse,
-    paymentAddress: INSCRIBE_PAYMENT_ADDRESS,
-    ...overrides,
-  });
+  makeXverseWallet({ paymentAddress: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', ...overrides });
 
 const utxo = (overrides: Partial<TxnOutput> = {}): TxnOutput => ({
   txid: 'a'.repeat(64),

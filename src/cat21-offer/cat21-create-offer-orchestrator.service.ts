@@ -114,7 +114,7 @@ export class Cat21CreateOfferOrchestrator {
   readonly targetCat = signal<BuyOfferTargetCat | null>(null);
 
   /** Where the seller wants payment (their own address; usually the seller's payment address). */
-  readonly sellerPaymentAddress = signal<string | null>(null);
+  readonly sellerPaymentAddress = signal<PaymentAddress | null>(null);
 
   /** Sats the buyer offers (this is the "ask" the seller's eventual payout output carries — `priceSats + CAT21_POSTAGE_SATS`). */
   readonly priceSats = signal<number | null>(null);

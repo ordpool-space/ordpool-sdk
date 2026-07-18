@@ -6,15 +6,12 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { WalletService } from '../wallet/wallet.service';
-import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types';
-import { makeWallet } from '../testing/fixtures';
+import { WalletInfo } from '../wallet/wallet.service.types';
+import { makeXverseWallet as wallet } from '../testing/fixtures';
 import { Cat21MintOrchestrator } from './cat21-mint-orchestrator.service';
 import { Cat21Service } from './cat21.service';
 import { cat21Config } from './cat21-sdk-config';
 import { SimulateTransactionResult, TxnOutput } from './cat21.service.types';
-
-const wallet = (overrides: Partial<WalletInfo> = {}): WalletInfo =>
-  makeWallet({ type: KnownOrdinalWalletType.xverse, ...overrides });
 
 const utxo = (overrides: Partial<TxnOutput> = {}): TxnOutput => ({
   txid: 'a'.repeat(64),

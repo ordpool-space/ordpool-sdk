@@ -26,6 +26,7 @@
  * Pure functions. No Angular, no I/O.
  */
 
+import { PaymentAddress } from '../wallet/address-types';
 import { CatOutpoint } from './cat-outpoint';
 
 /** Query param keys — single source of truth. */
@@ -85,7 +86,13 @@ export interface AskQueryArgs {
 
 export interface ParsedAskQuery {
   askSats: number | null;
-  sellerPaymentAddress: string | null;
+  /**
+   * Branded because the `payTo=` URL param IS the seller's payment
+   * address by construction — the seller's own wallet emitted it at
+   * sell-modal time. The parser has enough context to hand it back
+   * pre-branded so consumers don't have to re-cast at every callsite.
+   */
+  sellerPaymentAddress: PaymentAddress | null;
 }
 
 /**
@@ -140,7 +147,8 @@ export interface ParsedBuyOfferQuery {
   catNumber: number | null;
   askSats: number | null;
   fromAsk: boolean;
-  sellerPaymentAddress: string | null;
+  /** Branded — see `ParsedAskQuery.sellerPaymentAddress`. */
+  sellerPaymentAddress: PaymentAddress | null;
 }
 
 export function buildBuyOfferQueryParams(args: BuyOfferQueryArgs): Record<string, string> {
@@ -298,8 +306,13 @@ function assertBitcoinAddress(addr: string, fieldName: string): void {
  * tampered link degrades to "field missing" rather than crashing the
  * page. The consumer's own address decoder (scure `btc.Address(...)`
  * .decode) runs before signing anyway, so this is defence-in-depth.
+ *
+ * The return type is `PaymentAddress | null` because the ONLY place
+ * this parser is used is `payTo=` — the URL param defined as the
+ * seller's payment address. Branding at ingress means downstream
+ * consumers don't repeat the `toPaymentAddress()` cast at every hop.
  */
-function parseAddressParam(raw: string | null): string | null {
+function parseAddressParam(raw: string | null): PaymentAddress | null {
   if (raw === null) return null;
-  return ADDRESS_RE.test(raw) ? raw : null;
+  return ADDRESS_RE.test(raw) ? (raw as PaymentAddress) : null;
 }
