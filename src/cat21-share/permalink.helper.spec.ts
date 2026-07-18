@@ -21,6 +21,7 @@ describe('permalink helpers', () => {
       expect(parseAskQueryParams(new URLSearchParams(params))).toEqual({
         askSats: 21000,
         sellerPaymentAddress: null,
+        catOutpoint: null,
       });
     });
 
@@ -30,6 +31,7 @@ describe('permalink helpers', () => {
       expect(parseAskQueryParams(new URLSearchParams(params))).toEqual({
         askSats: 21000,
         sellerPaymentAddress: REAL_P2WPKH,
+        catOutpoint: null,
       });
     });
 
@@ -57,6 +59,7 @@ describe('permalink helpers', () => {
       expect(parseAskQueryParams(new URLSearchParams())).toEqual({
         askSats: null,
         sellerPaymentAddress: null,
+        catOutpoint: null,
       });
     });
 
@@ -65,6 +68,7 @@ describe('permalink helpers', () => {
         expect(parseAskQueryParams({ ask: bad })).toEqual({
           askSats: null,
           sellerPaymentAddress: null,
+          catOutpoint: null,
         });
       }
     });
@@ -73,6 +77,7 @@ describe('permalink helpers', () => {
       expect(parseAskQueryParams({ ask: '21000', payTo: 'evil-string' })).toEqual({
         askSats: 21000,
         sellerPaymentAddress: null,
+        catOutpoint: null,
       });
     });
 
@@ -81,7 +86,52 @@ describe('permalink helpers', () => {
       expect(parseAskQueryParams(url.searchParams)).toEqual({
         askSats: 99999,
         sellerPaymentAddress: REAL_P2WPKH,
+        catOutpoint: null,
       });
+    });
+
+    it('builds and parses catOutpoint (pins the seller intent to a specific UTXO)', () => {
+      const params = buildAskQueryParams({
+        askSats: 21000,
+        sellerPaymentAddress: REAL_P2WPKH,
+        catOutpoint: { txid: REAL_TXID, vout: 0 },
+      });
+      expect(params).toEqual({
+        ask: '21000',
+        payTo: REAL_P2WPKH,
+        catTxid: REAL_TXID,
+        catVout: '0',
+      });
+      expect(parseAskQueryParams(new URLSearchParams(params))).toEqual({
+        askSats: 21000,
+        sellerPaymentAddress: REAL_P2WPKH,
+        catOutpoint: { txid: REAL_TXID, vout: 0 },
+      });
+    });
+
+    it('rejects malformed catOutpoint at build time', () => {
+      expect(() =>
+        buildAskQueryParams({
+          askSats: 21000,
+          catOutpoint: { txid: 'not-hex', vout: 0 },
+        }),
+      ).toThrow(/catOutpoint\.txid/);
+      expect(() =>
+        buildAskQueryParams({
+          askSats: 21000,
+          catOutpoint: { txid: REAL_TXID, vout: -1 },
+        }),
+      ).toThrow(/catOutpoint\.vout/);
+    });
+
+    it('parse silently drops a tampered catOutpoint — same defence-in-depth as payTo', () => {
+      const parsed = parseAskQueryParams({
+        ask: '21000',
+        payTo: REAL_P2WPKH,
+        catTxid: 'ab', // too short
+        catVout: '0',
+      });
+      expect(parsed.catOutpoint).toBeNull();
     });
   });
 
@@ -119,6 +169,7 @@ describe('permalink helpers', () => {
         askSats: 21000,
         fromAsk: true,
         sellerPaymentAddress: REAL_P2WPKH,
+        catOutpoint: null,
       });
     });
 
@@ -129,6 +180,7 @@ describe('permalink helpers', () => {
         askSats: null,
         fromAsk: false,
         sellerPaymentAddress: null,
+        catOutpoint: null,
       });
     });
 
@@ -138,12 +190,14 @@ describe('permalink helpers', () => {
         askSats: null,
         fromAsk: false,
         sellerPaymentAddress: null,
+        catOutpoint: null,
       });
       expect(parseBuyOfferQueryParams({ catNumber: '-1' })).toEqual({
         catNumber: null,
         askSats: null,
         fromAsk: false,
         sellerPaymentAddress: null,
+        catOutpoint: null,
       });
     });
 
@@ -156,6 +210,25 @@ describe('permalink helpers', () => {
       expect(parseBuyOfferQueryParams({ fromAsk: 'true' }).fromAsk).toBe(false);
       expect(parseBuyOfferQueryParams({ fromAsk: 'yes' }).fromAsk).toBe(false);
       expect(parseBuyOfferQueryParams({ fromAsk: '1' }).fromAsk).toBe(true);
+    });
+
+    it('builds and parses catOutpoint (forwarded from the ask permalink; pins seller intent to a specific UTXO)', () => {
+      const params = buildBuyOfferQueryParams({
+        catNumber: 42,
+        askSats: 21000,
+        sellerPaymentAddress: REAL_P2WPKH,
+        catOutpoint: { txid: REAL_TXID, vout: 0 },
+      });
+      expect(params).toEqual({
+        catNumber: '42',
+        askPrice: '21000',
+        fromAsk: '1',
+        payTo: REAL_P2WPKH,
+        catTxid: REAL_TXID,
+        catVout: '0',
+      });
+      const parsed = parseBuyOfferQueryParams(new URLSearchParams(params));
+      expect(parsed.catOutpoint).toEqual({ txid: REAL_TXID, vout: 0 });
     });
   });
 

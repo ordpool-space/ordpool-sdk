@@ -78,6 +78,22 @@ export interface AskQueryArgs {
    * in the SDK CLAUDE.md.
    */
   sellerPaymentAddress?: string;
+  /**
+   * The cat UTXO outpoint at the moment the seller minted the link.
+   * Pins the seller's INTENT to a specific cat UTXO: when a viewer
+   * later loads the link, the consumer compares this against the
+   * current on-chain outpoint (via cat21-indexer / ord). Mismatch
+   * means the cat has moved since the link was created — the
+   * original sell intent is void (someone else already bought /
+   * transferred it) and any Buy action on the loaded page must
+   * refuse to build a PSBT.
+   *
+   * Optional in the type so legacy "make me an offer" ask links
+   * (no bound intent, no stale check) still parse; strongly
+   * recommended when the seller's wallet is connected at
+   * sell-modal-open time.
+   */
+  catOutpoint?: CatOutpoint;
 }
 
 export interface ParsedAskQuery {
@@ -89,6 +105,13 @@ export interface ParsedAskQuery {
    * pre-branded so consumers don't have to re-cast at every callsite.
    */
   sellerPaymentAddress: PaymentAddress | null;
+  /**
+   * Cat UTXO the seller's intent was pinned to. Consumer compares
+   * against the current on-chain outpoint to detect stale links
+   * (cat has moved since link creation → offer void). See
+   * `AskQueryArgs.catOutpoint` for the semantics.
+   */
+  catOutpoint: CatOutpoint | null;
 }
 
 /**
@@ -103,6 +126,11 @@ export function buildAskQueryParams(args: AskQueryArgs): Record<string, string> 
   if (args.sellerPaymentAddress !== undefined) {
     // Validate via the canonical shape check (throws on garbage).
     out[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
+  }
+  if (args.catOutpoint) {
+    assertCatOutpoint(args.catOutpoint);
+    out[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
+    out[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
   }
   return out;
 }
@@ -121,6 +149,7 @@ export function parseAskQueryParams(
   return {
     askSats: parseIntParam(readParam(query, CAT21_QUERY_KEYS.ask), (n) => n > 0),
     sellerPaymentAddress: parseAddressParam(readParam(query, CAT21_QUERY_KEYS.payTo)),
+    catOutpoint: parseCatOutpointParams(query),
   };
 }
 
@@ -137,6 +166,13 @@ export interface BuyOfferQueryArgs {
    * `AskQueryArgs.sellerPaymentAddress` for the why.
    */
   sellerPaymentAddress?: string;
+  /**
+   * Cat UTXO outpoint forwarded from the ask permalink. Pins the
+   * seller's intent to a specific UTXO — the make-offer page
+   * compares against the on-chain lookup and refuses to build a
+   * PSBT if the cat has moved. See `AskQueryArgs.catOutpoint`.
+   */
+  catOutpoint?: CatOutpoint;
 }
 
 export interface ParsedBuyOfferQuery {
@@ -145,6 +181,9 @@ export interface ParsedBuyOfferQuery {
   fromAsk: boolean;
   /** Branded — see `ParsedAskQuery.sellerPaymentAddress`. */
   sellerPaymentAddress: PaymentAddress | null;
+  /** Cat UTXO the seller pinned the offer to; null if not supplied.
+   *  See `AskQueryArgs.catOutpoint` for the staleness semantics. */
+  catOutpoint: CatOutpoint | null;
 }
 
 export function buildBuyOfferQueryParams(args: BuyOfferQueryArgs): Record<string, string> {
@@ -164,6 +203,11 @@ export function buildBuyOfferQueryParams(args: BuyOfferQueryArgs): Record<string
   if (args.sellerPaymentAddress !== undefined) {
     params[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
   }
+  if (args.catOutpoint) {
+    assertCatOutpoint(args.catOutpoint);
+    params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
+    params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
+  }
   return params;
 }
 
@@ -175,6 +219,7 @@ export function parseBuyOfferQueryParams(
     askSats: parseIntParam(readParam(query, CAT21_QUERY_KEYS.askPrice), (n) => n > 0),
     fromAsk: readParam(query, CAT21_QUERY_KEYS.fromAsk) === '1',
     sellerPaymentAddress: parseAddressParam(readParam(query, CAT21_QUERY_KEYS.payTo)),
+    catOutpoint: parseCatOutpointParams(query),
   };
 }
 

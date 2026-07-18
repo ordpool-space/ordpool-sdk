@@ -6219,6 +6219,11 @@ function buildAskQueryParams(args) {
         // Validate via the canonical shape check (throws on garbage).
         out[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
     }
+    if (args.catOutpoint) {
+        assertCatOutpoint(args.catOutpoint);
+        out[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
+        out[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
+    }
     return out;
 }
 /**
@@ -6233,6 +6238,7 @@ function parseAskQueryParams(query) {
     return {
         askSats: parseIntParam(readParam(query, CAT21_QUERY_KEYS.ask), (n) => n > 0),
         sellerPaymentAddress: parseAddressParam(readParam(query, CAT21_QUERY_KEYS.payTo)),
+        catOutpoint: parseCatOutpointParams(query),
     };
 }
 function buildBuyOfferQueryParams(args) {
@@ -6252,6 +6258,11 @@ function buildBuyOfferQueryParams(args) {
     if (args.sellerPaymentAddress !== undefined) {
         params[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
     }
+    if (args.catOutpoint) {
+        assertCatOutpoint(args.catOutpoint);
+        params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
+        params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
+    }
     return params;
 }
 function parseBuyOfferQueryParams(query) {
@@ -6260,6 +6271,7 @@ function parseBuyOfferQueryParams(query) {
         askSats: parseIntParam(readParam(query, CAT21_QUERY_KEYS.askPrice), (n) => n > 0),
         fromAsk: readParam(query, CAT21_QUERY_KEYS.fromAsk) === '1',
         sellerPaymentAddress: parseAddressParam(readParam(query, CAT21_QUERY_KEYS.payTo)),
+        catOutpoint: parseCatOutpointParams(query),
     };
 }
 function buildAcceptOfferQueryParams(args) {
