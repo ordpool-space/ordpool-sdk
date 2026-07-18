@@ -7,20 +7,14 @@ import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { WalletService } from '../wallet/wallet.service';
 import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types';
+import { makeWallet } from '../testing/fixtures';
 import { Cat21MintOrchestrator } from './cat21-mint-orchestrator.service';
 import { Cat21Service } from './cat21.service';
 import { cat21Config } from './cat21-sdk-config';
 import { SimulateTransactionResult, TxnOutput } from './cat21.service.types';
 
-const wallet = (overrides: Partial<WalletInfo> = {}): WalletInfo => ({
-  type: KnownOrdinalWalletType.xverse,
-  ordinalsAddress: 'bc1ptrrx4duc8afs4ye63xgcyf6d7kg29a4myay4nqxmd04zx8j9jers899d0x',
-  ordinalsPublicKey: '5df12ac222a1cd78dd4681c7c7a56f3e273884a086b2b6100957d20c73be3c37',
-  paymentAddress: 'bc1qexample',
-  paymentPublicKey: '0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b',
-  signingSupported: true,
-  ...overrides,
-});
+const wallet = (overrides: Partial<WalletInfo> = {}): WalletInfo =>
+  makeWallet({ type: KnownOrdinalWalletType.xverse, ...overrides });
 
 const utxo = (overrides: Partial<TxnOutput> = {}): TxnOutput => ({
   txid: 'a'.repeat(64),

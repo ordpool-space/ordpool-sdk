@@ -3,6 +3,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
+import { attachDummyBuyerSig } from '../testing/fixtures';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   buildCat21BuyOfferPsbt,
@@ -41,17 +42,7 @@ const SELLER_PAYMENT_ADDRESS = sellerPaymentScript.address!;
 const BUYER_PAYMENT_ADDRESS = buyerPaymentScript.address!;
 const BUYER_ORDINALS_ADDRESS = buyerOrdinalsScript.address!;
 
-/**
- * Attach a dummy buyer signature at input 1 so the validator's
- * "buyer-input-unsigned" gate doesn't fire on our synthetic PSBT.
- * The 71-byte fill is a stand-in for a real ECDSA signature; the
- * validator only checks presence, not verifiability.
- */
-function attachBuyerSig(psbtBytes: Uint8Array): Uint8Array {
-  const tx = btc.Transaction.fromPSBT(psbtBytes);
-  tx.updateInput(1, { partialSig: [[BUYER_KEY, new Uint8Array(71).fill(1)]] });
-  return tx.toPSBT();
-}
+const attachBuyerSig = (psbtBytes: Uint8Array) => attachDummyBuyerSig(psbtBytes, BUYER_KEY);
 
 // Sanity: the three addresses must be structurally different so the
 // round-trip test isn't accidentally passing on address equality.

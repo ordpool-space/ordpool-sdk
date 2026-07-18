@@ -6,20 +6,13 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { WalletService } from '../wallet/wallet.service';
-import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types';
+import { WalletInfo } from '../wallet/wallet.service.types';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { cat21Config } from '../cat21-mint/cat21-sdk-config';
+import { makeWallet } from '../testing/fixtures';
 import { Cat21AcceptOfferOrchestrator } from './cat21-accept-offer-orchestrator.service';
 
-const wallet = (overrides: Partial<WalletInfo> = {}): WalletInfo => ({
-  type: KnownOrdinalWalletType.cat21wallet,
-  ordinalsAddress: 'bc1pSeller',
-  ordinalsPublicKey: '5df12ac222a1cd78dd4681c7c7a56f3e273884a086b2b6100957d20c73be3c37',
-  paymentAddress: 'bc1qSellerPayment',
-  paymentPublicKey: '0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b',
-  signingSupported: true,
-  ...overrides,
-});
+const wallet = makeWallet;
 
 type MockWalletService = {
   connectedWallet$: BehaviorSubject<WalletInfo | null>;

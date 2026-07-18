@@ -3,6 +3,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
+import { attachDummyBuyerSig } from '../testing/fixtures';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   BuildCat21BuyOfferArgs,
@@ -293,11 +294,7 @@ describe('validateCat21BuyOfferPsbt', () => {
 
   describe('payment-output address gate (Finding #1)', () => {
 
-    function attachBuyerSig(psbtBytes: Uint8Array): Uint8Array {
-      const tx = btc.Transaction.fromPSBT(psbtBytes);
-      tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
-      return tx.toPSBT();
-    }
+    const attachBuyerSig = (psbtBytes: Uint8Array) => attachDummyBuyerSig(psbtBytes, publicKey);
 
     it('accepts when expectedSellerPaymentAddress matches Output 1 (testnet P2WPKH)', () => {
       const args = makeBaseArgs();
