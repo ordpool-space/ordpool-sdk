@@ -10,13 +10,41 @@ import {
 } from './permalink.helper';
 
 const REAL_TXID = 'ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df';
+const REAL_P2WPKH = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx';
+const REAL_P2TR = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxq7pkrz9';
 
 describe('permalink helpers', () => {
   describe('ask permalink', () => {
-    it('builds and parses a valid ask query', () => {
+    it('builds and parses a valid ask query (legacy — no payTo)', () => {
       const params = buildAskQueryParams({ askSats: 21000 });
       expect(params).toEqual({ ask: '21000' });
-      expect(parseAskQueryParams(new URLSearchParams(params))).toBe(21000);
+      expect(parseAskQueryParams(new URLSearchParams(params))).toEqual({
+        askSats: 21000,
+        sellerPaymentAddress: null,
+      });
+    });
+
+    it('builds and parses an ask with the seller payment address', () => {
+      const params = buildAskQueryParams({ askSats: 21000, sellerPaymentAddress: REAL_P2WPKH });
+      expect(params).toEqual({ ask: '21000', payTo: REAL_P2WPKH });
+      expect(parseAskQueryParams(new URLSearchParams(params))).toEqual({
+        askSats: 21000,
+        sellerPaymentAddress: REAL_P2WPKH,
+      });
+    });
+
+    it('accepts P2TR payment addresses too (some wallets use them)', () => {
+      const params = buildAskQueryParams({ askSats: 1, sellerPaymentAddress: REAL_P2TR });
+      expect(params['payTo']).toBe(REAL_P2TR);
+    });
+
+    it('rejects garbage sellerPaymentAddress at build time', () => {
+      expect(() =>
+        buildAskQueryParams({ askSats: 21000, sellerPaymentAddress: 'not-an-address' }),
+      ).toThrow(/valid Bitcoin address/);
+      expect(() =>
+        buildAskQueryParams({ askSats: 21000, sellerPaymentAddress: '' }),
+      ).toThrow(/valid Bitcoin address/);
     });
 
     it('rejects non-positive askSats at build time', () => {
@@ -25,19 +53,35 @@ describe('permalink helpers', () => {
       expect(() => buildAskQueryParams({ askSats: 1.5 })).toThrow(/positive integer/);
     });
 
-    it('parse returns null when the param is missing', () => {
-      expect(parseAskQueryParams(new URLSearchParams())).toBeNull();
+    it('parse returns both fields null when the params are missing', () => {
+      expect(parseAskQueryParams(new URLSearchParams())).toEqual({
+        askSats: null,
+        sellerPaymentAddress: null,
+      });
     });
 
     it('parse rejects tampered ask values', () => {
       for (const bad of ['abc', '-100', '0', '1.5', '1000 ', ' 1000', '1e5']) {
-        expect(parseAskQueryParams({ ask: bad })).toBeNull();
+        expect(parseAskQueryParams({ ask: bad })).toEqual({
+          askSats: null,
+          sellerPaymentAddress: null,
+        });
       }
     });
 
+    it('parse silently drops a tampered payTo — consumer address decoder catches it before signing', () => {
+      expect(parseAskQueryParams({ ask: '21000', payTo: 'evil-string' })).toEqual({
+        askSats: 21000,
+        sellerPaymentAddress: null,
+      });
+    });
+
     it('parses ask values that survive a round-trip through URLSearchParams', () => {
-      const url = new URL('https://cat21.space/cat/42?ask=99999');
-      expect(parseAskQueryParams(url.searchParams)).toBe(99999);
+      const url = new URL(`https://cat21.space/cat/42?ask=99999&payTo=${REAL_P2WPKH}`);
+      expect(parseAskQueryParams(url.searchParams)).toEqual({
+        askSats: 99999,
+        sellerPaymentAddress: REAL_P2WPKH,
+      });
     });
   });
 
@@ -52,16 +96,40 @@ describe('permalink helpers', () => {
       expect(params).toEqual({ catNumber: '42', askPrice: '21000', fromAsk: '1' });
     });
 
+    it('builds with sellerPaymentAddress forwarded from the ask permalink', () => {
+      const params = buildBuyOfferQueryParams({
+        catNumber: 42,
+        askSats: 21000,
+        sellerPaymentAddress: REAL_P2WPKH,
+      });
+      expect(params).toEqual({
+        catNumber: '42',
+        askPrice: '21000',
+        fromAsk: '1',
+        payTo: REAL_P2WPKH,
+      });
+    });
+
     it('parses fully-populated params', () => {
       const parsed = parseBuyOfferQueryParams(
-        new URLSearchParams({ catNumber: '42', askPrice: '21000', fromAsk: '1' }),
+        new URLSearchParams({ catNumber: '42', askPrice: '21000', fromAsk: '1', payTo: REAL_P2WPKH }),
       );
-      expect(parsed).toEqual({ catNumber: 42, askSats: 21000, fromAsk: true });
+      expect(parsed).toEqual({
+        catNumber: 42,
+        askSats: 21000,
+        fromAsk: true,
+        sellerPaymentAddress: REAL_P2WPKH,
+      });
     });
 
     it('parses without askSats — buyer landed on a bare make-offer link', () => {
       const parsed = parseBuyOfferQueryParams(new URLSearchParams({ catNumber: '42' }));
-      expect(parsed).toEqual({ catNumber: 42, askSats: null, fromAsk: false });
+      expect(parsed).toEqual({
+        catNumber: 42,
+        askSats: null,
+        fromAsk: false,
+        sellerPaymentAddress: null,
+      });
     });
 
     it('rejects tampered catNumber at parse time', () => {
@@ -69,11 +137,13 @@ describe('permalink helpers', () => {
         catNumber: null,
         askSats: null,
         fromAsk: false,
+        sellerPaymentAddress: null,
       });
       expect(parseBuyOfferQueryParams({ catNumber: '-1' })).toEqual({
         catNumber: null,
         askSats: null,
         fromAsk: false,
+        sellerPaymentAddress: null,
       });
     });
 

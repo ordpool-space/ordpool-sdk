@@ -6030,6 +6030,15 @@ async function broadcastCat21(input, broadcastViaMempool, options = {}) {
 const CAT21_QUERY_KEYS = {
     /** `/cat/N?ask=<sats>` — seller advertises a price. */
     ask: 'ask',
+    /**
+     * `?payTo=<address>` — seller's PAYMENT address (from the seller's
+     * own wallet). Carried in ask + buy-offer permalinks so the buyer
+     * NEVER has to derive it from an on-chain owner lookup — the on-
+     * chain owner is the seller's ORDINALS address (that's where cats
+     * live). See the HARD RULE "Never derive a payment address from an
+     * on-chain lookup" in the SDK CLAUDE.md.
+     */
+    payTo: 'payTo',
     /** `?catNumber=<n>` — pre-fill for make-offer or transfer. */
     catNumber: 'catNumber',
     /** `?askPrice=<sats>` — buyer-side landing knows what the seller asked. */
@@ -6044,6 +6053,10 @@ const CAT21_QUERY_KEYS = {
     catVout: 'catVout',
 };
 const TXID_RE = /^[0-9a-f]{64}$/i;
+// Minimal bech32/base58 sanity — full address validation belongs at
+// the consumer via `@scure/btc-signer` Address decoder; this just
+// stops obvious garbage from being percent-encoded into the URL.
+const ADDRESS_RE = /^(bc|tb|bcrt)1[0-9a-z]{25,87}$|^[13mn2][a-km-zA-HJ-NP-Z1-9]{25,60}$/;
 /**
  * Build the query params for an ask permalink. Consumer concatenates
  * with its own detail path, e.g. `${origin}/cat/${n}?${new URLSearchParams(query)}`.
@@ -6052,15 +6065,26 @@ function buildAskQueryParams(args) {
     if (!Number.isInteger(args.askSats) || args.askSats <= 0) {
         throw new Error(`askSats must be a positive integer; got ${args.askSats}`);
     }
-    return { [CAT21_QUERY_KEYS.ask]: String(args.askSats) };
+    const out = { [CAT21_QUERY_KEYS.ask]: String(args.askSats) };
+    if (args.sellerPaymentAddress !== undefined) {
+        assertBitcoinAddress(args.sellerPaymentAddress, 'sellerPaymentAddress');
+        out[CAT21_QUERY_KEYS.payTo] = args.sellerPaymentAddress;
+    }
+    return out;
 }
 /**
- * Parse an ask-query. Returns the ask value in sats when the `ask`
- * param is a positive integer; `null` when missing or malformed
- * (defence-in-depth against tampered links).
+ * Parse an ask-query. Returns `askSats` and `sellerPaymentAddress`
+ * as separate nullables — a link with only `ask=` (legacy) parses
+ * with `sellerPaymentAddress: null`; a link missing / malformed
+ * `ask=` parses with `askSats: null`. Tampered addresses (garbage,
+ * wrong HRP) come back as null; consumer's own address validator
+ * still runs before signing.
  */
 function parseAskQueryParams(query) {
-    return parseIntParam(readParam(query, CAT21_QUERY_KEYS.ask), (n) => n > 0);
+    return {
+        askSats: parseIntParam(readParam(query, CAT21_QUERY_KEYS.ask), (n) => n > 0),
+        sellerPaymentAddress: parseAddressParam(readParam(query, CAT21_QUERY_KEYS.payTo)),
+    };
 }
 function buildBuyOfferQueryParams(args) {
     if (!Number.isInteger(args.catNumber) || args.catNumber < 0) {
@@ -6076,13 +6100,19 @@ function buildBuyOfferQueryParams(args) {
         params[CAT21_QUERY_KEYS.askPrice] = String(args.askSats);
         params[CAT21_QUERY_KEYS.fromAsk] = '1';
     }
+    if (args.sellerPaymentAddress !== undefined) {
+        assertBitcoinAddress(args.sellerPaymentAddress, 'sellerPaymentAddress');
+        params[CAT21_QUERY_KEYS.payTo] = args.sellerPaymentAddress;
+    }
     return params;
 }
 function parseBuyOfferQueryParams(query) {
-    const catNumber = parseIntParam(readParam(query, CAT21_QUERY_KEYS.catNumber), (n) => n >= 0);
-    const askSats = parseIntParam(readParam(query, CAT21_QUERY_KEYS.askPrice), (n) => n > 0);
-    const fromAsk = readParam(query, CAT21_QUERY_KEYS.fromAsk) === '1';
-    return { catNumber, askSats, fromAsk };
+    return {
+        catNumber: parseIntParam(readParam(query, CAT21_QUERY_KEYS.catNumber), (n) => n >= 0),
+        askSats: parseIntParam(readParam(query, CAT21_QUERY_KEYS.askPrice), (n) => n > 0),
+        fromAsk: readParam(query, CAT21_QUERY_KEYS.fromAsk) === '1',
+        sellerPaymentAddress: parseAddressParam(readParam(query, CAT21_QUERY_KEYS.payTo)),
+    };
 }
 function buildAcceptOfferQueryParams(args) {
     if (!args.offerBase64 || typeof args.offerBase64 !== 'string') {
@@ -6159,6 +6189,22 @@ function assertCatOutpoint(o) {
     if (!Number.isInteger(o.vout) || o.vout < 0) {
         throw new Error(`catOutpoint.vout must be a non-negative integer; got ${o.vout}`);
     }
+}
+function assertBitcoinAddress(addr, fieldName) {
+    if (typeof addr !== 'string' || !ADDRESS_RE.test(addr)) {
+        throw new Error(`${fieldName} must be a valid Bitcoin address; got ${JSON.stringify(addr)}`);
+    }
+}
+/**
+ * Parser-side counterpart. Malformed values silently return null so a
+ * tampered link degrades to "field missing" rather than crashing the
+ * page. The consumer's own address decoder (scure `btc.Address(...)`
+ * .decode) runs before signing anyway, so this is defence-in-depth.
+ */
+function parseAddressParam(raw) {
+    if (raw === null)
+        return null;
+    return ADDRESS_RE.test(raw) ? raw : null;
 }
 
 /**

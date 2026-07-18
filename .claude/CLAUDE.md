@@ -542,3 +542,75 @@ Reasoning, in priority order:
 Workspace HQ carries the same rule (search "Offers can be shared in
 the wild" in `/Work/ordpool/CLAUDE.md`) so the cat21-indexer / ordpool
 consumer guides stay aligned.
+
+## HARD RULE: Never derive a payment address from an on-chain lookup
+
+**The seller's PAYMENT address is knowable only from the seller's own
+wallet.** It is NEVER derivable from an on-chain ownership lookup, an
+inscription-owner query, an ord `/output/*` response, an electrs
+`/address/*/utxo` listing, or any other on-chain source.
+
+Why: cats live on the seller's ORDINALS address per ordinal theory.
+Any on-chain query "who owns cat #N" returns the ordinals-context
+address. Treating that string as a payment address does two categories
+of damage:
+
+1. **Address-type mismatch on the offer path.** The buyer builds the
+   offer's payment output routed to the seller's ordinals address; the
+   seller's accept-side validator expects the payment output at their
+   wallet's `paymentAddress`. Validator returns `payment-output-wrong-
+   address`. Sign button never enables. Trade fails silently. Even if
+   the two happened to match (single-address wallets), the payment
+   would land at the ordinals address, contaminating the seller's
+   ordinal-safety accounting.
+
+2. **Wallet contamination on any future flow that consumes the
+   auto-filled value.** A payment address used for spendable BTC and
+   an ordinals address used for immovable NFT UTXOs are semantically
+   different categories. Every place that mixes them creates a future
+   burn opportunity.
+
+**The correct flow for cat21 permalinks** (implemented in
+`src/cat21-share/permalink.helper.ts`):
+
+- **Seller's device** (sell modal): read `wallet.paymentAddress` from
+  the connected wallet at modal-open time. Include as `payTo=<addr>`
+  in the ask permalink.
+- **Buyer's device** (make-offer): parse `sellerPaymentAddress` from
+  the URL via `parseBuyOfferQueryParams`. If missing, leave the form
+  field EMPTY with a copy prompt ("ask the seller for their payment
+  address"). NEVER auto-fill from any on-chain lookup.
+- **Any other future flow** that needs the seller's payment address:
+  same rule. Carry it in the URL, ask the user, or take it from the
+  connected wallet. Do NOT derive it.
+
+**How this rule applies beyond cat21 permalinks:**
+
+- Transfer recipient addresses: user-supplied (typed / pasted).
+- Buyer receive address: from the buyer's connected wallet
+  (`wallet.ordinalsAddress` — because cats land at ordinals).
+- Seller change addresses (offer flow): from the seller's connected
+  wallet (`wallet.paymentAddress`).
+- Any address that will EVER be spent from, funded to, or checked
+  against a signing key: comes from a wallet, not from a chain lookup.
+
+**Prevention going forward.** If you catch yourself writing a line
+like `orchestrator.setSellerPaymentAddress(ord.address)` or
+`payTo: catOwner`, stop. Trace where that address value originated.
+If it came from an ord / electrs / inscription-owner query, you're
+about to reproduce this bug. Route the address through the URL
+permalink or the connected wallet instead. When in doubt, brand the
+type: `type OrdinalsAddress = string & { __ord: never }` vs `type
+PaymentAddress = string & { __pay: never }` and the compiler catches
+the miscast.
+
+Illustrative incident: 2026-07-18 in `cat21-indexer/frontend/src/app/
+dashboard/trade/make-offer/make-offer.ts` — `resolvedSellerAddress`
+was set from `CatUtxoLookupService.getTargetByNumber(n)`'s
+`.sellerAddress` (an on-chain ord lookup returning the ordinals
+address), then piped into `orchestrator.setSellerPaymentAddress(...)`
+as if it were the payment address. Every URL-driven accept on
+Xverse/Leather/OKX broke silently. Fix: sellerPaymentAddress now
+travels in the ask permalink via `payTo=` (encoded on the seller's
+device where the paymentAddress is knowable), parsed on the buyer's
+side via `parseBuyOfferQueryParams(query).sellerPaymentAddress`.
