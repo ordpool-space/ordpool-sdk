@@ -45,7 +45,13 @@ export type ListingMessageFields = Pick<
  * ```
  */
 export function buildListingMessage(fields: ListingMessageFields): string {
-  assertPositiveInt(fields.catNumber, 'catNumber');
+  // catNumber allows 0 — the Genesis Cat (cat #0) is a real, indexable,
+  // owned UTXO like any other cat. Per the workspace HARD RULE "The
+  // Genesis Cat's price tag is 21 BTC" its lore-fixed askSats is 21 BTC
+  // (2_100_000_000 sats). Nothing in the protocol makes cat #0
+  // untransferable; blocking it from listings would just prevent the
+  // one canonical Genesis-Cat listing from ever being signed.
+  assertNonNegativeInt(fields.catNumber, 'catNumber');
   assertPositiveInt(fields.askSats, 'askSats');
   assertNonNegativeInt(fields.catVout, 'catVout');
   assertPositiveInt(fields.signedAt, 'signedAt');

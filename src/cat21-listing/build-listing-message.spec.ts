@@ -85,8 +85,10 @@ describe('buildListingMessage — canonical human-readable listing message for B
   });
 
   describe('validation — catNumber', () => {
-    it('rejects 0 (positive-integer contract)', () => {
-      expect(() => buildListingMessage({ ...baseFields(), catNumber: 0 })).toThrow(/catNumber/);
+    it('accepts 0 (Genesis Cat — a real listable UTXO with lore-fixed 21 BTC price)', () => {
+      const msg = buildListingMessage({ ...baseFields(), catNumber: 0, askSats: 2_100_000_000 });
+      expect(msg).toContain('catNumber=0');
+      expect(msg).toContain('askSats=2100000000');
     });
     it('rejects negative', () => {
       expect(() => buildListingMessage({ ...baseFields(), catNumber: -1 })).toThrow(/catNumber/);
