@@ -13,6 +13,7 @@ import {
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
+import { wrapSignMessage } from './wrap-sign-message';
 
 
 interface UnisatToSignInput {
@@ -117,10 +118,8 @@ const legacy = {
 export const unisatSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.unisat,
   ...operationNamedDefaults(legacy),
-  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
+  signMessage: (input: SignMessageArgs): Observable<SignMessageResult> => {
     const unisat = (window as unknown as { unisat: UnisatRpc }).unisat;
-    return defer(() => from(unisat.signMessage(input.message, 'bip322-simple'))).pipe(
-      map((signature) => ({ signature })),
-    );
+    return wrapSignMessage(() => unisat.signMessage(input.message, 'bip322-simple'));
   },
 };

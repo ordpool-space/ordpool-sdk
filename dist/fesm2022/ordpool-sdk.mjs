@@ -1950,6 +1950,18 @@ const binanceSigner = {
 };
 
 /**
+ * Wrap a wallet-specific `signMessage`-RPC Promise into the
+ * SignMessage Observable contract. All five real signMessage impls
+ * (cat21wallet, leather, xverse, unisat, okx) share this exact
+ * shape: `defer` for lazy invocation → `from` to lift the Promise →
+ * `map` to the `{signature}` envelope. Centralising here means
+ * changing the observable strategy is one edit, not five.
+ */
+function wrapSignMessage(callWallet) {
+    return defer(() => from(callWallet())).pipe(map((signature) => ({ signature })));
+}
+
+/**
  * CAT-21 wallet — `window.Cat21Provider.request('signPsbt', …)`.
  *
  * CAT-21 wallet is forked from Leather and inherits Leather's
@@ -2027,9 +2039,7 @@ function callCat21WalletSignMessage(message) {
 const cat21walletSigner = {
     providerId: KnownOrdinalWalletType.cat21wallet,
     ...operationNamedDefaults(legacy$8),
-    signMessage(input) {
-        return defer(() => from(callCat21WalletSignMessage(input.message))).pipe(map((signature) => ({ signature })));
-    },
+    signMessage: (input) => wrapSignMessage(() => callCat21WalletSignMessage(input.message)),
 };
 
 /**
@@ -2118,9 +2128,7 @@ function callLeatherSignMessage(message) {
 const leatherSigner = {
     providerId: KnownOrdinalWalletType.leather,
     ...operationNamedDefaults(legacy$7),
-    signMessage(input) {
-        return defer(() => from(callLeatherSignMessage(input.message))).pipe(map((signature) => ({ signature })));
-    },
+    signMessage: (input) => wrapSignMessage(() => callLeatherSignMessage(input.message)),
 };
 
 /**
@@ -2194,9 +2202,9 @@ const legacy$6 = {
 const okxSigner = {
     providerId: KnownOrdinalWalletType.okx,
     ...operationNamedDefaults(legacy$6),
-    signMessage(input) {
+    signMessage: (input) => {
         const okxBtc = window.okxwallet.bitcoin;
-        return defer(() => from(okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' }))).pipe(map((signature) => ({ signature })));
+        return wrapSignMessage(() => okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' }));
     },
 };
 
@@ -2532,9 +2540,9 @@ const legacy$2 = {
 const unisatSigner = {
     providerId: KnownOrdinalWalletType.unisat,
     ...operationNamedDefaults(legacy$2),
-    signMessage(input) {
+    signMessage: (input) => {
         const unisat = window.unisat;
-        return defer(() => from(unisat.signMessage(input.message, 'bip322-simple'))).pipe(map((signature) => ({ signature })));
+        return wrapSignMessage(() => unisat.signMessage(input.message, 'bip322-simple'));
     },
 };
 
@@ -2682,9 +2690,7 @@ function callXverseSignMessage(address, message) {
 const xverseSigner = {
     providerId: KnownOrdinalWalletType.xverse,
     ...operationNamedDefaults(legacy),
-    signMessage(input) {
-        return defer(() => from(callXverseSignMessage(input.address, input.message))).pipe(map((signature) => ({ signature })));
-    },
+    signMessage: (input) => wrapSignMessage(() => callXverseSignMessage(input.address, input.message)),
 };
 
 /**
@@ -6503,11 +6509,39 @@ function parseAddressParam(raw) {
 }
 
 /**
+ * Upper bound on `askSats`. 21 million BTC = 2.1 × 10^15 sats — the
+ * total supply ceiling. Any value above this is nonsense (a listing
+ * can't cost more than every bitcoin that will ever exist). Both the
+ * SDK message builder and the backend DTO enforce this so garbage
+ * or attention-grab values never land in the orderbook DB.
+ */
+const MAX_ASK_SATS = 21_000_000 * 100_000_000; // 2_100_000_000_000_000
+
+/**
  * Canonical listing-message format version. Bump when the field set,
  * order, or separator changes so old signatures don't accidentally
  * verify against a new-shape message (or vice versa).
+ *
+ * v2 (2026-07-19): added `network` line to block cross-network
+ * signature replay (mainnet ↔ testnet3). Every legit consumer signs
+ * fresh listings under v2; v1 signatures never verify against a
+ * v2 rebuild.
  */
-const CAT21_LISTING_MESSAGE_VERSION = 'v1';
+const CAT21_LISTING_MESSAGE_VERSION = 'v2';
+/**
+ * Serialise a Network value for the canonical message line. Fixed
+ * strings so a rename to the Network enum can't silently change the
+ * signed bytes.
+ */
+function networkTag(n) {
+    switch (n) {
+        case Network.Mainnet: return 'mainnet';
+        case Network.Testnet3: return 'testnet3';
+        case Network.Testnet4: return 'testnet4';
+        case Network.Regtest: return 'regtest';
+        default: throw new Error(`Unknown network: ${n}`);
+    }
+}
 /**
  * Build the canonical human-readable message the seller signs with
  * their ordinals wallet. Multi-line by design — the wallet's
@@ -6523,7 +6557,8 @@ const CAT21_LISTING_MESSAGE_VERSION = 'v1';
  * Example message the seller sees in their wallet:
  *
  * ```
- * cat21-ask:v1
+ * cat21-ask:v2
+ * network=mainnet
  * catNumber=42
  * askSats=21000
  * payTo=bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx
@@ -6542,6 +6577,9 @@ function buildListingMessage(fields) {
     // one canonical Genesis-Cat listing from ever being signed.
     assertNonNegativeInt(fields.catNumber, 'catNumber');
     assertPositiveInt(fields.askSats, 'askSats');
+    if (fields.askSats > MAX_ASK_SATS) {
+        throw new Error(`askSats must not exceed MAX_ASK_SATS (${MAX_ASK_SATS}); got ${fields.askSats}`);
+    }
     assertNonNegativeInt(fields.catVout, 'catVout');
     assertPositiveInt(fields.signedAt, 'signedAt');
     if (!fields.payTo || typeof fields.payTo !== 'string') {
@@ -6553,8 +6591,11 @@ function buildListingMessage(fields) {
     if (!/^[0-9a-f]{64}$/.test(fields.catTxid)) {
         throw new Error(`catTxid must be 64-char lowercase hex; got ${JSON.stringify(fields.catTxid)}`);
     }
+    // networkTag throws on unknown enum values — surface before the message emits.
+    const networkLine = networkTag(fields.network);
     return [
         `cat21-ask:${CAT21_LISTING_MESSAGE_VERSION}`,
+        `network=${networkLine}`,
         `catNumber=${fields.catNumber}`,
         `askSats=${fields.askSats}`,
         `payTo=${fields.payTo}`,
@@ -8266,5 +8307,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

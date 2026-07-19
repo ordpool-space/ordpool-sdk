@@ -14,6 +14,7 @@ import {
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
+import { wrapSignMessage } from './wrap-sign-message';
 
 
 interface OkxToSignInput {
@@ -123,10 +124,10 @@ const legacy = {
 export const okxSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.okx,
   ...operationNamedDefaults(legacy),
-  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
+  signMessage: (input: SignMessageArgs): Observable<SignMessageResult> => {
     const okxBtc = (window as unknown as { okxwallet: { bitcoin: OkxBtcRpc } }).okxwallet.bitcoin;
-    return defer(() =>
-      from(okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' })),
-    ).pipe(map((signature) => ({ signature })));
+    return wrapSignMessage(() =>
+      okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' }),
+    );
   },
 };

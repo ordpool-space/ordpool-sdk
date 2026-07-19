@@ -1,11 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 
+import { Network } from '../network';
 import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types';
 import {
   CAT21_LISTING_MESSAGE_VERSION,
   buildListingMessage,
   ListingMessageFields,
 } from './build-listing-message';
+import { MAX_ASK_SATS } from './cat21-listing.types';
 
 // Real derived addresses from a known test key so shape checks pass.
 const ORD_ADDR = toOrdinalsAddress('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxq7pkrz9');
@@ -14,6 +16,7 @@ const TXID = 'ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df';
 
 const baseFields = (): ListingMessageFields => ({
   catNumber: 42,
+  network: Network.Mainnet,
   askSats: 21_000,
   payTo: PAY_ADDR,
   catTxid: TXID,
@@ -26,7 +29,7 @@ describe('buildListingMessage — canonical human-readable listing message for B
 
   describe('version', () => {
     it('exposes the current message version constant (bump when format changes)', () => {
-      expect(CAT21_LISTING_MESSAGE_VERSION).toBe('v1');
+      expect(CAT21_LISTING_MESSAGE_VERSION).toBe('v2');
     });
   });
 
@@ -35,7 +38,8 @@ describe('buildListingMessage — canonical human-readable listing message for B
     it('produces the exact multi-line byte sequence expected — prefix, field order, separator all locked', () => {
       const msg = buildListingMessage(baseFields());
       const expected = [
-        'cat21-ask:v1',
+        'cat21-ask:v2',
+        'network=mainnet',
         'catNumber=42',
         'askSats=21000',
         'payTo=bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx',
@@ -56,6 +60,7 @@ describe('buildListingMessage — canonical human-readable listing message for B
     it('is insensitive to JS object property-insertion order (fixed canonical field order)', () => {
       const reordered: ListingMessageFields = {
         signedAt: 1_700_000_000,
+        network: Network.Mainnet,
         catVout: 0,
         ordinalsAddress: ORD_ADDR,
         payTo: PAY_ADDR,
@@ -68,7 +73,7 @@ describe('buildListingMessage — canonical human-readable listing message for B
 
     it('produces a message where every line except the first is a `key=value` pair', () => {
       const lines = buildListingMessage(baseFields()).split('\n');
-      expect(lines[0]).toBe('cat21-ask:v1');
+      expect(lines[0]).toBe('cat21-ask:v2');
       for (const line of lines.slice(1)) {
         expect(line).toMatch(/^[a-zA-Z]+=/);
       }
@@ -113,6 +118,30 @@ describe('buildListingMessage — canonical human-readable listing message for B
     });
     it('rejects non-integer', () => {
       expect(() => buildListingMessage({ ...baseFields(), askSats: 100.5 })).toThrow(/askSats/);
+    });
+    it('accepts exactly MAX_ASK_SATS (21 M BTC — total supply ceiling)', () => {
+      expect(() => buildListingMessage({ ...baseFields(), askSats: MAX_ASK_SATS })).not.toThrow();
+    });
+    it('rejects > MAX_ASK_SATS (nonsense — no listing costs more than every bitcoin)', () => {
+      expect(() => buildListingMessage({ ...baseFields(), askSats: MAX_ASK_SATS + 1 })).toThrow(/MAX_ASK_SATS/);
+    });
+  });
+
+  describe('validation — network (anti-replay across mainnet/testnet)', () => {
+    it('emits network=mainnet for Network.Mainnet', () => {
+      const msg = buildListingMessage({ ...baseFields(), network: Network.Mainnet });
+      expect(msg).toContain('network=mainnet');
+    });
+    it('emits network=testnet3 for Network.Testnet3', () => {
+      const msg = buildListingMessage({ ...baseFields(), network: Network.Testnet3 });
+      expect(msg).toContain('network=testnet3');
+    });
+    it('emits network=regtest for Network.Regtest', () => {
+      const msg = buildListingMessage({ ...baseFields(), network: Network.Regtest });
+      expect(msg).toContain('network=regtest');
+    });
+    it('rejects an unknown network value', () => {
+      expect(() => buildListingMessage({ ...baseFields(), network: 'sombrio' as never })).toThrow(/Unknown network/);
     });
   });
 

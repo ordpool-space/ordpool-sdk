@@ -4,6 +4,7 @@ import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha2';
 
+import { Network } from '../network';
 import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types';
 import { buildListingMessage, ListingMessageFields } from './build-listing-message';
 import { verifyListingSignature } from './verify-listing-signature';
@@ -36,6 +37,7 @@ const TXID = 'ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df';
 
 const baseFields = (): ListingMessageFields => ({
   catNumber: 42,
+  network: Network.Mainnet,
   askSats: 21_000,
   payTo: PAY_ADDR,
   catTxid: TXID,
@@ -353,6 +355,19 @@ describe('verifyListingSignature — address rejection', () => {
   });
 });
 
+describe('verifyListingSignature — cross-network replay is blocked by v2 network binding', () => {
+  it('signature for network=mainnet does NOT verify against fields claiming network=testnet3', () => {
+    // Attacker records a legit mainnet signature, then replays it
+    // against the same payload with network flipped to testnet3.
+    // The message the verifier rebuilds now includes `network=testnet3`
+    // — different bytes → schnorr sig no longer verifies.
+    const mainnetSig = signBase({ message: buildListingMessage(baseFields()) });
+    const testnetFields: ListingMessageFields = { ...baseFields(), network: Network.Testnet3 };
+    const result = verifyListingSignature({ fields: testnetFields, signatureBase64: mainnetSig });
+    expect(result).toEqual({ ok: false, reason: 'signature-does-not-verify' });
+  });
+});
+
 describe('verifyListingSignature — testnet3 works too', () => {
   it('verifies a P2TR listing on testnet3 (tb1p… address)', () => {
     // p2tr() takes the INTERNAL xonly and applies the taproot tweak
@@ -362,7 +377,7 @@ describe('verifyListingSignature — testnet3 works too', () => {
     // decoding a tb1p address emits.
     const p2trTestnet = btc.p2tr(XONLY_INTERNAL, undefined, btc.TEST_NETWORK);
     const testnetAddr = toOrdinalsAddress(p2trTestnet.address!);
-    const fields: ListingMessageFields = { ...baseFields(), ordinalsAddress: testnetAddr };
+    const fields: ListingMessageFields = { ...baseFields(), network: Network.Testnet3, ordinalsAddress: testnetAddr };
     const sig = signBip322Simple({
       message: buildListingMessage(fields),
       xOnlyPubkey: p2trTestnet.tweakedPubkey,

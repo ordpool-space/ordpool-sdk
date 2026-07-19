@@ -1,6 +1,6 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { defer, from, map, Observable, switchMap } from 'rxjs';
+import { defer, from, Observable, map, switchMap } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network';
 import { broadcastSignedPsbt } from '../psbt-extract';
@@ -17,6 +17,7 @@ import {
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
+import { wrapSignMessage } from './wrap-sign-message';
 
 
 interface Cat21WalletPSBTResponse {
@@ -155,9 +156,6 @@ function callCat21WalletSignMessage(message: string): Promise<string> {
 export const cat21walletSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.cat21wallet,
   ...operationNamedDefaults(legacy),
-  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
-    return defer(() => from(callCat21WalletSignMessage(input.message))).pipe(
-      map((signature) => ({ signature })),
-    );
-  },
+  signMessage: (input: SignMessageArgs): Observable<SignMessageResult> =>
+    wrapSignMessage(() => callCat21WalletSignMessage(input.message)),
 };

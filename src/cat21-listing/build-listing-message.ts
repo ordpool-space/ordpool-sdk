@@ -1,11 +1,17 @@
-import { Cat21Listing } from './cat21-listing.types';
+import { Network } from '../network';
+import { Cat21Listing, MAX_ASK_SATS } from './cat21-listing.types';
 
 /**
  * Canonical listing-message format version. Bump when the field set,
  * order, or separator changes so old signatures don't accidentally
  * verify against a new-shape message (or vice versa).
+ *
+ * v2 (2026-07-19): added `network` line to block cross-network
+ * signature replay (mainnet ↔ testnet3). Every legit consumer signs
+ * fresh listings under v2; v1 signatures never verify against a
+ * v2 rebuild.
  */
-export const CAT21_LISTING_MESSAGE_VERSION = 'v1';
+export const CAT21_LISTING_MESSAGE_VERSION = 'v2';
 
 /**
  * The fields the listing message covers, in the fixed canonical
@@ -16,8 +22,23 @@ export const CAT21_LISTING_MESSAGE_VERSION = 'v1';
  */
 export type ListingMessageFields = Pick<
   Cat21Listing,
-  'catNumber' | 'askSats' | 'payTo' | 'catTxid' | 'catVout' | 'ordinalsAddress' | 'signedAt'
+  'catNumber' | 'network' | 'askSats' | 'payTo' | 'catTxid' | 'catVout' | 'ordinalsAddress' | 'signedAt'
 >;
+
+/**
+ * Serialise a Network value for the canonical message line. Fixed
+ * strings so a rename to the Network enum can't silently change the
+ * signed bytes.
+ */
+function networkTag(n: Network): string {
+  switch (n) {
+    case Network.Mainnet: return 'mainnet';
+    case Network.Testnet3: return 'testnet3';
+    case Network.Testnet4: return 'testnet4';
+    case Network.Regtest: return 'regtest';
+    default: throw new Error(`Unknown network: ${n as string}`);
+  }
+}
 
 /**
  * Build the canonical human-readable message the seller signs with
@@ -34,7 +55,8 @@ export type ListingMessageFields = Pick<
  * Example message the seller sees in their wallet:
  *
  * ```
- * cat21-ask:v1
+ * cat21-ask:v2
+ * network=mainnet
  * catNumber=42
  * askSats=21000
  * payTo=bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx
@@ -53,6 +75,9 @@ export function buildListingMessage(fields: ListingMessageFields): string {
   // one canonical Genesis-Cat listing from ever being signed.
   assertNonNegativeInt(fields.catNumber, 'catNumber');
   assertPositiveInt(fields.askSats, 'askSats');
+  if (fields.askSats > MAX_ASK_SATS) {
+    throw new Error(`askSats must not exceed MAX_ASK_SATS (${MAX_ASK_SATS}); got ${fields.askSats}`);
+  }
   assertNonNegativeInt(fields.catVout, 'catVout');
   assertPositiveInt(fields.signedAt, 'signedAt');
   if (!fields.payTo || typeof fields.payTo !== 'string') {
@@ -64,8 +89,11 @@ export function buildListingMessage(fields: ListingMessageFields): string {
   if (!/^[0-9a-f]{64}$/.test(fields.catTxid)) {
     throw new Error(`catTxid must be 64-char lowercase hex; got ${JSON.stringify(fields.catTxid)}`);
   }
+  // networkTag throws on unknown enum values — surface before the message emits.
+  const networkLine = networkTag(fields.network);
   return [
     `cat21-ask:${CAT21_LISTING_MESSAGE_VERSION}`,
+    `network=${networkLine}`,
     `catNumber=${fields.catNumber}`,
     `askSats=${fields.askSats}`,
     `payTo=${fields.payTo}`,

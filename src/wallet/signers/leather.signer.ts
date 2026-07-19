@@ -15,6 +15,7 @@ import {
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
+import { wrapSignMessage } from './wrap-sign-message';
 
 
 interface LeatherPSBTBroadcastResponse {
@@ -154,9 +155,6 @@ function callLeatherSignMessage(message: string): Promise<string> {
 export const leatherSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.leather,
   ...operationNamedDefaults(legacy),
-  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
-    return defer(() => from(callLeatherSignMessage(input.message))).pipe(
-      map((signature) => ({ signature })),
-    );
-  },
+  signMessage: (input: SignMessageArgs): Observable<SignMessageResult> =>
+    wrapSignMessage(() => callLeatherSignMessage(input.message)),
 };

@@ -1,4 +1,14 @@
+import { Network } from '../network';
 import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types';
+
+/**
+ * Upper bound on `askSats`. 21 million BTC = 2.1 × 10^15 sats — the
+ * total supply ceiling. Any value above this is nonsense (a listing
+ * can't cost more than every bitcoin that will ever exist). Both the
+ * SDK message builder and the backend DTO enforce this so garbage
+ * or attention-grab values never land in the orderbook DB.
+ */
+export const MAX_ASK_SATS = 21_000_000 * 100_000_000; // 2_100_000_000_000_000
 
 /**
  * A CAT-21 sell listing — the seller's advertised intent to sell a
@@ -15,7 +25,18 @@ import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types';
 export interface Cat21Listing {
   /** Cat number the listing covers. */
   catNumber: number;
-  /** Price the seller is asking, in sats. Positive integer. */
+  /**
+   * Bitcoin network the seller signed against. Load-bearing for
+   * anti-replay: without this field, an attacker with a legit
+   * testnet listing could replay the raw bytes to mainnet (or vice
+   * versa) — cat numbering is shared across networks, and the
+   * SDK's `verifyListingSignature` decodes both `bc1p` and `tb1p`
+   * addresses. The seller's message COMMITS to the network, so
+   * cross-network replays produce a signature that doesn't verify
+   * against the destination network's address expectations.
+   */
+  network: Network;
+  /** Price the seller is asking, in sats. Positive integer. Capped at MAX_ASK_SATS (21 M BTC). */
   askSats: number;
   /**
    * Where the seller's sale proceeds should land. Branded — same

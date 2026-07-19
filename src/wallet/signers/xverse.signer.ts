@@ -16,6 +16,7 @@ import {
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
+import { wrapSignMessage } from './wrap-sign-message';
 
 
 /**
@@ -141,9 +142,6 @@ function callXverseSignMessage(address: string, message: string): Promise<string
 export const xverseSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.xverse,
   ...operationNamedDefaults(legacy),
-  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
-    return defer(() => from(callXverseSignMessage(input.address, input.message))).pipe(
-      map((signature) => ({ signature })),
-    );
-  },
+  signMessage: (input: SignMessageArgs): Observable<SignMessageResult> =>
+    wrapSignMessage(() => callXverseSignMessage(input.address, input.message)),
 };
