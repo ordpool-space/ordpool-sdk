@@ -22,6 +22,8 @@ export {
   type LeatherAddress,
   type LeatherBtcAddress,
   type LeatherStxAddress,
+  type SignMessageArgs,
+  type SignMessageResult,
 } from './wallet/wallet.service.types';
 // Branded Bitcoin address types — see core.ts for the rationale.
 export * from './wallet/address-types';

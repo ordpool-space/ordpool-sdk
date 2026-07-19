@@ -4,7 +4,7 @@ import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { hex, bech32m, base64 } from '@scure/base';
 import * as i0 from '@angular/core';
 import { InjectionToken, inject, Injectable, signal, computed } from '@angular/core';
-import { from, map, Observable, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, switchMap, defer, throwError, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
+import { from, map, Observable, switchMap, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
 import Wallet, { AddressPurpose, addListener, getAddress, signTransaction, MessageSigningProtocols } from 'sats-connect';
 import { HttpClient } from '@angular/common/http';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -1625,240 +1625,6 @@ function detectInstalledWallets(win, connectors = walletConnectors) {
     return { installedWallets, notInstalledWallets };
 }
 
-const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
-class WalletService {
-    storageService = inject(storage);
-    network = inject(bitcoinNetwork);
-    walletConnectRequested$ = new Subject();
-    connectedWallet$ = new BehaviorSubject(null);
-    wallets$ = timer(0, 500) // Start immediately and repeat every 500ms
-        .pipe(take(4), // Take 4 intervals only, i.e., perform the check four times
-    map(() => this.getInstalledWallets()), distinctUntilChanged((prev, curr) => {
-        return JSON.stringify(prev) === JSON.stringify(curr);
-    }));
-    // Static derivation from the injected network. Kept as a boolean field
-    // (read by frontend consumers that pick a mainnet-vs-testnet endpoint)
-    // and as a single-emission Observable for legacy subscribers — neither
-    // ever changes after construction; ordpool no longer routes a testnet UI.
-    isMainnet = this.network === Network.Mainnet;
-    isMainnet$ = of(this.isMainnet);
-    /**
-     * Coarse network group ('mainnet' | 'regtest' | 'testnet') the
-     * consumer is configured against. Compared against the connected
-     * wallet's address prefix to surface the "wrong network" red banner.
-     */
-    expectedNetworkGroup = this.network === Network.Mainnet ? 'mainnet'
-        : this.network === Network.Regtest ? 'regtest'
-            : 'testnet';
-    /**
-     * Emits `true` when the connected wallet's address prefix is
-     * incompatible with the configured network. Consumers wire this
-     * directly to a red-banner component. `false` when no wallet is
-     * connected (nothing to compare against) AND when the prefix
-     * matches the expected group.
-     */
-    networkMismatch$ = this.connectedWallet$.pipe(map((info) => {
-        if (!info?.paymentAddress)
-            return false;
-        try {
-            return !isAddressCompatibleWithNetwork(info.paymentAddress, this.expectedNetworkGroup);
-        }
-        catch {
-            // Unrecognized prefix counts as a mismatch — better to warn
-            // than to silently accept an unknown shape.
-            return true;
-        }
-    }), distinctUntilChanged());
-    /**
-     * Last-seen unsubscribe handle returned by the active connector's
-     * onAccountChange. Lives across reconnects; cleared on disconnect.
-     */
-    accountChangeUnsubscribe = null;
-    constructor() {
-        const lastConnectedWallet = this.storageService.getValue(LAST_CONNECTED_WALLET);
-        if (lastConnectedWallet) {
-            const info = JSON.parse(lastConnectedWallet);
-            this.connectedWallet$.next(info);
-            // Restore the event subscription so an account-switch fires
-            // even if the user only refreshed the page.
-            this.armAccountChangeSubscription(info.type);
-        }
-    }
-    get win() {
-        return typeof window === 'undefined' ? undefined : window;
-    }
-    findConnector(type) {
-        const connector = walletConnectors.find(c => c.providerId === type);
-        if (!connector) {
-            throw new Error(`Unknown wallet type: ${type}`);
-        }
-        return connector;
-    }
-    getInstalledWallets() {
-        return detectInstalledWallets(this.win);
-    }
-    connectWallet(key) {
-        return this.findConnector(key).connect(this.network).pipe(tap(walletInfo => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo))), tap(walletInfo => this.connectedWallet$.next(walletInfo)), tap(walletInfo => this.armAccountChangeSubscription(walletInfo.type)));
-    }
-    connectFakeWallet(walletInfo) {
-        this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo));
-        this.connectedWallet$.next(walletInfo);
-    }
-    disconnectWallet() {
-        // eslint-disable-next-line no-console
-        console.error('[wallet.service] disconnectWallet called from:', new Error().stack);
-        this.tearDownAccountChangeSubscription();
-        this.storageService.removeItem(LAST_CONNECTED_WALLET);
-        this.connectedWallet$.next(null);
-    }
-    /**
-     * Subscribe to the connector's `onAccountChange` (if exposed). When
-     * the wallet emits an account / network / disconnect event we
-     * re-call `connect()` silently — most wallets return the current
-     * account without a popup once the user has previously approved.
-     * The fresh WalletInfo overwrites the cached one, so the UI
-     * updates automatically through `connectedWallet$`. On failure we
-     * disconnect (the wallet has lost the connection).
-     */
-    armAccountChangeSubscription(type) {
-        this.tearDownAccountChangeSubscription();
-        const connector = this.findConnector(type);
-        if (!connector.onAccountChange)
-            return;
-        this.accountChangeUnsubscribe = connector.onAccountChange(() => {
-            connector.connect(this.network).subscribe({
-                next: (info) => {
-                    this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info));
-                    this.connectedWallet$.next(info);
-                },
-                // Don't disconnect on a transient reconnect error. Xverse fires
-                // onAccountChange repeatedly on regtest (and on hot chain-changes
-                // in general); each fire re-calls `connect()`, which triggers a
-                // fresh sats-connect popup. If that popup doesn't complete before
-                // the observable errors, disconnecting drops LAST_CONNECTED_WALLET
-                // and next(null)s — then the next onAccountChange fires connect
-                // again → next(wallet), causing downstream utxos$/simulations$ to
-                // flap between idle/ready fast enough that consumer UIs never
-                // settle their found-funds banner. Keep the cached wallet in
-                // place; the user can explicitly Disconnect if they want.
-                error: (err) => {
-                    console.warn('[wallet.service] onAccountChange reconnect failed; keeping cached wallet', err);
-                },
-            });
-        });
-    }
-    tearDownAccountChangeSubscription() {
-        if (this.accountChangeUnsubscribe) {
-            this.accountChangeUnsubscribe();
-            this.accountChangeUnsubscribe = null;
-        }
-    }
-    requestWalletConnect() {
-        this.walletConnectRequested$.next(true);
-    }
-    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: WalletService, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: WalletService, providedIn: 'root' });
-}
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: WalletService, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
-        }], ctorParameters: () => [] });
-
-/**
- * Branded Bitcoin address types — compile-time separation of the two
- * categories that keep getting confused in code review + at run time:
- *
- *   - `OrdinalsAddress` — the address a wallet's ordinals-key signs.
- *     Cats, inscriptions, runes, rare sats live here. Almost always
- *     a P2TR (taproot) address in modern wallets. Every on-chain
- *     "who owns this cat / inscription" lookup returns this type;
- *     ord's `/output/*` / `/cat/*` / `/inscription/*` all speak in
- *     this context.
- *   - `PaymentAddress` — the address a wallet's payment-key signs.
- *     BTC for fees and change lives here. Usually P2WPKH (bech32) or
- *     P2SH-P2WPKH; on single-address wallets (Unisat, xpub-only),
- *     structurally equal to `OrdinalsAddress`.
- *
- * The types share the underlying representation (`string`) so a
- * branded value flows freely into any `string` parameter — nothing
- * you already have breaks. The protection kicks in when a callee
- * types its parameter as one of the branded types: passing the
- * wrong brand fails to compile.
- *
- * Consumers that pass a bare `string` (URL params, textbox input,
- * on-chain lookup responses) must go through a constructor
- * (`toPaymentAddress` / `toOrdinalsAddress`). The constructor
- * validates the raw bytes AND forces the caller to name the type
- * explicitly — which is the friction that prevented the 2026-07-18
- * "auto-fill payment address from cat's on-chain owner" bug. See
- * the SDK CLAUDE.md HARD RULE "Never derive a payment address from
- * an on-chain lookup" for the full incident writeup.
- *
- * The typical trigger for those bugs is prose that talks about "the
- * seller's address" as if that were a single concept. The two are
- * different signing surfaces on the same wallet; the type system
- * refuses to conflate them.
- */
-/**
- * Address format check shared by both constructors. Accepts:
- *   - bech32 / bech32m (P2WPKH, P2WSH, P2TR — mainnet / testnet /
- *     regtest HRPs `bc`, `tb`, `bcrt`);
- *   - legacy base58 (P2PKH `1…`, P2SH `3…`, testnet `m…`/`n…`/`2…`).
- *
- * This is a shape check, not a full checksum decode. The caller's
- * signing / broadcast layer runs the full `@scure/btc-signer`
- * `Address(network).decode` before touching the wire. Runtime
- * validation belongs at the boundary; the type-brand is a
- * compile-time hint about which SIGNING CONTEXT the address
- * belongs to, not a proof of on-chain validity.
- */
-const ADDRESS_SHAPE_RE = /^(bc|tb|bcrt)1[0-9a-z]{25,87}$|^[13mn2][a-km-zA-HJ-NP-Z1-9]{25,60}$/;
-function assertShape(s, context) {
-    if (typeof s !== 'string' || !ADDRESS_SHAPE_RE.test(s)) {
-        throw new Error(`${context} must be a valid Bitcoin address; got ${JSON.stringify(s)}`);
-    }
-}
-/**
- * Cast a raw string into an `OrdinalsAddress`. Use at the boundary
- * where the wallet or ord API returns an owner address — this
- * documents "we treated this string as ordinals-context, and the
- * downstream type system will enforce it stays there".
- */
-function toOrdinalsAddress(s) {
-    assertShape(s, 'OrdinalsAddress');
-    return s;
-}
-/**
- * Cast a raw string into a `PaymentAddress`. Use at the boundary
- * where the wallet returns its payment address, OR where the seller's
- * payment address arrives from a trusted-to-be-payment source (the
- * URL's `payTo=` param — see `parseAskQueryParams` — or the seller's
- * connected wallet at sell-modal time).
- *
- * **Never** call this on a value that came from an on-chain owner
- * lookup — that's the ordinals address in ordinal-theory-tracked
- * contexts. The compiler can't stop you (both types are `string`
- * subtypes), but the SDK HARD RULE "Never derive a payment address
- * from an on-chain lookup" spells out why the audit will reject it.
- */
-function toPaymentAddress(s) {
-    assertShape(s, 'PaymentAddress');
-    return s;
-}
-/**
- * Escape hatch for the rare code that legitimately does not care
- * about the signing context — e.g. rendering an address in a
- * text-only display, hashing for equality, logging. Prefer the
- * branded types wherever the address will be USED (as an input to a
- * PSBT builder, a validator, a signer). Only reach for this when
- * you need a raw string for a truly context-free operation.
- */
-function eitherAsString(addr) {
-    return addr;
-}
-
-const cat21Config = new InjectionToken('cat21Config');
-
 /**
  * Sighash whitelist for Taproot key-path inputs.
  *
@@ -2979,6 +2745,262 @@ function findSignerOrThrow(type) {
     }
     return signer;
 }
+
+const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
+class WalletService {
+    storageService = inject(storage);
+    network = inject(bitcoinNetwork);
+    walletConnectRequested$ = new Subject();
+    connectedWallet$ = new BehaviorSubject(null);
+    wallets$ = timer(0, 500) // Start immediately and repeat every 500ms
+        .pipe(take(4), // Take 4 intervals only, i.e., perform the check four times
+    map(() => this.getInstalledWallets()), distinctUntilChanged((prev, curr) => {
+        return JSON.stringify(prev) === JSON.stringify(curr);
+    }));
+    // Static derivation from the injected network. Kept as a boolean field
+    // (read by frontend consumers that pick a mainnet-vs-testnet endpoint)
+    // and as a single-emission Observable for legacy subscribers — neither
+    // ever changes after construction; ordpool no longer routes a testnet UI.
+    isMainnet = this.network === Network.Mainnet;
+    isMainnet$ = of(this.isMainnet);
+    /**
+     * Coarse network group ('mainnet' | 'regtest' | 'testnet') the
+     * consumer is configured against. Compared against the connected
+     * wallet's address prefix to surface the "wrong network" red banner.
+     */
+    expectedNetworkGroup = this.network === Network.Mainnet ? 'mainnet'
+        : this.network === Network.Regtest ? 'regtest'
+            : 'testnet';
+    /**
+     * Emits `true` when the connected wallet's address prefix is
+     * incompatible with the configured network. Consumers wire this
+     * directly to a red-banner component. `false` when no wallet is
+     * connected (nothing to compare against) AND when the prefix
+     * matches the expected group.
+     */
+    networkMismatch$ = this.connectedWallet$.pipe(map((info) => {
+        if (!info?.paymentAddress)
+            return false;
+        try {
+            return !isAddressCompatibleWithNetwork(info.paymentAddress, this.expectedNetworkGroup);
+        }
+        catch {
+            // Unrecognized prefix counts as a mismatch — better to warn
+            // than to silently accept an unknown shape.
+            return true;
+        }
+    }), distinctUntilChanged());
+    /**
+     * Last-seen unsubscribe handle returned by the active connector's
+     * onAccountChange. Lives across reconnects; cleared on disconnect.
+     */
+    accountChangeUnsubscribe = null;
+    constructor() {
+        const lastConnectedWallet = this.storageService.getValue(LAST_CONNECTED_WALLET);
+        if (lastConnectedWallet) {
+            const info = JSON.parse(lastConnectedWallet);
+            this.connectedWallet$.next(info);
+            // Restore the event subscription so an account-switch fires
+            // even if the user only refreshed the page.
+            this.armAccountChangeSubscription(info.type);
+        }
+    }
+    get win() {
+        return typeof window === 'undefined' ? undefined : window;
+    }
+    findConnector(type) {
+        const connector = walletConnectors.find(c => c.providerId === type);
+        if (!connector) {
+            throw new Error(`Unknown wallet type: ${type}`);
+        }
+        return connector;
+    }
+    getInstalledWallets() {
+        return detectInstalledWallets(this.win);
+    }
+    connectWallet(key) {
+        return this.findConnector(key).connect(this.network).pipe(tap(walletInfo => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo))), tap(walletInfo => this.connectedWallet$.next(walletInfo)), tap(walletInfo => this.armAccountChangeSubscription(walletInfo.type)));
+    }
+    connectFakeWallet(walletInfo) {
+        this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo));
+        this.connectedWallet$.next(walletInfo);
+    }
+    disconnectWallet() {
+        // eslint-disable-next-line no-console
+        console.error('[wallet.service] disconnectWallet called from:', new Error().stack);
+        this.tearDownAccountChangeSubscription();
+        this.storageService.removeItem(LAST_CONNECTED_WALLET);
+        this.connectedWallet$.next(null);
+    }
+    /**
+     * Sign a UTF-8 message with the connected wallet's ordinals key via
+     * BIP-322. Consumers hand in `{address, message, network}` (usually
+     * `address = wallet.ordinalsAddress`, `network = this.network`) and
+     * get back the base64 signature. Dispatches to the appropriate
+     * `WalletSigner.signMessage` under the hood; wallets whose
+     * signMessage isn't wired yet emit a "not supported" error the
+     * caller surfaces to the user.
+     *
+     * Used by the CAT-21 orderbook flow to prove seller ownership
+     * without moving any sats. See `buildListingMessage` /
+     * `verifyListingSignature` for the message shape + verifier.
+     */
+    signMessage(input) {
+        const wallet = this.connectedWallet$.getValue();
+        if (!wallet) {
+            return new Observable((observer) => {
+                observer.error(new Error('No wallet connected'));
+            });
+        }
+        return findSignerOrThrow(wallet.type).signMessage(input);
+    }
+    /**
+     * Subscribe to the connector's `onAccountChange` (if exposed). When
+     * the wallet emits an account / network / disconnect event we
+     * re-call `connect()` silently — most wallets return the current
+     * account without a popup once the user has previously approved.
+     * The fresh WalletInfo overwrites the cached one, so the UI
+     * updates automatically through `connectedWallet$`. On failure we
+     * disconnect (the wallet has lost the connection).
+     */
+    armAccountChangeSubscription(type) {
+        this.tearDownAccountChangeSubscription();
+        const connector = this.findConnector(type);
+        if (!connector.onAccountChange)
+            return;
+        this.accountChangeUnsubscribe = connector.onAccountChange(() => {
+            connector.connect(this.network).subscribe({
+                next: (info) => {
+                    this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info));
+                    this.connectedWallet$.next(info);
+                },
+                // Don't disconnect on a transient reconnect error. Xverse fires
+                // onAccountChange repeatedly on regtest (and on hot chain-changes
+                // in general); each fire re-calls `connect()`, which triggers a
+                // fresh sats-connect popup. If that popup doesn't complete before
+                // the observable errors, disconnecting drops LAST_CONNECTED_WALLET
+                // and next(null)s — then the next onAccountChange fires connect
+                // again → next(wallet), causing downstream utxos$/simulations$ to
+                // flap between idle/ready fast enough that consumer UIs never
+                // settle their found-funds banner. Keep the cached wallet in
+                // place; the user can explicitly Disconnect if they want.
+                error: (err) => {
+                    console.warn('[wallet.service] onAccountChange reconnect failed; keeping cached wallet', err);
+                },
+            });
+        });
+    }
+    tearDownAccountChangeSubscription() {
+        if (this.accountChangeUnsubscribe) {
+            this.accountChangeUnsubscribe();
+            this.accountChangeUnsubscribe = null;
+        }
+    }
+    requestWalletConnect() {
+        this.walletConnectRequested$.next(true);
+    }
+    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: WalletService, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
+    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: WalletService, providedIn: 'root' });
+}
+i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: WalletService, decorators: [{
+            type: Injectable,
+            args: [{ providedIn: 'root' }]
+        }], ctorParameters: () => [] });
+
+/**
+ * Branded Bitcoin address types — compile-time separation of the two
+ * categories that keep getting confused in code review + at run time:
+ *
+ *   - `OrdinalsAddress` — the address a wallet's ordinals-key signs.
+ *     Cats, inscriptions, runes, rare sats live here. Almost always
+ *     a P2TR (taproot) address in modern wallets. Every on-chain
+ *     "who owns this cat / inscription" lookup returns this type;
+ *     ord's `/output/*` / `/cat/*` / `/inscription/*` all speak in
+ *     this context.
+ *   - `PaymentAddress` — the address a wallet's payment-key signs.
+ *     BTC for fees and change lives here. Usually P2WPKH (bech32) or
+ *     P2SH-P2WPKH; on single-address wallets (Unisat, xpub-only),
+ *     structurally equal to `OrdinalsAddress`.
+ *
+ * The types share the underlying representation (`string`) so a
+ * branded value flows freely into any `string` parameter — nothing
+ * you already have breaks. The protection kicks in when a callee
+ * types its parameter as one of the branded types: passing the
+ * wrong brand fails to compile.
+ *
+ * Consumers that pass a bare `string` (URL params, textbox input,
+ * on-chain lookup responses) must go through a constructor
+ * (`toPaymentAddress` / `toOrdinalsAddress`). The constructor
+ * validates the raw bytes AND forces the caller to name the type
+ * explicitly — which is the friction that prevented the 2026-07-18
+ * "auto-fill payment address from cat's on-chain owner" bug. See
+ * the SDK CLAUDE.md HARD RULE "Never derive a payment address from
+ * an on-chain lookup" for the full incident writeup.
+ *
+ * The typical trigger for those bugs is prose that talks about "the
+ * seller's address" as if that were a single concept. The two are
+ * different signing surfaces on the same wallet; the type system
+ * refuses to conflate them.
+ */
+/**
+ * Address format check shared by both constructors. Accepts:
+ *   - bech32 / bech32m (P2WPKH, P2WSH, P2TR — mainnet / testnet /
+ *     regtest HRPs `bc`, `tb`, `bcrt`);
+ *   - legacy base58 (P2PKH `1…`, P2SH `3…`, testnet `m…`/`n…`/`2…`).
+ *
+ * This is a shape check, not a full checksum decode. The caller's
+ * signing / broadcast layer runs the full `@scure/btc-signer`
+ * `Address(network).decode` before touching the wire. Runtime
+ * validation belongs at the boundary; the type-brand is a
+ * compile-time hint about which SIGNING CONTEXT the address
+ * belongs to, not a proof of on-chain validity.
+ */
+const ADDRESS_SHAPE_RE = /^(bc|tb|bcrt)1[0-9a-z]{25,87}$|^[13mn2][a-km-zA-HJ-NP-Z1-9]{25,60}$/;
+function assertShape(s, context) {
+    if (typeof s !== 'string' || !ADDRESS_SHAPE_RE.test(s)) {
+        throw new Error(`${context} must be a valid Bitcoin address; got ${JSON.stringify(s)}`);
+    }
+}
+/**
+ * Cast a raw string into an `OrdinalsAddress`. Use at the boundary
+ * where the wallet or ord API returns an owner address — this
+ * documents "we treated this string as ordinals-context, and the
+ * downstream type system will enforce it stays there".
+ */
+function toOrdinalsAddress(s) {
+    assertShape(s, 'OrdinalsAddress');
+    return s;
+}
+/**
+ * Cast a raw string into a `PaymentAddress`. Use at the boundary
+ * where the wallet returns its payment address, OR where the seller's
+ * payment address arrives from a trusted-to-be-payment source (the
+ * URL's `payTo=` param — see `parseAskQueryParams` — or the seller's
+ * connected wallet at sell-modal time).
+ *
+ * **Never** call this on a value that came from an on-chain owner
+ * lookup — that's the ordinals address in ordinal-theory-tracked
+ * contexts. The compiler can't stop you (both types are `string`
+ * subtypes), but the SDK HARD RULE "Never derive a payment address
+ * from an on-chain lookup" spells out why the audit will reject it.
+ */
+function toPaymentAddress(s) {
+    assertShape(s, 'PaymentAddress');
+    return s;
+}
+/**
+ * Escape hatch for the rare code that legitimately does not care
+ * about the signing context — e.g. rendering an address in a
+ * text-only display, hashing for equality, logging. Prefer the
+ * branded types wherever the address will be USED (as an input to a
+ * PSBT builder, a validator, a signer). Only reach for this when
+ * you need a raw string for a truly context-free operation.
+ */
+function eitherAsString(addr) {
+    return addr;
+}
+
+const cat21Config = new InjectionToken('cat21Config');
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}. The canonical constant lives in

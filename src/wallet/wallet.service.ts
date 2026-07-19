@@ -20,9 +20,12 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { detectInstalledWallets, walletConnectors } from './connectors';
+import { findSignerOrThrow } from './signers';
 import {
   KnownOrdinalWallet,
   KnownOrdinalWalletType,
+  SignMessageArgs,
+  SignMessageResult,
   WalletConnector,
   WalletInfo,
   WindowLike,
@@ -148,6 +151,29 @@ export class WalletService {
     this.tearDownAccountChangeSubscription();
     this.storageService.removeItem(LAST_CONNECTED_WALLET);
     this.connectedWallet$.next(null);
+  }
+
+  /**
+   * Sign a UTF-8 message with the connected wallet's ordinals key via
+   * BIP-322. Consumers hand in `{address, message, network}` (usually
+   * `address = wallet.ordinalsAddress`, `network = this.network`) and
+   * get back the base64 signature. Dispatches to the appropriate
+   * `WalletSigner.signMessage` under the hood; wallets whose
+   * signMessage isn't wired yet emit a "not supported" error the
+   * caller surfaces to the user.
+   *
+   * Used by the CAT-21 orderbook flow to prove seller ownership
+   * without moving any sats. See `buildListingMessage` /
+   * `verifyListingSignature` for the message shape + verifier.
+   */
+  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
+    const wallet = this.connectedWallet$.getValue();
+    if (!wallet) {
+      return new Observable<SignMessageResult>((observer) => {
+        observer.error(new Error('No wallet connected'));
+      });
+    }
+    return findSignerOrThrow(wallet.type).signMessage(input);
   }
 
   /**
