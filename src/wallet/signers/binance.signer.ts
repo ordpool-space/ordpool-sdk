@@ -11,6 +11,7 @@ import {
   WalletSigner,
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
+import { unsupportedSignMessage } from './unsupported-sign-message';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -106,4 +107,5 @@ const legacy = {
 export const binanceSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.binance,
   ...operationNamedDefaults(legacy),
+  signMessage: unsupportedSignMessage('Binance'),
 };

@@ -8,6 +8,8 @@ import { findCat21WalletProvider } from '../wallet.service.helper';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMessageArgs,
+  SignMessageResult,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
@@ -120,7 +122,42 @@ const legacy = {
   },
 };
 
+/**
+ * BIP-322 message signing via `window.Cat21Provider.request('signMessage', ...)`.
+ *
+ * CAT-21 wallet inherits Leather's `signMessage` RPC shape verbatim
+ * (forked codebase, same wire format). Params:
+ *   - `message`: the UTF-8 string to sign (wallet renders it verbatim
+ *     to the user in the approval popup, so the caller MUST pass the
+ *     final human-visible bytes — `buildListingMessage()`'s multi-
+ *     line output is exactly this).
+ *   - `paymentType`: `'p2tr'` forces the ordinals key. Cats live at
+ *     the ordinals P2TR address per ordinal theory, and BIP-322
+ *     ownership proof needs to be under that key.
+ *
+ * Wallet response shape: `{ result: { signature: string } }` — the
+ * signature is already base64-encoded BIP-322 witness bytes (raw sig
+ * OR wrapped-witness format; verifyListingSignature accepts both).
+ */
+interface Cat21WalletSignMessageResponse {
+  result: { signature: string };
+}
+
+function callCat21WalletSignMessage(message: string): Promise<string> {
+  const provider = findCat21WalletProvider(window as unknown as WindowLike);
+  if (!provider) {
+    throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
+  }
+  return (provider.request('signMessage', { message, paymentType: 'p2tr' }) as Promise<Cat21WalletSignMessageResponse>)
+    .then((resp) => resp.result.signature);
+}
+
 export const cat21walletSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.cat21wallet,
   ...operationNamedDefaults(legacy),
+  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
+    return defer(() => from(callCat21WalletSignMessage(input.message))).pipe(
+      map((signature) => ({ signature })),
+    );
+  },
 };

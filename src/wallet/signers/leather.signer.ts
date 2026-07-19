@@ -7,6 +7,8 @@ import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMessageArgs,
+  SignMessageResult,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
@@ -27,9 +29,27 @@ interface LeatherSignPsbtRequestParams {
   broadcast: false;
 }
 
+interface LeatherSignMessageParams {
+  message: string;
+  /**
+   * Which key signs. `'p2tr'` selects the taproot / ordinals key —
+   * the one BIP-322 for CAT-21 listings needs (cats live on the
+   * ordinals key per ordinal theory).
+   */
+  paymentType: 'p2tr' | 'p2wpkh';
+}
+
+interface LeatherSignMessageResponse {
+  result: {
+    signature: string; // base64 BIP-322 witness
+    address: string;   // returned for confirmation; caller may cross-check
+  };
+}
+
 interface LeatherRpcWindow {
   LeatherProvider: {
     request(method: 'signPsbt', params: LeatherSignPsbtRequestParams): Promise<LeatherPSBTBroadcastResponse>;
+    request(method: 'signMessage', params: LeatherSignMessageParams): Promise<LeatherSignMessageResponse>;
   };
 }
 
@@ -120,7 +140,23 @@ const legacy = {
   },
 };
 
+/**
+ * BIP-322 message signing via `window.LeatherProvider.request('signMessage', ...)`.
+ * `paymentType: 'p2tr'` forces the ordinals key. Wallet response's
+ * `result.signature` is already base64-encoded BIP-322 witness bytes.
+ */
+function callLeatherSignMessage(message: string): Promise<string> {
+  const win = window as unknown as LeatherRpcWindow;
+  return win.LeatherProvider.request('signMessage', { message, paymentType: 'p2tr' })
+    .then((resp) => resp.result.signature);
+}
+
 export const leatherSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.leather,
   ...operationNamedDefaults(legacy),
+  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
+    return defer(() => from(callLeatherSignMessage(input.message))).pipe(
+      map((signature) => ({ signature })),
+    );
+  },
 };

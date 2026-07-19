@@ -103,3 +103,79 @@ describe('cat21walletSigner.signSingleFundingInput', () => {
     expect(params.network).toBe('testnet');
   });
 });
+
+
+describe('cat21walletSigner.signMessage', () => {
+
+  let requestMock: jest.Mock;
+
+  beforeEach(() => {
+    requestMock = jest.fn();
+    (window as unknown as { Cat21Provider: { isCat21: true; request: jest.Mock } }).Cat21Provider = {
+      isCat21: true,
+      request: requestMock,
+    };
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { Cat21Provider?: unknown }).Cat21Provider;
+  });
+
+  it('hits Cat21Provider.request with method=signMessage, message=<verbatim>, paymentType=p2tr', async () => {
+    requestMock.mockResolvedValue({ result: { signature: 'AUHd69PrJ...==' } } as never);
+
+    const result = await firstValueFrom(cat21walletSigner.signMessage({
+      address: 'bc1p-ordinals-address',
+      message: 'cat21-ask:v1\ncatNumber=42\naskSats=21000',
+      network: Network.Mainnet,
+    }));
+
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    const [method, params] = requestMock.mock.calls[0] as [string, { message: string; paymentType: string }];
+    expect(method).toBe('signMessage');
+    expect(params.message).toBe('cat21-ask:v1\ncatNumber=42\naskSats=21000');
+    // p2tr forces the ordinals key — load-bearing for BIP-322 CAT-21 verify.
+    expect(params.paymentType).toBe('p2tr');
+    expect(result).toEqual({ signature: 'AUHd69PrJ...==' });
+  });
+
+  it('unwraps the { result: { signature } } envelope into the flat { signature } SDK contract', async () => {
+    requestMock.mockResolvedValue({ result: { signature: 'sig-bytes-base64' } } as never);
+    const result = await firstValueFrom(cat21walletSigner.signMessage({
+      address: 'bc1p-x',
+      message: 'hi',
+      network: Network.Mainnet,
+    }));
+    expect(result).toEqual({ signature: 'sig-bytes-base64' });
+  });
+
+  it('propagates a wallet-side rejection as an observable error', async () => {
+    requestMock.mockRejectedValue(new Error('User rejected the message-sign request') as never);
+    let caught: Error | null = null;
+    try {
+      await firstValueFrom(cat21walletSigner.signMessage({
+        address: 'bc1p-x',
+        message: 'hi',
+        network: Network.Mainnet,
+      }));
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught?.message).toContain('User rejected');
+  });
+
+  it('errors immediately when the CAT-21 wallet provider is not present', async () => {
+    delete (window as unknown as { Cat21Provider?: unknown }).Cat21Provider;
+    let caught: Error | null = null;
+    try {
+      await firstValueFrom(cat21walletSigner.signMessage({
+        address: 'bc1p-x',
+        message: 'hi',
+        network: Network.Mainnet,
+      }));
+    } catch (e) {
+      caught = e as Error;
+    }
+    expect(caught?.message).toContain('CAT-21 wallet provider not present');
+  });
+});

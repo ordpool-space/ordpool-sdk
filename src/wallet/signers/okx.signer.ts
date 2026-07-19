@@ -1,11 +1,13 @@
 import { hex } from '@scure/base';
-import { from, map, Observable, switchMap } from 'rxjs';
+import { defer, from, map, Observable, switchMap } from 'rxjs';
 
 import { broadcastSignedPsbt } from '../psbt-extract';
 import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMessageArgs,
+  SignMessageResult,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
@@ -24,6 +26,16 @@ interface OkxBtcRpc {
   signPsbt(
     psbtHex: string,
     options?: { autoFinalized?: boolean; from?: string; toSignInputs?: OkxToSignInput[] }
+  ): Promise<string>;
+  /**
+   * `signMessage(message, {from, protocol})`. `protocol =
+   * 'bip322-simple'` returns a base64 BIP-322 witness. Without
+   * `from`, OKX signs under the selected address (usually taproot
+   * for ordinals users, but caller passes explicitly to be safe).
+   */
+  signMessage(
+    message: string,
+    options?: { from?: string; protocol?: 'ecdsa' | 'bip322-simple' }
   ): Promise<string>;
 }
 
@@ -101,7 +113,20 @@ const legacy = {
   },
 };
 
+/**
+ * BIP-322 message signing via `window.okxwallet.bitcoin.signMessage(
+ * message, {from, protocol: 'bip322-simple'})`. Returns base64
+ * witness bytes directly (no envelope). `from` pins the signing
+ * address to the ordinals key so OKX doesn't fall back to a
+ * different address when the user has multiple.
+ */
 export const okxSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.okx,
   ...operationNamedDefaults(legacy),
+  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
+    const okxBtc = (window as unknown as { okxwallet: { bitcoin: OkxBtcRpc } }).okxwallet.bitcoin;
+    return defer(() =>
+      from(okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' })),
+    ).pipe(map((signature) => ({ signature })));
+  },
 };

@@ -1,13 +1,15 @@
 import { base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { Observable, map, switchMap } from 'rxjs';
-import { signTransaction } from 'sats-connect';
+import { defer, from, Observable, map, switchMap } from 'rxjs';
+import Wallet, { MessageSigningProtocols, signTransaction } from 'sats-connect';
 
 import { toBitcoinNetworkType } from '../../network';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMessageArgs,
+  SignMessageResult,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
@@ -108,7 +110,40 @@ const legacy = {
   },
 };
 
+/**
+ * BIP-322 message signing via sats-connect v3+ `Wallet.request('signMessage', ...)`.
+ *
+ * `protocol: MessageSigningProtocols.BIP322` selects BIP-322 (vs
+ * ECDSA — the older Sparrow-style prefixed-message format). Xverse
+ * returns a `{ status: 'success', result: { signature } }` envelope;
+ * `signature` is already base64-encoded BIP-322 witness bytes.
+ *
+ * The `address` arg drives which key the wallet signs with — must
+ * be the ordinals P2TR address (cats live on the ordinals key per
+ * ordinal theory). Caller passes this through from
+ * `wallet.ordinalsAddress`.
+ */
+function callXverseSignMessage(address: string, message: string): Promise<string> {
+  return Wallet.request('signMessage', {
+    address,
+    message,
+    protocol: MessageSigningProtocols.BIP322,
+  }).then((resp) => {
+    if (resp.status !== 'success') {
+      throw new Error(
+        `Xverse signMessage failed: ${resp.error?.message ?? 'unknown error'} (code ${resp.error?.code ?? '?'})`,
+      );
+    }
+    return resp.result.signature;
+  });
+}
+
 export const xverseSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.xverse,
   ...operationNamedDefaults(legacy),
+  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
+    return defer(() => from(callXverseSignMessage(input.address, input.message))).pipe(
+      map((signature) => ({ signature })),
+    );
+  },
 };

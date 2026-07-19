@@ -10,6 +10,7 @@ import {
   WalletSigner,
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
+import { unsupportedSignMessage } from './unsupported-sign-message';
 
 
 interface WebBtcApi {
@@ -114,4 +115,5 @@ const legacy = {
 export const albySigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.alby,
   ...operationNamedDefaults(legacy),
+  signMessage: unsupportedSignMessage('Alby'),
 };

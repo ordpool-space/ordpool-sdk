@@ -5,7 +5,7 @@ import { hex, bech32m, base64 } from '@scure/base';
 import * as i0 from '@angular/core';
 import { InjectionToken, inject, Injectable, signal, computed } from '@angular/core';
 import { from, map, Observable, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, switchMap, defer, throwError, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
-import { AddressPurpose, addListener, getAddress, signTransaction } from 'sats-connect';
+import Wallet, { AddressPurpose, addListener, getAddress, signTransaction, MessageSigningProtocols } from 'sats-connect';
 import { HttpClient } from '@angular/common/http';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { sha256 } from '@noble/hashes/sha2';
@@ -1945,6 +1945,28 @@ function operationNamedDefaults(legacy) {
 }
 
 /**
+ * Shared "signMessage is not wired for this wallet yet" implementation.
+ * Every WalletSigner MUST expose `signMessage` (interface contract);
+ * wallets whose signMessage RPC isn't wired yet return this stub so
+ * the picker can still surface them for OTHER cat flows (mint /
+ * transfer / offer) without breaking the type contract. The listing
+ * flow catches the error and surfaces "your wallet doesn't support
+ * message signing yet — use cat21-wallet / xverse / leather / unisat
+ * / okx to list on the orderbook".
+ *
+ * NEVER used to hide a missing RPC — only for wallets where the
+ * upstream signMessage endpoint genuinely isn't available (legacy
+ * wallets, watch-only signers, wallets focused on non-Bitcoin
+ * surfaces like Lightning).
+ */
+function unsupportedSignMessage(walletName) {
+    return (_input) => new Observable((observer) => {
+        observer.error(new Error(`${walletName} does not support BIP-322 message signing yet. ` +
+            `Use cat21-wallet, Xverse, Leather, Unisat, or OKX to list on the CAT-21 orderbook.`));
+    });
+}
+
+/**
  * Alby — `window.alby.webbtc.signPsbt(psbtHex, { sighashTypes })`.
  *
  * Alby's BTC sub-provider sits at `alby.webbtc` (verified iter 99
@@ -2024,6 +2046,7 @@ const legacy$a = {
 const albySigner = {
     providerId: KnownOrdinalWalletType.alby,
     ...operationNamedDefaults(legacy$a),
+    signMessage: unsupportedSignMessage('Alby'),
 };
 
 /**
@@ -2157,6 +2180,7 @@ const legacy$9 = {
 const binanceSigner = {
     providerId: KnownOrdinalWalletType.binance,
     ...operationNamedDefaults(legacy$9),
+    signMessage: unsupportedSignMessage('Binance'),
 };
 
 /**
@@ -2226,9 +2250,20 @@ const legacy$8 = {
         return defer(() => from(callCat21WalletSignPsbt(psbtHex, flatIndexes, network))).pipe(map((finalHex) => hex.decode(finalHex)));
     },
 };
+function callCat21WalletSignMessage(message) {
+    const provider = findCat21WalletProvider(window);
+    if (!provider) {
+        throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
+    }
+    return provider.request('signMessage', { message, paymentType: 'p2tr' })
+        .then((resp) => resp.result.signature);
+}
 const cat21walletSigner = {
     providerId: KnownOrdinalWalletType.cat21wallet,
     ...operationNamedDefaults(legacy$8),
+    signMessage(input) {
+        return defer(() => from(callCat21WalletSignMessage(input.message))).pipe(map((signature) => ({ signature })));
+    },
 };
 
 /**
@@ -2304,9 +2339,22 @@ const legacy$7 = {
         }).pipe(map((finalHex) => hex.decode(finalHex)));
     },
 };
+/**
+ * BIP-322 message signing via `window.LeatherProvider.request('signMessage', ...)`.
+ * `paymentType: 'p2tr'` forces the ordinals key. Wallet response's
+ * `result.signature` is already base64-encoded BIP-322 witness bytes.
+ */
+function callLeatherSignMessage(message) {
+    const win = window;
+    return win.LeatherProvider.request('signMessage', { message, paymentType: 'p2tr' })
+        .then((resp) => resp.result.signature);
+}
 const leatherSigner = {
     providerId: KnownOrdinalWalletType.leather,
     ...operationNamedDefaults(legacy$7),
+    signMessage(input) {
+        return defer(() => from(callLeatherSignMessage(input.message))).pipe(map((signature) => ({ signature })));
+    },
 };
 
 /**
@@ -2370,9 +2418,20 @@ const legacy$6 = {
         return from(okxBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(map((signedPsbtHex) => hex.decode(signedPsbtHex)));
     },
 };
+/**
+ * BIP-322 message signing via `window.okxwallet.bitcoin.signMessage(
+ * message, {from, protocol: 'bip322-simple'})`. Returns base64
+ * witness bytes directly (no envelope). `from` pins the signing
+ * address to the ordinals key so OKX doesn't fall back to a
+ * different address when the user has multiple.
+ */
 const okxSigner = {
     providerId: KnownOrdinalWalletType.okx,
     ...operationNamedDefaults(legacy$6),
+    signMessage(input) {
+        const okxBtc = window.okxwallet.bitcoin;
+        return defer(() => from(okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' }))).pipe(map((signature) => ({ signature })));
+    },
 };
 
 /**
@@ -2455,6 +2514,7 @@ const legacy$5 = {
 const oylSigner = {
     providerId: KnownOrdinalWalletType.oyl,
     ...operationNamedDefaults(legacy$5),
+    signMessage: unsupportedSignMessage('Oyl'),
 };
 
 /**
@@ -2526,6 +2586,7 @@ const legacy$4 = {
 const phantomSigner = {
     providerId: KnownOrdinalWalletType.phantom,
     ...operationNamedDefaults(legacy$4),
+    signMessage: unsupportedSignMessage('Phantom'),
 };
 
 /**
@@ -2636,6 +2697,7 @@ const legacy$3 = {
 const psbtExportSigner = {
     providerId: KnownOrdinalWalletType.xpub,
     ...operationNamedDefaults(legacy$3),
+    signMessage: unsupportedSignMessage('PSBT-export (watch-only)'),
 };
 
 /**
@@ -2693,9 +2755,21 @@ const legacy$2 = {
         return from(unisat.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(map((signedPsbtHex) => hex.decode(signedPsbtHex)));
     },
 };
+/**
+ * BIP-322 message signing via `window.unisat.signMessage(msg,
+ * 'bip322-simple')`. Signs under the currently-selected address —
+ * Unisat's single-address model means the ordinals and payment
+ * addresses are the same key, so callers pass either and get the
+ * same signature. Returns the base64 BIP-322 witness directly (no
+ * envelope).
+ */
 const unisatSigner = {
     providerId: KnownOrdinalWalletType.unisat,
     ...operationNamedDefaults(legacy$2),
+    signMessage(input) {
+        const unisat = window.unisat;
+        return defer(() => from(unisat.signMessage(input.message, 'bip322-simple'))).pipe(map((signature) => ({ signature })));
+    },
 };
 
 /**
@@ -2747,6 +2821,7 @@ const legacy$1 = {
 const wizzSigner = {
     providerId: KnownOrdinalWalletType.wizz,
     ...operationNamedDefaults(legacy$1),
+    signMessage: unsupportedSignMessage('Wizz'),
 };
 
 /**
@@ -2813,9 +2888,37 @@ const legacy = {
         return callXverseSignTransaction(input.psbtBytes, inputsToSign, networkType, 'Sign CAT-21 buy offer (no broadcast)').pipe(map((signedPsbtBase64) => base64.decode(signedPsbtBase64)));
     },
 };
+/**
+ * BIP-322 message signing via sats-connect v3+ `Wallet.request('signMessage', ...)`.
+ *
+ * `protocol: MessageSigningProtocols.BIP322` selects BIP-322 (vs
+ * ECDSA — the older Sparrow-style prefixed-message format). Xverse
+ * returns a `{ status: 'success', result: { signature } }` envelope;
+ * `signature` is already base64-encoded BIP-322 witness bytes.
+ *
+ * The `address` arg drives which key the wallet signs with — must
+ * be the ordinals P2TR address (cats live on the ordinals key per
+ * ordinal theory). Caller passes this through from
+ * `wallet.ordinalsAddress`.
+ */
+function callXverseSignMessage(address, message) {
+    return Wallet.request('signMessage', {
+        address,
+        message,
+        protocol: MessageSigningProtocols.BIP322,
+    }).then((resp) => {
+        if (resp.status !== 'success') {
+            throw new Error(`Xverse signMessage failed: ${resp.error?.message ?? 'unknown error'} (code ${resp.error?.code ?? '?'})`);
+        }
+        return resp.result.signature;
+    });
+}
 const xverseSigner = {
     providerId: KnownOrdinalWalletType.xverse,
     ...operationNamedDefaults(legacy),
+    signMessage(input) {
+        return defer(() => from(callXverseSignMessage(input.address, input.message))).pipe(map((signature) => ({ signature })));
+    },
 };
 
 /**

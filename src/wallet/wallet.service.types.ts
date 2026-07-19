@@ -246,6 +246,43 @@ export interface SignOfferCreatePsbtArgs {
 }
 
 /**
+ * BIP-322 message signing — off-chain, no PSBT, no broadcast. Used
+ * by the CAT-21 orderbook to prove "this wallet controls this
+ * ordinals address" without moving any sats. The message the seller
+ * signs is the canonical `buildListingMessage(...)` output; the
+ * server verifies via `verifyListingSignature(...)`.
+ *
+ * Different call-shape from the PSBT signers: no bytes to hand off,
+ * just an address + a string. Every major Bitcoin extension wallet
+ * exposes a `signMessage`-shaped RPC that emits a BIP-322 base64
+ * signature witness. Wallets that don't (or that focus on Lightning
+ * / non-Bitcoin flows) error with a clear "not supported" message.
+ */
+export interface SignMessageArgs {
+  /**
+   * The address whose key should sign — for BIP-322 P2TR this is
+   * the ordinals address (where cats live per ordinal theory).
+   * The signer maps this to whichever wallet-side "sign under this
+   * key" API the wallet exposes.
+   */
+  address: string;
+  /** UTF-8 message to sign. Wallet renders this to the user for approval. */
+  message: string;
+  /** Bitcoin network — used for the wallet's network-mismatch check. */
+  network: Network;
+}
+
+export interface SignMessageResult {
+  /**
+   * Base64-encoded BIP-322 "simple" signature witness. Wallet-format-
+   * dependent: some return raw 64/65-byte schnorr sigs, some wrap in
+   * a serialized witness stack (`numItems || sigLen || sigBytes`).
+   * `verifyListingSignature` accepts both shapes.
+   */
+  signature: string;
+}
+
+/**
  * A wallet signer handles the SIGN side of a wallet integration:
  * given an unsigned PSBT for a known on-chain operation, ask the
  * wallet to sign the inputs at the operation's fixed topology, and
@@ -283,6 +320,11 @@ export interface WalletSigner {
   signTransfer(input: SignTransferArgs): Observable<{ txId: string }>;
   signOfferAccept(input: SignOfferAcceptArgs): Observable<{ txId: string }>;
   signOfferCreatePsbt(input: SignOfferCreatePsbtArgs): Observable<Uint8Array>;
+  /**
+   * Sign a UTF-8 message under an ordinals key via BIP-322.
+   * Wallets without a BIP-322 RPC surface return an error observable.
+   */
+  signMessage(input: SignMessageArgs): Observable<SignMessageResult>;
 }
 
 /**

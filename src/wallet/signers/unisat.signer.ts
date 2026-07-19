@@ -1,10 +1,12 @@
 import { hex } from '@scure/base';
-import { from, map, Observable, switchMap } from 'rxjs';
+import { defer, from, map, Observable, switchMap } from 'rxjs';
 
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignMessageArgs,
+  SignMessageResult,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
@@ -24,6 +26,13 @@ interface UnisatRpc {
     psbtHex: string,
     options?: { autoFinalized?: boolean; toSignInputs?: UnisatToSignInput[] }
   ): Promise<string>;
+  /**
+   * Sign a message under the currently-selected address. `type =
+   * 'bip322-simple'` returns a base64 BIP-322 witness (what we
+   * want); `'ecdsa'` returns the older Sparrow-format ECDSA sig
+   * that verifyListingSignature does NOT accept.
+   */
+  signMessage(message: string, type?: 'ecdsa' | 'bip322-simple'): Promise<string>;
 }
 
 
@@ -97,7 +106,21 @@ const legacy = {
   },
 };
 
+/**
+ * BIP-322 message signing via `window.unisat.signMessage(msg,
+ * 'bip322-simple')`. Signs under the currently-selected address —
+ * Unisat's single-address model means the ordinals and payment
+ * addresses are the same key, so callers pass either and get the
+ * same signature. Returns the base64 BIP-322 witness directly (no
+ * envelope).
+ */
 export const unisatSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.unisat,
   ...operationNamedDefaults(legacy),
+  signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
+    const unisat = (window as unknown as { unisat: UnisatRpc }).unisat;
+    return defer(() => from(unisat.signMessage(input.message, 'bip322-simple'))).pipe(
+      map((signature) => ({ signature })),
+    );
+  },
 };

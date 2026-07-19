@@ -9,6 +9,7 @@ import {
   WalletSigner,
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
+import { unsupportedSignMessage } from './unsupported-sign-message';
 import { resolveSigningTargets } from './signing-targets.helper';
 
 
@@ -103,4 +104,5 @@ const legacy = {
 export const phantomSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.phantom,
   ...operationNamedDefaults(legacy),
+  signMessage: unsupportedSignMessage('Phantom'),
 };

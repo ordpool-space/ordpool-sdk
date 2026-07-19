@@ -10,6 +10,7 @@ import {
   WalletSigner,
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
+import { unsupportedSignMessage } from './unsupported-sign-message';
 
 
 /**
@@ -136,4 +137,5 @@ const legacy = {
 export const psbtExportSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.xpub,
   ...operationNamedDefaults(legacy),
+  signMessage: unsupportedSignMessage('PSBT-export (watch-only)'),
 };
