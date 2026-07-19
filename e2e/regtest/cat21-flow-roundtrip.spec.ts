@@ -40,6 +40,7 @@ import {
 import { buildCat21MintPsbt } from '../../src/cat21-mint/cat21-mint.helper';
 import { buildCat21TransferPsbt } from '../../src/cat21-transfer/cat21-transfer.helper';
 import { Network, toScureNetwork } from '../../src/network';
+import { toPaymentAddress } from '../../src/wallet/address-types';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import {
   ElectrsUtxo,
@@ -473,7 +474,7 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
       psbt: sdkOfferPsbtBytes,
       expectedSellerUtxo: catUtxoAfterTransfer,
       floorPriceSats: PRICE_SATS,
-      expectedSellerPaymentAddress: bAddress,
+      expectedSellerPaymentAddress: toPaymentAddress(bAddress),
       network: Network.Regtest,
     });
     expect(validation.ok).toBe(true);
