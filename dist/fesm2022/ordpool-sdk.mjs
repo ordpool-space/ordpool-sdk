@@ -4175,7 +4175,8 @@ class UtxoContentScanner {
             if (inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat) {
                 return { kind: 'scanned-clean' };
             }
-            const content = { outpoint, inscriptionIds, runes, catIds, rareSat };
+            const catSat = catIds.length > 0 ? firstSat(ord.sat_ranges) : null;
+            const content = { outpoint, inscriptionIds, runes, catIds, catSat, rareSat };
             return { kind: 'scanned-with-assets', content };
         }), catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -4245,6 +4246,17 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
         }] });
 function trimSlash(url) {
     return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+/**
+ * First sat of the first range, which is where a CAT-21 cat sits.
+ *
+ * The protocol pins a cat to offset 0 of its output, so the ranges do not need
+ * walking: the opening sat of the first range is the cat's sat. Returns null
+ * when ord supplied no ranges, which happens on an output it has not indexed.
+ */
+function firstSat(ranges) {
+    const first = ranges?.[0]?.[0];
+    return typeof first === 'number' ? first : null;
 }
 /**
  * Turn ord's `sat_ranges` into a rare-sat finding if one exists.

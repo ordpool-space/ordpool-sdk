@@ -1287,6 +1287,18 @@ interface UtxoContent {
     /** CAT-21 cat IDs at this outpoint, also in `{txid}i{index}` format. */
     catIds: string[];
     /**
+     * Sat the cats at this outpoint sit on, or `null` when the outpoint holds
+     * no cats or ord returned no sat ranges.
+     *
+     * CAT-21 pins a cat to offset 0 of its output (FIFO), so every cat here
+     * shares the first sat of the first range. That makes the sat derivable from
+     * the scan alone, with no per-cat lookup, and it is what a UI should link to:
+     * a sat page shows every cat riding that sat and where it sits now, whereas
+     * the mint transaction shows only where a cat started and misleads once it
+     * has moved.
+     */
+    catSat: number | null;
+    /**
      * Rarest sat inside the UTXO's `sat_ranges`, when the scanner ran
      * the rare-sat check (small-UTXO gate — see `RARE_SAT_SCAN_MAX_VALUE_SAT`).
      * `null` when no rare sat was found OR when the check was skipped

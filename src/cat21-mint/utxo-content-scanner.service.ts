@@ -103,7 +103,8 @@ export class UtxoContentScanner {
         if (inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat) {
           return { kind: 'scanned-clean' };
         }
-        const content: UtxoContent = { outpoint, inscriptionIds, runes, catIds, rareSat };
+        const catSat = catIds.length > 0 ? firstSat(ord.sat_ranges) : null;
+        const content: UtxoContent = { outpoint, inscriptionIds, runes, catIds, catSat, rareSat };
         return { kind: 'scanned-with-assets', content };
       }),
       catchError((err: unknown): Observable<UtxoScanState> => {
@@ -178,6 +179,20 @@ export class UtxoContentScanner {
 
 function trimSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+/**
+ * First sat of the first range, which is where a CAT-21 cat sits.
+ *
+ * The protocol pins a cat to offset 0 of its output, so the ranges do not need
+ * walking: the opening sat of the first range is the cat's sat. Returns null
+ * when ord supplied no ranges, which happens on an output it has not indexed.
+ */
+function firstSat(
+  ranges: ReadonlyArray<readonly [number, number]> | undefined
+): number | null {
+  const first = ranges?.[0]?.[0];
+  return typeof first === 'number' ? first : null;
 }
 
 /**
