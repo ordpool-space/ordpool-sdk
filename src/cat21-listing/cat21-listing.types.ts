@@ -23,8 +23,26 @@ export const MAX_ASK_SATS = 21_000_000 * 100_000_000; // 2_100_000_000_000_000
  * in cat21-indexer.
  */
 export interface Cat21Listing {
-  /** Cat number the listing covers. */
+  /**
+   * Headline cat number for the listing — the lowest-numbered cat on
+   * the UTXO. Presentational only (drives sort order and the "Cat #N"
+   * display); the load-bearing identifier for what's being sold is
+   * `cats` below. Every cat in `cats` is included in the sale because
+   * a PSBT spends the whole UTXO, not individual sats.
+   */
   catNumber: number;
+  /**
+   * Every cat currently sitting on the UTXO the listing pins
+   * (`catTxid:catVout`). Ord's `/output/<outpoint>` endpoint returns
+   * an array — a UTXO CAN carry multiple cats (typical: consolidation
+   * of previously-minted cat UTXOs into one output ≥ N × 546 sats).
+   * The seller cryptographically commits to this exact set, sorted
+   * ascending, so the buyer sees "you're buying this whole bundle"
+   * before signing. If a cat gets bundled onto the UTXO between sign
+   * and accept, the bundle drifts and the listing is stale (same
+   * eviction class as an outpoint drift).
+   */
+  cats: number[];
   /**
    * Bitcoin network the seller signed against. Load-bearing for
    * anti-replay: without this field, an attacker with a legit

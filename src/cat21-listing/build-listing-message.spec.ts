@@ -6,6 +6,8 @@ import {
   CAT21_LISTING_MESSAGE_VERSION,
   buildListingMessage,
   ListingMessageFields,
+  parseCatsList,
+  serializeCats,
 } from './build-listing-message';
 import { MAX_ASK_SATS } from './cat21-listing.types';
 
@@ -16,6 +18,7 @@ const TXID = 'ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df';
 
 const baseFields = (): ListingMessageFields => ({
   catNumber: 42,
+  cats: [42],
   network: Network.Mainnet,
   askSats: 21_000,
   payTo: PAY_ADDR,
@@ -29,7 +32,7 @@ describe('buildListingMessage — canonical human-readable listing message for B
 
   describe('version', () => {
     it('exposes the current message version constant (bump when format changes)', () => {
-      expect(CAT21_LISTING_MESSAGE_VERSION).toBe('v2');
+      expect(CAT21_LISTING_MESSAGE_VERSION).toBe('v3');
     });
   });
 
@@ -38,9 +41,10 @@ describe('buildListingMessage — canonical human-readable listing message for B
     it('produces the exact multi-line byte sequence expected — prefix, field order, separator all locked', () => {
       const msg = buildListingMessage(baseFields());
       const expected = [
-        'cat21-ask:v2',
+        'cat21-ask:v3',
         'network=mainnet',
         'catNumber=42',
+        'cats=42',
         'askSats=21000',
         'payTo=bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx',
         'catTxid=ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df',
@@ -65,6 +69,7 @@ describe('buildListingMessage — canonical human-readable listing message for B
         ordinalsAddress: ORD_ADDR,
         payTo: PAY_ADDR,
         catTxid: TXID,
+        cats: [42],
         askSats: 21_000,
         catNumber: 42,
       };
@@ -73,7 +78,7 @@ describe('buildListingMessage — canonical human-readable listing message for B
 
     it('produces a message where every line except the first is a `key=value` pair', () => {
       const lines = buildListingMessage(baseFields()).split('\n');
-      expect(lines[0]).toBe('cat21-ask:v2');
+      expect(lines[0]).toBe('cat21-ask:v3');
       for (const line of lines.slice(1)) {
         expect(line).toMatch(/^[a-zA-Z]+=/);
       }
@@ -91,7 +96,7 @@ describe('buildListingMessage — canonical human-readable listing message for B
 
   describe('validation — catNumber', () => {
     it('accepts 0 (Genesis Cat — a real listable UTXO with lore-fixed 21 BTC price)', () => {
-      const msg = buildListingMessage({ ...baseFields(), catNumber: 0, askSats: 2_100_000_000 });
+      const msg = buildListingMessage({ ...baseFields(), catNumber: 0, cats: [0], askSats: 2_100_000_000 });
       expect(msg).toContain('catNumber=0');
       expect(msg).toContain('askSats=2100000000');
     });
@@ -191,6 +196,79 @@ describe('buildListingMessage — canonical human-readable listing message for B
     });
     it('rejects non-integer', () => {
       expect(() => buildListingMessage({ ...baseFields(), signedAt: 1.5 })).toThrow(/signedAt/);
+    });
+  });
+
+  describe('cats bundle (v3 — the load-bearing on-chain identifier)', () => {
+    it('emits `cats=42` for a single-cat UTXO', () => {
+      const msg = buildListingMessage(baseFields());
+      expect(msg).toContain('cats=42');
+    });
+
+    it('emits `cats=0,42,100` sorted ascending for a bundle (order-insensitive input)', () => {
+      const msg = buildListingMessage({
+        ...baseFields(),
+        catNumber: 0,
+        cats: [100, 0, 42],
+        askSats: 2_100_000_000, // genesis-cat lore pin — not asserted here, avoids MAX_ASK check hit
+      });
+      expect(msg).toContain('cats=0,42,100');
+    });
+
+    it('dedupes repeats in the bundle', () => {
+      const msg = buildListingMessage({ ...baseFields(), cats: [42, 42, 42] });
+      expect(msg).toContain('cats=42');
+    });
+
+    it('rejects empty bundle (a listing must sell at least one cat)', () => {
+      expect(() => buildListingMessage({ ...baseFields(), cats: [] })).toThrow(/cats/);
+    });
+
+    it('rejects bundle containing a negative cat number', () => {
+      expect(() => buildListingMessage({ ...baseFields(), cats: [42, -1] })).toThrow(/cats/);
+    });
+
+    it('rejects bundle containing a non-integer', () => {
+      expect(() => buildListingMessage({ ...baseFields(), cats: [42, 1.5] })).toThrow(/cats/);
+    });
+
+    it('rejects when the headline catNumber is not a member of the bundle (would let a seller hide the headline)', () => {
+      expect(() =>
+        buildListingMessage({ ...baseFields(), catNumber: 42, cats: [100, 200] }),
+      ).toThrow(/headline catNumber 42 must be a member/);
+    });
+
+    it('accepts headline = min(cats) (the canonical case)', () => {
+      const msg = buildListingMessage({ ...baseFields(), catNumber: 0, cats: [0, 42, 100], askSats: 21_000 });
+      expect(msg).toContain('catNumber=0');
+      expect(msg).toContain('cats=0,42,100');
+    });
+
+    it('accepts headline that is a non-minimum member (rare but valid — presentational choice)', () => {
+      const msg = buildListingMessage({ ...baseFields(), catNumber: 42, cats: [0, 42, 100], askSats: 21_000 });
+      expect(msg).toContain('catNumber=42');
+      expect(msg).toContain('cats=0,42,100');
+    });
+  });
+
+  describe('serializeCats (canonicalizer) + parseCatsList (inverse)', () => {
+    it('serializes ascending + deduped', () => {
+      expect(serializeCats([100, 0, 42, 42], 0)).toBe('0,42,100');
+    });
+
+    it('parses back into the canonical number array', () => {
+      expect(parseCatsList('0,42,100')).toEqual([0, 42, 100]);
+    });
+
+    it('round-trips: parse(serialize(x)) === canonical(x)', () => {
+      const csv = serializeCats([100, 42, 0], 0);
+      expect(parseCatsList(csv)).toEqual([0, 42, 100]);
+    });
+
+    it('parseCatsList rejects garbage', () => {
+      expect(() => parseCatsList('abc,42')).toThrow(/cats line/);
+      expect(() => parseCatsList('42,-1')).toThrow(/cats line/);
+      expect(() => parseCatsList('')).toThrow(/cats line/);
     });
   });
 });

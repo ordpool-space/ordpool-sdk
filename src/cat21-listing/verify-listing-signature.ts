@@ -62,7 +62,21 @@ export function verifyListingSignature(args: {
   signatureBase64: string;
 }): VerifyListingSignatureResult {
   const { fields, signatureBase64 } = args;
-  const message = buildListingMessage(fields);
+  // Field-shape validation (e.g. cats-bundle sanity, headline
+  // membership, MAX_ASK_SATS) lives in buildListingMessage. A
+  // caller who hands us structurally-broken fields cannot have a
+  // signature that verifies against a canonical rebuild, so we
+  // collapse a build-time throw into the same `signature-does-
+  // not-verify` reason the caller already handles. Absent this,
+  // any post-verify tamper test that changes a single field to an
+  // internally-inconsistent value (e.g. the audit's `catNumber=999`
+  // when cats=[42]) would throw instead of returning a result.
+  let message: string;
+  try {
+    message = buildListingMessage(fields);
+  } catch {
+    return { ok: false, reason: 'signature-does-not-verify' };
+  }
   const ordinalsAddress = fields.ordinalsAddress;
 
   // --- Decode the ordinals address to its scriptPubKey -----------------

@@ -37,6 +37,7 @@ const TXID = 'ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df';
 
 const baseFields = (): ListingMessageFields => ({
   catNumber: 42,
+  cats: [42],
   network: Network.Mainnet,
   askSats: 21_000,
   payTo: PAY_ADDR,
@@ -224,6 +225,29 @@ describe('verifyListingSignature — field tampering (the whole point of the sig
   it('rejects when signedAt changed (any replay-window shift breaks the sig)', () => {
     const result = verifyListingSignature({
       fields: { ...baseFields(), signedAt: 1_700_000_001 },
+      signatureBase64: originalSig,
+    });
+    expect(result).toEqual({ ok: false, reason: 'signature-does-not-verify' });
+  });
+
+  it('rejects when cats bundle changed (extra cat appeared on the UTXO between sign and verify)', () => {
+    // Seller signed for cats=[42]; UTXO now carries {42, 99} — the
+    // bundle drifted. This is the "someone consolidated" stale case
+    // that the v3 cats-line was added to catch.
+    const result = verifyListingSignature({
+      fields: { ...baseFields(), cats: [42, 99] },
+      signatureBase64: originalSig,
+    });
+    expect(result).toEqual({ ok: false, reason: 'signature-does-not-verify' });
+  });
+
+  it('collapses a fields-shape throw (e.g. catNumber not in cats) into signature-does-not-verify', () => {
+    // The tamper here breaks buildListingMessage's own validation
+    // (headline catNumber must be a member of cats). Without the
+    // verify-side try/catch this would raise; with it, we return
+    // the same rejection reason the caller already handles.
+    const result = verifyListingSignature({
+      fields: { ...baseFields(), catNumber: 12345 }, // cats stays [42], mismatch
       signatureBase64: originalSig,
     });
     expect(result).toEqual({ ok: false, reason: 'signature-does-not-verify' });
