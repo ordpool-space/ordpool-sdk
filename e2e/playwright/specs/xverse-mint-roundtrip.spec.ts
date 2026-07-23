@@ -7,7 +7,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
-import { installBrowserErrorGuard } from '../console-guard';
+import { installContextErrorGuard } from '../browser-error-guard';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -45,6 +45,7 @@ const FUND_AMOUNT_BTC = 0.001;
 
 let context: BrowserContext;
 let extensionId: string;
+let errorGuard: ReturnType<typeof installContextErrorGuard>;
 
 async function shot(p: Page, name: string): Promise<void> {
   await p.screenshot({
@@ -94,9 +95,22 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // Rule §11: hook the browser-error guard at context level so every
+  // page the context spawns is covered (harness page + any extension
+  // popups we open — extension pages are filtered out via `isOurApp`
+  // so their own JS crashes can't cascade-fail our specs).
+  errorGuard = installContextErrorGuard(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
+});
+
+test.beforeEach(() => {
+  errorGuard?.resetPerTest();
+});
+
+test.afterEach(() => {
+  errorGuard?.assertClean();
 });
 
 test.afterAll(async () => {
@@ -133,10 +147,6 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
 
   // ─── Get the wallet's bcrt1 addresses via the SDK harness ──────
   const harness = await context.newPage();
-  // Rule §11: unfiltered browser console.error / pageerror during
-  // the mint arc fails the test. Assertion runs at test end after
-  // positive assertions land.
-  const errorGuard = installBrowserErrorGuard(harness);
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, { timeout: 15_000 });
 
@@ -289,8 +299,6 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
   expect(parsed!.transactionId).toBe(broadcastTxid);
   expect(parsed!.getImage()).toMatch(/^<svg/);
-
-  // Rule §11: after the full mint arc is proven, fail if any
-  // unfiltered browser console.error / pageerror surfaced.
-  errorGuard.assertNone();
+  // Rule §11 assertion runs in test.afterEach via the context-level
+  // errorGuard installed in beforeAll.
 });
