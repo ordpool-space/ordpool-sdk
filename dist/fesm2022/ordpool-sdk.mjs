@@ -2871,8 +2871,14 @@ class WalletService {
      */
     armAccountChangeSubscription(type) {
         this.tearDownAccountChangeSubscription();
-        const connector = this.findConnector(type);
-        if (!connector.onAccountChange)
+        // Soft lookup — a stale LAST_CONNECTED_WALLET pointing at a wallet
+        // whose connector was retired (e.g. `binance` after it left the
+        // roster) would otherwise throw synchronously in the constructor
+        // and wedge Angular DI on hard reload with no recovery path. If the
+        // connector is gone, silently skip re-arming; the cached wallet
+        // stays in place until the user explicitly disconnects.
+        const connector = walletConnectors.find(c => c.providerId === type);
+        if (!connector || !connector.onAccountChange)
             return;
         this.accountChangeUnsubscribe = connector.onAccountChange(() => {
             connector.connect(this.network).subscribe({
