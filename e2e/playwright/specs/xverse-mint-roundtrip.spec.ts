@@ -7,6 +7,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { installBrowserErrorGuard } from '../console-guard';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -132,6 +133,10 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
 
   // ─── Get the wallet's bcrt1 addresses via the SDK harness ──────
   const harness = await context.newPage();
+  // Rule §11: unfiltered browser console.error / pageerror during
+  // the mint arc fails the test. Assertion runs at test end after
+  // positive assertions land.
+  const errorGuard = installBrowserErrorGuard(harness);
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, { timeout: 15_000 });
 
@@ -284,4 +289,8 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
   expect(parsed!.transactionId).toBe(broadcastTxid);
   expect(parsed!.getImage()).toMatch(/^<svg/);
+
+  // Rule §11: after the full mint arc is proven, fail if any
+  // unfiltered browser console.error / pageerror surfaced.
+  errorGuard.assertNone();
 });
