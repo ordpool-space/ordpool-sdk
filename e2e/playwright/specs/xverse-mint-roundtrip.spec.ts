@@ -98,8 +98,22 @@ test.beforeAll(async () => {
   // Rule §11: hook the browser-error guard at context level so every
   // page the context spawns is covered (harness page + any extension
   // popups we open — extension pages are filtered out via `isOurApp`
-  // so their own JS crashes can't cascade-fail our specs).
-  errorGuard = installContextErrorGuard(context);
+  // so their own JS crashes can't cascade-fail our specs). Known
+  // regtest noise stays in the ignore list so real JS regressions
+  // can't hide behind them:
+  //   - 404s / net::* failures on regtest-absent endpoints (harness
+  //     assets, missing /api/v1/prices etc.)
+  //   - SDK diagnostics that use console.error for stdout visibility
+  //     (`[sdk:inscribe] connectedWallet$ emit`) — not real errors
+  //   - CORS blocks on preview iframes loading /assets that regtest
+  //     doesn't ship (null-origin iframe)
+  errorGuard = installContextErrorGuard(context, {
+    ignore: [
+      /Failed to load resource:.*(404|net::ERR_)/,
+      /^\[sdk:/,
+      /has been blocked by CORS policy/,
+    ],
+  });
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
