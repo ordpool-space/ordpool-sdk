@@ -442,6 +442,12 @@ pipelines, with different blast radii and different questions:
   unverified extension binaries on a dev machine. Iteration ladder:
   loads → onboard → SDK-handshake → matrix → mint roundtrip.
 
+  General Playwright rules (data-testid first, click instead of
+  `goto`, wait on states, ordpool-specific regtest bootstrap +
+  wallet-load pattern) live at workspace root:
+  `~/Work/ordpool/E2E_BEST_PRACTICES.md`. Read it before touching
+  any spec.
+
 ## HARD RULE: CI is the test. No manual smoke.
 
 The maintainer is Bitcoin-poor and will not install wallets +
