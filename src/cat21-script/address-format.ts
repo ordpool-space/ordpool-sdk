@@ -99,6 +99,37 @@ export function isSegWit(address: string): boolean {
 }
 
 /**
+ * Can this payment address be used to fund an inscribe commit?
+ *
+ * The inscribe pipeline pre-builds the reveal tx referencing the
+ * commit tx's SIMULATION txid (the commit isn't signed yet at that
+ * point). This assumes the txid is witness-independent — true for
+ * segwit inputs (signature lands in the witness, which is NOT part
+ * of the txid preimage). For legacy P2PKH inputs the signature lands
+ * in `scriptSig`, which IS in the non-witness serialization, so the
+ * real-signed commit has a DIFFERENT txid than the simulation and
+ * the pre-built reveal points at a txid that never existed on chain.
+ * The commit broadcasts fine, the reveal broadcast fails with
+ * `bad-txns-inputs-missingorspent`, and the postage sits locked in
+ * the commit output with no key to spend it (the ephemeral key that
+ * would sign a fresh reveal against the real commit txid is gone
+ * once the flow ends).
+ *
+ * Consumers use this to gate the inscribe UI: disable the button,
+ * show a "switch to Native SegWit or Taproot" banner, refuse before
+ * the user commits a fee. The inscribe pipeline itself also throws
+ * on this address type as defense-in-depth.
+ *
+ * P2SH is treated as SUPPORTED — it's assumed to wrap SegWit
+ * (P2SH-P2WPKH / Nested SegWit is the common case). The rare
+ * non-SegWit P2SH scripts would trip a different failure inside
+ * scure at signing time, not a silent postage loss.
+ */
+export function isInscribeSupportedPaymentAddress(address: string): boolean {
+  return getAddressFormat(address) !== 'P2PKH';
+}
+
+/**
  * Coarse network grouping reachable from an address prefix.
  *
  *   'mainnet'  — clearly mainnet (`1` / `3` / `bc1` / `bc1p`).

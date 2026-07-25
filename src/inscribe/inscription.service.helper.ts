@@ -2,7 +2,7 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
-import { getAddressFormat } from '../cat21-script/address-format';
+import { getAddressFormat, isInscribeSupportedPaymentAddress } from '../cat21-script/address-format';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -232,6 +232,22 @@ export function createInscribeTransactions(
 ): CreateInscribeTransactionsResult {
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
+  }
+  // Refuse P2PKH funding inputs. The reveal is pre-built against the
+  // commit's SIMULATION txid — witness-independent for segwit inputs
+  // but NOT for legacy P2PKH, where the real signature lives in
+  // `scriptSig` and changes the txid. A P2PKH inscribe would land
+  // the commit but the reveal would broadcast against a non-existent
+  // txid, locking the postage in the commit output forever (the
+  // ephemeral reveal key is not returned to the caller). Consumers
+  // should gate the UI with `isInscribeSupportedPaymentAddress` so
+  // this throw is unreachable in practice.
+  if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
+    throw new Error(
+      `Legacy P2PKH payment addresses are not supported for inscribing ` +
+      `(would lock the postage — see isInscribeSupportedPaymentAddress). ` +
+      `Switch the wallet to Native SegWit or Taproot and retry.`,
+    );
   }
   if (args.tip !== undefined) {
     if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
