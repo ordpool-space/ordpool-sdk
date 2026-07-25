@@ -2783,6 +2783,28 @@ function findSignerOrThrow(type) {
 }
 
 const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
+/**
+ * Guard that a parsed `LAST_CONNECTED_WALLET` payload has the fields
+ * the constructor is about to dereference. Prevents both malformed
+ * JSON (caught upstream by try/catch) and schema-drifted payloads
+ * from wedging Angular DI. Deliberately lax on optional fields —
+ * only asserts the four the constructor + armAccountChangeSubscription
+ * actually read. Extra fields pass through untouched; missing extras
+ * become undefined and reveal themselves later on flow-specific paths
+ * where a re-connect prompt is the right recovery.
+ *
+ * Exported for direct spec coverage — the constructor is behind
+ * Angular DI, this helper isn't.
+ */
+function isValidPersistedWalletInfo(v) {
+    if (!v || typeof v !== 'object')
+        return false;
+    const o = v;
+    return (typeof o.type === 'string' &&
+        o.type in KnownOrdinalWallets &&
+        typeof o.ordinalsAddress === 'string' && o.ordinalsAddress.length > 0 &&
+        typeof o.paymentAddress === 'string' && o.paymentAddress.length > 0);
+}
 class WalletService {
     storageService = inject(storage);
     network = inject(bitcoinNetwork);
@@ -2832,14 +2854,42 @@ class WalletService {
      */
     accountChangeUnsubscribe = null;
     constructor() {
-        const lastConnectedWallet = this.storageService.getValue(LAST_CONNECTED_WALLET);
-        if (lastConnectedWallet) {
-            const info = JSON.parse(lastConnectedWallet);
-            this.connectedWallet$.next(info);
-            // Restore the event subscription so an account-switch fires
-            // even if the user only refreshed the page.
-            this.armAccountChangeSubscription(info.type);
+        const raw = this.storageService.getValue(LAST_CONNECTED_WALLET);
+        if (!raw)
+            return;
+        // JSON.parse throws on any malformed payload — truncation caused
+        // by a browser storage-quota event, an out-of-app DevTools mis-
+        // write, an older SDK format that predates the current shape, a
+        // sync-corrupted transfer between browsers. Without the try/catch
+        // the throw propagates out of the Angular DI constructor,
+        // WalletService fails to instantiate, and every component that
+        // injects it fails to render — the app is bricked with a white
+        // page and no visible way to recover. Discard the corrupt entry
+        // and behave as a first-time visitor: the user reconnects, no
+        // support ticket.
+        let info = null;
+        try {
+            const parsed = JSON.parse(raw);
+            if (isValidPersistedWalletInfo(parsed)) {
+                info = parsed;
+            }
+            else {
+                // eslint-disable-next-line no-console
+                console.warn('[wallet.service] Discarding LAST_CONNECTED_WALLET with unrecognised shape:', parsed);
+            }
         }
+        catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn('[wallet.service] Discarding malformed LAST_CONNECTED_WALLET:', err);
+        }
+        if (!info) {
+            this.storageService.removeItem(LAST_CONNECTED_WALLET);
+            return;
+        }
+        this.connectedWallet$.next(info);
+        // Restore the event subscription so an account-switch fires
+        // even if the user only refreshed the page.
+        this.armAccountChangeSubscription(info.type);
     }
     get win() {
         return typeof window === 'undefined' ? undefined : window;
@@ -8481,5 +8531,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

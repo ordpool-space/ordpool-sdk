@@ -24,6 +24,7 @@ import { findSignerOrThrow } from './signers';
 import {
   KnownOrdinalWallet,
   KnownOrdinalWalletType,
+  KnownOrdinalWallets,
   SignMessageArgs,
   SignMessageResult,
   WalletConnector,
@@ -38,6 +39,30 @@ import {
 export { leatherOrdinalsAddressType, leatherPaymentAddressType } from './wallet.service.helper';
 
 export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
+
+/**
+ * Guard that a parsed `LAST_CONNECTED_WALLET` payload has the fields
+ * the constructor is about to dereference. Prevents both malformed
+ * JSON (caught upstream by try/catch) and schema-drifted payloads
+ * from wedging Angular DI. Deliberately lax on optional fields —
+ * only asserts the four the constructor + armAccountChangeSubscription
+ * actually read. Extra fields pass through untouched; missing extras
+ * become undefined and reveal themselves later on flow-specific paths
+ * where a re-connect prompt is the right recovery.
+ *
+ * Exported for direct spec coverage — the constructor is behind
+ * Angular DI, this helper isn't.
+ */
+export function isValidPersistedWalletInfo(v: unknown): v is WalletInfo {
+  if (!v || typeof v !== 'object') return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.type === 'string' &&
+    o.type in KnownOrdinalWallets &&
+    typeof o.ordinalsAddress === 'string' && o.ordinalsAddress.length > 0 &&
+    typeof o.paymentAddress === 'string' && o.paymentAddress.length > 0
+  );
+}
 
 
 @Injectable({ providedIn: 'root' })
@@ -103,14 +128,42 @@ export class WalletService {
   private accountChangeUnsubscribe: (() => void) | null = null;
 
   constructor() {
-    const lastConnectedWallet = this.storageService.getValue(LAST_CONNECTED_WALLET);
-    if (lastConnectedWallet) {
-      const info: WalletInfo = JSON.parse(lastConnectedWallet);
-      this.connectedWallet$.next(info);
-      // Restore the event subscription so an account-switch fires
-      // even if the user only refreshed the page.
-      this.armAccountChangeSubscription(info.type);
+    const raw = this.storageService.getValue(LAST_CONNECTED_WALLET);
+    if (!raw) return;
+
+    // JSON.parse throws on any malformed payload — truncation caused
+    // by a browser storage-quota event, an out-of-app DevTools mis-
+    // write, an older SDK format that predates the current shape, a
+    // sync-corrupted transfer between browsers. Without the try/catch
+    // the throw propagates out of the Angular DI constructor,
+    // WalletService fails to instantiate, and every component that
+    // injects it fails to render — the app is bricked with a white
+    // page and no visible way to recover. Discard the corrupt entry
+    // and behave as a first-time visitor: the user reconnects, no
+    // support ticket.
+    let info: WalletInfo | null = null;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (isValidPersistedWalletInfo(parsed)) {
+        info = parsed;
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn('[wallet.service] Discarding LAST_CONNECTED_WALLET with unrecognised shape:', parsed);
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[wallet.service] Discarding malformed LAST_CONNECTED_WALLET:', err);
     }
+
+    if (!info) {
+      this.storageService.removeItem(LAST_CONNECTED_WALLET);
+      return;
+    }
+
+    this.connectedWallet$.next(info);
+    // Restore the event subscription so an account-switch fires
+    // even if the user only refreshed the page.
+    this.armAccountChangeSubscription(info.type);
   }
 
   private get win(): WindowLike | undefined {
