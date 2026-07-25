@@ -3020,36 +3020,16 @@ type VerifyListingRejectionReason = 'malformed-signature' | 'unsupported-address
  * Verify a BIP-322 "simple" signature over the canonical listing
  * message, for a P2TR ordinals address.
  *
- * P2TR is the only address type supported in v1 — every wallet the
- * SDK integrates today puts ordinals on taproot, so the caller can
- * always match. If a future wallet ever stores cats on a non-taproot
- * address, add a P2WPKH branch here (BIP-322 for P2WPKH is
- * mechanically similar; only the sighash + verify function change).
- *
- * ### The BIP-322 "simple" verification recipe
- *
- * BIP-322 defines two virtual transactions the signature commits to:
- *
- *   `to_spend`: a synthetic tx with input from an all-zeros outpoint
- *   whose scriptSig is `OP_0 PUSH32 tagged_hash("BIP0322-signed-
- *   message", message)`, and output paying to the signer's address.
- *
- *   `to_sign`: a synthetic tx spending `to_spend[0]`, with a single
- *   `OP_RETURN` output and a witness holding the wallet's signature.
- *
- * For a P2TR key-path spend, the witness stack is a single 64- or
- * 65-byte schnorr signature. The verifier:
- *
- *   1. Rebuilds `to_spend` from the message + signer's script.
- *   2. Rebuilds `to_sign` referencing `to_spend[0]`.
- *   3. Computes the BIP-341 taproot sighash for `to_sign` spending
- *      `to_spend[0]` under the wallet-supplied sighash byte.
- *   4. Runs `schnorr.verify(sig, sighash, xonly_pubkey)` where
- *      `xonly_pubkey` comes from decoding the P2TR address's
- *      witness program (bytes 2..34 of the scriptPubKey).
- *
- * See https://github.com/bitcoin/bips/blob/master/bip-0322.mediawiki
- * for the full spec.
+ * The BIP-322 primitive itself lives in
+ * `../wallet/verify-bip322-signature.ts`; this function is the
+ * listing-shaped wrapper that (a) rebuilds the canonical message
+ * from the listing fields and (b) reuses the shared primitive.
+ * The listing-shape validation (cats-bundle sanity, headline
+ * membership, MAX_ASK_SATS) lives in `buildListingMessage` — a
+ * caller who hands us structurally-broken fields cannot have a
+ * signature that verifies against a canonical rebuild, so we
+ * collapse a build-time throw into the same `signature-does-not-
+ * verify` reason the caller already handles.
  */
 declare function verifyListingSignature(args: {
     fields: ListingMessageFields;

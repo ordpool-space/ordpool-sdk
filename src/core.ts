@@ -99,12 +99,29 @@ export * from './cat21-broadcast/slipstream.helper';
 //     cat21.space, cat21-wallet, and any future consumer). ---
 export * from './cat21-share';
 
-// --- CAT-21 listing (public "cat orderbook" listing shape +
-//     BIP-322 signature verify — anti-fraud layer for the
-//     orderbook. Pure functions, no Angular. ---
+// --- CAT-21 listing (public "cat orderbook" listing shape).
+//     Historical per-listing BIP-322 helpers (buildListingMessage,
+//     verifyListingSignature) are retained for backward compat but
+//     are no longer required by the marketplace flow — CREATE listing
+//     now authenticates via the session-token layer below, same as
+//     DELETE. See workspace CLAUDE.md philosophy: the marketplace
+//     layer is convenience; the tamper-proof record is the PSBT +
+//     Bitcoin as the ledger. ---
 export * from './cat21-listing/cat21-listing.types';
 export * from './cat21-listing/build-listing-message';
 export * from './cat21-listing/verify-listing-signature';
+
+// --- CAT-21 session-token capability layer. Prompts the user for
+//     ONE BIP-322 signature per ~24h; every marketplace mutation
+//     (CREATE listing, DELETE listing, DELETE bid, future capability
+//     endpoints) reuses the cached session token via headers. NOT
+//     used for CREATE bid (PSBT SIGHASH_ALL self-authenticates). ---
+export * from './cat21-session/session-message';
+
+// --- BIP-322 verification primitive. Extracted from
+//     verify-listing-signature.ts so the session guard + any future
+//     capability verifier share exactly one implementation. ---
+export * from './wallet/verify-bip322-signature';
 
 // --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
 export * from './inscribe/inscription-envelope';

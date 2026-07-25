@@ -49,6 +49,8 @@
     "src/cat21-listing/cat21-listing.types.ts",
     "src/cat21-listing/build-listing-message.ts",
     "src/cat21-listing/verify-listing-signature.ts",
+    "src/cat21-session/session-message.ts",
+    "src/wallet/verify-bip322-signature.ts",
     "src/agent-mode/agent-policy.helper.ts",
     "src/agent-mode/agent-policy.types.ts",
     "src/cat21-validation/index.ts",
