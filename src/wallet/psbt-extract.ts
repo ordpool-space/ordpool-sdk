@@ -35,7 +35,39 @@ export function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
   try {
     tx.finalize();
   } catch (e) {
-    if (!/Not enough partial sign/i.test((e as Error).message)) throw e;
+    const detail = e instanceof Error ? e.message : String(e);
+    // Two failure modes look the same to scure ("Not enough partial
+    // sign") but mean opposite things:
+    //   (A) Some wallets (Leather v6.x, Unisat autoFinalized:true)
+    //       return a PSBT where every input already carries a
+    //       `finalScriptWitness`. scure throws because it can't
+    //       find partialSig fields, but the wire tx is complete.
+    //   (B) A different signing path stripped inputs 1..N sigs
+    //       (some wallets don't preserve inputs they didn't sign).
+    //       scure throws for the same reason, but tx.hex would have
+    //       empty witnesses on those inputs — broadcast lands in
+    //       mempool as `mandatory-script-verify-flag-failed`.
+    //
+    // Distinguish by checking which inputs are actually missing a
+    // witness. If none are missing (A), swallow. If any are (B),
+    // re-throw with scure's message plus the input indexes so the
+    // caller can surface something actionable ("your wallet dropped
+    // signatures on input N") instead of a downstream script-verify
+    // failure that looks like our own bug.
+    const missing: number[] = [];
+    for (let i = 0; i < tx.inputsLength; i++) {
+      const input = tx.getInput(i);
+      if (!input.finalScriptWitness || input.finalScriptWitness.length === 0) {
+        missing.push(i);
+      }
+    }
+    if (missing.length > 0) {
+      throw new Error(
+        `PSBT finalize failed on input(s) ${missing.join(', ')} of ${tx.inputsLength}: ${detail}`,
+      );
+    }
+    // All inputs have a witness — the wallet pre-finalized. Ignore
+    // scure's throw and proceed with the wire tx.
   }
   return tx.hex;
 }
