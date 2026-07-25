@@ -67,11 +67,17 @@ export * from './cat21-broadcast/slipstream.helper';
 //     outpoint shape). ---
 export * from './cat21-share';
 
-// --- cat21 listing (public "cat orderbook" listing shape + BIP-322
-//     signature verify — the anti-fraud layer for the orderbook). ---
+// --- cat21 listing (public "cat orderbook" listing shape). Historical
+//     per-listing BIP-322 helpers are retained; the CREATE listing
+//     flow now authenticates via the session-token layer below. ---
 export * from './cat21-listing/cat21-listing.types';
 export * from './cat21-listing/build-listing-message';
 export * from './cat21-listing/verify-listing-signature';
+
+// --- CAT-21 session-token capability layer (BIP-322-authed session
+//     for marketplace mutations). ---
+export * from './cat21-session/session-message';
+export * from './wallet/verify-bip322-signature';
 
 // --- inscribe (commit + reveal pipeline; ord-compatible envelope) ---
 export * from './inscribe/inscription-envelope';
