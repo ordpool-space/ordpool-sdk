@@ -130,41 +130,27 @@ describe('buildCat21TransferPsbt', () => {
     ).toThrow(/Transfer funding insufficient/);
   });
 
-  describe('per-wallet sequence (RBF policy)', () => {
+  describe('RBF policy — always on for transfer, regardless of wallet (2026-07-25 fix)', () => {
 
-    it('cat21wallet → every input sequence = 0xfffffffd (RBF on)', () => {
+    // Transfers run against cats already on chain. A third-party
+    // wallet's accelerate UI producing an RBF replacement without
+    // `lockTime=21` only loses the BONUS mint, not the existing cat.
+    // The mint-only RBF-off gate does NOT apply here (per user rule:
+    // "I only care that cat21 mints are not destroyed"). Every
+    // wallet gets 0xfffffffd so third-party sellers stuck at old
+    // fees can bump.
+
+    it.each([
+      KnownOrdinalWalletType.cat21wallet,
+      KnownOrdinalWalletType.xverse,
+      KnownOrdinalWalletType.unisat,
+      KnownOrdinalWalletType.leather,
+    ])('%s → every input sequence = 0xfffffffd (RBF on)', (walletType) => {
       const tx = btc.Transaction.fromPSBT(
-        buildCat21TransferPsbt(makeBaseArgs({ walletType: KnownOrdinalWalletType.cat21wallet })).psbt
+        buildCat21TransferPsbt(makeBaseArgs({ walletType })).psbt
       );
       for (let i = 0; i < tx.inputsLength; i++) {
         expect(tx.getInput(i).sequence).toBe(0xfffffffd);
-      }
-    });
-
-    it('Xverse → every input sequence = 0xfffffffe (RBF off, third-party defence)', () => {
-      const tx = btc.Transaction.fromPSBT(
-        buildCat21TransferPsbt(makeBaseArgs({ walletType: KnownOrdinalWalletType.xverse })).psbt
-      );
-      for (let i = 0; i < tx.inputsLength; i++) {
-        expect(tx.getInput(i).sequence).toBe(0xfffffffe);
-      }
-    });
-
-    it('Unisat → every input sequence = 0xfffffffe', () => {
-      const tx = btc.Transaction.fromPSBT(
-        buildCat21TransferPsbt(makeBaseArgs({ walletType: KnownOrdinalWalletType.unisat })).psbt
-      );
-      for (let i = 0; i < tx.inputsLength; i++) {
-        expect(tx.getInput(i).sequence).toBe(0xfffffffe);
-      }
-    });
-
-    it('Leather → every input sequence = 0xfffffffe', () => {
-      const tx = btc.Transaction.fromPSBT(
-        buildCat21TransferPsbt(makeBaseArgs({ walletType: KnownOrdinalWalletType.leather })).psbt
-      );
-      for (let i = 0; i < tx.inputsLength; i++) {
-        expect(tx.getInput(i).sequence).toBe(0xfffffffe);
       }
     });
   });

@@ -1,7 +1,7 @@
 import * as btc from '@scure/btc-signer';
 
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
+import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
 import { Network, toScureNetwork } from '../network';
 import { PaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -24,16 +24,13 @@ import {
  */
 export interface BuildCat21BuyOfferArgs {
   /**
-   * The BUYER's wallet type. Determines the input sequence number per
-   * the unified per-wallet RBF policy (`resolveCat21InputSequence`):
-   *   - `cat21wallet`: sequence = 0xfffffffd (RBF on; our accelerate
-   *     flow preserves lockTime=21 through replacement, so signalling
-   *     RBF is safe AND useful).
-   *   - any other wallet: sequence = 0xfffffffe (RBF off; third-party
-   *     accelerate UIs can't fire on this tx and accidentally drop the
-   *     lockTime=21 marker, which would cost the buyer the cherry-on-
-   *     top bonus mint cat).
-   * Matches the mint/transfer flows.
+   * The BUYER's wallet type. Currently unused for sequence-picking —
+   * offers ship with `sequence = 0xfffffffd` (RBF on) for every wallet.
+   * The mint-only RBF-off gate (`resolveCat21MintInputSequence`) is NOT
+   * applied here: the cat is already on chain, so a third-party
+   * accelerate UI dropping `lockTime=21` on an RBF replacement only
+   * loses the bonus mint, not the cat itself. Kept in the type so
+   * consumers keep sending it — future flows may need it.
    */
   walletType: KnownOrdinalWalletType;
   network: Network;
@@ -102,13 +99,17 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
 
   const scureNetwork = toScureNetwork(args.network);
   // Per-wallet RBF sequence — same policy as mint and transfer (audit M4).
-  // cat21-wallet → 0xfffffffd (RBF on; our accelerate flow preserves
-  // lockTime=21). All other wallets → 0xfffffffe (RBF off; third-party
-  // accelerate UIs can't fire and drop the marker, which would cost the
-  // buyer the bonus-mint cat). The @scure default sequence is 0xffffffff
-  // (final); we override explicitly so a future scure change can't drift
-  // the behaviour.
-  const sequenceNumber = resolveCat21InputSequence(args.walletType);
+  // RBF-on (0xfffffffd) for every wallet on offers. The mint-only
+  // RBF-off policy (`resolveCat21MintInputSequence`) does NOT apply
+  // here: the cat is already on chain, so a third-party wallet's
+  // accelerate UI dropping `lockTime=21` on an RBF replacement only
+  // loses the bonus mint, not the cat itself. Third-party sellers
+  // stuck at old fees CAN bump. The @scure default sequence is
+  // 0xffffffff (final); we override explicitly so a future scure
+  // change can't drift the behaviour. Was wrong pre-2026-07-25
+  // (finding #8) — the call resolved to 0xfffffffe for non-cat21wallet
+  // sellers and disabled RBF on the whole tx.
+  const sequenceNumber = CAT21_WALLET_INPUT_SEQUENCE;
   // lockTime = 21 makes the offer-acceptance tx a CAT-21 mint in addition
   // to a transfer: cat21-ord reads tx.lock_time structurally and mints a
   // fresh cat at output 0 (the buyer's receive output), onto the same

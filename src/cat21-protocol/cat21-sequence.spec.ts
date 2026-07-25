@@ -9,7 +9,7 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE,
   CAT21_WALLET_INPUT_SEQUENCE,
-  resolveCat21InputSequence,
+  resolveCat21MintInputSequence,
 } from './cat21-sequence';
 import { buildCat21MintPsbt } from '../cat21-mint/cat21-mint.helper';
 import { createTransaction, getDummyKeypair } from '../cat21-mint/cat21.service.helper';
@@ -19,7 +19,7 @@ const publicKey = hex.decode('03000000000000000000000000000000000000000000000000
 const p2wpkhMainnet = btc.p2wpkh(publicKey, btc.NETWORK);
 const ADDR = p2wpkhMainnet.address!;
 
-describe('resolveCat21InputSequence (single source of truth)', () => {
+describe('resolveCat21MintInputSequence (single source of truth)', () => {
 
   it('exposes the two raw sequence constants', () => {
     expect(CAT21_WALLET_INPUT_SEQUENCE).toBe(0xfffffffd);
@@ -27,7 +27,7 @@ describe('resolveCat21InputSequence (single source of truth)', () => {
   });
 
   it('cat21wallet → 0xfffffffd', () => {
-    expect(resolveCat21InputSequence(KnownOrdinalWalletType.cat21wallet)).toBe(0xfffffffd);
+    expect(resolveCat21MintInputSequence(KnownOrdinalWalletType.cat21wallet)).toBe(0xfffffffd);
   });
 
   it.each([
@@ -35,17 +35,28 @@ describe('resolveCat21InputSequence (single source of truth)', () => {
     KnownOrdinalWalletType.unisat,
     KnownOrdinalWalletType.leather,
   ])('%s → 0xfffffffe', wallet => {
-    expect(resolveCat21InputSequence(wallet)).toBe(0xfffffffe);
+    expect(resolveCat21MintInputSequence(wallet)).toBe(0xfffffffe);
   });
 
-  describe('every cat-flow builder uses the same resolver — no triplication regression', () => {
+  describe('cat-flow builders — mint-only RBF-off, everything else RBF-on', () => {
 
-    // The regression we are pinning: round-2 audit Finding 1 caught
-    // that cat21-mint.helper.ts and cat21-transfer.helper.ts each
-    // shipped their own private walletInputSequence() copy of the
-    // ternary. If a future contributor copies the branch back into
-    // any helper, this spec catches the drift by demanding identical
-    // sequence values on output PSBTs.
+    // The 2026-07-25 code review (finding #8) caught that transfer +
+    // offer were incorrectly applying the mint-only per-wallet RBF
+    // gate — third-party sellers ended up with 0xfffffffe on the cat
+    // input and couldn't bump a stuck fee via their wallet's
+    // accelerate UI. The correct rule: mint (and createTransaction
+    // which builds mints) is the ONLY flow that needs RBF-off for
+    // third-party wallets, because the not-yet-confirmed mint carries
+    // the `lockTime=21` marker that would be dropped on a marker-
+    // ignorant RBF replacement. Post-mint flows (transfer, offer)
+    // run against cats already on chain; the worst RBF outcome is a
+    // missed bonus mint. Third-party sellers CAN bump.
+    //
+    // What this spec pins:
+    //   - mint + createTransaction: sequence == resolveCat21MintInputSequence(wallet)
+    //     (per-wallet: cat21wallet=RBF-on, others=RBF-off)
+    //   - transfer + offer: sequence == CAT21_WALLET_INPUT_SEQUENCE
+    //     (RBF-on for EVERY wallet — no more mint-only gate)
 
     function mintSequence(walletType: KnownOrdinalWalletType): number {
       const tx = btc.Transaction.fromPSBT(
@@ -92,9 +103,9 @@ describe('resolveCat21InputSequence (single source of truth)', () => {
     }
 
     function offerSellerSequence(walletType: KnownOrdinalWalletType): number {
-      // The offer builder applies `resolveCat21InputSequence(walletType)`
-      // per the unified per-wallet RBF policy (audit M4) — same shape as
-      // mint and transfer. cat21wallet → RBF on; everyone else → RBF off.
+      // Offers ship RBF-on for every wallet (2026-07-25). The
+      // walletType arg is still on the type for future use; the
+      // sequence-picking no longer branches on it.
       const tx = btc.Transaction.fromPSBT(
         buildCat21BuyOfferPsbt({
           walletType,
@@ -157,12 +168,20 @@ describe('resolveCat21InputSequence (single source of truth)', () => {
       KnownOrdinalWalletType.xverse,
       KnownOrdinalWalletType.unisat,
       KnownOrdinalWalletType.leather,
-    ])('mint, transfer, offer, AND createTransaction agree on sequence for %s', wallet => {
-      const expected = resolveCat21InputSequence(wallet);
+    ])('mint + createTransaction use the per-wallet mint gate for %s', wallet => {
+      const expected = resolveCat21MintInputSequence(wallet);
       expect(mintSequence(wallet)).toBe(expected);
-      expect(transferSequence(wallet)).toBe(expected);
-      expect(offerSellerSequence(wallet)).toBe(expected);
       expect(createTransactionSequence(wallet)).toBe(expected);
+    });
+
+    it.each([
+      KnownOrdinalWalletType.cat21wallet,
+      KnownOrdinalWalletType.xverse,
+      KnownOrdinalWalletType.unisat,
+      KnownOrdinalWalletType.leather,
+    ])('transfer + offer use RBF-on unconditionally for %s (no mint-only gate)', wallet => {
+      expect(transferSequence(wallet)).toBe(CAT21_WALLET_INPUT_SEQUENCE);
+      expect(offerSellerSequence(wallet)).toBe(CAT21_WALLET_INPUT_SEQUENCE);
     });
   });
 });

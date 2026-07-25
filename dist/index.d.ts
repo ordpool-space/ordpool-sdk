@@ -309,38 +309,51 @@ interface LeatherStxAddress {
 }
 
 /**
- * RBF-signalling. Used by every CAT-21 tx Cat21 Wallet builds (mint,
- * transfer, and any future cat-flow). Our own accelerate code path is
- * required to preserve `lockTime=21` through any RBF replacement
- * (cat21-wallet HARD RULE #1), so signalling RBF is safe AND useful —
- * users can bump a stuck fee without rebuilding the transaction.
+ * RBF-signalling sequence. Used on every input that comes from a
+ * `cat21wallet` signer AND on ALL cat inputs for transfer + offer
+ * flows regardless of wallet — see the scope note below.
+ *
+ * Our own accelerate code path is required to preserve `lockTime=21`
+ * through any RBF replacement (cat21-wallet HARD RULE #1), so
+ * signalling RBF is safe AND useful: users bump a stuck fee without
+ * rebuilding the transaction.
  */
 declare const CAT21_WALLET_INPUT_SEQUENCE = 4294967293;
 /**
- * Non-RBF. Used for every CAT-21 mint signed by a third-party wallet
- * (Xverse, Unisat, Leather, OKX, Oyl, Wizz, Phantom, Alby, …). Locks
- * their accelerate UI out of touching the marker — the 2024 Xverse
- * incident defence. (Note: only the MINT path applies this gate;
- * transfers and offers allow RBF for everyone, since cats are
- * immutable once on chain and the worst third-party-RBF outcome is a
- * missed bonus mint, not a cat loss.)
+ * Non-RBF sequence. ONLY used on CAT-21 MINT inputs signed by a
+ * third-party wallet (Xverse, Unisat, Leather, OKX, Oyl, Wizz,
+ * Phantom, Alby, …). Locks their accelerate UI out of touching a
+ * mint tx — the 2024 Xverse incident defence: a third-party wallet's
+ * fee-bump flow would build a replacement without `lockTime=21`,
+ * burning the not-yet-confirmed mint.
+ *
+ * Transfers, offers, and any other post-mint cat-flow do NOT use
+ * this value — the cat is already on chain, so the worst
+ * third-party-RBF outcome is a missed bonus mint, not a cat loss.
  */
 declare const CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE = 4294967294;
 /**
- * Single source of truth for the per-wallet input sequence on any
- * cat-touching tx OUR code builds. The mint, transfer, and any future
- * cat-flow builder MUST import this helper, NEVER re-implement the
- * ternary. The SDK CLAUDE.md "CAT-21 mints — RBF policy (per-wallet)"
- * rule is enforced at exactly ONE place: this function.
+ * MINT-ONLY sequence resolver — do NOT call from transfer / offer /
+ * any other cat-flow builder. Every cat-flow builder except mint
+ * uses `CAT21_WALLET_INPUT_SEQUENCE` (RBF-on) unconditionally.
  *
- * The value `21` (lockTime) has no consensus meaning — block 21 was
- * mined in 2009, so the constraint is trivially satisfied no matter
- * when the tx lands. The field is repurposed as protocol-marker data
- * that cat21-ord reads structurally. The sequence choice gates which
- * wallets' fee-bump UI fires on the broadcast tx; that's the real
- * protection axis.
+ * The mint case is special because the not-yet-confirmed mint tx
+ * carries the `lockTime=21` protocol marker — an RBF replacement
+ * built by a third-party wallet's accelerate UI would DROP the
+ * marker (that wallet doesn't know about cats). Every other
+ * cat-touching tx runs against a cat that's already on chain; a
+ * marker-less RBF replacement there only loses a bonus mint. That's
+ * "user's pity" territory (see workspace CLAUDE.md), NOT a fund
+ * loss, so we don't degrade the RBF UX for third-party sellers /
+ * transferers to prevent it.
+ *
+ * The SDK's CAT-21 RBF-policy HARD RULE is enforced at exactly ONE
+ * place: this function. Renaming it away from the generic
+ * `resolveCat21InputSequence` is deliberate — the old name was a
+ * footgun; transfer + offer got wired to it and the RBF-off leak
+ * only surfaced in the 2026-07-25 code review (finding #8).
  */
-declare function resolveCat21InputSequence(walletType: KnownOrdinalWalletType): number;
+declare function resolveCat21MintInputSequence(walletType: KnownOrdinalWalletType): number;
 
 /**
  * Address-format detection and Bitcoin dust-floor helpers.
@@ -1728,16 +1741,13 @@ type Cat21OfferValidation = Cat21OfferValidationResult | Cat21OfferValidationFai
  */
 interface BuildCat21BuyOfferArgs {
     /**
-     * The BUYER's wallet type. Determines the input sequence number per
-     * the unified per-wallet RBF policy (`resolveCat21InputSequence`):
-     *   - `cat21wallet`: sequence = 0xfffffffd (RBF on; our accelerate
-     *     flow preserves lockTime=21 through replacement, so signalling
-     *     RBF is safe AND useful).
-     *   - any other wallet: sequence = 0xfffffffe (RBF off; third-party
-     *     accelerate UIs can't fire on this tx and accidentally drop the
-     *     lockTime=21 marker, which would cost the buyer the cherry-on-
-     *     top bonus mint cat).
-     * Matches the mint/transfer flows.
+     * The BUYER's wallet type. Currently unused for sequence-picking —
+     * offers ship with `sequence = 0xfffffffd` (RBF on) for every wallet.
+     * The mint-only RBF-off gate (`resolveCat21MintInputSequence`) is NOT
+     * applied here: the cat is already on chain, so a third-party
+     * accelerate UI dropping `lockTime=21` on an RBF replacement only
+     * loses the bonus mint, not the cat itself. Kept in the type so
+     * consumers keep sending it — future flows may need it.
      */
     walletType: KnownOrdinalWalletType;
     network: Network;
@@ -3338,7 +3348,7 @@ declare function encodeParentInscriptionId(inscriptionId: string): Uint8Array;
  *   2. The commit transaction has:
  *        - 1 funding input (caller-supplied UTXO; user's wallet
  *          signs). Sequence is wallet-specific via
- *          `resolveCat21InputSequence(walletType)`: 0xfffffffd for
+ *          `resolveCat21MintInputSequence(walletType)`: 0xfffffffd for
  *          cat21wallet (RBF allowed; our wallet preserves
  *          lockTime=21 through replacement), 0xfffffffe for every
  *          third-party wallet (RBF disabled; locks accelerate UIs
@@ -3415,7 +3425,7 @@ interface InscribeCommitArgs {
     tipValueSats?: number;
     /**
      * Which wallet will sign the commit PSBT. Drives the funding
-     * input's sequence number via `resolveCat21InputSequence`:
+     * input's sequence number via `resolveCat21MintInputSequence`:
      *   - `cat21wallet`: 0xfffffffd (RBF-allowed; our wallet preserves
      *     `lockTime=21` through any replacement).
      *   - any other wallet (default): 0xfffffffe (non-RBF; locks
@@ -4420,5 +4430,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21InputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyBip322Signature, verifyListingSignature };
 export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeMintState, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };

@@ -2,7 +2,7 @@ import * as btc from '@scure/btc-signer';
 
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
-import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
+import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   Cat21TransferCatInput,
@@ -88,7 +88,13 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);
-  const sequence = resolveCat21InputSequence(args.walletType);
+  // RBF-on for every wallet on transfers. The mint-only RBF-off policy
+  // (`resolveCat21MintInputSequence`) does NOT apply here: the cat is
+  // already on chain, so a third-party wallet's accelerate UI dropping
+  // `lockTime=21` on an RBF replacement only loses the bonus mint, not
+  // the cat itself. Third-party wallets stuck at old fees CAN bump. Was
+  // wrong pre-2026-07-25; see cat21-sequence.ts docstring.
+  const sequence = CAT21_WALLET_INPUT_SEQUENCE;
 
   const tx = new btc.Transaction({
     lockTime: 21,

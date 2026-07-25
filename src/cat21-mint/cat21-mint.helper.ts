@@ -3,7 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
+import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}. The canonical constant lives in
@@ -137,7 +137,7 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   if (tipValueSats < 0) throw new Error('tip.valueSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);
-  const sequence = resolveCat21InputSequence(args.walletType);
+  const sequence = resolveCat21MintInputSequence(args.walletType);
 
   const tx = new btc.Transaction({
     lockTime: 21,

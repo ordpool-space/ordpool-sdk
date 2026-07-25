@@ -5,7 +5,7 @@
  *   - `CAT21_POSTAGE_SATS` — cat UTXO is always 546 sats (HARD RULE).
  *   - `CAT21_LOCK_TIME` + `assertCat21LockTime` — every cat-touching
  *     tx OUR code builds carries `nLockTime = 21`.
- *   - `resolveCat21InputSequence` + the two sequence constants — the
+ *   - `resolveCat21MintInputSequence` + the two sequence constants — the
  *     per-wallet RBF policy (cat21wallet → RBF on, every other
  *     wallet → RBF off).
  */

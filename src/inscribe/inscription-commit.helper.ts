@@ -1,7 +1,7 @@
 import * as btc from '@scure/btc-signer';
 
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { resolveCat21InputSequence } from '../cat21-protocol/cat21-sequence';
+import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
@@ -26,7 +26,7 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
  *   2. The commit transaction has:
  *        - 1 funding input (caller-supplied UTXO; user's wallet
  *          signs). Sequence is wallet-specific via
- *          `resolveCat21InputSequence(walletType)`: 0xfffffffd for
+ *          `resolveCat21MintInputSequence(walletType)`: 0xfffffffd for
  *          cat21wallet (RBF allowed; our wallet preserves
  *          lockTime=21 through replacement), 0xfffffffe for every
  *          third-party wallet (RBF disabled; locks accelerate UIs
@@ -105,7 +105,7 @@ export interface InscribeCommitArgs {
   tipValueSats?: number;
   /**
    * Which wallet will sign the commit PSBT. Drives the funding
-   * input's sequence number via `resolveCat21InputSequence`:
+   * input's sequence number via `resolveCat21MintInputSequence`:
    *   - `cat21wallet`: 0xfffffffd (RBF-allowed; our wallet preserves
    *     `lockTime=21` through any replacement).
    *   - any other wallet (default): 0xfffffffe (non-RBF; locks
@@ -201,7 +201,17 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   // Default to a non-cat21wallet sentinel so the sequence resolves to
   // the safer non-RBF value (0xfffffffe). Standalone callers get the
   // correct behaviour without having to learn the per-wallet rule.
-  const sequence = resolveCat21InputSequence(args.walletType ?? KnownOrdinalWalletType.xverse);
+  //
+  // NOTE: this is a DIFFERENT reason for RBF-off than the mint case.
+  // On mint, a third-party accelerate would drop `lockTime=21` and
+  // burn the cat. On inscribe commit, an RBF replacement changes the
+  // commit's inputs → its txid changes → the pre-built reveal (which
+  // references the SIMULATION commit txid) becomes invalid and the
+  // postage locks in an output nobody can spend (the ephemeral reveal
+  // key is not returned to the caller). Both cases warrant RBF-off
+  // for third-party wallets; the "mint" in the resolver's name refers
+  // to the CAT-flow rule, but the same value happens to protect us here.
+  const sequence = resolveCat21MintInputSequence(args.walletType ?? KnownOrdinalWalletType.xverse);
 
   // Funding input shape mirrors the cat21 mint adapter: witnessUtxo
   // for SegWit, nonWitnessUtxo for P2PKH legacy, plus per-address-
