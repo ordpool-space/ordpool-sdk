@@ -1739,8 +1739,20 @@ interface Cat21OfferDestinations {
     /** Where buyer change goes (when above dust). */
     buyerChangeAddress: string;
 }
-/** Reasons a seller-side validator may reject an inbound offer PSBT. */
-type Cat21OfferRejectionReason = 'missing-seller-input' | 'wrong-postage' | 'wrong-price' | 'wrong-seller-input-value' | 'sighash-not-all' | 'sighash-flag-byte-not-all' | 'buyer-input-unsigned' | 'missing-seller-payment-output' | 'payment-output-wrong-address' | 'cat-output-not-spendable';
+/**
+ * Reasons the buy-offer validator may reject an inbound PSBT.
+ *
+ * Split by audience:
+ *   - Seller-side: caller cares that the deal they'd sign matches the
+ *     deal they think they're signing (input 0, seller payment, sighash,
+ *     etc.). These fire whether or not any buyer-side expectation is
+ *     supplied.
+ *   - Marketplace / buyer-side: `cat-output-wrong-address`,
+ *     `change-output-wrong-address`, `wrong-price-exact` only fire when
+ *     the corresponding `expected*` arg is supplied. A bare seller-side
+ *     caller (no marketplace context) never sees them.
+ */
+type Cat21OfferRejectionReason = 'missing-seller-input' | 'wrong-postage' | 'wrong-price' | 'wrong-price-exact' | 'wrong-seller-input-value' | 'sighash-not-all' | 'sighash-flag-byte-not-all' | 'buyer-input-unsigned' | 'missing-seller-payment-output' | 'payment-output-wrong-address' | 'cat-output-not-spendable' | 'cat-output-wrong-address' | 'change-output-wrong-address';
 interface Cat21OfferValidationResult {
     ok: true;
     pricePaidSats: number;
@@ -1857,6 +1869,29 @@ interface ValidateCat21BuyOfferArgs {
      * Defaults to mainnet. Callers signing on testnet/regtest must pass it.
      */
     network?: Network;
+    /**
+     * Optional. Marketplace-side check: when supplied, Output 0's script
+     * is decoded and compared. Rejects with `cat-output-wrong-address` on
+     * mismatch. A bare seller-side caller (no marketplace context) can
+     * omit this; a marketplace indexer verifying "buyer signed for the
+     * cat to go where their DTO claims" should always pass it.
+     */
+    expectedBuyerReceiveAddress?: OrdinalsAddress;
+    /**
+     * Optional. Marketplace-side check: when supplied AND Output 2
+     * exists, Output 2's script is decoded and compared. Rejects with
+     * `change-output-wrong-address` on mismatch. A tx with no Output 2
+     * (buyer had no change) passes even when this arg is set.
+     */
+    expectedBuyerChangeAddress?: PaymentAddress;
+    /**
+     * Optional. Marketplace-side check: when supplied, tightens the
+     * existing floor-based `pricePaidSats >= floorPriceSats` gate to an
+     * EXACT equality (`pricePaidSats === expectedExactPrice`). Rejects
+     * with `wrong-price-exact` on mismatch. Use when the buyer's DTO
+     * declared a specific price and any deviation is signature drift.
+     */
+    expectedExactPrice?: number;
 }
 /**
  * Validates the on-the-wire shape of an inbound buy-offer PSBT.
@@ -1875,13 +1910,27 @@ interface ValidateCat21BuyOfferArgs {
  *      commits to its sighash).
  *   3. Every input 1..N carries a buyer signature (partialSig,
  *      tapKeySig, or finalScriptWitness).
- *   4. Output 0 (cat) postage ≥ configured minimum.
+ *   4. Output 0 (cat) postage ≥ configured minimum, script decodable.
  *   5. Output 1 (seller payment) ≥ floor price.
  *   6. When `expectedSellerPaymentAddress` is supplied, Output 1's
  *      script is decoded and compared. Strongly recommended whenever
  *      a human eventually signs — the validator is the single source
  *      of truth and can't delegate to a UI layer that may or may
  *      not exist.
+ *
+ * Optional marketplace-side gates (only fire when the corresponding
+ * `expected*` arg is supplied):
+ *
+ *   7. `expectedBuyerReceiveAddress` — Output 0's decoded address must
+ *      match. Rejects `cat-output-wrong-address` on mismatch. Catches
+ *      "buyer signed for the cat to go somewhere other than the
+ *      address their marketplace DTO claims".
+ *   8. `expectedBuyerChangeAddress` — Output 2's decoded address, when
+ *      Output 2 exists, must match. Rejects `change-output-wrong-address`.
+ *      Silent (no failure) when the tx has no Output 2.
+ *   9. `expectedExactPrice` — tightens the floor gate to exact equality.
+ *      Rejects `wrong-price-exact` on any deviation. Use when the DTO
+ *      declared a specific price and drift means signature tampering.
  */
 declare function validateCat21BuyOfferPsbt(args: ValidateCat21BuyOfferArgs): Cat21OfferValidation;
 

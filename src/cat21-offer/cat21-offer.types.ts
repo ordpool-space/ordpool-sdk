@@ -56,18 +56,33 @@ export interface Cat21OfferDestinations {
   buyerChangeAddress: string;
 }
 
-/** Reasons a seller-side validator may reject an inbound offer PSBT. */
+/**
+ * Reasons the buy-offer validator may reject an inbound PSBT.
+ *
+ * Split by audience:
+ *   - Seller-side: caller cares that the deal they'd sign matches the
+ *     deal they think they're signing (input 0, seller payment, sighash,
+ *     etc.). These fire whether or not any buyer-side expectation is
+ *     supplied.
+ *   - Marketplace / buyer-side: `cat-output-wrong-address`,
+ *     `change-output-wrong-address`, `wrong-price-exact` only fire when
+ *     the corresponding `expected*` arg is supplied. A bare seller-side
+ *     caller (no marketplace context) never sees them.
+ */
 export type Cat21OfferRejectionReason =
   | 'missing-seller-input'
   | 'wrong-postage'
   | 'wrong-price'
+  | 'wrong-price-exact'
   | 'wrong-seller-input-value'
   | 'sighash-not-all'
   | 'sighash-flag-byte-not-all'
   | 'buyer-input-unsigned'
   | 'missing-seller-payment-output'
   | 'payment-output-wrong-address'
-  | 'cat-output-not-spendable';
+  | 'cat-output-not-spendable'
+  | 'cat-output-wrong-address'
+  | 'change-output-wrong-address';
 
 export interface Cat21OfferValidationResult {
   ok: true;

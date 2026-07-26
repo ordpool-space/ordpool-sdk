@@ -4,7 +4,7 @@ import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
 import { attachDummyBuyerSig } from '../testing/fixtures';
-import { toPaymentAddress } from '../wallet/address-types';
+import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   BuildCat21BuyOfferArgs,
@@ -846,6 +846,234 @@ describe('validateCat21BuyOfferPsbt', () => {
         })
       );
       expect(result.buyerInputTotalSats).toBe(50_000);
+    });
+  });
+
+  describe('Finding #15 — marketplace-side expected* args', () => {
+
+    // The three optional args let a marketplace indexer (cat21-indexer's
+    // BidsService today, any future consumer) delegate the "does the
+    // PSBT match the DTO the buyer sent" check to the SDK validator
+    // instead of maintaining its own parallel implementation.
+
+    const attachBuyerSig = (psbtBytes: Uint8Array) => attachDummyBuyerSig(psbtBytes, publicKey);
+    const buyerReceive = p2wpkhTestnet.address!;
+    const otherAddr = btc.p2tr(publicKey.slice(1, 33), undefined, btc.TEST_NETWORK).address!;
+
+    describe('expectedBuyerReceiveAddress (Output 0 address gate)', () => {
+
+      it('accepts when Output 0 pays the expected buyer receive address', () => {
+        const args = makeBaseArgs({
+          destinations: {
+            buyerReceiveAddress: buyerReceive,
+            sellerPaymentAddress: p2wpkhTestnet.address!,
+            buyerChangeAddress: p2wpkhTestnet.address!,
+          },
+        });
+        const built = buildCat21BuyOfferPsbt(args);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 21_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          expectedBuyerReceiveAddress: toOrdinalsAddress(buyerReceive),
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(true);
+      });
+
+      it('rejects cat-output-wrong-address when Output 0 pays a different address', () => {
+        const args = makeBaseArgs({
+          destinations: {
+            buyerReceiveAddress: buyerReceive,
+            sellerPaymentAddress: p2wpkhTestnet.address!,
+            buyerChangeAddress: p2wpkhTestnet.address!,
+          },
+        });
+        const built = buildCat21BuyOfferPsbt(args);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 21_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          expectedBuyerReceiveAddress: toOrdinalsAddress(otherAddr),
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.reason).toBe('cat-output-wrong-address');
+          expect(result.detail).toContain(otherAddr);
+          expect(result.detail).toContain(buyerReceive);
+        }
+      });
+
+      it('pass-through: when omitted, cat output address is not checked', () => {
+        const args = makeBaseArgs();
+        const built = buildCat21BuyOfferPsbt(args);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 21_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          network: Network.Testnet3,
+          // expectedBuyerReceiveAddress deliberately absent
+        });
+        expect(result.ok).toBe(true);
+      });
+    });
+
+    describe('expectedBuyerChangeAddress (Output 2 address gate)', () => {
+
+      it('accepts when Output 2 pays the expected buyer change address', () => {
+        const args = makeBaseArgs({
+          destinations: {
+            buyerReceiveAddress: p2wpkhTestnet.address!,
+            sellerPaymentAddress: p2wpkhTestnet.address!,
+            buyerChangeAddress: buyerReceive,
+          },
+        });
+        const built = buildCat21BuyOfferPsbt(args);
+        // Base args yield 27_454 change → Output 2 is emitted.
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 21_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          expectedBuyerChangeAddress: toPaymentAddress(buyerReceive),
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(true);
+      });
+
+      it('rejects change-output-wrong-address when Output 2 pays a different address', () => {
+        const args = makeBaseArgs({
+          destinations: {
+            buyerReceiveAddress: p2wpkhTestnet.address!,
+            sellerPaymentAddress: p2wpkhTestnet.address!,
+            buyerChangeAddress: buyerReceive,
+          },
+        });
+        const built = buildCat21BuyOfferPsbt(args);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 21_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          expectedBuyerChangeAddress: toPaymentAddress(otherAddr),
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.reason).toBe('change-output-wrong-address');
+      });
+
+      it('silent pass when the PSBT has no Output 2 (buyer had no change)', () => {
+        // Under-fund the buyer so change is sub-dust and absorbed → 2 outputs only.
+        const args = makeBaseArgs({
+          destinations: {
+            buyerReceiveAddress: p2wpkhTestnet.address!,
+            sellerPaymentAddress: p2wpkhTestnet.address!,
+            buyerChangeAddress: buyerReceive,
+          },
+          buyerInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 22_646, // 100 change → sub-dust → absorbed
+              scriptPubKey: p2wpkhTestnet.script,
+            },
+          ],
+        });
+        const built = buildCat21BuyOfferPsbt(args);
+        expect(btc.Transaction.fromPSBT(built.psbt).outputsLength).toBe(2);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 21_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          expectedBuyerChangeAddress: toPaymentAddress(otherAddr),
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(true);
+      });
+
+      it('pass-through: when omitted, change output address is not checked', () => {
+        const args = makeBaseArgs();
+        const built = buildCat21BuyOfferPsbt(args);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 21_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(true);
+      });
+    });
+
+    describe('expectedExactPrice (tightens floor to equality)', () => {
+
+      it('accepts when pricePaidSats exactly equals expectedExactPrice', () => {
+        const args = makeBaseArgs({ priceSats: 21_000 });
+        const built = buildCat21BuyOfferPsbt(args);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 0,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          expectedExactPrice: 21_000,
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(true);
+      });
+
+      it('rejects wrong-price-exact when pricePaidSats differs by even 1 sat', () => {
+        const args = makeBaseArgs({ priceSats: 21_000 });
+        const built = buildCat21BuyOfferPsbt(args);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 0,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          expectedExactPrice: 21_001,
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(false);
+        if (!result.ok) {
+          expect(result.reason).toBe('wrong-price-exact');
+          expect(result.detail).toContain('21000');
+          expect(result.detail).toContain('21001');
+        }
+      });
+
+      it('floor check still fires first (wrong-price beats wrong-price-exact when floor is violated)', () => {
+        const args = makeBaseArgs({ priceSats: 21_000 });
+        const built = buildCat21BuyOfferPsbt(args);
+        // floorPriceSats=25_000 → floor check trips before exact check.
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 25_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          expectedExactPrice: 21_000,
+          network: Network.Testnet3,
+        });
+        expect(result.ok).toBe(false);
+        if (!result.ok) expect(result.reason).toBe('wrong-price');
+      });
+
+      it('pass-through: when omitted, only the floor gate applies', () => {
+        const args = makeBaseArgs({ priceSats: 21_000 });
+        const built = buildCat21BuyOfferPsbt(args);
+        const result = validateCat21BuyOfferPsbt({
+          psbt: attachBuyerSig(built.psbt),
+          expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+          floorPriceSats: 21_000,
+          expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+          network: Network.Testnet3,
+          // expectedExactPrice deliberately absent → floor semantics stand
+        });
+        expect(result.ok).toBe(true);
+      });
     });
   });
 });

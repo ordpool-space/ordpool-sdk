@@ -4,7 +4,7 @@ import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
 import { getMinimumUtxoSize } from '../cat21-script/address-format';
 import { Network, toScureNetwork } from '../network';
-import { PaymentAddress } from '../wallet/address-types';
+import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   CAT21_OFFER_POSTAGE_SATS,
@@ -289,6 +289,29 @@ export interface ValidateCat21BuyOfferArgs {
    * Defaults to mainnet. Callers signing on testnet/regtest must pass it.
    */
   network?: Network;
+  /**
+   * Optional. Marketplace-side check: when supplied, Output 0's script
+   * is decoded and compared. Rejects with `cat-output-wrong-address` on
+   * mismatch. A bare seller-side caller (no marketplace context) can
+   * omit this; a marketplace indexer verifying "buyer signed for the
+   * cat to go where their DTO claims" should always pass it.
+   */
+  expectedBuyerReceiveAddress?: OrdinalsAddress;
+  /**
+   * Optional. Marketplace-side check: when supplied AND Output 2
+   * exists, Output 2's script is decoded and compared. Rejects with
+   * `change-output-wrong-address` on mismatch. A tx with no Output 2
+   * (buyer had no change) passes even when this arg is set.
+   */
+  expectedBuyerChangeAddress?: PaymentAddress;
+  /**
+   * Optional. Marketplace-side check: when supplied, tightens the
+   * existing floor-based `pricePaidSats >= floorPriceSats` gate to an
+   * EXACT equality (`pricePaidSats === expectedExactPrice`). Rejects
+   * with `wrong-price-exact` on mismatch. Use when the buyer's DTO
+   * declared a specific price and any deviation is signature drift.
+   */
+  expectedExactPrice?: number;
 }
 
 /**
@@ -308,13 +331,27 @@ export interface ValidateCat21BuyOfferArgs {
  *      commits to its sighash).
  *   3. Every input 1..N carries a buyer signature (partialSig,
  *      tapKeySig, or finalScriptWitness).
- *   4. Output 0 (cat) postage ≥ configured minimum.
+ *   4. Output 0 (cat) postage ≥ configured minimum, script decodable.
  *   5. Output 1 (seller payment) ≥ floor price.
  *   6. When `expectedSellerPaymentAddress` is supplied, Output 1's
  *      script is decoded and compared. Strongly recommended whenever
  *      a human eventually signs — the validator is the single source
  *      of truth and can't delegate to a UI layer that may or may
  *      not exist.
+ *
+ * Optional marketplace-side gates (only fire when the corresponding
+ * `expected*` arg is supplied):
+ *
+ *   7. `expectedBuyerReceiveAddress` — Output 0's decoded address must
+ *      match. Rejects `cat-output-wrong-address` on mismatch. Catches
+ *      "buyer signed for the cat to go somewhere other than the
+ *      address their marketplace DTO claims".
+ *   8. `expectedBuyerChangeAddress` — Output 2's decoded address, when
+ *      Output 2 exists, must match. Rejects `change-output-wrong-address`.
+ *      Silent (no failure) when the tx has no Output 2.
+ *   9. `expectedExactPrice` — tightens the floor gate to exact equality.
+ *      Rejects `wrong-price-exact` on any deviation. Use when the DTO
+ *      declared a specific price and drift means signature tampering.
  */
 export function validateCat21BuyOfferPsbt(
   args: ValidateCat21BuyOfferArgs
@@ -471,10 +508,23 @@ export function validateCat21BuyOfferPsbt(
   if (!catOutput.script) {
     return fail('cat-output-not-spendable', 'cat output has no scriptPubKey');
   }
+  let catOutputAddress: string;
   try {
-    btc.Address(scureNetwork).encode(btc.OutScript.decode(catOutput.script));
+    catOutputAddress = btc.Address(scureNetwork).encode(btc.OutScript.decode(catOutput.script));
   } catch {
     return fail('cat-output-not-spendable', 'cat output scriptPubKey not a real address');
+  }
+
+  // 4c. Marketplace-side: cat output address must match the buyer's
+  //     declared receive address. Only runs when the caller supplies
+  //     `expectedBuyerReceiveAddress` (marketplace indexer path).
+  if (args.expectedBuyerReceiveAddress !== undefined) {
+    if (!addressesEquivalent(catOutputAddress, args.expectedBuyerReceiveAddress, args.network ?? Network.Mainnet)) {
+      return fail(
+        'cat-output-wrong-address',
+        `expected ${args.expectedBuyerReceiveAddress}, got ${catOutputAddress}`,
+      );
+    }
   }
 
   const paymentOutput = tx.getOutput(1);
@@ -516,6 +566,41 @@ export function validateCat21BuyOfferPsbt(
   const pricePaidSats = paymentOutputValue - sellerInputValueSats;
   if (pricePaidSats < args.floorPriceSats) {
     return fail('wrong-price', `${pricePaidSats} < ${args.floorPriceSats}`);
+  }
+
+  // 6b. Marketplace-side: exact-price match. Runs only when the caller
+  //     supplies `expectedExactPrice`. Catches "buyer's DTO claims price
+  //     X but the PSBT actually pays X±Δ" — signature drift or
+  //     mislabelled bid.
+  if (args.expectedExactPrice !== undefined && pricePaidSats !== args.expectedExactPrice) {
+    return fail(
+      'wrong-price-exact',
+      `pricePaidSats=${pricePaidSats} !== expected ${args.expectedExactPrice}`,
+    );
+  }
+
+  // 7. Marketplace-side: Output 2 (buyer change) must go to the
+  //     declared buyer change address. When the PSBT has no Output 2
+  //     (buyer had no change), this check silently passes — a
+  //     no-change tx is a valid shape. Only runs when the caller
+  //     supplies `expectedBuyerChangeAddress`.
+  if (args.expectedBuyerChangeAddress !== undefined && tx.outputsLength >= 3) {
+    const changeOutput = tx.getOutput(2);
+    if (!changeOutput.script) {
+      return fail('change-output-wrong-address', 'change output has no scriptPubKey');
+    }
+    let changeAddress: string;
+    try {
+      changeAddress = btc.Address(scureNetwork).encode(btc.OutScript.decode(changeOutput.script));
+    } catch {
+      return fail('change-output-wrong-address', 'change output scriptPubKey not a real address');
+    }
+    if (!addressesEquivalent(changeAddress, args.expectedBuyerChangeAddress, args.network ?? Network.Mainnet)) {
+      return fail(
+        'change-output-wrong-address',
+        `expected ${args.expectedBuyerChangeAddress}, got ${changeAddress}`,
+      );
+    }
   }
 
   return { ok: true, pricePaidSats, postageSats };
