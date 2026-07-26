@@ -96,4 +96,11 @@ export type AgentPolicyDenyReason =
   | 'spend-above-daily-cap'
   | 'fee-rate-above-ceiling'
   | 'price-below-floor'
-  | 'counterparty-not-allowed';
+  | 'counterparty-not-allowed'
+  // Shape rejection — any numeric field on `AgentPolicy` or
+  // `AgentActionContext` that isn't a finite, non-negative number.
+  // Catches NaN (which silently bypasses every > comparison since
+  // NaN > anything === false), ±Infinity, and negative values (spend
+  // sats can't be negative by definition). Same reason for policy
+  // fields AND action fields — the `detail` string names which one.
+  | 'malformed-numeric-field';

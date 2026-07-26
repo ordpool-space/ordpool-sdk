@@ -8560,6 +8560,30 @@ function evaluateAgentPolicy(policy, action) {
     if (!policy.enabled) {
         return deny('agent-disabled');
     }
+    // Shape guards. NaN silently bypasses every `>` comparison below
+    // (`NaN > anything === false`), so a caller that hands us
+    // `spendSats: NaN` — an LLM tool-call that parsed a bad number,
+    // a division-by-zero, a JSON-stringified undefined — sails through
+    // the gate. ±Infinity and negatives are also nonsense for sat
+    // amounts / fee rates. Reject on shape before the value comparisons
+    // so the gate has no bypass on malformed input.
+    //
+    // BOTH sides — action AND policy — need the guard: a broken policy
+    // (e.g. `maxSpendPerActionSats: NaN` from a corrupted Redux state)
+    // is arguably worse than a broken action.
+    const shapeFail = ensureFiniteNonNeg('action.spendSats', action.spendSats)
+        ?? ensureFiniteNonNeg('action.spentTodaySats', action.spentTodaySats)
+        ?? ensureFiniteNonNeg('action.feeRateSatPerVbyte', action.feeRateSatPerVbyte)
+        ?? ensureFiniteNonNeg('policy.maxSpendPerActionSats', policy.maxSpendPerActionSats)
+        ?? ensureFiniteNonNeg('policy.dailyCapSats', policy.dailyCapSats)
+        ?? ensureFiniteNonNeg('policy.maxFeeRateSatPerVbyte', policy.maxFeeRateSatPerVbyte)
+        ?? ensureFiniteNonNeg('policy.floorPriceSatsPerCat', policy.floorPriceSatsPerCat)
+        ?? (action.kind === 'cat21_accept_offer' || action.kind === 'cat21_create_offer'
+            // receivePriceSats is optional; when present it must be well-shaped.
+            ? ensureFiniteNonNeg('action.receivePriceSats', action.receivePriceSats ?? 0)
+            : null);
+    if (shapeFail !== null)
+        return shapeFail;
     if (action.spendSats > policy.maxSpendPerActionSats) {
         return deny('spend-above-action-cap', `${action.spendSats} > ${policy.maxSpendPerActionSats}`);
     }
@@ -8581,6 +8605,17 @@ function evaluateAgentPolicy(policy, action) {
         return deny('counterparty-not-allowed', action.counterpartyAddress);
     }
     return { allowed: true };
+}
+/**
+ * Returns a deny decision when `value` isn't a finite, non-negative
+ * number; returns null on ok. Callers chain via `??` to fail fast
+ * on the first bad field.
+ */
+function ensureFiniteNonNeg(fieldName, value) {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+        return deny('malformed-numeric-field', `${fieldName} must be a finite non-negative number; got ${String(value)}`);
+    }
+    return null;
 }
 function deny(reason, detail) {
     return { allowed: false, reason, detail };

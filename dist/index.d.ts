@@ -4397,7 +4397,7 @@ type AgentPolicyDecision = {
     reason: AgentPolicyDenyReason;
     detail?: string;
 };
-type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spend-above-daily-cap' | 'fee-rate-above-ceiling' | 'price-below-floor' | 'counterparty-not-allowed';
+type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spend-above-daily-cap' | 'fee-rate-above-ceiling' | 'price-below-floor' | 'counterparty-not-allowed' | 'malformed-numeric-field';
 
 /**
  * Pure-functional policy gate for agent-mode autonomous CAT-21 actions.

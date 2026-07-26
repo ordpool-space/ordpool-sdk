@@ -376,4 +376,81 @@ describe('evaluateAgentPolicy', () => {
       ).toEqual({ allowed: true });
     });
   });
+
+  // The 2026-07-25 code review (finding #10) caught that every `>`
+  // comparison in this gate silently returns false for NaN, so a
+  // caller that hands us `spendSats: NaN` sails through. Same class
+  // of bug for Infinity and negatives. These specs pin the shape
+  // rejection at the top of the gate.
+  describe('Finding #10 — malformed numeric fields cannot bypass the gate', () => {
+
+    it.each([
+      ['spendSats', NaN],
+      ['spendSats', Infinity],
+      ['spendSats', -Infinity],
+      ['spendSats', -1],
+      ['spentTodaySats', NaN],
+      ['spentTodaySats', -1],
+      ['feeRateSatPerVbyte', NaN],
+      ['feeRateSatPerVbyte', -1],
+    ])('rejects on action.%s = %p', (field, value) => {
+      const decision = evaluateAgentPolicy(basePolicy, {
+        ...baseAction,
+        [field]: value,
+      });
+      expect(decision).toEqual({
+        allowed: false,
+        reason: 'malformed-numeric-field',
+        detail: expect.stringContaining(`action.${field}`),
+      });
+    });
+
+    it.each([
+      ['maxSpendPerActionSats', NaN],
+      ['maxSpendPerActionSats', -1],
+      ['dailyCapSats', NaN],
+      ['dailyCapSats', Infinity],
+      ['maxFeeRateSatPerVbyte', NaN],
+      ['floorPriceSatsPerCat', NaN],
+    ])('rejects on policy.%s = %p', (field, value) => {
+      const decision = evaluateAgentPolicy(
+        { ...basePolicy, [field]: value },
+        baseAction,
+      );
+      expect(decision).toEqual({
+        allowed: false,
+        reason: 'malformed-numeric-field',
+        detail: expect.stringContaining(`policy.${field}`),
+      });
+    });
+
+    it('rejects on action.receivePriceSats = NaN for offer flows', () => {
+      const decision = evaluateAgentPolicy(basePolicy, {
+        ...baseAction,
+        kind: 'cat21_accept_offer',
+        receivePriceSats: NaN,
+      });
+      expect(decision).toEqual({
+        allowed: false,
+        reason: 'malformed-numeric-field',
+        detail: expect.stringContaining('action.receivePriceSats'),
+      });
+    });
+
+    it('receivePriceSats absent (undefined) on mint/transfer is fine — shape guard only fires on offer flows', () => {
+      // baseAction is 'cat21_mint' with no receivePriceSats. The
+      // guard should NOT fire on absent price for non-offer flows.
+      expect(evaluateAgentPolicy(basePolicy, baseAction)).toEqual({ allowed: true });
+    });
+
+    it('does NOT reject on legitimate zero values (0-spend, 0-fee is valid — pins the >= 0 threshold)', () => {
+      const decision = evaluateAgentPolicy(basePolicy, {
+        ...baseAction,
+        spendSats: 0,
+        spentTodaySats: 0,
+        feeRateSatPerVbyte: 0,
+      });
+      expect(decision).toEqual({ allowed: true });
+    });
+  });
 });
