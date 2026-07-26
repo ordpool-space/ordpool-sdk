@@ -21,6 +21,7 @@ import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { detectInstalledWallets, walletConnectors } from './connectors';
 import { findSignerOrThrow } from './signers';
+import { verifyBip322Signature } from './verify-bip322-signature';
 import {
   KnownOrdinalWallet,
   KnownOrdinalWalletType,
@@ -215,9 +216,31 @@ export class WalletService {
    * signMessage isn't wired yet emit a "not supported" error the
    * caller surfaces to the user.
    *
-   * Used by the CAT-21 orderbook flow to prove seller ownership
-   * without moving any sats. See `buildListingMessage` /
-   * `verifyListingSignature` for the message shape + verifier.
+   * Address-drift protection (finding #11 fix, 2026-07-25). Some
+   * wallets' `signMessage` API takes no address arg and just signs
+   * under whatever the wallet's UI currently has selected (Unisat,
+   * Leather, others). If the user account-switches between the
+   * caller reading `wallet.ordinalsAddress` and the wallet actually
+   * signing, the returned sig is a valid BIP-322 sig against a
+   * different key — every downstream verify (backend session guard,
+   * orderbook listing verify) fails with a confusing error even
+   * though the wallet reported success.
+   *
+   * Two gates catch the drift:
+   *
+   *   1. Pre-dispatch: `input.address` MUST match the currently-
+   *      cached `wallet.ordinalsAddress`. If not, throw before
+   *      calling the signer — no wallet round-trip wasted.
+   *
+   *   2. Post-verify: after the signer returns, verify the sig
+   *      against `input.address` using the SDK's BIP-322 primitive.
+   *      Catches the case where the cache was right but the wallet
+   *      itself signed with a different key (user switched inside
+   *      the wallet UI mid-request). ~1 ms schnorr, cheap.
+   *
+   * Used by the CAT-21 orderbook flow to prove seller ownership,
+   * by the session-token capability layer for marketplace mutations,
+   * and by any future BIP-322 auth surface.
    */
   signMessage(input: SignMessageArgs): Observable<SignMessageResult> {
     const wallet = this.connectedWallet$.getValue();
@@ -226,7 +249,32 @@ export class WalletService {
         observer.error(new Error('No wallet connected'));
       });
     }
-    return findSignerOrThrow(wallet.type).signMessage(input);
+    if (wallet.ordinalsAddress !== input.address) {
+      return new Observable<SignMessageResult>((observer) => {
+        observer.error(new Error(
+          `signMessage: caller-requested address ${input.address} does not match ` +
+          `the connected wallet's ordinals address ${wallet.ordinalsAddress}. ` +
+          `Reconnect the intended wallet and retry.`,
+        ));
+      });
+    }
+    return findSignerOrThrow(wallet.type).signMessage(input).pipe(
+      map((result) => {
+        const verify = verifyBip322Signature({
+          address: input.address,
+          message: input.message,
+          signatureBase64: result.signature,
+        });
+        if (!verify.ok) {
+          throw new Error(
+            `signMessage: returned signature does not verify against ${input.address} ` +
+            `(reason: ${verify.reason}). The wallet may have signed under a different ` +
+            `account than the one you connected; reconnect the intended account and retry.`,
+          );
+        }
+        return result;
+      }),
+    );
   }
 
   /**
