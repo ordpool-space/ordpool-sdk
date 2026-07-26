@@ -168,6 +168,48 @@ describe('buildCat21MintPsbt', () => {
     expect(tx.getInput(0).tapInternalKey).toBeDefined();
   });
 
+  // Finding #12 — the post-build sequence check used to `continue`
+  // for Taproot inputs (the continue was scoped to the sighash
+  // concern but accidentally swept the sequence check under). Pin
+  // that Taproot inputs' sequence is asserted against the resolved
+  // per-wallet value.
+  it('asserts sequence on Taproot inputs too (no continue-past-the-check)', () => {
+    const taproot = btc.p2tr(publicKey.slice(1, 33), undefined, btc.NETWORK);
+    // cat21wallet → 0xfffffffd
+    const cat21walletTx = btc.Transaction.fromPSBT(
+      buildCat21MintPsbt(
+        makeBaseArgs({
+          walletType: KnownOrdinalWalletType.cat21wallet,
+          fundingInput: {
+            txid: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+            vout: 0,
+            value: 50_000,
+            scriptPubKey: taproot.script,
+            tapInternalKey: publicKey.slice(1, 33),
+          },
+        }),
+      ).psbt,
+    );
+    expect(cat21walletTx.getInput(0).sequence).toBe(0xfffffffd);
+
+    // Xverse (third-party) → 0xfffffffe
+    const xverseTx = btc.Transaction.fromPSBT(
+      buildCat21MintPsbt(
+        makeBaseArgs({
+          walletType: KnownOrdinalWalletType.xverse,
+          fundingInput: {
+            txid: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+            vout: 0,
+            value: 50_000,
+            scriptPubKey: taproot.script,
+            tapInternalKey: publicKey.slice(1, 33),
+          },
+        }),
+      ).psbt,
+    );
+    expect(xverseTx.getInput(0).sequence).toBe(0xfffffffe);
+  });
+
   it('rejects a negative fee', () => {
     expect(() => buildCat21MintPsbt(makeBaseArgs({ feeSats: -1 }))).toThrow(/non-negative/);
   });

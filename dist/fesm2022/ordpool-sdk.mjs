@@ -3472,20 +3472,27 @@ function buildCat21MintPsbt(args) {
     }
     for (let i = 0; i < tx.inputsLength; i++) {
         const input = tx.getInput(i);
-        // Taproot inputs deliberately omit `sighashType` so signers default
-        // to SIGHASH_DEFAULT (wire-equivalent to SIGHASH_ALL on key-path
-        // spends per BIP-341). Allow undefined for those; require SIGHASH_ALL
-        // explicitly on every non-Taproot input.
+        // Sighash check. Taproot inputs deliberately omit `sighashType`
+        // so signers default to SIGHASH_DEFAULT (wire-equivalent to
+        // SIGHASH_ALL on key-path spends per BIP-341). Allow undefined
+        // for those; require SIGHASH_ALL explicitly on every non-Taproot
+        // input.
         const isTaproot = !!input.tapInternalKey;
         if (isTaproot) {
             if (input.sighashType !== undefined && input.sighashType !== btc.SigHash.ALL) {
                 throw new Error(`Internal error: input ${i} taproot sighashType=${input.sighashType}, expected undefined or SIGHASH_ALL`);
             }
-            continue;
         }
-        if (input.sighashType !== btc.SigHash.ALL) {
+        else if (input.sighashType !== btc.SigHash.ALL) {
             throw new Error(`Internal error: input ${i} sighashType is not SIGHASH_ALL`);
         }
+        // Sequence check applies to EVERY input, Taproot or not. The
+        // per-wallet RBF policy gates the wallet's accelerate UI; scure
+        // serialises `sequence` into the wire tx regardless of input
+        // type, so a Taproot input with a mis-set sequence would silently
+        // ship. Pre-2026-07-26 this block sat behind a `continue` inside
+        // the Taproot branch (finding #12 — the continue was scoped to
+        // the sighash concern but accidentally skipped this assert too).
         if (input.sequence !== sequence) {
             throw new Error(`Internal error: input ${i} sequence=${input.sequence}, expected ${sequence}`);
         }
