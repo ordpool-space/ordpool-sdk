@@ -9,7 +9,10 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "target": "es2022",
-    "lib": ["dom", "esnext"],
+    "lib": [
+      "dom",
+      "esnext"
+    ],
     "esModuleInterop": true
   },
   "include": [
@@ -68,7 +71,25 @@
     "src/inscribe/inscribe-broadcast.helper.ts",
     "src/inscribe/inscribe-orchestrator.ts",
     "src/inscribe/inscribe-brotli.helper.ts",
-    "src/wallet/signers/operation-named-defaults.ts"
+    "src/wallet/signers/operation-named-defaults.ts",
+    "src/wallet/psbt-extract.ts",
+    "src/wallet/sighash.ts",
+    "src/wallet/signers/alby.signer.ts",
+    "src/wallet/signers/binance.signer.ts",
+    "src/wallet/signers/cat21wallet.signer.ts",
+    "src/wallet/signers/index.ts",
+    "src/wallet/signers/leather.signer.ts",
+    "src/wallet/signers/okx.signer.ts",
+    "src/wallet/signers/oyl.signer.ts",
+    "src/wallet/signers/phantom.signer.ts",
+    "src/wallet/signers/psbt-export.signer.ts",
+    "src/wallet/signers/signing-targets.helper.ts",
+    "src/wallet/signers/unisat.signer.ts",
+    "src/wallet/signers/unsupported-sign-message.ts",
+    "src/wallet/signers/wizz.signer.ts",
+    "src/wallet/signers/wrap-sign-message.ts",
+    "src/wallet/signers/xverse.signer.ts",
+    "src/wallet/wallet.service.helper.ts"
   ],
   "exclude": [
     "node_modules",
