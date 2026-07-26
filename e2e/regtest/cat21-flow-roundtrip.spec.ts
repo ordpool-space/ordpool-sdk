@@ -32,7 +32,7 @@ import { base58, base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { CAT21_POSTAGE_SATS } from '../../src/cat21-protocol/cat21-postage';
-import { resolveCat21InputSequence } from '../../src/cat21-protocol/cat21-sequence';
+import { CAT21_WALLET_INPUT_SEQUENCE } from '../../src/cat21-protocol/cat21-sequence';
 import {
   buildCat21BuyOfferPsbt,
   validateCat21BuyOfferPsbt,
@@ -368,8 +368,8 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
 
     // input[0]: cat UTXO, sequence ENABLE_RBF_NO_LOCKTIME, unsigned
     const sellerIn = sdkTx.getInput(0);
-    expect(sellerIn.sequence).toBe(resolveCat21InputSequence(KnownOrdinalWalletType.cat21wallet));
-    expect(resolveCat21InputSequence(KnownOrdinalWalletType.cat21wallet)).toBe(0xfffffffd); // = ord's Sequence::ENABLE_RBF_NO_LOCKTIME
+    expect(sellerIn.sequence).toBe(CAT21_WALLET_INPUT_SEQUENCE);
+    expect(CAT21_WALLET_INPUT_SEQUENCE).toBe(0xfffffffd); // = ord's Sequence::ENABLE_RBF_NO_LOCKTIME
     expect(sellerIn.partialSig).toBeUndefined();
     expect(sellerIn.tapKeySig).toBeUndefined();
 
@@ -447,7 +447,7 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     // seller input: sequence ENABLE_RBF_NO_LOCKTIME (0xfffffffd), left
     // UNSIGNED — the seller signs it on `offer accept`.
     const ordSeller = ordTx.getInput(ordSellerIdx);
-    expect(ordSeller.sequence).toBe(resolveCat21InputSequence(KnownOrdinalWalletType.cat21wallet));
+    expect(ordSeller.sequence).toBe(CAT21_WALLET_INPUT_SEQUENCE);
     expect(ordSeller.sequence).toBe(sdkSeller.sequence);
     expect(ordSeller.partialSig).toBeUndefined();
     expect(ordSeller.tapKeySig).toBeUndefined();
