@@ -323,36 +323,38 @@ Split posture:
 
 Why the split:
 
-1. The global `ignore-scripts=true` posture on the maintainer's
-   `~/.npmrc` blocks any `prepare` / `postinstall` hook (Shai-Hulud
-   defence). We used to ship BOTH artifacts in git to bypass this.
-2. ng-packagr's tsc has an unresolved bug: run from inside a
+1. ng-packagr's tsc has an unresolved bug: run from inside a
    parent's `node_modules/`, it emits incomplete tmp-typings and
    fails with `Could not resolve "./cat21-protocol" from
    dist/tmp-typings/index.d.ts`. Same directory copied to `/tmp`
    builds clean. Root cause unknown. So `build:angular` genuinely
-   cannot run in the prepare hook.
-3. `build:core` (plain tsc, no ng-packagr) DOES work from inside
-   `node_modules/`. So the Angular-free entry can be prepared.
+   cannot run in the prepare hook — the Angular bundle has to ship
+   pre-built in git.
+2. `build:core` (plain tsc, no ng-packagr) DOES work from inside
+   `node_modules/`. So the Angular-free entry can be prepared at
+   install time and doesn't need to pollute git with dist churn.
 
 Consumer contract:
 
   - **Angular consumers** (ordpool/frontend, cat21-indexer/frontend)
     import from `ordpool-sdk` (main entry, `dist/`). The shipped
-    tarball bytes are what they get. No `.npmrc` change required.
+    tarball bytes are what they get.
   - **Non-Angular consumers** (cat21-wallet, cat21.space core code)
-    import from `ordpool-sdk/core` (`dist-core/`). These consumers
-    MUST have `ignore-scripts=false` in their `.npmrc` so the
-    `prepare` script actually runs. Without it, `dist-core/` is
-    missing after install and every `ordpool-sdk/core` import
-    fails at resolve time.
+    import from `ordpool-sdk/core` (`dist-core/`), which the
+    `prepare` script generates at install time. Install scripts
+    must be enabled for this to work — in this workspace they are:
+    `/Work/ordpool/.npmrc` sets `ignore-scripts=false` for every
+    project below it (the old global `ignore-scripts=true` posture
+    was retired 2026-07-17 and the global `~/.npmrc` deleted). If
+    `dist-core/` is missing after an install, the script didn't
+    run — check `npm config get ignore-scripts` resolves to
+    `false` from the consumer's directory.
 
-Trade-off accepted: any consumer with `ignore-scripts=false` has
-Shai-Hulud attack surface reopened for its entire dep tree, not
-just for ordpool-sdk (npm's `ignore-scripts` is a global switch,
-no per-package whitelist). Consumers that need `/core` accept this
-trade-off; consumers that only need the Angular entry don't touch
-their `.npmrc`.
+Trade-off accepted: install scripts running means Shai-Hulud-class
+attack surface across the dep tree (npm has no per-package script
+whitelist). The mitigation is lockfile discipline, not script
+blocking — see the workspace `CLAUDE.md` "Local npm setup" section
+and the header comment in `/Work/ordpool/.npmrc`.
 
 ## HARD RULE: build before commit
 
