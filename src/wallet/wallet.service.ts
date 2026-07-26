@@ -265,14 +265,14 @@ export class WalletService {
           message: input.message,
           signatureBase64: result.signature,
         });
-        if (!verify.ok) {
-          throw new Error(
-            `signMessage: returned signature does not verify against ${input.address} ` +
-            `(reason: ${verify.reason}). The wallet may have signed under a different ` +
-            `account than the one you connected; reconnect the intended account and retry.`,
-          );
+        if (verify.ok === true) {
+          return result;
         }
-        return result;
+        throw new Error(
+          `signMessage: returned signature does not verify against ${input.address} ` +
+          `(reason: ${verify.reason}). The wallet may have signed under a different ` +
+          `account than the one you connected; reconnect the intended account and retry.`,
+        );
       }),
     );
   }
