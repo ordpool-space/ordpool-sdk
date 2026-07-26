@@ -80,14 +80,15 @@ describe('buildCat21TransferPsbt', () => {
   });
 
   it('absorbs sub-dust change into the miner fee instead of emitting it', () => {
-    // catUtxo=546 + funding=1_645 = 2_191 totalIn; 2_191 - 546 - 1_100 = 545 change → sub-dust
+    // Default senderChangeAddress is P2WPKH → dust=294.
+    // catUtxo=546 + funding=1_393 = 1_939 totalIn; 1_939 - 546 - 1_100 = 293 change → sub-P2WPKH-dust
     const result = buildCat21TransferPsbt(
       makeBaseArgs({
         fundingInputs: [
           {
             txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
             vout: 1,
-            value: 1_645,
+            value: 1_393,
             scriptPubKey: p2wpkhMainnet.script,
           },
         ],
@@ -218,5 +219,78 @@ describe('buildCat21TransferPsbt', () => {
     const tx = btc.Transaction.fromPSBT(result.psbt);
     expect(tx.outputsLength).toBe(2);
     expect(result.changeSats).toBe(CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS);
+  });
+
+  describe('Finding #13 — per-address-type dust floor for senderChangeAddress', () => {
+
+    // Pre-fix the builder hardcoded 546 as the dust threshold, so a
+    // P2TR sender with change in [330, 546) lost the whole change to
+    // the miner fee silently. Fix derives the floor from
+    // senderChangeAddress via getMinimumUtxoSize (P2TR=330, P2WPKH=294,
+    // P2SH=546, P2PKH=546).
+
+    const p2trMainnet = btc.p2tr(publicKey.slice(1, 33), undefined, btc.NETWORK);
+
+    it('P2TR senderChangeAddress: emits change at 330 sats (previously absorbed)', () => {
+      // 546 cat + 1_430 funding - 546 postage - 1_100 fee = 330 change → emit (P2TR dust = 330).
+      const result = buildCat21TransferPsbt(
+        makeBaseArgs({
+          destinations: {
+            recipientAddress: RECIPIENT_ADDR,
+            senderChangeAddress: p2trMainnet.address!,
+          },
+          fundingInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 1_430,
+              scriptPubKey: p2wpkhMainnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.changeSats).toBe(330);
+      expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(2);
+    });
+
+    it('P2TR senderChangeAddress: absorbs 329 sats change into fee (just below P2TR dust)', () => {
+      // 546 + 1_429 - 546 - 1_100 = 329 change → sub-P2TR-dust → absorbed.
+      const result = buildCat21TransferPsbt(
+        makeBaseArgs({
+          destinations: {
+            recipientAddress: RECIPIENT_ADDR,
+            senderChangeAddress: p2trMainnet.address!,
+          },
+          fundingInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 1_429,
+              scriptPubKey: p2wpkhMainnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.changeSats).toBe(0);
+      expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(1);
+    });
+
+    it('P2WPKH senderChangeAddress: emits change at 294 sats (previously absorbed)', () => {
+      // 546 + 1_394 - 546 - 1_100 = 294 change → emit (P2WPKH dust = 294).
+      const result = buildCat21TransferPsbt(
+        makeBaseArgs({
+          fundingInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 1_394,
+              scriptPubKey: p2wpkhMainnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.changeSats).toBe(294);
+      expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(2);
+    });
   });
 });

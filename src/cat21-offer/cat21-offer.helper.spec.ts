@@ -712,15 +712,16 @@ describe('validateCat21BuyOfferPsbt', () => {
       expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(3);
     });
 
-    it('absorbs 545 sats change into fee (just below dust)', () => {
-      // Buyer 23_091 - 22_546 obligation = 545 change → sub-dust, absorbed.
+    it('absorbs 293 sats change into fee (just below P2WPKH dust of 294)', () => {
+      // Default buyerChangeAddress is P2WPKH → dust=294. Buyer 22_839
+      // - 22_546 obligation = 293 change → sub-P2WPKH-dust → absorbed.
       const result = buildCat21BuyOfferPsbt(
         makeBaseArgs({
           buyerInputs: [
             {
               txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
               vout: 1,
-              value: 23_091,
+              value: 22_839,
               scriptPubKey: p2wpkhTestnet.script,
             },
           ],
@@ -728,6 +729,86 @@ describe('validateCat21BuyOfferPsbt', () => {
       );
       expect(result.changeSats).toBe(0);
       expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(2);
+    });
+  });
+
+  describe('Finding #13 — per-address-type dust floor for buyerChangeAddress', () => {
+
+    // Pre-fix the builder hardcoded 546 as the change dust floor, so a
+    // P2TR buyer with change in [330, 546) lost the whole change output
+    // to the miner fee silently. Fix derives the floor from the
+    // buyerChangeAddress script type via getMinimumUtxoSize (P2TR=330,
+    // P2WPKH=294, P2SH=546, P2PKH=546).
+
+    const p2trTestnet = btc.p2tr(publicKey.slice(1, 33), undefined, btc.TEST_NETWORK);
+
+    it('P2TR buyerChangeAddress: emits change at 330 sats (previously absorbed)', () => {
+      // Buyer 22_876 - 22_546 obligation = 330 change. P2TR dust = 330 → emit.
+      const result = buildCat21BuyOfferPsbt(
+        makeBaseArgs({
+          destinations: {
+            buyerReceiveAddress: p2wpkhTestnet.address!,
+            sellerPaymentAddress: p2wpkhTestnet.address!,
+            buyerChangeAddress: p2trTestnet.address!,
+          },
+          buyerInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 22_876,
+              scriptPubKey: p2wpkhTestnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.changeSats).toBe(330);
+      expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(3);
+    });
+
+    it('P2TR buyerChangeAddress: absorbs 329 sats change into fee (just below P2TR dust)', () => {
+      // Buyer 22_875 - 22_546 obligation = 329 change → sub-P2TR-dust → absorbed.
+      const result = buildCat21BuyOfferPsbt(
+        makeBaseArgs({
+          destinations: {
+            buyerReceiveAddress: p2wpkhTestnet.address!,
+            sellerPaymentAddress: p2wpkhTestnet.address!,
+            buyerChangeAddress: p2trTestnet.address!,
+          },
+          buyerInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 22_875,
+              scriptPubKey: p2wpkhTestnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.changeSats).toBe(0);
+      expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(2);
+    });
+
+    it('P2WPKH buyerChangeAddress: emits change at 294 sats (previously absorbed)', () => {
+      // Buyer 22_840 - 22_546 obligation = 294 change. P2WPKH dust = 294 → emit.
+      const result = buildCat21BuyOfferPsbt(
+        makeBaseArgs({
+          destinations: {
+            buyerReceiveAddress: p2wpkhTestnet.address!,
+            sellerPaymentAddress: p2wpkhTestnet.address!,
+            buyerChangeAddress: p2wpkhTestnet.address!,
+          },
+          buyerInputs: [
+            {
+              txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+              vout: 1,
+              value: 22_840,
+              scriptPubKey: p2wpkhTestnet.script,
+            },
+          ],
+        })
+      );
+      expect(result.changeSats).toBe(294);
+      expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(3);
     });
   });
 

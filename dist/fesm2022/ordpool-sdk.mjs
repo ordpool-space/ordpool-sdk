@@ -4861,9 +4861,21 @@ function buildCat21BuyOfferPsbt(args) {
     if (changeSats < 0) {
         throw new Error('Buyer inputs do not cover priceSats + 2*postage + fee - sellerInput.value');
     }
-    // Use the seller-payment script type's dust as a conservative floor; 546 is
-    // safe across all current address types (taproot 330, segwit 294, p2sh 540).
-    if (changeSats >= 546) {
+    // Per-address-type dust floor for the buyer's change output. 546
+    // is the conservative cross-type floor (taproot 330, segwit 294,
+    // p2sh 540) and stays as the defence-in-depth fallback if
+    // getMinimumUtxoSize can't classify the address; the per-address
+    // value is preferred so P2TR (330) and P2WPKH (294) change amounts
+    // in [dust, 546) are actually emitted instead of silently absorbed
+    // into the miner fee. Was hardcoded 546 pre-2026-07-26 (finding #13).
+    let changeDustLimit;
+    try {
+        changeDustLimit = getMinimumUtxoSize(args.destinations.buyerChangeAddress);
+    }
+    catch {
+        changeDustLimit = 546;
+    }
+    if (changeSats >= changeDustLimit) {
         tx.addOutputAddress(args.destinations.buyerChangeAddress, BigInt(changeSats), scureNetwork);
     }
     // Sanity asserts. SIGHASH_ALL commits to lockTime + sequence across
@@ -4890,7 +4902,7 @@ function buildCat21BuyOfferPsbt(args) {
         hex: tx.hex,
         psbt: tx.toPSBT(),
         buyerInputTotalSats,
-        changeSats: changeSats >= 546 ? changeSats : 0,
+        changeSats: changeSats >= changeDustLimit ? changeSats : 0,
     };
 }
 /**
@@ -5974,8 +5986,23 @@ function buildCat21TransferPsbt(args) {
     if (changeRaw < 0) {
         throw new Error(`Transfer funding insufficient: ${totalInSats} sats < ${postageSats + args.feeSats} sats required`);
     }
+    // Per-address-type dust floor for the change output. The
+    // CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS constant (546) is the
+    // conservative cross-type floor and stays in place as a defence-
+    // in-depth fallback if getMinimumUtxoSize ever fails to classify
+    // the address; the per-address value is preferred so P2TR (330)
+    // and P2WPKH (294) change amounts in [dust, 546) actually get
+    // emitted instead of being silently absorbed into the miner fee.
+    // Was hardcoded 546 pre-2026-07-26 (finding #13).
+    let changeDustLimit;
+    try {
+        changeDustLimit = getMinimumUtxoSize(args.destinations.senderChangeAddress);
+    }
+    catch {
+        changeDustLimit = CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+    }
     let changeSats = 0;
-    if (changeRaw >= CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS) {
+    if (changeRaw >= changeDustLimit) {
         changeSats = changeRaw;
         tx.addOutputAddress(args.destinations.senderChangeAddress, BigInt(changeSats), scureNetwork);
     }

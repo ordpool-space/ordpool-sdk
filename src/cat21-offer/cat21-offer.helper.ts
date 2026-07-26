@@ -2,6 +2,7 @@ import * as btc from '@scure/btc-signer';
 
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
+import { getMinimumUtxoSize } from '../cat21-script/address-format';
 import { Network, toScureNetwork } from '../network';
 import { PaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -201,9 +202,20 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   if (changeSats < 0) {
     throw new Error('Buyer inputs do not cover priceSats + 2*postage + fee - sellerInput.value');
   }
-  // Use the seller-payment script type's dust as a conservative floor; 546 is
-  // safe across all current address types (taproot 330, segwit 294, p2sh 540).
-  if (changeSats >= 546) {
+  // Per-address-type dust floor for the buyer's change output. 546
+  // is the conservative cross-type floor (taproot 330, segwit 294,
+  // p2sh 540) and stays as the defence-in-depth fallback if
+  // getMinimumUtxoSize can't classify the address; the per-address
+  // value is preferred so P2TR (330) and P2WPKH (294) change amounts
+  // in [dust, 546) are actually emitted instead of silently absorbed
+  // into the miner fee. Was hardcoded 546 pre-2026-07-26 (finding #13).
+  let changeDustLimit: number;
+  try {
+    changeDustLimit = getMinimumUtxoSize(args.destinations.buyerChangeAddress);
+  } catch {
+    changeDustLimit = 546;
+  }
+  if (changeSats >= changeDustLimit) {
     tx.addOutputAddress(
       args.destinations.buyerChangeAddress,
       BigInt(changeSats),
@@ -239,7 +251,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
     hex: tx.hex,
     psbt: tx.toPSBT(),
     buyerInputTotalSats,
-    changeSats: changeSats >= 546 ? changeSats : 0,
+    changeSats: changeSats >= changeDustLimit ? changeSats : 0,
   };
 }
 

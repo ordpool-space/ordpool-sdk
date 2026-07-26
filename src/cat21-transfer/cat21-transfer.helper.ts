@@ -3,6 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
+import { getMinimumUtxoSize } from '../cat21-script/address-format';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   Cat21TransferCatInput,
@@ -125,8 +126,22 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
       `Transfer funding insufficient: ${totalInSats} sats < ${postageSats + args.feeSats} sats required`
     );
   }
+  // Per-address-type dust floor for the change output. The
+  // CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS constant (546) is the
+  // conservative cross-type floor and stays in place as a defence-
+  // in-depth fallback if getMinimumUtxoSize ever fails to classify
+  // the address; the per-address value is preferred so P2TR (330)
+  // and P2WPKH (294) change amounts in [dust, 546) actually get
+  // emitted instead of being silently absorbed into the miner fee.
+  // Was hardcoded 546 pre-2026-07-26 (finding #13).
+  let changeDustLimit: number;
+  try {
+    changeDustLimit = getMinimumUtxoSize(args.destinations.senderChangeAddress);
+  } catch {
+    changeDustLimit = CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+  }
   let changeSats = 0;
-  if (changeRaw >= CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS) {
+  if (changeRaw >= changeDustLimit) {
     changeSats = changeRaw;
     tx.addOutputAddress(args.destinations.senderChangeAddress, BigInt(changeSats), scureNetwork);
   }
