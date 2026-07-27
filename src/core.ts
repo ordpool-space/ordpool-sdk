@@ -78,6 +78,7 @@ export * from './cat21-mint/sat-rarity.helper';
 export * from './cat21-fee/fee-simulation.helper';
 export * from './cat21-fee/coin-selection.helper';
 export * from './cat21-fee/dummy-keypair';
+export * from './cat21-fee/compute-psbt-vsize.helper';
 
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';
