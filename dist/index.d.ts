@@ -4432,7 +4432,7 @@ interface AgentPolicy {
  * sees `'cat21_accept_offer'` and knows exactly which wallet RPC
  * method the policy is gating, without having to chase an alias.
  */
-type AgentActionKind = 'cat21_mint' | 'cat21_transfer' | 'cat21_create_offer' | 'cat21_accept_offer';
+type AgentActionKind = 'cat21_mint' | 'cat21_transfer' | 'cat21_create_offer' | 'cat21_accept_offer' | 'cat21_buy';
 interface AgentActionContext {
     kind: AgentActionKind;
     /** Sats the agent commits on this action (mint fee+postage, or buy price). */

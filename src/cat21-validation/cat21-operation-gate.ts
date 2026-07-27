@@ -20,6 +20,7 @@ import { Network, toScureNetwork } from '../network';
 
 import type {
   Cat21AcceptOfferIntent,
+  Cat21BuyIntent,
   Cat21CreateOfferIntent,
   Cat21GateRejectReason,
   Cat21GateResources,
@@ -53,7 +54,7 @@ export function validateCat21Operation(args: {
     Array.isArray(config.allowedOperations) &&
     config.allowedOperations.length > 0 &&
     !config.allowedOperations.includes(
-      operation.kind as 'mint' | 'transfer' | 'create_offer' | 'accept_offer',
+      operation.kind as 'mint' | 'transfer' | 'create_offer' | 'accept_offer' | 'buy',
     )
   ) {
     return reject('operation-kind-not-allowed', operation.kind);
@@ -68,6 +69,8 @@ export function validateCat21Operation(args: {
       return validateCreateOffer(operation.intent, config);
     case 'accept_offer':
       return validateAcceptOffer(operation.intent, config);
+    case 'buy':
+      return validateBuy(operation.intent, config);
     default: {
       // Exhaustiveness: any new `kind` member trips a TS error here
       // BEFORE it reaches the runtime check.
@@ -170,6 +173,44 @@ function validateCreateOffer(
   return success({
     kind: 'create_offer',
     paymentScript: payment.script,
+    catTxid: cat.txid,
+    catIndex: cat.index,
+  });
+}
+
+function validateBuy(
+  intent: Cat21BuyIntent,
+  config: Cat21OperationGateConfig,
+): Cat21OperationGateResult {
+  const cat = parseCatId(intent.catId);
+  if (!cat.ok) return reject('cat-id-malformed', intent.catId);
+
+  // bidSats is the buyer's outflow to the seller; reuse the same
+  // price validation (positive, under maxPriceSats) as create-offer.
+  const price = validatePrice(intent.bidSats, config);
+  if (!price.ok) return price.result;
+
+  const fee = validateFeeRate(intent.feeRate, config);
+  if (!fee.ok) return fee.result;
+
+  // sellerPaymentAddress comes from the listing (never an on-chain
+  // lookup). Decode it against the active network; on an allowlisted
+  // agent, it's the counterparty we'd pay.
+  const payment = validateAddress(intent.sellerPaymentAddress, config, 'payment-address');
+  if (!payment.ok) return payment.result;
+
+  if (config.allowedCounterparties && config.allowedCounterparties.length > 0) {
+    const targetNet = toScureNetwork(config.network);
+    if (
+      !allowlistContainsAddress(intent.sellerPaymentAddress, config.allowedCounterparties, targetNet)
+    ) {
+      return reject('payment-address-not-allowed', intent.sellerPaymentAddress);
+    }
+  }
+
+  return success({
+    kind: 'buy',
+    sellerPaymentScript: payment.script,
     catTxid: cat.txid,
     catIndex: cat.index,
   });

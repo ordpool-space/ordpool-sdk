@@ -55,7 +55,8 @@ export type AgentActionKind =
   | 'cat21_mint'
   | 'cat21_transfer'
   | 'cat21_create_offer'
-  | 'cat21_accept_offer';
+  | 'cat21_accept_offer'
+  | 'cat21_buy';
 
 export interface AgentActionContext {
   kind: AgentActionKind;

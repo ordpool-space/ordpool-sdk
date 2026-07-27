@@ -21,15 +21,16 @@ const baseAction: AgentActionContext = {
 
 describe('AgentActionKind — wallet RPC method names verbatim', () => {
 
-  // Pinning the four exact strings the wallet emits over chrome.runtime /
+  // Pinning the exact strings the wallet emits over chrome.runtime /
   // NMH. If the wallet renames a method or the SDK drifts, this test goes
   // red before the dispatcher silently mis-routes a real action.
-  it('accepts the four cat21_* method names', () => {
+  it('accepts the cat21_* method names', () => {
     const validKinds: AgentActionKind[] = [
       'cat21_mint',
       'cat21_transfer',
       'cat21_create_offer',
       'cat21_accept_offer',
+      'cat21_buy',
     ];
     for (const kind of validKinds) {
       const decision = evaluateAgentPolicy(basePolicy, {

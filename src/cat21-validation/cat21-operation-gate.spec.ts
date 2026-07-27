@@ -5,6 +5,7 @@ import { Network } from '../network';
 import { validateCat21Operation } from './cat21-operation-gate';
 import type {
   Cat21AcceptOfferIntent,
+  Cat21BuyIntent,
   Cat21CreateOfferIntent,
   Cat21MintIntent,
   Cat21OperationGateConfig,
@@ -35,6 +36,15 @@ function createOfferIntent(over: Partial<Cat21CreateOfferIntent> = {}): Cat21Cre
     catId: VALID_CAT_ID,
     priceSats: 21_000,
     paymentAddress: MAINNET_ADDR,
+    ...over,
+  };
+}
+function buyIntent(over: Partial<Cat21BuyIntent> = {}): Cat21BuyIntent {
+  return {
+    catId: VALID_CAT_ID,
+    bidSats: 21_000,
+    sellerPaymentAddress: MAINNET_ADDR,
+    feeRate: 5,
     ...over,
   };
 }
@@ -352,6 +362,72 @@ describe('validateCat21Operation — transfer', () => {
       operation: { kind: 'transfer', intent: transferIntent({ feeRate: 0 }) },
     });
     expect(result).toMatchObject({ ok: false, reason: 'fee-rate-not-positive' });
+  });
+});
+
+/* ──────────────────────────  Buy  ────────────────────────── */
+
+describe('validateCat21Operation — buy', () => {
+  it('accepts a valid buy and returns sellerPaymentScript + catTxid + catIndex', () => {
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: { kind: 'buy', intent: buyIntent() },
+    });
+    if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
+    expect(result.resources.kind).toBe('buy');
+    if (result.resources.kind !== 'buy') throw new Error('narrowing');
+    expect(result.resources.catIndex).toBe(0);
+    expect(result.resources.sellerPaymentScript.length).toBeGreaterThan(0);
+  });
+
+  it('accepts a valid buy on a high-vout cat', () => {
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: { kind: 'buy', intent: buyIntent({ catId: VALID_CAT_ID_HI_VOUT }) },
+    });
+    if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
+    if (result.resources.kind !== 'buy') throw new Error('narrowing');
+    expect(result.resources.catIndex).toBe(42);
+  });
+
+  it('rejects a malformed catId', () => {
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: { kind: 'buy', intent: buyIntent({ catId: 'not-a-cat' }) },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'cat-id-malformed' });
+  });
+
+  it('rejects zero bidSats', () => {
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: { kind: 'buy', intent: buyIntent({ bidSats: 0 }) },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'price-not-positive' });
+  });
+
+  it('rejects a non-positive feeRate', () => {
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: { kind: 'buy', intent: buyIntent({ feeRate: 0 }) },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'fee-rate-not-positive' });
+  });
+
+  it('rejects a sellerPaymentAddress on the wrong network', () => {
+    const result = validateCat21Operation({
+      config: mainnetConfig,
+      operation: { kind: 'buy', intent: buyIntent({ sellerPaymentAddress: TESTNET_ADDR }) },
+    });
+    expect(result).toMatchObject({ ok: false });
+  });
+
+  it('rejects buy when allowedOperations excludes it', () => {
+    const result = validateCat21Operation({
+      config: { network: Network.Mainnet, allowedOperations: ['mint'] },
+      operation: { kind: 'buy', intent: buyIntent() },
+    });
+    expect(result).toMatchObject({ ok: false, reason: 'operation-kind-not-allowed' });
   });
 });
 

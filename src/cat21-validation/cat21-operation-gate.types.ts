@@ -80,6 +80,32 @@ export interface Cat21AcceptOfferIntent {
 }
 
 /**
+ * Intent shape for `cat21_buy` — the BUYER side of the marketplace.
+ *
+ * The buyer bids on a listed cat: the wallet builds a buy-offer PSBT
+ * (`buildCat21BuyOfferPsbt`), funds it with the buyer's own UTXOs,
+ * signs the buyer inputs (SIGHASH_ALL, inputs 1..N — NOT input 0, the
+ * seller's cat), and POSTs the half-signed PSBT as a bid. It does NOT
+ * broadcast; the seller broadcasts on accept. Bidding at exactly the
+ * ask price is "buy at asking price".
+ *
+ * `sellerPaymentAddress` MUST come from the listing (the ask-link's
+ * `payTo` param or the listing GET), NEVER from an on-chain owner
+ * lookup — that's the 2026-07-18 payment-address-provenance rule.
+ * The buyer's own receive (ordinals) + change (payment) addresses are
+ * resolved by the wallet from its keychain, not carried here.
+ */
+export interface Cat21BuyIntent {
+  /** Inscription id of the cat to bid on (`<txid>i<index>`). */
+  catId: string;
+  /** Net sats offered to the seller (output 1 will be bidSats + 546). */
+  bidSats: number;
+  /** Seller's payout address, from the listing. Where the BTC lands. */
+  sellerPaymentAddress: string;
+  feeRate: number;
+}
+
+/**
  * Discriminated union over the four cat21 mutating operations the
  * gate validates. The `kind` field is the same string the wallet's
  * RPC method name uses (cat21_mint → 'mint', etc.) so consumer-side
@@ -94,7 +120,8 @@ export type Cat21Operation =
   | { kind: 'mint'; intent: Cat21MintIntent }
   | { kind: 'transfer'; intent: Cat21TransferIntent }
   | { kind: 'create_offer'; intent: Cat21CreateOfferIntent }
-  | { kind: 'accept_offer'; intent: Cat21AcceptOfferIntent };
+  | { kind: 'accept_offer'; intent: Cat21AcceptOfferIntent }
+  | { kind: 'buy'; intent: Cat21BuyIntent };
 
 /* ──────────────────────────  Config shapes  ────────────────────────── */
 
@@ -174,7 +201,7 @@ export interface Cat21OperationGateConfig {
    * When unset or empty array → all four kinds accepted (default
    * permissive).
    */
-  allowedOperations?: ReadonlyArray<'mint' | 'transfer' | 'create_offer' | 'accept_offer'>;
+  allowedOperations?: ReadonlyArray<'mint' | 'transfer' | 'create_offer' | 'accept_offer' | 'buy'>;
 }
 
 /* ──────────────────────────  Result shapes  ────────────────────────── */
@@ -260,6 +287,13 @@ export type Cat21GateResources =
   | {
       kind: 'accept_offer';
       offerPsbtBytes: Uint8Array;
+      catTxid: string;
+      catIndex: number;
+    }
+  | {
+      kind: 'buy';
+      /** Seller payout scriptPubKey decoded from sellerPaymentAddress. */
+      sellerPaymentScript: Uint8Array;
       catTxid: string;
       catIndex: number;
     };
