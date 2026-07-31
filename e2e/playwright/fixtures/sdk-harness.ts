@@ -115,26 +115,6 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
-      /**
-       * Cat21 Wallet supports a `devnet` (=regtest) network on its
-       * `getAddresses` JSON-RPC. This variant calls connect with
-       * `Network.Regtest` so the wallet returns its own bcrt1q +
-       * bcrt1p addresses directly (BIP-84 / BIP-86 from its own seed),
-       * sidestepping the cross-network-keys derivation trick the
-       * other mainnet-only wallets need. Specs that drive transfer
-       * / offer flows MUST use this connect path because the cat
-       * UTXO lives at the wallet's ACTUAL ordinals key — only the
-       * wallet knows the matching private key to sign Taproot input
-       * 0 on a transfer or offer-accept tx.
-       */
-      connectCat21WalletRegtest(): Promise<{
-        type: KnownOrdinalWalletType;
-        ordinalsAddress: string;
-        ordinalsPublicKey: string;
-        paymentAddress: string;
-        paymentPublicKey: string;
-        signingSupported: boolean;
-      }>;
       detectWizz(): boolean;
       connectWizz(): Promise<{
         type: KnownOrdinalWalletType;
@@ -612,22 +592,6 @@ window.ordpoolSdkHarness = {
     const info = await firstValueFrom(cat21walletConnector.connect(Network.Mainnet));
     statusEl().textContent = `connected: ${info.paymentAddress}`;
     log('connectCat21Wallet.result', info);
-    return info;
-  },
-
-  async connectCat21WalletRegtest() {
-    const start = Date.now();
-    while (Date.now() - start < 15_000) {
-      if (cat21walletConnector.detect(window)) break;
-      await new Promise(r => setTimeout(r, 100));
-    }
-    if (!cat21walletConnector.detect(window)) {
-      throw new Error('Cat21 Wallet provider not injected on the harness page within 15s');
-    }
-    statusEl().textContent = `connecting to cat21-wallet (regtest)…`;
-    const info = await firstValueFrom(cat21walletConnector.connect(Network.Regtest));
-    statusEl().textContent = `connected: ${info.paymentAddress}`;
-    log('connectCat21WalletRegtest.result', info);
     return info;
   },
 

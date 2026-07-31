@@ -28,7 +28,9 @@ import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../
  * Cat21 Wallet TRANSFER roundtrip on regtest — full popup-driven path.
  *
  * 1. Onboard Cat21 Wallet with the BIP-39 test seed.
- * 2. Open the harness, call connectCat21WalletRegtest → bcrt1q + bcrt1p
+ * 2. Open the harness, call connectCat21Wallet → mainnet bc1q / bc1p, then
+ *    derive the regtest bcrt1q + bcrt1p from the same pubkeys via
+ *    @scure/btc-signer (same trick every other cat21wallet spec uses)
  *    addresses returned directly by the wallet (no mainnet-keys trick).
  * 3. Fund the bcrt1q via local bitcoind, mine, wait for electrs.
  * 4. Mint via SDK + wallet popup. Cat lands at the wallet's bcrt1p
