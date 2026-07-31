@@ -57,11 +57,21 @@ export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
 export function isValidPersistedWalletInfo(v: unknown): v is WalletInfo {
   if (!v || typeof v !== 'object') return false;
   const o = v as Record<string, unknown>;
+  const isHex = (s: unknown): s is string =>
+    typeof s === 'string' && s.length > 0 && /^[0-9a-f]+$/i.test(s);
   return (
     typeof o.type === 'string' &&
     o.type in KnownOrdinalWallets &&
     typeof o.ordinalsAddress === 'string' && o.ordinalsAddress.length > 0 &&
-    typeof o.paymentAddress === 'string' && o.paymentAddress.length > 0
+    typeof o.paymentAddress === 'string' && o.paymentAddress.length > 0 &&
+    // Pubkey fields are read unconditionally by every mint / inscribe
+    // path (`hex.decode(wallet.paymentPublicKey)` in the orchestrator's
+    // simulation). Rehydrating a pre-schema payload without them
+    // crashes with a bare `TypeError: Cannot read properties of
+    // undefined` mid-simulation instead of forcing a clean reconnect
+    // at load time. Require both, hex-shaped.
+    isHex(o.paymentPublicKey) &&
+    isHex(o.ordinalsPublicKey)
   );
 }
 
@@ -200,8 +210,6 @@ export class WalletService {
   }
 
   disconnectWallet(): void {
-    // eslint-disable-next-line no-console
-    console.error('[wallet.service] disconnectWallet called from:', new Error().stack);
     this.tearDownAccountChangeSubscription();
     this.storageService.removeItem(LAST_CONNECTED_WALLET);
     this.connectedWallet$.next(null);

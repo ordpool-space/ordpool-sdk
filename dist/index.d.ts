@@ -4381,6 +4381,196 @@ declare class InscribeMintOrchestrator {
 declare function compressBrotli(body: Uint8Array): Uint8Array;
 
 /**
+ * Bulletproof gate types for the inscribe operation.
+ *
+ * Single entry point: `validateInscribeOperation({ config, operation })`
+ * returns a discriminated `{ ok: true, resources } | { ok: false,
+ * reason, detail? }`. Same shape as `validateCat21Operation` in
+ * `cat21-validation/`, but a SEPARATE module by deliberate design:
+ *
+ *   - Inscribing an ord envelope (`<pubkey> CHECKSIG OP_FALSE OP_IF
+ *     "ord" <tags> body OP_ENDIF`, lockTime=0) is a different
+ *     on-chain-data protocol from CAT-21 (`nLockTime=21`, no
+ *     envelope, no on-chain content). The validation surfaces stay
+ *     separate so consumers can't accidentally mix them.
+ *   - Inscribe consumers (cat21.space's future inscribe UI, a
+ *     potential `ordpool-inscriber` tool) configure inscribe rules
+ *     here. Cat21 consumers (cat21-wallet, cat21.space's mint flows)
+ *     configure cat21 rules in `cat21-validation/`.
+ *
+ * Address / fee-rate validation primitives are duplicated rather
+ * than shared with `cat21-validation/` so each gate's rejection-
+ * reason union stays minimal and operation-named. If a third
+ * Bitcoin operation lands and the same primitives surface for a
+ * third time, extract them into a shared `bitcoin-validation/`
+ * module at that point — YAGNI for now.
+ *
+ * Design rules:
+ *   - Each rejection reason is one test case. No catch-all
+ *     `'invalid-intent'` reasons.
+ *   - The `resources` field on success carries pre-decoded values
+ *     so the downstream builder doesn't re-decode.
+ *   - Config is wholly optional except for `network`.
+ */
+
+/**
+ * Intent shape for an ord-protocol inscription. The user/agent
+ * declares the body bytes + content type + recipient + fee rate;
+ * the SDK builds commit + reveal via `createInscribeTransactions`.
+ *
+ * NOT a cat21 operation. The wire-format outcome is two regular
+ * Bitcoin txs (lockTime=0) carrying an ord envelope in the reveal
+ * tx's witness — no `nLockTime=21`, no CAT-21 cat produced.
+ */
+interface InscribeIntent {
+    /** Where the inscription lands (P2TR recommended). */
+    recipient: string;
+    /** sat/vB target (applied identically to commit + reveal). */
+    feeRate: number;
+    /**
+     * Body bytes. The cap is `maxContentBytes` from config (default
+     * 350_000 — keeps the reveal under standard relay).
+     */
+    body: Uint8Array;
+    /**
+     * MIME type embedded in the envelope. The gate enforces the
+     * `allowedContentTypes` allowlist (when configured) and the
+     * `blockedContentTypes` blocklist defensive filter.
+     */
+    contentType?: string;
+    /**
+     * Optional reveal-tx tip output. The gate validates the address on
+     * the configured network and the value against the dust floor +
+     * `maxTipValueSats` cap. Zero is treated as "no tip".
+     *
+     * The most policy-sensitive optional — an autonomous agent path
+     * without a cap could drain a wallet by inflating `tip.value`.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
+    /** Optional Tag::Note (0x0f) UTF-8 watermark; capped at `maxNoteBytes`. */
+    note?: string;
+    /** Optional parent inscription id (`<txid>i<index>`). */
+    parent?: string;
+    /** Optional body-encoding hint (must be `'br'` if present). */
+    contentEncoding?: 'br';
+}
+/**
+ * Discriminated union over the inscribe-side operations the gate
+ * validates. One variant today (`'inscribe'`); the shape is a
+ * discriminated union so a future variant (RBF-the-reveal, etc.)
+ * can land without rewriting the caller-side dispatch.
+ */
+type InscribeOperation = {
+    kind: 'inscribe';
+    intent: InscribeIntent;
+};
+interface InscribeOperationGateConfig {
+    /** Active network. Address checks key off this. */
+    network: Network;
+    /**
+     * Hard ceiling on fee rate. Recommend 1000 sat/vB as a "you typed
+     * something wrong" backstop. When unset, only `feeRate > 0` is
+     * enforced.
+     */
+    maxFeeRatePerVbyte?: number;
+    /**
+     * Wallet's own payment address. When provided, the gate rejects
+     * an inscription whose recipient matches it (self-send guard).
+     */
+    ownPaymentAddress?: string;
+    /**
+     * Positive recipient allowlist. When set and non-empty, the
+     * recipient MUST be in the list.
+     */
+    allowedRecipients?: ReadonlyArray<string>;
+    /**
+     * Maximum inscription body size in bytes. Default 350_000.
+     * Larger bodies are a Phase-3 Slipstream concern.
+     */
+    maxContentBytes?: number;
+    /**
+     * Positive content-type allowlist (exact case-insensitive match).
+     * When unset/empty → any well-formed contentType permitted.
+     *
+     * Recommended day-one allowlist: image/png, image/jpeg,
+     * image/svg+xml, image/webp, image/gif, text/plain, text/html,
+     * application/json, application/cbor.
+     */
+    allowedContentTypes?: ReadonlyArray<string>;
+    /**
+     * Defensive content-type blocklist. Wins over the allowlist
+     * (defence in depth against a misconfigured allowlist).
+     *
+     * Recommended day-one blocklist: 'application/javascript',
+     * 'text/javascript', 'application/x-javascript' (XSS-flavoured
+     * inscribers).
+     */
+    blockedContentTypes?: ReadonlyArray<string>;
+    /**
+     * Hard ceiling on `tip.value` in sats. Recommended for autonomous
+     * flows (drain protection). When unset, only the dust-floor + integer
+     * checks apply.
+     */
+    maxTipValueSats?: number;
+    /**
+     * Positive tip-address allowlist. When set and non-empty, the tip
+     * MUST go to a listed address. Practical for automated flows where
+     * the tip beneficiary is fixed.
+     */
+    allowedTipAddresses?: ReadonlyArray<string>;
+    /** Maximum note bytes (UTF-8). Default 128. */
+    maxNoteBytes?: number;
+}
+type InscribeGateRejectReason = 'intent-not-an-object' | 'unsupported-operation-kind' | 'recipient-not-a-bitcoin-address' | 'recipient-wrong-network' | 'recipient-not-allowed' | 'self-send' | 'fee-rate-not-finite-number' | 'fee-rate-not-positive' | 'fee-rate-not-integer' | 'fee-rate-above-cap' | 'content-not-bytes' | 'content-too-large' | 'content-type-not-string' | 'content-type-not-allowed' | 'content-type-blocked' | 'tip-not-an-object' | 'tip-address-not-a-bitcoin-address' | 'tip-address-wrong-network' | 'tip-address-not-allowed' | 'tip-value-not-finite-number' | 'tip-value-not-integer' | 'tip-value-negative' | 'tip-value-below-dust' | 'tip-value-above-cap' | 'note-not-a-string' | 'note-too-large' | 'parent-malformed' | 'content-encoding-invalid';
+type InscribeGateResources = {
+    kind: 'inscribe';
+    recipientScript: Uint8Array;
+    /** Validated content bytes — same object the caller passed. */
+    contentBytes: Uint8Array;
+    /** Normalised contentType (lowercased) when present. */
+    contentType: string | undefined;
+    /**
+     * Pre-decoded tip when supplied and non-zero. Downstream builders
+     * pass `tipScript`/`tipValueSats` straight into the reveal builder
+     * without re-decoding the address.
+     */
+    tip?: {
+        address: string;
+        tipScript: Uint8Array;
+        tipValueSats: number;
+    };
+    /** Validated + length-checked note UTF-8 bytes, when supplied. */
+    noteBytes?: Uint8Array;
+    /** Pre-encoded parent tag value (reversed txid + LE-trimmed index), when supplied. */
+    parentBytes?: Uint8Array;
+    /** Validated content encoding when supplied. Only `'br'` today. */
+    contentEncoding?: 'br';
+};
+type InscribeOperationGateResult = {
+    ok: true;
+    resources: InscribeGateResources;
+} | {
+    ok: false;
+    reason: InscribeGateRejectReason;
+    detail?: string;
+};
+
+/**
+ * Inscribe operation validation gate. Parallel to
+ * `validateCat21Operation` from `cat21-validation/`, separate by
+ * design (different protocol, different consumer set). See the
+ * types file for the full rationale.
+ */
+
+declare function validateInscribeOperation(args: {
+    config: InscribeOperationGateConfig;
+    operation: InscribeOperation;
+}): InscribeOperationGateResult;
+
+/**
  * User-configured policy that every autonomous CAT-21 action must satisfy
  * before the SDK lets it proceed. Each agent / bot stores this struct
  * locally; the SDK is stateless and just evaluates a (policy, action) pair.
@@ -4501,5 +4691,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyBip322Signature, verifyListingSignature };
-export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeMintState, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };

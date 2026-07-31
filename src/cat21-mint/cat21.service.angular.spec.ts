@@ -83,9 +83,15 @@ describe('Cat21Service.getUtxos', () => {
     expect(result[1]).toMatchObject({ txid: utxos[1].txid, transactionHex: `hex-of-${utxos[1].txid}` });
   });
 
-  it('throws when address is empty', () => {
+  it('emits an observable-error when address is empty (never throws synchronously)', async () => {
     const { service } = buildService();
-    expect(() => service.getUtxos('')).toThrow('No wallet connected');
+    // Must NOT throw at call time — orchestrator pipes catchError on
+    // the returned Observable and can't recover from a synchronous
+    // throw here. Assert the failure is delivered as an error
+    // notification instead.
+    const obs = service.getUtxos('');
+    await expect(new Promise((resolve, reject) => obs.subscribe({ next: resolve, error: reject })))
+      .rejects.toThrow('No wallet connected');
   });
 });
 

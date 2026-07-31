@@ -3051,10 +3051,19 @@ function isValidPersistedWalletInfo(v) {
     if (!v || typeof v !== 'object')
         return false;
     const o = v;
+    const isHex = (s) => typeof s === 'string' && s.length > 0 && /^[0-9a-f]+$/i.test(s);
     return (typeof o.type === 'string' &&
         o.type in KnownOrdinalWallets &&
         typeof o.ordinalsAddress === 'string' && o.ordinalsAddress.length > 0 &&
-        typeof o.paymentAddress === 'string' && o.paymentAddress.length > 0);
+        typeof o.paymentAddress === 'string' && o.paymentAddress.length > 0 &&
+        // Pubkey fields are read unconditionally by every mint / inscribe
+        // path (`hex.decode(wallet.paymentPublicKey)` in the orchestrator's
+        // simulation). Rehydrating a pre-schema payload without them
+        // crashes with a bare `TypeError: Cannot read properties of
+        // undefined` mid-simulation instead of forcing a clean reconnect
+        // at load time. Require both, hex-shaped.
+        isHex(o.paymentPublicKey) &&
+        isHex(o.ordinalsPublicKey));
 }
 class WalletService {
     storageService = inject(storage);
@@ -3163,8 +3172,6 @@ class WalletService {
         this.connectedWallet$.next(walletInfo);
     }
     disconnectWallet() {
-        // eslint-disable-next-line no-console
-        console.error('[wallet.service] disconnectWallet called from:', new Error().stack);
         this.tearDownAccountChangeSubscription();
         this.storageService.removeItem(LAST_CONNECTED_WALLET);
         this.connectedWallet$.next(null);
@@ -3759,7 +3766,12 @@ class Cat21Service {
      */
     getUtxos(address) {
         if (!address) {
-            throw new Error('No wallet connected');
+            // Observable-error, NOT a synchronous throw: `switchMap` /
+            // `combineLatest` catchError chains upstream only see errors
+            // that come through the Observable, and orchestrator's
+            // `utxos$` sticks in `loading-utxos` forever if this factory
+            // throws before returning an Observable.
+            return throwError(() => new Error('No wallet connected'));
         }
         const $utxos = this.http.get(`${this.mempoolApiUrl}/api/address/${address}/utxo`);
         if (isSegWit(address)) {
@@ -5096,7 +5108,7 @@ function validateCat21BuyOfferPsbt(args) {
     //     declared receive address. Only runs when the caller supplies
     //     `expectedBuyerReceiveAddress` (marketplace indexer path).
     if (args.expectedBuyerReceiveAddress !== undefined) {
-        if (!addressesEquivalent(catOutputAddress, args.expectedBuyerReceiveAddress, args.network ?? Network.Mainnet)) {
+        if (!addressesEquivalent$1(catOutputAddress, args.expectedBuyerReceiveAddress, args.network ?? Network.Mainnet)) {
             return fail('cat-output-wrong-address', `expected ${args.expectedBuyerReceiveAddress}, got ${catOutputAddress}`);
         }
     }
@@ -5116,7 +5128,7 @@ function validateCat21BuyOfferPsbt(args) {
     catch {
         return fail('payment-output-wrong-address', 'scriptPubKey not decodable to address');
     }
-    if (!addressesEquivalent(actualAddress, args.expectedSellerPaymentAddress, args.network ?? Network.Mainnet)) {
+    if (!addressesEquivalent$1(actualAddress, args.expectedSellerPaymentAddress, args.network ?? Network.Mainnet)) {
         return fail('payment-output-wrong-address', `expected ${args.expectedSellerPaymentAddress}, got ${actualAddress}`);
     }
     // 6. Seller payment amount. Output 1's value is `priceSats + postageSats`
@@ -5152,7 +5164,7 @@ function validateCat21BuyOfferPsbt(args) {
         catch {
             return fail('change-output-wrong-address', 'change output scriptPubKey not a real address');
         }
-        if (!addressesEquivalent(changeAddress, args.expectedBuyerChangeAddress, args.network ?? Network.Mainnet)) {
+        if (!addressesEquivalent$1(changeAddress, args.expectedBuyerChangeAddress, args.network ?? Network.Mainnet)) {
             return fail('change-output-wrong-address', `expected ${args.expectedBuyerChangeAddress}, got ${changeAddress}`);
         }
     }
@@ -5165,7 +5177,7 @@ function validateCat21BuyOfferPsbt(args) {
  * defeats Latin/Cyrillic homoglyph attacks because non-ASCII bytes
  * fail bech32 decoding.
  */
-function addressesEquivalent(a, b, network) {
+function addressesEquivalent$1(a, b, network) {
     if (a === b)
         return true;
     try {
@@ -8431,8 +8443,6 @@ class InscribeMintOrchestrator {
         // state must not leak across sessions. Subscription leak is fine:
         // the service is providedIn:'root' so its lifetime is the app's.
         this.walletChangeSub = this.wallet.connectedWallet$.subscribe((w) => {
-            // eslint-disable-next-line no-console
-            console.error('[sdk:inscribe] connectedWallet$ emit w=' + (w ? 'wallet(' + w.ordinalsAddress.slice(0, 12) + ')' : 'null') + ' lastAddr=' + this.lastWalletAddress?.slice(0, 12));
             if (!w) {
                 this.lastWalletAddress = null;
                 this.resetFormState();
@@ -8654,6 +8664,316 @@ function compressBrotli(body) {
 }
 
 /**
+ * Inscribe operation validation gate. Parallel to
+ * `validateCat21Operation` from `cat21-validation/`, separate by
+ * design (different protocol, different consumer set). See the
+ * types file for the full rationale.
+ */
+/* ──────────────────────────  Public entry  ────────────────────────── */
+function validateInscribeOperation(args) {
+    const { config, operation } = args;
+    if (!isObject(operation) || typeof operation.kind !== 'string') {
+        return reject('intent-not-an-object');
+    }
+    if (!isObject(operation.intent)) {
+        return reject('intent-not-an-object');
+    }
+    switch (operation.kind) {
+        case 'inscribe':
+            return validateInscribe(operation.intent, config);
+        default: {
+            const _exhaust = operation.kind;
+            return reject('unsupported-operation-kind', safeStringify(_exhaust));
+        }
+    }
+}
+/* ──────────────────────────  Per-operation  ────────────────────────── */
+function validateInscribe(intent, config) {
+    // Recipient.
+    const recipient = validateAddress(intent.recipient, config);
+    if (recipient.ok === false)
+        return recipient.result;
+    const targetNet = toScureNetwork(config.network);
+    if (config.allowedRecipients && config.allowedRecipients.length > 0) {
+        if (!allowlistContainsAddress(intent.recipient, config.allowedRecipients, targetNet)) {
+            return reject('recipient-not-allowed', intent.recipient);
+        }
+    }
+    if (config.ownPaymentAddress &&
+        addressesEquivalent(intent.recipient, config.ownPaymentAddress, targetNet)) {
+        return reject('self-send', intent.recipient);
+    }
+    // Fee rate.
+    const fee = validateFeeRate(intent.feeRate, config);
+    if (fee.ok === false)
+        return fee.result;
+    // Content body.
+    if (!ArrayBuffer.isView(intent.body) || intent.body.constructor.name !== 'Uint8Array') {
+        return reject('content-not-bytes', safeStringify(typeof intent.body));
+    }
+    const cap = config.maxContentBytes ?? DEFAULT_MAX_CONTENT_BYTES;
+    if (intent.body.length > cap) {
+        return reject('content-too-large', `body=${intent.body.length} cap=${cap}`);
+    }
+    // Content type — optional, validated when present.
+    let normalisedContentType;
+    if (intent.contentType !== undefined) {
+        if (typeof intent.contentType !== 'string') {
+            return reject('content-type-not-string', safeStringify(typeof intent.contentType));
+        }
+        normalisedContentType = intent.contentType.toLowerCase().trim();
+        // Defensive blocklist runs FIRST. A misconfigured allowlist that
+        // accidentally permits `application/javascript` (a JS XSS vector
+        // inside inscribed HTML) still loses to the blocklist.
+        if (config.blockedContentTypes && config.blockedContentTypes.length > 0) {
+            if (config.blockedContentTypes.some(s => s.toLowerCase().trim() === normalisedContentType)) {
+                return reject('content-type-blocked', intent.contentType);
+            }
+        }
+        if (config.allowedContentTypes && config.allowedContentTypes.length > 0) {
+            if (!config.allowedContentTypes.some(s => s.toLowerCase().trim() === normalisedContentType)) {
+                return reject('content-type-not-allowed', intent.contentType);
+            }
+        }
+    }
+    // Tip — optional, validated when present.
+    let tipResource;
+    if (intent.tip !== undefined) {
+        const tipResult = validateTip(intent.tip, config);
+        if (tipResult.ok === false)
+            return tipResult.result;
+        tipResource = tipResult.resource;
+    }
+    // Note — optional, validated when present.
+    let noteBytes;
+    if (intent.note !== undefined) {
+        if (typeof intent.note !== 'string') {
+            return reject('note-not-a-string', safeStringify(typeof intent.note));
+        }
+        const encoded = new TextEncoder().encode(intent.note);
+        const noteCap = config.maxNoteBytes ?? DEFAULT_MAX_NOTE_BYTES;
+        if (encoded.length > noteCap) {
+            return reject('note-too-large', `note=${encoded.length} cap=${noteCap}`);
+        }
+        noteBytes = encoded;
+    }
+    // Parent inscription id — optional, encoder throws on bad input.
+    let parentBytes;
+    if (intent.parent !== undefined) {
+        try {
+            parentBytes = encodeParentInscriptionId(intent.parent);
+        }
+        catch (e) {
+            return reject('parent-malformed', e instanceof Error ? e.message : String(e));
+        }
+    }
+    // Content encoding — only 'br' is supported.
+    let contentEncoding;
+    if (intent.contentEncoding !== undefined) {
+        if (intent.contentEncoding !== 'br') {
+            return reject('content-encoding-invalid', safeStringify(intent.contentEncoding));
+        }
+        contentEncoding = 'br';
+    }
+    return success({
+        kind: 'inscribe',
+        recipientScript: recipient.script,
+        contentBytes: intent.body,
+        contentType: normalisedContentType,
+        tip: tipResource,
+        noteBytes,
+        parentBytes,
+        contentEncoding,
+    });
+}
+/**
+ * Validate the optional reveal-tx tip output.
+ *
+ * A tip is either absent OR fully valid — no partial passes. `value=0`
+ * is allowed as a no-op (matches the reveal builder's zero-skip
+ * sentinel); the resource is only produced when `value > 0`.
+ */
+function validateTip(tip, config) {
+    if (!isObject(tip)) {
+        return { ok: false, result: reject('tip-not-an-object', safeStringify(typeof tip)) };
+    }
+    const t = tip;
+    // Value first — cheaper to reject.
+    if (typeof t.value !== 'number' || !Number.isFinite(t.value)) {
+        return { ok: false, result: reject('tip-value-not-finite-number', safeStringify(t.value)) };
+    }
+    if (!Number.isInteger(t.value)) {
+        return { ok: false, result: reject('tip-value-not-integer', safeStringify(t.value)) };
+    }
+    if (t.value < 0) {
+        return { ok: false, result: reject('tip-value-negative', String(t.value)) };
+    }
+    if (t.value === 0) {
+        // Documented no-op: the reveal builder skips the output for value=0.
+        // We still require the address to be well-formed so a policy allowlist
+        // can't be bypassed by "just send 0".
+    }
+    if (t.value > 0 && t.value < INSCRIBE_POSTAGE_SATS) {
+        return { ok: false, result: reject('tip-value-below-dust', `value=${t.value} dust=${INSCRIBE_POSTAGE_SATS}`) };
+    }
+    if (config.maxTipValueSats != null && t.value > config.maxTipValueSats) {
+        return { ok: false, result: reject('tip-value-above-cap', `${t.value} > ${config.maxTipValueSats}`) };
+    }
+    // Address validation runs even at value=0 so an allowlist bypass isn't possible.
+    if (typeof t.address !== 'string' || t.address.length === 0) {
+        return { ok: false, result: reject('tip-address-not-a-bitcoin-address', safeStringify(t.address)) };
+    }
+    const scureTarget = toScureNetwork(config.network);
+    let tipScript;
+    try {
+        const decoded = btc.Address(scureTarget).decode(t.address);
+        tipScript = btc.OutScript.encode(decoded);
+    }
+    catch {
+        const otherNet = config.network === Network.Mainnet ? btc.TEST_NETWORK : btc.NETWORK;
+        try {
+            btc.Address(otherNet).decode(t.address);
+            return { ok: false, result: reject('tip-address-wrong-network', t.address) };
+        }
+        catch {
+            return { ok: false, result: reject('tip-address-not-a-bitcoin-address', t.address) };
+        }
+    }
+    if (config.allowedTipAddresses && config.allowedTipAddresses.length > 0) {
+        if (!allowlistContainsAddress(t.address, config.allowedTipAddresses, scureTarget)) {
+            return { ok: false, result: reject('tip-address-not-allowed', t.address) };
+        }
+    }
+    return {
+        ok: true,
+        resource: t.value > 0 ? { address: t.address, tipScript, tipValueSats: t.value } : undefined,
+    };
+}
+/** Default note cap (bytes). 128 is enough for "inscribed via ordpool.space" + a URL. */
+const DEFAULT_MAX_NOTE_BYTES = 128;
+/**
+ * 350 KB default cap on inscription body bytes. Phase-1 hard
+ * ceiling — keeps the reveal tx under the ~400 kWU standard relay
+ * cap. Override via `config.maxContentBytes`.
+ */
+const DEFAULT_MAX_CONTENT_BYTES = 350_000;
+function validateAddress(address, config) {
+    if (typeof address !== 'string' || address.length === 0) {
+        return { ok: false, result: reject('recipient-not-a-bitcoin-address', safeStringify(address)) };
+    }
+    const targetNet = toScureNetwork(config.network);
+    try {
+        const decoded = btc.Address(targetNet).decode(address);
+        const script = btc.OutScript.encode(decoded);
+        return { ok: true, script };
+    }
+    catch {
+        const otherNet = config.network === Network.Mainnet ? btc.TEST_NETWORK : btc.NETWORK;
+        try {
+            btc.Address(otherNet).decode(address);
+            return { ok: false, result: reject('recipient-wrong-network', address) };
+        }
+        catch {
+            return { ok: false, result: reject('recipient-not-a-bitcoin-address', address) };
+        }
+    }
+}
+function validateFeeRate(feeRate, config) {
+    if (typeof feeRate !== 'number' || !Number.isFinite(feeRate)) {
+        return { ok: false, result: reject('fee-rate-not-finite-number', safeStringify(feeRate)) };
+    }
+    if (!Number.isInteger(feeRate)) {
+        return { ok: false, result: reject('fee-rate-not-integer', safeStringify(feeRate)) };
+    }
+    if (feeRate <= 0) {
+        return { ok: false, result: reject('fee-rate-not-positive', safeStringify(feeRate)) };
+    }
+    if (config.maxFeeRatePerVbyte != null && feeRate > config.maxFeeRatePerVbyte) {
+        return {
+            ok: false,
+            result: reject('fee-rate-above-cap', `${feeRate} > ${config.maxFeeRatePerVbyte}`),
+        };
+    }
+    return { ok: true };
+}
+function addressesEquivalent(a, b, network) {
+    if (a === b)
+        return true;
+    try {
+        const da = btc.Address(network).decode(a);
+        const db = btc.Address(network).decode(b);
+        const sa = btc.OutScript.encode(da);
+        const sb = btc.OutScript.encode(db);
+        if (sa.length !== sb.length)
+            return false;
+        for (let i = 0; i < sa.length; i++)
+            if (sa[i] !== sb[i])
+                return false;
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+function allowlistContainsAddress(address, allowlist, network) {
+    for (const entry of allowlist) {
+        if (addressesEquivalent(address, entry, network))
+            return true;
+    }
+    return false;
+}
+function isObject(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function safeStringify(value) {
+    try {
+        return JSON.stringify(value) ?? String(value);
+    }
+    catch {
+        return String(value);
+    }
+}
+function reject(reason, detail) {
+    return { ok: false, reason, detail };
+}
+function success(resources) {
+    return { ok: true, resources };
+}
+
+/**
+ * Bulletproof gate types for the inscribe operation.
+ *
+ * Single entry point: `validateInscribeOperation({ config, operation })`
+ * returns a discriminated `{ ok: true, resources } | { ok: false,
+ * reason, detail? }`. Same shape as `validateCat21Operation` in
+ * `cat21-validation/`, but a SEPARATE module by deliberate design:
+ *
+ *   - Inscribing an ord envelope (`<pubkey> CHECKSIG OP_FALSE OP_IF
+ *     "ord" <tags> body OP_ENDIF`, lockTime=0) is a different
+ *     on-chain-data protocol from CAT-21 (`nLockTime=21`, no
+ *     envelope, no on-chain content). The validation surfaces stay
+ *     separate so consumers can't accidentally mix them.
+ *   - Inscribe consumers (cat21.space's future inscribe UI, a
+ *     potential `ordpool-inscriber` tool) configure inscribe rules
+ *     here. Cat21 consumers (cat21-wallet, cat21.space's mint flows)
+ *     configure cat21 rules in `cat21-validation/`.
+ *
+ * Address / fee-rate validation primitives are duplicated rather
+ * than shared with `cat21-validation/` so each gate's rejection-
+ * reason union stays minimal and operation-named. If a third
+ * Bitcoin operation lands and the same primitives surface for a
+ * third time, extract them into a shared `bitcoin-validation/`
+ * module at that point — YAGNI for now.
+ *
+ * Design rules:
+ *   - Each rejection reason is one test case. No catch-all
+ *     `'invalid-intent'` reasons.
+ *   - The `resources` field on success carries pre-decoded values
+ *     so the downstream builder doesn't re-decode.
+ *   - Config is wholly optional except for `network`.
+ */
+
+/**
  * Pure-functional policy gate for agent-mode autonomous CAT-21 actions.
  *
  * Every autonomous `cat21_*` action must pass through this gate BEFORE
@@ -8754,5 +9074,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

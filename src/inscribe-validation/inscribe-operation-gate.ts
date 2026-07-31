@@ -53,7 +53,7 @@ function validateInscribe(
 ): InscribeOperationGateResult {
   // Recipient.
   const recipient = validateAddress(intent.recipient, config);
-  if (!recipient.ok) return recipient.result;
+  if (recipient.ok === false) return recipient.result;
 
   const targetNet = toScureNetwork(config.network);
   if (config.allowedRecipients && config.allowedRecipients.length > 0) {
@@ -70,7 +70,7 @@ function validateInscribe(
 
   // Fee rate.
   const fee = validateFeeRate(intent.feeRate, config);
-  if (!fee.ok) return fee.result;
+  if (fee.ok === false) return fee.result;
 
   // Content body.
   if (!ArrayBuffer.isView(intent.body) || intent.body.constructor.name !== 'Uint8Array') {
@@ -107,7 +107,7 @@ function validateInscribe(
   let tipResource: { address: string; tipScript: Uint8Array; tipValueSats: number } | undefined;
   if (intent.tip !== undefined) {
     const tipResult = validateTip(intent.tip, config);
-    if (!tipResult.ok) return tipResult.result;
+    if (tipResult.ok === false) return tipResult.result;
     tipResource = tipResult.resource;
   }
 
@@ -166,9 +166,7 @@ function validateInscribe(
 function validateTip(
   tip: unknown,
   config: InscribeOperationGateConfig,
-):
-  | { ok: true; resource: { address: string; tipScript: Uint8Array; tipValueSats: number } | undefined }
-  | { ok: false; result: InscribeOperationGateResult } {
+): HelperResult<{ resource: { address: string; tipScript: Uint8Array; tipValueSats: number } | undefined }> {
   if (!isObject(tip)) {
     return { ok: false, result: reject('tip-not-an-object', safeStringify(typeof tip)) };
   }
@@ -238,12 +236,22 @@ const DEFAULT_MAX_CONTENT_BYTES = 350_000;
 
 /* ──────────────────────────  Helpers  ────────────────────────── */
 
+/**
+ * Internal helper return shape. Success carries the pre-decoded
+ * value; failure carries the public gate result. Callers narrow via
+ * `if (x.ok === false) return x.result;` — explicit `=== false` is
+ * used because the caller's outer `InscribeOperationGateResult`
+ * union also has an `ok: true` variant, and truthy-narrowing on
+ * plain `!x.ok` fails to discriminate under Angular's strict
+ * tsconfig.
+ */
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type
+type HelperResult<S = {}> = ({ ok: true } & S) | { ok: false; result: InscribeOperationGateResult };
+
 function validateAddress(
   address: unknown,
   config: InscribeOperationGateConfig,
-):
-  | { ok: true; script: Uint8Array }
-  | { ok: false; result: InscribeOperationGateResult } {
+): HelperResult<{ script: Uint8Array }> {
   if (typeof address !== 'string' || address.length === 0) {
     return { ok: false, result: reject('recipient-not-a-bitcoin-address', safeStringify(address)) };
   }
@@ -266,7 +274,7 @@ function validateAddress(
 function validateFeeRate(
   feeRate: unknown,
   config: InscribeOperationGateConfig,
-): { ok: true } | { ok: false; result: InscribeOperationGateResult } {
+): HelperResult {
   if (typeof feeRate !== 'number' || !Number.isFinite(feeRate)) {
     return { ok: false, result: reject('fee-rate-not-finite-number', safeStringify(feeRate)) };
   }

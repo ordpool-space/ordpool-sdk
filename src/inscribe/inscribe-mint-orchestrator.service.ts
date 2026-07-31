@@ -223,8 +223,6 @@ export class InscribeMintOrchestrator {
     // state must not leak across sessions. Subscription leak is fine:
     // the service is providedIn:'root' so its lifetime is the app's.
     this.walletChangeSub = this.wallet.connectedWallet$.subscribe((w) => {
-      // eslint-disable-next-line no-console
-      console.error('[sdk:inscribe] connectedWallet$ emit w=' + (w ? 'wallet(' + w.ordinalsAddress.slice(0, 12) + ')' : 'null') + ' lastAddr=' + this.lastWalletAddress?.slice(0, 12));
       if (!w) {
         this.lastWalletAddress = null;
         this.resetFormState();

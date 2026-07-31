@@ -14,6 +14,7 @@ import {
   startWith,
   switchMap,
   tap,
+  throwError,
   timer,
   toArray,
 } from 'rxjs';
@@ -81,7 +82,12 @@ export class Cat21Service {
   public getUtxos(address: string): Observable<TxnOutput[]> {
 
     if (!address) {
-      throw new Error('No wallet connected');
+      // Observable-error, NOT a synchronous throw: `switchMap` /
+      // `combineLatest` catchError chains upstream only see errors
+      // that come through the Observable, and orchestrator's
+      // `utxos$` sticks in `loading-utxos` forever if this factory
+      // throws before returning an Observable.
+      return throwError(() => new Error('No wallet connected'));
     }
 
     const $utxos = this.http.get<TxnOutput[]>(`${this.mempoolApiUrl}/api/address/${address}/utxo`);

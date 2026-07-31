@@ -91,6 +91,9 @@ export * from './inscribe/inscribe-orchestrator';
 export * from './inscribe/inscribe-mint-orchestrator.service';
 export * from './inscribe/inscribe-brotli.helper';
 
+// --- inscribe validation gate (pure helpers, same set that /core exposes) ---
+export * from './inscribe-validation';
+
 // --- agent-mode (autonomous-action policy gate) ---
 export * from './agent-mode/agent-policy.helper';
 export * from './agent-mode/agent-policy.types';
