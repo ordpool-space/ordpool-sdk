@@ -8,28 +8,34 @@ import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks,
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
- * Iteration 4 — full cat21 mint roundtrip with the real Leather
- * extension. Combines Pipeline B's wallet (Playwright + Leather)
- * with the regtest stack (bitcoind + electrs on localhost).
+ * Full CAT-21 mint roundtrip with the real Leather extension.
+ * Combines the wallet (Playwright + Leather) with the regtest stack
+ * (bitcoind + electrs on localhost).
  *
- * Leather supports a `devnet` network mode which is the wallet's
- * equivalent of bitcoind regtest (both use the `bcrt` HRP). No
- * cross-network trick needed — getAddresses already returns the
- * BIP-84 / BIP-86 mainnet derivations (we hard-derive the regtest
- * variants from the same pubkey via @scure/btc-signer), and signPsbt
- * accepts `network: 'devnet'` directly.
+ * Leather ignores its `network` arg in `getAddresses` and returns
+ * mainnet `bc1q…` / `bc1p…` regardless of what the dapp requests. We
+ * cross the network boundary via the two shims documented in the
+ * workspace's `E2E_WALLET_TRICKS.md`:
+ *
+ *   1. `deriveRegtestAddresses(pubkey)` (in `sdk-harness.ts`) uses
+ *      `@scure/btc-signer` to compute `bcrt1q` / `bcrt1p` from the
+ *      same mainnet pubkey Leather returned. Fund the bcrt on regtest.
+ *   2. `signerNetworkFor(leather)` returns `Network.Mainnet` (in
+ *      `sdk-harness.ts:1028-1037`), so `signPsbt` is invoked with
+ *      `network: 'mainnet'`. The signature verifies because the
+ *      regtest input's scriptPubKey bytes are HRP-independent and
+ *      match Leather's mainnet address hash byte-for-byte.
  *
  * Flow:
  *  1. Onboard Leather with the BIP-39 test seed.
  *  2. Open the harness; call connectLeather → mainnet bc1q / bc1p.
- *  3. Derive the regtest equivalents (deriveRegtestAddresses, same
- *     helper Unisat uses).
+ *  3. Derive the regtest equivalents (deriveRegtestAddresses).
  *  4. Fund the bcrt1q via local bitcoind.
  *  5. Build CAT-21 PSBT; sign via LeatherProvider.request('signPsbt',
- *     {broadcast: false, network: 'devnet'}); extract wire-format
- *     tx via the shared extractWireTxFromPsbt helper.
- *  6. Approve the sign popup (testid: bitcoin-sign-psbt-confirm-button,
- *     discovered via the bundle's OnboardingSelectors).
+ *     {broadcast: false, network: 'mainnet'}); extract wire-format tx
+ *     via the shared extractWireTxFromPsbt helper.
+ *  6. Approve the sign popup (matched by role-name /^(confirm|sign|
+ *     approve)$/i; Leather has no stable sign-testid).
  *  7. Broadcast via local electrs; mine; parse the result.
  */
 
