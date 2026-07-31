@@ -71,6 +71,72 @@ export function toRegtestAddress(mainnetAddress: string, publicKeyHex: string): 
 }
 
 /**
+ * Wallet-side address for `signPsbt`-flavoured RPCs that filter by
+ * address (Unisat/Wizz/OKX/Oyl accept a `toSignInputs`/`inputsToSign`
+ * shape with `{index, address}` rows and refuse to sign inputs whose
+ * `address` isn't in the wallet's own address set).
+ *
+ * On regtest, the app carries `bcrt1*` addresses (rewritten by the
+ * connector shim). Mainnet-only wallets don't recognise them; the
+ * sign popup silently never opens. Translate back: for those wallets,
+ * derive the equivalent mainnet address from the same pubkey via
+ * `@scure/btc-signer` and pass that to the wallet. The PSBT itself
+ * still carries the bcrt bytes — that's fine because the scriptPubKey
+ * bytes are HRP-independent and match either address hash.
+ *
+ * Native-regtest wallets (Xverse / Cat21Wallet / Alby) return the
+ * app address unchanged; they know how to sign bcrt inputs directly.
+ * Non-regtest requests also pass through unchanged.
+ *
+ * `publicKeyHex` may be omitted for backwards compat; in that case the
+ * app address is returned unchanged (existing behaviour before the
+ * shim landed).
+ */
+export function walletSidePaymentAddress(
+  walletType: KnownOrdinalWalletType,
+  appAddress: string,
+  publicKeyHex: string | undefined,
+): string {
+  if (!publicKeyHex) return appAddress;
+  if (!appAddress.startsWith('bcrt')) return appAddress;
+  switch (walletType) {
+    case KnownOrdinalWalletType.xverse:
+    case KnownOrdinalWalletType.cat21wallet:
+    case KnownOrdinalWalletType.alby:
+      return appAddress;
+    default:
+      return toMainnetAddress(appAddress, publicKeyHex);
+  }
+}
+
+/**
+ * Inverse of `toRegtestAddress`: derive the mainnet-HRP equivalent
+ * of a `bcrt*` address from the same pubkey.
+ */
+export function toMainnetAddress(bcrtAddress: string, publicKeyHex: string): string {
+  const mainnet = btc.NETWORK;
+  const pubkey = hex.decode(publicKeyHex);
+
+  if (bcrtAddress.startsWith('bcrt1q')) {
+    return btc.p2wpkh(pubkey, mainnet).address!;
+  }
+  if (bcrtAddress.startsWith('bcrt1p')) {
+    const xonly = pubkey.length === 33 ? pubkey.slice(1, 33) : pubkey;
+    return btc.p2tr(xonly, undefined, mainnet).address!;
+  }
+  if (bcrtAddress.startsWith('2')) {
+    return btc.p2sh(btc.p2wpkh(pubkey, mainnet), mainnet).address!;
+  }
+  if (bcrtAddress.startsWith('m') || bcrtAddress.startsWith('n')) {
+    return btc.p2pkh(pubkey, mainnet).address!;
+  }
+  throw new Error(
+    `toMainnetAddress: unsupported bcrt address type for "${bcrtAddress}" ` +
+    `(supported prefixes: bcrt1q, bcrt1p, 2, m, n)`,
+  );
+}
+
+/**
  * Wallet-side network arg for `signPsbt`. Native-regtest wallets get
  * the app's actual `network`; mainnet-only wallets (Leather / Unisat /
  * Wizz / OKX / Oyl) get `Network.Mainnet` even when the app asked for

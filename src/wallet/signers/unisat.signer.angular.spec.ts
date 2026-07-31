@@ -44,7 +44,15 @@ describe('unisatSigner.signSingleFundingInput', () => {
     const result = await firstValueFrom(unisatSigner.signSingleFundingInput(input));
 
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
-    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), { autoFinalized: false });
+    // toSignInputs is now always passed (address filter tells Unisat
+    // exactly which input+key to sign — required so cross-network
+    // regtest PSBTs surface the sign popup). Without paymentPublicKey
+    // in the input, walletSidePaymentAddress returns paymentAddress
+    // unchanged (backwards-compat).
+    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), {
+      autoFinalized: false,
+      toSignInputs: [{ index: 0, address: 'bc1qpayment' }],
+    });
 
     expect(broadcastSignedPsbtMock).toHaveBeenCalledTimes(1);
     expect(broadcastSignedPsbtMock).toHaveBeenCalledWith(input, hex.decode('70736274ff01'));

@@ -38,6 +38,7 @@ export function operationNamedDefaults(
       return legacy.signAndBroadcast({
         psbtBytes: input.psbtBytes,
         paymentAddress: input.paymentAddress,
+        paymentPublicKey: input.paymentPublicKey,
         network: input.network,
         broadcast: input.broadcast,
         promptForSignedPsbt: input.promptForSignedPsbt,

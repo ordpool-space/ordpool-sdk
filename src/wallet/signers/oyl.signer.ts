@@ -1,6 +1,7 @@
 import { base64, hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
+import { walletSidePaymentAddress } from '../network-address-shim';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
@@ -65,9 +66,14 @@ const legacy = {
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex = hex.encode(input.psbtBytes);
     const oyl = (window as unknown as { oyl: OylRpc }).oyl;
+    const walletAddress = walletSidePaymentAddress(
+      KnownOrdinalWalletType.oyl,
+      input.paymentAddress,
+      input.paymentPublicKey,
+    );
     const signPromise = oyl.signPsbt({
       psbt: psbtHex,
-      inputsToSign: [{ address: input.paymentAddress, signingIndexes: [0], sigHash: 0x01 }],
+      inputsToSign: [{ address: walletAddress, signingIndexes: [0], sigHash: 0x01 }],
       broadcast: false,
       finalize: false,
     });
@@ -81,7 +87,7 @@ const legacy = {
     const oyl = (window as unknown as { oyl: OylRpc }).oyl;
     const targets = resolveSigningTargets(input);
     const inputsToSign = targets.map((t) => ({
-      address: t.address,
+      address: walletSidePaymentAddress(KnownOrdinalWalletType.oyl, t.address, input.paymentPublicKey),
       signingIndexes: t.indexes,
       sigHash: t.sigHash,
     }));
@@ -101,7 +107,7 @@ const legacy = {
     const oyl = (window as unknown as { oyl: OylRpc }).oyl;
     const targets = resolveSigningTargets(input);
     const inputsToSign = targets.map((t) => ({
-      address: t.address,
+      address: walletSidePaymentAddress(KnownOrdinalWalletType.oyl, t.address, input.paymentPublicKey),
       signingIndexes: t.indexes,
       sigHash: t.sigHash,
     }));

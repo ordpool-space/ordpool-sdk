@@ -1,6 +1,7 @@
 import { hex } from '@scure/base';
 import { defer, from, map, Observable, switchMap } from 'rxjs';
 
+import { walletSidePaymentAddress } from '../network-address-shim';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
 import {
@@ -70,7 +71,11 @@ const legacy = {
       autoFinalized: false,
       toSignInputs: [{
         index: 0,
-        address: input.paymentAddress,
+        address: walletSidePaymentAddress(
+          KnownOrdinalWalletType.okx,
+          input.paymentAddress,
+          input.paymentPublicKey,
+        ),
         // BIP-341 key-path DEFAULT (0x00) and ALL (0x01) commit to
         // identical wire bytes; accept either so OKX's policy check
         // passes regardless of which shape the PSBT emits.
@@ -88,8 +93,9 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: OkxToSignInput[] = [];
     for (const t of targets) {
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
       }
     }
 
@@ -104,8 +110,9 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: OkxToSignInput[] = [];
     for (const t of targets) {
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
       }
     }
     return from(okxBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(

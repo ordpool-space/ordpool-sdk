@@ -1,6 +1,7 @@
 import { hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
+import { walletSidePaymentAddress } from '../network-address-shim';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
@@ -49,7 +50,14 @@ const legacy = {
     const psbtHex: string = hex.encode(input.psbtBytes);
     const wizz = (window as unknown as { wizz: WizzRpc }).wizz;
 
-    return from(wizz.signPsbt(psbtHex, { autoFinalized: false })).pipe(
+    const walletAddress = walletSidePaymentAddress(
+      KnownOrdinalWalletType.wizz,
+      input.paymentAddress,
+      input.paymentPublicKey,
+    );
+    const toSignInputs: WizzToSignInput[] = [{ index: 0, address: walletAddress }];
+
+    return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
       switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
     );
   },
@@ -61,8 +69,9 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: WizzToSignInput[] = [];
     for (const t of targets) {
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
       }
     }
 
@@ -77,8 +86,9 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: WizzToSignInput[] = [];
     for (const t of targets) {
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
       }
     }
     return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(

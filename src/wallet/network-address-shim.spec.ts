@@ -5,9 +5,11 @@ import { hex } from '@scure/base';
 
 import { Network, toScureNetwork } from '../network';
 import {
+  toMainnetAddress,
   toRegtestAddress,
   toRegtestWalletInfo,
   toWireNetworkFor,
+  walletSidePaymentAddress,
 } from './network-address-shim';
 import { KnownOrdinalWalletType, WalletInfo } from './wallet.service.types';
 
@@ -101,6 +103,70 @@ describe('toRegtestWalletInfo', () => {
     expect(regtestInfo.ordinalsPublicKey).toBe(mainnetInfo.ordinalsPublicKey);
     expect(regtestInfo.type).toBe(KnownOrdinalWalletType.leather);
     expect(regtestInfo.signingSupported).toBe(true);
+  });
+});
+
+describe('toMainnetAddress', () => {
+  it('bcrt1q → bc1q with identical script hash (inverse of toRegtestAddress)', () => {
+    const bcrt = btc.p2wpkh(PUBKEY, REGTEST).address!;
+    const mainnet = toMainnetAddress(bcrt, PUBKEY_HEX);
+    expect(mainnet).toMatch(/^bc1q/);
+    expect(scriptBytesOf(mainnet, MAINNET)).toBe(scriptBytesOf(bcrt, REGTEST));
+  });
+
+  it('bcrt1p → bc1p with identical script hash', () => {
+    const xonly = PUBKEY.slice(1, 33);
+    const bcrt = btc.p2tr(xonly, undefined, REGTEST).address!;
+    const mainnet = toMainnetAddress(bcrt, PUBKEY_HEX);
+    expect(mainnet).toMatch(/^bc1p/);
+    expect(scriptBytesOf(mainnet, MAINNET)).toBe(scriptBytesOf(bcrt, REGTEST));
+  });
+
+  it('throws on an unsupported address prefix', () => {
+    expect(() => toMainnetAddress('bogus_address', PUBKEY_HEX))
+      .toThrow(/unsupported bcrt address type/i);
+  });
+});
+
+describe('walletSidePaymentAddress', () => {
+  const bcrtP2WPKH = btc.p2wpkh(PUBKEY, REGTEST).address!;
+
+  it('translates bcrt → mainnet for mainnet-only wallets on regtest', () => {
+    for (const walletType of [
+      KnownOrdinalWalletType.leather,
+      KnownOrdinalWalletType.unisat,
+      KnownOrdinalWalletType.wizz,
+      KnownOrdinalWalletType.okx,
+      KnownOrdinalWalletType.oyl,
+    ]) {
+      const wallet = walletSidePaymentAddress(walletType, bcrtP2WPKH, PUBKEY_HEX);
+      expect(wallet).toMatch(/^bc1q/);
+      expect(scriptBytesOf(wallet, MAINNET)).toBe(scriptBytesOf(bcrtP2WPKH, REGTEST));
+    }
+  });
+
+  it('returns bcrt unchanged for native-regtest wallets', () => {
+    for (const walletType of [
+      KnownOrdinalWalletType.xverse,
+      KnownOrdinalWalletType.cat21wallet,
+      KnownOrdinalWalletType.alby,
+    ]) {
+      expect(walletSidePaymentAddress(walletType, bcrtP2WPKH, PUBKEY_HEX)).toBe(bcrtP2WPKH);
+    }
+  });
+
+  it('returns non-bcrt (mainnet/testnet) addresses unchanged', () => {
+    const mainnet = btc.p2wpkh(PUBKEY, MAINNET).address!;
+    for (const walletType of [
+      KnownOrdinalWalletType.leather,
+      KnownOrdinalWalletType.xverse,
+    ]) {
+      expect(walletSidePaymentAddress(walletType, mainnet, PUBKEY_HEX)).toBe(mainnet);
+    }
+  });
+
+  it('returns app address unchanged when no publicKey provided (backwards-compat path)', () => {
+    expect(walletSidePaymentAddress(KnownOrdinalWalletType.leather, bcrtP2WPKH, undefined)).toBe(bcrtP2WPKH);
   });
 });
 

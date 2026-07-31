@@ -43,7 +43,12 @@ describe('wizzSigner.signSingleFundingInput', () => {
     const result = await firstValueFrom(wizzSigner.signSingleFundingInput(input));
 
     expect(signPsbtMock).toHaveBeenCalledTimes(1);
-    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), { autoFinalized: false });
+    // toSignInputs always passed — see unisat signer spec for
+    // rationale (cross-network regtest sign-popup surface).
+    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), {
+      autoFinalized: false,
+      toSignInputs: [{ index: 0, address: 'bc1qpayment' }],
+    });
 
     expect(broadcastSignedPsbtMock).toHaveBeenCalledTimes(1);
     expect(broadcastSignedPsbtMock).toHaveBeenCalledWith(input, hex.decode('70736274ff01'));

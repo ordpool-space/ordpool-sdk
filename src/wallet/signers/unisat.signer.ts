@@ -1,6 +1,7 @@
 import { hex } from '@scure/base';
 import { defer, from, map, Observable, switchMap } from 'rxjs';
 
+import { walletSidePaymentAddress } from '../network-address-shim';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
@@ -67,7 +68,19 @@ const legacy = {
     const psbtHex = hex.encode(input.psbtBytes);
     const unisat = (window as unknown as { unisat: UnisatRpc }).unisat;
 
-    return from(unisat.signPsbt(psbtHex, { autoFinalized: false })).pipe(
+    // Wallet-side address for the toSignInputs address filter.
+    // On regtest, the app carries bcrt; Unisat's mainnet wallet
+    // refuses those. Shim rewrites to the equivalent bc1q/bc1p.
+    const walletAddress = walletSidePaymentAddress(
+      KnownOrdinalWalletType.unisat,
+      input.paymentAddress,
+      input.paymentPublicKey,
+    );
+    const toSignInputs: UnisatToSignInput[] = [
+      { index: 0, address: walletAddress },
+    ];
+
+    return from(unisat.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
       switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
     );
   },
@@ -79,8 +92,9 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: UnisatToSignInput[] = [];
     for (const t of targets) {
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
       }
     }
 
@@ -96,8 +110,9 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: UnisatToSignInput[] = [];
     for (const t of targets) {
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
       }
     }
 

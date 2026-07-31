@@ -94,6 +94,8 @@ export interface WalletConnector {
 export interface SignAndBroadcastInput {
   psbtBytes: Uint8Array;
   paymentAddress: string;
+  /** See `SignSingleFundingInputArgs.paymentPublicKey`. Optional. */
+  paymentPublicKey?: string;
   network: Network;
   /** Broadcast a finalized tx-hex. Returns the txid. */
   broadcast(txHex: string): Observable<string>;
@@ -157,6 +159,8 @@ export interface PsbtSigningTarget {
 export interface SignMultiInputAndBroadcastInput {
   psbtBytes: Uint8Array;
   signingMap: ReadonlyArray<PsbtSigningTarget>;
+  /** See `SignSingleFundingInputArgs.paymentPublicKey`. Optional. */
+  paymentPublicKey?: string;
   network: Network;
   /** Broadcast a finalized tx-hex. Returns the txid. */
   broadcast(txHex: string): Observable<string>;
@@ -179,6 +183,8 @@ export interface SignMultiInputAndBroadcastInput {
 export interface SignPsbtOnlyInput {
   psbtBytes: Uint8Array;
   signingMap: ReadonlyArray<PsbtSigningTarget>;
+  /** See `SignSingleFundingInputArgs.paymentPublicKey`. Optional. */
+  paymentPublicKey?: string;
   network: Network;
   /** Mirrors SignAndBroadcastInput.promptForSignedPsbt for watch-only signers. */
   promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
@@ -193,6 +199,16 @@ export interface SignPsbtOnlyInput {
 export interface SignSingleFundingInputArgs {
   psbtBytes: Uint8Array;
   paymentAddress: string;
+  /**
+   * Optional; enables the Unisat/Wizz/OKX/Oyl wallet-side address
+   * shim on regtest. When set + the app's `paymentAddress` is bcrt,
+   * the signer derives the wallet's mainnet-view of the same key
+   * (script bytes identical) and passes THAT in the sign RPC's
+   * per-input address filter. Mainnet-only wallets refuse to open
+   * their sign popup when the address isn't in their address set,
+   * so this field is load-bearing for cross-network signing.
+   */
+  paymentPublicKey?: string;
   network: Network;
   broadcast(txHex: string): Observable<string>;
   promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
