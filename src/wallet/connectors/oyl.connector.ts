@@ -1,6 +1,7 @@
 import { from, map, Observable } from 'rxjs';
 
 import { Network } from '../../network';
+import { toRegtestWalletInfo } from '../network-address-shim';
 import {
   isOylInstalled,
   OylAddressResponse,
@@ -37,10 +38,11 @@ export const oylConnector: WalletConnector = {
     return isOylInstalled(win);
   },
 
-  connect(_network: Network): Observable<WalletInfo> {
+  connect(network: Network): Observable<WalletInfo> {
     const oyl = (window as unknown as { oyl: OylApi }).oyl;
     return from(oyl.getAddresses()).pipe(
       map(addresses => parseOylAddressResponse(addresses)),
+      map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info),
     );
   },
 };

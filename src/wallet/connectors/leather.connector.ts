@@ -1,6 +1,7 @@
 import { from, map, Observable } from 'rxjs';
 
 import { Network } from '../../network';
+import { toRegtestWalletInfo } from '../network-address-shim';
 import {
   isLeatherInstalled,
   parseLeatherAddressResponse,
@@ -37,12 +38,13 @@ export const leatherConnector: WalletConnector = {
     return isLeatherInstalled(win);
   },
 
-  connect(_network: Network): Observable<WalletInfo> {
+  connect(network: Network): Observable<WalletInfo> {
     return from(
       (window as unknown as { LeatherProvider: { request(method: string): Promise<LeatherAddressResponse> } })
         .LeatherProvider.request('getAddresses')
     ).pipe(
-      map(parseLeatherAddressResponse)
+      map(parseLeatherAddressResponse),
+      map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info),
     );
   },
 };

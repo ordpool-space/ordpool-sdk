@@ -3,6 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { defer, from, map, Observable, switchMap } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network';
+import { toWireNetworkFor } from '../network-address-shim';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
@@ -98,7 +99,7 @@ const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const psbtHex = hex.encode(input.psbtBytes);
-    const network = toLeatherNetworkString(input.network);
+    const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
     return defer(() => from(callLeatherSignPsbt(psbtHex, 0, network))).pipe(
       switchMap((signedHex) => broadcastSignedPsbt(input, hex.decode(signedHex))),
     );
@@ -110,7 +111,7 @@ const legacy = {
     for (const t of targets) {
       for (const i of t.indexes) flatIndexes.push(i);
     }
-    const network = toLeatherNetworkString(input.network);
+    const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
 
     return defer(() => {
       let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));
@@ -129,7 +130,7 @@ const legacy = {
     for (const t of targets) {
       for (const i of t.indexes) flatIndexes.push(i);
     }
-    const network = toLeatherNetworkString(input.network);
+    const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
 
     return defer(() => {
       let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));

@@ -1,6 +1,7 @@
 import { from, map, Observable } from 'rxjs';
 
 import { Network } from '../../network';
+import { toRegtestWalletInfo } from '../network-address-shim';
 import {
   isOkxInstalled,
   okxBasicInfoToWalletInfo,
@@ -54,9 +55,10 @@ export const okxConnector: WalletConnector = {
     return isOkxInstalled(win);
   },
 
-  connect(_network: Network): Observable<WalletInfo> {
+  connect(network: Network): Observable<WalletInfo> {
     return from(getBasicOkxInfo()).pipe(
-      map(({ address, publicKey }) => okxBasicInfoToWalletInfo(address, publicKey))
+      map(({ address, publicKey }) => okxBasicInfoToWalletInfo(address, publicKey)),
+      map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info),
     );
   },
 

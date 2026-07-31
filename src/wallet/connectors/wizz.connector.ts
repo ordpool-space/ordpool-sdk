@@ -1,6 +1,7 @@
 import { from, map, Observable } from 'rxjs';
 
 import { Network } from '../../network';
+import { toRegtestWalletInfo } from '../network-address-shim';
 import {
   isWizzInstalled,
   wizzBasicInfoToWalletInfo,
@@ -50,9 +51,10 @@ export const wizzConnector: WalletConnector = {
     return isWizzInstalled(win);
   },
 
-  connect(_network: Network): Observable<WalletInfo> {
+  connect(network: Network): Observable<WalletInfo> {
     return from(getBasicWizzInfo()).pipe(
-      map(({ address, publicKey }) => wizzBasicInfoToWalletInfo(address, publicKey))
+      map(({ address, publicKey }) => wizzBasicInfoToWalletInfo(address, publicKey)),
+      map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info),
     );
   },
 
