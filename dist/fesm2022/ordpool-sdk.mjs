@@ -1259,6 +1259,90 @@ const cat21walletConnector = {
 };
 
 /**
+ * Non-native regtest wallets (Leather / Unisat / Wizz / OKX / Oyl)
+ * hard-code mainnet HRP in their `getAddresses` responses regardless
+ * of the network the dapp asked for. When a consumer initialises the
+ * SDK with `Network.Regtest`, this helper post-processes the wallet's
+ * returned `WalletInfo` and swaps its payment + ordinals addresses for
+ * their `bcrt`-prefixed equivalents, derived from the same pubkeys via
+ * `@scure/btc-signer`.
+ *
+ * Correctness rests on: scriptPubKey bytes are HRP-independent, so a
+ * signature the wallet produces against ITS mainnet address hash also
+ * verifies against the equivalent regtest scriptPubKey (matching bytes
+ * modulo the human-readable prefix). The signer-side companion — see
+ * `toWireNetworkFor(walletType, network)` — takes care of passing
+ * `network: 'mainnet'` to the wallet's `signPsbt` even when the app
+ * asked for regtest, so the wallet unlocks its mainnet-derived key.
+ *
+ * Native-regtest wallets (Xverse, Cat21Wallet, Alby) skip this: their
+ * connectors already return `bcrt1*` when asked with `Network.Regtest`.
+ */
+function toRegtestWalletInfo(info) {
+    return {
+        ...info,
+        paymentAddress: toRegtestAddress(info.paymentAddress, info.paymentPublicKey),
+        ordinalsAddress: toRegtestAddress(info.ordinalsAddress, info.ordinalsPublicKey),
+    };
+}
+/**
+ * Detect the address type from its mainnet HRP / prefix and re-derive
+ * it under the regtest network from the same pubkey. Supports the four
+ * address shapes any of our five non-native wallets actually returns:
+ *   - `bc1q…` → P2WPKH (Native SegWit)
+ *   - `bc1p…` → P2TR (Taproot)
+ *   - `3…`    → P2SH-wrapped-P2WPKH (Nested SegWit)
+ *   - `1…`    → P2PKH (Legacy)
+ *
+ * P2PKH is included because Unisat's user-selectable address-type UI
+ * exposes it; we throw a targeted error for anything that doesn't match
+ * one of the four rather than returning silently-wrong bytes.
+ */
+function toRegtestAddress(mainnetAddress, publicKeyHex) {
+    const regtest = toScureNetwork(Network.Regtest);
+    const pubkey = hex.decode(publicKeyHex);
+    if (mainnetAddress.startsWith('bc1q')) {
+        return btc.p2wpkh(pubkey, regtest).address;
+    }
+    if (mainnetAddress.startsWith('bc1p')) {
+        // BIP-86 tap-internal-key = x-only (32 bytes). Compressed pubkeys
+        // (33 bytes, 02/03-prefixed) drop their parity byte.
+        const xonly = pubkey.length === 33 ? pubkey.slice(1, 33) : pubkey;
+        return btc.p2tr(xonly, undefined, regtest).address;
+    }
+    if (mainnetAddress.startsWith('3')) {
+        return btc.p2sh(btc.p2wpkh(pubkey, regtest), regtest).address;
+    }
+    if (mainnetAddress.startsWith('1')) {
+        return btc.p2pkh(pubkey, regtest).address;
+    }
+    throw new Error(`toRegtestAddress: unsupported address type for "${mainnetAddress}" ` +
+        `(supported prefixes: bc1q, bc1p, 3, 1)`);
+}
+/**
+ * Wallet-side network arg for `signPsbt`. Native-regtest wallets get
+ * the app's actual `network`; mainnet-only wallets (Leather / Unisat /
+ * Wizz / OKX / Oyl) get `Network.Mainnet` even when the app asked for
+ * `Network.Regtest`, so the wallet unlocks its mainnet-derived key
+ * (which produces a signature that verifies against the equivalent
+ * regtest scriptPubKey — see `toRegtestWalletInfo`'s docstring).
+ *
+ * Non-regtest networks pass through unchanged.
+ */
+function toWireNetworkFor(walletType, appNetwork) {
+    if (appNetwork !== Network.Regtest)
+        return appNetwork;
+    switch (walletType) {
+        case KnownOrdinalWalletType.xverse:
+        case KnownOrdinalWalletType.cat21wallet:
+        case KnownOrdinalWalletType.alby:
+            return Network.Regtest;
+        default:
+            return Network.Mainnet;
+    }
+}
+
+/**
  * Leather — `window.LeatherProvider.request(method, params)`.
  *
  * Namespace matters: the historical Hiro wallet exposed `window.btc`,
@@ -1278,9 +1362,9 @@ const leatherConnector = {
     detect(win) {
         return isLeatherInstalled(win);
     },
-    connect(_network) {
+    connect(network) {
         return from(window
-            .LeatherProvider.request('getAddresses')).pipe(map(parseLeatherAddressResponse));
+            .LeatherProvider.request('getAddresses')).pipe(map(parseLeatherAddressResponse), map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info));
     },
 };
 
@@ -1312,8 +1396,8 @@ const okxConnector = {
     detect(win) {
         return isOkxInstalled(win);
     },
-    connect(_network) {
-        return from(getBasicOkxInfo()).pipe(map(({ address, publicKey }) => okxBasicInfoToWalletInfo(address, publicKey)));
+    connect(network) {
+        return from(getBasicOkxInfo()).pipe(map(({ address, publicKey }) => okxBasicInfoToWalletInfo(address, publicKey)), map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info));
     },
     onAccountChange(handler) {
         const okxBtc = window.okxwallet?.bitcoin;
@@ -1343,9 +1427,9 @@ const oylConnector = {
     detect(win) {
         return isOylInstalled(win);
     },
-    connect(_network) {
+    connect(network) {
         const oyl = window.oyl;
-        return from(oyl.getAddresses()).pipe(map(addresses => parseOylAddressResponse(addresses)));
+        return from(oyl.getAddresses()).pipe(map(addresses => parseOylAddressResponse(addresses)), map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info));
     },
 };
 
@@ -1430,8 +1514,8 @@ const unisatConnector = {
     detect(win) {
         return isUnisatInstalled(win);
     },
-    connect(_network) {
-        return from(getBasicUnisatInfo()).pipe(map(({ address, publicKey }) => unisatBasicInfoToWalletInfo(address, publicKey)));
+    connect(network) {
+        return from(getBasicUnisatInfo()).pipe(map(({ address, publicKey }) => unisatBasicInfoToWalletInfo(address, publicKey)), map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info));
     },
     onAccountChange(handler) {
         const unisat = window.unisat;
@@ -1470,8 +1554,8 @@ const wizzConnector = {
     detect(win) {
         return isWizzInstalled(win);
     },
-    connect(_network) {
-        return from(getBasicWizzInfo()).pipe(map(({ address, publicKey }) => wizzBasicInfoToWalletInfo(address, publicKey)));
+    connect(network) {
+        return from(getBasicWizzInfo()).pipe(map(({ address, publicKey }) => wizzBasicInfoToWalletInfo(address, publicKey)), map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info));
     },
     onAccountChange(handler) {
         const wizz = window.wizz;
@@ -2151,7 +2235,7 @@ function callLeatherSignPsbt(psbtHex, signAtIndex, network) {
 const legacy$7 = {
     signAndBroadcast(input) {
         const psbtHex = hex.encode(input.psbtBytes);
-        const network = toLeatherNetworkString(input.network);
+        const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
         return defer(() => from(callLeatherSignPsbt(psbtHex, 0, network))).pipe(switchMap((signedHex) => broadcastSignedPsbt(input, hex.decode(signedHex))));
     },
     signMultiInputAndBroadcast(input) {
@@ -2161,7 +2245,7 @@ const legacy$7 = {
             for (const i of t.indexes)
                 flatIndexes.push(i);
         }
-        const network = toLeatherNetworkString(input.network);
+        const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
         return defer(() => {
             let chain = Promise.resolve(hex.encode(input.psbtBytes));
             for (const i of flatIndexes) {
@@ -2177,7 +2261,7 @@ const legacy$7 = {
             for (const i of t.indexes)
                 flatIndexes.push(i);
         }
-        const network = toLeatherNetworkString(input.network);
+        const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
         return defer(() => {
             let chain = Promise.resolve(hex.encode(input.psbtBytes));
             for (const i of flatIndexes) {
