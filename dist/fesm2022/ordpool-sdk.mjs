@@ -174,6 +174,14 @@ const KnownOrdinalWallets = {
         label: 'Phantom',
         logo: walletLogos.phantom,
         downloadLink: 'https://phantom.com/download',
+        // Phantom v26.14.0+ ships `btc.js` as an inpage script but never
+        // registers it as a content script, AND the SW rejects
+        // `btc_requestAccounts` with "isn't implemented". Positively
+        // pinned by phantom-mint-connect-blocked.spec.ts +
+        // phantom-inscribe-connect-blocked.spec.ts +
+        // phantom-sdk-handshake.spec.ts:370-476. Hidden until Phantom
+        // wires the SW handlers.
+        hiddenFromPicker: true,
     },
     [KnownOrdinalWalletType.oyl]: {
         type: KnownOrdinalWalletType.oyl,
@@ -186,20 +194,27 @@ const KnownOrdinalWallets = {
         label: 'Alby',
         // Lightning + Nostr FIRST, but the webbtc sub-provider signs any
         // Taproot input the user's mnemonic can spend — proven by the
-        // SDK's alby-mint-roundtrip spec (CAT-21 mint end-to-end). Keep
-        // the subLabel as a UX hint that Alby isn't ordinals-focused,
-        // but don't hide it from ordinal-oriented pickers.
+        // SDK's alby-mint-roundtrip spec (CAT-21 mint end-to-end). The
+        // subLabel stays as a UX hint that Alby isn't ordinals-focused.
         subLabel: 'Lightning + Nostr focused; on-chain via webbtc',
         logo: walletLogos.alby,
         downloadLink: 'https://getalby.com/',
-        onChainOrdinals: true,
     },
     [KnownOrdinalWalletType.binance]: {
         type: KnownOrdinalWalletType.binance,
         label: 'Binance Wallet',
-        subLabel: 'API documented but not exposed in v1.17.2 — surfaces only if Binance enables it',
         logo: walletLogos.binance,
         downloadLink: 'https://www.binance.com/en/web3wallet',
+        // Binance Web3 Wallet v1.17.2 (disassembled 2026-06-12) injects
+        // only window.binancew3w.{wallet, ethereum, solana, tron, sui,
+        // tonconnect} — the documented .bitcoin sub-provider that our
+        // connector + signer target isn't wired. Detection returns false
+        // on real installs; this wallet's connector + signer + registry
+        // entry all ship (per the "ship every signer" HARD RULE) but the
+        // wallet is hidden from consumer pickers until Binance enables
+        // the documented surface. See honest-wallet-coverage.spec.ts's
+        // WALLETS_WITHOUT_PIPELINE_B carve-out for the full trail.
+        hiddenFromPicker: true,
     },
     [KnownOrdinalWalletType.cat21wallet]: {
         type: KnownOrdinalWalletType.cat21wallet,
@@ -3237,7 +3252,20 @@ class WalletService {
     connectedWallet$ = new BehaviorSubject(null);
     wallets$ = timer(0, 500) // Start immediately and repeat every 500ms
         .pipe(take(4), // Take 4 intervals only, i.e., perform the check four times
-    map(() => this.getInstalledWallets()), distinctUntilChanged((prev, curr) => {
+    map(() => this.getInstalledWallets()), 
+    // Drop wallets flagged `hiddenFromPicker` in the SDK metadata —
+    // wallets whose shipped binary is structurally incapable of
+    // driving the SDK's inscribe / CAT-21 flows (Phantom, Binance
+    // as of 2026-08-01). Filter both installed AND notInstalled so
+    // the wallet doesn't surface in ANY picker slot — including the
+    // "install this wallet" list, which would otherwise send users
+    // to install a wallet that won't work once installed. Single
+    // source of truth: the wallet's metadata. Consumers don't need
+    // to know about individual broken wallets.
+    map(({ installedWallets, notInstalledWallets }) => ({
+        installedWallets: installedWallets.filter((w) => !w.hiddenFromPicker),
+        notInstalledWallets: notInstalledWallets.filter((w) => !w.hiddenFromPicker),
+    })), distinctUntilChanged((prev, curr) => {
         return JSON.stringify(prev) === JSON.stringify(curr);
     }));
     // Static derivation from the injected network. Kept as a boolean field

@@ -394,16 +394,24 @@ export interface KnownOrdinalWallet {
   logo: string;
   downloadLink: string;
   /**
-   * Whether this wallet can hold on-chain ordinal artifacts
-   * (inscriptions, CAT-21 sats, runes, etc.) at all. Defaults to
-   * `true` when omitted; `false` for Lightning-/Nostr-only wallets
-   * whose detection succeeds but whose addresses can't carry sats
-   * the consumer cares about. Consumers building strictly ordinals-
-   * focused pickers (cat21.space) filter these out; consumers with
-   * Lightning surfaces (future ordpool Lightning support, Alby for
-   * webln) leave them in.
+   * When `true`, `WalletService.wallets$` drops this wallet from BOTH
+   * `installedWallets` AND `notInstalledWallets` — the wallet
+   * disappears from every consumer's picker AND from every "install
+   * this wallet" list.
+   *
+   * Use this ONLY when the wallet's shipped binary is structurally
+   * incapable of driving the SDK's inscribe / CAT-21 flows — either
+   * the required in-page provider surface isn't injected (Binance
+   * v1.17.2 omits `window.binancew3w.bitcoin`) or the service worker
+   * doesn't implement the required RPC methods (Phantom v26.x has no
+   * `btc_*` handlers). Offering a wallet as "installable" when
+   * installing it still leaves the user unable to sign is a lie.
+   *
+   * The connector + signer files stay in the SDK — the day the
+   * vendor ships the missing surface, flip this back to `false`
+   * (or delete) and the wallet lights up automatically.
    */
-  onChainOrdinals?: boolean;
+  hiddenFromPicker?: boolean;
 }
 
 import { walletLogos } from './wallet-logos';
@@ -448,6 +456,14 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     label: 'Phantom',
     logo: walletLogos.phantom,
     downloadLink: 'https://phantom.com/download',
+    // Phantom v26.14.0+ ships `btc.js` as an inpage script but never
+    // registers it as a content script, AND the SW rejects
+    // `btc_requestAccounts` with "isn't implemented". Positively
+    // pinned by phantom-mint-connect-blocked.spec.ts +
+    // phantom-inscribe-connect-blocked.spec.ts +
+    // phantom-sdk-handshake.spec.ts:370-476. Hidden until Phantom
+    // wires the SW handlers.
+    hiddenFromPicker: true,
   },
   [KnownOrdinalWalletType.oyl]: {
     type: KnownOrdinalWalletType.oyl,
@@ -460,20 +476,27 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     label: 'Alby',
     // Lightning + Nostr FIRST, but the webbtc sub-provider signs any
     // Taproot input the user's mnemonic can spend — proven by the
-    // SDK's alby-mint-roundtrip spec (CAT-21 mint end-to-end). Keep
-    // the subLabel as a UX hint that Alby isn't ordinals-focused,
-    // but don't hide it from ordinal-oriented pickers.
+    // SDK's alby-mint-roundtrip spec (CAT-21 mint end-to-end). The
+    // subLabel stays as a UX hint that Alby isn't ordinals-focused.
     subLabel: 'Lightning + Nostr focused; on-chain via webbtc',
     logo: walletLogos.alby,
     downloadLink: 'https://getalby.com/',
-    onChainOrdinals: true,
   },
   [KnownOrdinalWalletType.binance]: {
     type: KnownOrdinalWalletType.binance,
     label: 'Binance Wallet',
-    subLabel: 'API documented but not exposed in v1.17.2 — surfaces only if Binance enables it',
     logo: walletLogos.binance,
     downloadLink: 'https://www.binance.com/en/web3wallet',
+    // Binance Web3 Wallet v1.17.2 (disassembled 2026-06-12) injects
+    // only window.binancew3w.{wallet, ethereum, solana, tron, sui,
+    // tonconnect} — the documented .bitcoin sub-provider that our
+    // connector + signer target isn't wired. Detection returns false
+    // on real installs; this wallet's connector + signer + registry
+    // entry all ship (per the "ship every signer" HARD RULE) but the
+    // wallet is hidden from consumer pickers until Binance enables
+    // the documented surface. See honest-wallet-coverage.spec.ts's
+    // WALLETS_WITHOUT_PIPELINE_B carve-out for the full trail.
+    hiddenFromPicker: true,
   },
   [KnownOrdinalWalletType.cat21wallet]: {
     type: KnownOrdinalWalletType.cat21wallet,

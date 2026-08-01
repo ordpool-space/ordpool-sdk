@@ -89,6 +89,19 @@ export class WalletService {
     .pipe(
       take(4), // Take 4 intervals only, i.e., perform the check four times
       map(() => this.getInstalledWallets()),
+      // Drop wallets flagged `hiddenFromPicker` in the SDK metadata —
+      // wallets whose shipped binary is structurally incapable of
+      // driving the SDK's inscribe / CAT-21 flows (Phantom, Binance
+      // as of 2026-08-01). Filter both installed AND notInstalled so
+      // the wallet doesn't surface in ANY picker slot — including the
+      // "install this wallet" list, which would otherwise send users
+      // to install a wallet that won't work once installed. Single
+      // source of truth: the wallet's metadata. Consumers don't need
+      // to know about individual broken wallets.
+      map(({ installedWallets, notInstalledWallets }) => ({
+        installedWallets:    installedWallets.filter((w) => !w.hiddenFromPicker),
+        notInstalledWallets: notInstalledWallets.filter((w) => !w.hiddenFromPicker),
+      })),
       distinctUntilChanged((prev, curr) => {
         return JSON.stringify(prev) === JSON.stringify(curr);
       })

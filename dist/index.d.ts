@@ -254,16 +254,24 @@ interface KnownOrdinalWallet {
     logo: string;
     downloadLink: string;
     /**
-     * Whether this wallet can hold on-chain ordinal artifacts
-     * (inscriptions, CAT-21 sats, runes, etc.) at all. Defaults to
-     * `true` when omitted; `false` for Lightning-/Nostr-only wallets
-     * whose detection succeeds but whose addresses can't carry sats
-     * the consumer cares about. Consumers building strictly ordinals-
-     * focused pickers (cat21.space) filter these out; consumers with
-     * Lightning surfaces (future ordpool Lightning support, Alby for
-     * webln) leave them in.
+     * When `true`, `WalletService.wallets$` drops this wallet from BOTH
+     * `installedWallets` AND `notInstalledWallets` — the wallet
+     * disappears from every consumer's picker AND from every "install
+     * this wallet" list.
+     *
+     * Use this ONLY when the wallet's shipped binary is structurally
+     * incapable of driving the SDK's inscribe / CAT-21 flows — either
+     * the required in-page provider surface isn't injected (Binance
+     * v1.17.2 omits `window.binancew3w.bitcoin`) or the service worker
+     * doesn't implement the required RPC methods (Phantom v26.x has no
+     * `btc_*` handlers). Offering a wallet as "installable" when
+     * installing it still leaves the user unable to sign is a lie.
+     *
+     * The connector + signer files stay in the SDK — the day the
+     * vendor ships the missing surface, flip this back to `false`
+     * (or delete) and the wallet lights up automatically.
      */
-    onChainOrdinals?: boolean;
+    hiddenFromPicker?: boolean;
 }
 declare const KnownOrdinalWallets: {
     [K in KnownOrdinalWalletType]: KnownOrdinalWallet;
