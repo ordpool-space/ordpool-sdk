@@ -244,16 +244,27 @@ for (const variant of VARIANTS) {
       await context.route('**/configs.wizz.cash/**', route => route.abort());
     } else if (isP2TR && WIZZ_CONFIGS_FIXTURE) {
       await context.route('**/configs.wizz.cash/**', route => {
-        // Match by the request's pathname (host-relative). Falls
-        // back to the first fixture entry if no exact match — many
-        // configs.wizz.cash endpoints are stateless enough that any
-        // payload satisfies the SW.
+        // Match by the request's pathname (host-relative). If the
+        // fixture doesn't have an exact entry, ABORT — never serve a
+        // random other endpoint's body. The previous behaviour
+        // (`?? Object.values(...)[0] ?? ''`) silently served the FIRST
+        // fixture value for any unknown path, so a wizz release that
+        // added a new bootstrap request (`/api/settings`) would get
+        // back the body of `/api/networks` and derive an unpredictable
+        // address — with no way for the maintainer to tell whether
+        // wizz broke, the fixture aged out, or the fallback mis-served.
+        // Aborting drops the request cleanly; wizz's SW handles a
+        // network failure with a documented -32603 rejection or the
+        // captured fixture (whichever the test's `variant` expects).
         const url = new URL(route.request().url());
         const path = url.pathname + url.search;
-        const body = WIZZ_CONFIGS_FIXTURE[path]
-          ?? WIZZ_CONFIGS_FIXTURE[url.pathname]
-          ?? Object.values(WIZZ_CONFIGS_FIXTURE)[0]
-          ?? '';
+        const body = WIZZ_CONFIGS_FIXTURE[path] ?? WIZZ_CONFIGS_FIXTURE[url.pathname];
+        if (body === undefined) {
+          // eslint-disable-next-line no-console
+          console.log(`[wizz-matrix] no fixture for ${url.pathname}${url.search} — aborting`);
+          route.abort().catch(() => undefined);
+          return;
+        }
         route.fulfill({
           status: 200,
           contentType: 'application/json',

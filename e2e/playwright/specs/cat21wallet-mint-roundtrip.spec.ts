@@ -13,12 +13,15 @@ import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../
  * extension. Combines Pipeline B's wallet (Playwright + Cat21 Wallet)
  * with the regtest stack (bitcoind + electrs on localhost).
  *
- * Cat21 Wallet supports a `devnet` network mode which is the wallet's
- * equivalent of bitcoind regtest (both use the `bcrt` HRP). No
- * cross-network trick needed — getAddresses already returns the
- * BIP-84 / BIP-86 mainnet derivations (we hard-derive the regtest
- * variants from the same pubkey via @scure/btc-signer), and signPsbt
- * accepts `network: 'devnet'` directly.
+ * Cat21 Wallet supports a `regtest` network mode (both mainnet and
+ * regtest use the `bcrt` HRP; `regtest` is the standard Bitcoin term
+ * — the wallet also accepts Leather's legacy Stacks-era `devnet`
+ * alias for backwards compatibility, but every new consumer should
+ * use `regtest`). No cross-network trick needed — getAddresses
+ * already returns the BIP-84 / BIP-86 mainnet derivations (we
+ * hard-derive the regtest variants from the same pubkey via
+ * @scure/btc-signer), and signPsbt accepts `network: 'regtest'`
+ * directly (see `toLeatherNetworkString` in `src/network.ts`).
  *
  * Flow:
  *  1. Onboard Cat21 Wallet with the BIP-39 test seed.
@@ -27,7 +30,7 @@ import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../
  *     helper Unisat uses).
  *  4. Fund the bcrt1q via local bitcoind.
  *  5. Build CAT-21 PSBT; sign via Cat21Provider.request('signPsbt',
- *     {broadcast: false, network: 'devnet'}); extract wire-format
+ *     {broadcast: false, network: 'regtest'}); extract wire-format
  *     tx via the shared extractWireTxFromPsbt helper.
  *  6. Approve the sign popup (testid: bitcoin-sign-psbt-confirm-button,
  *     discovered via the bundle's OnboardingSelectors).
@@ -198,6 +201,14 @@ test('mint a cat21 on regtest via Cat21 Wallet: build PSBT in SDK, sign in popup
   expect(esploraTx.locktime).toBe(21);
   expect(esploraTx.status.block_hash).toBeTruthy();
   assertAllInputsSighashAll(esploraTx);
+
+  // RBF policy: cat21-wallet deliberately signals RBF (sequence
+  // 0xfffffffd) because its mempool-acceleration UI guarantees that
+  // any replacement preserves nLockTime=21. Any other value would
+  // mean the signer regressed.
+  for (const vin of esploraTx.vin) {
+    expect(vin.sequence).toBe(0xfffffffd);
+  }
 
   const parsed = Cat21ParserService.parse(esploraTx);
   expect(parsed).not.toBeNull();

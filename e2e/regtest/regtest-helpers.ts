@@ -12,6 +12,11 @@ const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 // service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`
 // spec to verify a real upstream-ord recognises the SDK's inscriptions.
 const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
+// The bitcoind container name. Defaults to the SDK's own stack
+// (`ordpool-e2e-bitcoind`); consumer repos (cubes-frontend, ordpool)
+// stand up their own compose with a different name (e.g.
+// `ordpool-e2e-consumer-bitcoind`) and override via env.
+const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? 'ordpool-e2e-bitcoind';
 
 export interface FundedAccount {
   address: string;
@@ -36,7 +41,7 @@ export function getFundedAccount(): FundedAccount {
 export function rpc(...args: string[]): string {
   return execFileSync(
     'docker',
-    ['exec', 'ordpool-e2e-bitcoind', 'bitcoin-cli',
+    ['exec', BITCOIND_CONTAINER, 'bitcoin-cli',
      '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args],
     { encoding: 'utf8' },
   ).trim();

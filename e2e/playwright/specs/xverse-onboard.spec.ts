@@ -23,10 +23,20 @@ import * as fs from 'node:fs';
  *   (`abandon abandon abandon abandon abandon abandon abandon
  *    abandon abandon abandon abandon about`)
  * - Set a throwaway password (twice)
- * - Reach the dashboard
- * - Read back the displayed Bitcoin payment address (P2WPKH) and
- *   the ordinals address (P2TR), assert they match the well-known
- *   BIP-84 / BIP-86 derivations of the test seed
+ * - Reach the dashboard ("Account 1" header) — proof that extension
+ *   storage committed the wallet state
+ *
+ * Address-correctness verification lives in `xverse-sdk-handshake.spec.ts`
+ * where a test harness page imports our SDK + sats-connect and queries
+ * the wallet for its derived addresses through the same API our
+ * production code uses. That path bypasses the popup UI entirely and
+ * is the honest place to pin the BIP-84 / BIP-86 derivations of the
+ * test seed. This onboard spec deliberately does NOT read addresses
+ * out of Xverse's popup DOM — the popup overlays marketing modals
+ * (bank-yield CTA, $ZEST banner) and renders address cards as
+ * <span> labels inside non-standard clickable wrappers that resist
+ * Playwright's click actionability. Trying to pin addresses here
+ * turns this "did onboarding commit?" tripwire into a flaky UI test.
  *
  * The selectors here are text-based on purpose. Xverse ships with
  * styled-components hashed class names (`sc-329d22af-0 kBasGW`) that
@@ -41,13 +51,10 @@ const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 
 // BIP-39 abandon × 11 + about. Well-known test vector; the derived
 // addresses are publicly documented and never used for real funds.
+// Pinned BIP-84 / BIP-86 derivations of this seed live in
+// xverse-sdk-handshake.spec.ts (which is where address correctness
+// is actually asserted — see the docstring above for why).
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-
-// Expected addresses derived from TEST_MNEMONIC on mainnet:
-//   m/84'/0'/0'/0/0  (BIP-84, native segwit, what Xverse calls "Payment")
-//   m/86'/0'/0'/0/0  (BIP-86, taproot,       what Xverse calls "Ordinals")
-const EXPECTED_BIP84_ADDRESS = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
-const EXPECTED_BIP86_ADDRESS = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
 
 const TEST_PASSWORD = 'TestPassword123!';
 

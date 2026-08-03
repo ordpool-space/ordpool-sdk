@@ -148,7 +148,12 @@ describe('inscribe → real-ord indexing roundtrip on regtest', () => {
     expect(insc.content_length).toBe(body.length);
     // The reveal output we built is the postage output — 546 sats per
     // CAT-21 convention; the inscribe orchestrator uses the same floor.
-    expect(insc.value).toBeGreaterThan(0);
+    // Pinned exactly (not >0) because every cat21 consumer (explorers,
+    // wallets, offer-validator) assumes 546-sat postage on every cat
+    // UTXO. A drift to any other positive value would silently break
+    // the whole convention — sibling inscribe-tip-roundtrip.spec.ts
+    // pins the same 546.
+    expect(insc.value).toBe(546);
 
     // Phase 6: byte-equal content roundtrip via ord's /content/<id>.
     const content = await getStockOrdContent(id);

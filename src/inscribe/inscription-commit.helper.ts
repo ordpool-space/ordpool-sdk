@@ -204,8 +204,9 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   //
   // NOTE: this is a DIFFERENT reason for RBF-off than the mint case.
   // On mint, a third-party accelerate would drop `lockTime=21` and
-  // burn the cat. On inscribe commit, an RBF replacement changes the
-  // commit's inputs → its txid changes → the pre-built reveal (which
+  // kill the mint (no cat is produced). On inscribe commit, an RBF
+  // replacement changes the commit's inputs → its txid changes → the
+  // pre-built reveal (which
   // references the SIMULATION commit txid) becomes invalid and the
   // postage locks in an output nobody can spend (the ephemeral reveal
   // key is not returned to the caller). Both cases warrant RBF-off

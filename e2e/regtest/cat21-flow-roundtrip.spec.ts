@@ -105,6 +105,7 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
   let mintTxid: string;
   let inscriptionId: string;
   let mintedCatNumber: number;
+  let mintedCatSat: number;
   let transferTxid: string;
   let catUtxoAfterTransfer: { txid: string; vout: number };
   let aChangeUtxoAfterTransfer: ElectrsUtxo;
@@ -230,6 +231,15 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     // ASSIGNED number here and reuse it in the final-state assertion.
     expect(inscription.number).toBeGreaterThanOrEqual(0);
     mintedCatNumber = inscription.number;
+
+    // Pin the sat number now so the transfer + final-state steps can
+    // cross-check it and prove ordinal continuity. --index-sats is on
+    // per docker-compose.regtest.yml, so ord MUST return a number here
+    // — a null/undefined would mean cat21-ord silently regressed
+    // (index disabled, JSON shape changed) and every downstream
+    // consumer relying on the sat field breaks.
+    expect(typeof inscription.sat).toBe('number');
+    mintedCatSat = inscription.sat as number;
   });
 
   it('step 2: A transfers the cat to B; ord sees the cat at B', async () => {
@@ -280,6 +290,11 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     const inscription = await waitForCatAtAddress(inscriptionId, bAddress);
     expect(inscription.address).toBe(bAddress);
     expect(inscription.value).toBe(CAT21_POSTAGE_SATS);
+    // Same-sat invariant: the transfer MUST land on the same ordinal
+    // (that's the whole point of ordinal theory). Silent skip on
+    // undefined is not acceptable — we already asserted the number
+    // at mint; if it goes missing here that's a regression.
+    expect(inscription.sat).toBe(mintedCatSat);
 
     catUtxoAfterTransfer = { txid: transferTxid, vout: 0 };
 
@@ -452,6 +467,17 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     expect(ordSeller.partialSig).toBeUndefined();
     expect(ordSeller.tapKeySig).toBeUndefined();
 
+    // OUTPUT COUNT: ord and the SDK must emit the same number of
+    // outputs. The SDK deliberately produces exactly 2 (cat + seller
+    // payment) with no explicit change output — buyer inputs are
+    // sized to the exact fee. If ord's `fund_raw_transaction` were
+    // to add a change output (or any extra output) at a future
+    // version, the SDK's PSBT wouldn't work with ord-wallet-holders'
+    // funded outputs. The byte-compare below would still pass on the
+    // pinned indexes 0 and 1; without this check the drift is silent.
+    expect(ordTx.outputsLength).toBe(sdkTx.outputsLength);
+    expect(ordTx.outputsLength).toBe(2);
+
     // output[0]: 546 postage (the cat lands on the buyer side).
     expect(ordTx.getOutput(0).amount).toBe(BigInt(CAT21_POSTAGE_SATS));
     expect(ordTx.getOutput(0).amount).toBe(sdkTx.getOutput(0).amount);
@@ -504,7 +530,9 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
 
     // The cat sat is the SAME ordinal across all three transactions —
     // ord's sat field on the inscription record is set when --index-sats
-    // is on (which our compose passes).
-    expect(typeof inscription.sat === 'number' || inscription.sat == null).toBe(true);
+    // is on (which our compose passes). Pinned as a concrete number
+    // at the mint step; MUST still be that number here (offer-accept
+    // returned the cat to A on the same sat that was minted originally).
+    expect(inscription.sat).toBe(mintedCatSat);
   });
 });

@@ -249,6 +249,15 @@ test('mint a cat21 on regtest via Wizz: build PSBT in SDK, sign in popup (mainne
   expect(esploraTx.status.block_hash).toBeTruthy();
   assertAllInputsSighashAll(esploraTx);
 
+  // Cat-sat guard: every input's sequence MUST be >= 0xfffffffe (RBF-
+  // final). A lower value would let a fee-bump replacement drop the
+  // nLockTime=21 marker and kill the mint (no cat is produced) — the
+  // 2024 Xverse-Accelerate mint-RBF incident this test suite exists
+  // to prevent.
+  for (const vin of esploraTx.vin) {
+    expect(vin.sequence).toBeGreaterThanOrEqual(0xfffffffe);
+  }
+
   const parsed = Cat21ParserService.parse(esploraTx);
   expect(parsed).not.toBeNull();
   expect(parsed!.type).toBe(DigitalArtifactType.Cat21);

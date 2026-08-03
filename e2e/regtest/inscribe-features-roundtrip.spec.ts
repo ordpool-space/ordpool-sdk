@@ -168,11 +168,14 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     const expectedSatpoint = `${revealTxid}:0:0`;
     expect(catA.satpoint).toBe(expectedSatpoint);
     expect(catB.satpoint).toBe(expectedSatpoint);
-    // Same sat: cat21-ord exposes the sat number on each cat record;
-    // if both are on the same sat the values match.
-    if (catA.sat != null && catB.sat != null) {
-      expect(catB.sat).toBe(catA.sat);
-    }
+    // Same sat: cat21-ord exposes the sat number on each cat record.
+    // Both cats live at the same satpoint (offset 0 of the reveal's
+    // vout[0]), so their sat numbers MUST match. --index-sats is on
+    // per docker-compose.regtest.yml, so a null/undefined here would
+    // mean cat21-ord regressed silently — fail instead of skip.
+    expect(typeof catA.sat).toBe('number');
+    expect(typeof catB.sat).toBe('number');
+    expect(catB.sat).toBe(catA.sat);
     // Distinct cat numbers — they're different cats, even on the
     // same sat. Cat A was minted in an earlier block (commit tip),
     // cat B in a later block (reveal tip), so cat A's number < cat B's.
@@ -193,14 +196,18 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     const recoveredBody = new TextDecoder().decode(parsed[0].getDataRaw());
     expect(recoveredBody).toBe(bodyText);
     // The parser surfaces all known ord tags via `fields: { tag, value }[]`.
-    // Tag 0x0f is the note tag.
+    // Tag 0x0f is the note tag. The whole point of this spec is
+    // "consumer apps can read the watermark from parsed fields" —
+    // silently skipping when the parser drops the tag is exactly the
+    // failure mode this test should catch. Assert the tag IS present
+    // and its decoded value matches the NOTE we wrote.
     const fields = (parsed[0] as unknown as { fields: { tag: number; value: Uint8Array }[] }).fields;
     const noteField = fields.find(f => f.tag === 0x0f);
-    if (noteField !== undefined) {
-      expect(new TextDecoder().decode(noteField.value)).toBe(NOTE);
-    }
-    // Even if the parser doesn't expose the raw fields map, the
-    // witness must contain the note bytes — check the raw witness.
+    expect(noteField).toBeDefined();
+    expect(new TextDecoder().decode(noteField!.value)).toBe(NOTE);
+    // Additionally: the raw witness must contain the note bytes.
+    // Defensive belt + parser-side braces — catches a case where
+    // the parser exposes the tag but with corrupted bytes.
     const allWitnessHex = witnessHex.join('');
     const noteHex = Array.from(new TextEncoder().encode(NOTE))
       .map(b => b.toString(16).padStart(2, '0')).join('');

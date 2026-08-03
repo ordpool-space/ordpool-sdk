@@ -79,9 +79,18 @@ async function onboardOyl(page: Page): Promise<void> {
   }, undefined, { timeout: 60_000, polling: 500 });
 }
 
-async function approveOylPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  // Oyl's approval may not pop up (auto-resolves from current account)
-  // or it may render a confirm/approve button. Race both paths.
+async function approveOylPopup(
+  ctx: BrowserContext,
+  knownPages: Set<Page>,
+  opts: { required: boolean; label: string },
+): Promise<void> {
+  // For CONNECT: Oyl may auto-resolve from the current active account
+  // and render no popup at all — legitimate no-op.
+  // For SIGN: a popup MUST appear. Silently swallowing a missing sign
+  // popup turned a real failure (extension not primed, sign flow broken,
+  // approval regex mismatch) into a downstream test timeout on the
+  // signedHexPromise with no useful error. Require the popup and fail
+  // fast when opts.required is true.
   try {
     const approval = await waitForApprovalPopup({
       context: ctx,
@@ -96,7 +105,12 @@ async function approveOylPopup(ctx: BrowserContext, knownPages: Set<Page>): Prom
     });
     await shot(approval, '03a-approval');
     await approval.getByRole('button', { name: /^(connect|approve|confirm|allow|sign)$/i }).first().click();
-  } catch {
+  } catch (e) {
+    if (opts.required) {
+      throw new Error(
+        `[oyl-mint] expected ${opts.label} approval popup within 30s but none appeared: ${(e as Error).message}`,
+      );
+    }
     // Auto-resolved; nothing to click.
   }
 }
@@ -155,7 +169,7 @@ test('mint a cat21 on regtest via Oyl: build PSBT in SDK, sign in popup (mainnet
 
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOyl());
-  await approveOylPopup(context, connectKnownPages);
+  await approveOylPopup(context, connectKnownPages, { required: false, label: 'connect' });
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
   console.log(`[oyl-mint] mainnet payment = ${wallet.paymentAddress}`);
@@ -192,7 +206,7 @@ test('mint a cat21 on regtest via Oyl: build PSBT in SDK, sign in popup (mainnet
       feeSats: 1500,
     },
   );
-  await approveOylPopup(context, signKnownPages);
+  await approveOylPopup(context, signKnownPages, { required: true, label: 'sign' });
   const signed = await signedHexPromise;
   console.log(`[oyl-mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);
 
@@ -206,6 +220,15 @@ test('mint a cat21 on regtest via Oyl: build PSBT in SDK, sign in popup (mainnet
   console.log(`[oyl-mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);
   assertAllInputsSighashAll(esploraTx);
+
+  // Cat-sat guard: every input's sequence MUST be >= 0xfffffffe (RBF-
+  // final). A lower value would let a fee-bump replacement drop the
+  // nLockTime=21 marker and kill the mint (no cat is produced) — the
+  // 2024 Xverse-Accelerate mint-RBF incident this test suite exists
+  // to prevent.
+  for (const vin of esploraTx.vin) {
+    expect(vin.sequence).toBeGreaterThanOrEqual(0xfffffffe);
+  }
 
   const parsed = Cat21ParserService.parse(esploraTx);
   expect(parsed).not.toBeNull();

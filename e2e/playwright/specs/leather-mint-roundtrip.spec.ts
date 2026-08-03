@@ -170,7 +170,7 @@ test('mint a cat21 on regtest via Leather: build PSBT in SDK, sign in popup (mai
   // eslint-disable-next-line no-console
   console.log(`[leather-mint] mainnet payment = ${wallet.paymentAddress}`);
   // BIP-84 m/84'/0'/0'/0/0 derivation of `abandon × 11 + about` on
-  // mainnet — pinned because Leather is configured for devnet here
+  // mainnet — pinned because Leather is configured for regtest here
   // but its connector returns the mainnet payment address from the
   // same seed. Any drift in the bundled extension's derivation
   // (e.g. an internal upgrade that bumps the default account index)
@@ -231,6 +231,15 @@ test('mint a cat21 on regtest via Leather: build PSBT in SDK, sign in popup (mai
   expect(esploraTx.locktime).toBe(21);
   expect(esploraTx.status.block_hash).toBeTruthy();
   assertAllInputsSighashAll(esploraTx);
+
+  // Cat-sat guard: every input's sequence MUST be >= 0xfffffffe (RBF-
+  // final). A lower value would let a fee-bump replacement drop the
+  // nLockTime=21 marker and kill the mint (no cat is produced) — the
+  // 2024 Xverse-Accelerate mint-RBF incident this test suite exists
+  // to prevent.
+  for (const vin of esploraTx.vin) {
+    expect(vin.sequence).toBeGreaterThanOrEqual(0xfffffffe);
+  }
 
   const parsed = Cat21ParserService.parse(esploraTx);
   expect(parsed).not.toBeNull();
