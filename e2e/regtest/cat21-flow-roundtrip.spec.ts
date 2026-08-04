@@ -467,16 +467,19 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     expect(ordSeller.partialSig).toBeUndefined();
     expect(ordSeller.tapKeySig).toBeUndefined();
 
-    // OUTPUT COUNT: the SDK deliberately produces exactly 2 outputs
-    // (cat at index 0, seller payment at index 1) with NO explicit
-    // change output — buyer inputs are sized to the exact fee. ord's
-    // `wallet offer create` calls `fundrawtransaction` under the
-    // hood, which adds a change output when the funded amount
-    // exceeds the exact fee, so ord's tx typically has 3 outputs.
-    // The byte-compare below pins ord's indices 0 and 1 to match the
-    // SDK's, and ignores any ord change output at index 2+.
-    expect(sdkTx.outputsLength).toBe(2);
+    // OUTPUT COUNT: both sides emit cat + seller-payment + optional
+    // buyer-change (when change > per-address-type dust). So the
+    // expected count is 2 or 3 — anything else is a builder drift.
+    // The SDK's optional change lives at output[2] (see
+    // `cat21-offer.helper.ts` line ~218); ord's optional change comes
+    // from `fundrawtransaction` in `wallet offer create`. The
+    // byte-compare below pins the load-bearing indices 0 (cat) and
+    // 1 (payment); this count check catches any 4th unexpected
+    // output on either side that would otherwise go undetected.
+    expect(sdkTx.outputsLength).toBeGreaterThanOrEqual(2);
+    expect(sdkTx.outputsLength).toBeLessThanOrEqual(3);
     expect(ordTx.outputsLength).toBeGreaterThanOrEqual(2);
+    expect(ordTx.outputsLength).toBeLessThanOrEqual(3);
 
     // output[0]: 546 postage (the cat lands on the buyer side).
     expect(ordTx.getOutput(0).amount).toBe(BigInt(CAT21_POSTAGE_SATS));
