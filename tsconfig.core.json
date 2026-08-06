@@ -81,7 +81,6 @@
     "src/wallet/signers/index.ts",
     "src/wallet/signers/leather.signer.ts",
     "src/wallet/signers/okx.signer.ts",
-    "src/wallet/signers/oyl.signer.ts",
     "src/wallet/signers/phantom.signer.ts",
     "src/wallet/signers/psbt-export.signer.ts",
     "src/wallet/signers/signing-targets.helper.ts",

@@ -180,7 +180,7 @@ test('transfer a cat21 on regtest via Cat21 Wallet: mint via popup, transfer via
   // Cat21 Wallet's `getAddresses` `network: 'regtest'` parameter is
   // not honored by the shipping binary — it returns mainnet addresses
   // either way. The cross-network-keys trick used by Leather/Unisat
-  // /OKX/Wizz/Oyl applies here too: cat21-wallet inherits Leather's
+  // /OKX/Wizz applies here too: cat21-wallet inherits Leather's
   // universal coin-type-0 derivation, so the bcrt1q / bcrt1p script
   // bytes derived from the mainnet pubkeys are identical to what the
   // wallet computes internally on regtest — only the bech32 HRP

@@ -18,7 +18,6 @@ export interface WindowLike {
   atom?: unknown;            // wizz's legacy namespace (formerly Atom Wallet)
   okxwallet?: unknown;
   phantom?: unknown;
-  oyl?: unknown;
   alby?: unknown;
   webln?: unknown;           // alby's standard Lightning provider name
   binancew3w?: unknown;      // Binance Web3 Wallet multi-chain namespace
@@ -118,7 +117,7 @@ export interface SignAndBroadcastInput {
  * multi-address signing.
  *
  * For wallets whose RPC takes one address+indexes pair per call
- * (Xverse, Phantom, Oyl, Unisat with toSignInputs, Binance): the
+ * (Xverse, Phantom, Unisat with toSignInputs, Binance): the
  * signer maps directly to the wallet's per-pair array shape.
  *
  * For single-index wallets (Leather, cat21-wallet): the signer
@@ -200,7 +199,7 @@ export interface SignSingleFundingInputArgs {
   psbtBytes: Uint8Array;
   paymentAddress: string;
   /**
-   * Optional; enables the Unisat/Wizz/OKX/Oyl wallet-side address
+   * Optional; enables the Unisat/Wizz/OKX wallet-side address
    * shim on regtest. When set + the app's `paymentAddress` is bcrt,
    * the signer derives the wallet's mainnet-view of the same key
    * (script bytes identical) and passes THAT in the sign RPC's
@@ -365,7 +364,6 @@ export enum KnownOrdinalWalletType {
   wizz = 'wizz',
   okx = 'okx',
   phantom = 'phantom',
-  oyl = 'oyl',
   alby = 'alby',
   binance = 'binance',
   /**
@@ -464,12 +462,6 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     // phantom-sdk-handshake.spec.ts:370-476. Hidden until Phantom
     // wires the SW handlers.
     hiddenFromPicker: true,
-  },
-  [KnownOrdinalWalletType.oyl]: {
-    type: KnownOrdinalWalletType.oyl,
-    label: 'Oyl',
-    logo: walletLogos.oyl,
-    downloadLink: 'https://oyl.io/',
   },
   [KnownOrdinalWalletType.alby]: {
     type: KnownOrdinalWalletType.alby,

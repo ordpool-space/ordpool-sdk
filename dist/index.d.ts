@@ -137,7 +137,6 @@ interface WindowLike {
     atom?: unknown;
     okxwallet?: unknown;
     phantom?: unknown;
-    oyl?: unknown;
     alby?: unknown;
     webln?: unknown;
     binancew3w?: unknown;
@@ -226,7 +225,6 @@ declare enum KnownOrdinalWalletType {
     wizz = "wizz",
     okx = "okx",
     phantom = "phantom",
-    oyl = "oyl",
     alby = "alby",
     binance = "binance",
     /**
@@ -329,7 +327,7 @@ interface LeatherStxAddress {
 declare const CAT21_WALLET_INPUT_SEQUENCE = 4294967293;
 /**
  * Non-RBF sequence. ONLY used on CAT-21 MINT inputs signed by a
- * third-party wallet (Xverse, Unisat, Leather, OKX, Oyl, Wizz,
+ * third-party wallet (Xverse, Unisat, Leather, OKX, Wizz,
  * Phantom, Alby, …). Locks their accelerate UI out of touching a
  * mint tx — the 2024 Xverse incident defence: a third-party wallet's
  * fee-bump flow would build a replacement without `lockTime=21`,
@@ -3707,7 +3705,7 @@ declare function prepareInscribeFundingInput(args: PrepareInscribeFundingInputAr
  *
  * Universal fee strategy that matches every inscriber in the
  * verified OSS catalog (ord client, micro-ordinals examples,
- * oyl-sdk, ordit-sdk, 0xFlicker, LaserEyes — see
+ * ordit-sdk, 0xFlicker, LaserEyes — see
  * OSS-INSCRIBERS.md). No zero-fee tricks, no CPFP magic; the
  * atomicity story is `submitpackage` at broadcast time, which
  * handles its own package-feerate math.

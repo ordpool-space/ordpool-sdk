@@ -9,7 +9,6 @@ import {
   leatherOrdinalsAddressType,
   leatherPaymentAddressType,
   parseLeatherAddressResponse,
-  parseOylAddressResponse,
   parsePhantomAddressResponse,
   parseXverseAddressResponse,
   repairXverseRegtestTaproot,
@@ -254,57 +253,6 @@ describe('parseLeatherAddressResponse', () => {
     expect(parseLeatherAddressResponse(response).ordinalsPublicKey).toBe(
       'cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115',
     );
-  });
-});
-
-
-describe('parseOylAddressResponse', () => {
-
-  it('maps a full {nativeSegwit, taproot} response to ordinals + payment lanes', () => {
-    const info = parseOylAddressResponse({
-      nativeSegwit: {
-        address: 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu',
-        publicKey: '0212345678901234567890123456789012345678901234567890123456789012ab',
-      },
-      taproot: {
-        address: 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr',
-        publicKey: 'cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115',
-      },
-    });
-    expect(info.type).toBe(KnownOrdinalWalletType.oyl);
-    expect(info.paymentAddress).toBe('bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu');
-    expect(info.ordinalsAddress).toBe('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr');
-  });
-
-  it('falls back to nestedSegwit for payment when nativeSegwit is absent', () => {
-    const info = parseOylAddressResponse({
-      nestedSegwit: { address: '37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf', publicKey: '02nestedpub' },
-      taproot: { address: 'bc1pordinals', publicKey: 'ord' },
-    });
-    expect(info.paymentAddress).toBe('37VucYSaXLCAsxYyAPfbSi9eh4iEcbShgf');
-  });
-
-  it('normalises a compressed taproot ordinalsPublicKey to x-only', () => {
-    const info = parseOylAddressResponse({
-      nativeSegwit: { address: 'bc1qpayment', publicKey: '02pay' },
-      taproot: {
-        address: 'bc1pord',
-        publicKey: '03cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115',
-      },
-    });
-    expect(info.ordinalsPublicKey).toBe('cc8a4bc64d897bddc5fbc2f670f7a8ba0b386779106cf1223c6fc5d7cd6fc115');
-  });
-
-  it('throws when taproot (ordinals) is missing', () => {
-    expect(() => parseOylAddressResponse({
-      nativeSegwit: { address: 'bc1qpay', publicKey: 'pay' },
-    })).toThrow('Required address not found?!');
-  });
-
-  it('throws when both nativeSegwit and nestedSegwit are missing', () => {
-    expect(() => parseOylAddressResponse({
-      taproot: { address: 'bc1pord', publicKey: 'ord' },
-    })).toThrow('Required address not found?!');
   });
 });
 

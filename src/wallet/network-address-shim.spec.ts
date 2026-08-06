@@ -137,7 +137,6 @@ describe('walletSidePaymentAddress', () => {
       KnownOrdinalWalletType.unisat,
       KnownOrdinalWalletType.wizz,
       KnownOrdinalWalletType.okx,
-      KnownOrdinalWalletType.oyl,
     ]) {
       const wallet = walletSidePaymentAddress(walletType, bcrtP2WPKH, PUBKEY_HEX);
       expect(wallet).toMatch(/^bc1q/);
@@ -182,7 +181,6 @@ describe('toWireNetworkFor', () => {
     expect(toWireNetworkFor(KnownOrdinalWalletType.unisat,  Network.Regtest)).toBe(Network.Mainnet);
     expect(toWireNetworkFor(KnownOrdinalWalletType.wizz,    Network.Regtest)).toBe(Network.Mainnet);
     expect(toWireNetworkFor(KnownOrdinalWalletType.okx,     Network.Regtest)).toBe(Network.Mainnet);
-    expect(toWireNetworkFor(KnownOrdinalWalletType.oyl,     Network.Regtest)).toBe(Network.Mainnet);
   });
 
   it('passes non-regtest networks through unchanged (both wallet families)', () => {

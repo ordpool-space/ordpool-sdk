@@ -250,7 +250,7 @@ choosing it later would invalidate the signature.
 | Wallet | Sequence | RBF-signaling? | Why |
 |---|---|---|---|
 | **Cat21 Wallet** (`KnownOrdinalWalletType.cat21wallet`) | `0xfffffffd` | YES | OUR wallet. Knows about cats by construction. Its mempool-acceleration UI guarantees `nLockTime=21` is preserved on any RBF replacement (HARD RULE #1 in `cat21-wallet/CLAUDE.md` — `CAT21_MINT_INPUT_SEQUENCE` constant, replacement-construction asserts `lockTime === 21` before broadcast). RBF here is safe AND useful — users can bump fee in mempool congestion without rebuilding the mint. |
-| **Everyone else** (Xverse, Unisat, Leather, OKX, Oyl, Wizz, Phantom, Alby, …) | `0xfffffffe` | NO | Third-party wallets don't know about cats. If their UI offers "accelerate / replace with higher fee" on a CAT-21 mint, the replacement is built without `nLockTime=21` and the cat is burned. The 2024 Xverse incident is the lesson. Default policy: refuse to signal RBF so no external wallet ever offers to accelerate. |
+| **Everyone else** (Xverse, Unisat, Leather, OKX, Wizz, Phantom, Alby, …) | `0xfffffffe` | NO | Third-party wallets don't know about cats. If their UI offers "accelerate / replace with higher fee" on a CAT-21 mint, the replacement is built without `nLockTime=21` and the cat is burned. The 2024 Xverse incident is the lesson. Default policy: refuse to signal RBF so no external wallet ever offers to accelerate. |
 
 **Number `21` is data, not a time-lock.** Block 21 was mined in
 2009, so the `nLockTime=21` constraint is trivially satisfied no

@@ -5,7 +5,7 @@ import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType, WalletInfo } from './wallet.service.types';
 
 /**
- * Non-native regtest wallets (Leather / Unisat / Wizz / OKX / Oyl)
+ * Non-native regtest wallets (Leather / Unisat / Wizz / OKX)
  * hard-code mainnet HRP in their `getAddresses` responses regardless
  * of the network the dapp asked for. When a consumer initialises the
  * SDK with `Network.Regtest`, this helper post-processes the wallet's
@@ -35,7 +35,7 @@ export function toRegtestWalletInfo(info: WalletInfo): WalletInfo {
 /**
  * Detect the address type from its mainnet HRP / prefix and re-derive
  * it under the regtest network from the same pubkey. Supports the four
- * address shapes any of our five non-native wallets actually returns:
+ * address shapes any of our four non-native wallets actually returns:
  *   - `bc1q…` → P2WPKH (Native SegWit)
  *   - `bc1p…` → P2TR (Taproot)
  *   - `3…`    → P2SH-wrapped-P2WPKH (Nested SegWit)
@@ -72,7 +72,7 @@ export function toRegtestAddress(mainnetAddress: string, publicKeyHex: string): 
 
 /**
  * Wallet-side address for `signPsbt`-flavoured RPCs that filter by
- * address (Unisat/Wizz/OKX/Oyl accept a `toSignInputs`/`inputsToSign`
+ * address (Unisat/Wizz/OKX accept a `toSignInputs`/`inputsToSign`
  * shape with `{index, address}` rows and refuse to sign inputs whose
  * `address` isn't in the wallet's own address set).
  *
@@ -139,7 +139,7 @@ export function toMainnetAddress(bcrtAddress: string, publicKeyHex: string): str
 /**
  * Wallet-side network arg for `signPsbt`. Native-regtest wallets get
  * the app's actual `network`; mainnet-only wallets (Leather / Unisat /
- * Wizz / OKX / Oyl) get `Network.Mainnet` even when the app asked for
+ * Wizz / OKX) get `Network.Mainnet` even when the app asked for
  * `Network.Regtest`, so the wallet unlocks its mainnet-derived key
  * (which produces a signature that verifies against the equivalent
  * regtest scriptPubKey — see `toRegtestWalletInfo`'s docstring).

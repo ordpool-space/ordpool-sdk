@@ -11,9 +11,9 @@ import { KnownOrdinalWalletType } from './wallet.service.types';
  *
  * History: before commit 26730b0, the SDK dispatched per-wallet input-
  * script construction via a switch that only handled four wallet
- * names. Six wallets (oyl, wizz, okx, phantom, alby, binance) hit a
+ * names. Five wallets (wizz, okx, phantom, alby, binance) hit a
  * `default → throw 'Unknown wallet'` branch. To make Pipeline B 49/49
- * green anyway, four harnesses (wizz, okx, oyl, phantom) passed
+ * green anyway, three harnesses (wizz, okx, phantom) passed
  * `KnownOrdinalWalletType.unisat` to `createTransaction` while
  * advertising they were testing the actual wallet — the harness lied
  * at the API boundary. Alby bypassed the SDK API entirely via a
@@ -47,7 +47,7 @@ describe('Honest wallet coverage (audit gate)', () => {
     expect(variants).toEqual(
       expect.arrayContaining([
         'xverse', 'leather', 'unisat', 'cat21wallet',
-        'oyl', 'wizz', 'okx', 'phantom', 'alby', 'binance',
+        'wizz', 'okx', 'phantom', 'alby', 'binance',
       ]),
     );
   });

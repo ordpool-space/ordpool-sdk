@@ -14,7 +14,7 @@ export const CAT21_WALLET_INPUT_SEQUENCE = 0xfffffffd;
 
 /**
  * Non-RBF sequence. ONLY used on CAT-21 MINT inputs signed by a
- * third-party wallet (Xverse, Unisat, Leather, OKX, Oyl, Wizz,
+ * third-party wallet (Xverse, Unisat, Leather, OKX, Wizz,
  * Phantom, Alby, …). Locks their accelerate UI out of touching a
  * mint tx — the 2024 Xverse incident defence: a third-party wallet's
  * fee-bump flow would build a replacement without `lockTime=21`,

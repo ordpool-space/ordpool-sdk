@@ -4,7 +4,6 @@ import { binanceSigner } from './binance.signer';
 import { cat21walletSigner } from './cat21wallet.signer';
 import { leatherSigner } from './leather.signer';
 import { okxSigner } from './okx.signer';
-import { oylSigner } from './oyl.signer';
 import { phantomSigner } from './phantom.signer';
 import { psbtExportSigner } from './psbt-export.signer';
 import { unisatSigner } from './unisat.signer';
@@ -48,7 +47,6 @@ export const walletSigners: readonly WalletSigner[] = [
   leatherSigner,
   unisatSigner,
   okxSigner,
-  oylSigner,
   wizzSigner,
   phantomSigner,
   albySigner,
@@ -78,7 +76,6 @@ export { binanceSigner } from './binance.signer';
 export { cat21walletSigner } from './cat21wallet.signer';
 export { leatherSigner } from './leather.signer';
 export { okxSigner } from './okx.signer';
-export { oylSigner } from './oyl.signer';
 export { phantomSigner } from './phantom.signer';
 export { psbtExportSigner } from './psbt-export.signer';
 export { unisatSigner } from './unisat.signer';

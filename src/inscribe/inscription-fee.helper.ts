@@ -31,7 +31,7 @@ import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-re
  *
  * Universal fee strategy that matches every inscriber in the
  * verified OSS catalog (ord client, micro-ordinals examples,
- * oyl-sdk, ordit-sdk, 0xFlicker, LaserEyes — see
+ * ordit-sdk, 0xFlicker, LaserEyes — see
  * OSS-INSCRIBERS.md). No zero-fee tricks, no CPFP magic; the
  * atomicity story is `submitpackage` at broadcast time, which
  * handles its own package-feerate math.

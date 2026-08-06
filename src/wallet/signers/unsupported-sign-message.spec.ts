@@ -4,7 +4,6 @@ import { firstValueFrom } from 'rxjs';
 import { Network } from '../../network';
 import { albySigner } from './alby.signer';
 import { binanceSigner } from './binance.signer';
-import { oylSigner } from './oyl.signer';
 import { phantomSigner } from './phantom.signer';
 import { psbtExportSigner } from './psbt-export.signer';
 import { unsupportedSignMessage } from './unsupported-sign-message';
@@ -48,7 +47,6 @@ describe('unsupportedSignMessage — shared "wallet cannot sign a BIP-322 messag
   it.each([
     ['alby', albySigner, 'Alby'],
     ['binance', binanceSigner, 'Binance'],
-    ['oyl', oylSigner, 'Oyl'],
     ['phantom', phantomSigner, 'Phantom'],
     ['wizz', wizzSigner, 'Wizz'],
     ['psbt-export', psbtExportSigner, 'PSBT-export (watch-only)'],

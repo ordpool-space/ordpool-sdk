@@ -65,7 +65,7 @@ function assertCat21LockTime(lockTime) {
 // Sources (all MIT-licensed open-source projects whose own UIs render
 // these marks for the same wallet-picker purpose we use them for):
 //
-//   xverse, leather, unisat, wizz, okx, phantom, oyl, binance
+//   xverse, leather, unisat, wizz, okx, phantom, binance
 //     ← omnisat/lasereyes-mono packages/react/src/icons/*.tsx
 //
 //   alby
@@ -88,11 +88,6 @@ const walletLogos = {
     wizz: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MiIgaGVpZ2h0PSI0MiIgdmlld0JveD0iMCAwIDQyIDQyIiBmaWxsPSJub25lIiA+IDxnIGNsaXAtcGF0aD0idXJsKCNhKSI+IDxwYXRoIGZpbGw9IiMwMDAiIGQ9Ik0zMiAwSDEwQzQuNDc3IDAgMCA0LjQ3NyAwIDEwdjIyYzAgNS41MjMgNC40NzcgMTAgMTAgMTBoMjJjNS41MjMgMCAxMC00LjQ3NyAxMC0xMFYxMGMwLTUuNTIzLTQuNDc3LTEwLTEwLTEwWiIgLz4gPGcgZmlsbC1ydWxlPSJldmVub2RkIiBjbGlwLXBhdGg9InVybCgjYikiIGNsaXAtcnVsZT0iZXZlbm9kZCI+IDxwYXRoIGZpbGw9IiNGRkQ4MTUiIGQ9Im0yNi41MDcgMTcuNzQtMS42MjMtMS42MjMtMS42MjQgMS42MjMgMS42MjMgMS42MjMgMS42MjQgMS42MjQgMS42MjMtMS42MjQtMS42MjMtMS42MjNaIiAvPiA8cGF0aCBmaWxsPSIjRkY5ODEzIiBkPSJtMjYuNTA3IDgtMS42MjQgMS42MjMgMS42MjQgMS42MjQgMS42MjMtMS42MjRMMjYuNTA3IDhaTTMzIDE0LjQ5M2wtMS42MjMtMS42MjMtMS42MjQgMS42MjMgMS42MjQgMS42MjNMMzMgMTQuNDkzWk0yMy4yNiAyNy40OGwxLjYyMyAxLjYyMyAxLjYyNC0xLjYyMy0xLjYyMy0xLjYyNC0xLjYyNCAxLjYyNFpNMTEuODk3IDE2LjExN2wxLjYyMyAxLjYyMyAxLjYyMy0xLjYyMy0xLjYyMy0xLjYyNC0xLjYyMyAxLjYyNFpNMjAuMDE0IDggMTguMzkgOS42MjNsMS42MjQgMS42MjQgMS42MjMtMS42MjRMMjAuMDE0IDhaTTEzLjUyIDExLjI0N2wxLjYyNCAxLjYyMyAxLjYyMy0xLjYyMy0xLjYyMy0xLjYyNC0xLjYyNCAxLjYyNFpNMzEuMzc3IDE5LjM2M2wtMS42MjQgMS42MjMgMS42MjQgMS42MjRMMzMgMjAuOTg3bC0xLjYyMy0xLjYyNFpNMjguMTMgMjUuODU2bDEuNjIzIDEuNjI0IDEuNjI0LTEuNjI0LTEuNjI0LTEuNjIzLTEuNjIzIDEuNjIzWiIgLz4gPHBhdGggZmlsbD0iIzVCNUI3MiIgZD0ibTI2LjUwNyAyMC45ODYtMS42MjQtMS42MjMtMS42MjMgMS42MjMtMS42MjMtMS42MjMtMS42MjMtMS42MjMgMS42MjMtMS42MjQtMS42MjMtMS42MjMtMS42MjQtMS42MjMtMS42MjMgMS42MjMgMS42MjMgMS42MjMtMS42MjMgMS42MjQgMS42MjMgMS42MjMtMS42MjMgMS42MjMtLjgxMi0uODExLTEuNjIzIDEuNjIzIDEuNjIzIDEuNjIzLTEuNjIzIDEuNjI0LTEuNTQzIDEuNTQyLTEuNTQyIDEuNTQzLTEuNjI0IDEuNjIzTDggMzEuMzc3IDkuNjIzIDMzbDEuNjI0LTEuNjIzIDEuNjIzLTEuNjI0IDEuNTQzLTEuNTQyLjA4LS4wOCAxLjQ2Mi0xLjQ2My4wOC0uMDggMS41NDQtMS41NDMgMS42MjMgMS42MjMgMS42MjMtMS42MjMtLjgxMS0uODEyIDEuNjIzLTEuNjIzIDEuNjIzIDEuNjIzIDEuNjIzLTEuNjIzIDEuNjI0IDEuNjIzIDEuNjIzLTEuNjIzLTEuNjIzLTEuNjI0WiIgLz4gPHBhdGggZmlsbD0iI0ZGOTgxMyIgZD0ibTI2LjUwNyAxNC40OTMtMS42MjQtMS42MjMtMS42MjMgMS42MjMtMS42MjMtMS42MjMtMS42MjMgMS42MjMgMS42MjMgMS42MjMtMS42MjMgMS42MjQgMS42MjMgMS42MjMgMS42MjMgMS42MjMgMS42MjMtMS42MjMtMS42MjMtMS42MjMgMS42MjMtMS42MjMgMS42MjQgMS42MjMgMS42MjMtMS42MjMtMS42MjMtMS42MjRaIiAvPiA8L2c+IDwvZz4gPGRlZnM+IDxjbGlwUGF0aCBpZD0iYSI+IDxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0wIDBoNDJ2NDJIMHoiIC8+IDwvY2xpcFBhdGg+IDxjbGlwUGF0aCBpZD0iYiI+IDxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik04IDhoMjV2MjVIOHoiIC8+IDwvY2xpcFBhdGg+IDwvZGVmcz4gPC9zdmc+',
     okx: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MiIgaGVpZ2h0PSI0MiIgdmlld0JveD0iMCAwIDQyIDQyIiBmaWxsPSJub25lIiA+IDxnIGNsaXAtcGF0aD0idXJsKCNhKSI+IDxwYXRoIGZpbGw9IiMwMDAiIGQ9Ik0zMiAwSDEwQzQuNDc3IDAgMCA0LjQ3NyAwIDEwdjIyYzAgNS41MjMgNC40NzcgMTAgMTAgMTBoMjJjNS41MjMgMCAxMC00LjQ3NyAxMC0xMFYxMGMwLTUuNTIzLTQuNDc3LTEwLTEwLTEwWiIgLz4gPGcgZmlsbD0iI2ZmZiIgY2xpcC1wYXRoPSJ1cmwoI2IpIj4gPHBhdGggZD0iTTI0LjU3OCAxNy4wNTJoLTYuNzg3YS41MjMuNTIzIDAgMCAwLS41Mi41MnY2Ljc4OGMwIC4yODYuMjM1LjUyLjUyLjUyaDYuNzg3Yy4yODYgMCAuNTIxLS4yMzQuNTIxLS41MnYtNi43ODdhLjUyMy41MjMgMCAwIDAtLjUyLS41MjFaTTE2LjczMyA5LjIyM0g5Ljk0NmEuNTIzLjUyMyAwIDAgMC0uNTIxLjUyMXY2Ljc4N2MwIC4yODYuMjM1LjUyMS41Mi41MjFoNi43ODhjLjI4NSAwIC41Mi0uMjM1LjUyLS41MlY5Ljc0M2EuNTIzLjUyMyAwIDAgMC0uNTItLjUyWk0zMi40MjQgOS4yMjNoLTYuNzg3YS41MjMuNTIzIDAgMCAwLS41MjEuNTIxdjYuNzg3YzAgLjI4Ni4yMzUuNTIxLjUyLjUyMWg2Ljc4OGMuMjg2IDAgLjUyLS4yMzUuNTItLjUyVjkuNzQzYS41MjMuNTIzIDAgMCAwLS41Mi0uNTJaTTE2LjczMyAyNC44OThIOS45NDZhLjUyMy41MjMgMCAwIDAtLjUyMS41MnY2Ljc4OGMwIC4yODUuMjM1LjUyLjUyLjUyaDYuNzg4Yy4yODUgMCAuNTItLjIzNS41Mi0uNTJ2LTYuNzg4YS41MjMuNTIzIDAgMCAwLS41Mi0uNTJaTTMyLjQyNCAyNC44OThoLTYuNzg3YS41MjMuNTIzIDAgMCAwLS41MjEuNTJ2Ni43ODhjMCAuMjg1LjIzNS41Mi41Mi41Mmg2Ljc4OGMuMjg2IDAgLjUyLS4yMzUuNTItLjUydi02Ljc4OGEuNTIzLjUyMyAwIDAgMC0uNTItLjUyWiIgLz4gPC9nPiA8L2c+IDxkZWZzPiA8Y2xpcFBhdGggaWQ9ImEiPiA8cGF0aCBmaWxsPSIjZmZmIiBkPSJNMCAwaDQydjQySDB6IiAvPiA8L2NsaXBQYXRoPiA8Y2xpcFBhdGggaWQ9ImIiPiA8cGF0aCBmaWxsPSIjZmZmIiBkPSJNMCAwaDQydjQySDB6IiAvPiA8L2NsaXBQYXRoPiA8L2RlZnM+IDwvc3ZnPg==',
     phantom: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MiIgaGVpZ2h0PSI0MiIgdmlld0JveD0iMCAwIDQyIDQyIiBmaWxsPSJub25lIiA+IDxnIGNsaXAtcGF0aD0idXJsKCNhKSI+IDxwYXRoIGZpbGw9IiNBQjlGRjIiIGQ9Ik0zMiAwSDEwQzQuNDc3IDAgMCA0LjQ3NyAwIDEwdjIyYzAgNS41MjMgNC40NzcgMTAgMTAgMTBoMjJjNS41MjMgMCAxMC00LjQ3NyAxMC0xMFYxMGMwLTUuNTIzLTQuNDc3LTEwLTEwLTEwWiIgLz4gPHBhdGggZmlsbD0iI0ZGRkRGOCIgZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMTcuNjg2IDI3LjU2N2MtMS42NzYgMi41NjktNC40ODQgNS44MTktOC4yMiA1LjgxOS0xLjc2NyAwLTMuNDY2LS43MjgtMy40NjYtMy44ODdDNiAyMS40NTQgMTYuOTg0IDkgMjcuMTc2IDljNS43OTggMCA4LjEwOCA0LjAyMyA4LjEwOCA4LjU5IDAgNS44NjQtMy44MDUgMTIuNTY4LTcuNTg3IDEyLjU2OC0xLjIgMC0xLjc5LS42NTktMS43OS0xLjcwNCAwLS4yNzMuMDQ2LS41NjguMTM3LS44ODctMS4yOTEgMi4yMDUtMy43ODMgNC4yNS02LjExNiA0LjI1LTEuNjk4IDAtMi41NTktMS4wNjgtMi41NTktMi41NjggMC0uNTQ1LjExNC0xLjExMy4zMTctMS42ODFabTguNzgtMTAuMTM1YzAgMS4zMzEtLjc4NiAxLjk5Ny0xLjY2NCAxLjk5Ny0uODkyIDAtMS42NjQtLjY2Ni0xLjY2NC0xLjk5N3MuNzcyLTEuOTk2IDEuNjY0LTEuOTk2Yy44NzggMCAxLjY2My42NjUgMS42NjMgMS45OTZabTQuOTkgMGMwIDEuMzMxLS43ODUgMS45OTctMS42NjMgMS45OTctLjg5MiAwLTEuNjY0LS42NjYtMS42NjQtMS45OTcgMC0xLjMzLjc3Mi0xLjk5NiAxLjY2NC0xLjk5Ni44NzggMCAxLjY2NC42NjUgMS42NjQgMS45OTZaIiBjbGlwLXJ1bGU9ImV2ZW5vZGQiIC8+IDwvZz4gPGRlZnM+IDxjbGlwUGF0aCBpZD0iYSI+IDxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik0wIDBoNDJ2NDJIMHoiIC8+IDwvY2xpcFBhdGg+IDwvZGVmcz4gPC9zdmc+',
-    // The Oyl logo source had stray JSX-style `style={{ ... }}` attributes
-    // (copy-pasted from a TSX file). Invalid XML → browsers refused to render
-    // the SVG. Stripped the broken attributes; `fill="..."` covers the same
-    // intent.
-    oyl: 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDIiIGhlaWdodD0iNDIiIHZpZXdCb3g9IjAgMCA0MiA0MiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiA+IDxyZWN0IHdpZHRoPSI0MiIgaGVpZ2h0PSI0MiIgcng9IjEwIiBmaWxsPSIjMDkwQTBDIiAvPiA8cGF0aCBkPSJNMjEgMTRDMjkuMjIyIDE0IDM4IDE1Ljk2NzYgMzggMjAuOTA1NEMzOCAyNS44NjIyIDI5LjIyMiAyOCAyMSAyOEMxMi43NzggMjggNCAyNi4wMzI0IDQgMjEuMDk0NkM0IDE2LjEzNzggMTIuNzc4IDE0IDIxIDE0Wk0yMS4wMzk3IDI1LjMxMzVDMjQuNjkzOSAyNS4zMTM1IDMwLjE3NTIgMjQuMzI5NyAzMC4xNzUyIDIxQzMwLjE3NTIgMTcuNjcwMyAyNC42OTM5IDE2LjY4NjUgMjEuMDM5NyAxNi42ODY1SDIwLjk2MDNDMTcuMzA2MSAxNi42ODY1IDExLjgyNDggMTcuNjcwMyAxMS44MjQ4IDIxQzExLjgyNDggMjQuMzI5NyAxNy4zMDYxIDI1LjMxMzUgMjAuOTYwMyAyNS4zMTM1SDIxLjAzOTdaIiBmaWxsPSJ3aGl0ZSIgLz48L3N2Zz4=',
     binance: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MiIgaGVpZ2h0PSI0MiIgdmlld0JveD0iMCAwIDQyIDQyIiBmaWxsPSJub25lIiA+IDxnPiA8cGF0aCBzdHJva2U9Im51bGwiIGlkPSJzdmdfMSIgZD0ibTAsMTBjMCwtNS40MzM3OSA0LjU2NjIxLC0xMCAxMCwtMTBsMjIsMGM1LjQzMzc5LDAgMTAsNC41NjYyMSAxMCwxMGwwLDIyYzAsNS40MzM3OSAtNC41NjYyMSwxMCAtMTAsMTBsLTIyLDBjLTUuNDMzNzksMCAtMTAsLTQuNTY2MjEgLTEwLC0xMGwwLC0yMnoiIG9wYWNpdHk9InVuZGVmaW5lZCIgZmlsbD0iIzA5MEEwQyIgLz4gPGcgc3Ryb2tlPSJudWxsIj4gPHBvbHlnb24gc3Ryb2tlPSJudWxsIiBwb2ludHM9IjEzLjczMzA1Mzg2MzA0ODU1MywxOC4zNDA4NzU2MjU2MTAzNSAyMS4wNDQyNDA2NTM1MTQ4NjIsMTEuMDI5OTk3ODI1NjIyNTU5IDI4LjM1OTI5NDU5MzMzNDE5OCwxOC4zNDQ3Mzk5MTM5NDA0MyAzMi42MTM0NDY4OTEzMDc4MywxNC4wOTA1OTMzMzgwMTI2OTUgMjEuMDQ0MjQwNjUzNTE0ODYyLDIuNTIxMTA2MDA0NzE0OTY2IDkuNDc4ODk4NzA0MDUxOTcxLDE0LjA4NjcyODA5NjAwODMgIiBmaWxsPSIjRjNCQTJGIiAvPiA8cmVjdCBzdHJva2U9Im51bGwiIGhlaWdodD0iMjAuMjM0IiB3aWR0aD0iMjAuMjMzIiBmaWxsPSIjRjNCQTJGIiB0cmFuc2Zvcm09Im1hdHJpeCgwLjIxMDI1NSAwLjIxMDI1NCAtMC4yMTAyNTUgMC4yMTAyNTQgMTMuNjI5OSAtMTYuMDI4NCkiIHk9Ijk1Ljc3MzY0IiB4PSI2MS43NDI1IiAvPiA8cG9seWdvbiBzdHJva2U9Im51bGwiIHBvaW50cz0iMTMuNzMzMDUzODYzMDQ4NTUzLDI0LjM0ODc3NTg2MzY0NzQ2IDIxLjA0NDI0MDY1MzUxNDg2MiwzMS42NTk2NTQ2MTczMDk1NyAyOC4zNTg5OTcwNDY5NDc0OCwyNC4zNDUyMDkxMjE3MDQxIDMyLjYxNTUyOTcxNjAxNDg2LDI4LjU5Njk3OTE0MTIzNTM1IDMyLjYxMzQ0Njg5MTMwNzgzLDI4LjU5OTM1NTY5NzYzMTgzNiAyMS4wNDQyNDA2NTM1MTQ4NjIsNDAuMTY4NTQ0NzY5Mjg3MTEgOS40Nzg2MDIxMTEzMzk1NjksMjguNjAzMjIzODAwNjU5MTggOS40NzI2NTQ5OTgzMDI0NiwyOC41OTcyNzI4NzI5MjQ4MDUgIiBmaWxsPSIjRjNCQTJGIiAvPiA8cmVjdCBzdHJva2U9Im51bGwiIGhlaWdodD0iMjAuMjMzIiB3aWR0aD0iMjAuMjM0IiBmaWxsPSIjRjNCQTJGIiB0cmFuc2Zvcm09Im1hdHJpeCgtMC4yMTAyNTUgMC4yMTAyNTQgLTAuMjEwMjU1IC0wLjIxMDI1NCA2OS4xNjA0IC0xMC4wMTAxKSIgeT0iLTQuOTA5NSIgeD0iMTQ0LjIyNTY0IiAvPiA8cG9seWdvbiBzdHJva2U9Im51bGwiIHBvaW50cz0iMjUuMzU5MzUxODEzNzkzMTgyLDIxLjM0MjU5NjA1NDA3NzE1IDI1LjM2MTEzNTE4NDc2NDg2MiwyMS4zNDI1OTYwNTQwNzcxNSAyMS4wNDQyNDA2NTM1MTQ4NjIsMTcuMDI1NzA5MTUyMjIxNjggMTcuODUzOTk0MDcxNDgzNjEyLDIwLjIxNTk0ODEwNDg1ODQgMTcuODUzNjk4NDMyNDQ1NTI2LDIwLjIxNTk0ODEwNDg1ODQgMTcuNDg3MzY1NDI0NjMzMDI2LDIwLjU4MjU3Njc1MTcwODk4NCAxNi43MzEyMTIzMTc5NDM1NzMsMjEuMzM4NzI3OTUxMDQ5ODA1IDE2LjczMTIxMjMxNzk0MzU3MywyMS4zMzg3Mjc5NTEwNDk4MDUgMTYuNzI1MjYzMjk3NTU3ODMsMjEuMzQ0Njc2OTcxNDM1NTQ3IDE2LjczMTIxMjMxNzk0MzU3MywyMS4zNTA5MjM1MzgyMDgwMDggMjEuMDQ0MjQwNjUzNTE0ODYyLDI1LjY2Mzk0NjE1MTczMzQgMjUuMzYxMTM1MTg0NzY0ODYyLDIxLjM0NzA1NzM0MjUyOTI5NyAyNS4zNjMyMTQxOTQ3NzQ2MjgsMjEuMzQ0Njc2OTcxNDM1NTQ3ICIgZmlsbD0iI0YzQkEyRiIgLz4gPC9nPiA8L2c+IDwvc3ZnPg==',
     alby: 'data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB2ZXJzaW9uPSIxLjEiIHZpZXdCb3g9IjAgMCA4MDAwIDgwMDAiPiA8IS0tIEdlbmVyYXRvcjogQWRvYmUgSWxsdXN0cmF0b3IgMjkuOC4xLCBTVkcgRXhwb3J0IFBsdWctSW4gLiBTVkcgVmVyc2lvbjogMi4xLjEgQnVpbGQgMikgLS0+IDxkZWZzPiA8c3R5bGU+IC5zdDAgeyBmaWxsOiAjZmVjYTAwOyB9IC5zdDEgeyBmaWxsOiAjMjAyMDIwOyB9IDwvc3R5bGU+IDwvZGVmcz4gPHBhdGggY2xhc3M9InN0MCIgZD0iTTI4OTIuMSw3MjAwLjJjMTQ0LjQsMjkuNSwyOTIsNDcuNSw0NDAuMyw1My43LTMwNC44LDEwMS02MDcuNiwyMDguNC05MDkuMywzMTcuOWgtLjJjLTI4MC44LDEwMC44LTU2MC43LDIwNC40LTg0NS4zLDI5NC4yLTIyOS4zLDcxLjEtNDYzLjMsMTMzLTcwMi41LDEzNy41LTQ2Mi43LDExLjUtODE0LjYtMjM1LjctODcwLjEtNzEwLjgtNDUuNy00MzEuNCwxMjUuMi04NTgsMjYxLTEyNjIuMSwxNDUuNy00MTAuNiwyOTYuNy04MTkuNSw0MzYuNy0xMjMyLjEsOS4zLDg0LjcsMjIuNSwxNjguOCwzOS41LDI1MS44LDM2LjMsMTc3LjYsOTAuNiwzNTIuMiwxNjEuMiw1MTkuMiw2OS4zLDE2My44LDE1NSwzMjEuNywyNTQuNyw0NjkuNCw5OC43LDE0Ni4xLDIxMi4xLDI4My42LDMzNyw0MDguNCwxMjQuOCwxMjQuOSwyNjIuMywyMzguMiw0MDguNCwzMzcsMTQ3LjcsOTkuOCwzMDUuNiwxODUuNSw0NjkuNCwyNTQuNywxNjYuOSw3MC42LDM0MS42LDEyNC44LDUxOS4yLDE2MS4yWiIvPiA8cGF0aCBjbGFzcz0ic3QwIiBkPSJNMTQ5NS4yLDI1NDEuM2MtOTAuNSw5MC41LTE3NC45LDE4Ny42LTI1Mi4yLDI4OS44LDkyLjMtNDM4LjEsMTcyLjgtODc4LjksMjU2LTEzMTguNywxMDguNS01MjMuNSwyMjkuOS0xMjg2LjEsODEwLjQtMTQ3My44LDMxMS41LTk1LjUsNjMxLDQ3LjQsODc0LjUsMjQzLDI4MiwyMjcuNSw1MTMuNiw1MTQuNCw3NTAuOSw3ODcuMiwxODguMiwyMjIuMiwzNzYuOCw0NDQuMyw1NjguNSw2NjMuNmgtMTA1NS4yYy0xODcuMSwwLTM3NC4yLDE4LjktNTU2LjEsNTYuMS0xNzcuNiwzNi4zLTM1Mi4yLDkwLjYtNTE5LjIsMTYxLjEtMTYzLjgsNjkuMy0zMjEuNywxNTUtNDY5LjQsMjU0LjgtMTQ2LjIsOTguNy0yODMuNiwyMTIuMS00MDguNCwzMzdaIi8+IDxwYXRoIGNsYXNzPSJzdDAiIGQ9Ik03NzcwLjUsNjAwNC4xYy0yMTguMiwyMTguNS01MjAuNywzMjAuMy04MTYuOSwzOTUuOS03MC4yLDE3LjctMTQwLjcsMzMuOC0yMTEuNCw0OS4xLTU4OC44LDEyMi44LTExODMuMSwyMjAuNC0xNzcwLjUsMzQ5LjMsNy00LjcsMTQuMS05LjQsMjEuMS0xNC4xLDE0Ni4xLTk4LjcsMjgzLjUtMjEyLjEsNDA4LjQtMzM3LDEyNC45LTEyNC45LDIzOC4yLTI2Mi4zLDMzNy00MDguNCw5OS44LTE0Ny43LDE4NS41LTMwNS42LDI1NC44LTQ2OS40LDcwLjYtMTY2LjksMTI0LjgtMzQxLjYsMTYxLjItNTE5LjIsMzcuMi0xODEuOSw1Ni4xLTM2OSw1Ni4xLTU1Ni4xdi0xMDQ3LjZjMzUzLjQsMzA4LjUsNzE0LjgsNjA4LjEsMTA2Ni4zLDkxOSw4MC4xLDcxLjgsMTU5LjEsMTQ0LjksMjM1LjEsMjIxLDE5My44LDE5NSwzNzMuMiw0MTMuMyw0NDguNyw2NzgsNzcuOCwyNjksOS4zLDU0MS4yLTE4OS43LDczOS41WiIvPiA8cGF0aCBjbGFzcz0ic3QxIiBkPSJNNTIwMCw0NTUwYzAsOTY2LjUtNzgzLjUsMTc1MC0xNzUwLDE3NTAtOTY2LjUsMC0xNzUwLTc4My41LTE3NTAtMTc1MCwwLTk2Ni41LDc4My41LTE3NTAsMTc1MC0xNzUwaDE3NTB2MTc1MFoiLz4gPC9zdmc+',
     xpub: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0MiIgaGVpZ2h0PSI0MiIgdmlld0JveD0iMCAwIDQyIDQyIj48Y2lyY2xlIGN4PSIyMSIgY3k9IjIxIiByPSIyMSIgZmlsbD0iI0ZGOTkwMCIvPjx0ZXh0IHg9IjIxIiB5PSIyOSIgZm9udC1mYW1pbHk9InN5c3RlbS11aSxzYW5zLXNlcmlmIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iNzAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmZmIj5XPC90ZXh0Pjwvc3ZnPg==',
@@ -113,7 +108,6 @@ var KnownOrdinalWalletType;
     KnownOrdinalWalletType["wizz"] = "wizz";
     KnownOrdinalWalletType["okx"] = "okx";
     KnownOrdinalWalletType["phantom"] = "phantom";
-    KnownOrdinalWalletType["oyl"] = "oyl";
     KnownOrdinalWalletType["alby"] = "alby";
     KnownOrdinalWalletType["binance"] = "binance";
     /**
@@ -183,12 +177,6 @@ const KnownOrdinalWallets = {
         // wires the SW handlers.
         hiddenFromPicker: true,
     },
-    [KnownOrdinalWalletType.oyl]: {
-        type: KnownOrdinalWalletType.oyl,
-        label: 'Oyl',
-        logo: walletLogos.oyl,
-        downloadLink: 'https://oyl.io/',
-    },
     [KnownOrdinalWalletType.alby]: {
         type: KnownOrdinalWalletType.alby,
         label: 'Alby',
@@ -245,7 +233,7 @@ const KnownOrdinalWallets = {
 const CAT21_WALLET_INPUT_SEQUENCE = 0xfffffffd;
 /**
  * Non-RBF sequence. ONLY used on CAT-21 MINT inputs signed by a
- * third-party wallet (Xverse, Unisat, Leather, OKX, Oyl, Wizz,
+ * third-party wallet (Xverse, Unisat, Leather, OKX, Wizz,
  * Phantom, Alby, …). Locks their accelerate UI out of touching a
  * mint tx — the 2024 Xverse incident defence: a third-party wallet's
  * fee-bump flow would build a replacement without `lockTime=21`,
@@ -909,13 +897,6 @@ function isPhantomInstalled(win) {
     return !!p?.bitcoin;
 }
 /**
- * Oyl injects a single top-level `window.oyl` provider — no multi-
- * chain wrapper, no sub-namespace.
- */
-function isOylInstalled(win) {
-    return !!win?.oyl;
-}
-/**
  * Alby exposes a top-level `window.alby` provider (Lightning + Nostr
  * focus). Also injects `window.webln` per the WebLN standard.
  * Detect either.
@@ -1069,32 +1050,6 @@ function binanceBasicInfoToWalletInfo(address, publicKey) {
         ordinalsPublicKey: publicKey,
         paymentAddress: address,
         paymentPublicKey: publicKey,
-        signingSupported: true,
-    };
-}
-/**
- * Oyl's `getAddresses()` returns a record keyed by address type
- * (nativeSegwit / nestedSegwit / taproot), each populated with
- * `{address, publicKey}`. Split into the SDK's lanes:
- *  - taproot → ordinalsAddress
- *  - nativeSegwit preferred for payment; fall back to nestedSegwit
- *    if nativeSegwit is absent
- *
- * Throws if either lane can't be filled.
- */
-function parseOylAddressResponse(r) {
-    const ordinals = r.taproot;
-    const payment = r.nativeSegwit ?? r.nestedSegwit;
-    if (!ordinals || !payment) {
-        throw new Error('Required address not found?!');
-    }
-    return {
-        type: KnownOrdinalWalletType.oyl,
-        ordinalsAddress: ordinals.address,
-        // Same x-only normalisation as Leather / Phantom.
-        ordinalsPublicKey: toXOnlyPubkeyHex(ordinals.publicKey),
-        paymentAddress: payment.address,
-        paymentPublicKey: payment.publicKey,
         signingSupported: true,
     };
 }
@@ -1279,7 +1234,7 @@ const cat21walletConnector = {
 };
 
 /**
- * Non-native regtest wallets (Leather / Unisat / Wizz / OKX / Oyl)
+ * Non-native regtest wallets (Leather / Unisat / Wizz / OKX)
  * hard-code mainnet HRP in their `getAddresses` responses regardless
  * of the network the dapp asked for. When a consumer initialises the
  * SDK with `Network.Regtest`, this helper post-processes the wallet's
@@ -1308,7 +1263,7 @@ function toRegtestWalletInfo(info) {
 /**
  * Detect the address type from its mainnet HRP / prefix and re-derive
  * it under the regtest network from the same pubkey. Supports the four
- * address shapes any of our five non-native wallets actually returns:
+ * address shapes any of our four non-native wallets actually returns:
  *   - `bc1q…` → P2WPKH (Native SegWit)
  *   - `bc1p…` → P2TR (Taproot)
  *   - `3…`    → P2SH-wrapped-P2WPKH (Nested SegWit)
@@ -1341,7 +1296,7 @@ function toRegtestAddress(mainnetAddress, publicKeyHex) {
 }
 /**
  * Wallet-side address for `signPsbt`-flavoured RPCs that filter by
- * address (Unisat/Wizz/OKX/Oyl accept a `toSignInputs`/`inputsToSign`
+ * address (Unisat/Wizz/OKX accept a `toSignInputs`/`inputsToSign`
  * shape with `{index, address}` rows and refuse to sign inputs whose
  * `address` isn't in the wallet's own address set).
  *
@@ -1401,7 +1356,7 @@ function toMainnetAddress(bcrtAddress, publicKeyHex) {
 /**
  * Wallet-side network arg for `signPsbt`. Native-regtest wallets get
  * the app's actual `network`; mainnet-only wallets (Leather / Unisat /
- * Wizz / OKX / Oyl) get `Network.Mainnet` even when the app asked for
+ * Wizz / OKX) get `Network.Mainnet` even when the app asked for
  * `Network.Regtest`, so the wallet unlocks its mainnet-derived key
  * (which produces a signature that verifies against the equivalent
  * regtest scriptPubKey — see `toRegtestWalletInfo`'s docstring).
@@ -1488,27 +1443,6 @@ const okxConnector = {
             okxBtc.removeListener('accountChanged', handler);
             okxBtc.removeListener('networkChanged', handler);
         };
-    },
-};
-
-/**
- * Oyl — `window.oyl.getAddresses()` returns a `{nativeSegwit,
- * nestedSegwit?, taproot}` record. Like Xverse / Leather / Phantom,
- * Oyl exposes proper ordinals vs payment lane separation — safer
- * for cat sats than the single-address Unisat/Wizz/OKX wallets.
- *
- * Schema verified in static/background/index.js v1.17.1.
- */
-const oylConnector = {
-    providerId: KnownOrdinalWalletType.oyl,
-    wallet: KnownOrdinalWallets[KnownOrdinalWalletType.oyl],
-    signingSupported: true,
-    detect(win) {
-        return isOylInstalled(win);
-    },
-    connect(network) {
-        const oyl = window.oyl;
-        return from(oyl.getAddresses()).pipe(map(addresses => parseOylAddressResponse(addresses)), map(info => network === Network.Regtest ? toRegtestWalletInfo(info) : info));
     },
 };
 
@@ -1810,7 +1744,6 @@ const walletConnectors = [
     wizzConnector,
     okxConnector,
     phantomConnector,
-    oylConnector,
     albyConnector,
 ];
 /**
@@ -1971,7 +1904,7 @@ function unsupportedSignMessage(walletName) {
  * inject in-page providers — it uses NWC deeplinks, a completely
  * different integration model that this signer doesn't cover.
  */
-const legacy$a = {
+const legacy$9 = {
     signAndBroadcast(input) {
         const psbtHex = hex.encode(input.psbtBytes);
         const alby = window.alby;
@@ -2018,7 +1951,7 @@ const legacy$a = {
 };
 const albySigner = {
     providerId: KnownOrdinalWalletType.alby,
-    ...operationNamedDefaults(legacy$a),
+    ...operationNamedDefaults(legacy$9),
     signMessage: unsupportedSignMessage('Alby'),
 };
 
@@ -2137,7 +2070,7 @@ function resolveSigningTargets(input) {
  * Ships as potential-support; lights up automatically when
  * Binance enables the documented surface.
  */
-const legacy$9 = {
+const legacy$8 = {
     signAndBroadcast(input) {
         const psbtHex = hex.encode(input.psbtBytes);
         const binanceBtc = window.binancew3w.bitcoin;
@@ -2181,7 +2114,7 @@ const legacy$9 = {
 };
 const binanceSigner = {
     providerId: KnownOrdinalWalletType.binance,
-    ...operationNamedDefaults(legacy$9),
+    ...operationNamedDefaults(legacy$8),
     signMessage: unsupportedSignMessage('Binance'),
 };
 
@@ -2235,7 +2168,7 @@ function callCat21WalletSignPsbt(psbtHex, signAtIndex, network) {
     return provider.request('signPsbt', params)
         .then((resp) => resp.result.hex);
 }
-const legacy$8 = {
+const legacy$7 = {
     signAndBroadcast(input) {
         const psbtHex = hex.encode(input.psbtBytes);
         const network = toLeatherNetworkString(input.network);
@@ -2274,7 +2207,7 @@ function callCat21WalletSignMessage(message) {
 }
 const cat21walletSigner = {
     providerId: KnownOrdinalWalletType.cat21wallet,
-    ...operationNamedDefaults(legacy$8),
+    ...operationNamedDefaults(legacy$7),
     signMessage: (input) => wrapSignMessage(() => callCat21WalletSignMessage(input.message)),
 };
 
@@ -2312,7 +2245,7 @@ function callLeatherSignPsbt(psbtHex, signAtIndex, network) {
     };
     return win.LeatherProvider.request('signPsbt', params).then((resp) => resp.result.hex);
 }
-const legacy$7 = {
+const legacy$6 = {
     signAndBroadcast(input) {
         const psbtHex = hex.encode(input.psbtBytes);
         const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
@@ -2363,7 +2296,7 @@ function callLeatherSignMessage(message) {
 }
 const leatherSigner = {
     providerId: KnownOrdinalWalletType.leather,
-    ...operationNamedDefaults(legacy$7),
+    ...operationNamedDefaults(legacy$6),
     signMessage: (input) => wrapSignMessage(() => callLeatherSignMessage(input.message)),
 };
 
@@ -2381,7 +2314,7 @@ const leatherSigner = {
  * Multi-input signing: OKX follows the Unisat-derived
  * `toSignInputs` convention. Same mapping as the unisat signer.
  */
-const legacy$6 = {
+const legacy$5 = {
     signAndBroadcast(input) {
         const psbtHex = hex.encode(input.psbtBytes);
         const okxBtc = window.okxwallet.bitcoin;
@@ -2439,95 +2372,11 @@ const legacy$6 = {
  */
 const okxSigner = {
     providerId: KnownOrdinalWalletType.okx,
-    ...operationNamedDefaults(legacy$6),
+    ...operationNamedDefaults(legacy$5),
     signMessage: (input) => {
         const okxBtc = window.okxwallet.bitcoin;
         return wrapSignMessage(() => okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' }));
     },
-};
-
-/**
- * Oyl — `window.oyl.signPsbt({psbt, inputsToSign, broadcast,
- * finalize})`.
- *
- * Oyl exposes a single `window.oyl` provider whose methods route
- * via its relay-based messaging shim to the extension background.
- *
- * Schema verified by grepping v1.17.1's static/background/index.js
- * (signPsbt handler at byte 4708500):
- *   - `body.psbt` is a hex string. The error message
- *     "A psbt hex is required" refers to the value TYPE, not the
- *     field name; passing base64 here gets rejected.
- *   - Response may use `signedPsbtHex` (hex), `signedPsbt` (base64),
- *     or `psbt` (whichever shape Oyl emits for that version). The
- *     signer normalises by sniffing.
- *
- * Per the SDK-wide "WE broadcast" convention, we set
- * `broadcast: false, finalize: false` so Oyl returns the
- * partial-sig PSBT for us to finalize via scure +
- * broadcastSignedPsbt.
- */
-function decodeOylResponse(r) {
-    if (r.signedPsbtHex)
-        return hex.decode(r.signedPsbtHex);
-    if (r.signedPsbt)
-        return base64.decode(r.signedPsbt);
-    if (r.psbt) {
-        return /^[0-9a-f]+$/i.test(r.psbt) ? hex.decode(r.psbt) : base64.decode(r.psbt);
-    }
-    throw new Error('Oyl signPsbt response carried no signed-psbt field');
-}
-const legacy$5 = {
-    signAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
-        const oyl = window.oyl;
-        const walletAddress = walletSidePaymentAddress(KnownOrdinalWalletType.oyl, input.paymentAddress, input.paymentPublicKey);
-        const signPromise = oyl.signPsbt({
-            psbt: psbtHex,
-            inputsToSign: [{ address: walletAddress, signingIndexes: [0], sigHash: 0x01 }],
-            broadcast: false,
-            finalize: false,
-        });
-        return from(signPromise).pipe(switchMap(response => broadcastSignedPsbt(input, decodeOylResponse(response))));
-    },
-    signMultiInputAndBroadcast(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
-        const oyl = window.oyl;
-        const targets = resolveSigningTargets(input);
-        const inputsToSign = targets.map((t) => ({
-            address: walletSidePaymentAddress(KnownOrdinalWalletType.oyl, t.address, input.paymentPublicKey),
-            signingIndexes: t.indexes,
-            sigHash: t.sigHash,
-        }));
-        const signPromise = oyl.signPsbt({
-            psbt: psbtHex,
-            inputsToSign,
-            broadcast: false,
-            finalize: false,
-        });
-        return from(signPromise).pipe(switchMap(response => broadcastSignedPsbt(input, decodeOylResponse(response))));
-    },
-    signPsbtOnly(input) {
-        const psbtHex = hex.encode(input.psbtBytes);
-        const oyl = window.oyl;
-        const targets = resolveSigningTargets(input);
-        const inputsToSign = targets.map((t) => ({
-            address: walletSidePaymentAddress(KnownOrdinalWalletType.oyl, t.address, input.paymentPublicKey),
-            signingIndexes: t.indexes,
-            sigHash: t.sigHash,
-        }));
-        return from(oyl.signPsbt({
-            psbt: psbtHex,
-            inputsToSign,
-            broadcast: false,
-            finalize: false,
-        })).pipe(map((response) => decodeOylResponse(response)));
-    },
-};
-const oylSigner = {
-    providerId: KnownOrdinalWalletType.oyl,
-    ...operationNamedDefaults(legacy$5),
-    signMessage: unsupportedSignMessage('Oyl'),
 };
 
 /**
@@ -2981,7 +2830,6 @@ const walletSigners = [
     leatherSigner,
     unisatSigner,
     okxSigner,
-    oylSigner,
     wizzSigner,
     phantomSigner,
     albySigner,
@@ -8503,7 +8351,7 @@ function inscribeAndBroadcast(args) {
             psbtBytes: built.commitPsbt,
             paymentAddress: args.paymentAddress,
             // Pubkey enables the SDK's wallet-side-address shim so
-            // Unisat/Wizz/OKX/Oyl see their MAINNET address in `toSignInputs`
+            // Unisat/Wizz/OKX see their MAINNET address in `toSignInputs`
             // even when the app carries a bcrt address on regtest. Native-
             // regtest wallets (Xverse/Cat21/Alby) get the app address
             // unchanged. See src/wallet/network-address-shim.ts.

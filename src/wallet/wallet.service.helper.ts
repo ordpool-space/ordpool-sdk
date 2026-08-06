@@ -167,14 +167,6 @@ export function isPhantomInstalled(win: WindowLike | undefined): boolean {
 }
 
 /**
- * Oyl injects a single top-level `window.oyl` provider — no multi-
- * chain wrapper, no sub-namespace.
- */
-export function isOylInstalled(win: WindowLike | undefined): boolean {
-  return !!win?.oyl;
-}
-
-/**
  * Alby exposes a top-level `window.alby` provider (Lightning + Nostr
  * focus). Also injects `window.webln` per the WebLN standard.
  * Detect either.
@@ -356,40 +348,6 @@ export interface PhantomBtcAddress {
   publicKey: string;
   addressType: 'p2tr' | 'p2wpkh' | 'p2sh' | 'p2pkh';
   purpose: 'payment' | 'ordinals';
-}
-
-/** Oyl's getAddresses response: per-type address-and-pubkey objects. */
-export interface OylAddressResponse {
-  nativeSegwit?: { address: string; publicKey: string };
-  nestedSegwit?: { address: string; publicKey: string };
-  taproot?:      { address: string; publicKey: string };
-}
-
-/**
- * Oyl's `getAddresses()` returns a record keyed by address type
- * (nativeSegwit / nestedSegwit / taproot), each populated with
- * `{address, publicKey}`. Split into the SDK's lanes:
- *  - taproot → ordinalsAddress
- *  - nativeSegwit preferred for payment; fall back to nestedSegwit
- *    if nativeSegwit is absent
- *
- * Throws if either lane can't be filled.
- */
-export function parseOylAddressResponse(r: OylAddressResponse): WalletInfo {
-  const ordinals = r.taproot;
-  const payment  = r.nativeSegwit ?? r.nestedSegwit;
-  if (!ordinals || !payment) {
-    throw new Error('Required address not found?!');
-  }
-  return {
-    type: KnownOrdinalWalletType.oyl,
-    ordinalsAddress:   ordinals.address,
-    // Same x-only normalisation as Leather / Phantom.
-    ordinalsPublicKey: toXOnlyPubkeyHex(ordinals.publicKey),
-    paymentAddress:    payment.address,
-    paymentPublicKey:  payment.publicKey,
-    signingSupported:  true,
-  };
 }
 
 /**

@@ -53,10 +53,6 @@ case "$WALLET" in
     VERSION="2.13.4"
     ASSET_NAME="wizz-wallet-v${VERSION}.crx"
     ;;
-  oyl)
-    VERSION="1.17.1"
-    ASSET_NAME="oyl-wallet-v${VERSION}.crx"
-    ;;
   alby)
     VERSION="3.14.2"
     ASSET_NAME="alby-bitcoin-wallet-v${VERSION}.crx"
@@ -71,7 +67,7 @@ case "$WALLET" in
     ASSET_NAME="cat21-wallet-v${VERSION}.crx"
     ;;
   *)
-    echo "ERROR: unknown wallet '$WALLET'. Supported: xverse, unisat, leather, okx, phantom, wizz, oyl, alby, cat21wallet." >&2
+    echo "ERROR: unknown wallet '$WALLET'. Supported: xverse, unisat, leather, okx, phantom, wizz, alby, cat21wallet." >&2
     exit 2
     ;;
 esac

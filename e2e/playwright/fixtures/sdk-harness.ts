@@ -21,7 +21,6 @@ import { cat21walletConnector } from '../../../src/wallet/connectors/cat21wallet
 import { wizzConnector } from '../../../src/wallet/connectors/wizz.connector';
 import { okxConnector } from '../../../src/wallet/connectors/okx.connector';
 import { phantomConnector } from '../../../src/wallet/connectors/phantom.connector';
-import { oylConnector } from '../../../src/wallet/connectors/oyl.connector';
 import { albyConnector } from '../../../src/wallet/connectors/alby.connector';
 import { findSignerOrThrow } from '../../../src/wallet/signers';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
@@ -44,7 +43,7 @@ declare global {
        *
        * Wallet-specific test quirks (cross-network-keys "tell the
        * mainnet-only wallet it's signing mainnet, hand it regtest
-       * PSBT bytes" trick used by Leather / Unisat / Wizz / OKX / Oyl
+       * PSBT bytes" trick used by Leather / Unisat / Wizz / OKX
        * / Phantom) are handled inside this method; specs stay
        * wallet-agnostic.
        *
@@ -135,15 +134,6 @@ declare global {
       }>;
       detectPhantom(): boolean;
       connectPhantom(): Promise<{
-        type: KnownOrdinalWalletType;
-        ordinalsAddress: string;
-        ordinalsPublicKey: string;
-        paymentAddress: string;
-        paymentPublicKey: string;
-        signingSupported: boolean;
-      }>;
-      detectOyl(): boolean;
-      connectOyl(): Promise<{
         type: KnownOrdinalWalletType;
         ordinalsAddress: string;
         ordinalsPublicKey: string;
@@ -680,21 +670,6 @@ window.ordpoolSdkHarness = {
     return info;
   },
 
-  detectOyl(): boolean { return oylConnector.detect(window); },
-  async connectOyl() {
-    const start = Date.now();
-    while (Date.now() - start < 15_000) {
-      if (oylConnector.detect(window)) break;
-      await new Promise(r => setTimeout(r, 100));
-    }
-    if (!oylConnector.detect(window)) throw new Error('Oyl provider not injected within 15s');
-    statusEl().textContent = `connecting to oyl…`;
-    const info = await firstValueFrom(oylConnector.connect(Network.Mainnet));
-    statusEl().textContent = `connected: ${info.paymentAddress}`;
-    log('connectOyl.result', info);
-    return info;
-  },
-
   detectAlby(): boolean { return albyConnector.detect(window); },
   async connectAlby() {
     const start = Date.now();
@@ -861,14 +836,6 @@ window.ordpoolSdkHarness.deriveRegtestAddresses = (paymentPublicKeyHex: string) 
  * false}) — same shape as Unisat. Cross-network-keys trick applies
  * the same way; OKX's signPsbt matches the script bytes against
  * the wallet's own (mainnet) address.
- */
-
-/**
- * Oyl mint: window.oyl.signPsbt({psbtBase64, inputsToSign}) →
- * {signedPsbt: base64}. Oyl exposes both bcrt1q + bcrt1p natively
- * when its UI is on regtest, but in headless Pipeline B we stay on
- * Oyl's default (mainnet) and use the cross-network-keys trick as
- * with Unisat/Wizz/OKX.
  */
 
 /**

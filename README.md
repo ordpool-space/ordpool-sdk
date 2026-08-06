@@ -62,7 +62,7 @@ intentionally minimal and additive.
 | Wallet | Status |
 |---|---|
 | Cat21 Wallet | Our own wallet (ordpool-space/cat21-wallet) |
-| Xverse, Leather, Unisat, Wizz, OKX, Oyl, Alby | Connector + signer ship; detection gates picker visibility |
+| Xverse, Leather, Unisat, Wizz, OKX, Alby | Connector + signer ship; detection gates picker visibility |
 | Watch-only (Sparrow, Electrum, Coldcard, Ledger, Trezor, Specter, Bitcoin Core) | Via PSBT export round-trip |
 
 Wallets without a runtime surface simply don't appear in the

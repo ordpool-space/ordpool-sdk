@@ -152,7 +152,7 @@ export function inscribeAndBroadcast(
       psbtBytes: built.commitPsbt,
       paymentAddress: args.paymentAddress,
       // Pubkey enables the SDK's wallet-side-address shim so
-      // Unisat/Wizz/OKX/Oyl see their MAINNET address in `toSignInputs`
+      // Unisat/Wizz/OKX see their MAINNET address in `toSignInputs`
       // even when the app carries a bcrt address on regtest. Native-
       // regtest wallets (Xverse/Cat21/Alby) get the app address
       // unchanged. See src/wallet/network-address-shim.ts.
