@@ -180,11 +180,6 @@ const KnownOrdinalWallets = {
     [KnownOrdinalWalletType.alby]: {
         type: KnownOrdinalWalletType.alby,
         label: 'Alby',
-        // Lightning + Nostr FIRST, but the webbtc sub-provider signs any
-        // Taproot input the user's mnemonic can spend — proven by the
-        // SDK's alby-mint-roundtrip spec (CAT-21 mint end-to-end). The
-        // subLabel stays as a UX hint that Alby isn't ordinals-focused.
-        subLabel: 'Lightning + Nostr focused; on-chain via webbtc',
         logo: walletLogos.alby,
         downloadLink: 'https://getalby.com/',
     },
