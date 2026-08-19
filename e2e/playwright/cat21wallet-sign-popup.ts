@@ -116,7 +116,7 @@ export async function approveCat21WalletSignPopup(
     await confirmBtn.click({ noWaitAfter: true });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (!/Target (page|context|browser) has been closed/.test(msg)) throw err;
+    if (!/Target page, context or browser has been closed/.test(msg)) throw err;
   }
   knownPages.add(approval);
 }
