@@ -14,9 +14,8 @@ import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import {
   FundedAccount,
   getFundedAccount,
-  getTx,
   getTxHex,
-  getTxStatus,
+  waitForTxConfirmed,
   mineBlocks,
   postTx,
   rpc,
@@ -343,7 +342,11 @@ describe('cat21 mint roundtrip on regtest', () => {
       await waitForElectrsSync(tipAfterMine);
 
       // ─── Phase 9: confirmation + bytes round-trip ───
-      const status = await getTxStatus(broadcastedTxid);
+      // Poll until confirmed: getTxStatus is a single fetch and races
+      // electrs's block-mapping pass after waitForElectrsSync (which only
+      // tracks tip height). waitForTxConfirmed polls status.confirmed +
+      // block_hash.
+      const status = (await waitForTxConfirmed(broadcastedTxid)).status;
       expect(status.confirmed).toBe(true);
       expect(status.block_height).toBe(tipAfterMine);
 
@@ -364,7 +367,7 @@ describe('cat21 mint roundtrip on regtest', () => {
       assertSighashAll(onChainInput0, testCase.expectedWitnessShape);
 
       // ─── Phase 11: ordpool-parser identifies the on-chain tx as a CAT-21 ───
-      const esploraTx = await getTx(broadcastedTxid);
+      const esploraTx = await waitForTxConfirmed(broadcastedTxid);
       // eslint-disable-next-line no-console
       console.log(`[e2e:${testCase.label}] txid       = ${esploraTx.txid}`);
       // eslint-disable-next-line no-console
@@ -452,7 +455,7 @@ describe('cat21 mint roundtrip on regtest', () => {
       await waitForElectrsSync(tipAfterMine);
 
       // ─── electrs sees one output worth 546, fee 454 ───
-      const esploraTx = await getTx(broadcastedTxid);
+      const esploraTx = await waitForTxConfirmed(broadcastedTxid);
       // eslint-disable-next-line no-console
       console.log(`[e2e:dust-absorb] txid       = ${esploraTx.txid}`);
       // eslint-disable-next-line no-console
