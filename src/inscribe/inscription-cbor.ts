@@ -201,8 +201,11 @@ function encodeMapEntries(entries: Array<[unknown, unknown]>, out: number[]): vo
 
   writeHead(5, BigInt(encoded.length), out);
   for (const { keyBytes, valBytes } of encoded) {
-    out.push(...keyBytes);
-    out.push(...valBytes);
+    // Append byte-by-byte, NOT `out.push(...bytes)`: a spread of a
+    // large value-encoding (a big metadata blob) blows the call-stack
+    // argument limit with a RangeError.
+    for (let i = 0; i < keyBytes.length; i++) out.push(keyBytes[i]);
+    for (let i = 0; i < valBytes.length; i++) out.push(valBytes[i]);
   }
 }
 

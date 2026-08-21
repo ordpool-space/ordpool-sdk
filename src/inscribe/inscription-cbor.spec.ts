@@ -81,6 +81,13 @@ describe('encodeCborDeterministic — round-trip through ordpool-parser CBOR.dec
     expect(decode(encodeCborDeterministic(value))).toEqual(value);
   });
 
+  it('large metadata round-trips without a call-stack blowup (byte-by-byte map append)', () => {
+    // A map value big enough that an `out.push(...valBytes)` spread
+    // would risk a RangeError; the encoder appends byte-by-byte.
+    const value = { blob: 'z'.repeat(200_000), n: 7 };
+    expect(decode(encodeCborDeterministic(value))).toEqual(value);
+  });
+
   it('Map with integer keys round-trips (ord properties use integer keys)', () => {
     const value = new Map<number, unknown>([[0, 'gallery'], [1, 'attrs'], [2, 'packed']]);
     // Decoder returns a plain object with the integer keys coerced to
