@@ -1,12 +1,20 @@
 name: E2E (wallet matrix)
 
-# Iteration 1: prove we can load the published Xverse .crx in
-# headed Chromium under xvfb in CI. Onboarding flow + mint
-# roundtrip land in follow-up iterations once we have CI
-# screenshots confirming the entry point.
+# Loads each wallet's published extension in headed Chromium under xvfb
+# and runs that wallet's Playwright specs (loads / onboard / sdk-handshake
+# / mint / inscribe / cat21 flows) against a fresh regtest stack.
 #
-# This workflow does NOT run on dev machines. The Xverse .crx is
-# unverified-binary code; we keep it off contributor laptops.
+# One matrix shard per wallet: the specs are wallet-isolated (each spec
+# launches its own persistent context with `--load-extension` scoped to a
+# single wallet), so a shard bootstraps only its own extension and runs
+# only `playwright test <wallet>`. Sharding keeps every shard well under
+# the per-job cap as the spec roster grows, and a slow or hanging wallet
+# no longer starves the others (fail-fast is off, so one red wallet does
+# not cancel the rest).
+#
+# This workflow does NOT run on dev machines. The wallet .crx files are
+# unverified-binary code; we keep them off contributor laptops. CI gets a
+# fresh container per run.
 
 on:
   push:
@@ -30,13 +38,31 @@ permissions:
 jobs:
   playwright:
     runs-on: ubuntu-latest
-    # 45 min: was 30, but adding the cat21-ord container image build
-    # (~3-5 min on cold cache) and the 8-wallet spec matrix's growing
-    # roster of cat21wallet specs (mint+inscribe+transfer+offer pair +
-    # handshake + loads + onboard = 7) pushed the total wall-clock
-    # past 30 min consistently. Recent run 28297743062 finished its
-    # last spec at 30m20s before the cap hit.
-    timeout-minutes: 45
+    # Per-shard cap. A .crx shard is npm ci + cached extension + a
+    # bitcoind/electrs stack + one wallet's specs (~8-12 min). The
+    # cat21wallet shard also builds the wallet from source and the
+    # cat21-ord image (~18-22 min) — the long pole, still under cap.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `ext` is the actions/cache key that pins the published .crx
+          # version (see playwright-bootstrap.sh). Only the cat21wallet
+          # shard also brings up cat21-ord — its transfer/offer/accept
+          # specs poll `/status` on it; every other wallet needs only
+          # bitcoind + electrs. Gated by wallet name below (a boolean
+          # matrix flag can coerce to the string "false", which is
+          # truthy — the name comparison is unambiguous).
+          - { wallet: xverse,      ext: "xverse-extension-v2.3.2" }
+          - { wallet: unisat,      ext: "unisat-extension-v1.7.15" }
+          - { wallet: leather,     ext: "leather-extension-v6.102.0" }
+          - { wallet: okx,         ext: "okx-extension-v4.1.0" }
+          - { wallet: phantom,     ext: "phantom-extension-v26.16.0" }
+          - { wallet: wizz,        ext: "wizz-extension-v2.13.4" }
+          - { wallet: alby,        ext: "alby-extension-v3.14.2" }
+          # cat21wallet is built from source, not downloaded — no `ext` key.
+          - { wallet: cat21wallet, ext: "" }
     steps:
       - uses: actions/checkout@v5
 
@@ -50,10 +76,9 @@ jobs:
       - name: Install Playwright browsers + system deps
         run: npx playwright install --with-deps chromium
 
-      # Cache unpacked extensions keyed by the version pinned in
-      # playwright-bootstrap.sh. First run on a new version:
-      # download .crx from this repo's release asset and unzip (~5s).
-      # Subsequent runs: cache hit, no download.
+      # Xverse is bootstrapped in EVERY shard: global-setup.ts pre-seeds
+      # the Xverse vault snapshot and runs once per Playwright invocation
+      # regardless of which wallet is under test. Cached, ~5s on a hit.
       - name: Cache unpacked Xverse extension
         id: xverse-cache
         uses: actions/cache@v4
@@ -67,83 +92,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash e2e/playwright/playwright-bootstrap.sh xverse
 
-      - name: Cache unpacked Unisat extension
-        id: unisat-cache
+      # The wallet under test, when it is a downloaded .crx other than
+      # xverse (already handled above) and not cat21wallet (built from
+      # source below).
+      - name: Cache unpacked ${{ matrix.wallet }} extension
+        id: wallet-cache
+        if: matrix.ext != '' && matrix.wallet != 'xverse'
         uses: actions/cache@v4
         with:
-          path: e2e/extensions/unisat
-          key: unisat-extension-v1.7.15
+          path: e2e/extensions/${{ matrix.wallet }}
+          key: ${{ matrix.ext }}
 
-      - name: Download + unpack Unisat from internal release mirror
-        if: steps.unisat-cache.outputs.cache-hit != 'true'
+      - name: Download + unpack ${{ matrix.wallet }} from internal release mirror
+        if: matrix.ext != '' && matrix.wallet != 'xverse' && steps.wallet-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash e2e/playwright/playwright-bootstrap.sh unisat
-
-      - name: Cache unpacked Leather extension
-        id: leather-cache
-        uses: actions/cache@v4
-        with:
-          path: e2e/extensions/leather
-          key: leather-extension-v6.102.0
-
-      - name: Download + unpack Leather from internal release mirror
-        if: steps.leather-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash e2e/playwright/playwright-bootstrap.sh leather
-
-      - name: Cache unpacked OKX extension
-        id: okx-cache
-        uses: actions/cache@v4
-        with:
-          path: e2e/extensions/okx
-          key: okx-extension-v4.1.0
-
-      - name: Download + unpack OKX from internal release mirror
-        if: steps.okx-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash e2e/playwright/playwright-bootstrap.sh okx
-
-      - name: Cache unpacked Phantom extension
-        id: phantom-cache
-        uses: actions/cache@v4
-        with:
-          path: e2e/extensions/phantom
-          key: phantom-extension-v26.16.0
-
-      - name: Download + unpack Phantom from internal release mirror
-        if: steps.phantom-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash e2e/playwright/playwright-bootstrap.sh phantom
-
-      - name: Cache unpacked Wizz extension
-        id: wizz-cache
-        uses: actions/cache@v4
-        with:
-          path: e2e/extensions/wizz
-          key: wizz-extension-v2.13.4
-
-      - name: Download + unpack Wizz from internal release mirror
-        if: steps.wizz-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash e2e/playwright/playwright-bootstrap.sh wizz
-
-      - name: Cache unpacked Alby extension
-        id: alby-cache
-        uses: actions/cache@v4
-        with:
-          path: e2e/extensions/alby
-          key: alby-extension-v3.14.2
-
-      - name: Download + unpack Alby from internal release mirror
-        if: steps.alby-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: bash e2e/playwright/playwright-bootstrap.sh alby
+        run: bash e2e/playwright/playwright-bootstrap.sh ${{ matrix.wallet }}
 
       # Cat21 Wallet — our own wallet (ordpool-space/cat21-wallet).
       # We build from source so a CRX release of the wallet isn't a
@@ -159,6 +123,7 @@ jobs:
       # missing).
       - name: Compute cat21-wallet HEAD SHA (for cache invalidation)
         id: cat21wallet-rev
+        if: matrix.wallet == 'cat21wallet'
         run: |
           REV=$(git ls-remote https://github.com/ordpool-space/cat21-wallet.git refs/heads/main | cut -f1)
           echo "Cat21 Wallet main HEAD = $REV"
@@ -166,6 +131,7 @@ jobs:
 
       - name: Cache cat21-wallet source + build
         id: cat21wallet-cache
+        if: matrix.wallet == 'cat21wallet'
         uses: actions/cache@v4
         with:
           path: |
@@ -174,13 +140,13 @@ jobs:
           key: cat21wallet-from-source-${{ steps.cat21wallet-rev.outputs.rev }}
 
       - name: Install pnpm for cat21-wallet build
-        if: steps.cat21wallet-cache.outputs.cache-hit != 'true'
+        if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
         uses: pnpm/action-setup@v4
         with:
           version: 10
 
       - name: Clone + build cat21-wallet from source
-        if: steps.cat21wallet-cache.outputs.cache-hit != 'true'
+        if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
         env:
           # GitHub-provided token is enough for read-only public clone.
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -210,10 +176,9 @@ jobs:
         run: npm run e2e:harness:build
 
       # cat21-ord source — `docker compose --profile cat21-ord up`
-      # below builds the ord image from this checkout. Specs that
-      # poll `/status` on ord (cat21wallet-transfer-roundtrip,
-      # cat21wallet-create-offer-roundtrip, cat21wallet-accept-
-      # offer-roundtrip) need it running.
+      # below builds the ord image from this checkout. Only the ord
+      # shard (cat21wallet) needs it; its transfer/offer/accept specs
+      # poll `/status` on ord.
       #
       # actions/checkout v5 rejects paths outside $GITHUB_WORKSPACE,
       # but the compose's build context is `../../cat21-ord` (relative
@@ -221,19 +186,25 @@ jobs:
       # PARENT directory). So we check out under the workspace, then
       # symlink at the parent for compose's resolution to land.
       - name: Checkout cat21-ord source (for the cat21-ord container)
+        if: matrix.wallet == 'cat21wallet'
         uses: actions/checkout@v5
         with:
           repository: ordpool-space/cat21-ord
           ref: index-cat21
           path: _cat21-ord-src
       - name: Symlink cat21-ord at compose's expected location
+        if: matrix.wallet == 'cat21wallet'
         run: ln -s "$GITHUB_WORKSPACE/_cat21-ord-src" "$(dirname "$GITHUB_WORKSPACE")/cat21-ord"
 
-      # Pipeline B's mint roundtrip spec funds, broadcasts and
-      # mines against this regtest stack. bitcoind + mempool/electrs
-      # come up on localhost:18443 / :3000 respectively; cat21-ord
-      # (profile-gated) on :8080.
+      # Regtest stack. Every shard needs bitcoind + electrs to fund,
+      # broadcast and mine. The ord shard additionally brings up
+      # cat21-ord (profile-gated; default `up` is bitcoind + electrs only).
+      - name: Start regtest stack (bitcoind + electrs)
+        if: matrix.wallet != 'cat21wallet'
+        run: docker compose -f e2e/docker-compose.regtest.yml up -d
+
       - name: Start regtest stack (bitcoind + electrs + cat21-ord)
+        if: matrix.wallet == 'cat21wallet'
         # --wait would block on electrs's wget healthcheck which the
         # mempool/electrs image lacks; the curl polls below handle
         # the actual readiness checks.
@@ -259,6 +230,7 @@ jobs:
           done
 
       - name: Wait for cat21-ord to be ready on :8080/status
+        if: matrix.wallet == 'cat21wallet'
         run: |
           for i in {1..120}; do
             if curl -fsS http://localhost:8080/status >/dev/null; then
@@ -271,8 +243,8 @@ jobs:
           docker compose -f e2e/docker-compose.regtest.yml logs --tail 80 ord
           exit 1
 
-      - name: Run Playwright tests under xvfb
-        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e:playwright
+      - name: Run ${{ matrix.wallet }} Playwright specs under xvfb
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e:playwright -- ${{ matrix.wallet }}
 
       - name: Stop regtest stack
         if: always()
@@ -282,16 +254,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-results
+          name: playwright-results-${{ matrix.wallet }}
           path: |
             test-results/
             playwright-report/
+            e2e/extensions/${{ matrix.wallet }}/manifest.json
             e2e/extensions/xverse/manifest.json
-            e2e/extensions/unisat/manifest.json
-            e2e/extensions/leather/manifest.json
-            e2e/extensions/okx/manifest.json
-            e2e/extensions/phantom/manifest.json
-            e2e/extensions/wizz/manifest.json
-            e2e/extensions/alby/manifest.json
           retention-days: 7
           if-no-files-found: warn
