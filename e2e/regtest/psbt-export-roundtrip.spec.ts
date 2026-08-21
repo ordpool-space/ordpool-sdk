@@ -49,9 +49,8 @@ import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import { psbtExportSigner } from '../../src/wallet/signers/psbt-export.signer';
 import {
   ElectrsUtxo,
-  getTx,
   getTxHex,
-  getTxStatus,
+  waitForTxConfirmed,
   mineBlocks,
   postTx,
   rpc,
@@ -219,7 +218,9 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
     await waitForElectrsSync(tipAfterMine);
 
     // Phase 6: tx confirmed, bytes match.
-    const status = await getTxStatus(broadcastedTxid);
+    // Poll until confirmed: getTxStatus is a single fetch and races
+    // electrs's block-mapping pass after waitForElectrsSync.
+    const status = (await waitForTxConfirmed(broadcastedTxid)).status;
     expect(status.confirmed).toBe(true);
     expect(status.block_height).toBe(tipAfterMine);
 
@@ -227,7 +228,7 @@ describe('psbt-export signer roundtrip on regtest (external offline wallet via b
     expect(retrievedHex).toBe(capturedTxHex);
 
     // Phase 7: ordpool-parser recognises the on-chain tx as a CAT-21.
-    const esploraTx = await getTx(broadcastedTxid);
+    const esploraTx = await waitForTxConfirmed(broadcastedTxid);
     const cat = Cat21ParserService.parse(esploraTx);
     expect(cat).not.toBeNull();
     expect(cat!.type).toBe(DigitalArtifactType.Cat21);
