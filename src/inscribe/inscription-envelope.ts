@@ -160,6 +160,26 @@ function tagAsScriptItem(tag: number): keyof typeof OP | Uint8Array {
  * Returns the encoded tapscript bytes ready for taproot leaf
  * inclusion via `btc.p2tr(..., { script, leafVersion: 0xc0 })`.
  */
+/**
+ * Guard a single envelope push against the 520-byte standardness cap.
+ * The remediation depends on the tag: only metadata (0x05) and
+ * properties (0x11) are read back by concatenating repeated same-tag
+ * chunks, so only those can be split with `chunkFieldValue`. Every
+ * other tag (content_type, metaprotocol, note, parent, delegate, rune,
+ * …) is read from its FIRST field only, so splitting silently truncates
+ * it; those values simply must fit in one push.
+ */
+function assertPushWithinCap(tag: number, length: number): void {
+  if (length <= MAX_PUSH_BYTES) return;
+  const chunkable = tag === ORD_TAGS.metadata || tag === ORD_TAGS.properties;
+  const advice = chunkable
+    ? 'Split into repeated same-tag fields with chunkFieldValue.'
+    : 'This tag is read from its first field only and cannot be chunked; the value must fit in one push.';
+  throw new Error(
+    `envelope field value for tag ${tag} is ${length} bytes; max ${MAX_PUSH_BYTES} per push. ${advice}`,
+  );
+}
+
 export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Uint8Array {
   if (args.revealPubkeyXonly.length !== 32) {
     throw new Error(`revealPubkeyXonly must be 32 bytes; got ${args.revealPubkeyXonly.length}`);
@@ -182,25 +202,23 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
   // keeping content_type first makes hex-grepping the envelope
   // boundary easier.
   if (args.contentType !== undefined) {
+    const contentTypeBytes = new TextEncoder().encode(args.contentType);
+    // Same 520-byte standardness cap as every other push (below). A
+    // content_type over the cap is absurd for a real MIME type, but the
+    // guard keeps every single push in this envelope uniformly checked
+    // rather than leaving one silent hole.
+    assertPushWithinCap(ORD_TAGS.content_type, contentTypeBytes.length);
     items.push(tagAsScriptItem(ORD_TAGS.content_type));
-    items.push(new TextEncoder().encode(args.contentType));
+    items.push(contentTypeBytes);
   }
 
   // Other fields in the order the caller supplied.
   for (const field of args.fields ?? []) {
-    // Each field value is ONE push. Bitcoin standardness caps a push
-    // at 520 bytes, and ord's decoder reads each field as a single
-    // pushdata, so a value above the cap can't be expressed as a
-    // valid same-tag field. Large payloads (metadata / properties)
-    // must be pre-split into repeated same-tag fields via
-    // `chunkFieldValue`. Fail loud here rather than emit a
-    // non-standard, non-relayable push.
-    if (field.value.length > MAX_PUSH_BYTES) {
-      throw new Error(
-        `envelope field value for tag ${field.tag} is ${field.value.length} bytes; ` +
-        `max ${MAX_PUSH_BYTES} per push. Split into repeated same-tag fields (chunkFieldValue).`,
-      );
-    }
+    // Each field value is ONE push. Bitcoin standardness caps a push at
+    // 520 bytes, and ord's decoder reads each field as a single
+    // pushdata, so a value above the cap can't be a valid single field.
+    // Fail loud here rather than emit a non-standard, non-relayable push.
+    assertPushWithinCap(field.tag, field.value.length);
     items.push(tagAsScriptItem(field.tag));
     items.push(field.value);
   }
@@ -222,7 +240,7 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
 
 /**
  * Encode an inscription id (`<txid>i<index>`) into the byte form ord
- * expects wherever an inscription id appears in an envelope value —
+ * expects wherever an inscription id appears in an envelope value:
  * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
  *
  *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]

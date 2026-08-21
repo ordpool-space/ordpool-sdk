@@ -190,17 +190,17 @@ export interface CreateInscribeTransactionsArgs {
    * vout[1]). A pointer only lands on the inscription's UTXO when it
    * points inside that first output, i.e. `pointer < 546`. A larger
    * offset would move the inscription onto the tip output or past the
-   * end of the outputs — unreachable / not what any single-inscription
-   * caller wants — so values `>= 546` are rejected rather than
-   * silently emitted. Default (unset) behaves like pointer 0.
+   * end of the outputs (unreachable, and not what any single-inscription
+   * caller wants), so values `>= 546` are rejected rather than silently
+   * emitted. Default (unset) behaves like pointer 0.
    */
   pointer?: number;
   /**
    * Optional CBOR metadata (tag 0x05). Pass the ALREADY-CBOR-ENCODED
-   * bytes — use the exported `encodeCborDeterministic(value)` helper
-   * to turn a structured value into canonical CBOR first. Values over
-   * 520 bytes are split across repeated tag-5 fields automatically
-   * (ord concatenates them before decoding). Must be non-empty.
+   * bytes: use the exported `encodeCborDeterministic(value)` helper to
+   * turn a structured value into canonical CBOR first. Values over 520
+   * bytes are split across repeated tag-5 fields automatically (ord
+   * concatenates them before decoding). Must be non-empty.
    */
   metadata?: Uint8Array;
   /**
@@ -213,7 +213,7 @@ export interface CreateInscribeTransactionsArgs {
    * A delegate inscription typically carries an EMPTY body and points
    * at another inscription's content; ord serves the delegate's
    * content in its place. Unlike `parent`, this is functional with no
-   * extra tx topology — the delegate link resolves purely from the
+   * extra tx topology: the delegate link resolves purely from the
    * envelope tag. A body alongside a delegate is allowed (ord ignores
    * it when the delegate resolves) but the canonical shape is an
    * empty body.
@@ -228,8 +228,14 @@ export interface CreateInscribeTransactionsArgs {
   rune?: bigint;
   /**
    * Optional CBOR properties (tag 0x11): gallery items + attributes.
-   * Same contract as `metadata` — pass ALREADY-CBOR-ENCODED bytes
+   * Same contract as `metadata`: pass ALREADY-CBOR-ENCODED bytes
    * (`encodeCborDeterministic`), chunked automatically over 520 bytes.
+   *
+   * ord's properties struct is INTEGER-keyed. Build the CBOR with a
+   * `Map` whose keys are real numbers (`new Map([[0, gallery], [1,
+   * attrs]])`), NOT a plain object `{0: …, 1: …}` (whose keys are the
+   * strings `"0"`/`"1"`); ord drops a text-keyed properties map. See
+   * `encodeCborDeterministic`'s doc for the full caveat.
    */
   properties?: Uint8Array;
   /**
@@ -327,7 +333,7 @@ export function createInscribeTransactions(
   // Synthesise envelope fields from the convenience args and prepend
   // to the caller-supplied envelopeFields. On duplicate tags (e.g.
   // caller also supplies a parent entry) BOTH entries are emitted in
-  // order — ord's decoder handles multiple instances per tag according
+  // order; ord's decoder handles multiple instances per tag according
   // to that tag's semantics: `parent` / `delegate` accumulate,
   // `content_type` / `content_encoding` first-wins (so caller-supplied
   // values behind an auto-field are ignored by downstream indexers).

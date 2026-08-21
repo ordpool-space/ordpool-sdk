@@ -354,14 +354,40 @@ describe('first-class envelope tags — round-trip via ordpool-parser', () => {
     });
   });
 
-  describe('520-byte per-field-value guard', () => {
-    it('buildInscriptionEnvelope throws on a raw field value over 520 bytes', () => {
+  describe('520-byte per-push guard', () => {
+    it('throws on a raw field value over 520 bytes', () => {
       expect(() => buildInscriptionEnvelope({
         revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
         contentType: 'text/plain',
         body: new Uint8Array(0),
         fields: [{ tag: ORD_TAGS.metadata, value: new Uint8Array(521) }],
       })).toThrow(/max 520 per push/);
+    });
+
+    it('also guards the content_type push (not just the fields loop)', () => {
+      const hugeContentType = 'x'.repeat(521);
+      expect(() => buildInscriptionEnvelope({
+        revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+        contentType: hugeContentType,
+        body: new Uint8Array(0),
+      })).toThrow(/max 520 per push/);
+    });
+
+    it('chunkable tag (metadata) advises chunkFieldValue; non-chunkable tag (metaprotocol) does not', () => {
+      const over = new Uint8Array(521);
+      expect(() => buildInscriptionEnvelope({
+        revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+        contentType: 'text/plain',
+        body: new Uint8Array(0),
+        fields: [{ tag: ORD_TAGS.metadata, value: over }],
+      })).toThrow(/chunkFieldValue/);
+
+      expect(() => buildInscriptionEnvelope({
+        revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+        contentType: 'text/plain',
+        body: new Uint8Array(0),
+        fields: [{ tag: ORD_TAGS.metaprotocol, value: over }],
+      })).toThrow(/cannot be chunked/);
     });
   });
 });

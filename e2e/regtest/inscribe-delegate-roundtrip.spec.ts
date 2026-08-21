@@ -6,17 +6,17 @@
  * is FUNCTIONAL: an inscription with a delegate carries an empty body
  * and ord serves the delegate target's content in its place. This spec
  * proves the SDK's first-class `delegate` arg produces an inscription
- * that a real ord resolves — the strongest possible proof, since it
+ * that a real ord resolves: the strongest possible proof, since it
  * exercises ord's own delegate-resolution path, not just our parser.
  *
  * Flow:
- *   1. Inscribe A — a normal text inscription (the delegate TARGET).
- *   2. Inscribe B — empty body, `delegate: A_id` (the DELEGATE).
+ *   1. Inscribe A: a normal text inscription (the delegate TARGET).
+ *   2. Inscribe B: empty body, `delegate: A_id` (the DELEGATE).
  *   3. Broadcast + confirm both commit/reveal pairs.
  *   4. Parser proof: B's reveal witness decodes to `getDelegates() ===
  *      [A_id]` with a zero-length body.
  *   5. ord proof: `GET /content/<B_id>` on stock ord returns A's body
- *      bytes — ord resolved the delegate.
+ *      bytes: ord resolved the delegate.
  *
  * A second test inscribes CBOR metadata and proves the on-chain bytes
  * round-trip through ordpool-parser's `getMetadata()`.
@@ -135,7 +135,7 @@ describe('inscribe → delegate + metadata roundtrip on regtest (stock ord)', ()
       delegate: a.id,
     });
 
-    // Phase 3: parser proof — B's reveal witness carries the delegate
+    // Phase 3: parser proof: B's reveal witness carries the delegate
     // tag and an empty body.
     const bWitness = (b.revealTx as unknown as { vin: { witness: string[] }[] }).vin[0].witness;
     const parsedB = InscriptionParserService.parse({ txid: b.revealTxid, vin: [{ witness: bWitness }] });
@@ -143,12 +143,12 @@ describe('inscribe → delegate + metadata roundtrip on regtest (stock ord)', ()
     expect(parsedB[0].getDelegates()).toEqual([a.id]);
     expect(parsedB[0].getDataRaw().length).toBe(0);
 
-    // Phase 4: ord proof — stock ord resolves B's content to A's bytes.
+    // Phase 4: ord proof: stock ord resolves B's content to A's bytes.
     await waitForOrdStockSync(b.revealTip);
     const insc = await waitForOrdStockInscription(b.id);
     expect(insc.id).toBe(b.id);
     const content = await getStockOrdContent(b.id);
-    // ord served A's body when asked for B's content — the delegate
+    // ord served A's body when asked for B's content: the delegate
     // resolved end-to-end.
     expect(content.bytes.length).toBe(targetBody.length);
     for (let i = 0; i < targetBody.length; i++) {

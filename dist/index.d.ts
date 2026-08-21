@@ -3354,42 +3354,10 @@ interface BuildInscriptionEnvelopeArgs {
      */
     fields?: ReadonlyArray<OrdEnvelopeField>;
 }
-/**
- * Builds the inscription tapscript: the bytes that hash into a
- * tapscript leaf on the commit address, and that the reveal tx
- * provides as witness when spending via the envelope leaf.
- *
- * Structure (per ord protocol):
- *
- * ```
- * <revealPubkeyXonly>                    (32-byte push)
- * OP_CHECKSIG
- * OP_FALSE                               (0x00)
- * OP_IF                                  (0x63)
- *   "ord"                                (3-byte push)
- *   [for each field:]
- *     <tag>                              (OP_N for tag ≤ 16, else 1-byte push)
- *     <value>                            (variable push)
- *   OP_0                                 (separator before body)
- *   [for each body chunk (≤ 520 bytes):]
- *     <chunk>
- * OP_ENDIF                               (0x68)
- * ```
- *
- * The `OP_FALSE OP_IF ... OP_ENDIF` block is provably-dead code:
- * script execution never enters the IF branch because the top of
- * stack is OP_FALSE. The bytes are still committed to in the
- * tapleaf hash, which is what carries the inscription on-chain.
- * The actual spending check is the `<pubkey> OP_CHECKSIG` PREFIX,
- * which ord's protocol places before the dead envelope.
- *
- * Returns the encoded tapscript bytes ready for taproot leaf
- * inclusion via `btc.p2tr(..., { script, leafVersion: 0xc0 })`.
- */
 declare function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Uint8Array;
 /**
  * Encode an inscription id (`<txid>i<index>`) into the byte form ord
- * expects wherever an inscription id appears in an envelope value —
+ * expects wherever an inscription id appears in an envelope value:
  * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
  *
  *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
@@ -3455,15 +3423,15 @@ declare function chunkFieldValue(tag: OrdTag, value: Uint8Array): OrdEnvelopeFie
  * ## Why this lives in the SDK, not in ordpool-parser
  *
  * ordpool-parser owns the CBOR *decoder* (`lib/cbor.ts`, `CBOR.decode`)
- * and is a zero-dependency *decode* library — nothing there ever
- * encodes CBOR. The inscribe pipeline is the only place in the whole
- * ecosystem that *builds* inscriptions, so it is the only CBOR
- * *producer*. That mirrors the existing split exactly: the envelope
- * encoder (`buildInscriptionEnvelope`) is described in its own module
- * doc as "the inverse of ordpool-parser's InscriptionParserService"
- * and it lives here in the SDK, not in the parser. This CBOR encoder
- * is the same shape of thing — the inverse of `CBOR.decode` — so it
- * belongs next to the envelope encoder it feeds.
+ * and is a zero-dependency *decode* library; nothing there ever encodes
+ * CBOR. The inscribe pipeline is the only place in the whole ecosystem
+ * that *builds* inscriptions, so it is the only CBOR *producer*. That
+ * mirrors the existing split exactly: the envelope encoder
+ * (`buildInscriptionEnvelope`) is described in its own module doc as
+ * "the inverse of ordpool-parser's InscriptionParserService" and it
+ * lives here in the SDK, not in the parser. This CBOR encoder is the
+ * same shape of thing (the inverse of `CBOR.decode`), so it belongs
+ * next to the envelope encoder it feeds.
  *
  * The correctness oracle is still the parser: every value this encoder
  * produces round-trips through ordpool-parser's `CBOR.decode` in the
@@ -3471,20 +3439,20 @@ declare function chunkFieldValue(tag: OrdTag, value: Uint8Array): OrdEnvelopeFie
  *
  * ## Deterministic = canonical (RFC 8949 §4.2)
  *
- * "Deterministic" here means: the same logical value always produces
- * the same bytes. That property matters for a signing library —
- * identical metadata must yield an identical inscription envelope,
- * hence an identical commit address, so a retried inscribe is
- * idempotent and reproducible.
+ * "Deterministic" here means the same logical value always produces the
+ * same bytes. That property matters for a signing library: identical
+ * metadata must yield an identical inscription envelope, hence an
+ * identical commit address, so a retried inscribe is idempotent and
+ * reproducible.
  *
  * The encoder implements RFC 8949 §4.2.1 core rules:
  *   - integers use the shortest encoding that fits;
  *   - all lengths are definite (never indefinite/streaming);
  *   - map keys are sorted in bytewise lexicographic order of their
- *     own deterministic encodings.
+ *     own deterministic encodings, and duplicate keys are rejected.
  *
  * Non-integer numbers are emitted as float64 (§4.2.2's shortest-float
- * preference is NOT implemented — metadata rarely carries floats, and
+ * preference is NOT implemented; metadata rarely carries floats, and
  * float64 is already deterministic: the same double always encodes to
  * the same 8 bytes). Everything else is fully canonical.
  *
@@ -3500,9 +3468,31 @@ declare function chunkFieldValue(tag: OrdTag, value: Uint8Array): OrdEnvelopeFie
  *   Map      → map (major 5) with number | bigint | string keys
  *   object   → map (major 5) with string keys (own enumerable)
  *
- * `undefined`, functions, and symbols throw — CBOR has no faithful,
+ * `undefined`, functions, and symbols throw: CBOR has no faithful,
  * unambiguous encoding for them and silently dropping them would make
  * the output non-deterministic w.r.t. the input.
+ *
+ * ## Two round-trip caveats worth knowing
+ *
+ * 1. **Integers above 2^53 are exact on chain, lossy back through the
+ *    parser.** This encoder emits correct CBOR for the full u64 range,
+ *    and ord's own (Rust) decoder reads it exactly. But
+ *    ordpool-parser's `CBOR.decode` returns every integer as a JS
+ *    `number` (`readUint32()*2^32 + readUint32()`), which loses
+ *    precision above `Number.MAX_SAFE_INTEGER`. So a u64 metadata value
+ *    displays exactly in ord but may render off-by-a-few on ordpool. If
+ *    you need an exact round-trip through the parser, carry large
+ *    integers as a byte string.
+ *
+ * 2. **Integer CBOR map keys require a `Map`, not a plain object.** ord's
+ *    properties struct (tag 0x11) is integer-keyed. A plain object
+ *    `{0: gallery, 1: attrs}` has STRING keys (`"0"`, `"1"`), which this
+ *    encoder faithfully emits as CBOR text-string keys; real ord then
+ *    fails to deserialize the integer-keyed struct and drops the field.
+ *    ordpool-parser happens to accept text keys via JS coercion, so a
+ *    round-trip test with a plain object passes while the real chain
+ *    ignores it. Build integer-keyed CBOR (properties, gallery items)
+ *    with a `Map` whose keys are real numbers.
  */
 /**
  * Encode a value as canonical (deterministic) CBOR.
@@ -4048,17 +4038,17 @@ interface CreateInscribeTransactionsArgs {
      * vout[1]). A pointer only lands on the inscription's UTXO when it
      * points inside that first output, i.e. `pointer < 546`. A larger
      * offset would move the inscription onto the tip output or past the
-     * end of the outputs — unreachable / not what any single-inscription
-     * caller wants — so values `>= 546` are rejected rather than
-     * silently emitted. Default (unset) behaves like pointer 0.
+     * end of the outputs (unreachable, and not what any single-inscription
+     * caller wants), so values `>= 546` are rejected rather than silently
+     * emitted. Default (unset) behaves like pointer 0.
      */
     pointer?: number;
     /**
      * Optional CBOR metadata (tag 0x05). Pass the ALREADY-CBOR-ENCODED
-     * bytes — use the exported `encodeCborDeterministic(value)` helper
-     * to turn a structured value into canonical CBOR first. Values over
-     * 520 bytes are split across repeated tag-5 fields automatically
-     * (ord concatenates them before decoding). Must be non-empty.
+     * bytes: use the exported `encodeCborDeterministic(value)` helper to
+     * turn a structured value into canonical CBOR first. Values over 520
+     * bytes are split across repeated tag-5 fields automatically (ord
+     * concatenates them before decoding). Must be non-empty.
      */
     metadata?: Uint8Array;
     /**
@@ -4071,7 +4061,7 @@ interface CreateInscribeTransactionsArgs {
      * A delegate inscription typically carries an EMPTY body and points
      * at another inscription's content; ord serves the delegate's
      * content in its place. Unlike `parent`, this is functional with no
-     * extra tx topology — the delegate link resolves purely from the
+     * extra tx topology: the delegate link resolves purely from the
      * envelope tag. A body alongside a delegate is allowed (ord ignores
      * it when the delegate resolves) but the canonical shape is an
      * empty body.
@@ -4086,8 +4076,14 @@ interface CreateInscribeTransactionsArgs {
     rune?: bigint;
     /**
      * Optional CBOR properties (tag 0x11): gallery items + attributes.
-     * Same contract as `metadata` — pass ALREADY-CBOR-ENCODED bytes
+     * Same contract as `metadata`: pass ALREADY-CBOR-ENCODED bytes
      * (`encodeCborDeterministic`), chunked automatically over 520 bytes.
+     *
+     * ord's properties struct is INTEGER-keyed. Build the CBOR with a
+     * `Map` whose keys are real numbers (`new Map([[0, gallery], [1,
+     * attrs]])`), NOT a plain object `{0: …, 1: …}` (whose keys are the
+     * strings `"0"`/`"1"`); ord drops a text-keyed properties map. See
+     * `encodeCborDeterministic`'s doc for the full caveat.
      */
     properties?: Uint8Array;
     /**

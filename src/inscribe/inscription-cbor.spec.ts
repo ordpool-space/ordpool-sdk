@@ -3,12 +3,12 @@
  *
  * Two guarantees are pinned:
  *
- *   1. **Round-trip correctness** — every value the encoder produces
+ *   1. **Round-trip correctness**: every value the encoder produces
  *      decodes back to the same value through ordpool-parser's
  *      `CBOR.decode` (the same decoder that reads inscription metadata
  *      on chain). Encoder and decoder are inverses.
  *
- *   2. **Determinism / canonical form** — the same logical value always
+ *   2. **Determinism / canonical form**: the same logical value always
  *      encodes to the same bytes: integers use the shortest head, map
  *      keys are sorted by their encoded bytes. Pinned with exact byte
  *      arrays so a regression in the head-encoding or key-sort surfaces
@@ -22,7 +22,7 @@ import { encodeCborDeterministic } from './inscription-cbor';
 
 const decode = (bytes: Uint8Array): unknown => CBOR.decode(bytes);
 
-describe('encodeCborDeterministic — round-trip through ordpool-parser CBOR.decode', () => {
+describe('encodeCborDeterministic: round-trip through ordpool-parser CBOR.decode', () => {
 
   it('unsigned integers round-trip', () => {
     for (const n of [0, 1, 23, 24, 255, 256, 65535, 65536, 4294967295, 4294967296]) {
@@ -96,7 +96,7 @@ describe('encodeCborDeterministic — round-trip through ordpool-parser CBOR.dec
   });
 });
 
-describe('encodeCborDeterministic — canonical byte form (exact pins)', () => {
+describe('encodeCborDeterministic: canonical byte form (exact pins)', () => {
 
   it('unsigned integer heads use the shortest encoding', () => {
     expect(encodeCborDeterministic(0)).toEqual(new Uint8Array([0x00]));
@@ -133,7 +133,7 @@ describe('encodeCborDeterministic — canonical byte form (exact pins)', () => {
     expect(encodeCborDeterministic({ a: 1 })).toEqual(new Uint8Array([0xa1, 0x61, 0x61, 0x01]));
   });
 
-  it('map keys are sorted canonically — key insertion order does NOT change the bytes', () => {
+  it('map keys are sorted canonically: key insertion order does NOT change the bytes', () => {
     const forward = encodeCborDeterministic({ a: 1, b: 2 });
     const reversed = encodeCborDeterministic({ b: 2, a: 1 });
     // a = 0x6161, b = 0x6162; "a" sorts before "b".
@@ -153,9 +153,19 @@ describe('encodeCborDeterministic — canonical byte form (exact pins)', () => {
     const value = { z: [1, 2], a: 'x', m: { b: true, a: null } };
     expect(encodeCborDeterministic(value)).toEqual(encodeCborDeterministic(value));
   });
+
+  it('a u64 above 2^53 emits correct 8-byte CBOR (exact on chain; ord decodes it, the parser would not)', () => {
+    // 2^53 + 1 = 9007199254740993 = 0x0020000000000001. The encoder is
+    // exact across the full u64 range; ordpool-parser's JS-number
+    // decoder is lossy here, which is why the docstring steers large
+    // integers to a byte string for an exact parser round-trip.
+    expect(encodeCborDeterministic(9007199254740993n)).toEqual(
+      new Uint8Array([0x1b, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]),
+    );
+  });
 });
 
-describe('encodeCborDeterministic — rejects unsupported inputs', () => {
+describe('encodeCborDeterministic: rejects unsupported inputs', () => {
 
   it('throws on undefined', () => {
     expect(() => encodeCborDeterministic(undefined)).toThrow(/undefined/);
@@ -177,5 +187,12 @@ describe('encodeCborDeterministic — rejects unsupported inputs', () => {
   it('throws on an unsupported map key type', () => {
     const m = new Map<unknown, unknown>([[{ nested: 'key' }, 1]]);
     expect(() => encodeCborDeterministic(m)).toThrow(/map key/);
+  });
+
+  it('throws on duplicate keys that collide after encoding (number 1 vs bigint 1n)', () => {
+    // Both keys encode to the byte 0x01; a duplicate-key map violates
+    // RFC 8949 canonical form and would be dropped by strict decoders.
+    const m = new Map<unknown, unknown>([[1, 'a'], [1n, 'b']]);
+    expect(() => encodeCborDeterministic(m)).toThrow(/duplicate keys/);
   });
 });

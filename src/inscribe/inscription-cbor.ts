@@ -4,15 +4,15 @@
  * ## Why this lives in the SDK, not in ordpool-parser
  *
  * ordpool-parser owns the CBOR *decoder* (`lib/cbor.ts`, `CBOR.decode`)
- * and is a zero-dependency *decode* library — nothing there ever
- * encodes CBOR. The inscribe pipeline is the only place in the whole
- * ecosystem that *builds* inscriptions, so it is the only CBOR
- * *producer*. That mirrors the existing split exactly: the envelope
- * encoder (`buildInscriptionEnvelope`) is described in its own module
- * doc as "the inverse of ordpool-parser's InscriptionParserService"
- * and it lives here in the SDK, not in the parser. This CBOR encoder
- * is the same shape of thing — the inverse of `CBOR.decode` — so it
- * belongs next to the envelope encoder it feeds.
+ * and is a zero-dependency *decode* library; nothing there ever encodes
+ * CBOR. The inscribe pipeline is the only place in the whole ecosystem
+ * that *builds* inscriptions, so it is the only CBOR *producer*. That
+ * mirrors the existing split exactly: the envelope encoder
+ * (`buildInscriptionEnvelope`) is described in its own module doc as
+ * "the inverse of ordpool-parser's InscriptionParserService" and it
+ * lives here in the SDK, not in the parser. This CBOR encoder is the
+ * same shape of thing (the inverse of `CBOR.decode`), so it belongs
+ * next to the envelope encoder it feeds.
  *
  * The correctness oracle is still the parser: every value this encoder
  * produces round-trips through ordpool-parser's `CBOR.decode` in the
@@ -20,20 +20,20 @@
  *
  * ## Deterministic = canonical (RFC 8949 §4.2)
  *
- * "Deterministic" here means: the same logical value always produces
- * the same bytes. That property matters for a signing library —
- * identical metadata must yield an identical inscription envelope,
- * hence an identical commit address, so a retried inscribe is
- * idempotent and reproducible.
+ * "Deterministic" here means the same logical value always produces the
+ * same bytes. That property matters for a signing library: identical
+ * metadata must yield an identical inscription envelope, hence an
+ * identical commit address, so a retried inscribe is idempotent and
+ * reproducible.
  *
  * The encoder implements RFC 8949 §4.2.1 core rules:
  *   - integers use the shortest encoding that fits;
  *   - all lengths are definite (never indefinite/streaming);
  *   - map keys are sorted in bytewise lexicographic order of their
- *     own deterministic encodings.
+ *     own deterministic encodings, and duplicate keys are rejected.
  *
  * Non-integer numbers are emitted as float64 (§4.2.2's shortest-float
- * preference is NOT implemented — metadata rarely carries floats, and
+ * preference is NOT implemented; metadata rarely carries floats, and
  * float64 is already deterministic: the same double always encodes to
  * the same 8 bytes). Everything else is fully canonical.
  *
@@ -49,15 +49,39 @@
  *   Map      → map (major 5) with number | bigint | string keys
  *   object   → map (major 5) with string keys (own enumerable)
  *
- * `undefined`, functions, and symbols throw — CBOR has no faithful,
+ * `undefined`, functions, and symbols throw: CBOR has no faithful,
  * unambiguous encoding for them and silently dropping them would make
  * the output non-deterministic w.r.t. the input.
+ *
+ * ## Two round-trip caveats worth knowing
+ *
+ * 1. **Integers above 2^53 are exact on chain, lossy back through the
+ *    parser.** This encoder emits correct CBOR for the full u64 range,
+ *    and ord's own (Rust) decoder reads it exactly. But
+ *    ordpool-parser's `CBOR.decode` returns every integer as a JS
+ *    `number` (`readUint32()*2^32 + readUint32()`), which loses
+ *    precision above `Number.MAX_SAFE_INTEGER`. So a u64 metadata value
+ *    displays exactly in ord but may render off-by-a-few on ordpool. If
+ *    you need an exact round-trip through the parser, carry large
+ *    integers as a byte string.
+ *
+ * 2. **Integer CBOR map keys require a `Map`, not a plain object.** ord's
+ *    properties struct (tag 0x11) is integer-keyed. A plain object
+ *    `{0: gallery, 1: attrs}` has STRING keys (`"0"`, `"1"`), which this
+ *    encoder faithfully emits as CBOR text-string keys; real ord then
+ *    fails to deserialize the integer-keyed struct and drops the field.
+ *    ordpool-parser happens to accept text keys via JS coercion, so a
+ *    round-trip test with a plain object passes while the real chain
+ *    ignores it. Build integer-keyed CBOR (properties, gallery items)
+ *    with a `Map` whose keys are real numbers.
  */
 
 /** Max bytes CBOR's native integer heads can express (u64). */
 const U64_MAX = (1n << 64n) - 1n;
 /** Most-negative CBOR native integer: major type 1 stores -(n+1), n up to u64_max. */
 const NEG_MIN = -(1n << 64n);
+/** Reused across every string value + key; TextEncoder is stateless. */
+const TEXT_ENCODER = new TextEncoder();
 
 /**
  * Encode a value as canonical (deterministic) CBOR.
@@ -120,15 +144,16 @@ function encodeItem(value: unknown, out: number[]): void {
 
   switch (typeof value) {
     case 'number': {
-      if (Number.isInteger(value) && Number.isSafeInteger(value)) {
+      // isSafeInteger already implies isInteger + within 2^53.
+      if (Number.isSafeInteger(value)) {
         encodeInteger(BigInt(value), out);
         return;
       }
       if (!Number.isFinite(value)) {
         throw new Error(`Cannot CBOR-encode non-finite number ${value}.`);
       }
-      // Non-integer (or unsafe-integer) → float64. Deterministic: the
-      // same double always serialises to the same 8 bytes.
+      // Non-integer (or unsafe-integer) value goes to float64.
+      // Deterministic: the same double always serialises to 8 bytes.
       out.push(0xfb);
       const buf = new ArrayBuffer(8);
       new DataView(buf).setFloat64(0, value, false); // big-endian per CBOR
@@ -142,7 +167,7 @@ function encodeItem(value: unknown, out: number[]): void {
       return;
 
     case 'string': {
-      const utf8 = new TextEncoder().encode(value);
+      const utf8 = TEXT_ENCODER.encode(value);
       writeHead(3, BigInt(utf8.length), out);
       for (let i = 0; i < utf8.length; i++) out.push(utf8[i]);
       return;
@@ -199,6 +224,17 @@ function encodeMapEntries(entries: Array<[unknown, unknown]>, out: number[]): vo
 
   encoded.sort((a, b) => compareBytes(a.keyBytes, b.keyBytes));
 
+  // Duplicate keys violate RFC 8949 §4.2 deterministic encoding and get
+  // rejected (or last-wins) by strict decoders like ord's serde_cbor,
+  // which would silently drop the whole field. Sorted, so any duplicate
+  // is adjacent. This also catches keys that collide only after
+  // encoding, e.g. number 1 and bigint 1n both encoding to 0x01.
+  for (let i = 1; i < encoded.length; i++) {
+    if (compareBytes(encoded[i - 1].keyBytes, encoded[i].keyBytes) === 0) {
+      throw new Error('CBOR map has duplicate keys after canonical encoding');
+    }
+  }
+
   writeHead(5, BigInt(encoded.length), out);
   for (const { keyBytes, valBytes } of encoded) {
     // Append byte-by-byte, NOT `out.push(...bytes)`: a spread of a
@@ -215,13 +251,13 @@ function encodeMapEntries(entries: Array<[unknown, unknown]>, out: number[]): vo
  * always hands us string keys; a `Map` may carry number / bigint keys
  * (ord's properties format uses integer keys). A string key that is a
  * canonical non-negative integer (`"0"`, `"1"`, …) coming from a plain
- * object stays a text-string key — we do NOT silently reinterpret it
- * as an integer key, because that would change the map's meaning.
+ * object stays a text-string key: we do NOT silently reinterpret it as
+ * an integer key, because that would change the map's meaning.
  * Use a `Map` with real numeric keys when integer keys are intended.
  */
 function encodeKey(key: unknown, out: number[]): void {
   if (typeof key === 'string') {
-    const utf8 = new TextEncoder().encode(key);
+    const utf8 = TEXT_ENCODER.encode(key);
     writeHead(3, BigInt(utf8.length), out);
     for (let i = 0; i < utf8.length; i++) out.push(utf8[i]);
     return;
