@@ -126,6 +126,7 @@ export * from './wallet/verify-bip322-signature';
 
 // --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
 export * from './inscribe/inscription-envelope';
+export * from './inscribe/inscription-cbor';
 export * from './inscribe/inscription-commit.helper';
 export * from './inscribe/inscription-reveal.helper';
 export * from './inscribe/inscription-input-adapter';

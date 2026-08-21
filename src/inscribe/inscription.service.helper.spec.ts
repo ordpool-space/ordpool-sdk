@@ -25,6 +25,8 @@ import { InscriptionParserService } from 'ordpool-parser';
 
 import { Network, toScureNetwork } from '../network';
 
+import { encodeCborDeterministic } from './inscription-cbor';
+import { encodeInscriptionId } from './inscription-envelope';
 import { createInscribeTransactions } from './inscription.service.helper';
 
 const NETWORK = Network.Mainnet;
@@ -469,6 +471,201 @@ describe('createInscribeTransactions', () => {
         .map(b => b.toString(16).padStart(2, '0')).join('');
       // OP_9 = 0x59 followed by a 2-byte push (0x02) of UTF-8 "br" = 0x62 0x72.
       expect(envelopeHex).toContain('5902' + '6272');
+    });
+  });
+
+  describe('first-class envelope tags synthesised into the reveal', () => {
+    const DELEGATE_ID = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0';
+
+    // Build a real commit+reveal for the given extra args, then decode
+    // the reveal's witness and run it through ordpool-parser — the same
+    // path a real indexer walks. Returns the parsed inscription so each
+    // test asserts on the tag the parser actually surfaces.
+    function buildAndParseReveal(extra: Record<string, unknown>, body = new Uint8Array(0)) {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const r = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body,
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        network: NETWORK,
+        ...extra,
+      });
+      const reveal = btc.Transaction.fromRaw(hex.decode(r.revealHex));
+      const witness = reveal.getInput(0).finalScriptWitness!.map(w => hex.encode(w));
+      const parsed = InscriptionParserService.parse({ txid: r.revealTxid, vin: [{ witness }] });
+      expect(parsed.length).toBe(1);
+      return parsed[0];
+    }
+
+    it('pointer → getPointer() on the parsed reveal', () => {
+      expect(buildAndParseReveal({ pointer: 42 }).getPointer()).toBe(42);
+    });
+
+    it('rejects a pointer >= 546 (unreachable given the single-output reveal)', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new Uint8Array(0),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        pointer: 546,
+        network: NETWORK,
+      })).toThrow(/unreachable/);
+    });
+
+    it('metaprotocol → getMetaprotocol()', () => {
+      expect(buildAndParseReveal({ metaprotocol: 'brc-20' }).getMetaprotocol()).toBe('brc-20');
+    });
+
+    it('delegate (empty body) → getDelegates()', () => {
+      expect(buildAndParseReveal({ delegate: DELEGATE_ID }).getDelegates()).toEqual([DELEGATE_ID]);
+    });
+
+    it('rejects a malformed delegate id', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new Uint8Array(0),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        delegate: 'not-an-id',
+        network: NETWORK,
+      })).toThrow(/Invalid inscription id/);
+    });
+
+    it('rune → getRune() raw bytes (minimal little-endian)', () => {
+      // 258 = 0x0102 → LE [0x02, 0x01].
+      expect(buildAndParseReveal({ rune: 258n }).getRune()).toEqual(new Uint8Array([0x02, 0x01]));
+    });
+
+    it('rejects a rune above u128', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new Uint8Array(0),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        rune: 1n << 128n,
+        network: NETWORK,
+      })).toThrow(/u128 range/);
+    });
+
+    it('metadata (pre-encoded CBOR) → getMetadata()', () => {
+      const cbor = encodeCborDeterministic({ name: 'genesis', power: 9000 });
+      expect(buildAndParseReveal({ metadata: cbor }).getMetadata()).toEqual({ name: 'genesis', power: 9000 });
+    });
+
+    it('multi-chunk metadata (> 520 B) reassembles through the reveal', () => {
+      const big = 'y'.repeat(1400);
+      const cbor = encodeCborDeterministic({ blob: big });
+      expect(buildAndParseReveal({ metadata: cbor }).getMetadata()).toEqual({ blob: big });
+    });
+
+    it('rejects empty metadata bytes', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new Uint8Array(0),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        metadata: new Uint8Array(0),
+        network: NETWORK,
+      })).toThrow(/non-empty/);
+    });
+
+    it('rejects non-Uint8Array metadata (runtime guard for plain-JS consumers)', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new Uint8Array(0),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        // A structured value passed where bytes are required — the SDK
+        // takes pre-encoded CBOR, so this must throw, not silently
+        // mis-encode.
+        metadata: { name: 'oops' } as unknown as Uint8Array,
+        network: NETWORK,
+      })).toThrow(/Uint8Array/);
+    });
+
+    it('properties (CBOR gallery + title) → getProperties()', async () => {
+      // ord properties use integer-keyed CBOR maps: {0: gallery[], 1: attrs}.
+      const galleryItem = new Map<number, unknown>([[0, encodeInscriptionId(DELEGATE_ID)]]);
+      const attributes = new Map<number, unknown>([[0, 'Gallery One']]);
+      const properties = new Map<number, unknown>([[0, [galleryItem]], [1, attributes]]);
+      const cbor = encodeCborDeterministic(properties);
+
+      const parsed = buildAndParseReveal({ properties: cbor });
+      expect(await parsed.getProperties()).toEqual({
+        gallery: [{ inscriptionId: DELEGATE_ID }],
+        title: 'Gallery One',
+      });
+    });
+
+    it('propertyEncoding without properties throws', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      expect(() => createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new Uint8Array(0),
+        contentType: 'text/plain',
+        feeRatePerVbyte: 8,
+        propertyEncoding: 'br',
+        network: NETWORK,
+      })).toThrow(/only valid alongside properties/);
+    });
+
+    it('all typed tags at once resolve through the parsed reveal', () => {
+      const cbor = encodeCborDeterministic({ author: 'ordpool' });
+      const parsed = buildAndParseReveal({
+        pointer: 100,
+        metaprotocol: 'brc-20',
+        parent: DELEGATE_ID,
+        delegate: DELEGATE_ID,
+        rune: 258n,
+        metadata: cbor,
+        note: 'ordpool.space',
+      });
+      expect(parsed.getPointer()).toBe(100);
+      expect(parsed.getMetaprotocol()).toBe('brc-20');
+      expect(parsed.getParents()).toEqual([DELEGATE_ID]);
+      expect(parsed.getDelegates()).toEqual([DELEGATE_ID]);
+      expect(parsed.getRune()).toEqual(new Uint8Array([0x02, 0x01]));
+      expect(parsed.getMetadata()).toEqual({ author: 'ordpool' });
+      expect(parsed.getNote()).toBe('ordpool.space');
+    });
+
+    it('the generic envelopeFields escape hatch still merges alongside a typed arg (not clobbered)', () => {
+      // Caller supplies a raw metaprotocol field AND a typed note. Both
+      // must reach the reveal: the typed note via synthesis, the raw
+      // field via the escape hatch.
+      const parsed = buildAndParseReveal({
+        note: 'typed-note',
+        envelopeFields: [{ tag: 0x07, value: new TextEncoder().encode('escape-hatch-mp') }],
+      });
+      expect(parsed.getNote()).toBe('typed-note');
+      expect(parsed.getMetaprotocol()).toBe('escape-hatch-mp');
     });
   });
 

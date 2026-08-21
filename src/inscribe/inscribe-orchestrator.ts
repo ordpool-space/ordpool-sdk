@@ -78,6 +78,37 @@ export interface InscribeAndBroadcastArgs {
    * already be compressed; this flag only emits the envelope tag.
    */
   contentEncoding?: 'br';
+  /**
+   * Optional pointer (tag 0x02) sat offset. Must be < 546 given this
+   * builder's single-output reveal topology. See
+   * `createInscribeTransactions` for the full caveat.
+   */
+  pointer?: number;
+  /**
+   * Optional CBOR metadata (tag 0x05). Pass pre-encoded bytes
+   * (`encodeCborDeterministic`); chunked automatically over 520 bytes.
+   */
+  metadata?: Uint8Array;
+  /** Optional metaprotocol identifier (tag 0x07), emitted as UTF-8. */
+  metaprotocol?: string;
+  /**
+   * Optional delegate inscription id (`<txid>i<index>`, tag 0x0b).
+   * Functional (no extra tx topology): ord serves the delegate's
+   * content. Canonical shape is an empty `body`.
+   */
+  delegate?: string;
+  /**
+   * Optional rune-name commitment (tag 0x0d) as the rune's u128 value,
+   * emitted as minimal little-endian bytes.
+   */
+  rune?: bigint;
+  /**
+   * Optional CBOR properties (tag 0x11): gallery + attributes. Pass
+   * pre-encoded bytes (`encodeCborDeterministic`); chunked over 520.
+   */
+  properties?: Uint8Array;
+  /** Optional properties-encoding hint (tag 0x13); only with `properties`. */
+  propertyEncoding?: 'br';
   network: Network;
   /**
    * Broadcasts a wire-format tx hex; returns the resulting txid.
@@ -129,6 +160,13 @@ export function inscribeAndBroadcast(
         note: args.note,
         parent: args.parent,
         contentEncoding: args.contentEncoding,
+        pointer: args.pointer,
+        metadata: args.metadata,
+        metaprotocol: args.metaprotocol,
+        delegate: args.delegate,
+        rune: args.rune,
+        properties: args.properties,
+        propertyEncoding: args.propertyEncoding,
         network: args.network,
       });
     } catch (err) {

@@ -3388,8 +3388,9 @@ interface BuildInscriptionEnvelopeArgs {
  */
 declare function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Uint8Array;
 /**
- * Encode a parent inscription id (`<txid>i<index>`) into the byte
- * form ord expects on tag 0x03 (`parent`) values:
+ * Encode an inscription id (`<txid>i<index>`) into the byte form ord
+ * expects wherever an inscription id appears in an envelope value —
+ * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
  *
  *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
  *
@@ -3397,12 +3398,117 @@ declare function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): U
  * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
  *
  * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
- * which is what ordpool renders inscriptions from. If the round-trip
- * doesn't match, the parser drops the parent silently (ord's
+ * which is what ordpool renders parents / delegates from. If the
+ * round-trip doesn't match, the parser drops the id silently (ord's
  * `filter_map` semantics), so the caller MUST hand us a canonical id
  * form.
  */
-declare function encodeParentInscriptionId(inscriptionId: string): Uint8Array;
+declare function encodeInscriptionId(inscriptionId: string): Uint8Array;
+/**
+ * Backwards-compatible alias. `parent` (tag 0x03) and `delegate`
+ * (tag 0x0b) share the same inscription-id byte form, so both go
+ * through `encodeInscriptionId`. Kept exported because consumers +
+ * specs already import this name.
+ */
+declare const encodeParentInscriptionId: typeof encodeInscriptionId;
+/**
+ * Encode a pointer sat-offset (tag 0x02) as minimal little-endian
+ * bytes: the u64 offset with trailing zero bytes trimmed. Offset 0
+ * encodes as an empty push (ord reads a missing/empty value as 0);
+ * 255 → `[0xff]`; 256 → `[0x00, 0x01]`.
+ *
+ * Inverse of `ordpool-parser`'s `extractPointer`, which little-endian-
+ * decodes the value. The pointer names the sat position (in the
+ * concatenated outputs) the inscription is assigned to; only the
+ * builder knows whether that offset is reachable given the reveal's
+ * output topology, so range-vs-topology validation lives at the
+ * synthesis layer, not here.
+ */
+declare function encodePointerValue(offset: number): Uint8Array;
+/**
+ * Encode a rune-name commitment (tag 0x0d) as minimal little-endian
+ * bytes: the rune's u128 value with trailing zero bytes trimmed.
+ * Value 0 encodes as an empty push. Rejects negatives and anything
+ * above u128 max.
+ *
+ * ord's rune etching reads this back as the u128 commitment (see
+ * `ordpool-parser` `knownFields.rune`); the etching tx must later
+ * spend this inscription's UTXO. A pre-computed byte value can still
+ * be passed through the generic `envelopeFields` escape hatch.
+ */
+declare function encodeRuneCommitment(value: bigint): Uint8Array;
+/**
+ * Split a field value into one-or-more `{ tag, value }` entries so no
+ * single push exceeds the 520-byte standardness cap. ord's decoder
+ * concatenates all same-tag chunks before decoding (metadata tag 0x05,
+ * properties tag 0x11), so a large CBOR blob is carried as several
+ * repeated-tag fields.
+ *
+ * A zero-length value yields a single empty-value field (callers that
+ * reject empty payloads gate that upstream).
+ */
+declare function chunkFieldValue(tag: OrdTag, value: Uint8Array): OrdEnvelopeField[];
+
+/**
+ * Deterministic CBOR encoder for inscription metadata + properties.
+ *
+ * ## Why this lives in the SDK, not in ordpool-parser
+ *
+ * ordpool-parser owns the CBOR *decoder* (`lib/cbor.ts`, `CBOR.decode`)
+ * and is a zero-dependency *decode* library — nothing there ever
+ * encodes CBOR. The inscribe pipeline is the only place in the whole
+ * ecosystem that *builds* inscriptions, so it is the only CBOR
+ * *producer*. That mirrors the existing split exactly: the envelope
+ * encoder (`buildInscriptionEnvelope`) is described in its own module
+ * doc as "the inverse of ordpool-parser's InscriptionParserService"
+ * and it lives here in the SDK, not in the parser. This CBOR encoder
+ * is the same shape of thing — the inverse of `CBOR.decode` — so it
+ * belongs next to the envelope encoder it feeds.
+ *
+ * The correctness oracle is still the parser: every value this encoder
+ * produces round-trips through ordpool-parser's `CBOR.decode` in the
+ * spec, so encoder and decoder stay pinned as inverses.
+ *
+ * ## Deterministic = canonical (RFC 8949 §4.2)
+ *
+ * "Deterministic" here means: the same logical value always produces
+ * the same bytes. That property matters for a signing library —
+ * identical metadata must yield an identical inscription envelope,
+ * hence an identical commit address, so a retried inscribe is
+ * idempotent and reproducible.
+ *
+ * The encoder implements RFC 8949 §4.2.1 core rules:
+ *   - integers use the shortest encoding that fits;
+ *   - all lengths are definite (never indefinite/streaming);
+ *   - map keys are sorted in bytewise lexicographic order of their
+ *     own deterministic encodings.
+ *
+ * Non-integer numbers are emitted as float64 (§4.2.2's shortest-float
+ * preference is NOT implemented — metadata rarely carries floats, and
+ * float64 is already deterministic: the same double always encodes to
+ * the same 8 bytes). Everything else is fully canonical.
+ *
+ * ## Supported types
+ *
+ *   number   → integer (major 0/1) if a safe integer, else float64
+ *   bigint   → integer (major 0/1), range [-(2^64), 2^64 - 1]
+ *   string   → UTF-8 text string (major 3)
+ *   Uint8Array / any ArrayBuffer view → byte string (major 2)
+ *   boolean  → 0xf5 (true) / 0xf4 (false)
+ *   null     → 0xf6
+ *   Array    → array (major 4)
+ *   Map      → map (major 5) with number | bigint | string keys
+ *   object   → map (major 5) with string keys (own enumerable)
+ *
+ * `undefined`, functions, and symbols throw — CBOR has no faithful,
+ * unambiguous encoding for them and silently dropping them would make
+ * the output non-deterministic w.r.t. the input.
+ */
+/**
+ * Encode a value as canonical (deterministic) CBOR.
+ * Throws on unsupported inputs rather than emitting lossy bytes.
+ */
+declare function encodeCborDeterministic(value: unknown): Uint8Array;
 
 /**
  * Layer-1 builder for the inscribe **commit** transaction.
@@ -3932,6 +4038,64 @@ interface CreateInscribeTransactionsArgs {
      * but the inscribe builder is sync.
      */
     contentEncoding?: 'br';
+    /**
+     * Optional pointer (tag 0x02): the sat offset, within the reveal's
+     * concatenated outputs, the inscription is assigned to. Emitted as
+     * minimal little-endian bytes.
+     *
+     * TOPOLOGY CAVEAT: this builder's reveal has the inscription's own
+     * 546-sat recipient output at vout[0] (plus an optional tip at
+     * vout[1]). A pointer only lands on the inscription's UTXO when it
+     * points inside that first output, i.e. `pointer < 546`. A larger
+     * offset would move the inscription onto the tip output or past the
+     * end of the outputs — unreachable / not what any single-inscription
+     * caller wants — so values `>= 546` are rejected rather than
+     * silently emitted. Default (unset) behaves like pointer 0.
+     */
+    pointer?: number;
+    /**
+     * Optional CBOR metadata (tag 0x05). Pass the ALREADY-CBOR-ENCODED
+     * bytes — use the exported `encodeCborDeterministic(value)` helper
+     * to turn a structured value into canonical CBOR first. Values over
+     * 520 bytes are split across repeated tag-5 fields automatically
+     * (ord concatenates them before decoding). Must be non-empty.
+     */
+    metadata?: Uint8Array;
+    /**
+     * Optional metaprotocol identifier (tag 0x07). Emitted as UTF-8
+     * bytes (e.g. `'brc-20'`).
+     */
+    metaprotocol?: string;
+    /**
+     * Optional delegate inscription id (`<txid>i<index>`, tag 0x0b).
+     * A delegate inscription typically carries an EMPTY body and points
+     * at another inscription's content; ord serves the delegate's
+     * content in its place. Unlike `parent`, this is functional with no
+     * extra tx topology — the delegate link resolves purely from the
+     * envelope tag. A body alongside a delegate is allowed (ord ignores
+     * it when the delegate resolves) but the canonical shape is an
+     * empty body.
+     */
+    delegate?: string;
+    /**
+     * Optional rune-name commitment (tag 0x0d) as the rune's u128 value.
+     * Emitted as minimal little-endian bytes. The etching transaction
+     * must later spend this inscription's UTXO. A pre-computed byte
+     * value can go through `envelopeFields` instead.
+     */
+    rune?: bigint;
+    /**
+     * Optional CBOR properties (tag 0x11): gallery items + attributes.
+     * Same contract as `metadata` — pass ALREADY-CBOR-ENCODED bytes
+     * (`encodeCborDeterministic`), chunked automatically over 520 bytes.
+     */
+    properties?: Uint8Array;
+    /**
+     * Optional properties-encoding hint (tag 0x13). When `'br'`, signals
+     * that the `properties` bytes are brotli-compressed. Only emitted
+     * alongside `properties`.
+     */
+    propertyEncoding?: 'br';
     /** Network. */
     network: Network;
 }
@@ -4173,6 +4337,37 @@ interface InscribeAndBroadcastArgs {
      * already be compressed; this flag only emits the envelope tag.
      */
     contentEncoding?: 'br';
+    /**
+     * Optional pointer (tag 0x02) sat offset. Must be < 546 given this
+     * builder's single-output reveal topology. See
+     * `createInscribeTransactions` for the full caveat.
+     */
+    pointer?: number;
+    /**
+     * Optional CBOR metadata (tag 0x05). Pass pre-encoded bytes
+     * (`encodeCborDeterministic`); chunked automatically over 520 bytes.
+     */
+    metadata?: Uint8Array;
+    /** Optional metaprotocol identifier (tag 0x07), emitted as UTF-8. */
+    metaprotocol?: string;
+    /**
+     * Optional delegate inscription id (`<txid>i<index>`, tag 0x0b).
+     * Functional (no extra tx topology): ord serves the delegate's
+     * content. Canonical shape is an empty `body`.
+     */
+    delegate?: string;
+    /**
+     * Optional rune-name commitment (tag 0x0d) as the rune's u128 value,
+     * emitted as minimal little-endian bytes.
+     */
+    rune?: bigint;
+    /**
+     * Optional CBOR properties (tag 0x11): gallery + attributes. Pass
+     * pre-encoded bytes (`encodeCborDeterministic`); chunked over 520.
+     */
+    properties?: Uint8Array;
+    /** Optional properties-encoding hint (tag 0x13); only with `properties`. */
+    propertyEncoding?: 'br';
     network: Network;
     /**
      * Broadcasts a wire-format tx hex; returns the resulting txid.
@@ -4226,6 +4421,20 @@ interface InscribeContent {
     note?: string;
     parent?: string;
     contentEncoding?: 'br';
+    /** Pointer (tag 0x02) sat offset; must be < 546. See createInscribeTransactions. */
+    pointer?: number;
+    /** CBOR metadata (tag 0x05), pre-encoded via encodeCborDeterministic; chunked over 520. */
+    metadata?: Uint8Array;
+    /** Metaprotocol identifier (tag 0x07), UTF-8. */
+    metaprotocol?: string;
+    /** Delegate inscription id (tag 0x0b); ord serves the delegate's content. */
+    delegate?: string;
+    /** Rune-name commitment (tag 0x0d) as the rune's u128 value. */
+    rune?: bigint;
+    /** CBOR properties (tag 0x11), pre-encoded; chunked over 520. */
+    properties?: Uint8Array;
+    /** Properties-encoding hint (tag 0x13); only alongside properties. */
+    propertyEncoding?: 'br';
     /** Override for the inscription's recipient. Defaults to wallet.ordinalsAddress. */
     recipient?: string;
 }
@@ -4697,5 +4906,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
