@@ -188,6 +188,19 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
 
   // Other fields in the order the caller supplied.
   for (const field of args.fields ?? []) {
+    // Each field value is ONE push. Bitcoin standardness caps a push
+    // at 520 bytes, and ord's decoder reads each field as a single
+    // pushdata, so a value above the cap can't be expressed as a
+    // valid same-tag field. Large payloads (metadata / properties)
+    // must be pre-split into repeated same-tag fields via
+    // `chunkFieldValue`. Fail loud here rather than emit a
+    // non-standard, non-relayable push.
+    if (field.value.length > MAX_PUSH_BYTES) {
+      throw new Error(
+        `envelope field value for tag ${field.tag} is ${field.value.length} bytes; ` +
+        `max ${MAX_PUSH_BYTES} per push. Split into repeated same-tag fields (chunkFieldValue).`,
+      );
+    }
     items.push(tagAsScriptItem(field.tag));
     items.push(field.value);
   }
@@ -208,8 +221,9 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
 }
 
 /**
- * Encode a parent inscription id (`<txid>i<index>`) into the byte
- * form ord expects on tag 0x03 (`parent`) values:
+ * Encode an inscription id (`<txid>i<index>`) into the byte form ord
+ * expects wherever an inscription id appears in an envelope value —
+ * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
  *
  *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
  *
@@ -217,12 +231,12 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
  * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
  *
  * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
- * which is what ordpool renders inscriptions from. If the round-trip
- * doesn't match, the parser drops the parent silently (ord's
+ * which is what ordpool renders parents / delegates from. If the
+ * round-trip doesn't match, the parser drops the id silently (ord's
  * `filter_map` semantics), so the caller MUST hand us a canonical id
  * form.
  */
-export function encodeParentInscriptionId(inscriptionId: string): Uint8Array {
+export function encodeInscriptionId(inscriptionId: string): Uint8Array {
   const m = inscriptionId.match(/^([0-9a-f]{64})i(\d+)$/);
   if (!m) {
     throw new Error(
@@ -256,4 +270,95 @@ export function encodeParentInscriptionId(inscriptionId: string): Uint8Array {
   out.set(txidBytes);
   out.set(indexBytes.subarray(0, end), 32);
   return out;
+}
+
+/**
+ * Backwards-compatible alias. `parent` (tag 0x03) and `delegate`
+ * (tag 0x0b) share the same inscription-id byte form, so both go
+ * through `encodeInscriptionId`. Kept exported because consumers +
+ * specs already import this name.
+ */
+export const encodeParentInscriptionId = encodeInscriptionId;
+
+/**
+ * Encode a pointer sat-offset (tag 0x02) as minimal little-endian
+ * bytes: the u64 offset with trailing zero bytes trimmed. Offset 0
+ * encodes as an empty push (ord reads a missing/empty value as 0);
+ * 255 → `[0xff]`; 256 → `[0x00, 0x01]`.
+ *
+ * Inverse of `ordpool-parser`'s `extractPointer`, which little-endian-
+ * decodes the value. The pointer names the sat position (in the
+ * concatenated outputs) the inscription is assigned to; only the
+ * builder knows whether that offset is reachable given the reveal's
+ * output topology, so range-vs-topology validation lives at the
+ * synthesis layer, not here.
+ */
+export function encodePointerValue(offset: number): Uint8Array {
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error(`pointer must be a non-negative integer; got ${offset}`);
+  }
+  if (!Number.isSafeInteger(offset)) {
+    throw new Error(`pointer ${offset} exceeds the safe-integer range`);
+  }
+  return minimalLeBytes(BigInt(offset));
+}
+
+/**
+ * Encode a rune-name commitment (tag 0x0d) as minimal little-endian
+ * bytes: the rune's u128 value with trailing zero bytes trimmed.
+ * Value 0 encodes as an empty push. Rejects negatives and anything
+ * above u128 max.
+ *
+ * ord's rune etching reads this back as the u128 commitment (see
+ * `ordpool-parser` `knownFields.rune`); the etching tx must later
+ * spend this inscription's UTXO. A pre-computed byte value can still
+ * be passed through the generic `envelopeFields` escape hatch.
+ */
+export function encodeRuneCommitment(value: bigint): Uint8Array {
+  if (typeof value !== 'bigint') {
+    throw new Error('rune commitment must be a bigint');
+  }
+  if (value < 0n) {
+    throw new Error(`rune commitment must be non-negative; got ${value}`);
+  }
+  const U128_MAX = (1n << 128n) - 1n;
+  if (value > U128_MAX) {
+    throw new Error(`rune commitment ${value} exceeds u128 range`);
+  }
+  return minimalLeBytes(value);
+}
+
+/** Little-endian bytes of a non-negative bigint, trailing zeros trimmed. */
+function minimalLeBytes(value: bigint): Uint8Array {
+  if (value === 0n) {
+    return new Uint8Array(0);
+  }
+  const bytes: number[] = [];
+  let v = value;
+  while (v > 0n) {
+    bytes.push(Number(v & 0xffn));
+    v >>= 8n;
+  }
+  return Uint8Array.from(bytes);
+}
+
+/**
+ * Split a field value into one-or-more `{ tag, value }` entries so no
+ * single push exceeds the 520-byte standardness cap. ord's decoder
+ * concatenates all same-tag chunks before decoding (metadata tag 0x05,
+ * properties tag 0x11), so a large CBOR blob is carried as several
+ * repeated-tag fields.
+ *
+ * A zero-length value yields a single empty-value field (callers that
+ * reject empty payloads gate that upstream).
+ */
+export function chunkFieldValue(tag: OrdTag, value: Uint8Array): OrdEnvelopeField[] {
+  if (value.length === 0) {
+    return [{ tag, value }];
+  }
+  const fields: OrdEnvelopeField[] = [];
+  for (let i = 0; i < value.length; i += MAX_PUSH_BYTES) {
+    fields.push({ tag, value: value.subarray(i, i + MAX_PUSH_BYTES) });
+  }
+  return fields;
 }

@@ -18,9 +18,14 @@ import { describe, expect, it } from '@jest/globals';
 import { bytesToHex } from '@noble/hashes/utils';
 import { InscriptionParserService } from 'ordpool-parser';
 
+import { encodeCborDeterministic } from './inscription-cbor';
 import {
   buildInscriptionEnvelope,
+  chunkFieldValue,
+  encodeInscriptionId,
   encodeParentInscriptionId,
+  encodePointerValue,
+  encodeRuneCommitment,
   ORD_TAGS,
   type OrdEnvelopeField,
 } from './inscription-envelope';
@@ -193,6 +198,171 @@ describe('buildInscriptionEnvelope — reversibility against ordpool-parser', ()
     expect(ORD_TAGS.note).toBe(0x0f);
     expect(ORD_TAGS.properties).toBe(0x11);
     expect(ORD_TAGS.property_encoding).toBe(0x13);
+  });
+});
+
+describe('first-class envelope tags — round-trip via ordpool-parser', () => {
+
+  const DELEGATE_ID = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0';
+  const DELEGATE_ID_IDX = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i7';
+
+  function parseFields(fields: OrdEnvelopeField[], body = new Uint8Array(0)) {
+    const envelope = buildInscriptionEnvelope({
+      revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+      contentType: 'text/plain',
+      body,
+      fields,
+    });
+    const parsed = InscriptionParserService.parse(fakeTxFromEnvelope(envelope));
+    expect(parsed.length).toBe(1);
+    return parsed[0];
+  }
+
+  describe('pointer (tag 0x02)', () => {
+    for (const offset of [0, 1, 255, 256, 545]) {
+      it(`pointer ${offset} round-trips through getPointer()`, () => {
+        const p = parseFields([{ tag: ORD_TAGS.pointer, value: encodePointerValue(offset) }]);
+        expect(p.getPointer()).toBe(offset);
+      });
+    }
+
+    it('encodePointerValue emits minimal little-endian bytes', () => {
+      expect(encodePointerValue(0)).toEqual(new Uint8Array(0));
+      expect(encodePointerValue(1)).toEqual(new Uint8Array([0x01]));
+      expect(encodePointerValue(255)).toEqual(new Uint8Array([0xff]));
+      expect(encodePointerValue(256)).toEqual(new Uint8Array([0x00, 0x01]));
+    });
+
+    it('rejects negative / non-integer offsets', () => {
+      expect(() => encodePointerValue(-1)).toThrow(/non-negative/);
+      expect(() => encodePointerValue(1.5)).toThrow(/non-negative integer/);
+    });
+  });
+
+  describe('metaprotocol (tag 0x07)', () => {
+    it('round-trips as a UTF-8 string via getMetaprotocol()', () => {
+      const p = parseFields([{ tag: ORD_TAGS.metaprotocol, value: new TextEncoder().encode('brc-20') }]);
+      expect(p.getMetaprotocol()).toBe('brc-20');
+    });
+  });
+
+  describe('delegate (tag 0x0b)', () => {
+    it('index-0 delegate id round-trips via getDelegates()', () => {
+      const p = parseFields([{ tag: ORD_TAGS.delegate, value: encodeInscriptionId(DELEGATE_ID) }]);
+      expect(p.getDelegates()).toEqual([DELEGATE_ID]);
+    });
+
+    it('non-zero-index delegate id round-trips', () => {
+      const p = parseFields([{ tag: ORD_TAGS.delegate, value: encodeInscriptionId(DELEGATE_ID_IDX) }]);
+      expect(p.getDelegates()).toEqual([DELEGATE_ID_IDX]);
+    });
+
+    it('encodeInscriptionId is the same function backing encodeParentInscriptionId (shared byte form)', () => {
+      expect(encodeInscriptionId).toBe(encodeParentInscriptionId);
+      expect(encodeInscriptionId(DELEGATE_ID)).toEqual(encodeParentInscriptionId(DELEGATE_ID));
+    });
+  });
+
+  describe('rune (tag 0x0d)', () => {
+    it('rune 0 encodes as an empty push and getRune() returns empty bytes', () => {
+      expect(encodeRuneCommitment(0n)).toEqual(new Uint8Array(0));
+      const p = parseFields([{ tag: ORD_TAGS.rune, value: encodeRuneCommitment(0n) }]);
+      expect(p.getRune()).toEqual(new Uint8Array(0));
+    });
+
+    it('small rune value round-trips as minimal little-endian bytes', () => {
+      // 0x0102 = 258 → LE [0x02, 0x01].
+      expect(encodeRuneCommitment(258n)).toEqual(new Uint8Array([0x02, 0x01]));
+      const p = parseFields([{ tag: ORD_TAGS.rune, value: encodeRuneCommitment(258n) }]);
+      expect(p.getRune()).toEqual(new Uint8Array([0x02, 0x01]));
+    });
+
+    it('u128-max rune value encodes as 16 0xff bytes and round-trips', () => {
+      const U128_MAX = (1n << 128n) - 1n;
+      const bytes = encodeRuneCommitment(U128_MAX);
+      expect(bytes).toEqual(new Uint8Array(16).fill(0xff));
+      const p = parseFields([{ tag: ORD_TAGS.rune, value: bytes }]);
+      expect(p.getRune()).toEqual(new Uint8Array(16).fill(0xff));
+    });
+
+    it('rejects negative and above-u128 values', () => {
+      expect(() => encodeRuneCommitment(-1n)).toThrow(/non-negative/);
+      expect(() => encodeRuneCommitment(1n << 128n)).toThrow(/u128 range/);
+    });
+  });
+
+  describe('metadata (tag 0x05) chunked across 520-byte pushes', () => {
+    it('single-chunk CBOR metadata round-trips via getMetadata()', () => {
+      const cbor = encodeCborDeterministic({ name: 'test', n: 3 });
+      const p = parseFields(chunkFieldValue(ORD_TAGS.metadata, cbor));
+      expect(p.getMetadata()).toEqual({ name: 'test', n: 3 });
+    });
+
+    it('multi-chunk CBOR metadata (> 520 B, 3 chunks) reassembles + decodes', () => {
+      // A ~1200-byte string forces CBOR well past 520 bytes → 3 chunks.
+      const big = 'x'.repeat(1200);
+      const cbor = encodeCborDeterministic({ blob: big, kind: 'metadata' });
+      const chunks = chunkFieldValue(ORD_TAGS.metadata, cbor);
+      expect(chunks.length).toBe(3);
+      const p = parseFields(chunks);
+      expect(p.getMetadata()).toEqual({ blob: big, kind: 'metadata' });
+    });
+
+    it('exactly-520-byte value stays a single chunk; 521 splits into two', () => {
+      expect(chunkFieldValue(ORD_TAGS.metadata, new Uint8Array(520)).length).toBe(1);
+      expect(chunkFieldValue(ORD_TAGS.metadata, new Uint8Array(521)).length).toBe(2);
+    });
+  });
+
+  describe('properties (tag 0x11) + property_encoding (tag 0x13)', () => {
+    it('CBOR gallery + title round-trips via getProperties()', async () => {
+      // ord properties use INTEGER keys: {0: gallery[], 1: attributes{}}.
+      // A Map preserves integer-keyed encoding through encodeCborDeterministic.
+      const galleryItem = new Map<number, unknown>([[0, encodeInscriptionId(DELEGATE_ID)]]);
+      const attributes = new Map<number, unknown>([[0, 'My Gallery']]);
+      const properties = new Map<number, unknown>([[0, [galleryItem]], [1, attributes]]);
+      const cbor = encodeCborDeterministic(properties);
+
+      const p = parseFields(chunkFieldValue(ORD_TAGS.properties, cbor));
+      const result = await p.getProperties();
+      expect(result).toEqual({ gallery: [{ inscriptionId: DELEGATE_ID }], title: 'My Gallery' });
+    });
+  });
+
+  describe('all first-class tags at once (coexistence + ordering independence)', () => {
+    it('pointer + metaprotocol + parent + delegate + rune + metadata + note + contentEncoding all resolve', () => {
+      const cbor = encodeCborDeterministic({ author: 'ordpool' });
+      const fields: OrdEnvelopeField[] = [
+        { tag: ORD_TAGS.pointer, value: encodePointerValue(42) },
+        { tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') },
+        { tag: ORD_TAGS.metaprotocol, value: new TextEncoder().encode('brc-20') },
+        { tag: ORD_TAGS.parent, value: encodeParentInscriptionId(DELEGATE_ID) },
+        { tag: ORD_TAGS.delegate, value: encodeInscriptionId(DELEGATE_ID_IDX) },
+        { tag: ORD_TAGS.rune, value: encodeRuneCommitment(258n) },
+        ...chunkFieldValue(ORD_TAGS.metadata, cbor),
+        { tag: ORD_TAGS.note, value: new TextEncoder().encode('ordpool.space') },
+      ];
+      const p = parseFields(fields);
+      expect(p.getPointer()).toBe(42);
+      expect(p.getContentEncoding()).toBe('br');
+      expect(p.getMetaprotocol()).toBe('brc-20');
+      expect(p.getParents()).toEqual([DELEGATE_ID]);
+      expect(p.getDelegates()).toEqual([DELEGATE_ID_IDX]);
+      expect(p.getRune()).toEqual(new Uint8Array([0x02, 0x01]));
+      expect(p.getMetadata()).toEqual({ author: 'ordpool' });
+      expect(p.getNote()).toBe('ordpool.space');
+    });
+  });
+
+  describe('520-byte per-field-value guard', () => {
+    it('buildInscriptionEnvelope throws on a raw field value over 520 bytes', () => {
+      expect(() => buildInscriptionEnvelope({
+        revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+        contentType: 'text/plain',
+        body: new Uint8Array(0),
+        fields: [{ tag: ORD_TAGS.metadata, value: new Uint8Array(521) }],
+      })).toThrow(/max 520 per push/);
+    });
   });
 });
 

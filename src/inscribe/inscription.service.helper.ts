@@ -8,12 +8,17 @@ import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 import {
+  INSCRIBE_POSTAGE_SATS,
   buildInscribeCommitPsbt,
 } from './inscription-commit.helper';
 import {
   ORD_TAGS,
   buildInscriptionEnvelope,
+  chunkFieldValue,
+  encodeInscriptionId,
   encodeParentInscriptionId,
+  encodePointerValue,
+  encodeRuneCommitment,
   type OrdEnvelopeField,
 } from './inscription-envelope';
 import {
@@ -175,6 +180,64 @@ export interface CreateInscribeTransactionsArgs {
    * but the inscribe builder is sync.
    */
   contentEncoding?: 'br';
+  /**
+   * Optional pointer (tag 0x02): the sat offset, within the reveal's
+   * concatenated outputs, the inscription is assigned to. Emitted as
+   * minimal little-endian bytes.
+   *
+   * TOPOLOGY CAVEAT: this builder's reveal has the inscription's own
+   * 546-sat recipient output at vout[0] (plus an optional tip at
+   * vout[1]). A pointer only lands on the inscription's UTXO when it
+   * points inside that first output, i.e. `pointer < 546`. A larger
+   * offset would move the inscription onto the tip output or past the
+   * end of the outputs — unreachable / not what any single-inscription
+   * caller wants — so values `>= 546` are rejected rather than
+   * silently emitted. Default (unset) behaves like pointer 0.
+   */
+  pointer?: number;
+  /**
+   * Optional CBOR metadata (tag 0x05). Pass the ALREADY-CBOR-ENCODED
+   * bytes — use the exported `encodeCborDeterministic(value)` helper
+   * to turn a structured value into canonical CBOR first. Values over
+   * 520 bytes are split across repeated tag-5 fields automatically
+   * (ord concatenates them before decoding). Must be non-empty.
+   */
+  metadata?: Uint8Array;
+  /**
+   * Optional metaprotocol identifier (tag 0x07). Emitted as UTF-8
+   * bytes (e.g. `'brc-20'`).
+   */
+  metaprotocol?: string;
+  /**
+   * Optional delegate inscription id (`<txid>i<index>`, tag 0x0b).
+   * A delegate inscription typically carries an EMPTY body and points
+   * at another inscription's content; ord serves the delegate's
+   * content in its place. Unlike `parent`, this is functional with no
+   * extra tx topology — the delegate link resolves purely from the
+   * envelope tag. A body alongside a delegate is allowed (ord ignores
+   * it when the delegate resolves) but the canonical shape is an
+   * empty body.
+   */
+  delegate?: string;
+  /**
+   * Optional rune-name commitment (tag 0x0d) as the rune's u128 value.
+   * Emitted as minimal little-endian bytes. The etching transaction
+   * must later spend this inscription's UTXO. A pre-computed byte
+   * value can go through `envelopeFields` instead.
+   */
+  rune?: bigint;
+  /**
+   * Optional CBOR properties (tag 0x11): gallery items + attributes.
+   * Same contract as `metadata` — pass ALREADY-CBOR-ENCODED bytes
+   * (`encodeCborDeterministic`), chunked automatically over 520 bytes.
+   */
+  properties?: Uint8Array;
+  /**
+   * Optional properties-encoding hint (tag 0x13). When `'br'`, signals
+   * that the `properties` bytes are brotli-compressed. Only emitted
+   * alongside `properties`.
+   */
+  propertyEncoding?: 'br';
   /** Network. */
   network: Network;
 }
@@ -261,26 +324,15 @@ export function createInscribeTransactions(
   const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
   const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
 
-  // Synthesise envelope fields from the convenience args (parent,
-  // note, contentEncoding) and prepend to the caller-supplied
-  // envelopeFields. On duplicate tags (e.g. caller also supplies a
-  // parent entry) BOTH entries are emitted in order — ord's decoder
-  // handles multiple instances per tag according to that tag's
-  // semantics: `parent` accumulates (multi-parent inscriptions are
-  // valid), `content_type` / `content_encoding` first-wins (so
-  // caller-supplied values behind an auto-field are ignored by
-  // downstream indexers). Caller-side dedup is the consumer's
-  // responsibility.
-  const autoFields: OrdEnvelopeField[] = [];
-  if (args.parent !== undefined) {
-    autoFields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });
-  }
-  if (args.note !== undefined) {
-    autoFields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
-  }
-  if (args.contentEncoding === 'br') {
-    autoFields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') });
-  }
+  // Synthesise envelope fields from the convenience args and prepend
+  // to the caller-supplied envelopeFields. On duplicate tags (e.g.
+  // caller also supplies a parent entry) BOTH entries are emitted in
+  // order — ord's decoder handles multiple instances per tag according
+  // to that tag's semantics: `parent` / `delegate` accumulate,
+  // `content_type` / `content_encoding` first-wins (so caller-supplied
+  // values behind an auto-field are ignored by downstream indexers).
+  // Caller-side dedup is the consumer's responsibility.
+  const autoFields = synthesizeEnvelopeFields(args);
   const mergedFields: ReadonlyArray<OrdEnvelopeField> = autoFields.length === 0
     ? (args.envelopeFields ?? [])
     : [...autoFields, ...(args.envelopeFields ?? [])];
@@ -420,6 +472,88 @@ export function createInscribeTransactions(
       envelopeScript: envelope,
     },
   };
+}
+
+/**
+ * Turn the convenience args (pointer, metadata, metaprotocol, parent,
+ * delegate, rune, note, contentEncoding, properties, propertyEncoding)
+ * into ord envelope fields in the exact byte form ord expects. Each
+ * value is validated here; large CBOR payloads (metadata / properties)
+ * are chunked across repeated same-tag fields so no single push
+ * exceeds the 520-byte cap. Field ORDER doesn't affect the resolved
+ * inscription (ord indexes by tag), but a stable order keeps the
+ * encoded envelope diff-friendly.
+ */
+function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnvelopeField[] {
+  const fields: OrdEnvelopeField[] = [];
+
+  if (args.pointer !== undefined) {
+    // Topology gate: this builder places the inscription's 546-sat
+    // recipient output at vout[0]. A pointer must point inside that
+    // output to land on the inscription's own UTXO. Reject an
+    // unreachable offset rather than emit a pointer that silently
+    // moves the inscription off its cat-bearing UTXO.
+    if (args.pointer >= INSCRIBE_POSTAGE_SATS) {
+      throw new Error(
+        `pointer ${args.pointer} is unreachable: this builder's reveal has a single ` +
+        `${INSCRIBE_POSTAGE_SATS}-sat inscription output at vout[0], so pointer must be < ${INSCRIBE_POSTAGE_SATS}.`,
+      );
+    }
+    fields.push({ tag: ORD_TAGS.pointer, value: encodePointerValue(args.pointer) });
+  }
+
+  if (args.contentEncoding === 'br') {
+    fields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') });
+  }
+
+  if (args.metaprotocol !== undefined) {
+    fields.push({ tag: ORD_TAGS.metaprotocol, value: new TextEncoder().encode(args.metaprotocol) });
+  }
+
+  if (args.parent !== undefined) {
+    fields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });
+  }
+
+  if (args.delegate !== undefined) {
+    fields.push({ tag: ORD_TAGS.delegate, value: encodeInscriptionId(args.delegate) });
+  }
+
+  if (args.metadata !== undefined) {
+    if (!ArrayBuffer.isView(args.metadata)) {
+      throw new Error('metadata must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
+    }
+    if (args.metadata.length === 0) {
+      throw new Error('metadata must be non-empty CBOR bytes');
+    }
+    fields.push(...chunkFieldValue(ORD_TAGS.metadata, args.metadata));
+  }
+
+  if (args.rune !== undefined) {
+    fields.push({ tag: ORD_TAGS.rune, value: encodeRuneCommitment(args.rune) });
+  }
+
+  if (args.properties !== undefined) {
+    if (!ArrayBuffer.isView(args.properties)) {
+      throw new Error('properties must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
+    }
+    if (args.properties.length === 0) {
+      throw new Error('properties must be non-empty CBOR bytes');
+    }
+    fields.push(...chunkFieldValue(ORD_TAGS.properties, args.properties));
+  }
+
+  if (args.propertyEncoding === 'br') {
+    if (args.properties === undefined) {
+      throw new Error('propertyEncoding is only valid alongside properties');
+    }
+    fields.push({ tag: ORD_TAGS.property_encoding, value: new TextEncoder().encode('br') });
+  }
+
+  if (args.note !== undefined) {
+    fields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
+  }
+
+  return fields;
 }
 
 /** Per-address-type dust limit, mirroring `getMinimumUtxoSize`. */

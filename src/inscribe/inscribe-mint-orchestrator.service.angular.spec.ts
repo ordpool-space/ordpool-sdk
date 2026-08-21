@@ -270,6 +270,43 @@ describe('InscribeMintOrchestrator — mint() guards', () => {
 });
 
 
+describe('InscribeMintOrchestrator — InscribeContent carries the first-class envelope tags', () => {
+
+  // mint() forwards each content field to inscribeAndBroadcast (proven
+  // end-to-end in inscribe-orchestrator.spec.ts). Here we pin that the
+  // InscribeContent surface accepts all first-class tags and the
+  // orchestrator preserves them verbatim on the content signal — so a
+  // consumer wiring pointer / metadata / delegate / rune / properties
+  // reaches the forwarding call with those exact values.
+  it('setContent preserves pointer, metadata, metaprotocol, delegate, rune, properties, propertyEncoding', () => {
+    const { orchestrator } = buildOrchestrator();
+    const metadata = new Uint8Array([0xa1, 0x61, 0x61, 0x01]); // CBOR {a:1}
+    const properties = new Uint8Array([0xa0]); // CBOR {}
+    const full = content({
+      body: new Uint8Array(0),
+      pointer: 100,
+      metadata,
+      metaprotocol: 'brc-20',
+      delegate: '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0',
+      rune: 258n,
+      properties,
+      propertyEncoding: 'br',
+    });
+
+    orchestrator.setContent(full);
+    const stored = orchestrator.content();
+
+    expect(stored?.pointer).toBe(100);
+    expect(stored?.metadata).toBe(metadata);
+    expect(stored?.metaprotocol).toBe('brc-20');
+    expect(stored?.delegate).toBe('6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0');
+    expect(stored?.rune).toBe(258n);
+    expect(stored?.properties).toBe(properties);
+    expect(stored?.propertyEncoding).toBe('br');
+  });
+});
+
+
 describe('InscribeMintOrchestrator — setFeeRate rejects invalid input', () => {
 
   it('ignores zero, negative, NaN', () => {

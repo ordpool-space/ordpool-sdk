@@ -47,6 +47,20 @@ export interface InscribeContent {
   note?: string;
   parent?: string;
   contentEncoding?: 'br';
+  /** Pointer (tag 0x02) sat offset; must be < 546. See createInscribeTransactions. */
+  pointer?: number;
+  /** CBOR metadata (tag 0x05), pre-encoded via encodeCborDeterministic; chunked over 520. */
+  metadata?: Uint8Array;
+  /** Metaprotocol identifier (tag 0x07), UTF-8. */
+  metaprotocol?: string;
+  /** Delegate inscription id (tag 0x0b); ord serves the delegate's content. */
+  delegate?: string;
+  /** Rune-name commitment (tag 0x0d) as the rune's u128 value. */
+  rune?: bigint;
+  /** CBOR properties (tag 0x11), pre-encoded; chunked over 520. */
+  properties?: Uint8Array;
+  /** Properties-encoding hint (tag 0x13); only alongside properties. */
+  propertyEncoding?: 'br';
   /** Override for the inscription's recipient. Defaults to wallet.ordinalsAddress. */
   recipient?: string;
 }
@@ -296,6 +310,13 @@ export class InscribeMintOrchestrator {
       note: content.note,
       parent: content.parent,
       contentEncoding: content.contentEncoding,
+      pointer: content.pointer,
+      metadata: content.metadata,
+      metaprotocol: content.metaprotocol,
+      delegate: content.delegate,
+      rune: content.rune,
+      properties: content.properties,
+      propertyEncoding: content.propertyEncoding,
       network: this.network,
       broadcast: (txHex: string) => this.cat21.postTransaction(txHex),
     }).pipe(

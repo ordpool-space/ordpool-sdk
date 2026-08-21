@@ -7445,6 +7445,17 @@ function buildInscriptionEnvelope(args) {
     }
     // Other fields in the order the caller supplied.
     for (const field of args.fields ?? []) {
+        // Each field value is ONE push. Bitcoin standardness caps a push
+        // at 520 bytes, and ord's decoder reads each field as a single
+        // pushdata, so a value above the cap can't be expressed as a
+        // valid same-tag field. Large payloads (metadata / properties)
+        // must be pre-split into repeated same-tag fields via
+        // `chunkFieldValue`. Fail loud here rather than emit a
+        // non-standard, non-relayable push.
+        if (field.value.length > MAX_PUSH_BYTES) {
+            throw new Error(`envelope field value for tag ${field.tag} is ${field.value.length} bytes; ` +
+                `max ${MAX_PUSH_BYTES} per push. Split into repeated same-tag fields (chunkFieldValue).`);
+        }
         items.push(tagAsScriptItem(field.tag));
         items.push(field.value);
     }
@@ -7460,8 +7471,9 @@ function buildInscriptionEnvelope(args) {
     return Script.encode(items);
 }
 /**
- * Encode a parent inscription id (`<txid>i<index>`) into the byte
- * form ord expects on tag 0x03 (`parent`) values:
+ * Encode an inscription id (`<txid>i<index>`) into the byte form ord
+ * expects wherever an inscription id appears in an envelope value —
+ * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
  *
  *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
  *
@@ -7469,12 +7481,12 @@ function buildInscriptionEnvelope(args) {
  * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
  *
  * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
- * which is what ordpool renders inscriptions from. If the round-trip
- * doesn't match, the parser drops the parent silently (ord's
+ * which is what ordpool renders parents / delegates from. If the
+ * round-trip doesn't match, the parser drops the id silently (ord's
  * `filter_map` semantics), so the caller MUST hand us a canonical id
  * form.
  */
-function encodeParentInscriptionId(inscriptionId) {
+function encodeInscriptionId(inscriptionId) {
     const m = inscriptionId.match(/^([0-9a-f]{64})i(\d+)$/);
     if (!m) {
         throw new Error(`Invalid inscription id "${inscriptionId}"; expected 64 lowercase hex + "i" + non-negative integer.`);
@@ -7505,6 +7517,333 @@ function encodeParentInscriptionId(inscriptionId) {
     out.set(txidBytes);
     out.set(indexBytes.subarray(0, end), 32);
     return out;
+}
+/**
+ * Backwards-compatible alias. `parent` (tag 0x03) and `delegate`
+ * (tag 0x0b) share the same inscription-id byte form, so both go
+ * through `encodeInscriptionId`. Kept exported because consumers +
+ * specs already import this name.
+ */
+const encodeParentInscriptionId = encodeInscriptionId;
+/**
+ * Encode a pointer sat-offset (tag 0x02) as minimal little-endian
+ * bytes: the u64 offset with trailing zero bytes trimmed. Offset 0
+ * encodes as an empty push (ord reads a missing/empty value as 0);
+ * 255 → `[0xff]`; 256 → `[0x00, 0x01]`.
+ *
+ * Inverse of `ordpool-parser`'s `extractPointer`, which little-endian-
+ * decodes the value. The pointer names the sat position (in the
+ * concatenated outputs) the inscription is assigned to; only the
+ * builder knows whether that offset is reachable given the reveal's
+ * output topology, so range-vs-topology validation lives at the
+ * synthesis layer, not here.
+ */
+function encodePointerValue(offset) {
+    if (!Number.isInteger(offset) || offset < 0) {
+        throw new Error(`pointer must be a non-negative integer; got ${offset}`);
+    }
+    if (!Number.isSafeInteger(offset)) {
+        throw new Error(`pointer ${offset} exceeds the safe-integer range`);
+    }
+    return minimalLeBytes(BigInt(offset));
+}
+/**
+ * Encode a rune-name commitment (tag 0x0d) as minimal little-endian
+ * bytes: the rune's u128 value with trailing zero bytes trimmed.
+ * Value 0 encodes as an empty push. Rejects negatives and anything
+ * above u128 max.
+ *
+ * ord's rune etching reads this back as the u128 commitment (see
+ * `ordpool-parser` `knownFields.rune`); the etching tx must later
+ * spend this inscription's UTXO. A pre-computed byte value can still
+ * be passed through the generic `envelopeFields` escape hatch.
+ */
+function encodeRuneCommitment(value) {
+    if (typeof value !== 'bigint') {
+        throw new Error('rune commitment must be a bigint');
+    }
+    if (value < 0n) {
+        throw new Error(`rune commitment must be non-negative; got ${value}`);
+    }
+    const U128_MAX = (1n << 128n) - 1n;
+    if (value > U128_MAX) {
+        throw new Error(`rune commitment ${value} exceeds u128 range`);
+    }
+    return minimalLeBytes(value);
+}
+/** Little-endian bytes of a non-negative bigint, trailing zeros trimmed. */
+function minimalLeBytes(value) {
+    if (value === 0n) {
+        return new Uint8Array(0);
+    }
+    const bytes = [];
+    let v = value;
+    while (v > 0n) {
+        bytes.push(Number(v & 0xffn));
+        v >>= 8n;
+    }
+    return Uint8Array.from(bytes);
+}
+/**
+ * Split a field value into one-or-more `{ tag, value }` entries so no
+ * single push exceeds the 520-byte standardness cap. ord's decoder
+ * concatenates all same-tag chunks before decoding (metadata tag 0x05,
+ * properties tag 0x11), so a large CBOR blob is carried as several
+ * repeated-tag fields.
+ *
+ * A zero-length value yields a single empty-value field (callers that
+ * reject empty payloads gate that upstream).
+ */
+function chunkFieldValue(tag, value) {
+    if (value.length === 0) {
+        return [{ tag, value }];
+    }
+    const fields = [];
+    for (let i = 0; i < value.length; i += MAX_PUSH_BYTES) {
+        fields.push({ tag, value: value.subarray(i, i + MAX_PUSH_BYTES) });
+    }
+    return fields;
+}
+
+/**
+ * Deterministic CBOR encoder for inscription metadata + properties.
+ *
+ * ## Why this lives in the SDK, not in ordpool-parser
+ *
+ * ordpool-parser owns the CBOR *decoder* (`lib/cbor.ts`, `CBOR.decode`)
+ * and is a zero-dependency *decode* library — nothing there ever
+ * encodes CBOR. The inscribe pipeline is the only place in the whole
+ * ecosystem that *builds* inscriptions, so it is the only CBOR
+ * *producer*. That mirrors the existing split exactly: the envelope
+ * encoder (`buildInscriptionEnvelope`) is described in its own module
+ * doc as "the inverse of ordpool-parser's InscriptionParserService"
+ * and it lives here in the SDK, not in the parser. This CBOR encoder
+ * is the same shape of thing — the inverse of `CBOR.decode` — so it
+ * belongs next to the envelope encoder it feeds.
+ *
+ * The correctness oracle is still the parser: every value this encoder
+ * produces round-trips through ordpool-parser's `CBOR.decode` in the
+ * spec, so encoder and decoder stay pinned as inverses.
+ *
+ * ## Deterministic = canonical (RFC 8949 §4.2)
+ *
+ * "Deterministic" here means: the same logical value always produces
+ * the same bytes. That property matters for a signing library —
+ * identical metadata must yield an identical inscription envelope,
+ * hence an identical commit address, so a retried inscribe is
+ * idempotent and reproducible.
+ *
+ * The encoder implements RFC 8949 §4.2.1 core rules:
+ *   - integers use the shortest encoding that fits;
+ *   - all lengths are definite (never indefinite/streaming);
+ *   - map keys are sorted in bytewise lexicographic order of their
+ *     own deterministic encodings.
+ *
+ * Non-integer numbers are emitted as float64 (§4.2.2's shortest-float
+ * preference is NOT implemented — metadata rarely carries floats, and
+ * float64 is already deterministic: the same double always encodes to
+ * the same 8 bytes). Everything else is fully canonical.
+ *
+ * ## Supported types
+ *
+ *   number   → integer (major 0/1) if a safe integer, else float64
+ *   bigint   → integer (major 0/1), range [-(2^64), 2^64 - 1]
+ *   string   → UTF-8 text string (major 3)
+ *   Uint8Array / any ArrayBuffer view → byte string (major 2)
+ *   boolean  → 0xf5 (true) / 0xf4 (false)
+ *   null     → 0xf6
+ *   Array    → array (major 4)
+ *   Map      → map (major 5) with number | bigint | string keys
+ *   object   → map (major 5) with string keys (own enumerable)
+ *
+ * `undefined`, functions, and symbols throw — CBOR has no faithful,
+ * unambiguous encoding for them and silently dropping them would make
+ * the output non-deterministic w.r.t. the input.
+ */
+/** Max bytes CBOR's native integer heads can express (u64). */
+const U64_MAX = (1n << 64n) - 1n;
+/** Most-negative CBOR native integer: major type 1 stores -(n+1), n up to u64_max. */
+const NEG_MIN = -(1n << 64n);
+/**
+ * Encode a value as canonical (deterministic) CBOR.
+ * Throws on unsupported inputs rather than emitting lossy bytes.
+ */
+function encodeCborDeterministic(value) {
+    const out = [];
+    encodeItem(value, out);
+    return Uint8Array.from(out);
+}
+/** Emit a CBOR head: major type in the top 3 bits, argument `n`. */
+function writeHead(major, n, out) {
+    const mt = major << 5;
+    if (n < 24n) {
+        out.push(mt | Number(n));
+    }
+    else if (n < 0x100n) {
+        out.push(mt | 24, Number(n));
+    }
+    else if (n < 0x10000n) {
+        out.push(mt | 25, Number(n >> 8n) & 0xff, Number(n) & 0xff);
+    }
+    else if (n < 0x100000000n) {
+        out.push(mt | 26);
+        for (let shift = 24n; shift >= 0n; shift -= 8n)
+            out.push(Number((n >> shift) & 0xffn));
+    }
+    else {
+        // 8-byte argument (u64). Callers guarantee n <= U64_MAX.
+        out.push(mt | 27);
+        for (let shift = 56n; shift >= 0n; shift -= 8n)
+            out.push(Number((n >> shift) & 0xffn));
+    }
+}
+/** Encode a signed integer (number or bigint) as major type 0 / 1. */
+function encodeInteger(value, out) {
+    if (value >= 0n) {
+        if (value > U64_MAX) {
+            throw new Error(`Integer ${value} exceeds CBOR u64 range; pre-encode as a byte string for bignums.`);
+        }
+        writeHead(0, value, out);
+    }
+    else {
+        if (value < NEG_MIN) {
+            throw new Error(`Integer ${value} below CBOR negative range; pre-encode as a byte string for bignums.`);
+        }
+        // Major type 1 stores -(n + 1); recover n = -value - 1.
+        writeHead(1, -value - 1n, out);
+    }
+}
+function encodeItem(value, out) {
+    if (value === null) {
+        out.push(0xf6);
+        return;
+    }
+    if (value === true) {
+        out.push(0xf5);
+        return;
+    }
+    if (value === false) {
+        out.push(0xf4);
+        return;
+    }
+    switch (typeof value) {
+        case 'number': {
+            if (Number.isInteger(value) && Number.isSafeInteger(value)) {
+                encodeInteger(BigInt(value), out);
+                return;
+            }
+            if (!Number.isFinite(value)) {
+                throw new Error(`Cannot CBOR-encode non-finite number ${value}.`);
+            }
+            // Non-integer (or unsafe-integer) → float64. Deterministic: the
+            // same double always serialises to the same 8 bytes.
+            out.push(0xfb);
+            const buf = new ArrayBuffer(8);
+            new DataView(buf).setFloat64(0, value, false); // big-endian per CBOR
+            const bytes = new Uint8Array(buf);
+            for (let i = 0; i < 8; i++)
+                out.push(bytes[i]);
+            return;
+        }
+        case 'bigint':
+            encodeInteger(value, out);
+            return;
+        case 'string': {
+            const utf8 = new TextEncoder().encode(value);
+            writeHead(3, BigInt(utf8.length), out);
+            for (let i = 0; i < utf8.length; i++)
+                out.push(utf8[i]);
+            return;
+        }
+        case 'object': {
+            if (ArrayBuffer.isView(value)) {
+                const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+                writeHead(2, BigInt(bytes.length), out);
+                for (let i = 0; i < bytes.length; i++)
+                    out.push(bytes[i]);
+                return;
+            }
+            if (Array.isArray(value)) {
+                writeHead(4, BigInt(value.length), out);
+                for (const item of value)
+                    encodeItem(item, out);
+                return;
+            }
+            if (value instanceof Map) {
+                encodeMapEntries([...value.entries()], out);
+                return;
+            }
+            // Plain object → string-keyed map.
+            const entries = Object.entries(value);
+            encodeMapEntries(entries, out);
+            return;
+        }
+        default:
+            // undefined, function, symbol.
+            throw new Error(`Cannot CBOR-encode value of type ${typeof value}.`);
+    }
+}
+/**
+ * Encode map entries with RFC 8949 §4.2.1 canonical key ordering:
+ * each key is deterministically encoded, then entries are sorted by
+ * the bytewise lexicographic order of those key-encodings.
+ */
+function encodeMapEntries(entries, out) {
+    const encoded = entries.map(([k, v]) => {
+        const keyBytes = [];
+        encodeKey(k, keyBytes);
+        const valBytes = [];
+        encodeItem(v, valBytes);
+        return { keyBytes, valBytes };
+    });
+    encoded.sort((a, b) => compareBytes(a.keyBytes, b.keyBytes));
+    writeHead(5, BigInt(encoded.length), out);
+    for (const { keyBytes, valBytes } of encoded) {
+        // Append byte-by-byte, NOT `out.push(...bytes)`: a spread of a
+        // large value-encoding (a big metadata blob) blows the call-stack
+        // argument limit with a RangeError.
+        for (let i = 0; i < keyBytes.length; i++)
+            out.push(keyBytes[i]);
+        for (let i = 0; i < valBytes.length; i++)
+            out.push(valBytes[i]);
+    }
+}
+/**
+ * Map keys are restricted to the CBOR key types the parser's decoder
+ * reads back cleanly: text strings and integers. `Object.entries`
+ * always hands us string keys; a `Map` may carry number / bigint keys
+ * (ord's properties format uses integer keys). A string key that is a
+ * canonical non-negative integer (`"0"`, `"1"`, …) coming from a plain
+ * object stays a text-string key — we do NOT silently reinterpret it
+ * as an integer key, because that would change the map's meaning.
+ * Use a `Map` with real numeric keys when integer keys are intended.
+ */
+function encodeKey(key, out) {
+    if (typeof key === 'string') {
+        const utf8 = new TextEncoder().encode(key);
+        writeHead(3, BigInt(utf8.length), out);
+        for (let i = 0; i < utf8.length; i++)
+            out.push(utf8[i]);
+        return;
+    }
+    if (typeof key === 'number' && Number.isSafeInteger(key)) {
+        encodeInteger(BigInt(key), out);
+        return;
+    }
+    if (typeof key === 'bigint') {
+        encodeInteger(key, out);
+        return;
+    }
+    throw new Error(`Unsupported CBOR map key type: ${typeof key} (${String(key)}). Use string or integer keys.`);
+}
+/** Bytewise lexicographic comparison; shorter is smaller when a prefix. */
+function compareBytes(a, b) {
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+        if (a[i] !== b[i])
+            return a[i] - b[i];
+    }
+    return a.length - b.length;
 }
 
 /**
@@ -7996,26 +8335,15 @@ function createInscribeTransactions(args) {
     }
     const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
     const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
-    // Synthesise envelope fields from the convenience args (parent,
-    // note, contentEncoding) and prepend to the caller-supplied
-    // envelopeFields. On duplicate tags (e.g. caller also supplies a
-    // parent entry) BOTH entries are emitted in order — ord's decoder
-    // handles multiple instances per tag according to that tag's
-    // semantics: `parent` accumulates (multi-parent inscriptions are
-    // valid), `content_type` / `content_encoding` first-wins (so
-    // caller-supplied values behind an auto-field are ignored by
-    // downstream indexers). Caller-side dedup is the consumer's
-    // responsibility.
-    const autoFields = [];
-    if (args.parent !== undefined) {
-        autoFields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });
-    }
-    if (args.note !== undefined) {
-        autoFields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
-    }
-    if (args.contentEncoding === 'br') {
-        autoFields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') });
-    }
+    // Synthesise envelope fields from the convenience args and prepend
+    // to the caller-supplied envelopeFields. On duplicate tags (e.g.
+    // caller also supplies a parent entry) BOTH entries are emitted in
+    // order — ord's decoder handles multiple instances per tag according
+    // to that tag's semantics: `parent` / `delegate` accumulate,
+    // `content_type` / `content_encoding` first-wins (so caller-supplied
+    // values behind an auto-field are ignored by downstream indexers).
+    // Caller-side dedup is the consumer's responsibility.
+    const autoFields = synthesizeEnvelopeFields(args);
     const mergedFields = autoFields.length === 0
         ? (args.envelopeFields ?? [])
         : [...autoFields, ...(args.envelopeFields ?? [])];
@@ -8146,6 +8474,74 @@ function createInscribeTransactions(args) {
             envelopeScript: envelope,
         },
     };
+}
+/**
+ * Turn the convenience args (pointer, metadata, metaprotocol, parent,
+ * delegate, rune, note, contentEncoding, properties, propertyEncoding)
+ * into ord envelope fields in the exact byte form ord expects. Each
+ * value is validated here; large CBOR payloads (metadata / properties)
+ * are chunked across repeated same-tag fields so no single push
+ * exceeds the 520-byte cap. Field ORDER doesn't affect the resolved
+ * inscription (ord indexes by tag), but a stable order keeps the
+ * encoded envelope diff-friendly.
+ */
+function synthesizeEnvelopeFields(args) {
+    const fields = [];
+    if (args.pointer !== undefined) {
+        // Topology gate: this builder places the inscription's 546-sat
+        // recipient output at vout[0]. A pointer must point inside that
+        // output to land on the inscription's own UTXO. Reject an
+        // unreachable offset rather than emit a pointer that silently
+        // moves the inscription off its cat-bearing UTXO.
+        if (args.pointer >= INSCRIBE_POSTAGE_SATS) {
+            throw new Error(`pointer ${args.pointer} is unreachable: this builder's reveal has a single ` +
+                `${INSCRIBE_POSTAGE_SATS}-sat inscription output at vout[0], so pointer must be < ${INSCRIBE_POSTAGE_SATS}.`);
+        }
+        fields.push({ tag: ORD_TAGS.pointer, value: encodePointerValue(args.pointer) });
+    }
+    if (args.contentEncoding === 'br') {
+        fields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') });
+    }
+    if (args.metaprotocol !== undefined) {
+        fields.push({ tag: ORD_TAGS.metaprotocol, value: new TextEncoder().encode(args.metaprotocol) });
+    }
+    if (args.parent !== undefined) {
+        fields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });
+    }
+    if (args.delegate !== undefined) {
+        fields.push({ tag: ORD_TAGS.delegate, value: encodeInscriptionId(args.delegate) });
+    }
+    if (args.metadata !== undefined) {
+        if (!ArrayBuffer.isView(args.metadata)) {
+            throw new Error('metadata must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
+        }
+        if (args.metadata.length === 0) {
+            throw new Error('metadata must be non-empty CBOR bytes');
+        }
+        fields.push(...chunkFieldValue(ORD_TAGS.metadata, args.metadata));
+    }
+    if (args.rune !== undefined) {
+        fields.push({ tag: ORD_TAGS.rune, value: encodeRuneCommitment(args.rune) });
+    }
+    if (args.properties !== undefined) {
+        if (!ArrayBuffer.isView(args.properties)) {
+            throw new Error('properties must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
+        }
+        if (args.properties.length === 0) {
+            throw new Error('properties must be non-empty CBOR bytes');
+        }
+        fields.push(...chunkFieldValue(ORD_TAGS.properties, args.properties));
+    }
+    if (args.propertyEncoding === 'br') {
+        if (args.properties === undefined) {
+            throw new Error('propertyEncoding is only valid alongside properties');
+        }
+        fields.push({ tag: ORD_TAGS.property_encoding, value: new TextEncoder().encode('br') });
+    }
+    if (args.note !== undefined) {
+        fields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
+    }
+    return fields;
 }
 /** Per-address-type dust limit, mirroring `getMinimumUtxoSize`. */
 function changeDustLimitFor(address) {
@@ -8322,6 +8718,13 @@ function inscribeAndBroadcast(args) {
                 note: args.note,
                 parent: args.parent,
                 contentEncoding: args.contentEncoding,
+                pointer: args.pointer,
+                metadata: args.metadata,
+                metaprotocol: args.metaprotocol,
+                delegate: args.delegate,
+                rune: args.rune,
+                properties: args.properties,
+                propertyEncoding: args.propertyEncoding,
                 network: args.network,
             });
         }
@@ -8556,6 +8959,13 @@ class InscribeMintOrchestrator {
             note: content.note,
             parent: content.parent,
             contentEncoding: content.contentEncoding,
+            pointer: content.pointer,
+            metadata: content.metadata,
+            metaprotocol: content.metaprotocol,
+            delegate: content.delegate,
+            rune: content.rune,
+            properties: content.properties,
+            propertyEncoding: content.propertyEncoding,
             network: this.network,
             broadcast: (txHex) => this.cat21.postTransaction(txHex),
         }).pipe(tap((result) => {
@@ -9117,5 +9527,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeParentInscriptionId, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

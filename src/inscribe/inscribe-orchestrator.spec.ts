@@ -13,9 +13,12 @@ import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, of } from 'rxjs';
 
+import { InscriptionParserService } from 'ordpool-parser';
+
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
+import { encodeCborDeterministic } from './inscription-cbor';
 import { inscribeAndBroadcast } from './inscribe-orchestrator';
 
 const NETWORK = Network.Mainnet;
@@ -110,6 +113,58 @@ describe('inscribeAndBroadcast orchestrator', () => {
     // reveal hex it broadcast.
     const revealTx = btc.Transaction.fromRaw(hex.decode(broadcasts[1]));
     expect(revealTx.id).toBe(result.revealTxId);
+  });
+
+  it('threads pointer + metaprotocol + delegate + rune + metadata + note through to the broadcast reveal', async () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
+    const DELEGATE_ID = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0';
+    const metadata = encodeCborDeterministic({ author: 'ordpool' });
+
+    const promptForSignedPsbt = (unsigned: { base64: string; hex: string }) => {
+      const psbt = btc.Transaction.fromPSBT(base64.decode(unsigned.base64));
+      psbt.signIdx(PAYMENT_PRIV, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+      psbt.finalize();
+      return of(base64.encode(psbt.toPSBT(0)));
+    };
+
+    const broadcasts: string[] = [];
+    const broadcast = jest.fn((txHex: string) => {
+      broadcasts.push(txHex);
+      return of(btc.Transaction.fromRaw(hex.decode(txHex)).id);
+    });
+
+    const result = await firstValueFrom(inscribeAndBroadcast({
+      walletType: KnownOrdinalWalletType.xpub,
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey,
+      paymentAddress,
+      recipientAddress: recipientAddress(),
+      // delegate inscriptions carry an empty body.
+      body: new Uint8Array(0),
+      feeRatePerVbyte: 5,
+      pointer: 200,
+      metaprotocol: 'brc-20',
+      delegate: DELEGATE_ID,
+      rune: 258n,
+      metadata,
+      note: 'ordpool.space',
+      network: NETWORK,
+      broadcast,
+      promptForSignedPsbt,
+    }));
+
+    // broadcasts[1] is the reveal — parse its witness the way an indexer would.
+    const revealTx = btc.Transaction.fromRaw(hex.decode(broadcasts[1]));
+    expect(revealTx.id).toBe(result.revealTxId);
+    const witness = revealTx.getInput(0).finalScriptWitness!.map(w => hex.encode(w));
+    const parsed = InscriptionParserService.parse({ txid: result.revealTxId, vin: [{ witness }] });
+    expect(parsed.length).toBe(1);
+    expect(parsed[0].getPointer()).toBe(200);
+    expect(parsed[0].getMetaprotocol()).toBe('brc-20');
+    expect(parsed[0].getDelegates()).toEqual([DELEGATE_ID]);
+    expect(parsed[0].getRune()).toEqual(new Uint8Array([0x02, 0x01]));
+    expect(parsed[0].getMetadata()).toEqual({ author: 'ordpool' });
+    expect(parsed[0].getNote()).toBe('ordpool.space');
   });
 
   it('throws "Insufficient funds for inscribe" when funding < requirement (no signer call)', async () => {
