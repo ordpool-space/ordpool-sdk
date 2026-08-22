@@ -41,6 +41,13 @@ export interface Cat21BroadcastOptions {
   signal?: AbortSignal;
   /** Slipstream base URL override. */
   slipstreamBaseUrl?: string;
+  /**
+   * Slipstream bearer token. Slipstream authorises the broadcast with
+   * `Authorization: Bearer <token>` (see `slipstream.helper.ts`); a
+   * slipstream submit without it is auth-rejected. Required whenever a
+   * broadcast actually routes to the slipstream channel.
+   */
+  slipstreamBearerToken?: string;
   /** Allows tests + node-only environments to inject a fetch impl. */
   fetchImpl?: typeof fetch;
 }
@@ -122,6 +129,7 @@ export async function broadcastCat21(
   if (decision.channel === 'slipstream') {
     const res = await submitToSlipstream(input.hex, {
       baseUrl: options.slipstreamBaseUrl,
+      bearerToken: options.slipstreamBearerToken,
       signal: options.signal,
       fetchImpl: options.fetchImpl,
     });

@@ -157,7 +157,12 @@ export function parseCatsList(csv: string): number[] {
     }
     nums.push(n);
   }
-  return nums;
+  // Sort + dedup so the return value is the true inverse of
+  // serializeCats (which emits a sorted, deduped set). A canonical
+  // cats= line is already sorted+deduped, so this is a no-op on
+  // well-formed input; it only normalises a hand-rolled non-canonical
+  // line back to the set the message represents.
+  return Array.from(new Set(nums)).sort((a, b) => a - b);
 }
 
 function assertPositiveInt(n: number, name: string): void {

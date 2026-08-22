@@ -94,12 +94,20 @@ export function evaluateAgentPolicy(
       );
     }
   }
-  if (
-    policy.allowedCounterparties.length > 0 &&
-    action.counterpartyAddress !== undefined &&
-    !policy.allowedCounterparties.includes(action.counterpartyAddress)
-  ) {
-    return deny('counterparty-not-allowed', action.counterpartyAddress);
+  // Counterparty allowlist. Applies to every action that HAS a
+  // counterparty (all kinds except cat21_mint, which pays the network,
+  // not a party). When an allowlist is configured, a counterparty-
+  // bearing action MUST carry an address that is on it. A MISSING
+  // address fails CLOSED: a malformed intent that dropped the
+  // counterparty must not slip past the allowlist (matching the
+  // fail-closed posture of the numeric shape guards above).
+  if (policy.allowedCounterparties.length > 0 && action.kind !== 'cat21_mint') {
+    if (
+      action.counterpartyAddress === undefined ||
+      !policy.allowedCounterparties.includes(action.counterpartyAddress)
+    ) {
+      return deny('counterparty-not-allowed', action.counterpartyAddress ?? '(missing counterparty address)');
+    }
   }
   return { allowed: true };
 }

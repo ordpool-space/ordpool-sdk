@@ -86,6 +86,23 @@ describe('broadcastCat21', () => {
     expect(result).toEqual({ txid: 'slipstream-txid', channel: 'slipstream' });
   });
 
+  it('forwards the slipstream bearer token as an Authorization header', async () => {
+    const fetchSpy = jest
+      .fn<typeof fetch>()
+      .mockResolvedValue(fakeResponse({ txid: 'slipstream-txid' }));
+
+    await broadcastCat21(
+      { hex: 'cafebabe', weight: STANDARD_TX_WEIGHT_LIMIT + 1 },
+      jest.fn<(hex: string) => Promise<string>>(),
+      { fetchImpl: fetchSpy, slipstreamBearerToken: 'secret-token' }
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer secret-token');
+  });
+
   it('forwards the AbortSignal to slipstream', async () => {
     const fetchSpy = jest
       .fn<typeof fetch>()

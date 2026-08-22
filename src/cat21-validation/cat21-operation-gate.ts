@@ -428,7 +428,13 @@ function parseCatId(value: unknown):
   const m = CAT_ID_RE.exec(value);
   if (!m) return { ok: false };
   const index = Number.parseInt(m[2], 10);
-  if (!Number.isFinite(index) || index < 0) return { ok: false };
+  // Reject an index that doesn't survive a parse→string round-trip:
+  // beyond 2^53 `parseInt` rounds, so `catIndex` would silently differ
+  // from the on-wire index. `String(index) === m[2]` also rejects the
+  // (regex-excluded, but defensive) leading-zero form.
+  if (!Number.isSafeInteger(index) || index < 0 || String(index) !== m[2]) {
+    return { ok: false };
+  }
   return { ok: true, txid: m[1], index };
 }
 

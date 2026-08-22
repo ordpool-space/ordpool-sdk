@@ -174,10 +174,9 @@ describe('evaluateAgentPolicy', () => {
     ).toEqual({ allowed: true });
   });
 
-  it('allows when allowlist is non-empty but counterpartyAddress is omitted', () => {
-    // Edge case: caller didn't pass a counterparty. The action is allowed —
-    // the gate fires only when both an allowlist exists AND a counterparty
-    // address is offered for matching.
+  it('cat21_mint is exempt from the allowlist (it pays the network, not a counterparty)', () => {
+    // baseAction is cat21_mint with no counterparty. A mint has no
+    // counterparty to match, so a configured allowlist does not apply.
     expect(
       evaluateAgentPolicy(
         { ...basePolicy, allowedCounterparties: ['bc1qknown'] },
@@ -185,6 +184,27 @@ describe('evaluateAgentPolicy', () => {
       )
     ).toEqual({ allowed: true });
   });
+
+  it.each([
+    'cat21_transfer',
+    'cat21_create_offer',
+    'cat21_accept_offer',
+    'cat21_buy',
+  ] as const)(
+    'FAILS CLOSED: %s with a configured allowlist but NO counterpartyAddress is denied',
+    (kind) => {
+      // A counterparty-bearing action that dropped its address (malformed
+      // intent, or an LLM tool-call that omitted the field) must not slip
+      // past a configured allowlist. Regression guard for the fail-OPEN
+      // bug where the allowlist branch was skipped on undefined address.
+      const decision = evaluateAgentPolicy(
+        { ...basePolicy, allowedCounterparties: ['bc1qknown'], floorPriceSatsPerCat: 0 },
+        { ...baseAction, kind, receivePriceSats: 0 /* counterpartyAddress omitted */ },
+      );
+      expect(decision.allowed).toBe(false);
+      if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
+    },
+  );
 
   describe('Finding #10 — deny ordering precedence (cheapest-first)', () => {
 

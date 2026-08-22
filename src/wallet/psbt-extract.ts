@@ -48,8 +48,11 @@ export function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
     //       empty witnesses on those inputs — broadcast lands in
     //       mempool as `mandatory-script-verify-flag-failed`.
     //
-    // Distinguish by checking which inputs are actually missing a
-    // witness. If none are missing (A), swallow. If any are (B),
+    // Distinguish by checking which inputs are actually missing their
+    // finalized script. A legacy (P2PKH) input carries a
+    // `finalScriptSig` and NO witness; a segwit input carries a
+    // `finalScriptWitness`. An input is only truly missing when it has
+    // neither. If none are missing (A), swallow. If any are (B),
     // re-throw with scure's message plus the input indexes so the
     // caller can surface something actionable ("your wallet dropped
     // signatures on input N") instead of a downstream script-verify
@@ -57,7 +60,9 @@ export function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
     const missing: number[] = [];
     for (let i = 0; i < tx.inputsLength; i++) {
       const input = tx.getInput(i);
-      if (!input.finalScriptWitness || input.finalScriptWitness.length === 0) {
+      const hasWitness = !!input.finalScriptWitness && input.finalScriptWitness.length > 0;
+      const hasScriptSig = !!input.finalScriptSig && input.finalScriptSig.length > 0;
+      if (!hasWitness && !hasScriptSig) {
         missing.push(i);
       }
     }

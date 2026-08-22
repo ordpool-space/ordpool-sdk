@@ -1,5 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
+import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import {
   catchError,
@@ -247,6 +248,12 @@ export class Cat21Service {
     const result = signer.signSingleFundingInput({
       psbtBytes,
       paymentAddress,
+      // Enables the wallet-side-address shim so Unisat/Wizz/OKX see
+      // their mainnet-view address in `toSignInputs` even when the app
+      // carries a bcrt address on regtest. On mainnet the app address
+      // already IS the mainnet address, so this is a no-op there. Same
+      // wiring the inscribe orchestrator uses.
+      paymentPublicKey: hex.encode(paymentPublicKey),
       network: this.network,
       broadcast: (txHex: string) => this.postTransaction(txHex),
     });

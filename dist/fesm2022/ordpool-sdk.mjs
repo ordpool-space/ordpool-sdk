@@ -1988,8 +1988,11 @@ function extractWireTxFromPsbt(signedPsbtBytes) {
         //       empty witnesses on those inputs — broadcast lands in
         //       mempool as `mandatory-script-verify-flag-failed`.
         //
-        // Distinguish by checking which inputs are actually missing a
-        // witness. If none are missing (A), swallow. If any are (B),
+        // Distinguish by checking which inputs are actually missing their
+        // finalized script. A legacy (P2PKH) input carries a
+        // `finalScriptSig` and NO witness; a segwit input carries a
+        // `finalScriptWitness`. An input is only truly missing when it has
+        // neither. If none are missing (A), swallow. If any are (B),
         // re-throw with scure's message plus the input indexes so the
         // caller can surface something actionable ("your wallet dropped
         // signatures on input N") instead of a downstream script-verify
@@ -1997,7 +2000,9 @@ function extractWireTxFromPsbt(signedPsbtBytes) {
         const missing = [];
         for (let i = 0; i < tx.inputsLength; i++) {
             const input = tx.getInput(i);
-            if (!input.finalScriptWitness || input.finalScriptWitness.length === 0) {
+            const hasWitness = !!input.finalScriptWitness && input.finalScriptWitness.length > 0;
+            const hasScriptSig = !!input.finalScriptSig && input.finalScriptSig.length > 0;
+            if (!hasWitness && !hasScriptSig) {
                 missing.push(i);
             }
         }
@@ -3909,6 +3914,12 @@ class Cat21Service {
         const result = signer.signSingleFundingInput({
             psbtBytes,
             paymentAddress,
+            // Enables the wallet-side-address shim so Unisat/Wizz/OKX see
+            // their mainnet-view address in `toSignInputs` even when the app
+            // carries a bcrt address on regtest. On mainnet the app address
+            // already IS the mainnet address, so this is a no-op there. Same
+            // wiring the inscribe orchestrator uses.
+            paymentPublicKey: hex.encode(paymentPublicKey),
             network: this.network,
             broadcast: (txHex) => this.postTransaction(txHex),
         });
@@ -5011,7 +5022,7 @@ function validateCat21BuyOfferPsbt(args) {
     // 0a. Size cap. Mirrors Cat21OperationGate.MAX_OFFER_PSBT_BYTES so
     //     direct callers (cat21-wallet, scripts) get the same DoS guard.
     if (args.psbt.byteLength > MAX_BUY_OFFER_PSBT_BYTES) {
-        return fail('missing-seller-input', `psbt too large: ${args.psbt.byteLength} > ${MAX_BUY_OFFER_PSBT_BYTES}`);
+        return fail('malformed-offer-psbt', `psbt too large: ${args.psbt.byteLength} > ${MAX_BUY_OFFER_PSBT_BYTES}`);
     }
     // 0b. Magic bytes. PSBT magic is 0x70 0x73 0x62 0x74 0xff. Reject
     //     anything else before scure tries to parse — keeps a cheap
@@ -5022,7 +5033,7 @@ function validateCat21BuyOfferPsbt(args) {
         || args.psbt[2] !== 0x62
         || args.psbt[3] !== 0x74
         || args.psbt[4] !== 0xff) {
-        return fail('missing-seller-input', 'not a PSBT (magic bytes mismatch)');
+        return fail('malformed-offer-psbt', 'not a PSBT (magic bytes mismatch)');
     }
     let tx;
     try {
@@ -5030,10 +5041,10 @@ function validateCat21BuyOfferPsbt(args) {
     }
     catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        return fail('missing-seller-input', `PSBT parse failed: ${detail}`);
+        return fail('malformed-offer-psbt', `PSBT parse failed: ${detail}`);
     }
     if (tx.inputsLength === 0) {
-        return fail('missing-seller-input', 'tx has no inputs');
+        return fail('malformed-offer-psbt', 'tx has no inputs');
     }
     if (tx.outputsLength < 2) {
         return fail('missing-seller-payment-output', 'tx has fewer than 2 outputs');
@@ -5289,12 +5300,34 @@ function prepareBuyOfferBuyerInput(args) {
 }
 
 /**
- * Fake 64-byte taproot key-path witness. `.vsize` on a finalized
- * schnorr key-path input measures the same whether the 64 bytes are
- * a real signature or zero-fill, so a module-scoped constant is fine
- * (read-only downstream in scure's `updateInput`).
+ * Fake taproot key-path witness: a single 64-byte schnorr signature.
+ * `.vsize` measures the same whether the bytes are a real signature or
+ * zero-fill, so a module-scoped constant is fine (read-only downstream
+ * in scure's `updateInput`).
  */
 const DUMMY_TAPROOT_KEYPATH_WITNESS = new Uint8Array(64);
+/**
+ * Fake P2WPKH witness: `<sig ~72><pubkey 33>`. Used as the fallback
+ * for any non-taproot non-signable input. A DER-encoded ECDSA sig with
+ * a sighash byte is up to ~72 bytes; erring on the larger side means we
+ * over- rather than under-estimate the fee for that input.
+ */
+const DUMMY_P2WPKH_WITNESS = [new Uint8Array(72), new Uint8Array(33)];
+/**
+ * Size the dummy witness for a non-signable input by its scriptPubKey.
+ * A cat can be held on a taproot (Xverse/Leather) OR a native-segwit
+ * (Unisat/Wizz) ordinals address; faking a taproot 64-byte witness on a
+ * real P2WPKH input under-counts ~11 vB and underpays the fee. Read the
+ * input's own scriptPubKey (from its witnessUtxo) and match the witness
+ * shape. Unknown/absent script falls back to the larger P2WPKH shape.
+ */
+function dummyWitnessForNonSignable(script) {
+    // P2TR scriptPubKey: OP_1 (0x51) PUSH32 (0x20) <32-byte key> = 34 bytes.
+    if (script && script.length === 34 && script[0] === 0x51 && script[1] === 0x20) {
+        return [DUMMY_TAPROOT_KEYPATH_WITNESS];
+    }
+    return DUMMY_P2WPKH_WITNESS;
+}
 /**
  * Return `tx.vsize` for a freshly-built PSBT by dummy-signing every
  * signable input and attaching a fake witness to any `nonSignableInputs`.
@@ -5310,7 +5343,8 @@ function computePsbtVsize(args) {
     const nonSignable = args.nonSignableInputs ? new Set(args.nonSignableInputs) : null;
     for (let i = 0; i < tx.inputsLength; i++) {
         if (nonSignable?.has(i)) {
-            tx.updateInput(i, { finalScriptWitness: [DUMMY_TAPROOT_KEYPATH_WITNESS] });
+            const script = tx.getInput(i).witnessUtxo?.script;
+            tx.updateInput(i, { finalScriptWitness: dummyWitnessForNonSignable(script) });
         }
         else {
             tx.signIdx(dummyPrivateKey, i, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
@@ -6808,6 +6842,7 @@ async function broadcastCat21(input, broadcastViaMempool, options = {}) {
     if (decision.channel === 'slipstream') {
         const res = await submitToSlipstream(input.hex, {
             baseUrl: options.slipstreamBaseUrl,
+            bearerToken: options.slipstreamBearerToken,
             signal: options.signal,
             fetchImpl: options.fetchImpl,
         });
@@ -7188,7 +7223,12 @@ function parseCatsList(csv) {
         }
         nums.push(n);
     }
-    return nums;
+    // Sort + dedup so the return value is the true inverse of
+    // serializeCats (which emits a sorted, deduped set). A canonical
+    // cats= line is already sorted+deduped, so this is a no-op on
+    // well-formed input; it only normalises a hand-rolled non-canonical
+    // line back to the set the message represents.
+    return Array.from(new Set(nums)).sort((a, b) => a - b);
 }
 function assertPositiveInt(n, name) {
     if (!Number.isInteger(n) || n <= 0) {
@@ -9551,10 +9591,18 @@ function evaluateAgentPolicy(policy, action) {
             return deny('price-below-floor', `${receivePrice} < ${policy.floorPriceSatsPerCat}`);
         }
     }
-    if (policy.allowedCounterparties.length > 0 &&
-        action.counterpartyAddress !== undefined &&
-        !policy.allowedCounterparties.includes(action.counterpartyAddress)) {
-        return deny('counterparty-not-allowed', action.counterpartyAddress);
+    // Counterparty allowlist. Applies to every action that HAS a
+    // counterparty (all kinds except cat21_mint, which pays the network,
+    // not a party). When an allowlist is configured, a counterparty-
+    // bearing action MUST carry an address that is on it. A MISSING
+    // address fails CLOSED: a malformed intent that dropped the
+    // counterparty must not slip past the allowlist (matching the
+    // fail-closed posture of the numeric shape guards above).
+    if (policy.allowedCounterparties.length > 0 && action.kind !== 'cat21_mint') {
+        if (action.counterpartyAddress === undefined ||
+            !policy.allowedCounterparties.includes(action.counterpartyAddress)) {
+            return deny('counterparty-not-allowed', action.counterpartyAddress ?? '(missing counterparty address)');
+        }
     }
     return { allowed: true };
 }

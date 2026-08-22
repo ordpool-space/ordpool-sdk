@@ -360,7 +360,7 @@ export function validateCat21BuyOfferPsbt(
   //     direct callers (cat21-wallet, scripts) get the same DoS guard.
   if (args.psbt.byteLength > MAX_BUY_OFFER_PSBT_BYTES) {
     return fail(
-      'missing-seller-input',
+      'malformed-offer-psbt',
       `psbt too large: ${args.psbt.byteLength} > ${MAX_BUY_OFFER_PSBT_BYTES}`,
     );
   }
@@ -376,7 +376,7 @@ export function validateCat21BuyOfferPsbt(
     || args.psbt[3] !== 0x74
     || args.psbt[4] !== 0xff
   ) {
-    return fail('missing-seller-input', 'not a PSBT (magic bytes mismatch)');
+    return fail('malformed-offer-psbt', 'not a PSBT (magic bytes mismatch)');
   }
 
   let tx: btc.Transaction;
@@ -384,11 +384,11 @@ export function validateCat21BuyOfferPsbt(
     tx = btc.Transaction.fromPSBT(args.psbt);
   } catch (err: unknown) {
     const detail = err instanceof Error ? err.message : String(err);
-    return fail('missing-seller-input', `PSBT parse failed: ${detail}`);
+    return fail('malformed-offer-psbt', `PSBT parse failed: ${detail}`);
   }
 
   if (tx.inputsLength === 0) {
-    return fail('missing-seller-input', 'tx has no inputs');
+    return fail('malformed-offer-psbt', 'tx has no inputs');
   }
   if (tx.outputsLength < 2) {
     return fail('missing-seller-payment-output', 'tx has fewer than 2 outputs');

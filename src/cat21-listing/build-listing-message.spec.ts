@@ -270,5 +270,11 @@ describe('buildListingMessage — canonical human-readable listing message for B
       expect(() => parseCatsList('42,-1')).toThrow(/cats line/);
       expect(() => parseCatsList('')).toThrow(/cats line/);
     });
+
+    it('parseCatsList normalises a non-canonical line to sorted + deduped (the true inverse of serializeCats)', () => {
+      // Doc promises a sorted, deduped array; a hand-rolled unsorted /
+      // duplicated line must come back as the set it represents.
+      expect(parseCatsList('100,42,0,42,100')).toEqual([0, 42, 100]);
+    });
   });
 });

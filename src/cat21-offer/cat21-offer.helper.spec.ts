@@ -275,7 +275,20 @@ describe('validateCat21BuyOfferPsbt', () => {
     if (!result.ok) expect(result.reason).toBe('wrong-postage');
   });
 
-  it('rejects a PSBT with no inputs', () => {
+  it('rejects a non-PSBT blob (magic-byte mismatch) as malformed-offer-psbt', () => {
+    const notAPsbt = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00]);
+    const result = validateCat21BuyOfferPsbt({
+      psbt: notAPsbt,
+      expectedSellerUtxo: { txid: '00'.repeat(32), vout: 0 },
+      floorPriceSats: 1,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+      network: Network.Testnet3,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('malformed-offer-psbt');
+  });
+
+  it('rejects a PSBT with no inputs as malformed (not a seller-input problem)', () => {
     const empty = new btc.Transaction({ allowUnknownInputs: true, lockTime: 21 }).toPSBT();
     const result = validateCat21BuyOfferPsbt({
       psbt: empty,
@@ -285,7 +298,9 @@ describe('validateCat21BuyOfferPsbt', () => {
       network: Network.Testnet3,
     });
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe('missing-seller-input');
+    // A PSBT with no inputs is a malformed artifact, not a "the seller's
+    // input isn't the one I expected" case — those are distinct reasons.
+    if (!result.ok) expect(result.reason).toBe('malformed-offer-psbt');
   });
 
   // Avoid unused `p2wpkh` warning when both networks are imported in setup.

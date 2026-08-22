@@ -70,6 +70,7 @@ export interface Cat21OfferDestinations {
  *     caller (no marketplace context) never sees them.
  */
 export type Cat21OfferRejectionReason =
+  | 'malformed-offer-psbt'
   | 'missing-seller-input'
   | 'wrong-postage'
   | 'wrong-price'

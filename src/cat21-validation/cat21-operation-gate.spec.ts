@@ -348,6 +348,9 @@ describe('validateCat21Operation — transfer', () => {
     ['negative index', VALID_CAT_ID.replace('i0', 'i-1')],
     ['non-numeric index', VALID_CAT_ID.replace('i0', 'iabc')],
     ['no separator', VALID_CAT_ID.replace('i0', '00')],
+    // Index beyond 2^53 doesn't survive parseInt without rounding, so the
+    // parsed catIndex would silently differ from the on-wire index.
+    ['index above safe-integer range', VALID_CAT_ID.replace('i0', 'i99999999999999999999')],
   ])('rejects malformed catId (%s)', (_label: string, badCatId: string) => {
     const result = validateCat21Operation({
       config: mainnetConfig,

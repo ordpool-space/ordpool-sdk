@@ -1758,7 +1758,7 @@ interface Cat21OfferDestinations {
  *     the corresponding `expected*` arg is supplied. A bare seller-side
  *     caller (no marketplace context) never sees them.
  */
-type Cat21OfferRejectionReason = 'missing-seller-input' | 'wrong-postage' | 'wrong-price' | 'wrong-price-exact' | 'wrong-seller-input-value' | 'sighash-not-all' | 'sighash-flag-byte-not-all' | 'buyer-input-unsigned' | 'missing-seller-payment-output' | 'payment-output-wrong-address' | 'cat-output-not-spendable' | 'cat-output-wrong-address' | 'change-output-wrong-address';
+type Cat21OfferRejectionReason = 'malformed-offer-psbt' | 'missing-seller-input' | 'wrong-postage' | 'wrong-price' | 'wrong-price-exact' | 'wrong-seller-input-value' | 'sighash-not-all' | 'sighash-flag-byte-not-all' | 'buyer-input-unsigned' | 'missing-seller-payment-output' | 'payment-output-wrong-address' | 'cat-output-not-spendable' | 'cat-output-wrong-address' | 'change-output-wrong-address';
 interface Cat21OfferValidationResult {
     ok: true;
     pricePaidSats: number;
@@ -2640,6 +2640,13 @@ interface Cat21BroadcastOptions {
     signal?: AbortSignal;
     /** Slipstream base URL override. */
     slipstreamBaseUrl?: string;
+    /**
+     * Slipstream bearer token. Slipstream authorises the broadcast with
+     * `Authorization: Bearer <token>` (see `slipstream.helper.ts`); a
+     * slipstream submit without it is auth-rejected. Required whenever a
+     * broadcast actually routes to the slipstream channel.
+     */
+    slipstreamBearerToken?: string;
     /** Allows tests + node-only environments to inject a fetch impl. */
     fetchImpl?: typeof fetch;
 }
