@@ -153,16 +153,17 @@ function firstSatOfBlock(block: number): bigint {
  * as ord returns them on `/output/{outpoint}` (`sat_ranges`). Returns
  * null when every range is entirely common — the fast path.
  */
+const RARITY_RANK: Record<SatRarity, number> = {
+  common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 5,
+};
+
 export function findRareSatInRanges(
   ranges: ReadonlyArray<readonly [bigint, bigint]>,
 ): { sat: bigint; block: number; rarity: SatRarity } | null {
-  const rarityRank: Record<SatRarity, number> = {
-    common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 5,
-  };
   let rarest: { sat: bigint; block: number; rarity: SatRarity } | null = null;
   for (const [start, end] of ranges) {
     const hit = findRareSatInRange(start, end);
-    if (hit && (rarest === null || rarityRank[hit.rarity] > rarityRank[rarest.rarity])) {
+    if (hit && (rarest === null || RARITY_RANK[hit.rarity] > RARITY_RANK[rarest.rarity])) {
       rarest = hit;
       if (hit.rarity === 'mythic') return rarest;
     }

@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -140,7 +141,7 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   const sequence = resolveCat21MintInputSequence(args.walletType);
 
   const tx = new btc.Transaction({
-    lockTime: 21,
+    lockTime: CAT21_LOCK_TIME,
     allowLegacyWitnessUtxo: true,
     disableScriptCheck: true,
   });
@@ -181,9 +182,7 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   const finalFeeSats = args.feeSats + absorbedIntoFee;
 
   // Hard post-build asserts.
-  if (tx.lockTime !== 21) {
-    throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
-  }
+  assertCat21LockTime(tx.lockTime);
   for (let i = 0; i < tx.inputsLength; i++) {
     const input = tx.getInput(i);
     // Sighash check. Taproot inputs deliberately omit `sighashType`

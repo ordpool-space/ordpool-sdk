@@ -92,6 +92,19 @@ export function toRegtestAddress(mainnetAddress: string, publicKeyHex: string): 
  * app address is returned unchanged (existing behaviour before the
  * shim landed).
  */
+/**
+ * Wallets whose extension natively supports a regtest network, so the
+ * SDK does NOT rewrite their address / wire-network. Every other
+ * (mainnet-only) wallet (Leather / Unisat / Wizz / OKX / …) is shimmed
+ * to its mainnet-HRP equivalent. Single source of truth for both the
+ * address shim and the wire-network arg, which must agree.
+ */
+function isNativeRegtestWallet(walletType: KnownOrdinalWalletType): boolean {
+  return walletType === KnownOrdinalWalletType.xverse
+    || walletType === KnownOrdinalWalletType.cat21wallet
+    || walletType === KnownOrdinalWalletType.alby;
+}
+
 export function walletSidePaymentAddress(
   walletType: KnownOrdinalWalletType,
   appAddress: string,
@@ -99,14 +112,9 @@ export function walletSidePaymentAddress(
 ): string {
   if (!publicKeyHex) return appAddress;
   if (!appAddress.startsWith('bcrt')) return appAddress;
-  switch (walletType) {
-    case KnownOrdinalWalletType.xverse:
-    case KnownOrdinalWalletType.cat21wallet:
-    case KnownOrdinalWalletType.alby:
-      return appAddress;
-    default:
-      return toMainnetAddress(appAddress, publicKeyHex);
-  }
+  return isNativeRegtestWallet(walletType)
+    ? appAddress
+    : toMainnetAddress(appAddress, publicKeyHex);
 }
 
 /**
@@ -151,12 +159,5 @@ export function toWireNetworkFor(
   appNetwork: Network,
 ): Network {
   if (appNetwork !== Network.Regtest) return appNetwork;
-  switch (walletType) {
-    case KnownOrdinalWalletType.xverse:
-    case KnownOrdinalWalletType.cat21wallet:
-    case KnownOrdinalWalletType.alby:
-      return Network.Regtest;
-    default:
-      return Network.Mainnet;
-  }
+  return isNativeRegtestWallet(walletType) ? Network.Regtest : Network.Mainnet;
 }

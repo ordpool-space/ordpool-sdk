@@ -2,7 +2,7 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
-import { getAddressFormat, isInscribeSupportedPaymentAddress } from '../cat21-script/address-format';
+import { getMinimumUtxoSize, isInscribeSupportedPaymentAddress } from '../cat21-script/address-format';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -408,7 +408,7 @@ export function createInscribeTransactions(
   }
 
   // Layer-1 build at resolved fees.
-  const changeDustLimitSats = changeDustLimitFor(args.paymentAddress);
+  const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
   const commit = buildInscribeCommitPsbt({
     fundingInput: realFundingInput,
     senderChangeAddress: args.paymentAddress,
@@ -562,15 +562,4 @@ function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnve
   }
 
   return fields;
-}
-
-/** Per-address-type dust limit, mirroring `getMinimumUtxoSize`. */
-function changeDustLimitFor(address: string): number {
-  const fmt = getAddressFormat(address);
-  switch (fmt) {
-    case 'P2TR': return 330;
-    case 'P2WPKH': return 294;
-    case 'P2SH???':
-    case 'P2PKH': return 546;
-  }
 }

@@ -76,6 +76,19 @@ export function isValidPersistedWalletInfo(v: unknown): v is WalletInfo {
 }
 
 
+/**
+ * Cheap identity of the two wallet buckets for `distinctUntilChanged`:
+ * only bucket membership (by wallet type) ever changes between
+ * emissions, so this never touches the static per-wallet logo strings.
+ */
+function walletBucketKey(buckets: {
+  installedWallets: KnownOrdinalWallet[];
+  notInstalledWallets: KnownOrdinalWallet[];
+}): string {
+  return buckets.installedWallets.map((w) => w.type).join(',')
+    + '||' + buckets.notInstalledWallets.map((w) => w.type).join(',');
+}
+
 @Injectable({ providedIn: 'root' })
 export class WalletService {
 
@@ -102,9 +115,13 @@ export class WalletService {
         installedWallets:    installedWallets.filter((w) => !w.hiddenFromPicker),
         notInstalledWallets: notInstalledWallets.filter((w) => !w.hiddenFromPicker),
       })),
-      distinctUntilChanged((prev, curr) => {
-        return JSON.stringify(prev) === JSON.stringify(curr);
-      })
+      // The only thing that ever changes between emissions is WHICH
+      // wallets are detected in each bucket; every wallet's metadata
+      // (label, ~1.5-19 KB base64 logo data-URI) is static. Compare the
+      // cheap type-membership of both buckets rather than JSON-stringify
+      // the buckets (which would serialise ~40 KB of logo strings per
+      // check, up to 3x per subscription).
+      distinctUntilChanged((prev, curr) => walletBucketKey(prev) === walletBucketKey(curr))
     );
 
   // Static derivation from the injected network. Kept as a boolean field

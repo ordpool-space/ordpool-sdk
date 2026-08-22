@@ -1,6 +1,7 @@
 import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { Network, toScureNetwork } from '../network';
 
 import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
@@ -130,7 +131,7 @@ export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealR
   // Net: one inscription, two cats stacked on the same 546-sat UTXO
   // at the inscription recipient. The maintainer's call: "there are
   // never enough cats".
-  const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: 21 });
+  const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
 
   // Input 0: commit P2TR output, spent via the envelope leaf.
   // Envelope leaf is index 0 of the args.taproot.tapLeafScript array.
@@ -200,9 +201,7 @@ export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealR
     finalScriptWitness: [signature, bareLeafScript, controlBlock],
   }, true);
 
-  if (tx.lockTime !== 21) {
-    throw new Error(`Internal error: reveal lockTime=${tx.lockTime}, expected 21`);
-  }
+  assertCat21LockTime(tx.lockTime);
 
   return {
     revealHex: tx.hex,

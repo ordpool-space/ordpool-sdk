@@ -1,8 +1,10 @@
+import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
+import { addressesEquivalent, getMinimumUtxoSize } from '../cat21-script/address-format';
 import { Network, toScureNetwork } from '../network';
 import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -115,7 +117,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // to a transfer: cat21-ord reads tx.lock_time structurally and mints a
   // fresh cat at output 0 (the buyer's receive output), onto the same
   // satoshi the existing cat ordinal travels to via FIFO.
-  const tx = new btc.Transaction({ lockTime: 21, allowUnknownInputs: true });
+  const tx = new btc.Transaction({ lockTime: CAT21_LOCK_TIME, allowUnknownInputs: true });
 
   // Input 0: seller's cat UTXO, unsigned, sighash ALL pinned, sequence
   // per the per-wallet policy resolved above.
@@ -243,9 +245,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
       );
     }
   }
-  if (tx.lockTime !== 21) {
-    throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
-  }
+  assertCat21LockTime(tx.lockTime);
 
   return {
     hex: tx.hex,
@@ -412,7 +412,7 @@ export function validateCat21BuyOfferPsbt(
   // 1. Seller's input on index 0.
   const sellerInput = tx.getInput(0);
   const sellerTxidBytes = sellerInput.txid;
-  const sellerTxid = sellerTxidBytes ? bytesToHex(sellerTxidBytes) : '';
+  const sellerTxid = sellerTxidBytes ? hex.encode(sellerTxidBytes) : '';
   if (
     sellerTxid !== args.expectedSellerUtxo.txid ||
     sellerInput.index !== args.expectedSellerUtxo.vout
@@ -519,7 +519,7 @@ export function validateCat21BuyOfferPsbt(
   //     declared receive address. Only runs when the caller supplies
   //     `expectedBuyerReceiveAddress` (marketplace indexer path).
   if (args.expectedBuyerReceiveAddress !== undefined) {
-    if (!addressesEquivalent(catOutputAddress, args.expectedBuyerReceiveAddress, args.network ?? Network.Mainnet)) {
+    if (!addressesEquivalent(catOutputAddress, args.expectedBuyerReceiveAddress, scureNetwork)) {
       return fail(
         'cat-output-wrong-address',
         `expected ${args.expectedBuyerReceiveAddress}, got ${catOutputAddress}`,
@@ -551,7 +551,7 @@ export function validateCat21BuyOfferPsbt(
       'scriptPubKey not decodable to address'
     );
   }
-  if (!addressesEquivalent(actualAddress, args.expectedSellerPaymentAddress, args.network ?? Network.Mainnet)) {
+  if (!addressesEquivalent(actualAddress, args.expectedSellerPaymentAddress, scureNetwork)) {
     return fail(
       'payment-output-wrong-address',
       `expected ${args.expectedSellerPaymentAddress}, got ${actualAddress}`
@@ -595,7 +595,7 @@ export function validateCat21BuyOfferPsbt(
     } catch {
       return fail('change-output-wrong-address', 'change output scriptPubKey not a real address');
     }
-    if (!addressesEquivalent(changeAddress, args.expectedBuyerChangeAddress, args.network ?? Network.Mainnet)) {
+    if (!addressesEquivalent(changeAddress, args.expectedBuyerChangeAddress, scureNetwork)) {
       return fail(
         'change-output-wrong-address',
         `expected ${args.expectedBuyerChangeAddress}, got ${changeAddress}`,
@@ -606,39 +606,7 @@ export function validateCat21BuyOfferPsbt(
   return { ok: true, pricePaidSats, postageSats };
 }
 
-/**
- * Compare two address strings by re-decoding both to script bytes on
- * the configured network. Tolerant of bech32 case differences (BIP173
- * allows mixed but typically all-lowercase or all-uppercase) and
- * defeats Latin/Cyrillic homoglyph attacks because non-ASCII bytes
- * fail bech32 decoding.
- */
-function addressesEquivalent(a: string, b: string, network: Network): boolean {
-  if (a === b) return true;
-  try {
-    const scureNetwork = toScureNetwork(network);
-    const decodeA = btc.Address(scureNetwork).decode(a);
-    const decodeB = btc.Address(scureNetwork).decode(b);
-    const scriptA = btc.OutScript.encode(decodeA);
-    const scriptB = btc.OutScript.encode(decodeB);
-    if (scriptA.length !== scriptB.length) return false;
-    for (let i = 0; i < scriptA.length; i++) {
-      if (scriptA[i] !== scriptB[i]) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function fail(reason: Cat21OfferRejectionReason, detail?: string): Cat21OfferValidation {
   return { ok: false, reason, detail };
-}
-
-function bytesToHex(bytes: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < bytes.length; i++) {
-    out += bytes[i].toString(16).padStart(2, '0');
-  }
-  return out;
 }

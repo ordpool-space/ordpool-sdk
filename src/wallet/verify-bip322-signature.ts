@@ -2,6 +2,7 @@ import { base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha2';
+import { concatBytes } from '@noble/hashes/utils';
 
 /**
  * Result of `verifyBip322Signature`. On success, `ok: true` — the
@@ -202,7 +203,7 @@ function buildToSpend(messageHash: Uint8Array, scriptPubKey: Uint8Array): Uint8A
     scriptPubKey,
     new Uint8Array([0x00, 0x00, 0x00, 0x00]),
   ];
-  return concatBytes(parts);
+  return concatBytes(...parts);
 }
 
 function computeToSignTaprootSighash(args: {
@@ -233,16 +234,4 @@ function writeVarInt(n: number): Uint8Array {
     return new Uint8Array([0xfe, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
   }
   throw new Error(`varint too large for the tiny writer: ${n}`);
-}
-
-function concatBytes(parts: Uint8Array[]): Uint8Array {
-  let total = 0;
-  for (const p of parts) total += p.length;
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const p of parts) {
-    out.set(p, offset);
-    offset += p.length;
-  }
-  return out;
 }

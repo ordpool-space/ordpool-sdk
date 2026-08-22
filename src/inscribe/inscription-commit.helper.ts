@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
 import { Network, toScureNetwork } from '../network';
@@ -197,7 +198,7 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   // Block 21 was mined in 2009, so the lockTime constraint is
   // trivially satisfied no matter when the tx lands. The field is
   // repurposed protocol-marker data; cat21-ord reads it structurally.
-  const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: 21 });
+  const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: CAT21_LOCK_TIME });
   // Default to a non-cat21wallet sentinel so the sequence resolves to
   // the safer non-RBF value (0xfffffffe). Standalone callers get the
   // correct behaviour without having to learn the per-wallet rule.
@@ -271,9 +272,7 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   if (tx.getOutput(0).amount !== BigInt(commitOutputValueSats)) {
     throw new Error('Internal error: commit output 0 amount drifted');
   }
-  if (tx.lockTime !== 21) {
-    throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
-  }
+  assertCat21LockTime(tx.lockTime);
   if (tx.getInput(0).sequence !== sequence) {
     throw new Error(
       `Internal error: input 0 sequence=${tx.getInput(0).sequence}, expected ${sequence}`

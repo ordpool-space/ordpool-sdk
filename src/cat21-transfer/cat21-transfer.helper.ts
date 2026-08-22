@@ -1,5 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
@@ -98,7 +99,7 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   const sequence = CAT21_WALLET_INPUT_SEQUENCE;
 
   const tx = new btc.Transaction({
-    lockTime: 21,
+    lockTime: CAT21_LOCK_TIME,
     allowLegacyWitnessUtxo: true,
     disableScriptCheck: true,
   });
@@ -149,9 +150,7 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   // Hard post-build asserts. SIGHASH_ALL commits to lockTime + sequence
   // across the whole tx, so once any input signs, the 21 marker AND
   // the chosen RBF semantics are cryptographically locked.
-  if (tx.lockTime !== 21) {
-    throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
-  }
+  assertCat21LockTime(tx.lockTime);
   for (let i = 0; i < tx.inputsLength; i++) {
     const input = tx.getInput(i);
     // Taproot inputs intentionally omit sighashType (see addInput);

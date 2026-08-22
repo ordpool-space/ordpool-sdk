@@ -118,6 +118,21 @@ export interface ParsedAskQuery {
  * Build the query params for an ask permalink. Consumer concatenates
  * with its own detail path, e.g. `${origin}/cat/${n}?${new URLSearchParams(query)}`.
  */
+/**
+ * Write the cat-outpoint half of a permalink (`catTxid` / `catVout`)
+ * into `params`, validating the outpoint first. Read-side mirror of
+ * `parseCatOutpointParams`. No-op when `outpoint` is undefined.
+ */
+function writeCatOutpointParams(
+  params: Record<string, string>,
+  outpoint: CatOutpoint | undefined,
+): void {
+  if (!outpoint) return;
+  assertCatOutpoint(outpoint);
+  params[CAT21_QUERY_KEYS.catTxid] = outpoint.txid.toLowerCase();
+  params[CAT21_QUERY_KEYS.catVout] = String(outpoint.vout);
+}
+
 export function buildAskQueryParams(args: AskQueryArgs): Record<string, string> {
   if (!Number.isInteger(args.askSats) || args.askSats <= 0) {
     throw new Error(`askSats must be a positive integer; got ${args.askSats}`);
@@ -127,11 +142,7 @@ export function buildAskQueryParams(args: AskQueryArgs): Record<string, string> 
     // Validate via the canonical shape check (throws on garbage).
     out[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
   }
-  if (args.catOutpoint) {
-    assertCatOutpoint(args.catOutpoint);
-    out[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
-    out[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
-  }
+  writeCatOutpointParams(out, args.catOutpoint);
   return out;
 }
 
@@ -203,11 +214,7 @@ export function buildBuyOfferQueryParams(args: BuyOfferQueryArgs): Record<string
   if (args.sellerPaymentAddress !== undefined) {
     params[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
   }
-  if (args.catOutpoint) {
-    assertCatOutpoint(args.catOutpoint);
-    params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
-    params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
-  }
+  writeCatOutpointParams(params, args.catOutpoint);
   return params;
 }
 
@@ -244,11 +251,7 @@ export function buildAcceptOfferQueryParams(args: AcceptOfferQueryArgs): Record<
   const params: Record<string, string> = {
     [CAT21_QUERY_KEYS.offer]: args.offerBase64,
   };
-  if (args.catOutpoint) {
-    assertCatOutpoint(args.catOutpoint);
-    params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
-    params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
-  }
+  writeCatOutpointParams(params, args.catOutpoint);
   return params;
 }
 
@@ -280,11 +283,7 @@ export function buildTransferQueryParams(args: TransferQueryArgs): Record<string
   const params: Record<string, string> = {
     [CAT21_QUERY_KEYS.catNumber]: String(args.catNumber),
   };
-  if (args.catOutpoint) {
-    assertCatOutpoint(args.catOutpoint);
-    params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
-    params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
-  }
+  writeCatOutpointParams(params, args.catOutpoint);
   return params;
 }
 

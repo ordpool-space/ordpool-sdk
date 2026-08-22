@@ -39,17 +39,32 @@ export interface PickFundingUtxoArgs<T extends FundingUtxo> {
  *     change just under dust, where the builders fold it into the
  *     miner fee — the user over-pays).
  */
+/**
+ * Shared filter+sort: every UTXO whose value covers `targetSpendSats`,
+ * ordered by value (`'desc'` = largest-first, `'asc'` = smallest-first).
+ * Throws on a non-positive target. The three public entry points below
+ * document their strategy and layer their own empty-list handling on
+ * top; this owns the covering-filter + sort in one place.
+ */
+function sortedCovering<T extends FundingUtxo>(
+  utxos: ReadonlyArray<T>,
+  targetSpendSats: number,
+  dir: 'desc' | 'asc',
+): T[] {
+  if (targetSpendSats <= 0) {
+    throw new Error('targetSpendSats must be positive');
+  }
+  const sign = dir === 'desc' ? -1 : 1;
+  return [...utxos]
+    .filter(u => u.value >= targetSpendSats)
+    .sort((a, b) => sign * (a.value - b.value));
+}
+
 export function pickLargestFundingUtxoThatCovers<T extends FundingUtxo>(
   args: PickFundingUtxoArgs<T>,
 ): T | null {
   if (args.utxos.length === 0) return null;
-  if (args.targetSpendSats <= 0) {
-    throw new Error('targetSpendSats must be positive');
-  }
-  const sorted = [...args.utxos]
-    .filter(u => u.value >= args.targetSpendSats)
-    .sort((a, b) => b.value - a.value);
-  return sorted[0] ?? null;
+  return sortedCovering(args.utxos, args.targetSpendSats, 'desc')[0] ?? null;
 }
 
 /**
@@ -69,13 +84,7 @@ export function pickSmallestFundingUtxoThatCovers<T extends FundingUtxo>(
   args: PickFundingUtxoArgs<T>,
 ): T | null {
   if (args.utxos.length === 0) return null;
-  if (args.targetSpendSats <= 0) {
-    throw new Error('targetSpendSats must be positive');
-  }
-  const sorted = [...args.utxos]
-    .filter(u => u.value >= args.targetSpendSats)
-    .sort((a, b) => a.value - b.value);
-  return sorted[0] ?? null;
+  return sortedCovering(args.utxos, args.targetSpendSats, 'asc')[0] ?? null;
 }
 
 /**
@@ -87,10 +96,5 @@ export function pickSmallestFundingUtxoThatCovers<T extends FundingUtxo>(
 export function listFundingUtxosThatCover<T extends FundingUtxo>(
   args: PickFundingUtxoArgs<T>,
 ): T[] {
-  if (args.targetSpendSats <= 0) {
-    throw new Error('targetSpendSats must be positive');
-  }
-  return [...args.utxos]
-    .filter(u => u.value >= args.targetSpendSats)
-    .sort((a, b) => b.value - a.value);
+  return sortedCovering(args.utxos, args.targetSpendSats, 'desc');
 }

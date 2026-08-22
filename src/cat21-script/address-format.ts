@@ -10,6 +10,9 @@
  * No CAT-21-specific semantics — pure Bitcoin address-format logic.
  */
 
+import { hex } from '@scure/base';
+import * as btc from '@scure/btc-signer';
+
 /**
  * Conservative dust-floor (in sats) per address type. P2SH could
  * be Nested SegWit (540) or full-witness-script wrap; we return 546
@@ -211,4 +214,49 @@ export function isAddressCompatibleWithNetwork(
  */
 export function toXOnly(pubkey: Uint8Array): Uint8Array {
   return pubkey.subarray(1, 33);
+}
+
+/**
+ * True when `a` and `b` are the SAME Bitcoin address by scriptPubKey,
+ * even if the two strings differ. Decodes both to scriptPubKey bytes
+ * and byte-compares. This is the canonical address-equivalence check
+ * that guards payout / recipient / allowlist addresses, so it lives in
+ * ONE place. Defends against:
+ *
+ *   - BIP173 uppercase/lowercase: `BC1QW508…` and `bc1qw508…` are the
+ *     same address (scure accepts both), so a config storing one form
+ *     still matches the other.
+ *   - Homoglyph swaps (Latin/Cyrillic look-alikes): decode to a
+ *     different (or undecodable) script → unequal.
+ *   - Mixed encodings: `bc1q…` (P2WPKH) vs `3…` (P2SH-wrapped) decode
+ *     to different scripts → correctly unequal.
+ *
+ * Returns `false` on any decode failure of EITHER address (a config
+ * typo / whitespace rejects the candidate without crashing the caller).
+ *
+ * `network` is the scure network OBJECT (mainnet / testnet / regtest,
+ * all structurally `typeof btc.NETWORK`). Callers holding the SDK
+ * `Network` enum convert via `toScureNetwork(...)` first.
+ */
+export function addressesEquivalent(a: string, b: string, network: typeof btc.NETWORK): boolean {
+  if (a === b) return true;
+  try {
+    const scriptA = btc.OutScript.encode(btc.Address(network).decode(a));
+    const scriptB = btc.OutScript.encode(btc.Address(network).decode(b));
+    return hex.encode(scriptA) === hex.encode(scriptB);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when `candidate` is equivalent (per `addressesEquivalent`) to
+ * any address in `allowlist`.
+ */
+export function allowlistContainsAddress(
+  candidate: string,
+  allowlist: ReadonlyArray<string>,
+  network: typeof btc.NETWORK,
+): boolean {
+  return allowlist.some((entry) => addressesEquivalent(candidate, entry, network));
 }

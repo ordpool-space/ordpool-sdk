@@ -1,12 +1,13 @@
+import { hex, bech32m, base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { Script } from '@scure/btc-signer';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
-import { hex, bech32m, base64 } from '@scure/base';
 import * as i0 from '@angular/core';
 import { InjectionToken, inject, Injectable, signal, computed } from '@angular/core';
 import { from, map, Observable, switchMap, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
 import Wallet, { AddressPurpose, addListener, getAddress, signTransaction, MessageSigningProtocols } from 'sats-connect';
 import { sha256 } from '@noble/hashes/sha2';
+import { concatBytes } from '@noble/hashes/utils';
 import { HttpClient } from '@angular/common/http';
 import { toSignal } from '@angular/core/rxjs-interop';
 
@@ -467,6 +468,47 @@ function isAddressCompatibleWithNetwork(address, expectedNetworkGroup) {
  */
 function toXOnly(pubkey) {
     return pubkey.subarray(1, 33);
+}
+/**
+ * True when `a` and `b` are the SAME Bitcoin address by scriptPubKey,
+ * even if the two strings differ. Decodes both to scriptPubKey bytes
+ * and byte-compares. This is the canonical address-equivalence check
+ * that guards payout / recipient / allowlist addresses, so it lives in
+ * ONE place. Defends against:
+ *
+ *   - BIP173 uppercase/lowercase: `BC1QW508…` and `bc1qw508…` are the
+ *     same address (scure accepts both), so a config storing one form
+ *     still matches the other.
+ *   - Homoglyph swaps (Latin/Cyrillic look-alikes): decode to a
+ *     different (or undecodable) script → unequal.
+ *   - Mixed encodings: `bc1q…` (P2WPKH) vs `3…` (P2SH-wrapped) decode
+ *     to different scripts → correctly unequal.
+ *
+ * Returns `false` on any decode failure of EITHER address (a config
+ * typo / whitespace rejects the candidate without crashing the caller).
+ *
+ * `network` is the scure network OBJECT (mainnet / testnet / regtest,
+ * all structurally `typeof btc.NETWORK`). Callers holding the SDK
+ * `Network` enum convert via `toScureNetwork(...)` first.
+ */
+function addressesEquivalent(a, b, network) {
+    if (a === b)
+        return true;
+    try {
+        const scriptA = btc.OutScript.encode(btc.Address(network).decode(a));
+        const scriptB = btc.OutScript.encode(btc.Address(network).decode(b));
+        return hex.encode(scriptA) === hex.encode(scriptB);
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * True when `candidate` is equivalent (per `addressesEquivalent`) to
+ * any address in `allowlist`.
+ */
+function allowlistContainsAddress(candidate, allowlist, network) {
+    return allowlist.some((entry) => addressesEquivalent(candidate, entry, network));
 }
 
 /**
@@ -1311,19 +1353,26 @@ function toRegtestAddress(mainnetAddress, publicKeyHex) {
  * app address is returned unchanged (existing behaviour before the
  * shim landed).
  */
+/**
+ * Wallets whose extension natively supports a regtest network, so the
+ * SDK does NOT rewrite their address / wire-network. Every other
+ * (mainnet-only) wallet (Leather / Unisat / Wizz / OKX / …) is shimmed
+ * to its mainnet-HRP equivalent. Single source of truth for both the
+ * address shim and the wire-network arg, which must agree.
+ */
+function isNativeRegtestWallet(walletType) {
+    return walletType === KnownOrdinalWalletType.xverse
+        || walletType === KnownOrdinalWalletType.cat21wallet
+        || walletType === KnownOrdinalWalletType.alby;
+}
 function walletSidePaymentAddress(walletType, appAddress, publicKeyHex) {
     if (!publicKeyHex)
         return appAddress;
     if (!appAddress.startsWith('bcrt'))
         return appAddress;
-    switch (walletType) {
-        case KnownOrdinalWalletType.xverse:
-        case KnownOrdinalWalletType.cat21wallet:
-        case KnownOrdinalWalletType.alby:
-            return appAddress;
-        default:
-            return toMainnetAddress(appAddress, publicKeyHex);
-    }
+    return isNativeRegtestWallet(walletType)
+        ? appAddress
+        : toMainnetAddress(appAddress, publicKeyHex);
 }
 /**
  * Inverse of `toRegtestAddress`: derive the mainnet-HRP equivalent
@@ -1361,14 +1410,7 @@ function toMainnetAddress(bcrtAddress, publicKeyHex) {
 function toWireNetworkFor(walletType, appNetwork) {
     if (appNetwork !== Network.Regtest)
         return appNetwork;
-    switch (walletType) {
-        case KnownOrdinalWalletType.xverse:
-        case KnownOrdinalWalletType.cat21wallet:
-        case KnownOrdinalWalletType.alby:
-            return Network.Regtest;
-        default:
-            return Network.Mainnet;
-    }
+    return isNativeRegtestWallet(walletType) ? Network.Regtest : Network.Mainnet;
 }
 
 /**
@@ -3020,7 +3062,7 @@ function buildToSpend(messageHash, scriptPubKey) {
         scriptPubKey,
         new Uint8Array([0x00, 0x00, 0x00, 0x00]),
     ];
-    return concatBytes(parts);
+    return concatBytes(...parts);
 }
 function computeToSignTaprootSighash(args) {
     const tx = new btc.Transaction({
@@ -3047,18 +3089,6 @@ function writeVarInt(n) {
         return new Uint8Array([0xfe, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
     }
     throw new Error(`varint too large for the tiny writer: ${n}`);
-}
-function concatBytes(parts) {
-    let total = 0;
-    for (const p of parts)
-        total += p.length;
-    const out = new Uint8Array(total);
-    let offset = 0;
-    for (const p of parts) {
-        out.set(p, offset);
-        offset += p.length;
-    }
-    return out;
 }
 
 const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
@@ -3093,6 +3123,15 @@ function isValidPersistedWalletInfo(v) {
         isHex(o.paymentPublicKey) &&
         isHex(o.ordinalsPublicKey));
 }
+/**
+ * Cheap identity of the two wallet buckets for `distinctUntilChanged`:
+ * only bucket membership (by wallet type) ever changes between
+ * emissions, so this never touches the static per-wallet logo strings.
+ */
+function walletBucketKey(buckets) {
+    return buckets.installedWallets.map((w) => w.type).join(',')
+        + '||' + buckets.notInstalledWallets.map((w) => w.type).join(',');
+}
 class WalletService {
     storageService = inject(storage);
     network = inject(bitcoinNetwork);
@@ -3113,9 +3152,14 @@ class WalletService {
     map(({ installedWallets, notInstalledWallets }) => ({
         installedWallets: installedWallets.filter((w) => !w.hiddenFromPicker),
         notInstalledWallets: notInstalledWallets.filter((w) => !w.hiddenFromPicker),
-    })), distinctUntilChanged((prev, curr) => {
-        return JSON.stringify(prev) === JSON.stringify(curr);
-    }));
+    })), 
+    // The only thing that ever changes between emissions is WHICH
+    // wallets are detected in each bucket; every wallet's metadata
+    // (label, ~1.5-19 KB base64 logo data-URI) is static. Compare the
+    // cheap type-membership of both buckets rather than JSON-stringify
+    // the buckets (which would serialise ~40 KB of logo strings per
+    // check, up to 3x per subscription).
+    distinctUntilChanged((prev, curr) => walletBucketKey(prev) === walletBucketKey(curr)));
     // Static derivation from the injected network. Kept as a boolean field
     // (read by frontend consumers that pick a mainnet-vs-testnet endpoint)
     // and as a single-emission Observable for legacy subscribers — neither
@@ -3480,7 +3524,7 @@ function buildCat21MintPsbt(args) {
     const scureNetwork = toScureNetwork(args.network);
     const sequence = resolveCat21MintInputSequence(args.walletType);
     const tx = new btc.Transaction({
-        lockTime: 21,
+        lockTime: CAT21_LOCK_TIME,
         allowLegacyWitnessUtxo: true,
         disableScriptCheck: true,
     });
@@ -3515,9 +3559,7 @@ function buildCat21MintPsbt(args) {
     }
     const finalFeeSats = args.feeSats + absorbedIntoFee;
     // Hard post-build asserts.
-    if (tx.lockTime !== 21) {
-        throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
-    }
+    assertCat21LockTime(tx.lockTime);
     for (let i = 0; i < tx.inputsLength; i++) {
         const input = tx.getInput(i);
         // Sighash check. Taproot inputs deliberately omit `sighashType`
@@ -4524,14 +4566,14 @@ function firstSatOfBlock(block) {
  * as ord returns them on `/output/{outpoint}` (`sat_ranges`). Returns
  * null when every range is entirely common — the fast path.
  */
+const RARITY_RANK = {
+    common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 5,
+};
 function findRareSatInRanges(ranges) {
-    const rarityRank = {
-        common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 5,
-    };
     let rarest = null;
     for (const [start, end] of ranges) {
         const hit = findRareSatInRange(start, end);
-        if (hit && (rarest === null || rarityRank[hit.rarity] > rarityRank[rarest.rarity])) {
+        if (hit && (rarest === null || RARITY_RANK[hit.rarity] > RARITY_RANK[rarest.rarity])) {
             rarest = hit;
             if (hit.rarity === 'mythic')
                 return rarest;
@@ -4745,16 +4787,26 @@ function detectRareSat(ranges) {
  *     change just under dust, where the builders fold it into the
  *     miner fee — the user over-pays).
  */
+/**
+ * Shared filter+sort: every UTXO whose value covers `targetSpendSats`,
+ * ordered by value (`'desc'` = largest-first, `'asc'` = smallest-first).
+ * Throws on a non-positive target. The three public entry points below
+ * document their strategy and layer their own empty-list handling on
+ * top; this owns the covering-filter + sort in one place.
+ */
+function sortedCovering(utxos, targetSpendSats, dir) {
+    if (targetSpendSats <= 0) {
+        throw new Error('targetSpendSats must be positive');
+    }
+    const sign = dir === 'desc' ? -1 : 1;
+    return [...utxos]
+        .filter(u => u.value >= targetSpendSats)
+        .sort((a, b) => sign * (a.value - b.value));
+}
 function pickLargestFundingUtxoThatCovers(args) {
     if (args.utxos.length === 0)
         return null;
-    if (args.targetSpendSats <= 0) {
-        throw new Error('targetSpendSats must be positive');
-    }
-    const sorted = [...args.utxos]
-        .filter(u => u.value >= args.targetSpendSats)
-        .sort((a, b) => b.value - a.value);
-    return sorted[0] ?? null;
+    return sortedCovering(args.utxos, args.targetSpendSats, 'desc')[0] ?? null;
 }
 /**
  * OPT-IN strategy. Returns the UTXO with the SMALLEST value that
@@ -4772,13 +4824,7 @@ function pickLargestFundingUtxoThatCovers(args) {
 function pickSmallestFundingUtxoThatCovers(args) {
     if (args.utxos.length === 0)
         return null;
-    if (args.targetSpendSats <= 0) {
-        throw new Error('targetSpendSats must be positive');
-    }
-    const sorted = [...args.utxos]
-        .filter(u => u.value >= args.targetSpendSats)
-        .sort((a, b) => a.value - b.value);
-    return sorted[0] ?? null;
+    return sortedCovering(args.utxos, args.targetSpendSats, 'asc')[0] ?? null;
 }
 /**
  * Returns ALL UTXOs that can cover `targetSpendSats`, sorted
@@ -4787,12 +4833,7 @@ function pickSmallestFundingUtxoThatCovers(args) {
  * fee-simulation grid where the user picks from the list).
  */
 function listFundingUtxosThatCover(args) {
-    if (args.targetSpendSats <= 0) {
-        throw new Error('targetSpendSats must be positive');
-    }
-    return [...args.utxos]
-        .filter(u => u.value >= args.targetSpendSats)
-        .sort((a, b) => b.value - a.value);
+    return sortedCovering(args.utxos, args.targetSpendSats, 'desc');
 }
 
 /**
@@ -4844,7 +4885,7 @@ function buildCat21BuyOfferPsbt(args) {
     // to a transfer: cat21-ord reads tx.lock_time structurally and mints a
     // fresh cat at output 0 (the buyer's receive output), onto the same
     // satoshi the existing cat ordinal travels to via FIFO.
-    const tx = new btc.Transaction({ lockTime: 21, allowUnknownInputs: true });
+    const tx = new btc.Transaction({ lockTime: CAT21_LOCK_TIME, allowUnknownInputs: true });
     // Input 0: seller's cat UTXO, unsigned, sighash ALL pinned, sequence
     // per the per-wallet policy resolved above.
     // Detect Taproot from the scriptPubKey shape (OP_1 + 0x20-prefixed
@@ -4954,9 +4995,7 @@ function buildCat21BuyOfferPsbt(args) {
             throw new Error(`Internal error: input ${i} sequence=${input.sequence}, expected ${sequenceNumber}`);
         }
     }
-    if (tx.lockTime !== 21) {
-        throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
-    }
+    assertCat21LockTime(tx.lockTime);
     return {
         hex: tx.hex,
         psbt: tx.toPSBT(),
@@ -5066,7 +5105,7 @@ function validateCat21BuyOfferPsbt(args) {
     // 1. Seller's input on index 0.
     const sellerInput = tx.getInput(0);
     const sellerTxidBytes = sellerInput.txid;
-    const sellerTxid = sellerTxidBytes ? bytesToHex(sellerTxidBytes) : '';
+    const sellerTxid = sellerTxidBytes ? hex.encode(sellerTxidBytes) : '';
     if (sellerTxid !== args.expectedSellerUtxo.txid ||
         sellerInput.index !== args.expectedSellerUtxo.vout) {
         return fail('missing-seller-input', `got ${sellerTxid}:${sellerInput.index}`);
@@ -5155,7 +5194,7 @@ function validateCat21BuyOfferPsbt(args) {
     //     declared receive address. Only runs when the caller supplies
     //     `expectedBuyerReceiveAddress` (marketplace indexer path).
     if (args.expectedBuyerReceiveAddress !== undefined) {
-        if (!addressesEquivalent$1(catOutputAddress, args.expectedBuyerReceiveAddress, args.network ?? Network.Mainnet)) {
+        if (!addressesEquivalent(catOutputAddress, args.expectedBuyerReceiveAddress, scureNetwork)) {
             return fail('cat-output-wrong-address', `expected ${args.expectedBuyerReceiveAddress}, got ${catOutputAddress}`);
         }
     }
@@ -5175,7 +5214,7 @@ function validateCat21BuyOfferPsbt(args) {
     catch {
         return fail('payment-output-wrong-address', 'scriptPubKey not decodable to address');
     }
-    if (!addressesEquivalent$1(actualAddress, args.expectedSellerPaymentAddress, args.network ?? Network.Mainnet)) {
+    if (!addressesEquivalent(actualAddress, args.expectedSellerPaymentAddress, scureNetwork)) {
         return fail('payment-output-wrong-address', `expected ${args.expectedSellerPaymentAddress}, got ${actualAddress}`);
     }
     // 6. Seller payment amount. Output 1's value is `priceSats + postageSats`
@@ -5211,49 +5250,14 @@ function validateCat21BuyOfferPsbt(args) {
         catch {
             return fail('change-output-wrong-address', 'change output scriptPubKey not a real address');
         }
-        if (!addressesEquivalent$1(changeAddress, args.expectedBuyerChangeAddress, args.network ?? Network.Mainnet)) {
+        if (!addressesEquivalent(changeAddress, args.expectedBuyerChangeAddress, scureNetwork)) {
             return fail('change-output-wrong-address', `expected ${args.expectedBuyerChangeAddress}, got ${changeAddress}`);
         }
     }
     return { ok: true, pricePaidSats, postageSats };
 }
-/**
- * Compare two address strings by re-decoding both to script bytes on
- * the configured network. Tolerant of bech32 case differences (BIP173
- * allows mixed but typically all-lowercase or all-uppercase) and
- * defeats Latin/Cyrillic homoglyph attacks because non-ASCII bytes
- * fail bech32 decoding.
- */
-function addressesEquivalent$1(a, b, network) {
-    if (a === b)
-        return true;
-    try {
-        const scureNetwork = toScureNetwork(network);
-        const decodeA = btc.Address(scureNetwork).decode(a);
-        const decodeB = btc.Address(scureNetwork).decode(b);
-        const scriptA = btc.OutScript.encode(decodeA);
-        const scriptB = btc.OutScript.encode(decodeB);
-        if (scriptA.length !== scriptB.length)
-            return false;
-        for (let i = 0; i < scriptA.length; i++) {
-            if (scriptA[i] !== scriptB[i])
-                return false;
-        }
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
 function fail(reason, detail) {
     return { ok: false, reason, detail };
-}
-function bytesToHex(bytes) {
-    let out = '';
-    for (let i = 0; i < bytes.length; i++) {
-        out += bytes[i].toString(16).padStart(2, '0');
-    }
-    return out;
 }
 
 /**
@@ -6097,7 +6101,7 @@ function buildCat21TransferPsbt(args) {
     // wrong pre-2026-07-25; see cat21-sequence.ts docstring.
     const sequence = CAT21_WALLET_INPUT_SEQUENCE;
     const tx = new btc.Transaction({
-        lockTime: 21,
+        lockTime: CAT21_LOCK_TIME,
         allowLegacyWitnessUtxo: true,
         disableScriptCheck: true,
     });
@@ -6142,9 +6146,7 @@ function buildCat21TransferPsbt(args) {
     // Hard post-build asserts. SIGHASH_ALL commits to lockTime + sequence
     // across the whole tx, so once any input signs, the 21 marker AND
     // the chosen RBF semantics are cryptographically locked.
-    if (tx.lockTime !== 21) {
-        throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
-    }
+    assertCat21LockTime(tx.lockTime);
     for (let i = 0; i < tx.inputsLength; i++) {
         const input = tx.getInput(i);
         // Taproot inputs intentionally omit sighashType (see addInput);
@@ -6910,6 +6912,18 @@ const TXID_RE = /^[0-9a-f]{64}$/i;
  * Build the query params for an ask permalink. Consumer concatenates
  * with its own detail path, e.g. `${origin}/cat/${n}?${new URLSearchParams(query)}`.
  */
+/**
+ * Write the cat-outpoint half of a permalink (`catTxid` / `catVout`)
+ * into `params`, validating the outpoint first. Read-side mirror of
+ * `parseCatOutpointParams`. No-op when `outpoint` is undefined.
+ */
+function writeCatOutpointParams(params, outpoint) {
+    if (!outpoint)
+        return;
+    assertCatOutpoint(outpoint);
+    params[CAT21_QUERY_KEYS.catTxid] = outpoint.txid.toLowerCase();
+    params[CAT21_QUERY_KEYS.catVout] = String(outpoint.vout);
+}
 function buildAskQueryParams(args) {
     if (!Number.isInteger(args.askSats) || args.askSats <= 0) {
         throw new Error(`askSats must be a positive integer; got ${args.askSats}`);
@@ -6919,11 +6933,7 @@ function buildAskQueryParams(args) {
         // Validate via the canonical shape check (throws on garbage).
         out[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
     }
-    if (args.catOutpoint) {
-        assertCatOutpoint(args.catOutpoint);
-        out[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
-        out[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
-    }
+    writeCatOutpointParams(out, args.catOutpoint);
     return out;
 }
 /**
@@ -6958,11 +6968,7 @@ function buildBuyOfferQueryParams(args) {
     if (args.sellerPaymentAddress !== undefined) {
         params[CAT21_QUERY_KEYS.payTo] = toPaymentAddress(args.sellerPaymentAddress);
     }
-    if (args.catOutpoint) {
-        assertCatOutpoint(args.catOutpoint);
-        params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
-        params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
-    }
+    writeCatOutpointParams(params, args.catOutpoint);
     return params;
 }
 function parseBuyOfferQueryParams(query) {
@@ -6981,11 +6987,7 @@ function buildAcceptOfferQueryParams(args) {
     const params = {
         [CAT21_QUERY_KEYS.offer]: args.offerBase64,
     };
-    if (args.catOutpoint) {
-        assertCatOutpoint(args.catOutpoint);
-        params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
-        params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
-    }
+    writeCatOutpointParams(params, args.catOutpoint);
     return params;
 }
 function parseAcceptOfferQueryParams(query) {
@@ -7004,11 +7006,7 @@ function buildTransferQueryParams(args) {
     const params = {
         [CAT21_QUERY_KEYS.catNumber]: String(args.catNumber),
     };
-    if (args.catOutpoint) {
-        assertCatOutpoint(args.catOutpoint);
-        params[CAT21_QUERY_KEYS.catTxid] = args.catOutpoint.txid.toLowerCase();
-        params[CAT21_QUERY_KEYS.catVout] = String(args.catOutpoint.vout);
-    }
+    writeCatOutpointParams(params, args.catOutpoint);
     return params;
 }
 function parseTransferQueryParams(query) {
@@ -8035,7 +8033,7 @@ function buildInscribeCommitPsbt(args) {
     // Block 21 was mined in 2009, so the lockTime constraint is
     // trivially satisfied no matter when the tx lands. The field is
     // repurposed protocol-marker data; cat21-ord reads it structurally.
-    const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: 21 });
+    const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: CAT21_LOCK_TIME });
     // Default to a non-cat21wallet sentinel so the sequence resolves to
     // the safer non-RBF value (0xfffffffe). Standalone callers get the
     // correct behaviour without having to learn the per-wallet rule.
@@ -8103,9 +8101,7 @@ function buildInscribeCommitPsbt(args) {
     if (tx.getOutput(0).amount !== BigInt(commitOutputValueSats)) {
         throw new Error('Internal error: commit output 0 amount drifted');
     }
-    if (tx.lockTime !== 21) {
-        throw new Error(`Internal error: lockTime=${tx.lockTime}, expected 21`);
-    }
+    assertCat21LockTime(tx.lockTime);
     if (tx.getInput(0).sequence !== sequence) {
         throw new Error(`Internal error: input 0 sequence=${tx.getInput(0).sequence}, expected ${sequence}`);
     }
@@ -8166,7 +8162,7 @@ function buildInscribeRevealTx(args) {
     // Net: one inscription, two cats stacked on the same 546-sat UTXO
     // at the inscription recipient. The maintainer's call: "there are
     // never enough cats".
-    const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: 21 });
+    const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
     // Input 0: commit P2TR output, spent via the envelope leaf.
     // Envelope leaf is index 0 of the args.taproot.tapLeafScript array.
     tx.addInput({
@@ -8223,9 +8219,7 @@ function buildInscribeRevealTx(args) {
     tx.updateInput(0, {
         finalScriptWitness: [signature, bareLeafScript, controlBlock],
     }, true);
-    if (tx.lockTime !== 21) {
-        throw new Error(`Internal error: reveal lockTime=${tx.lockTime}, expected 21`);
-    }
+    assertCat21LockTime(tx.lockTime);
     return {
         revealHex: tx.hex,
         revealTxid: tx.id,
@@ -8498,7 +8492,7 @@ function createInscribeTransactions(args) {
             `${fees.commitOutputValueSats})`);
     }
     // Layer-1 build at resolved fees.
-    const changeDustLimitSats = changeDustLimitFor(args.paymentAddress);
+    const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
     const commit = buildInscribeCommitPsbt({
         fundingInput: realFundingInput,
         senderChangeAddress: args.paymentAddress,
@@ -8635,16 +8629,6 @@ function synthesizeEnvelopeFields(args) {
         fields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
     }
     return fields;
-}
-/** Per-address-type dust limit, mirroring `getMinimumUtxoSize`. */
-function changeDustLimitFor(address) {
-    const fmt = getAddressFormat(address);
-    switch (fmt) {
-        case 'P2TR': return 330;
-        case 'P2WPKH': return 294;
-        case 'P2SH???':
-        case 'P2PKH': return 546;
-    }
 }
 
 /**
@@ -9583,32 +9567,6 @@ function validateFeeRate(feeRate, config) {
     }
     return { ok: true };
 }
-function addressesEquivalent(a, b, network) {
-    if (a === b)
-        return true;
-    try {
-        const da = btc.Address(network).decode(a);
-        const db = btc.Address(network).decode(b);
-        const sa = btc.OutScript.encode(da);
-        const sb = btc.OutScript.encode(db);
-        if (sa.length !== sb.length)
-            return false;
-        for (let i = 0; i < sa.length; i++)
-            if (sa[i] !== sb[i])
-                return false;
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-function allowlistContainsAddress(address, allowlist, network) {
-    for (const entry of allowlist) {
-        if (addressesEquivalent(address, entry, network))
-            return true;
-    }
-    return false;
-}
 function isObject(value) {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -9769,5 +9727,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressBrotli, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressBrotli, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

@@ -7,6 +7,7 @@
 
 import * as btc from '@scure/btc-signer';
 
+import { addressesEquivalent, allowlistContainsAddress } from '../cat21-script/address-format';
 import { INSCRIBE_POSTAGE_SATS } from '../inscribe/inscription-commit.helper';
 import { encodeParentInscriptionId } from '../inscribe/inscription-envelope';
 import { Network, toScureNetwork } from '../network';
@@ -291,36 +292,6 @@ function validateFeeRate(
     };
   }
   return { ok: true };
-}
-
-function addressesEquivalent(
-  a: string,
-  b: string,
-  network: typeof btc.NETWORK,
-): boolean {
-  if (a === b) return true;
-  try {
-    const da = btc.Address(network).decode(a);
-    const db = btc.Address(network).decode(b);
-    const sa = btc.OutScript.encode(da);
-    const sb = btc.OutScript.encode(db);
-    if (sa.length !== sb.length) return false;
-    for (let i = 0; i < sa.length; i++) if (sa[i] !== sb[i]) return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function allowlistContainsAddress(
-  address: string,
-  allowlist: ReadonlyArray<string>,
-  network: typeof btc.NETWORK,
-): boolean {
-  for (const entry of allowlist) {
-    if (addressesEquivalent(address, entry, network)) return true;
-  }
-  return false;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
