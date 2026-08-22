@@ -31,7 +31,8 @@ import { findSignerOrThrow } from '../wallet/signers';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletInfo } from '../wallet/wallet.service.types';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { buildCat21TransferPsbt } from './cat21-transfer.helper';
+import { getMinimumUtxoSize } from '../cat21-script/address-format';
+import { buildCat21TransferPsbt, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS } from './cat21-transfer.helper';
 import {
   prepareTransferCatInput,
   prepareTransferFundingInput,
@@ -425,7 +426,19 @@ export class Cat21TransferOrchestrator {
         feeRatePerVbyte: feeRate,
       });
       const totalIn = CAT21_POSTAGE_SATS + pick.value;
-      const changeSats = Math.max(0, totalIn - CAT21_POSTAGE_SATS - finalFeeSats);
+      // Mirror the builder's change-output dust rule: sub-dust change is
+      // absorbed into the miner fee (no change output emitted), so report
+      // 0 back to the user rather than a "you'll get N sats" figure that
+      // never lands on chain. Same per-address dust floor + 546 fallback
+      // the builder uses for senderChangeAddress = wallet.paymentAddress.
+      const changeRaw = totalIn - CAT21_POSTAGE_SATS - finalFeeSats;
+      let changeDustLimit: number;
+      try {
+        changeDustLimit = getMinimumUtxoSize(wallet.paymentAddress);
+      } catch {
+        changeDustLimit = CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+      }
+      const changeSats = changeRaw >= changeDustLimit ? changeRaw : 0;
       return {
         simulation: {
           vsize,

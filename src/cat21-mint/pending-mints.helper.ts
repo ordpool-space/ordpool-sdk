@@ -33,7 +33,10 @@ export function txToPendingMint(tx: MempoolTx, seenAt: string): PendingMint {
     vsize,
     fee: tx.fee,
     feeRate: Math.round((tx.fee / vsize) * 10) / 10,
-    recipientAddress: tx.vout[0].scriptpubkey_address!,
+    // A CAT-21 mint's vout[0] is the recipient address output, but an
+    // OP_RETURN vout[0] (or an empty vout) has no address; fall back to
+    // '' rather than assert non-null.
+    recipientAddress: tx.vout[0]?.scriptpubkey_address ?? '',
     seenAt,
   };
 }
@@ -62,7 +65,7 @@ export function selectMatchingPendingMints(
       seenInThisPass.add(tx.txid);
       if (!matchesCat21Mint(tx, querySet)) continue;
       if (!firstSeen.has(tx.txid)) firstSeen.set(tx.txid, nowIso);
-      result.push(txToPendingMint(tx, firstSeen.get(tx.txid)!));
+      result.push(txToPendingMint(tx, firstSeen.get(tx.txid) ?? nowIso));
     }
   }
   return result;

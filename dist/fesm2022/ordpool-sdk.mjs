@@ -3800,7 +3800,10 @@ function txToPendingMint(tx, seenAt) {
         vsize,
         fee: tx.fee,
         feeRate: Math.round((tx.fee / vsize) * 10) / 10,
-        recipientAddress: tx.vout[0].scriptpubkey_address,
+        // A CAT-21 mint's vout[0] is the recipient address output, but an
+        // OP_RETURN vout[0] (or an empty vout) has no address; fall back to
+        // '' rather than assert non-null.
+        recipientAddress: tx.vout[0]?.scriptpubkey_address ?? '',
         seenAt,
     };
 }
@@ -3825,7 +3828,7 @@ function selectMatchingPendingMints(txArrays, querySet, firstSeen, nowIso) {
                 continue;
             if (!firstSeen.has(tx.txid))
                 firstSeen.set(tx.txid, nowIso);
-            result.push(txToPendingMint(tx, firstSeen.get(tx.txid)));
+            result.push(txToPendingMint(tx, firstSeen.get(tx.txid) ?? nowIso));
         }
     }
     return result;
@@ -6425,7 +6428,20 @@ class Cat21TransferOrchestrator {
                 feeRatePerVbyte: feeRate,
             });
             const totalIn = CAT21_POSTAGE_SATS + pick.value;
-            const changeSats = Math.max(0, totalIn - CAT21_POSTAGE_SATS - finalFeeSats);
+            // Mirror the builder's change-output dust rule: sub-dust change is
+            // absorbed into the miner fee (no change output emitted), so report
+            // 0 back to the user rather than a "you'll get N sats" figure that
+            // never lands on chain. Same per-address dust floor + 546 fallback
+            // the builder uses for senderChangeAddress = wallet.paymentAddress.
+            const changeRaw = totalIn - CAT21_POSTAGE_SATS - finalFeeSats;
+            let changeDustLimit;
+            try {
+                changeDustLimit = getMinimumUtxoSize(wallet.paymentAddress);
+            }
+            catch {
+                changeDustLimit = CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+            }
+            const changeSats = changeRaw >= changeDustLimit ? changeRaw : 0;
             return {
                 simulation: {
                     vsize,
@@ -7082,7 +7098,7 @@ function serializeCats(cats, headlineCatNumber) {
         }
     }
     const sorted = Array.from(new Set(cats)).sort((a, b) => a - b);
-    if (sorted[0] !== headlineCatNumber && !sorted.includes(headlineCatNumber)) {
+    if (!sorted.includes(headlineCatNumber)) {
         throw new Error(`headline catNumber ${headlineCatNumber} must be a member of cats [${sorted.join(',')}]`);
     }
     return sorted.join(',');

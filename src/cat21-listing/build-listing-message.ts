@@ -131,7 +131,7 @@ export function serializeCats(cats: number[], headlineCatNumber: number): string
     }
   }
   const sorted = Array.from(new Set(cats)).sort((a, b) => a - b);
-  if (sorted[0] !== headlineCatNumber && !sorted.includes(headlineCatNumber)) {
+  if (!sorted.includes(headlineCatNumber)) {
     throw new Error(
       `headline catNumber ${headlineCatNumber} must be a member of cats [${sorted.join(',')}]`,
     );
