@@ -1,4 +1,5 @@
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
+import { Cat21PreparedInput } from '../cat21-script/prepare-cat21-input';
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}, kept for legacy import paths. The
@@ -10,25 +11,10 @@ export const CAT21_TRANSFER_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 /**
  * The cat-bearing UTXO the seller spends to move the cat. The first sat
  * of this UTXO carries the existing cat ordinal; per ordinal-theory
- * FIFO, it travels to the first sat of output 0.
+ * FIFO, it travels to the first sat of output 0. Same prepared-input
+ * shape as every other cat-touching flow ({@link Cat21PreparedInput}).
  */
-export interface Cat21TransferCatInput {
-  txid: string;
-  vout: number;
-  /** Sats locked in the cat-bearing UTXO. Usually 546. */
-  value: number;
-  /** scriptPubKey of the cat UTXO, raw bytes. */
-  scriptPubKey: Uint8Array;
-  /** For taproot inputs, the x-only internal public key. */
-  tapInternalKey?: Uint8Array;
-  /** For P2SH-wrapped SegWit (Xverse / Unisat-NestedSegWit). */
-  redeemScript?: Uint8Array;
-  /**
-   * For legacy P2PKH inputs (Unisat-Legacy). Full previous-tx bytes —
-   * scure refuses to sign legacy inputs from witnessUtxo alone.
-   */
-  nonWitnessUtxo?: Uint8Array;
-}
+export type Cat21TransferCatInput = Cat21PreparedInput;
 
 /**
  * Wallet-provided funding UTXOs that pay the miner fee. Coin selection is
@@ -36,20 +22,7 @@ export interface Cat21TransferCatInput {
  * may also pass zero funding inputs if the cat UTXO itself has surplus
  * value above postage + fee.
  */
-export interface Cat21TransferFundingInput {
-  txid: string;
-  vout: number;
-  value: number;
-  scriptPubKey: Uint8Array;
-  tapInternalKey?: Uint8Array;
-  /** For P2SH-wrapped SegWit (Xverse / Unisat-NestedSegWit). */
-  redeemScript?: Uint8Array;
-  /**
-   * For legacy P2PKH inputs (Unisat-Legacy). Full previous-tx bytes —
-   * scure refuses to sign legacy inputs from witnessUtxo alone.
-   */
-  nonWitnessUtxo?: Uint8Array;
-}
+export type Cat21TransferFundingInput = Cat21PreparedInput;
 
 /** Output destinations of a CAT-21 transfer. */
 export interface Cat21TransferDestinations {

@@ -7,3 +7,4 @@
  */
 export * from './address-format';
 export * from './build-input-script';
+export * from './prepare-cat21-input';

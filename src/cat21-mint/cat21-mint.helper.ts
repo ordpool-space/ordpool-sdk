@@ -2,6 +2,7 @@ import * as btc from '@scure/btc-signer';
 
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
+import { Cat21PreparedInput } from '../cat21-script/prepare-cat21-input';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
@@ -31,22 +32,7 @@ export const CAT21_MINT_CHANGE_DUST_LIMIT_SATS = 546;
  *   - Legacy P2PKH: `scriptPubKey` + `nonWitnessUtxo` (full
  *     previous-tx bytes; scure requires this for legacy inputs).
  */
-export interface Cat21MintFundingInput {
-  txid: string;
-  vout: number;
-  value: number;
-  /** scriptPubKey bytes. */
-  scriptPubKey: Uint8Array;
-  /** For taproot inputs, the x-only internal public key. */
-  tapInternalKey?: Uint8Array;
-  /** For P2SH-wrapped SegWit inputs (Xverse, Unisat-NestedSegWit). */
-  redeemScript?: Uint8Array;
-  /**
-   * For legacy P2PKH inputs (Unisat-Legacy). Full previous transaction
-   * bytes — scure refuses to sign legacy inputs from witnessUtxo alone.
-   */
-  nonWitnessUtxo?: Uint8Array;
-}
+export type Cat21MintFundingInput = Cat21PreparedInput;
 
 /** Output destinations of a CAT-21 mint. */
 export interface Cat21MintDestinations {

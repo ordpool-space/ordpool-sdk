@@ -1,4 +1,5 @@
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
+import { Cat21PreparedInput } from '../cat21-script/prepare-cat21-input';
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS} kept for legacy import paths. The
@@ -24,27 +25,10 @@ export interface Cat21OfferSellerInput {
 /**
  * Buyer-funded input the offer PSBT borrows to cover price + fee + postage.
  * Caller pre-selects these via the SDK's coin-selection logic (or its own);
- * the offer builder does NOT coin-select.
+ * the offer builder does NOT coin-select. Same prepared-input shape as
+ * every other cat-touching flow ({@link Cat21PreparedInput}).
  */
-export interface Cat21OfferBuyerInput {
-  txid: string;
-  vout: number;
-  value: number;
-  scriptPubKey: Uint8Array;
-  /**
-   * For taproot inputs, the x-only internal public key. When set, the input
-   * gets `tapInternalKey` populated so a taproot signer can produce a valid
-   * key-path signature.
-   */
-  tapInternalKey?: Uint8Array;
-  /** For P2SH-wrapped SegWit (Xverse / Unisat-NestedSegWit). */
-  redeemScript?: Uint8Array;
-  /**
-   * For legacy P2PKH inputs (Unisat-Legacy). Full previous-tx bytes —
-   * scure refuses to sign legacy inputs from witnessUtxo alone.
-   */
-  nonWitnessUtxo?: Uint8Array;
-}
+export type Cat21OfferBuyerInput = Cat21PreparedInput;
 
 /** Output destinations of an ord-style offer. */
 export interface Cat21OfferDestinations {

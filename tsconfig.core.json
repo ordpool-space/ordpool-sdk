@@ -24,6 +24,7 @@
     "src/cat21-script/index.ts",
     "src/cat21-script/address-format.ts",
     "src/cat21-script/build-input-script.ts",
+    "src/cat21-script/prepare-cat21-input.ts",
     "src/cat21-script/per-wallet-scripts.ts",
     "src/network.ts",
     "src/wallet/wallet.service.types.ts",

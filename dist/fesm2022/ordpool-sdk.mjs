@@ -657,16 +657,6 @@ function buildInputScript(args) {
 }
 
 /**
- * Bitcoin / per-wallet script construction helpers, used across the
- * CAT-21 pipeline. No flow-specific code lives here — every consumer
- * (mint, transfer, offer) and the cat21.space orchestrator all reach
- * into this folder for address-format detection + per-wallet script
- * assembly.
- */
-
-const storage = new InjectionToken('storage');
-
-/**
  * Sats-connect's `BitcoinNetworkType` enum, redeclared locally.
  *
  * Why not import from `sats-connect` directly: sats-connect's index
@@ -774,6 +764,68 @@ function toLeatherNetworkString(network) {
         default: return 'testnet';
     }
 }
+
+/**
+ * Layer-2 input adapter shared by the mint / transfer / offer / inscribe
+ * pipelines: turn a raw funding UTXO (`TxnOutput`) plus the wallet's
+ * payment details into the prepared PSBT-input shape the Layer-1
+ * builders consume.
+ *
+ * Address-format-driven via `buildInputScript` — universal dispatch
+ * across every wallet the SDK supports. The wallet identity is
+ * irrelevant to script construction; only the payment address shape
+ * matters. Handles taproot (`tapInternalKey`), P2SH-wrapped SegWit
+ * (`redeemScript`), and legacy P2PKH (`nonWitnessUtxo`, since scure
+ * refuses witnessUtxo on legacy inputs). Pure function. No I/O, no
+ * Angular.
+ */
+function prepareCat21Input(args) {
+    const scureNetwork = toScureNetwork(args.network);
+    const { scriptData, tapInternalKey } = buildInputScript({
+        paymentAddress: args.paymentAddress,
+        paymentPublicKey: args.paymentPublicKey,
+        isSimulation: args.isSimulation,
+        network: scureNetwork,
+    });
+    const result = {
+        txid: args.utxo.txid,
+        vout: args.utxo.vout,
+        value: args.utxo.value,
+        scriptPubKey: scriptData.script,
+    };
+    if (scriptData.redeemScript) {
+        result.redeemScript = scriptData.redeemScript;
+    }
+    if (tapInternalKey) {
+        result.tapInternalKey = tapInternalKey;
+    }
+    if (!isSegWit(args.paymentAddress)) {
+        // Legacy P2PKH path. scure refuses witnessUtxo on legacy inputs;
+        // the full previous-tx bytes go via nonWitnessUtxo.
+        if (args.isSimulation) {
+            const dummyTx = getDummyLegacyTransaction(args.utxo, scureNetwork);
+            result.txid = dummyTx.id;
+            result.nonWitnessUtxo = hex.decode(dummyTx.hex);
+        }
+        else if (args.utxo.transactionHex) {
+            result.nonWitnessUtxo = hex.decode(args.utxo.transactionHex);
+        }
+        else {
+            throw new Error('Missing transaction hex for legacy UTXO input');
+        }
+    }
+    return result;
+}
+
+/**
+ * Bitcoin / per-wallet script construction helpers, used across the
+ * CAT-21 pipeline. No flow-specific code lives here — every consumer
+ * (mint, transfer, offer) and the cat21.space orchestrator all reach
+ * into this folder for address-format detection + per-wallet script
+ * assembly.
+ */
+
+const storage = new InjectionToken('storage');
 
 /**
  * Consumers provide this in their root injector — `useValue: Network.Mainnet`
@@ -3648,53 +3700,20 @@ function addInput$1(tx, utxo, sequence) {
 }
 
 /**
- * Layer-2 input adapter for the CAT-21 mint pipeline.
- *
- * Takes a raw funding UTXO (`TxnOutput`) plus the wallet's payment
- * details and produces the full `Cat21MintFundingInput` shape that
- * `buildCat21MintPsbt` consumes.
- *
- * Address-format-driven via `buildInputScript`. The wallet identity
- * is irrelevant — only the payment address shape matters.
- *
- * Pure function. No I/O, no Angular.
+ * Layer-2 input adapter for the CAT-21 mint pipeline. Thin,
+ * positional-args wrapper over the shared `prepareCat21Input`; the
+ * mint / transfer / offer / inscribe adapters all delegate to that one
+ * body so the wire-format logic (taproot / P2SH / legacy dispatch)
+ * lives in a single place.
  */
 function prepareMintInputForWallet(paymentOutput, paymentPublicKey, paymentAddress, isSimulation, network) {
-    const scureNetwork = toScureNetwork(network);
-    const { scriptData, tapInternalKey } = buildInputScript({
-        paymentAddress,
+    return prepareCat21Input({
+        utxo: paymentOutput,
         paymentPublicKey,
+        paymentAddress,
         isSimulation,
-        network: scureNetwork,
+        network,
     });
-    const result = {
-        txid: paymentOutput.txid,
-        vout: paymentOutput.vout,
-        value: paymentOutput.value,
-        scriptPubKey: scriptData.script,
-    };
-    if (scriptData.redeemScript) {
-        result.redeemScript = scriptData.redeemScript;
-    }
-    if (tapInternalKey) {
-        result.tapInternalKey = tapInternalKey;
-    }
-    if (!isSegWit(paymentAddress)) {
-        // Legacy P2PKH path. Scure refuses witnessUtxo on legacy inputs;
-        // the full previous-tx bytes go via nonWitnessUtxo.
-        if (isSimulation) {
-            const dummyTx = getDummyLegacyTransaction(paymentOutput, scureNetwork);
-            result.txid = dummyTx.id;
-            result.nonWitnessUtxo = hex.decode(dummyTx.hex);
-        }
-        else if (paymentOutput.transactionHex) {
-            result.nonWitnessUtxo = hex.decode(paymentOutput.transactionHex);
-        }
-        else {
-            throw new Error('Missing transaction hex for legacy UTXO input');
-        }
-    }
-    return result;
 }
 
 /**
@@ -5268,39 +5287,7 @@ function fail(reason, detail) {
 const CAT21_OFFER_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
 function prepareBuyOfferBuyerInput(args) {
-    const scureNetwork = toScureNetwork(args.network);
-    const { scriptData, tapInternalKey } = buildInputScript({
-        paymentAddress: args.paymentAddress,
-        paymentPublicKey: args.paymentPublicKey,
-        isSimulation: args.isSimulation,
-        network: scureNetwork,
-    });
-    const result = {
-        txid: args.utxo.txid,
-        vout: args.utxo.vout,
-        value: args.utxo.value,
-        scriptPubKey: scriptData.script,
-    };
-    if (scriptData.redeemScript) {
-        result.redeemScript = scriptData.redeemScript;
-    }
-    if (tapInternalKey) {
-        result.tapInternalKey = tapInternalKey;
-    }
-    if (!isSegWit(args.paymentAddress)) {
-        if (args.isSimulation) {
-            const dummyTx = getDummyLegacyTransaction(args.utxo, scureNetwork);
-            result.txid = dummyTx.id;
-            result.nonWitnessUtxo = hex.decode(dummyTx.hex);
-        }
-        else if (args.utxo.transactionHex) {
-            result.nonWitnessUtxo = hex.decode(args.utxo.transactionHex);
-        }
-        else {
-            throw new Error('Missing transaction hex for legacy UTXO input');
-        }
-    }
-    return result;
+    return prepareCat21Input(args);
 }
 
 /**
@@ -6219,45 +6206,10 @@ function addInput(tx, utxo, sequence) {
 const CAT21_TRANSFER_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
 function prepareTransferCatInput(args) {
-    return prepareInput(args);
+    return prepareCat21Input(args);
 }
 function prepareTransferFundingInput(args) {
-    return prepareInput(args);
-}
-function prepareInput(args) {
-    const scureNetwork = toScureNetwork(args.network);
-    const { scriptData, tapInternalKey } = buildInputScript({
-        paymentAddress: args.paymentAddress,
-        paymentPublicKey: args.paymentPublicKey,
-        isSimulation: args.isSimulation,
-        network: scureNetwork,
-    });
-    const result = {
-        txid: args.utxo.txid,
-        vout: args.utxo.vout,
-        value: args.utxo.value,
-        scriptPubKey: scriptData.script,
-    };
-    if (scriptData.redeemScript) {
-        result.redeemScript = scriptData.redeemScript;
-    }
-    if (tapInternalKey) {
-        result.tapInternalKey = tapInternalKey;
-    }
-    if (!isSegWit(args.paymentAddress)) {
-        if (args.isSimulation) {
-            const dummyTx = getDummyLegacyTransaction(args.utxo, scureNetwork);
-            result.txid = dummyTx.id;
-            result.nonWitnessUtxo = hex.decode(dummyTx.hex);
-        }
-        else if (args.utxo.transactionHex) {
-            result.nonWitnessUtxo = hex.decode(args.utxo.transactionHex);
-        }
-        else {
-            throw new Error('Missing transaction hex for legacy UTXO input');
-        }
-    }
-    return result;
+    return prepareCat21Input(args);
 }
 
 /**
@@ -8241,41 +8193,7 @@ function deriveRevealPubkeyXonly(privKey) {
 }
 
 function prepareInscribeFundingInput(args) {
-    const scureNetwork = toScureNetwork(args.network);
-    const { scriptData, tapInternalKey } = buildInputScript({
-        paymentAddress: args.paymentAddress,
-        paymentPublicKey: args.paymentPublicKey,
-        isSimulation: args.isSimulation,
-        network: scureNetwork,
-    });
-    const result = {
-        txid: args.utxo.txid,
-        vout: args.utxo.vout,
-        value: args.utxo.value,
-        scriptPubKey: scriptData.script,
-    };
-    if (scriptData.redeemScript) {
-        result.redeemScript = scriptData.redeemScript;
-    }
-    if (tapInternalKey) {
-        result.tapInternalKey = tapInternalKey;
-    }
-    if (!isSegWit(args.paymentAddress)) {
-        // Legacy P2PKH path. Scure refuses witnessUtxo on legacy inputs;
-        // the full previous-tx bytes go via nonWitnessUtxo.
-        if (args.isSimulation) {
-            const dummyTx = getDummyLegacyTransaction(args.utxo, scureNetwork);
-            result.txid = dummyTx.id;
-            result.nonWitnessUtxo = hex.decode(dummyTx.hex);
-        }
-        else if (args.utxo.transactionHex) {
-            result.nonWitnessUtxo = hex.decode(args.utxo.transactionHex);
-        }
-        else {
-            throw new Error('Missing transaction hex for legacy UTXO input');
-        }
-    }
-    return result;
+    return prepareCat21Input(args);
 }
 
 /**
@@ -9727,5 +9645,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressBrotli, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressBrotli, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map
