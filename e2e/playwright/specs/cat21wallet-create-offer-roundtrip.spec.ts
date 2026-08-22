@@ -408,6 +408,8 @@ async function runAdversarialValidatorChecks(args: {
     expect(wrongUtxoValidation.reason).toBe('missing-seller-input');
   }
 
+  // Garbage PSBT bytes → 'malformed-offer-psbt': a non-PSBT blob is a
+  // malformed artifact, not a seller-input problem.
   const garbage = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
   const garbageValidation = validateCat21BuyOfferPsbt({
     psbt: garbage,
@@ -418,6 +420,6 @@ async function runAdversarialValidatorChecks(args: {
   });
   expect(garbageValidation.ok, 'non-PSBT bytes must be rejected').toBe(false);
   if (garbageValidation.ok === false) {
-    expect(garbageValidation.reason).toBe('missing-seller-input');
+    expect(garbageValidation.reason).toBe('malformed-offer-psbt');
   }
 }

@@ -173,7 +173,7 @@ export class Cat21AcceptOfferOrchestrator {
     if (trimmed.length > Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES) {
       const msg = `Pasted offer too large: ${trimmed.length} bytes > ${Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES} cap`;
       this.errorMessage.set(msg);
-      this.validationResult.set({ ok: false, reason: 'missing-seller-input', detail: msg });
+      this.validationResult.set({ ok: false, reason: 'malformed-offer-psbt', detail: msg });
       this.parsedOffer.set(null);
       this.state.set('invalid');
       return;
@@ -185,7 +185,7 @@ export class Cat21AcceptOfferOrchestrator {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.errorMessage.set(msg);
-      this.validationResult.set({ ok: false, reason: 'missing-seller-input', detail: msg });
+      this.validationResult.set({ ok: false, reason: 'malformed-offer-psbt', detail: msg });
       this.parsedOffer.set(null);
       this.state.set('invalid');
       return;
@@ -214,7 +214,7 @@ export class Cat21AcceptOfferOrchestrator {
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      validation = { ok: false, reason: 'missing-seller-input', detail: msg };
+      validation = { ok: false, reason: 'malformed-offer-psbt', detail: msg };
     }
     this.validationResult.set(validation);
     this.errorMessage.set(null);
