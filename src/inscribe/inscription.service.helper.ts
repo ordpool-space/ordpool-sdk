@@ -168,16 +168,18 @@ export interface CreateInscribeTransactionsArgs {
    */
   parent?: string;
   /**
-   * Optional body-encoding hint. When set to `'br'`, the SDK emits
-   * the `content_encoding: br` envelope tag — signalling to indexers
-   * that the body is brotli-compressed. The body must already be
-   * brotli-compressed by the caller (use `compressBrotli` from
-   * `inscribe-brotli.helper.ts`); this flag only emits the tag.
+   * Optional body-encoding hint. When set to `'br'`, the SDK emits the
+   * `content_encoding: br` envelope tag, signalling to indexers that the
+   * body is brotli-compressed. The body must ALREADY be brotli-compressed
+   * by the caller; this flag only emits the tag.
    *
-   * Split between caller-side compression and SDK-side tag emission
-   * because brotli encoders are environment-specific (Node `zlib`
-   * vs browser `CompressionStream`) and benefit from being async,
-   * but the inscribe builder is sync.
+   * Compression is a deliberate, explicit consumer step (never hidden in
+   * this builder): call `assessCompression(bytes, contentType)` from
+   * `inscribe-brotli.helper.ts`, show the savings, and if you choose to
+   * compress pass its `compressed` body here with `contentEncoding: 'br'`.
+   * `assessCompression` / `compressBrotli` are async + isomorphic (they
+   * work in the browser via `brotli-wasm`), so the compression happens at
+   * the call site before this sync builder runs.
    */
   contentEncoding?: 'br';
   /**

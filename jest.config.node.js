@@ -11,7 +11,9 @@ module.exports = {
   // pending port to the SDK proper. Its specs import @leather.io/*
   // packages that aren't in the SDK's node_modules, so they fail
   // outside the wallet's own monorepo. Skip until the port lands.
-  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/', '\\.angular\\.spec\\.ts$'],
+  // `.angular.spec.ts` + `.browser.spec.ts` run only under the jsdom
+  // (browser) config; the node config skips both.
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/', '\\.angular\\.spec\\.ts$', '\\.browser\\.spec\\.ts$'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // Transform every node_modules file except snapshots — sats-connect
   // v4 and several of its transitive deps (synckit, base58-js,

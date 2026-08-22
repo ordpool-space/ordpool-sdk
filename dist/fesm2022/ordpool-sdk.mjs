@@ -9154,59 +9154,200 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
         }], ctorParameters: () => [] });
 
 /**
- * Brotli compression helper for inscribe bodies.
+ * Isomorphic brotli compression for inscription bodies (browser + Node).
  *
- * Inscription bytes go on-chain at ~~32 sat/vB during congestion;
- * brotli typically shrinks HTML / JSON / text content by 30-70%, so
- * compressing before inscribing is a direct fee win. ord recognises
- * brotli-encoded bodies via the `content_encoding: br` envelope tag
- * (tag 0x09) — the `compressBrotli` output is paired with
- * `createInscribeTransactions({ contentEncoding: 'br', body })` at
- * the call site.
+ * Inscription bytes go on-chain at ~32 sat/vB during congestion; brotli
+ * typically shrinks HTML / JSON / text by 30-70%, so compressing before
+ * inscribing is a direct fee win. ord recognises brotli-encoded bodies
+ * via the `content_encoding: br` envelope tag (0x09); the `compressBrotli`
+ * output is paired with `createInscribeTransactions({ contentEncoding:
+ * 'br', body })` at the call site.
  *
- * # Environment matrix
+ * # Why a dependency, and why `brotli-wasm`
  *
- * Brotli encoding is NOT part of the standardised web Compression
- * Streams API (`CompressionStream` accepts `gzip`, `deflate`,
- * `deflate-raw` per the WHATWG spec; `'br'` is not in it). So the
- * approach splits by environment:
+ * Brotli is NOT part of the web Compression Streams API (`CompressionStream`
+ * only does gzip / deflate), so a browser cannot produce a `content_encoding:
+ * 'br'` body on its own. The two browser consumers that need this
+ * (ordpool `/inscribe` and cubes-frontend) therefore require a real brotli
+ * encoder that runs in the browser. The zero-dependency rule is relaxed
+ * here for that reason (maintainer-approved).
  *
- *   - **Node 12+ (this helper)**: uses `zlib.brotliCompressSync`,
- *     synchronous, no dependencies.
- *   - **Browser** consumers must pre-compress before calling
- *     `createInscribeTransactions`. Practical options: a WASM
- *     encoder (e.g. `brotli-wasm` npm), a server-side endpoint,
- *     or already-brotli-encoded source content. The SDK's
- *     `contentEncoding: 'br'` flag only emits the envelope tag;
- *     it does not require this helper to have produced the bytes.
+ * We take exactly one runtime dependency: **`brotli-wasm` (pinned 3.0.1)**.
+ *   - **Correctness first.** These bytes land on Bitcoin permanently. A
+ *     hand-rolled or pure-JS encoder with a rare edge-case bug would
+ *     corrupt an inscription forever. `brotli-wasm` is the reference Rust
+ *     brotli compiled to WebAssembly, so its output is standard-conformant
+ *     by construction. Verified: `node:zlib.brotliDecompressSync` AND
+ *     `ordpool-parser`'s inline decoder both decode `brotli-wasm` output.
+ *   - **Single code path.** One library, one async API, Node + browser
+ *     (its package `exports` resolve `index.node.js` / `index.browser.js`
+ *     automatically). No `typeof window` branching.
+ *   - **Clean supply chain.** Zero transitive dependencies, no install
+ *     scripts (no `postinstall`/`prepare`), Apache-2.0, integrity-pinned
+ *     in `package-lock.json`.
+ *   - **Size cost.** The package is ~3.2 MB unpacked (multiple target
+ *     variants); a browser bundle ships one wasm variant (~hundreds of KB),
+ *     loaded once and cached. That is a one-time bundle cost, not a
+ *     per-inscription cost, and is dwarfed by the on-chain fee an
+ *     image-or-HTML inscriber already pays. Consumers should lazy-load the
+ *     inscribe route so the wasm isn't in the initial bundle.
  *
- * Sync API on purpose: keeps the inscribe builder's overall flow
- * sync end-to-end, matching `createInscribeTransactions`.
+ * # Async on purpose
+ *
+ * WebAssembly instantiation is async, so `compressBrotli` /
+ * `decompressBrotli` return Promises (the module is initialised once and
+ * cached). Callers `await` them; the inscribe builder itself stays sync
+ * because compression happens at the call site BEFORE
+ * `createInscribeTransactions` (see `assessCompression`).
+ *
+ * # Reuse beyond inscribe (cubes)
+ *
+ * `assessCompression` is deliberately generic (takes arbitrary bytes +
+ * a content-type). cubes-frontend's cube HTML (`t='id1|id2|…'` +
+ * `<script src=/content/RENDERER>`) is highly compressible text, so cubes
+ * can adopt `assessCompression` for its cube inscriptions without any
+ * inscribe-specific coupling. This file ships in `dist-core`, so both
+ * browser consumers import it from `ordpool-sdk/core`.
  */
 /**
- * Compress `body` with brotli (quality 11, mode generic) on Node.
- * Throws on non-Node runtimes with a pointer at the browser-side
- * alternative.
+ * brotli-wasm's default export is a Promise that resolves to the module
+ * once the wasm is instantiated. Cache the resolved module so the wasm is
+ * initialised at most once per process/page.
  */
-function compressBrotli(body) {
+let brotliModulePromise;
+async function getBrotli() {
+    if (!brotliModulePromise) {
+        brotliModulePromise = import('brotli-wasm').then((mod) => (mod.default ?? mod));
+    }
+    return brotliModulePromise;
+}
+/**
+ * Brotli quality 11 (maximum). Matches the previous `node:zlib` default
+ * and the compression ratio ord's own encoders produce. Inscribing is a
+ * one-time action, so the extra CPU of q11 over q9 is worth the smaller
+ * on-chain body.
+ */
+const BROTLI_QUALITY = 11;
+/**
+ * Compress `body` with brotli (quality 11). Works in the browser AND Node
+ * via `brotli-wasm`. Returns a fresh `Uint8Array`.
+ */
+async function compressBrotli(body) {
     if (!ArrayBuffer.isView(body)) {
         throw new Error('compressBrotli: body must be a Uint8Array');
     }
-    let zlib;
-    try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        zlib = require('node:zlib');
+    const brotli = await getBrotli();
+    const input = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    const out = brotli.compress(input, { quality: BROTLI_QUALITY });
+    // Normalise to a plain Uint8Array so cross-realm callers don't depend on
+    // any wasm-glue return subtype.
+    return new Uint8Array(out.buffer, out.byteOffset, out.byteLength);
+}
+/**
+ * Decompress brotli `body`. The inverse of `compressBrotli`; used by tests
+ * and by any consumer that wants to verify a `content_encoding: 'br'` body
+ * recovers its original bytes. `ordpool-parser` already decompresses `br`
+ * bodies on read (`getContent()` / `getDataUri()`); this is the SDK-side
+ * primitive for the same operation.
+ */
+async function decompressBrotli(body) {
+    if (!ArrayBuffer.isView(body)) {
+        throw new Error('decompressBrotli: body must be a Uint8Array');
     }
-    catch {
-        throw new Error('compressBrotli: node:zlib is not available in this runtime. ' +
-            'For browsers, pre-compress with a WASM brotli encoder (e.g. brotli-wasm) ' +
-            'and pass the result + `contentEncoding: \'br\'` to createInscribeTransactions.');
+    const brotli = await getBrotli();
+    const input = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    const out = brotli.decompress(input);
+    return new Uint8Array(out.buffer, out.byteOffset, out.byteLength);
+}
+/**
+ * Content types whose payload is already compressed, so brotli almost
+ * never helps and often adds bytes. `assessCompression` short-circuits
+ * these WITHOUT running brotli. Compared case-insensitively against the
+ * media type with any `; parameters` stripped.
+ */
+const ALREADY_COMPRESSED_TYPES = new Set([
+    // Raster images (all entropy-coded / already compressed).
+    'image/png',
+    'image/jpeg',
+    'image/jpg',
+    'image/gif',
+    'image/webp',
+    'image/avif',
+    'image/heic',
+    'image/heif',
+    // Video / audio containers.
+    'video/mp4',
+    'video/webm',
+    'video/quicktime',
+    'audio/mpeg',
+    'audio/ogg',
+    'audio/aac',
+    'audio/webm',
+    // Archives / already-compressed streams.
+    'application/zip',
+    'application/gzip',
+    'application/x-gzip',
+    'application/x-brotli',
+    'application/x-7z-compressed',
+    'application/x-rar-compressed',
+    'application/x-bzip2',
+    // Compressed font container (woff2 is brotli-compressed already; woff is
+    // zlib-compressed).
+    'font/woff2',
+    'font/woff',
+]);
+/** Default minimum saving (percent) below which compression isn't worth it. */
+const DEFAULT_MIN_SAVED_PERCENT = 5;
+/**
+ * Assess whether inscribing `bytes` brotli-compressed is worth it. Pure
+ * assessment: emits NO envelope tag, makes NO inscribe-specific
+ * assumptions, and returns everything the caller needs to decide. Generic
+ * enough for cubes-frontend to call on arbitrary cube HTML.
+ *
+ * Behaviour:
+ *   - Known already-compressed `contentType` (image/*, video, zip, woff2,
+ *     …) → short-circuits to `worthIt: false` WITHOUT running brotli
+ *     (`compressed` = the original bytes, 0% saved).
+ *   - Otherwise compresses once, compares, and sets
+ *     `worthIt = savedBytes > 0 && savedPercent >= minSavedPercent`. The
+ *     `savedBytes > 0` term is also the "brotli output larger than the
+ *     original → not worth it" guard. The `compressed` bytes are returned
+ *     so the caller reuses them (never compresses twice).
+ */
+async function assessCompression(bytes, contentType, options = {}) {
+    if (!ArrayBuffer.isView(bytes)) {
+        throw new Error('assessCompression: bytes must be a Uint8Array');
     }
-    const result = zlib.brotliCompressSync(body);
-    // zlib returns a Node Buffer (which is a Uint8Array subclass); copy
-    // into a fresh Uint8Array so cross-realm callers don't accidentally
-    // depend on Buffer-only methods.
-    return new Uint8Array(result.buffer, result.byteOffset, result.byteLength);
+    const minSavedPercent = options.minSavedPercent ?? DEFAULT_MIN_SAVED_PERCENT;
+    const originalSize = bytes.length;
+    const mediaType = (contentType ?? '').split(';')[0].trim().toLowerCase();
+    if (ALREADY_COMPRESSED_TYPES.has(mediaType)) {
+        return {
+            worthIt: false,
+            originalSize,
+            compressedSize: originalSize,
+            savedBytes: 0,
+            savedPercent: 0,
+            compressed: bytes,
+        };
+    }
+    const compressed = await compressBrotli(bytes);
+    const compressedSize = compressed.length;
+    const savedBytes = originalSize - compressedSize;
+    const savedPercent = originalSize === 0
+        ? 0
+        : Math.round((savedBytes / originalSize) * 10000) / 100;
+    const worthIt = savedBytes > 0 && savedPercent >= minSavedPercent;
+    return {
+        worthIt,
+        originalSize,
+        compressedSize,
+        savedBytes,
+        savedPercent,
+        // Reuse the compressed bytes when worth it; otherwise the caller
+        // inscribes the original, so hand that back to avoid a larger body.
+        compressed: worthIt ? compressed : bytes,
+    };
 }
 
 /**
@@ -9628,5 +9769,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressBrotli, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map
