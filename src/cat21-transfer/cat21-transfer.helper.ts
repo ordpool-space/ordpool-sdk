@@ -5,6 +5,7 @@ import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
 import { getMinimumUtxoSize } from '../cat21-script/address-format';
+import { addCat21Input } from '../cat21-script/prepare-cat21-input';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   Cat21TransferCatInput,
@@ -105,13 +106,13 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   });
 
   // Input 0: the cat-bearing UTXO.
-  addInput(tx, args.catUtxo, sequence);
+  addCat21Input(tx, args.catUtxo, sequence);
 
   // Input 1..N: funding UTXOs (may be empty).
   let fundingInputTotalSats = 0;
   for (const funding of args.fundingInputs) {
     fundingInputTotalSats += funding.value;
-    addInput(tx, funding, sequence);
+    addCat21Input(tx, funding, sequence);
   }
 
   // Output 0: recipient. Cat ordinal travels here via FIFO; `lockTime=21`
@@ -153,7 +154,7 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   assertCat21LockTime(tx.lockTime);
   for (let i = 0; i < tx.inputsLength; i++) {
     const input = tx.getInput(i);
-    // Taproot inputs intentionally omit sighashType (see addInput);
+    // Taproot inputs intentionally omit sighashType (see addCat21Input);
     // SIGHASH_DEFAULT and SIGHASH_ALL are wire-equivalent for key-path
     // spends per BIP-341.
     const isTaproot = !!input.tapInternalKey;
@@ -175,47 +176,3 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   };
 }
 
-function addInput(
-  tx: btc.Transaction,
-  utxo: Cat21TransferCatInput | Cat21TransferFundingInput,
-  sequence: number
-): void {
-  // Legacy P2PKH path: scure refuses to sign legacy inputs from
-  // witnessUtxo alone, the caller must supply the full prev-tx bytes
-  // via nonWitnessUtxo.
-  if (utxo.nonWitnessUtxo) {
-    const legacyInput: btc.TransactionInputUpdate = {
-      txid: utxo.txid,
-      index: utxo.vout,
-      sequence,
-      sighashType: btc.SigHash.ALL,
-      nonWitnessUtxo: utxo.nonWitnessUtxo,
-    };
-    if (utxo.redeemScript) legacyInput.redeemScript = utxo.redeemScript;
-    tx.addInput(legacyInput);
-    return;
-  }
-
-  // SegWit family: witnessUtxo + optional redeemScript (P2SH-wrap) +
-  // optional tapInternalKey (Taproot key-path).
-  //
-  // Taproot inputs OMIT sighashType — see the same comment in
-  // cat21-mint.helper.ts. SIGHASH_DEFAULT and SIGHASH_ALL commit to
-  // identical bytes for Taproot key-path spends (BIP-341); omitting
-  // the field lets the wallet's signer use its default (DEFAULT) and
-  // avoids the Alby/bitcoinjs-lib whitelist rejection.
-  const isTaproot = !!utxo.tapInternalKey;
-  const inputBase: btc.TransactionInputUpdate = {
-    txid: utxo.txid,
-    index: utxo.vout,
-    sequence,
-    witnessUtxo: {
-      script: utxo.scriptPubKey,
-      amount: BigInt(utxo.value),
-    },
-  };
-  if (!isTaproot) inputBase.sighashType = btc.SigHash.ALL;
-  if (utxo.redeemScript) inputBase.redeemScript = utxo.redeemScript;
-  if (utxo.tapInternalKey) inputBase.tapInternalKey = utxo.tapInternalKey;
-  tx.addInput(inputBase);
-}

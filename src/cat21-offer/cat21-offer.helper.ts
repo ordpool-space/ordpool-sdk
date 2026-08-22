@@ -5,6 +5,7 @@ import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lo
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
 import { addressesEquivalent, getMinimumUtxoSize } from '../cat21-script/address-format';
+import { addCat21Input } from '../cat21-script/prepare-cat21-input';
 import { Network, toScureNetwork } from '../network';
 import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -145,36 +146,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   let buyerInputTotalSats = 0;
   for (const input of args.buyerInputs) {
     buyerInputTotalSats += input.value;
-
-    // Legacy P2PKH path: scure refuses witnessUtxo on legacy inputs.
-    if (input.nonWitnessUtxo) {
-      const legacyInput: btc.TransactionInputUpdate = {
-        txid: input.txid,
-        index: input.vout,
-        sequence: sequenceNumber,
-        nonWitnessUtxo: input.nonWitnessUtxo,
-        sighashType: btc.SigHash.ALL,
-      };
-      if (input.redeemScript) legacyInput.redeemScript = input.redeemScript;
-      tx.addInput(legacyInput);
-      continue;
-    }
-
-    // SegWit family.
-    const isTaproot = !!input.tapInternalKey;
-    const base: btc.TransactionInputUpdate = {
-      txid: input.txid,
-      index: input.vout,
-      sequence: sequenceNumber,
-      witnessUtxo: {
-        script: input.scriptPubKey,
-        amount: BigInt(input.value),
-      },
-    };
-    if (!isTaproot) base.sighashType = btc.SigHash.ALL;
-    if (input.redeemScript) base.redeemScript = input.redeemScript;
-    if (input.tapInternalKey) base.tapInternalKey = input.tapInternalKey;
-    tx.addInput(base);
+    addCat21Input(tx, input, sequenceNumber);
   }
 
   // Output 0: cat lands at buyer.

@@ -1,4 +1,5 @@
 import { hex } from '@scure/base';
+import * as btc from '@scure/btc-signer';
 
 import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
@@ -94,4 +95,67 @@ export function prepareCat21Input(args: PrepareCat21InputArgs): Cat21PreparedInp
   }
 
   return result;
+}
+
+/**
+ * Add a prepared cat21 input to `tx` at the given `sequence`, encoding
+ * the per-address-type PSBT fields. Shared by the mint / transfer /
+ * offer-buyer builders so the input wire-format dispatch lives in one
+ * place.
+ *
+ *   - Legacy P2PKH (`nonWitnessUtxo` set): `nonWitnessUtxo` +
+ *     SIGHASH_ALL + optional `redeemScript` (scure refuses witnessUtxo
+ *     on legacy inputs).
+ *   - SegWit: `witnessUtxo` + optional `redeemScript` (P2SH-wrap) +
+ *     optional `tapInternalKey` (Taproot key-path).
+ *
+ * Taproot inputs OMIT `sighashType`. Per BIP-341 SIGHASH_DEFAULT
+ * (absent) and SIGHASH_ALL commit to identical bytes for a key-path
+ * spend — only the signature length differs (64 vs 65). Some wallet
+ * signers default to DEFAULT for Taproot and a few (Alby's
+ * bitcoinjs-lib signer) REJECT an explicit SIGHASH_ALL on Taproot
+ * because it requires an `allowedSighashTypes` opt-in the wallet
+ * doesn't expose. Omitting the field lets the signer pick its default;
+ * the wire commitment is identical.
+ */
+export function addCat21Input(
+  tx: btc.Transaction,
+  input: Cat21PreparedInput,
+  sequence: number,
+): void {
+  if (input.nonWitnessUtxo) {
+    const legacyInput: btc.TransactionInputUpdate = {
+      txid: input.txid,
+      index: input.vout,
+      sequence,
+      sighashType: btc.SigHash.ALL,
+      nonWitnessUtxo: input.nonWitnessUtxo,
+    };
+    if (input.redeemScript) {
+      legacyInput.redeemScript = input.redeemScript;
+    }
+    tx.addInput(legacyInput);
+    return;
+  }
+
+  const isTaproot = !!input.tapInternalKey;
+  const base: btc.TransactionInputUpdate = {
+    txid: input.txid,
+    index: input.vout,
+    sequence,
+    witnessUtxo: {
+      script: input.scriptPubKey,
+      amount: BigInt(input.value),
+    },
+  };
+  if (!isTaproot) {
+    base.sighashType = btc.SigHash.ALL;
+  }
+  if (input.redeemScript) {
+    base.redeemScript = input.redeemScript;
+  }
+  if (input.tapInternalKey) {
+    base.tapInternalKey = input.tapInternalKey;
+  }
+  tx.addInput(base);
 }

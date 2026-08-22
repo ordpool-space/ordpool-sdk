@@ -816,6 +816,63 @@ function prepareCat21Input(args) {
     }
     return result;
 }
+/**
+ * Add a prepared cat21 input to `tx` at the given `sequence`, encoding
+ * the per-address-type PSBT fields. Shared by the mint / transfer /
+ * offer-buyer builders so the input wire-format dispatch lives in one
+ * place.
+ *
+ *   - Legacy P2PKH (`nonWitnessUtxo` set): `nonWitnessUtxo` +
+ *     SIGHASH_ALL + optional `redeemScript` (scure refuses witnessUtxo
+ *     on legacy inputs).
+ *   - SegWit: `witnessUtxo` + optional `redeemScript` (P2SH-wrap) +
+ *     optional `tapInternalKey` (Taproot key-path).
+ *
+ * Taproot inputs OMIT `sighashType`. Per BIP-341 SIGHASH_DEFAULT
+ * (absent) and SIGHASH_ALL commit to identical bytes for a key-path
+ * spend — only the signature length differs (64 vs 65). Some wallet
+ * signers default to DEFAULT for Taproot and a few (Alby's
+ * bitcoinjs-lib signer) REJECT an explicit SIGHASH_ALL on Taproot
+ * because it requires an `allowedSighashTypes` opt-in the wallet
+ * doesn't expose. Omitting the field lets the signer pick its default;
+ * the wire commitment is identical.
+ */
+function addCat21Input(tx, input, sequence) {
+    if (input.nonWitnessUtxo) {
+        const legacyInput = {
+            txid: input.txid,
+            index: input.vout,
+            sequence,
+            sighashType: btc.SigHash.ALL,
+            nonWitnessUtxo: input.nonWitnessUtxo,
+        };
+        if (input.redeemScript) {
+            legacyInput.redeemScript = input.redeemScript;
+        }
+        tx.addInput(legacyInput);
+        return;
+    }
+    const isTaproot = !!input.tapInternalKey;
+    const base = {
+        txid: input.txid,
+        index: input.vout,
+        sequence,
+        witnessUtxo: {
+            script: input.scriptPubKey,
+            amount: BigInt(input.value),
+        },
+    };
+    if (!isTaproot) {
+        base.sighashType = btc.SigHash.ALL;
+    }
+    if (input.redeemScript) {
+        base.redeemScript = input.redeemScript;
+    }
+    if (input.tapInternalKey) {
+        base.tapInternalKey = input.tapInternalKey;
+    }
+    tx.addInput(base);
+}
 
 /**
  * Bitcoin / per-wallet script construction helpers, used across the
@@ -3582,7 +3639,7 @@ function buildCat21MintPsbt(args) {
     });
     // Input 0: the funding UTXO. The first sat of this UTXO becomes the
     // first sat of output 0; cat21-ord mints the cat there.
-    addInput$1(tx, args.fundingInput, sequence);
+    addCat21Input(tx, args.fundingInput, sequence);
     // Output 0: recipient (cat lands here).
     tx.addOutputAddress(args.destinations.recipientAddress, BigInt(postageSats), scureNetwork);
     // Output 1: optional tip.
@@ -3646,57 +3703,6 @@ function buildCat21MintPsbt(args) {
         changeSats,
         finalFeeSats,
     };
-}
-function addInput$1(tx, utxo, sequence) {
-    // Legacy P2PKH path: scure requires `nonWitnessUtxo` (full previous
-    // tx) and does NOT accept witnessUtxo for legacy inputs. Detect via
-    // the explicit nonWitnessUtxo field set by the Layer-2 adapter.
-    if (utxo.nonWitnessUtxo) {
-        const legacyInput = {
-            txid: utxo.txid,
-            index: utxo.vout,
-            sequence,
-            sighashType: btc.SigHash.ALL,
-            nonWitnessUtxo: utxo.nonWitnessUtxo,
-        };
-        if (utxo.redeemScript) {
-            legacyInput.redeemScript = utxo.redeemScript;
-        }
-        tx.addInput(legacyInput);
-        return;
-    }
-    // SegWit family: witnessUtxo + (optional) redeemScript for P2SH-wrap
-    // + (optional) tapInternalKey for Taproot key-path.
-    //
-    // For Taproot inputs we OMIT `sighashType`. Per BIP-341, SIGHASH_DEFAULT
-    // (absent) and SIGHASH_ALL (0x01) commit to identical bytes — only the
-    // signature length differs (64 vs 65 bytes; DEFAULT skips the explicit
-    // flag suffix). Most wallet signers default to DEFAULT for Taproot and
-    // some (Alby's bitcoinjs-lib-based signer) REJECT an explicit
-    // SIGHASH_ALL on Taproot inputs because their whitelist requires
-    // `allowedSighashTypes` to be passed to opt in, and not every wallet
-    // exposes that knob. Omitting the field lets the signer pick its
-    // default; the wire-format commitment is identical.
-    const isTaproot = !!utxo.tapInternalKey;
-    const inputBase = {
-        txid: utxo.txid,
-        index: utxo.vout,
-        sequence,
-        witnessUtxo: {
-            script: utxo.scriptPubKey,
-            amount: BigInt(utxo.value),
-        },
-    };
-    if (!isTaproot) {
-        inputBase.sighashType = btc.SigHash.ALL;
-    }
-    if (utxo.redeemScript) {
-        inputBase.redeemScript = utxo.redeemScript;
-    }
-    if (utxo.tapInternalKey) {
-        inputBase.tapInternalKey = utxo.tapInternalKey;
-    }
-    tx.addInput(inputBase);
 }
 
 /**
@@ -4930,38 +4936,7 @@ function buildCat21BuyOfferPsbt(args) {
     let buyerInputTotalSats = 0;
     for (const input of args.buyerInputs) {
         buyerInputTotalSats += input.value;
-        // Legacy P2PKH path: scure refuses witnessUtxo on legacy inputs.
-        if (input.nonWitnessUtxo) {
-            const legacyInput = {
-                txid: input.txid,
-                index: input.vout,
-                sequence: sequenceNumber,
-                nonWitnessUtxo: input.nonWitnessUtxo,
-                sighashType: btc.SigHash.ALL,
-            };
-            if (input.redeemScript)
-                legacyInput.redeemScript = input.redeemScript;
-            tx.addInput(legacyInput);
-            continue;
-        }
-        // SegWit family.
-        const isTaproot = !!input.tapInternalKey;
-        const base = {
-            txid: input.txid,
-            index: input.vout,
-            sequence: sequenceNumber,
-            witnessUtxo: {
-                script: input.scriptPubKey,
-                amount: BigInt(input.value),
-            },
-        };
-        if (!isTaproot)
-            base.sighashType = btc.SigHash.ALL;
-        if (input.redeemScript)
-            base.redeemScript = input.redeemScript;
-        if (input.tapInternalKey)
-            base.tapInternalKey = input.tapInternalKey;
-        tx.addInput(base);
+        addCat21Input(tx, input, sequenceNumber);
     }
     // Output 0: cat lands at buyer.
     tx.addOutputAddress(args.destinations.buyerReceiveAddress, BigInt(postageSats), scureNetwork);
@@ -6093,12 +6068,12 @@ function buildCat21TransferPsbt(args) {
         disableScriptCheck: true,
     });
     // Input 0: the cat-bearing UTXO.
-    addInput(tx, args.catUtxo, sequence);
+    addCat21Input(tx, args.catUtxo, sequence);
     // Input 1..N: funding UTXOs (may be empty).
     let fundingInputTotalSats = 0;
     for (const funding of args.fundingInputs) {
         fundingInputTotalSats += funding.value;
-        addInput(tx, funding, sequence);
+        addCat21Input(tx, funding, sequence);
     }
     // Output 0: recipient. Cat ordinal travels here via FIFO; `lockTime=21`
     // mints a fresh cat onto the same sat in the same tx.
@@ -6136,7 +6111,7 @@ function buildCat21TransferPsbt(args) {
     assertCat21LockTime(tx.lockTime);
     for (let i = 0; i < tx.inputsLength; i++) {
         const input = tx.getInput(i);
-        // Taproot inputs intentionally omit sighashType (see addInput);
+        // Taproot inputs intentionally omit sighashType (see addCat21Input);
         // SIGHASH_DEFAULT and SIGHASH_ALL are wire-equivalent for key-path
         // spends per BIP-341.
         const isTaproot = !!input.tapInternalKey;
@@ -6153,49 +6128,6 @@ function buildCat21TransferPsbt(args) {
         fundingInputTotalSats,
         changeSats,
     };
-}
-function addInput(tx, utxo, sequence) {
-    // Legacy P2PKH path: scure refuses to sign legacy inputs from
-    // witnessUtxo alone, the caller must supply the full prev-tx bytes
-    // via nonWitnessUtxo.
-    if (utxo.nonWitnessUtxo) {
-        const legacyInput = {
-            txid: utxo.txid,
-            index: utxo.vout,
-            sequence,
-            sighashType: btc.SigHash.ALL,
-            nonWitnessUtxo: utxo.nonWitnessUtxo,
-        };
-        if (utxo.redeemScript)
-            legacyInput.redeemScript = utxo.redeemScript;
-        tx.addInput(legacyInput);
-        return;
-    }
-    // SegWit family: witnessUtxo + optional redeemScript (P2SH-wrap) +
-    // optional tapInternalKey (Taproot key-path).
-    //
-    // Taproot inputs OMIT sighashType — see the same comment in
-    // cat21-mint.helper.ts. SIGHASH_DEFAULT and SIGHASH_ALL commit to
-    // identical bytes for Taproot key-path spends (BIP-341); omitting
-    // the field lets the wallet's signer use its default (DEFAULT) and
-    // avoids the Alby/bitcoinjs-lib whitelist rejection.
-    const isTaproot = !!utxo.tapInternalKey;
-    const inputBase = {
-        txid: utxo.txid,
-        index: utxo.vout,
-        sequence,
-        witnessUtxo: {
-            script: utxo.scriptPubKey,
-            amount: BigInt(utxo.value),
-        },
-    };
-    if (!isTaproot)
-        inputBase.sighashType = btc.SigHash.ALL;
-    if (utxo.redeemScript)
-        inputBase.redeemScript = utxo.redeemScript;
-    if (utxo.tapInternalKey)
-        inputBase.tapInternalKey = utxo.tapInternalKey;
-    tx.addInput(inputBase);
 }
 
 /**
@@ -9645,5 +9577,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressBrotli, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressBrotli, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressBrotli, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

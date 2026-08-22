@@ -2,7 +2,7 @@ import * as btc from '@scure/btc-signer';
 
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { Cat21PreparedInput } from '../cat21-script/prepare-cat21-input';
+import { Cat21PreparedInput, addCat21Input } from '../cat21-script/prepare-cat21-input';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
@@ -134,7 +134,7 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
 
   // Input 0: the funding UTXO. The first sat of this UTXO becomes the
   // first sat of output 0; cat21-ord mints the cat there.
-  addInput(tx, args.fundingInput, sequence);
+  addCat21Input(tx, args.fundingInput, sequence);
 
   // Output 0: recipient (cat lands here).
   tx.addOutputAddress(args.destinations.recipientAddress, BigInt(postageSats), scureNetwork);
@@ -207,59 +207,3 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   };
 }
 
-function addInput(
-  tx: btc.Transaction,
-  utxo: Cat21MintFundingInput,
-  sequence: number
-): void {
-  // Legacy P2PKH path: scure requires `nonWitnessUtxo` (full previous
-  // tx) and does NOT accept witnessUtxo for legacy inputs. Detect via
-  // the explicit nonWitnessUtxo field set by the Layer-2 adapter.
-  if (utxo.nonWitnessUtxo) {
-    const legacyInput: btc.TransactionInputUpdate = {
-      txid: utxo.txid,
-      index: utxo.vout,
-      sequence,
-      sighashType: btc.SigHash.ALL,
-      nonWitnessUtxo: utxo.nonWitnessUtxo,
-    };
-    if (utxo.redeemScript) {
-      legacyInput.redeemScript = utxo.redeemScript;
-    }
-    tx.addInput(legacyInput);
-    return;
-  }
-
-  // SegWit family: witnessUtxo + (optional) redeemScript for P2SH-wrap
-  // + (optional) tapInternalKey for Taproot key-path.
-  //
-  // For Taproot inputs we OMIT `sighashType`. Per BIP-341, SIGHASH_DEFAULT
-  // (absent) and SIGHASH_ALL (0x01) commit to identical bytes — only the
-  // signature length differs (64 vs 65 bytes; DEFAULT skips the explicit
-  // flag suffix). Most wallet signers default to DEFAULT for Taproot and
-  // some (Alby's bitcoinjs-lib-based signer) REJECT an explicit
-  // SIGHASH_ALL on Taproot inputs because their whitelist requires
-  // `allowedSighashTypes` to be passed to opt in, and not every wallet
-  // exposes that knob. Omitting the field lets the signer pick its
-  // default; the wire-format commitment is identical.
-  const isTaproot = !!utxo.tapInternalKey;
-  const inputBase: btc.TransactionInputUpdate = {
-    txid: utxo.txid,
-    index: utxo.vout,
-    sequence,
-    witnessUtxo: {
-      script: utxo.scriptPubKey,
-      amount: BigInt(utxo.value),
-    },
-  };
-  if (!isTaproot) {
-    inputBase.sighashType = btc.SigHash.ALL;
-  }
-  if (utxo.redeemScript) {
-    inputBase.redeemScript = utxo.redeemScript;
-  }
-  if (utxo.tapInternalKey) {
-    inputBase.tapInternalKey = utxo.tapInternalKey;
-  }
-  tx.addInput(inputBase);
-}
