@@ -30,7 +30,7 @@ import * as btc from '@scure/btc-signer';
 import { brotliDecompressSync } from 'node:zlib';
 import { InscriptionParserService } from 'ordpool-parser';
 
-import { compressBrotli } from '../../src/inscribe/inscribe-brotli.helper';
+import { assessCompression } from '../../src/inscribe/inscribe-brotli.helper';
 import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
 import { Network, toScureNetwork } from '../../src/network';
 import {
@@ -230,9 +230,12 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     const original = new TextEncoder().encode(
       '<html><body>' + 'tip the maintainer '.repeat(200) + '</body></html>',
     );
-    const compressed = compressBrotli(original);
-    // Sanity: brotli actually saved bytes on this input.
-    expect(compressed.length).toBeLessThan(original.length);
+    // Run the consumer-facing decision helper: it reports the savings and
+    // hands back the compressed bytes to reuse (never compresses twice).
+    const assessment = await assessCompression(original, 'text/html');
+    expect(assessment.worthIt).toBe(true);
+    expect(assessment.compressedSize).toBeLessThan(assessment.originalSize);
+    const compressed = assessment.compressed;
 
     // Phase 1: build with the COMPRESSED body + contentEncoding flag.
     const inscribed = createInscribeTransactions({
@@ -300,6 +303,15 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     // consumer that does its own decompression.
     const decompressed = brotliDecompressSync(onChainBody);
     expect(decompressed).toEqual(Buffer.from(original));
+
+    // Phase 6b: ordpool-parser recovers the ORIGINAL bytes itself. The
+    // parser reads content_encoding: 'br' and auto-decompresses on
+    // getContent() / getDataUri() (getDataRaw stays the raw compressed
+    // bytes, asserted in phase 4). This is the end-user render path: an
+    // explorer shows the decompressed HTML, not the brotli blob.
+    const recovered = await parsed[0].getContent();
+    expect(recovered).toBe(new TextDecoder().decode(original));
+    expect(parsed[0].getContentEncoding()).toBe('br');
 
     // Phase 7: cat21-ord saw two cats on this inscription too — the
     // nLockTime=21-on-both-txs behaviour applies whatever the body
