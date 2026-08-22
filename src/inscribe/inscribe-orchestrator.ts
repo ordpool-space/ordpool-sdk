@@ -10,6 +10,7 @@ import {
   CreateInscribeTransactionsResult,
   createInscribeTransactions,
 } from './inscription.service.helper';
+import type { InscriptionContentEncoding } from './inscribe-compression.helper';
 import { OrdEnvelopeField } from './inscription-envelope';
 
 /**
@@ -74,10 +75,11 @@ export interface InscribeAndBroadcastArgs {
    */
   parent?: string;
   /**
-   * Optional body-encoding hint ('br' for brotli). Body must
-   * already be compressed; this flag only emits the envelope tag.
+   * Optional body-encoding hint ('gzip', or 'br' for a caller-supplied
+   * brotli body). Body must already be compressed; this flag only emits
+   * the envelope tag.
    */
-  contentEncoding?: 'br';
+  contentEncoding?: InscriptionContentEncoding;
   /**
    * Optional pointer (tag 0x02) sat offset. Must be < 546 given this
    * builder's single-output reveal topology. See

@@ -74,7 +74,7 @@
     "src/inscribe/inscription.service.helper.ts",
     "src/inscribe/inscribe-broadcast.helper.ts",
     "src/inscribe/inscribe-orchestrator.ts",
-    "src/inscribe/inscribe-brotli.helper.ts",
+    "src/inscribe/inscribe-compression.helper.ts",
     "src/wallet/signers/operation-named-defaults.ts",
     "src/wallet/psbt-extract.ts",
     "src/wallet/sighash.ts",

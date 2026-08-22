@@ -32,6 +32,7 @@
  */
 
 import { type Network } from '../network';
+import { type InscriptionContentEncoding } from '../inscribe/inscribe-compression.helper';
 
 /* ──────────────────────────  Intent shape  ────────────────────────── */
 
@@ -73,8 +74,8 @@ export interface InscribeIntent {
   note?: string;
   /** Optional parent inscription id (`<txid>i<index>`). */
   parent?: string;
-  /** Optional body-encoding hint (must be `'br'` if present). */
-  contentEncoding?: 'br';
+  /** Optional body-encoding hint (`'gzip'` or `'br'` if present). */
+  contentEncoding?: InscriptionContentEncoding;
 }
 
 /**
@@ -219,8 +220,8 @@ export type InscribeGateResources = {
   noteBytes?: Uint8Array;
   /** Pre-encoded parent tag value (reversed txid + LE-trimmed index), when supplied. */
   parentBytes?: Uint8Array;
-  /** Validated content encoding when supplied. Only `'br'` today. */
-  contentEncoding?: 'br';
+  /** Validated content encoding when supplied (`'gzip'` or `'br'`). */
+  contentEncoding?: InscriptionContentEncoding;
 };
 
 export type InscribeOperationGateResult =

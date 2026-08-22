@@ -8,6 +8,7 @@
 import * as btc from '@scure/btc-signer';
 
 import { addressesEquivalent, allowlistContainsAddress } from '../cat21-script/address-format';
+import { INSCRIPTION_CONTENT_ENCODINGS, type InscriptionContentEncoding } from '../inscribe/inscribe-compression.helper';
 import { INSCRIBE_POSTAGE_SATS } from '../inscribe/inscription-commit.helper';
 import { encodeParentInscriptionId } from '../inscribe/inscription-envelope';
 import { Network, toScureNetwork } from '../network';
@@ -136,13 +137,15 @@ function validateInscribe(
     }
   }
 
-  // Content encoding — only 'br' is supported.
-  let contentEncoding: 'br' | undefined;
+  // Content encoding — 'gzip' or 'br'. This is the untrusted-input
+  // boundary (agent mode), so validate against the runtime allowlist
+  // even though the typed surface narrows it.
+  let contentEncoding: InscriptionContentEncoding | undefined;
   if (intent.contentEncoding !== undefined) {
-    if (intent.contentEncoding !== 'br') {
+    if (!INSCRIPTION_CONTENT_ENCODINGS.includes(intent.contentEncoding)) {
       return reject('content-encoding-invalid', safeStringify(intent.contentEncoding));
     }
-    contentEncoding = 'br';
+    contentEncoding = intent.contentEncoding;
   }
 
   return success({

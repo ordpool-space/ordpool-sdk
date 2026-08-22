@@ -415,10 +415,21 @@ describe('validateInscribeOperation — contentEncoding', () => {
     }
   });
 
-  it('rejects any other contentEncoding string', () => {
+  it('accepts contentEncoding=gzip', () => {
     const result = validateInscribeOperation({
       config: mainnetConfig,
-      operation: { kind: 'inscribe', intent: inscribeIntent({ contentEncoding: 'gzip' as unknown as 'br' }) },
+      operation: { kind: 'inscribe', intent: inscribeIntent({ contentEncoding: 'gzip' }) },
+    });
+    if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
+    if (result.resources.kind === 'inscribe') {
+      expect(result.resources.contentEncoding).toBe('gzip');
+    }
+  });
+
+  it('rejects an unsupported contentEncoding string', () => {
+    const result = validateInscribeOperation({
+      config: mainnetConfig,
+      operation: { kind: 'inscribe', intent: inscribeIntent({ contentEncoding: 'deflate' as unknown as 'gzip' }) },
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('content-encoding-invalid');

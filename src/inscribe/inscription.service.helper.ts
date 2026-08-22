@@ -32,6 +32,7 @@ import {
   simulateInscribeFees,
   type SimulateInscribeFeesResult,
 } from './inscription-fee.helper';
+import type { InscriptionContentEncoding } from './inscribe-compression.helper';
 
 /**
  * Layer-4 orchestration entry: ties the envelope encoder + per-
@@ -66,7 +67,8 @@ import {
  *     `<pubkey> CHECKSIG` prefix AND the taproot internal key of the
  *     commit output.
  *  3. Build envelope with caller's content + auto-prepended fields
- *     (note → tag 0x0f UTF-8; contentEncoding='br' → tag 0x09 "br")
+ *     (note → tag 0x0f UTF-8; contentEncoding → tag 0x09, the encoding
+ *     string e.g. "gzip" / "br")
  *     + any caller-supplied `envelopeFields`.
  *  4. Simulate fees (Layer 3): commitFee, revealFee,
  *     commitOutputValueSats (= postage + revealFee + tip.value),
@@ -168,20 +170,23 @@ export interface CreateInscribeTransactionsArgs {
    */
   parent?: string;
   /**
-   * Optional body-encoding hint. When set to `'br'`, the SDK emits the
-   * `content_encoding: br` envelope tag, signalling to indexers that the
-   * body is brotli-compressed. The body must ALREADY be brotli-compressed
-   * by the caller; this flag only emits the tag.
+   * Optional body-encoding hint. When set, the SDK emits the
+   * `content_encoding` envelope tag (0x09) with this exact string,
+   * signalling to indexers + ord that the body is compressed with that
+   * codec. The body must ALREADY be compressed by the caller; this flag
+   * only emits the tag.
    *
    * Compression is a deliberate, explicit consumer step (never hidden in
    * this builder): call `assessCompression(bytes, contentType)` from
-   * `inscribe-brotli.helper.ts`, show the savings, and if you choose to
-   * compress pass its `compressed` body here with `contentEncoding: 'br'`.
-   * `assessCompression` / `compressBrotli` are async + isomorphic (they
-   * work in the browser via `brotli-wasm`), so the compression happens at
-   * the call site before this sync builder runs.
+   * `inscribe-compression.helper.ts`, show the savings, and if you choose
+   * to compress pass its `compressed` body here with
+   * `contentEncoding: assessment.bestEncoding`. `assessCompression` /
+   * `compressGzip` are async + isomorphic (native Compression Streams),
+   * so the compression happens at the call site before this sync builder
+   * runs. `'br'` is also accepted for a caller that brings its own brotli
+   * bytes (the decoder lives in `ordpool-parser`).
    */
-  contentEncoding?: 'br';
+  contentEncoding?: InscriptionContentEncoding;
   /**
    * Optional pointer (tag 0x02): the sat offset, within the reveal's
    * concatenated outputs, the inscription is assigned to. Emitted as
@@ -510,8 +515,8 @@ function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnve
     fields.push({ tag: ORD_TAGS.pointer, value: encodePointerValue(args.pointer) });
   }
 
-  if (args.contentEncoding === 'br') {
-    fields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode('br') });
+  if (args.contentEncoding !== undefined) {
+    fields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode(args.contentEncoding) });
   }
 
   if (args.metaprotocol !== undefined) {

@@ -90,7 +90,7 @@ export * from './inscribe/inscription.service.helper';
 export * from './inscribe/inscribe-broadcast.helper';
 export * from './inscribe/inscribe-orchestrator';
 export * from './inscribe/inscribe-mint-orchestrator.service';
-export * from './inscribe/inscribe-brotli.helper';
+export * from './inscribe/inscribe-compression.helper';
 
 // --- inscribe validation gate (pure helpers, same set that /core exposes) ---
 export * from './inscribe-validation';

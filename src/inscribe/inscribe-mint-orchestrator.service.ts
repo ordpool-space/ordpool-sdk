@@ -27,6 +27,7 @@ import { WalletService } from '../wallet/wallet.service';
 import { WalletInfo } from '../wallet/wallet.service.types';
 
 import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orchestrator';
+import type { InscriptionContentEncoding } from './inscribe-compression.helper';
 import { OrdEnvelopeField } from './inscription-envelope';
 import { SimulateInscribeFeesResult, simulateInscribeFees } from './inscription-fee.helper';
 import { prepareInscribeFundingInput } from './inscription-input-adapter';
@@ -46,7 +47,7 @@ export interface InscribeContent {
   tip?: { address: string; value: number };
   note?: string;
   parent?: string;
-  contentEncoding?: 'br';
+  contentEncoding?: InscriptionContentEncoding;
   /** Pointer (tag 0x02) sat offset; must be < 546. See createInscribeTransactions. */
   pointer?: number;
   /** CBOR metadata (tag 0x05), pre-encoded via encodeCborDeterministic; chunked over 520. */

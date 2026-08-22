@@ -472,6 +472,26 @@ describe('createInscribeTransactions', () => {
       // OP_9 = 0x59 followed by a 2-byte push (0x02) of UTF-8 "br" = 0x62 0x72.
       expect(envelopeHex).toContain('5902' + '6272');
     });
+
+    it('contentEncoding=gzip → envelope carries tag 0x09 (OP_9) with UTF-8 "gzip"', () => {
+      const { paymentPublicKey, paymentAddress } = paymentContext();
+      const result = createInscribeTransactions({
+        paymentOutput: paymentOutputAt(100_000),
+        paymentPublicKey,
+        paymentAddress,
+        recipientAddress: recipientAddress(),
+        body: new Uint8Array([0x1f, 0x8b]),
+        contentType: 'text/html',
+        feeRatePerVbyte: 8,
+        contentEncoding: 'gzip',
+        network: NETWORK,
+      });
+      const envelopeHex = Array.from(result.commit.envelopeScript)
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+      // OP_9 = 0x59 followed by a 4-byte push (0x04) of UTF-8 "gzip" =
+      // 0x67 0x7a 0x69 0x70.
+      expect(envelopeHex).toContain('5904' + '677a6970');
+    });
   });
 
   describe('first-class envelope tags synthesised into the reveal', () => {

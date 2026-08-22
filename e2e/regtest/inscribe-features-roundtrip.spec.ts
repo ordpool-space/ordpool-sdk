@@ -27,10 +27,10 @@ import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { brotliDecompressSync } from 'node:zlib';
+import { gunzipSync } from 'node:zlib';
 import { InscriptionParserService } from 'ordpool-parser';
 
-import { assessCompression } from '../../src/inscribe/inscribe-brotli.helper';
+import { assessCompression } from '../../src/inscribe/inscribe-compression.helper';
 import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
 import { Network, toScureNetwork } from '../../src/network';
 import {
@@ -56,7 +56,7 @@ function bitcoinCliPsbtWallet(...args: string[]): string {
   return rpc('-rpcwallet=' + PSBT_WALLET, ...args);
 }
 
-describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)', () => {
+describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', () => {
 
   const scureRegtest = toScureNetwork(Network.Regtest);
 
@@ -214,7 +214,7 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     expect(allWitnessHex).toContain(noteHex);
   }, 240_000);
 
-  it('brotli-compressed body round-trips on chain (compressed bytes in the witness, content_encoding: br tag)', async () => {
+  it('gzip-compressed body round-trips on chain (compressed bytes in the witness, content_encoding: gzip tag)', async () => {
     const recipientKey = secp256k1.utils.randomPrivateKey();
     const recipientAddress = btc.p2tr(schnorr.getPublicKey(recipientKey), undefined, scureRegtest, true).address!;
 
@@ -226,7 +226,7 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     await waitForElectrsSync(mineBlocks(1));
     const utxo = await waitForUtxoAt(fundingPaymentAddress, FUND_AMOUNT_SATS);
 
-    // Realistic HTML-ish body that brotli compresses well.
+    // Realistic HTML-ish body that gzip compresses well.
     const original = new TextEncoder().encode(
       '<html><body>' + 'tip the maintainer '.repeat(200) + '</body></html>',
     );
@@ -234,6 +234,7 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
     // hands back the compressed bytes to reuse (never compresses twice).
     const assessment = await assessCompression(original, 'text/html');
     expect(assessment.worthIt).toBe(true);
+    expect(assessment.bestEncoding).toBe('gzip');
     expect(assessment.compressedSize).toBeLessThan(assessment.originalSize);
     const compressed = assessment.compressed;
 
@@ -251,7 +252,9 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
       body: compressed,
       contentType: 'text/html',
       feeRatePerVbyte: FEE_RATE,
-      contentEncoding: 'br',
+      // 'none' → no tag; otherwise pass the winning codec. This is the
+      // exact wiring a consumer (the inscribe UI) uses.
+      contentEncoding: assessment.bestEncoding === 'none' ? undefined : assessment.bestEncoding,
       network: Network.Regtest,
     });
 
@@ -278,7 +281,7 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
 
     // Phase 4: parse the inscription out of the reveal's witness.
     // ordpool-parser sees the body as the on-chain bytes, which is
-    // the COMPRESSED brotli output we built with.
+    // the COMPRESSED gzip output we built with.
     const witnessHex = (revealTx as unknown as { vin: { witness: string[] }[] }).vin[0].witness;
     const parsed = InscriptionParserService.parse({
       txid: revealTxid,
@@ -292,26 +295,28 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + brotli)',
       expect(onChainBody[i]).toBe(compressed[i]);
     }
 
-    // Phase 5: the witness must also carry the `content_encoding: br`
+    // Phase 5: the witness must also carry the `content_encoding: gzip`
     // envelope tag. Tag 0x09 encodes as OP_9 (0x59); the value is a
-    // 2-byte push of UTF-8 'br' (0x62 0x72).
+    // 4-byte push (OP_PUSHBYTES_4 = 0x04) of UTF-8 'gzip'
+    // (0x67 0x7a 0x69 0x70).
     const allWitnessHex = witnessHex.join('');
-    expect(allWitnessHex).toContain('5902' + '6272');
+    expect(allWitnessHex).toContain('5904' + '677a6970');
 
     // Phase 6: decompress the on-chain bytes — equal to the original
-    // body. Proves the brotli envelope tag is honoured by any
-    // consumer that does its own decompression.
-    const decompressed = brotliDecompressSync(onChainBody);
+    // body. Proves the gzip envelope tag is honoured by any consumer
+    // that does its own decompression (here node:zlib, independent of
+    // the Compression Streams API the SDK used to compress).
+    const decompressed = gunzipSync(onChainBody);
     expect(decompressed).toEqual(Buffer.from(original));
 
     // Phase 6b: ordpool-parser recovers the ORIGINAL bytes itself. The
-    // parser reads content_encoding: 'br' and auto-decompresses on
+    // parser reads content_encoding: 'gzip' and auto-decompresses on
     // getContent() / getDataUri() (getDataRaw stays the raw compressed
     // bytes, asserted in phase 4). This is the end-user render path: an
-    // explorer shows the decompressed HTML, not the brotli blob.
+    // explorer shows the decompressed HTML, not the gzip blob.
     const recovered = await parsed[0].getContent();
     expect(recovered).toBe(new TextDecoder().decode(original));
-    expect(parsed[0].getContentEncoding()).toBe('br');
+    expect(parsed[0].getContentEncoding()).toBe('gzip');
 
     // Phase 7: cat21-ord saw two cats on this inscription too — the
     // nLockTime=21-on-both-txs behaviour applies whatever the body

@@ -134,7 +134,7 @@ export * from './inscribe/inscription-fee.helper';
 export * from './inscribe/inscription.service.helper';
 export * from './inscribe/inscribe-broadcast.helper';
 export * from './inscribe/inscribe-orchestrator';
-export * from './inscribe/inscribe-brotli.helper';
+export * from './inscribe/inscribe-compression.helper';
 
 // --- Agent-mode policy gate ---
 export * from './agent-mode/agent-policy.helper';

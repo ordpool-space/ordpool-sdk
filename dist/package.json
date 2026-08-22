@@ -53,9 +53,8 @@
     "rxjs": ">=7",
     "sats-connect": ">=4"
   },
+  "sideEffects": false,
   "dependencies": {
-    "brotli-wasm": "3.0.1",
     "tslib": "^2.3.0"
-  },
-  "sideEffects": false
+  }
 }

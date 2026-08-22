@@ -49,7 +49,7 @@ export const ORD_TAGS = {
   metadata: 0x05,
   /** Metaprotocol identifier string. */
   metaprotocol: 0x07,
-  /** Body encoding hint (`br` for brotli). */
+  /** Body encoding hint (e.g. `gzip`, or `br` for brotli). */
   content_encoding: 0x09,
   /** Delegate inscription id (point to another inscription's body). */
   delegate: 0x0b,
