@@ -1,0 +1,152 @@
+import { Observable, defer, map, switchMap, throwError } from 'rxjs';
+import { hex } from '@scure/base';
+
+import { findSignerOrThrow } from '../wallet/signers';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network';
+import { TxnOutput } from '../cat21-mint/cat21.service.types';
+
+import {
+  CreateChildInscribeTransactionsResult,
+  createChildInscribeTransactions,
+} from './inscription.service.helper';
+import { ChildRevealParent } from './inscription-child-reveal.helper';
+import { OrdEnvelopeField } from './inscription-envelope';
+import type { InscriptionContentEncoding } from './inscribe-compression.helper';
+
+/**
+ * Public orchestrator for the ord parent/child (provenance) inscribe.
+ * Composes builder + signer + broadcast for Path 2/3:
+ *
+ *   1. `createChildInscribeTransactions` — commit PSBT + a CHILD reveal
+ *      PSBT (parent input unsigned, commit input ephemeral-finalized).
+ *   2. `signSingleFundingInput` — the wallet signs the commit's funding
+ *      input; broadcast the commit.
+ *   3. `signChildRevealParentInputs` — the wallet signs the reveal's
+ *      PARENT input (index 0, the ordinals key that owns the parent);
+ *      the commit input (index 1) is already witnessed; broadcast.
+ *
+ * The parent inscription is spent (proving control) and returned to the
+ * wallet, and the child is created with the `parent` tag — which is what
+ * makes ord recognise the provenance link. See
+ * `inscription-child-reveal.helper.ts` for the topology + safety.
+ */
+export interface InscribeChildAndBroadcastArgs {
+  paymentOutput: TxnOutput;
+  paymentPublicKey: Uint8Array;
+  paymentAddress: string;
+  /** Where the CHILD inscription lands. */
+  recipientAddress: string;
+  body: Uint8Array;
+  contentType?: string;
+  envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
+  feeRatePerVbyte: number;
+  walletType: KnownOrdinalWalletType;
+  tip?: { address: string; value: number };
+  note?: string;
+  contentEncoding?: InscriptionContentEncoding;
+  pointer?: number;
+  metadata?: Uint8Array;
+  metaprotocol?: string;
+  delegate?: string;
+  rune?: bigint;
+  properties?: Uint8Array;
+  propertyEncoding?: 'br';
+  /** The parent inscription id (`<txid>i<index>`) — the `parent` tag. */
+  parentInscriptionId: string;
+  /**
+   * The parent inscription's CURRENT UTXO (spent by the reveal) + where it
+   * returns. For the in-wallet case both belong to the connected wallet;
+   * `parentUtxo.returnAddress` is the ordinals address the wallet signs at.
+   */
+  parentUtxo: ChildRevealParent;
+  network: Network;
+  broadcast(txHex: string): Observable<string>;
+  /** Fired with the wallet-signed commit hex before broadcast. */
+  onCommitSigned?(signedCommitHex: string): void;
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+export interface InscribeChildAndBroadcastResult {
+  commitTxId: string;
+  revealTxId: string;
+  /** The child's inscription id (`<revealTxId>i0`). */
+  childInscriptionId: string;
+  commitAddress: string;
+  /** Ephemeral bearer key — persist or forfeit reveal-side flexibility. */
+  ephemeral: CreateChildInscribeTransactionsResult['ephemeral'];
+  fees: CreateChildInscribeTransactionsResult['fees'];
+}
+
+export function inscribeChildAndBroadcast(
+  args: InscribeChildAndBroadcastArgs,
+): Observable<InscribeChildAndBroadcastResult> {
+  return defer(() => {
+    let built: CreateChildInscribeTransactionsResult;
+    try {
+      built = createChildInscribeTransactions({
+        paymentOutput: args.paymentOutput,
+        paymentPublicKey: args.paymentPublicKey,
+        paymentAddress: args.paymentAddress,
+        recipientAddress: args.recipientAddress,
+        body: args.body,
+        contentType: args.contentType,
+        envelopeFields: args.envelopeFields,
+        feeRatePerVbyte: args.feeRatePerVbyte,
+        walletType: args.walletType,
+        tip: args.tip,
+        note: args.note,
+        contentEncoding: args.contentEncoding,
+        pointer: args.pointer,
+        metadata: args.metadata,
+        metaprotocol: args.metaprotocol,
+        delegate: args.delegate,
+        rune: args.rune,
+        properties: args.properties,
+        propertyEncoding: args.propertyEncoding,
+        parentInscriptionId: args.parentInscriptionId,
+        parentUtxo: args.parentUtxo,
+        network: args.network,
+      });
+    } catch (err) {
+      return throwError(() => err);
+    }
+
+    const signer = findSignerOrThrow(args.walletType);
+
+    const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
+      if (args.onCommitSigned) {
+        try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
+      }
+      return args.broadcast(signedCommitHex);
+    };
+
+    return signer.signSingleFundingInput({
+      psbtBytes: built.commitPsbt,
+      paymentAddress: args.paymentAddress,
+      paymentPublicKey: hex.encode(args.paymentPublicKey),
+      network: args.network,
+      broadcast: captureAndBroadcast,
+      promptForSignedPsbt: args.promptForSignedPsbt,
+    }).pipe(
+      switchMap(({ txId: commitTxId }) =>
+        signer.signChildRevealParentInputs({
+          psbtBytes: built.revealPsbt,
+          ordinalsAddress: args.parentUtxo.returnAddress,
+          network: args.network,
+          broadcast: args.broadcast,
+          promptForSignedPsbt: args.promptForSignedPsbt,
+        }).pipe(
+          map(({ txId: revealTxId }) => ({
+            commitTxId,
+            revealTxId,
+            childInscriptionId: `${revealTxId}i0`,
+            commitAddress: built.commitAddress,
+            ephemeral: built.ephemeral,
+            fees: built.fees,
+          })),
+        ),
+      ),
+    );
+  });
+}

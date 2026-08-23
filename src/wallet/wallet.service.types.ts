@@ -246,6 +246,22 @@ export interface SignOfferAcceptArgs {
 }
 
 /**
+ * Child-inscribe reveal (ord parent/child) shape. The reveal PSBT already
+ * has the child's COMMIT input ephemeral-finalized; the wallet signs the
+ * PARENT inscription input at index 0 (P2TR key-path at the ordinals
+ * address — the key that owns the parent), then the tx is finalized +
+ * broadcast. Same one-ordinals-input topology as `signOfferAccept`.
+ */
+export interface SignChildRevealParentInputsArgs {
+  psbtBytes: Uint8Array;
+  /** The parent inscription's address — where it lives + returns to. */
+  ordinalsAddress: string;
+  network: Network;
+  broadcast(txHex: string): Observable<string>;
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+/**
  * Offer-create (buyer) shape — input 0 = seller's cat placeholder
  * (untouched), inputs 1..`fundingInputCount` = buyer's funding UTXOs
  * at `paymentAddress`, all SIGHASH_ALL. Returns the partial-sig
@@ -335,6 +351,7 @@ export interface WalletSigner {
   signTransfer(input: SignTransferArgs): Observable<{ txId: string }>;
   signOfferAccept(input: SignOfferAcceptArgs): Observable<{ txId: string }>;
   signOfferCreatePsbt(input: SignOfferCreatePsbtArgs): Observable<Uint8Array>;
+  signChildRevealParentInputs(input: SignChildRevealParentInputsArgs): Observable<{ txId: string }>;
   /**
    * Sign a UTF-8 message under an ordinals key via BIP-322.
    * Wallets without a BIP-322 RPC surface return an error observable.

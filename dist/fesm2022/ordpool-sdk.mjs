@@ -1984,6 +1984,18 @@ function operationNamedDefaults(legacy) {
                 promptForSignedPsbt: input.promptForSignedPsbt,
             });
         },
+        signChildRevealParentInputs(input) {
+            // The child reveal has the parent inscription at input 0 (P2TR
+            // key-path, the ordinals address) and the ephemeral-finalized commit
+            // at input 1. Sign only input 0; input 1 is already witnessed.
+            return legacy.signMultiInputAndBroadcast({
+                psbtBytes: input.psbtBytes,
+                signingMap: [{ address: input.ordinalsAddress, indexes: [0] }],
+                network: input.network,
+                broadcast: input.broadcast,
+                promptForSignedPsbt: input.promptForSignedPsbt,
+            });
+        },
         signOfferCreatePsbt(input) {
             const paymentIndexes = Array.from({ length: input.fundingInputCount }, (_, i) => i + 1);
             return legacy.signPsbtOnly({
@@ -8998,6 +9010,72 @@ function inscribeAndBroadcast(args) {
     });
 }
 
+function inscribeChildAndBroadcast(args) {
+    return defer(() => {
+        let built;
+        try {
+            built = createChildInscribeTransactions({
+                paymentOutput: args.paymentOutput,
+                paymentPublicKey: args.paymentPublicKey,
+                paymentAddress: args.paymentAddress,
+                recipientAddress: args.recipientAddress,
+                body: args.body,
+                contentType: args.contentType,
+                envelopeFields: args.envelopeFields,
+                feeRatePerVbyte: args.feeRatePerVbyte,
+                walletType: args.walletType,
+                tip: args.tip,
+                note: args.note,
+                contentEncoding: args.contentEncoding,
+                pointer: args.pointer,
+                metadata: args.metadata,
+                metaprotocol: args.metaprotocol,
+                delegate: args.delegate,
+                rune: args.rune,
+                properties: args.properties,
+                propertyEncoding: args.propertyEncoding,
+                parentInscriptionId: args.parentInscriptionId,
+                parentUtxo: args.parentUtxo,
+                network: args.network,
+            });
+        }
+        catch (err) {
+            return throwError(() => err);
+        }
+        const signer = findSignerOrThrow(args.walletType);
+        const captureAndBroadcast = (signedCommitHex) => {
+            if (args.onCommitSigned) {
+                try {
+                    args.onCommitSigned(signedCommitHex);
+                }
+                catch { /* swallow */ }
+            }
+            return args.broadcast(signedCommitHex);
+        };
+        return signer.signSingleFundingInput({
+            psbtBytes: built.commitPsbt,
+            paymentAddress: args.paymentAddress,
+            paymentPublicKey: hex.encode(args.paymentPublicKey),
+            network: args.network,
+            broadcast: captureAndBroadcast,
+            promptForSignedPsbt: args.promptForSignedPsbt,
+        }).pipe(switchMap(({ txId: commitTxId }) => signer.signChildRevealParentInputs({
+            psbtBytes: built.revealPsbt,
+            ordinalsAddress: args.parentUtxo.returnAddress,
+            network: args.network,
+            broadcast: args.broadcast,
+            promptForSignedPsbt: args.promptForSignedPsbt,
+        }).pipe(map(({ txId: revealTxId }) => ({
+            commitTxId,
+            revealTxId,
+            childInscriptionId: `${revealTxId}i0`,
+            commitAddress: built.commitAddress,
+            ephemeral: built.ephemeral,
+            fees: built.fees,
+        })))));
+    });
+}
+
 /**
  * High-level inscribe flow. Wraps `Cat21Service` (UTXOs, broadcast) +
  * `WalletService` (connected wallet) + the pure `simulateInscribeFees`
@@ -10495,5 +10573,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

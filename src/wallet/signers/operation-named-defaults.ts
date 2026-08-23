@@ -1,6 +1,7 @@
 import { Observable } from 'rxjs';
 
 import {
+  SignChildRevealParentInputsArgs,
   SignOfferAcceptArgs,
   SignOfferCreatePsbtArgs,
   SignSingleFundingInputArgs,
@@ -32,6 +33,7 @@ export function operationNamedDefaults(
   | 'signTransfer'
   | 'signOfferAccept'
   | 'signOfferCreatePsbt'
+  | 'signChildRevealParentInputs'
 > {
   return {
     signSingleFundingInput(input: SignSingleFundingInputArgs): Observable<{ txId: string }> {
@@ -63,6 +65,19 @@ export function operationNamedDefaults(
     },
 
     signOfferAccept(input: SignOfferAcceptArgs): Observable<{ txId: string }> {
+      return legacy.signMultiInputAndBroadcast({
+        psbtBytes: input.psbtBytes,
+        signingMap: [{ address: input.ordinalsAddress, indexes: [0] }],
+        network: input.network,
+        broadcast: input.broadcast,
+        promptForSignedPsbt: input.promptForSignedPsbt,
+      });
+    },
+
+    signChildRevealParentInputs(input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> {
+      // The child reveal has the parent inscription at input 0 (P2TR
+      // key-path, the ordinals address) and the ephemeral-finalized commit
+      // at input 1. Sign only input 0; input 1 is already witnessed.
       return legacy.signMultiInputAndBroadcast({
         psbtBytes: input.psbtBytes,
         signingMap: [{ address: input.ordinalsAddress, indexes: [0] }],
