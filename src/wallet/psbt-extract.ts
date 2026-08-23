@@ -31,7 +31,12 @@ type BroadcastingInput = Pick<SignAndBroadcastInput | SignMultiInputAndBroadcast
  *  3. `extract()` produces the wire-format bytes; we serialise to hex.
  */
 export function extractWireTxFromPsbt(signedPsbtBytes: Uint8Array): string {
-  const tx = btc.Transaction.fromPSBT(signedPsbtBytes);
+  // allowUnknownInputs: the child-inscribe reveal's commit input is a
+  // Taproot SCRIPT-PATH spend of the ord envelope leaf — a non-standard
+  // ("unknown") script. scure's finalize() refuses to build a witness for
+  // an unknown tapLeafScript unless this opt is set. No effect on standard
+  // inputs (P2WPKH / P2TR key-path), so it's inert for mint/transfer/offer.
+  const tx = btc.Transaction.fromPSBT(signedPsbtBytes, { allowUnknownInputs: true });
   try {
     tx.finalize();
   } catch (e) {

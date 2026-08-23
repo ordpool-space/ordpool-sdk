@@ -73,7 +73,7 @@ function build(overrides: Partial<CreateChildInscribeTransactionsArgs> = {}) {
 }
 
 describe('createChildInscribeTransactions — reveal topology', () => {
-  it('reveal has parent input 0 (UNSIGNED, wallet signs) + commit input 1 (ephemeral-finalized)', () => {
+  it('reveal has parent input 0 (UNSIGNED, wallet signs) + commit input 1 (ephemeral partial sig, not finalized)', () => {
     const reveal = btc.Transaction.fromPSBT(build().revealPsbt);
     expect(reveal.inputsLength).toBe(2);
 
@@ -84,9 +84,33 @@ describe('createChildInscribeTransactions — reveal topology', () => {
     expect(parentIn.finalScriptWitness).toBeUndefined(); // wallet must sign it
     expect(parentIn.tapInternalKey).toBeDefined();        // P2TR key-path signable
 
+    // Commit input is signed by the ephemeral key but left PARTIAL
+    // (tapScriptSig + tapLeafScript), NOT finalized — so a PSBT handed to
+    // a wallet contains no already-finalized input (address-filter signers
+    // reject those). Both inputs finalize at the extract step.
     const commitIn = reveal.getInput(1);
-    expect(commitIn.finalScriptWitness).toBeDefined();     // ephemeral, done
-    expect(commitIn.finalScriptWitness!.length).toBe(3);   // [sig, envelopeScript, controlBlock]
+    expect(commitIn.finalScriptWitness).toBeUndefined();
+    expect(commitIn.tapScriptSig).toBeDefined();
+    expect(commitIn.tapScriptSig!.length).toBe(1);
+    expect(commitIn.tapLeafScript).toBeDefined();          // envelope leaf, used to finalize
+  });
+
+  it('finalizes to valid witnesses on BOTH inputs — the partial tapScriptSig round-trips through finalize()', () => {
+    // The core of the fix: sign the parent input 0 (key-path), then run
+    // scure finalize() over the whole tx (exactly what the production
+    // extract path does). Input 1's partial tapScriptSig + tapLeafScript
+    // must build a valid [sig, envelopeScript, controlBlock] script-path
+    // witness — if scure couldn't, every wallet would regress here.
+    const tx = btc.Transaction.fromPSBT(build().revealPsbt, { allowUnknownInputs: true });
+    tx.signIdx(PARENT_PRIV, 0);
+    tx.finalize();
+    const parentWitness = tx.getInput(0).finalScriptWitness!;
+    const commitWitness = tx.getInput(1).finalScriptWitness!;
+    expect(parentWitness.length).toBe(1);   // key-path: [schnorr sig]
+    expect(commitWitness.length).toBe(3);   // script-path: [sig, envelopeScript, controlBlock]
+    const idHex = hex.encode(encodeInscriptionId(PARENT_INSCRIPTION_ID));
+    expect(hex.encode(commitWitness[1])).toContain('0103' + '20' + idHex);
+    expect(tx.hex.length).toBeGreaterThan(0); // serialises to a wire tx
   });
 
   it('reveal outputs: parent RETURN (0) preserves the parent value, child (1) = 546', () => {
@@ -114,8 +138,10 @@ describe('createChildInscribeTransactions — reveal topology', () => {
 
   it('envelope carries the parent tag (0x03, data-pushed) with the encoded parent id', () => {
     const reveal = btc.Transaction.fromPSBT(build().revealPsbt);
-    // The commit input's witness element [1] is the bare envelope script.
-    const envelopeScript = reveal.getInput(1).finalScriptWitness![1];
+    // The commit input's tapLeafScript carries the envelope script (with a
+    // trailing leaf-version byte; the parent tag sits mid-script so a
+    // substring check is unaffected).
+    const envelopeScript = reveal.getInput(1).tapLeafScript![0][1];
     const envelopeHex = hex.encode(envelopeScript);
     const idHex = hex.encode(encodeInscriptionId(PARENT_INSCRIPTION_ID));
     // Tag 0x03 data-pushed as `01 03` (ord-identical) + a 32-byte push (0x20)

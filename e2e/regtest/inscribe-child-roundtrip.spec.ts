@@ -167,15 +167,14 @@ describe('inscribe child (ord provenance) roundtrip on regtest', () => {
     });
     await signAndBroadcastCommit(child.commitPsbt, child.commitTxid);
 
-    // Sign the child reveal's PARENT input (0) with the wallet key. Input 1
-    // (commit) is already ephemeral-finalized; finalize input 0 manually
-    // from the key-path signature so we never re-run scure's finalize()
-    // over the envelope tap-leaf witness (which would corrupt it).
-    const revealTx = btc.Transaction.fromPSBT(child.revealPsbt);
+    // Sign the child reveal's PARENT input (0) with the wallet key, then
+    // finalize BOTH inputs: input 0 from the key-path sig, input 1 from the
+    // ephemeral tapScriptSig (via its tapLeafScript). This mirrors the
+    // production extract path (extractWireTxFromPsbt → finalize → extract).
+    const revealTx = btc.Transaction.fromPSBT(child.revealPsbt, { allowUnknownInputs: true });
     revealTx.signIdx(walletKey, 0);
-    const parentSig = revealTx.getInput(0).tapKeySig;
-    expect(parentSig).toBeDefined();
-    revealTx.updateInput(0, { finalScriptWitness: [parentSig!] }, true);
+    expect(revealTx.getInput(0).tapKeySig).toBeDefined();
+    revealTx.finalize();
     const childRevealTxid = await postTx(revealTx.hex);
     expect(childRevealTxid).toBe(child.revealTxid);
     const childTip = mineBlocks(1);

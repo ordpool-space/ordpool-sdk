@@ -115,7 +115,12 @@ describe('inscribeChildAndBroadcast orchestrator', () => {
     const revealPsbt = btc.Transaction.fromPSBT(revealArgs.psbtBytes);
     expect(revealPsbt.inputsLength).toBe(2);
     expect(revealPsbt.getInput(0).finalScriptWitness).toBeUndefined(); // wallet signs it
-    expect(revealPsbt.getInput(1).finalScriptWitness).toBeDefined();   // ephemeral, done
+    // Input 1 (commit) carries the ephemeral script-path sig as a PARTIAL
+    // (tapScriptSig), not a finalized witness — so address-filter wallets
+    // accept the PSBT. Both inputs finalize at the extract step.
+    expect(revealPsbt.getInput(1).finalScriptWitness).toBeUndefined();
+    expect(revealPsbt.getInput(1).tapScriptSig).toBeDefined();
+    expect(revealPsbt.getInput(1).tapScriptSig!.length).toBe(1);
   });
 
   it('broadcasts commit then reveal, and threads the txids into the result', async () => {

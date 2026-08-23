@@ -2133,7 +2133,12 @@ const albySigner = {
  *  3. `extract()` produces the wire-format bytes; we serialise to hex.
  */
 function extractWireTxFromPsbt(signedPsbtBytes) {
-    const tx = btc.Transaction.fromPSBT(signedPsbtBytes);
+    // allowUnknownInputs: the child-inscribe reveal's commit input is a
+    // Taproot SCRIPT-PATH spend of the ord envelope leaf — a non-standard
+    // ("unknown") script. scure's finalize() refuses to build a witness for
+    // an unknown tapLeafScript unless this opt is set. No effect on standard
+    // inputs (P2WPKH / P2TR key-path), so it's inert for mint/transfer/offer.
+    const tx = btc.Transaction.fromPSBT(signedPsbtBytes, { allowUnknownInputs: true });
     try {
         tx.finalize();
     }
@@ -8244,8 +8249,20 @@ function buildChildInscribeRevealTx(args) {
     const sighash = tx.preimageWitnessV1(commitInputIndex, [args.parent.utxo.scriptPubKey, args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(parentValue), BigInt(args.commitOutputValueSats)], undefined, bareLeafScript, leafVersion);
     const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
     const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
+    // Attach the ephemeral script-path signature as a PARTIAL sig
+    // (tapScriptSig), NOT a finalScriptWitness. A PSBT that hands a wallet
+    // an already-FINALIZED sibling input is rejected by the address-filter
+    // signers (Unisat/Wizz/OKX) — their signPsbt won't produce a signing
+    // prompt for such a PSBT. Left partial, every input is unfinalized when
+    // the wallet sees it; the wallet signs input 0, and the shared
+    // extract-wire-tx step finalizes BOTH inputs (input 0 from the wallet's
+    // key-path sig, input 1 from this tapScriptSig via the tapLeafScript
+    // set above). Index-based signers (Leather / cat21-wallet) reach the
+    // same finalized witness. The measurement clone below still finalizes
+    // input 1 directly so revealTxid / revealVsize are exact.
+    const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
     tx.updateInput(commitInputIndex, {
-        finalScriptWitness: [signature, bareLeafScript, controlBlock],
+        tapScriptSig: [[{ pubKey: args.taproot.internalKey, leafHash }, signature]],
     }, true);
     assertCat21LockTime(tx.lockTime);
     // Measure vsize + txid on a fully-signed CLONE: set a dummy 64-byte
