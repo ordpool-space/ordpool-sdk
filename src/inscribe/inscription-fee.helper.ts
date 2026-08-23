@@ -47,6 +47,12 @@ export interface SimulateInscribeFeesArgs {
   /** Optional extra envelope fields (parent, metaprotocol, metadata...). */
   envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
   /**
+   * Tag push-encoding choice. Threads to `buildInscriptionEnvelope`
+   * so the simulated reveal vsize matches the encoding the real
+   * commit will use (pushnum saves 1 byte per tag). Default false.
+   */
+  minimalTagPush?: boolean;
+  /**
    * Funding-input shape — the same `InscribeFundingInput` the commit
    * helper consumes. The Layer-2 adapter produces this.
    */
@@ -129,6 +135,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     contentType: args.contentType,
     body: args.body,
     fields: args.envelopeFields,
+    minimalTagPush: args.minimalTagPush,
   });
 
   // ---- Step 1: reveal vsize is deterministic; compute once. ----

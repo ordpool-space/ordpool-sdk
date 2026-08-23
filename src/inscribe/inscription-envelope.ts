@@ -108,27 +108,44 @@ export interface BuildInscriptionEnvelopeArgs {
    * indexes by tag, not position.
    */
   fields?: ReadonlyArray<OrdEnvelopeField>;
+  /**
+   * How each tag number is pushed into the tapscript. `false`
+   * (default) uses a 1-byte DATA push (`OP_PUSHBYTES_1 <tag>`) —
+   * byte-for-byte what ord's own wallet emits, so the inscription is
+   * charm-free. `true` uses the pushnum opcode `OP_1..OP_16` for tags
+   * 1–16 — 1 byte smaller per tag, but ord flags any pushnum inside an
+   * envelope as `Curse::Pushnum` and stamps the `vindicated` charm
+   * (post-jubilee). Everything else about the inscription is identical:
+   * same content, same tracking, same parent/child provenance, and on
+   * mainnet the same non-negative number. Purely a push-encoding choice.
+   */
+  minimalTagPush?: boolean;
 }
 
 /**
- * Encodes a tag as a script item: a 1-byte DATA push of the tag value
- * (`OP_PUSHBYTES_1 <tag>`), for EVERY tag.
+ * Encodes a tag as a script item. The push form is the ONLY difference
+ * between an ord-standard inscription and a `vindicated`-charmed one; it's
+ * purely how the tag number lands in the script:
  *
- * This is byte-for-byte what ord emits — `Tag::append` does
- * `push_slice(self.bytes())` where `bytes()` is the single tag byte
- * (`cat21-ord/src/inscriptions/tag.rs`). It must NOT be an `OP_1..OP_16`
- * pushnum opcode: ord flags any pushnum in an envelope as
- * `Curse::Pushnum`, which curses (pre-jubilee) / vindicates (post-jubilee)
- * the inscription instead of blessing it. A blessed inscription — the same
- * result ord's own wallet produces — requires the data-push form.
- *
- * scure's `Script.encode` does NOT minimal-encode a single byte back to a
- * pushnum: `Script.encode([Uint8Array([1])])` is `01 01`, not `51`. So
- * handing back `Uint8Array([tag])` yields exactly ord's bytes.
+ *   - `minimal === false` (default): a 1-byte DATA push,
+ *     `OP_PUSHBYTES_1 <tag>` (e.g. `01 01`). Byte-for-byte what ord emits
+ *     (`Tag::append` → `push_slice(self.bytes())`), so the inscription is
+ *     blessed / charm-free. scure does NOT minimal-encode a single byte
+ *     back to a pushnum — `Script.encode([Uint8Array([1])])` is `01 01`,
+ *     not `51` — so `Uint8Array([tag])` yields ord's exact bytes.
+ *   - `minimal === true`: the pushnum opcode `OP_1..OP_16` (e.g. `51`) for
+ *     tags 1–16 — 1 byte smaller, but ord flags any pushnum inside an
+ *     envelope as `Curse::Pushnum` → the inscription carries the
+ *     `vindicated` charm (post-jubilee). Everything else about the
+ *     inscription is identical. Tags > 16 have no pushnum opcode and always
+ *     data-push regardless of `minimal`.
  */
-function tagAsScriptItem(tag: number): Uint8Array {
+function tagAsScriptItem(tag: number, minimal: boolean): keyof typeof OP | Uint8Array {
   if (tag <= 0) throw new Error(`Tag must be positive; got ${tag}`);
   if (tag > 255) throw new Error(`Tag must fit in one byte; got ${tag}`);
+  if (minimal && tag <= 16) {
+    return `OP_${tag}` as keyof typeof OP;
+  }
   return new Uint8Array([tag]);
 }
 
@@ -190,6 +207,7 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
   }
 
   const items: ScureScriptItem[] = [];
+  const minimalTagPush = args.minimalTagPush ?? false;
 
   // Spending condition: <pubkey> OP_CHECKSIG. The reveal's signature
   // checks against this; everything after is inert data.
@@ -212,7 +230,7 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
     // guard keeps every single push in this envelope uniformly checked
     // rather than leaving one silent hole.
     assertPushWithinCap(ORD_TAGS.content_type, contentTypeBytes.length);
-    items.push(tagAsScriptItem(ORD_TAGS.content_type));
+    items.push(tagAsScriptItem(ORD_TAGS.content_type, minimalTagPush));
     items.push(contentTypeBytes);
   }
 
@@ -223,7 +241,7 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
     // pushdata, so a value above the cap can't be a valid single field.
     // Fail loud here rather than emit a non-standard, non-relayable push.
     assertPushWithinCap(field.tag, field.value.length);
-    items.push(tagAsScriptItem(field.tag));
+    items.push(tagAsScriptItem(field.tag, minimalTagPush));
     items.push(field.value);
   }
 

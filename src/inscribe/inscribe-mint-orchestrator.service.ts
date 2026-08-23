@@ -62,6 +62,13 @@ export interface InscribeContent {
   properties?: Uint8Array;
   /** Properties-encoding hint (tag 0x13); only alongside properties. */
   propertyEncoding?: 'br';
+  /**
+   * Tag push-encoding choice. `false` (default) = data push (ord-standard,
+   * charm-free); `true` = pushnum for tags 1–16 (1 byte smaller, ord's
+   * `vindicated` charm). Threads to both the fee preview and the mint so
+   * the quoted vsize matches the broadcast tx. See createInscribeTransactions.
+   */
+  minimalTagPush?: boolean;
   /** Override for the inscription's recipient. Defaults to wallet.ordinalsAddress. */
   recipient?: string;
 }
@@ -318,6 +325,7 @@ export class InscribeMintOrchestrator {
       rune: content.rune,
       properties: content.properties,
       propertyEncoding: content.propertyEncoding,
+      minimalTagPush: content.minimalTagPush,
       network: this.network,
       broadcast: (txHex: string) => this.cat21.postTransaction(txHex),
     }).pipe(
@@ -386,6 +394,7 @@ export class InscribeMintOrchestrator {
           body: content.body,
           contentType: content.contentType,
           envelopeFields: content.envelopeFields,
+          minimalTagPush: content.minimalTagPush,
           fundingInput,
           senderChangeAddress: wallet.paymentAddress,
           recipientAddress: recipient,

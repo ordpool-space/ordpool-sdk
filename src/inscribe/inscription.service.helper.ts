@@ -256,6 +256,18 @@ export interface CreateInscribeTransactionsArgs {
    * alongside `properties`.
    */
   propertyEncoding?: 'br';
+  /**
+   * How each ord tag number is pushed into the reveal tapscript.
+   * `false` (default) uses a 2-byte data push (`OP_PUSHBYTES_1 <tag>`),
+   * byte-for-byte what ord's own wallet emits — the inscription is
+   * charm-free. `true` uses the 1-byte pushnum opcode (`OP_1..OP_16`)
+   * for tags 1–16, saving 1 byte per tag, at the cost of ord stamping
+   * the `vindicated` charm (post-jubilee). Nothing else changes: same
+   * content, tracking, provenance, and non-negative number on mainnet.
+   * The commit + reveal fee simulation uses the same encoding, so the
+   * quoted vsize/fees already reflect the choice.
+   */
+  minimalTagPush?: boolean;
   /** Network. */
   network: Network;
 }
@@ -360,6 +372,7 @@ export function createInscribeTransactions(
     contentType: args.contentType,
     body: args.body,
     fields: mergedFields,
+    minimalTagPush: args.minimalTagPush,
   });
 
   // Layer-2: convert raw UTXO into the funding-input shape the
@@ -389,6 +402,7 @@ export function createInscribeTransactions(
       body: args.body,
       contentType: args.contentType,
       envelopeFields: mergedFields,
+      minimalTagPush: args.minimalTagPush,
       fundingInput: simulationFundingInput,
       senderChangeAddress: args.paymentAddress,
       recipientAddress: args.recipientAddress,
@@ -594,6 +608,7 @@ export function createChildInscribeTransactions(
     contentType: args.contentType,
     body: args.body,
     fields: mergedFields,
+    minimalTagPush: args.minimalTagPush,
   });
 
   const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));

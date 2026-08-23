@@ -201,6 +201,110 @@ describe('buildInscriptionEnvelope — reversibility against ordpool-parser', ()
   });
 });
 
+describe('buildInscriptionEnvelope — minimalTagPush (the push-encoding flag)', () => {
+  // The ONLY difference between an ord-standard inscription and a
+  // `vindicated`-charmed one is how each tag number lands in the
+  // tapscript. `minimalTagPush` toggles it; nothing else about the
+  // envelope changes. These specs pin both byte forms and prove the
+  // pushnum form still parses to the identical content.
+  const body = new TextEncoder().encode('hello, ordinals');
+  const parentId = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0';
+  // "text/plain" = 10 bytes → OP_PUSHBYTES_10 (0x0a) + the ASCII bytes.
+  const contentTypePush = '0a' + bytesToHex(new TextEncoder().encode('text/plain'));
+
+  it('default (false): content_type tag is a 2-byte DATA push (01 01), ord-standard', () => {
+    const envelope = buildInscriptionEnvelope({
+      revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+      contentType: 'text/plain',
+      body,
+    });
+    // ...OP_FALSE OP_IF "ord" | 01 01 (data-push tag 1) | 0a <text/plain>...
+    expect(bytesToHex(envelope)).toContain('0063036f7264' + '0101' + contentTypePush);
+  });
+
+  it('true: content_type tag is the 1-byte pushnum OP_1 (0x51), ord flags vindicated', () => {
+    const envelope = buildInscriptionEnvelope({
+      revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+      contentType: 'text/plain',
+      body,
+      minimalTagPush: true,
+    });
+    // ...OP_FALSE OP_IF "ord" | 51 (OP_1) | 0a <text/plain>...
+    expect(bytesToHex(envelope)).toContain('0063036f7264' + '51' + contentTypePush);
+    // And it must NOT carry the data-push form.
+    expect(bytesToHex(envelope)).not.toContain('0063036f7264' + '0101');
+  });
+
+  it('true: an extra tag ≤ 16 (parent, 0x03) becomes OP_3 (0x53)', () => {
+    const envelope = buildInscriptionEnvelope({
+      revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+      contentType: 'text/plain',
+      body,
+      fields: [{ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(parentId) }],
+      minimalTagPush: true,
+    });
+    const hex = bytesToHex(envelope);
+    const parentValue = encodeParentInscriptionId(parentId);
+    // OP_PUSHBYTES_<len> prefix for the id value (index 0 trims to the
+    // bare 32-byte txid, so len = 0x20).
+    const valuePush = parentValue.length.toString(16).padStart(2, '0') + bytesToHex(parentValue);
+    // OP_3 (0x53) pushnum for the parent tag, then the id value push.
+    expect(hex).toContain('53' + valuePush);
+    // default form (data-push 01 03) is absent
+    expect(hex).not.toContain('0103' + valuePush);
+  });
+
+  it('tags > 16 have no pushnum opcode, so they DATA-push (01 11) even when minimal', () => {
+    const properties = new Uint8Array([0xa0]); // 1-byte CBOR value, contents irrelevant here
+    const envelope = buildInscriptionEnvelope({
+      revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+      contentType: 'text/plain',
+      body,
+      fields: [{ tag: ORD_TAGS.properties, value: properties }],
+      minimalTagPush: true,
+    });
+    // content_type (tag 1) still went pushnum...
+    expect(bytesToHex(envelope)).toContain('51' + contentTypePush);
+    // ...but properties (tag 0x11 = 17) has no OP_17, so it stays a data-push.
+    expect(bytesToHex(envelope)).toContain('0111' + '01a0');
+  });
+
+  it('minimal saves exactly one byte per tag ≤ 16', () => {
+    const args = {
+      revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+      contentType: 'text/plain',
+      body,
+      fields: [{ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(parentId) }],
+    } as const;
+    const dataPush = buildInscriptionEnvelope({ ...args });
+    const pushnum = buildInscriptionEnvelope({ ...args, minimalTagPush: true });
+    // Two tags ≤ 16 (content_type + parent): each drops from 2 bytes to 1.
+    expect(dataPush.length - pushnum.length).toBe(2);
+  });
+
+  it('the pushnum (vindicated) envelope parses to the IDENTICAL content — the charm is cosmetic', () => {
+    const dataEnv = buildInscriptionEnvelope({
+      revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+      contentType: 'text/plain',
+      body,
+    });
+    const pushnumEnv = buildInscriptionEnvelope({
+      revealPubkeyXonly: DUMMY_REVEAL_PUBKEY,
+      contentType: 'text/plain',
+      body,
+      minimalTagPush: true,
+    });
+    const dataParsed = InscriptionParserService.parse(fakeTxFromEnvelope(dataEnv));
+    const pushnumParsed = InscriptionParserService.parse(fakeTxFromEnvelope(pushnumEnv));
+    expect(dataParsed[0].contentType).toBe('text/plain');
+    expect(pushnumParsed[0].contentType).toBe('text/plain');
+    // Same content type, byte-identical body — the vindicated charm is
+    // purely how the tag number was pushed, not what got inscribed.
+    expect(pushnumParsed[0].getDataRaw()).toEqual(dataParsed[0].getDataRaw());
+    expect(pushnumParsed[0].getDataRaw()).toEqual(body);
+  });
+});
+
 describe('first-class envelope tags — round-trip via ordpool-parser', () => {
 
   const DELEGATE_ID = '6fb976ab49dcec017f1e201e84395983204ae1a7c2abf7ced0a85d692e442799i0';

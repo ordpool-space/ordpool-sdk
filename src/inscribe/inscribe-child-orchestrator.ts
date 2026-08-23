@@ -52,6 +52,12 @@ export interface InscribeChildAndBroadcastArgs {
   rune?: bigint;
   properties?: Uint8Array;
   propertyEncoding?: 'br';
+  /**
+   * Tag push-encoding choice. `false` (default) = data push (ord-standard,
+   * charm-free); `true` = pushnum for tags 1–16 (1 byte smaller, ord's
+   * `vindicated` charm). See `createInscribeTransactions`.
+   */
+  minimalTagPush?: boolean;
   /** The parent inscription id (`<txid>i<index>`) — the `parent` tag. */
   parentInscriptionId: string;
   /**
@@ -104,6 +110,7 @@ export function inscribeChildAndBroadcast(
         rune: args.rune,
         properties: args.properties,
         propertyEncoding: args.propertyEncoding,
+        minimalTagPush: args.minimalTagPush,
         parentInscriptionId: args.parentInscriptionId,
         parentUtxo: args.parentUtxo,
         network: args.network,

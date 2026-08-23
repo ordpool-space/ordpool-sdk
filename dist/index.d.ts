@@ -3351,6 +3351,18 @@ interface BuildInscriptionEnvelopeArgs {
      * indexes by tag, not position.
      */
     fields?: ReadonlyArray<OrdEnvelopeField>;
+    /**
+     * How each tag number is pushed into the tapscript. `false`
+     * (default) uses a 1-byte DATA push (`OP_PUSHBYTES_1 <tag>`) —
+     * byte-for-byte what ord's own wallet emits, so the inscription is
+     * charm-free. `true` uses the pushnum opcode `OP_1..OP_16` for tags
+     * 1–16 — 1 byte smaller per tag, but ord flags any pushnum inside an
+     * envelope as `Curse::Pushnum` and stamps the `vindicated` charm
+     * (post-jubilee). Everything else about the inscription is identical:
+     * same content, same tracking, same parent/child provenance, and on
+     * mainnet the same non-negative number. Purely a push-encoding choice.
+     */
+    minimalTagPush?: boolean;
 }
 declare function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Uint8Array;
 /**
@@ -3905,6 +3917,12 @@ interface SimulateInscribeFeesArgs {
     /** Optional extra envelope fields (parent, metaprotocol, metadata...). */
     envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
     /**
+     * Tag push-encoding choice. Threads to `buildInscriptionEnvelope`
+     * so the simulated reveal vsize matches the encoding the real
+     * commit will use (pushnum saves 1 byte per tag). Default false.
+     */
+    minimalTagPush?: boolean;
+    /**
      * Funding-input shape — the same `InscribeFundingInput` the commit
      * helper consumes. The Layer-2 adapter produces this.
      */
@@ -4350,6 +4368,18 @@ interface CreateInscribeTransactionsArgs {
      * alongside `properties`.
      */
     propertyEncoding?: 'br';
+    /**
+     * How each ord tag number is pushed into the reveal tapscript.
+     * `false` (default) uses a 2-byte data push (`OP_PUSHBYTES_1 <tag>`),
+     * byte-for-byte what ord's own wallet emits — the inscription is
+     * charm-free. `true` uses the 1-byte pushnum opcode (`OP_1..OP_16`)
+     * for tags 1–16, saving 1 byte per tag, at the cost of ord stamping
+     * the `vindicated` charm (post-jubilee). Nothing else changes: same
+     * content, tracking, provenance, and non-negative number on mainnet.
+     * The commit + reveal fee simulation uses the same encoding, so the
+     * quoted vsize/fees already reflect the choice.
+     */
+    minimalTagPush?: boolean;
     /** Network. */
     network: Network;
 }
@@ -4699,6 +4729,14 @@ interface InscribeAndBroadcastArgs {
     properties?: Uint8Array;
     /** Optional properties-encoding hint (tag 0x13); only with `properties`. */
     propertyEncoding?: 'br';
+    /**
+     * How ord tag numbers are pushed into the reveal tapscript. `false`
+     * (default) = 2-byte data push, matching ord's own wallet (charm-free).
+     * `true` = 1-byte pushnum for tags 1–16, saving a byte per tag at the
+     * cost of ord's `vindicated` charm. Everything else identical. See
+     * `createInscribeTransactions`.
+     */
+    minimalTagPush?: boolean;
     network: Network;
     /**
      * Broadcasts a wire-format tx hex; returns the resulting txid.
@@ -4774,6 +4812,12 @@ interface InscribeChildAndBroadcastArgs {
     rune?: bigint;
     properties?: Uint8Array;
     propertyEncoding?: 'br';
+    /**
+     * Tag push-encoding choice. `false` (default) = data push (ord-standard,
+     * charm-free); `true` = pushnum for tags 1–16 (1 byte smaller, ord's
+     * `vindicated` charm). See `createInscribeTransactions`.
+     */
+    minimalTagPush?: boolean;
     /** The parent inscription id (`<txid>i<index>`) — the `parent` tag. */
     parentInscriptionId: string;
     /**
@@ -4836,6 +4880,13 @@ interface InscribeContent {
     properties?: Uint8Array;
     /** Properties-encoding hint (tag 0x13); only alongside properties. */
     propertyEncoding?: 'br';
+    /**
+     * Tag push-encoding choice. `false` (default) = data push (ord-standard,
+     * charm-free); `true` = pushnum for tags 1–16 (1 byte smaller, ord's
+     * `vindicated` charm). Threads to both the fee preview and the mint so
+     * the quoted vsize matches the broadcast tx. See createInscribeTransactions.
+     */
+    minimalTagPush?: boolean;
     /** Override for the inscription's recipient. Defaults to wallet.ordinalsAddress. */
     recipient?: string;
 }

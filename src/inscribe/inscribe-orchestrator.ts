@@ -111,6 +111,14 @@ export interface InscribeAndBroadcastArgs {
   properties?: Uint8Array;
   /** Optional properties-encoding hint (tag 0x13); only with `properties`. */
   propertyEncoding?: 'br';
+  /**
+   * How ord tag numbers are pushed into the reveal tapscript. `false`
+   * (default) = 2-byte data push, matching ord's own wallet (charm-free).
+   * `true` = 1-byte pushnum for tags 1–16, saving a byte per tag at the
+   * cost of ord's `vindicated` charm. Everything else identical. See
+   * `createInscribeTransactions`.
+   */
+  minimalTagPush?: boolean;
   network: Network;
   /**
    * Broadcasts a wire-format tx hex; returns the resulting txid.
@@ -169,6 +177,7 @@ export function inscribeAndBroadcast(
         rune: args.rune,
         properties: args.properties,
         propertyEncoding: args.propertyEncoding,
+        minimalTagPush: args.minimalTagPush,
         network: args.network,
       });
     } catch (err) {

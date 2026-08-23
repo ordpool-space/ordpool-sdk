@@ -146,10 +146,60 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
 
     const insc = await waitForOrdStockInscription(inscriptionId(revealTxid, 0));
     // Blessed: non-negative number AND no curse charm — exactly how ord's
-    // own single-input inscriptions index. (Pre-fix, the OP_N pushnum tags
-    // made this `vindicated`.)
+    // own single-input inscriptions index. (The default data-push tag form
+    // carries no `Curse::Pushnum`.)
     expect(insc.number).toBeGreaterThanOrEqual(0);
     expect(insc.charms ?? []).not.toContain('cursed');
     expect(insc.charms ?? []).not.toContain('vindicated');
+  }, 180_000);
+
+  it('minimalTagPush:true makes stock ord stamp the `vindicated` charm', async () => {
+    // Same inscription, only `minimalTagPush: true`. The pushnum tag form
+    // trips ord's `Curse::Pushnum`; post-jubilee (the beforeAll mined past
+    // 110) that resolves to a `vindicated` charm with a non-negative number.
+    // This pins the flag's real-ord effect — the ONLY thing it changes.
+    const recipientKey = secp256k1.utils.randomPrivateKey();
+    const recipientAddress = btc.p2tr(schnorr.getPublicKey(recipientKey), undefined, scureRegtest, true).address!;
+
+    const fundingAddr = bitcoinCliPsbtWallet('getnewaddress', '', 'bech32');
+    const fundingPubkey = hex.decode(JSON.parse(bitcoinCliPsbtWallet('getaddressinfo', fundingAddr)).pubkey);
+    bitcoinCliPsbtWallet('sendtoaddress', fundingAddr, '1.0');
+    await waitForElectrsSync(mineBlocks(1));
+    const utxo = await waitForUtxoAt(fundingAddr, 100_000_000);
+
+    const body = new TextEncoder().encode('vindicated by pushnum');
+    const inscribed = createInscribeTransactions({
+      paymentOutput: { txid: utxo.txid, vout: utxo.vout, value: utxo.value, status: { confirmed: true } },
+      paymentPublicKey: fundingPubkey,
+      paymentAddress: fundingAddr,
+      recipientAddress,
+      body,
+      contentType: TXT_CONTENT_TYPE,
+      feeRatePerVbyte: 5,
+      minimalTagPush: true,
+      network: Network.Regtest,
+    });
+
+    const processed = JSON.parse(bitcoinCliPsbtWallet(
+      '-named', 'walletprocesspsbt', `psbt=${base64.encode(inscribed.commitPsbt)}`, 'sign=true', 'finalize=true',
+    ));
+    expect(processed.complete).toBe(true);
+    const commitTxid = await postTx(btc.Transaction.fromRaw(hex.decode(processed.hex)).hex);
+    mineBlocks(1);
+    await waitForTxConfirmed(commitTxid);
+
+    const revealTxid = await postTx(inscribed.revealHex);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForTxConfirmed(revealTxid);
+    await waitForOrdStockSync(tip);
+
+    const insc = await waitForOrdStockInscription(inscriptionId(revealTxid, 0));
+    // Post-jubilee: vindicated (NOT cursed), number still non-negative.
+    // The body + content-type are unchanged from the blessed case — only
+    // the charm differs, which is the whole point of the flag.
+    expect(insc.charms ?? []).toContain('vindicated');
+    expect(insc.charms ?? []).not.toContain('cursed');
+    expect(insc.number).toBeGreaterThanOrEqual(0);
   }, 180_000);
 });
