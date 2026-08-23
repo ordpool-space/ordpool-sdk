@@ -111,20 +111,24 @@ export interface BuildInscriptionEnvelopeArgs {
 }
 
 /**
- * Encodes a tag as a script item. Tags 1–16 use the OP_1..OP_16
- * opcodes (single byte, no push prefix); tag 17+ become a 1-byte
- * data push.
+ * Encodes a tag as a script item: a 1-byte DATA push of the tag value
+ * (`OP_PUSHBYTES_1 <tag>`), for EVERY tag.
  *
- * scure's `Script` codec recognises opcodes by their STRING name
- * (`'OP_1'`, `'CHECKSIG'`, etc.), not by numeric value. Numeric
- * values get interpreted as data pushes. So we hand back the
- * literal opcode name string for 1–16.
+ * This is byte-for-byte what ord emits — `Tag::append` does
+ * `push_slice(self.bytes())` where `bytes()` is the single tag byte
+ * (`cat21-ord/src/inscriptions/tag.rs`). It must NOT be an `OP_1..OP_16`
+ * pushnum opcode: ord flags any pushnum in an envelope as
+ * `Curse::Pushnum`, which curses (pre-jubilee) / vindicates (post-jubilee)
+ * the inscription instead of blessing it. A blessed inscription — the same
+ * result ord's own wallet produces — requires the data-push form.
+ *
+ * scure's `Script.encode` does NOT minimal-encode a single byte back to a
+ * pushnum: `Script.encode([Uint8Array([1])])` is `01 01`, not `51`. So
+ * handing back `Uint8Array([tag])` yields exactly ord's bytes.
  */
-function tagAsScriptItem(tag: number): keyof typeof OP | Uint8Array {
+function tagAsScriptItem(tag: number): Uint8Array {
   if (tag <= 0) throw new Error(`Tag must be positive; got ${tag}`);
-  if (tag <= 16) {
-    return `OP_${tag}` as keyof typeof OP;
-  }
+  if (tag > 255) throw new Error(`Tag must fit in one byte; got ${tag}`);
   return new Uint8Array([tag]);
 }
 
@@ -142,7 +146,7 @@ function tagAsScriptItem(tag: number): keyof typeof OP | Uint8Array {
  * OP_IF                                  (0x63)
  *   "ord"                                (3-byte push)
  *   [for each field:]
- *     <tag>                              (OP_N for tag ≤ 16, else 1-byte push)
+ *     <tag>                              (1-byte data push, ord-identical)
  *     <value>                            (variable push)
  *   OP_0                                 (separator before body)
  *   [for each body chunk (≤ 520 bytes):]

@@ -312,10 +312,11 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
   it('gzip-compressed body round-trips on chain (content_encoding: gzip tag)', async () => {
     const compressed = await compressGzip(COMPRESSIBLE_HTML);
     expect(compressed.length).toBeLessThan(COMPRESSIBLE_HTML.length);
-    // OP_9 (0x59) + OP_PUSHBYTES_4 (0x04) + 'gzip' (67 7a 69 70).
+    // content_encoding tag 0x09 data-pushed as `01 09`, then
+    // OP_PUSHBYTES_4 (0x04) + 'gzip' (67 7a 69 70).
     await inscribeCompressedRoundtrip({
       original: COMPRESSIBLE_HTML, compressed, encoding: 'gzip',
-      tagHex: '5904' + '677a6970', decode: gunzipSync,
+      tagHex: '0109' + '04' + '677a6970', decode: gunzipSync,
     });
   }, 240_000);
 
@@ -326,10 +327,11 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
     const wasm = readFileSync(join(__dirname, '../../wasm/brotli_wasm_bg.wasm'));
     const compressed = await compressBrotliWasm(COMPRESSIBLE_HTML, 11, wasm);
     expect(compressed.length).toBeLessThan(COMPRESSIBLE_HTML.length);
-    // OP_9 (0x59) + OP_PUSHBYTES_2 (0x02) + 'br' (62 72).
+    // content_encoding tag 0x09 data-pushed as `01 09`, then
+    // OP_PUSHBYTES_2 (0x02) + 'br' (62 72).
     await inscribeCompressedRoundtrip({
       original: COMPRESSIBLE_HTML, compressed, encoding: 'br',
-      tagHex: '5902' + '6272', decode: brotliDecompressSync,
+      tagHex: '0109' + '02' + '6272', decode: brotliDecompressSync,
     });
   }, 240_000);
 });

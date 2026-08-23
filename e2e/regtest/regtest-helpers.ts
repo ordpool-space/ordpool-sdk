@@ -484,6 +484,45 @@ export function ordCreateWallet(name = 'ord'): string {
   throw new Error(`unexpected ord wallet receive shape: ${stdout}`);
 }
 
+/**
+ * Write arbitrary bytes to a file inside the cat21-ord container (via
+ * base64 to survive any byte value / the shell). Used to feed `ord wallet
+ * inscribe --file` a known content for byte-parity comparison.
+ */
+export function writeCat21OrdFile(containerPath: string, content: Uint8Array): void {
+  const b64 = Buffer.from(content).toString('base64');
+  execFileSync(
+    'docker',
+    ['exec', 'ordpool-e2e-cat21-ord', 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`],
+    { encoding: 'utf8' },
+  );
+}
+
+/**
+ * Run ord's OWN `wallet inscribe` (the reference implementation). Returns
+ * the commit + reveal txids. `--no-backup` avoids ord's recovery-key
+ * import into bitcoind (which fails on the shared regtest wallet). The
+ * envelope-construction code (`append_reveal_script`) is identical to
+ * stock ord, so the reveal's envelope bytes are ord-canonical.
+ */
+export function ordWalletInscribe(
+  walletName: string,
+  containerFilePath: string,
+  feeRateSatPerVb: number,
+  extraArgs: string[] = [],
+): { commit: string; reveal: string } {
+  const stdout = ordWalletCli(
+    walletName,
+    'inscribe',
+    '--no-backup',
+    '--fee-rate', String(feeRateSatPerVb),
+    '--file', containerFilePath,
+    ...extraArgs,
+  );
+  const parsed = JSON.parse(stdout) as { commit: string; reveal: string };
+  return { commit: parsed.commit, reveal: parsed.reveal };
+}
+
 export function assertAllInputsSighashAll(tx: EsploraTx): void {
   for (let i = 0; i < tx.vin.length; i++) {
     const input = tx.vin[i] as EsploraVin;

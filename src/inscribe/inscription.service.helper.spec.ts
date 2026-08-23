@@ -403,14 +403,14 @@ describe('createInscribeTransactions', () => {
         network: NETWORK,
       });
       // The envelope script bytes contain the note value. Tag 0x0f
-      // encodes as opcode OP_15 (0x5f) and the UTF-8 push follows.
+      // data-pushes as `01 0f` (ord-identical), then the UTF-8 push.
       const envelopeHex = Array.from(result.commit.envelopeScript)
         .map(b => b.toString(16).padStart(2, '0')).join('');
       const noteHex = Array.from(new TextEncoder().encode('minted via ordpool.space'))
         .map(b => b.toString(16).padStart(2, '0')).join('');
       expect(envelopeHex).toContain(noteHex);
-      // OP_15 = 0x5f, immediately preceding the note push prefix.
-      expect(envelopeHex).toMatch(/5f[0-9a-f]{2}[0-9a-f]*/);
+      // `01 0f` (data push of tag 0x0f), immediately preceding the note push.
+      expect(envelopeHex).toMatch(/010f[0-9a-f]{2}[0-9a-f]*/);
     });
   });
 
@@ -431,10 +431,10 @@ describe('createInscribeTransactions', () => {
       });
       const envelopeHex = Array.from(result.commit.envelopeScript)
         .map(b => b.toString(16).padStart(2, '0')).join('');
-      // OP_3 = 0x53, followed by a 32-byte push (0x20). Then bb00...aa
-      // (reversed txid — proves the byte-order flip landed).
+      // Tag 0x03 data-pushed as `01 03` (ord-identical), then a 32-byte
+      // push (0x20) of bb00...aa (reversed txid — the byte-order flip).
       const reversedTxidHex = 'bb' + '00'.repeat(30) + 'aa';
-      expect(envelopeHex).toContain('5320' + reversedTxidHex);
+      expect(envelopeHex).toContain('0103' + '20' + reversedTxidHex);
     });
 
     it('rejects a malformed parent id', () => {
@@ -469,8 +469,8 @@ describe('createInscribeTransactions', () => {
       });
       const envelopeHex = Array.from(result.commit.envelopeScript)
         .map(b => b.toString(16).padStart(2, '0')).join('');
-      // OP_9 = 0x59 followed by a 2-byte push (0x02) of UTF-8 "br" = 0x62 0x72.
-      expect(envelopeHex).toContain('5902' + '6272');
+      // Tag 0x09 data-pushed as `01 09`, then a 2-byte push (0x02) of "br".
+      expect(envelopeHex).toContain('0109' + '02' + '6272');
     });
 
     it('contentEncoding=gzip → envelope carries tag 0x09 (OP_9) with UTF-8 "gzip"', () => {
@@ -488,9 +488,8 @@ describe('createInscribeTransactions', () => {
       });
       const envelopeHex = Array.from(result.commit.envelopeScript)
         .map(b => b.toString(16).padStart(2, '0')).join('');
-      // OP_9 = 0x59 followed by a 4-byte push (0x04) of UTF-8 "gzip" =
-      // 0x67 0x7a 0x69 0x70.
-      expect(envelopeHex).toContain('5904' + '677a6970');
+      // Tag 0x09 data-pushed as `01 09`, then a 4-byte push (0x04) of "gzip".
+      expect(envelopeHex).toContain('0109' + '04' + '677a6970');
     });
   });
 

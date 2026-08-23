@@ -112,14 +112,15 @@ describe('createChildInscribeTransactions — reveal topology', () => {
     expect(btc.Transaction.fromPSBT(build().revealPsbt).lockTime).toBe(21);
   });
 
-  it('envelope carries the parent tag (0x03 = OP_3) with the encoded parent id', () => {
+  it('envelope carries the parent tag (0x03, data-pushed) with the encoded parent id', () => {
     const reveal = btc.Transaction.fromPSBT(build().revealPsbt);
     // The commit input's witness element [1] is the bare envelope script.
     const envelopeScript = reveal.getInput(1).finalScriptWitness![1];
     const envelopeHex = hex.encode(envelopeScript);
     const idHex = hex.encode(encodeInscriptionId(PARENT_INSCRIPTION_ID));
-    // OP_3 (0x53) + a 32-byte push (0x20) of the encoded parent id.
-    expect(envelopeHex).toContain('53' + '20' + idHex);
+    // Tag 0x03 data-pushed as `01 03` (ord-identical) + a 32-byte push (0x20)
+    // of the encoded parent id.
+    expect(envelopeHex).toContain('0103' + '20' + idHex);
   });
 });
 
