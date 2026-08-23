@@ -27,10 +27,13 @@ import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { gunzipSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { InscriptionParserService } from 'ordpool-parser';
 
-import { assessCompression } from '../../src/inscribe/inscribe-compression.helper';
+import { compressGzip } from '../../src/inscribe/inscribe-compression.helper';
+import { compressBrotliWasm } from '../../src/inscribe/brotli-wasm-encoder';
 import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
 import { Network, toScureNetwork } from '../../src/network';
 import {
@@ -214,7 +217,21 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
     expect(allWitnessHex).toContain(noteHex);
   }, 240_000);
 
-  it('gzip-compressed body round-trips on chain (compressed bytes in the witness, content_encoding: gzip tag)', async () => {
+  // Full inscribe -> broadcast -> parse round-trip for a COMPRESSED body,
+  // parametrized over the codec so both gzip (native) and brotli (the wasm
+  // encoder, i.e. the Chrome/Edge path) get an on-chain proof: the
+  // compressed bytes land in the reveal witness, the `content_encoding` tag
+  // is present, an independent decoder (node:zlib) recovers the original,
+  // and ordpool-parser auto-decodes on getContent().
+  async function inscribeCompressedRoundtrip(opts: {
+    original: Uint8Array;
+    compressed: Uint8Array;
+    encoding: 'gzip' | 'br';
+    tagHex: string;
+    decode: (b: Uint8Array) => Buffer;
+  }): Promise<void> {
+    const { original, compressed, encoding, tagHex, decode } = opts;
+
     const recipientKey = secp256k1.utils.randomPrivateKey();
     const recipientAddress = btc.p2tr(schnorr.getPublicKey(recipientKey), undefined, scureRegtest, true).address!;
 
@@ -226,48 +243,25 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
     await waitForElectrsSync(mineBlocks(1));
     const utxo = await waitForUtxoAt(fundingPaymentAddress, FUND_AMOUNT_SATS);
 
-    // Realistic HTML-ish body that gzip compresses well.
-    const original = new TextEncoder().encode(
-      '<html><body>' + 'tip the maintainer '.repeat(200) + '</body></html>',
-    );
-    // Run the consumer-facing decision helper: it reports the savings and
-    // hands back the compressed bytes to reuse (never compresses twice).
-    const assessment = await assessCompression(original, 'text/html');
-    expect(assessment.worthIt).toBe(true);
-    expect(assessment.bestEncoding).toBe('gzip');
-    expect(assessment.compressedSize).toBeLessThan(assessment.originalSize);
-    const compressed = assessment.compressed;
-
-    // Phase 1: build with the COMPRESSED body + contentEncoding flag.
+    // Phase 1: build with the COMPRESSED body + contentEncoding tag.
     const inscribed = createInscribeTransactions({
-      paymentOutput: {
-        txid: utxo.txid,
-        vout: utxo.vout,
-        value: utxo.value,
-        status: { confirmed: true },
-      },
+      paymentOutput: { txid: utxo.txid, vout: utxo.vout, value: utxo.value, status: { confirmed: true } },
       paymentPublicKey: fundingPaymentPublicKey,
       paymentAddress: fundingPaymentAddress,
       recipientAddress,
       body: compressed,
       contentType: 'text/html',
       feeRatePerVbyte: FEE_RATE,
-      // 'none' → no tag; otherwise pass the winning codec. This is the
-      // exact wiring a consumer (the inscribe UI) uses.
-      contentEncoding: assessment.bestEncoding === 'none' ? undefined : assessment.bestEncoding,
+      contentEncoding: encoding,
       network: Network.Regtest,
     });
 
     // Phase 2: sign + broadcast commit.
     const unsignedCommitBase64 = base64.encode(inscribed.commitPsbt);
     const walletprocessed = JSON.parse(bitcoinCliPsbtWallet(
-      '-named', 'walletprocesspsbt',
-      `psbt=${unsignedCommitBase64}`,
-      'sign=true',
-      'finalize=true',
+      '-named', 'walletprocesspsbt', `psbt=${unsignedCommitBase64}`, 'sign=true', 'finalize=true',
     ));
     expect(walletprocessed.complete).toBe(true);
-    // See above for why we use walletprocessed.hex directly.
     const signedCommit = btc.Transaction.fromRaw(hex.decode(walletprocessed.hex));
     const commitTxid = await postTx(signedCommit.hex);
     expect(commitTxid).toBe(inscribed.commitTxid);
@@ -279,14 +273,9 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
     await waitForElectrsSync(revealTip);
     const revealTx: EsploraTx = await waitForTxConfirmed(revealTxid);
 
-    // Phase 4: parse the inscription out of the reveal's witness.
-    // ordpool-parser sees the body as the on-chain bytes, which is
-    // the COMPRESSED gzip output we built with.
+    // Phase 4: the on-chain body is the COMPRESSED bytes we built with.
     const witnessHex = (revealTx as unknown as { vin: { witness: string[] }[] }).vin[0].witness;
-    const parsed = InscriptionParserService.parse({
-      txid: revealTxid,
-      vin: [{ witness: witnessHex }],
-    });
+    const parsed = InscriptionParserService.parse({ txid: revealTxid, vin: [{ witness: witnessHex }] });
     expect(parsed.length).toBe(1);
     expect(parsed[0].contentType).toBe('text/html');
     const onChainBody = parsed[0].getDataRaw();
@@ -295,40 +284,52 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
       expect(onChainBody[i]).toBe(compressed[i]);
     }
 
-    // Phase 5: the witness must also carry the `content_encoding: gzip`
-    // envelope tag. Tag 0x09 encodes as OP_9 (0x59); the value is a
-    // 4-byte push (OP_PUSHBYTES_4 = 0x04) of UTF-8 'gzip'
-    // (0x67 0x7a 0x69 0x70).
-    const allWitnessHex = witnessHex.join('');
-    expect(allWitnessHex).toContain('5904' + '677a6970');
+    // Phase 5: the witness carries the `content_encoding` tag (0x09 → OP_9
+    // = 0x59, followed by the pushed encoding string).
+    expect(witnessHex.join('')).toContain(tagHex);
 
-    // Phase 6: decompress the on-chain bytes — equal to the original
-    // body. Proves the gzip envelope tag is honoured by any consumer
-    // that does its own decompression (here node:zlib, independent of
-    // the Compression Streams API the SDK used to compress).
-    const decompressed = gunzipSync(onChainBody);
-    expect(decompressed).toEqual(Buffer.from(original));
+    // Phase 6: an independent decoder (node:zlib) recovers the original.
+    expect(decode(onChainBody)).toEqual(Buffer.from(original));
 
-    // Phase 6b: ordpool-parser recovers the ORIGINAL bytes itself. The
-    // parser reads content_encoding: 'gzip' and auto-decompresses on
-    // getContent() / getDataUri() (getDataRaw stays the raw compressed
-    // bytes, asserted in phase 4). This is the end-user render path: an
-    // explorer shows the decompressed HTML, not the gzip blob.
-    const recovered = await parsed[0].getContent();
-    expect(recovered).toBe(new TextDecoder().decode(original));
-    expect(parsed[0].getContentEncoding()).toBe('gzip');
+    // Phase 6b: ordpool-parser auto-decodes on getContent() (the render
+    // path; getDataRaw stays the raw compressed bytes, asserted in phase 4).
+    expect(await parsed[0].getContent()).toBe(new TextDecoder().decode(original));
+    expect(parsed[0].getContentEncoding()).toBe(encoding);
 
-    // Phase 7: cat21-ord saw two cats on this inscription too — the
-    // nLockTime=21-on-both-txs behaviour applies whatever the body
-    // content. Confirm both at the recipient's UTXO.
+    // Phase 7: both cats (commit + reveal) land at the reveal's first sat.
     await waitForOrdSync(revealTip);
     const catA = await waitForCatAtAddress(catInscriptionId(commitTxid), recipientAddress, 30_000);
     const catB = await waitForCatAtAddress(catInscriptionId(revealTxid), recipientAddress, 30_000);
-    // Both cats live at the SAME satpoint: the first sat (offset 0)
-    // of the reveal's vout[0]. ord's `/inscription/<id>` JSON exposes
-    // this as `satpoint = <txid>:<vout>:<offset>`.
     const expectedSatpoint = `${revealTxid}:0:0`;
     expect(catA.satpoint).toBe(expectedSatpoint);
     expect(catB.satpoint).toBe(expectedSatpoint);
+  }
+
+  const COMPRESSIBLE_HTML = new TextEncoder().encode(
+    '<html><body>' + 'tip the maintainer '.repeat(200) + '</body></html>',
+  );
+
+  it('gzip-compressed body round-trips on chain (content_encoding: gzip tag)', async () => {
+    const compressed = await compressGzip(COMPRESSIBLE_HTML);
+    expect(compressed.length).toBeLessThan(COMPRESSIBLE_HTML.length);
+    // OP_9 (0x59) + OP_PUSHBYTES_4 (0x04) + 'gzip' (67 7a 69 70).
+    await inscribeCompressedRoundtrip({
+      original: COMPRESSIBLE_HTML, compressed, encoding: 'gzip',
+      tagHex: '5904' + '677a6970', decode: gunzipSync,
+    });
+  }, 240_000);
+
+  it('brotli body via the WASM encoder round-trips on chain (content_encoding: br tag)', async () => {
+    // The Chrome/Edge path: compress with the vendored wasm brotli encoder
+    // (loaded here from the package's own .wasm bytes), proving its output
+    // is on-chain-valid brotli that ord serves and the parser recovers.
+    const wasm = readFileSync(join(__dirname, '../../wasm/brotli_wasm_bg.wasm'));
+    const compressed = await compressBrotliWasm(COMPRESSIBLE_HTML, 11, wasm);
+    expect(compressed.length).toBeLessThan(COMPRESSIBLE_HTML.length);
+    // OP_9 (0x59) + OP_PUSHBYTES_2 (0x02) + 'br' (62 72).
+    await inscribeCompressedRoundtrip({
+      original: COMPRESSIBLE_HTML, compressed, encoding: 'br',
+      tagHex: '5902' + '6272', decode: brotliDecompressSync,
+    });
   }, 240_000);
 });

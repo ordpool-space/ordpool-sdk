@@ -75,6 +75,8 @@
     "src/inscribe/inscribe-broadcast.helper.ts",
     "src/inscribe/inscribe-orchestrator.ts",
     "src/inscribe/inscribe-compression.helper.ts",
+    "src/inscribe/brotli-wasm-glue.generated.ts",
+    "src/inscribe/brotli-wasm-encoder.ts",
     "src/wallet/signers/operation-named-defaults.ts",
     "src/wallet/psbt-extract.ts",
     "src/wallet/sighash.ts",

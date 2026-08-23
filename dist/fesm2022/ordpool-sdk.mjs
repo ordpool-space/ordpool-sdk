@@ -9003,9 +9003,520 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
             args: [{ providedIn: 'root' }]
         }], ctorParameters: () => [] });
 
+/* eslint-disable */
+// @ts-nocheck
 /**
- * Isomorphic inscription-body compression (browser + Node), zero runtime
- * dependencies.
+ * AUTO-GENERATED — DO NOT EDIT. Regenerate via `node scripts/gen-brotli-wasm.mjs`.
+ *
+ * Vendored wasm-bindgen glue from brotli-wasm@3.0.1 (pkg.web), with its
+ * module-relative wasm-URL default removed so it bundles in any tool
+ * (Angular esbuild + webpack). `init(urlOrBytes)`: pass the URL of a hosted
+ * `brotli_wasm_bg.wasm` (or its bytes in Node).
+ */
+let wasm;
+const heap = new Array(32).fill(undefined);
+heap.push(undefined, null, true, false);
+function getObject(idx) { return heap[idx]; }
+const cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
+cachedTextDecoder.decode();
+let cachegetUint8Memory0 = null;
+function getUint8Memory0() {
+    if (cachegetUint8Memory0 === null || cachegetUint8Memory0.buffer !== wasm.memory.buffer) {
+        cachegetUint8Memory0 = new Uint8Array(wasm.memory.buffer);
+    }
+    return cachegetUint8Memory0;
+}
+function getStringFromWasm0(ptr, len) {
+    return cachedTextDecoder.decode(getUint8Memory0().subarray(ptr, ptr + len));
+}
+let heap_next = heap.length;
+function addHeapObject(obj) {
+    if (heap_next === heap.length)
+        heap.push(heap.length + 1);
+    const idx = heap_next;
+    heap_next = heap[idx];
+    heap[idx] = obj;
+    return idx;
+}
+let WASM_VECTOR_LEN = 0;
+const cachedTextEncoder = new TextEncoder('utf-8');
+const encodeString = (typeof cachedTextEncoder.encodeInto === 'function'
+    ? function (arg, view) {
+        return cachedTextEncoder.encodeInto(arg, view);
+    }
+    : function (arg, view) {
+        const buf = cachedTextEncoder.encode(arg);
+        view.set(buf);
+        return {
+            read: arg.length,
+            written: buf.length
+        };
+    });
+function passStringToWasm0(arg, malloc, realloc) {
+    if (realloc === undefined) {
+        const buf = cachedTextEncoder.encode(arg);
+        const ptr = malloc(buf.length);
+        getUint8Memory0().subarray(ptr, ptr + buf.length).set(buf);
+        WASM_VECTOR_LEN = buf.length;
+        return ptr;
+    }
+    let len = arg.length;
+    let ptr = malloc(len);
+    const mem = getUint8Memory0();
+    let offset = 0;
+    for (; offset < len; offset++) {
+        const code = arg.charCodeAt(offset);
+        if (code > 0x7F)
+            break;
+        mem[ptr + offset] = code;
+    }
+    if (offset !== len) {
+        if (offset !== 0) {
+            arg = arg.slice(offset);
+        }
+        ptr = realloc(ptr, len, len = offset + arg.length * 3);
+        const view = getUint8Memory0().subarray(ptr + offset, ptr + len);
+        const ret = encodeString(arg, view);
+        offset += ret.written;
+    }
+    WASM_VECTOR_LEN = offset;
+    return ptr;
+}
+let cachegetInt32Memory0 = null;
+function getInt32Memory0() {
+    if (cachegetInt32Memory0 === null || cachegetInt32Memory0.buffer !== wasm.memory.buffer) {
+        cachegetInt32Memory0 = new Int32Array(wasm.memory.buffer);
+    }
+    return cachegetInt32Memory0;
+}
+function dropObject(idx) {
+    if (idx < 36)
+        return;
+    heap[idx] = heap_next;
+    heap_next = idx;
+}
+function takeObject(idx) {
+    const ret = getObject(idx);
+    dropObject(idx);
+    return ret;
+}
+function passArray8ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 1);
+    getUint8Memory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+let stack_pointer = 32;
+function addBorrowedObject(obj) {
+    if (stack_pointer == 1)
+        throw new Error('out of js stack');
+    heap[--stack_pointer] = obj;
+    return stack_pointer;
+}
+function getArrayU8FromWasm0(ptr, len) {
+    return getUint8Memory0().subarray(ptr / 1, ptr / 1 + len);
+}
+/**
+* @param {Uint8Array} buf
+* @param {any} raw_options
+* @returns {Uint8Array}
+*/
+function compress(buf, raw_options) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(buf, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.compress(retptr, ptr0, len0, addBorrowedObject(raw_options));
+        var r0 = getInt32Memory0()[retptr / 4 + 0];
+        var r1 = getInt32Memory0()[retptr / 4 + 1];
+        var r2 = getInt32Memory0()[retptr / 4 + 2];
+        var r3 = getInt32Memory0()[retptr / 4 + 3];
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v1 = getArrayU8FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_free(r0, r1 * 1);
+        return v1;
+    }
+    finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        heap[stack_pointer++] = undefined;
+    }
+}
+/**
+* @param {Uint8Array} buf
+* @returns {Uint8Array}
+*/
+function decompress(buf) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(buf, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.decompress(retptr, ptr0, len0);
+        var r0 = getInt32Memory0()[retptr / 4 + 0];
+        var r1 = getInt32Memory0()[retptr / 4 + 1];
+        var r2 = getInt32Memory0()[retptr / 4 + 2];
+        var r3 = getInt32Memory0()[retptr / 4 + 3];
+        if (r3) {
+            throw takeObject(r2);
+        }
+        var v1 = getArrayU8FromWasm0(r0, r1).slice();
+        wasm.__wbindgen_free(r0, r1 * 1);
+        return v1;
+    }
+    finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+function isLikeNone(x) {
+    return x === undefined || x === null;
+}
+/**
+* Same as [`brotli::BrotliResult`] except [`brotli::BrotliResult::ResultFailure`].
+*
+* Always `> 0`.
+*
+* `ResultFailure` is removed
+* because we will convert the failure to an actual negative error code (if available) and pass it elsewhere.
+*/
+const BrotliStreamResultCode = Object.freeze({ ResultSuccess: 1, "1": "ResultSuccess", NeedsMoreInput: 2, "2": "NeedsMoreInput", NeedsMoreOutput: 3, "3": "NeedsMoreOutput", });
+/**
+* Returned by every successful (de)compression.
+*/
+class BrotliStreamResult {
+    static __wrap(ptr) {
+        const obj = Object.create(BrotliStreamResult.prototype);
+        obj.ptr = ptr;
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_brotlistreamresult_free(ptr);
+    }
+    /**
+    * Result code.
+    *
+    * See [`BrotliStreamResultCode`] for available values.
+    *
+    * When error, the error code is not passed here but rather goes to `Err`.
+    */
+    get code() {
+        const ret = wasm.__wbg_get_brotlistreamresult_code(this.ptr);
+        return ret >>> 0;
+    }
+    /**
+    * Result code.
+    *
+    * See [`BrotliStreamResultCode`] for available values.
+    *
+    * When error, the error code is not passed here but rather goes to `Err`.
+    * @param {number} arg0
+    */
+    set code(arg0) {
+        wasm.__wbg_set_brotlistreamresult_code(this.ptr, arg0);
+    }
+    /**
+    * Output buffer
+    */
+    get buf() {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.__wbg_get_brotlistreamresult_buf(retptr, this.ptr);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var v0 = getArrayU8FromWasm0(r0, r1).slice();
+            wasm.__wbindgen_free(r0, r1 * 1);
+            return v0;
+        }
+        finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * Output buffer
+    * @param {Uint8Array} arg0
+    */
+    set buf(arg0) {
+        const ptr0 = passArray8ToWasm0(arg0, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.__wbg_set_brotlistreamresult_buf(this.ptr, ptr0, len0);
+    }
+    /**
+    * Consumed bytes of the input buffer
+    */
+    get input_offset() {
+        const ret = wasm.__wbg_get_brotlistreamresult_input_offset(this.ptr);
+        return ret >>> 0;
+    }
+    /**
+    * Consumed bytes of the input buffer
+    * @param {number} arg0
+    */
+    set input_offset(arg0) {
+        wasm.__wbg_set_brotlistreamresult_input_offset(this.ptr, arg0);
+    }
+}
+/**
+*/
+class CompressStream {
+    static __wrap(ptr) {
+        const obj = Object.create(CompressStream.prototype);
+        obj.ptr = ptr;
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_compressstream_free(ptr);
+    }
+    /**
+    * @param {number | undefined} quality
+    */
+    constructor(quality) {
+        const ret = wasm.compressstream_new(!isLikeNone(quality), isLikeNone(quality) ? 0 : quality);
+        return CompressStream.__wrap(ret);
+    }
+    /**
+    * @param {Uint8Array | undefined} input_opt
+    * @param {number} output_size
+    * @returns {BrotliStreamResult}
+    */
+    compress(input_opt, output_size) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            var ptr0 = isLikeNone(input_opt) ? 0 : passArray8ToWasm0(input_opt, wasm.__wbindgen_malloc);
+            var len0 = WASM_VECTOR_LEN;
+            wasm.compressstream_compress(retptr, this.ptr, ptr0, len0, output_size);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var r2 = getInt32Memory0()[retptr / 4 + 2];
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return BrotliStreamResult.__wrap(r0);
+        }
+        finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * @returns {number}
+    */
+    total_out() {
+        const ret = wasm.compressstream_total_out(this.ptr);
+        return ret >>> 0;
+    }
+}
+/**
+*/
+class DecompressStream {
+    static __wrap(ptr) {
+        const obj = Object.create(DecompressStream.prototype);
+        obj.ptr = ptr;
+        return obj;
+    }
+    __destroy_into_raw() {
+        const ptr = this.ptr;
+        this.ptr = 0;
+        return ptr;
+    }
+    free() {
+        const ptr = this.__destroy_into_raw();
+        wasm.__wbg_decompressstream_free(ptr);
+    }
+    /**
+    */
+    constructor() {
+        const ret = wasm.decompressstream_new();
+        return DecompressStream.__wrap(ret);
+    }
+    /**
+    * @param {Uint8Array} input
+    * @param {number} output_size
+    * @returns {BrotliStreamResult}
+    */
+    decompress(input, output_size) {
+        try {
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            const ptr0 = passArray8ToWasm0(input, wasm.__wbindgen_malloc);
+            const len0 = WASM_VECTOR_LEN;
+            wasm.decompressstream_decompress(retptr, this.ptr, ptr0, len0, output_size);
+            var r0 = getInt32Memory0()[retptr / 4 + 0];
+            var r1 = getInt32Memory0()[retptr / 4 + 1];
+            var r2 = getInt32Memory0()[retptr / 4 + 2];
+            if (r2) {
+                throw takeObject(r1);
+            }
+            return BrotliStreamResult.__wrap(r0);
+        }
+        finally {
+            wasm.__wbindgen_add_to_stack_pointer(16);
+        }
+    }
+    /**
+    * @returns {number}
+    */
+    total_out() {
+        const ret = wasm.decompressstream_total_out(this.ptr);
+        return ret >>> 0;
+    }
+}
+async function load(module, imports) {
+    if (typeof Response === 'function' && module instanceof Response) {
+        if (typeof WebAssembly.instantiateStreaming === 'function') {
+            try {
+                return await WebAssembly.instantiateStreaming(module, imports);
+            }
+            catch (e) {
+                if (module.headers.get('Content-Type') != 'application/wasm') {
+                    console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
+                }
+                else {
+                    throw e;
+                }
+            }
+        }
+        const bytes = await module.arrayBuffer();
+        return await WebAssembly.instantiate(bytes, imports);
+    }
+    else {
+        const instance = await WebAssembly.instantiate(module, imports);
+        if (instance instanceof WebAssembly.Instance) {
+            return { instance, module };
+        }
+        else {
+            return instance;
+        }
+    }
+}
+async function init(input) {
+    if (typeof input === 'undefined') {
+        throw new Error('brotli-wasm-glue: init() requires a wasm URL or bytes');
+    }
+    const imports = {};
+    imports.wbg = {};
+    imports.wbg.__wbindgen_is_undefined = function (arg0) {
+        const ret = getObject(arg0) === undefined;
+        return ret;
+    };
+    imports.wbg.__wbindgen_is_object = function (arg0) {
+        const val = getObject(arg0);
+        const ret = typeof (val) === 'object' && val !== null;
+        return ret;
+    };
+    imports.wbg.__wbindgen_string_new = function (arg0, arg1) {
+        const ret = getStringFromWasm0(arg0, arg1);
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbindgen_error_new = function (arg0, arg1) {
+        const ret = new Error(getStringFromWasm0(arg0, arg1));
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbindgen_json_serialize = function (arg0, arg1) {
+        const obj = getObject(arg1);
+        const ret = JSON.stringify(obj === undefined ? null : obj);
+        const ptr0 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        getInt32Memory0()[arg0 / 4 + 1] = len0;
+        getInt32Memory0()[arg0 / 4 + 0] = ptr0;
+    };
+    imports.wbg.__wbg_new_693216e109162396 = function () {
+        const ret = new Error();
+        return addHeapObject(ret);
+    };
+    imports.wbg.__wbg_stack_0ddaca5d1abfb52f = function (arg0, arg1) {
+        const ret = getObject(arg1).stack;
+        const ptr0 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        getInt32Memory0()[arg0 / 4 + 1] = len0;
+        getInt32Memory0()[arg0 / 4 + 0] = ptr0;
+    };
+    imports.wbg.__wbg_error_09919627ac0992f5 = function (arg0, arg1) {
+        try {
+            console.error(getStringFromWasm0(arg0, arg1));
+        }
+        finally {
+            wasm.__wbindgen_free(arg0, arg1);
+        }
+    };
+    imports.wbg.__wbindgen_object_drop_ref = function (arg0) {
+        takeObject(arg0);
+    };
+    imports.wbg.__wbindgen_throw = function (arg0, arg1) {
+        throw new Error(getStringFromWasm0(arg0, arg1));
+    };
+    if (typeof input === 'string' || (typeof Request === 'function' && input instanceof Request) || (typeof URL === 'function' && input instanceof URL)) {
+        input = fetch(input);
+    }
+    const { instance, module } = await load(await input, imports);
+    wasm = instance.exports;
+    init.__wbindgen_wasm_module = module;
+    return wasm;
+}
+
+/**
+ * Browser brotli ENCODER for runtimes without native
+ * `CompressionStream('brotli')` — i.e. Chrome/Edge (Blink), which
+ * deliberately don't ship the brotli compression dictionary. Safari,
+ * Firefox, Node 24.7+ and Deno have native brotli and never load this.
+ *
+ * The encoder is the reference Rust brotli compiled to wasm, vendored via
+ * `scripts/gen-brotli-wasm.mjs` into {@link ./brotli-wasm-glue.generated}
+ * (glue with no module-relative wasm URL, so it bundles in any tool) plus
+ * `wasm/brotli_wasm_bg.wasm` (shipped as a PACKAGE ASSET, not bundled into
+ * JS). Loading follows the standard wasm-library pattern (onnxruntime-web,
+ * sql.js, ffmpeg.wasm): the CONSUMER hosts the `.wasm` on its own origin
+ * (Angular `assets`) and passes the URL; we `fetch` + instantiate on
+ * demand, once, cached. So the ~1 MB never touches the JS bundle and is
+ * only fetched when a Chrome user actually inscribes compressible content.
+ */
+let readyPromise;
+let readyKey;
+function sourceKey(source) {
+    return typeof source === 'string' ? source : '<inline>';
+}
+/**
+ * Instantiate the brotli wasm from `source`, once. Idempotent per source:
+ * repeated calls with the same URL reuse the first instantiation. A
+ * consumer can call this eagerly (e.g. when the inscribe route mounts) to
+ * warm the encoder before the user hits compress.
+ */
+function loadBrotliWasm(source) {
+    const key = sourceKey(source);
+    if (!readyPromise || readyKey !== key) {
+        readyKey = key;
+        readyPromise = Promise.resolve(init(source)).then(() => undefined);
+    }
+    return readyPromise;
+}
+/**
+ * Compress `bytes` with the wasm brotli encoder at the given `quality`
+ * (1..11). `source` is loaded on first use (cached). Returns a plain
+ * `Uint8Array` of standard brotli bytes (decodable by ord, `ordpool-parser`,
+ * `node:zlib`, and any brotli decoder).
+ */
+async function compressBrotliWasm(bytes, quality, source) {
+    if (!ArrayBuffer.isView(bytes)) {
+        throw new Error('compressBrotliWasm: bytes must be a Uint8Array');
+    }
+    await loadBrotliWasm(source);
+    const input = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const out = compress(input, { quality });
+    // Normalise to a plain Uint8Array independent of the wasm-glue return subtype.
+    return new Uint8Array(out.buffer, out.byteOffset, out.byteLength);
+}
+
+/**
+ * Isomorphic inscription-body compression (browser + Node).
  *
  * Inscription bytes go on-chain at real sat/vB; compressing HTML / JSON /
  * SVG / text before inscribing is a direct fee win. ord recognises a
@@ -9013,39 +9524,31 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
  * serves it back with a matching HTTP `Content-Encoding` header, so the
  * viewing browser transparently decompresses it (see cat21-ord
  * `src/subcommand/server/r.rs`). Browsers always send `Accept-Encoding:
- * gzip, deflate, br`, so a `content_encoding: gzip` body renders
- * everywhere ordinals do.
+ * gzip, deflate, br`, so both `gzip` and `br` bodies render everywhere
+ * ordinals do; brotli typically lands ~15-20% smaller than gzip on
+ * text/SVG/JSON.
  *
- * # Codec: gzip, via the native Compression Streams API
+ * # Codecs: native first, wasm brotli only where forced
  *
- * `CompressionStream('gzip')` / `DecompressionStream('gzip')` are native
- * in every target runtime (Node 18+, Chrome/Edge 80+, Safari 16.4+,
- * Firefox 113+). That gives us a browser-capable compressor with NO
- * dependency and NO bundler surface: unlike a wasm encoder, a native
- * global is not an import, so webpack / Angular / esbuild leave it
- * untouched (nothing to resolve, no `.wasm` to fetch via
- * `new URL(..., import.meta.url)`).
+ * - **gzip** — native `CompressionStream('gzip')` everywhere (Node 18+,
+ *   all modern browsers). The universal baseline.
+ * - **brotli, native** — `CompressionStream('brotli')` where the runtime
+ *   has it: Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+ (brotli was
+ *   added to the WHATWG Compression Standard in 2026). Zero dependency,
+ *   no fetch.
+ * - **brotli, wasm fallback** — Chrome/Edge (Blink) deliberately don't
+ *   ship the brotli compression dictionary, so there is no native encoder
+ *   there. For those runtimes {@link assessCompression} uses the reference
+ *   Rust brotli compiled to wasm (see {@link ./brotli-wasm-encoder}), but
+ *   ONLY when the caller passes `brotliWasmUrl`. The `.wasm` is a hosted
+ *   PACKAGE ASSET the consumer serves from its own origin and is fetched
+ *   on demand — it never bloats the JS bundle. Omit the URL and Chrome
+ *   simply falls back to gzip.
  *
- * ## Why gzip and not brotli
- *
- * These bytes land on Bitcoin permanently: a single encoder bug corrupts
- * an inscription forever. gzip is the platform's battle-tested zlib, not
- * our code, so that entire risk class is absent by construction. brotli
- * is deliberately NOT offered on the encode side: the Compression Streams
- * API has no brotli encoder, there is no reference-derived pure-JS brotli
- * *encoder* to port (only decoders exist), and a hand-written one could
- * not be certified byte-exact against adversarial inputs to the standard
- * that immutable on-chain data demands. Decoding brotli is a solved
- * problem and lives in `ordpool-parser` (`brotliDecode`), which is where a
- * consumer verifies an existing `content_encoding: br` inscription.
- *
- * ## Future-shaped for a second codec
- *
- * {@link assessCompression} evaluates a list of codecs and returns the
- * smallest result, so adding a trustworthy brotli encoder later is a
- * one-line registration in {@link CODECS} plus widening the returned
- * `bestEncoding`. The `CompressionAssessment.bestEncoding` union already
- * carries `'br'` for that day; nothing here produces it today.
+ * Immutable-data safety: every encoder here is the platform's zlib or the
+ * reference Rust brotli — never hand-rolled — so an encoder bug can't
+ * corrupt an inscription. Decoding lives in `ordpool-parser`
+ * (`brotliDecode` / native `DecompressionStream`).
  *
  * # Async on purpose
  *
@@ -9079,24 +9582,48 @@ const INSCRIPTION_CONTENT_ENCODINGS = ['br', 'gzip'];
  * body we build (the parser uses the same ceiling on the render path).
  */
 const MAX_DECOMPRESSED_SIZE = 1 * 1024 * 1024;
+async function compressViaCompressionStream(body, format) {
+    if (!ArrayBuffer.isView(body)) {
+        throw new Error('compress: body must be a Uint8Array');
+    }
+    if (typeof CompressionStream === 'undefined') {
+        throw new Error(`${format} compression is not supported in this environment. For Node.js, upgrade to version 18 or higher.`);
+    }
+    const input = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    // `as BufferSource`: TS 5.7+ typed-array workaround (Uint8Array's backing
+    // buffer is `ArrayBufferLike`, which BlobPart won't accept). `as unknown as
+    // CompressionFormat`: lib.dom.d.ts still types the enum as gzip/deflate
+    // only, predating 'brotli' in the 2026 spec.
+    const stream = new Blob([input])
+        .stream()
+        .pipeThrough(new CompressionStream(format));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+}
 /**
  * Compress `body` with gzip via the native Compression Streams API. Works
  * in the browser AND Node. Returns a fresh `Uint8Array` (gzip stream:
  * magic `1f 8b`).
  */
 async function compressGzip(body) {
-    if (!ArrayBuffer.isView(body)) {
-        throw new Error('compressGzip: body must be a Uint8Array');
+    return compressViaCompressionStream(body, 'gzip');
+}
+/**
+ * Whether the runtime has a native `CompressionStream('brotli')` encoder:
+ * true on Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+; false on
+ * Chrome/Edge (Blink), which deliberately don't ship the brotli compression
+ * dictionary. Construction throws synchronously for an unsupported format,
+ * so this is a cheap sync feature test.
+ */
+function nativeBrotliAvailable() {
+    if (typeof CompressionStream === 'undefined')
+        return false;
+    try {
+        new CompressionStream('brotli');
+        return true;
     }
-    if (typeof CompressionStream === 'undefined') {
-        throw new Error('gzip compression is not supported in this environment. For Node.js, upgrade to version 18 or higher.');
+    catch {
+        return false;
     }
-    const input = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-    // `as BufferSource` is the TS 5.7+ typed-array workaround (a Uint8Array's
-    // backing buffer is `ArrayBufferLike`, which BlobPart won't accept).
-    const stream = new Blob([input]).stream().pipeThrough(new CompressionStream('gzip'));
-    const out = new Uint8Array(await new Response(stream).arrayBuffer());
-    return out;
 }
 /**
  * Decompress a gzip `body` via the native Compression Streams API. The
@@ -9148,9 +9675,29 @@ async function decompressGzip(body) {
     }
     return result;
 }
-const CODECS = [
-    { encoding: 'gzip', compress: compressGzip },
-];
+/** brotli quality on the wasm path (max; matches ord's encoders). */
+const BROTLI_WASM_QUALITY = 11;
+/**
+ * The compressors {@link assessCompression} tries, chosen per call:
+ *   - `gzip` always (native Compression Streams; universal).
+ *   - `br` via native `CompressionStream('brotli')` when the runtime has it
+ *     (Safari / Firefox / Node) — zero dependency, no fetch.
+ *   - else `br` via the wasm encoder IF the caller passed `brotliWasmUrl`
+ *     (Chrome / Edge path: fetch + instantiate the hosted wasm on demand).
+ * assessCompression runs them all and keeps the smallest output; ties go to
+ * the earlier entry (gzip), so it stays first.
+ */
+function buildCodecs(options) {
+    const codecs = [{ encoding: 'gzip', compress: compressGzip }];
+    if (nativeBrotliAvailable()) {
+        codecs.push({ encoding: 'br', compress: (b) => compressViaCompressionStream(b, 'brotli') });
+    }
+    else if (options.brotliWasmUrl) {
+        const url = options.brotliWasmUrl;
+        codecs.push({ encoding: 'br', compress: (b) => compressBrotliWasm(b, BROTLI_WASM_QUALITY, url) });
+    }
+    return codecs;
+}
 /**
  * Content types whose payload is already compressed, so re-compressing
  * almost never helps and often adds bytes. {@link assessCompression}
@@ -9193,7 +9740,8 @@ const ALREADY_COMPRESSED_TYPES = new Set([
 const DEFAULT_MIN_SAVED_PERCENT = 5;
 /**
  * Assess whether inscribing `bytes` compressed is worth it, trying every
- * registered codec (gzip today) and returning the smallest winner. Pure
+ * available codec (gzip, plus brotli where an encoder exists) and returning
+ * the smallest winner. Pure
  * assessment: emits NO envelope tag, makes NO inscribe-specific
  * assumptions, and returns everything the caller needs to decide. Generic
  * enough for cubes-frontend to call on arbitrary cube HTML.
@@ -9206,9 +9754,8 @@ const DEFAULT_MIN_SAVED_PERCENT = 5;
  *     sets `worthIt = savedBytes > 0 && savedPercent >= minSavedPercent`.
  *     The `savedBytes > 0` term also guards the "compressed output larger
  *     than the original → not worth it" case. On a size tie the earlier
- *     codec in {@link CODECS} wins (gzip: native decode everywhere,
- *     smaller trust surface). The winning bytes are returned so the caller
- *     reuses them (never compresses twice).
+ *     codec wins (gzip; see {@link buildCodecs}). The winning bytes are
+ *     returned so the caller reuses them (never compresses twice).
  */
 async function assessCompression(bytes, contentType, options = {}) {
     if (!ArrayBuffer.isView(bytes)) {
@@ -9228,9 +9775,9 @@ async function assessCompression(bytes, contentType, options = {}) {
             compressed: bytes,
         };
     }
-    // Run every codec; keep the smallest output. CODECS order breaks ties
-    // (first-declared wins), so leave gzip first.
-    const candidates = await Promise.all(CODECS.map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })));
+    // Run every available codec; keep the smallest output. Codec order breaks
+    // ties (gzip first).
+    const candidates = await Promise.all(buildCodecs(options).map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })));
     let best = candidates[0];
     for (const candidate of candidates) {
         if (candidate.out.length < best.out.length)
@@ -9660,5 +10207,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

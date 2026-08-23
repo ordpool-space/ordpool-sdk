@@ -3854,8 +3854,7 @@ interface SimulateInscribeFeesResult {
 declare function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateInscribeFeesResult;
 
 /**
- * Isomorphic inscription-body compression (browser + Node), zero runtime
- * dependencies.
+ * Isomorphic inscription-body compression (browser + Node).
  *
  * Inscription bytes go on-chain at real sat/vB; compressing HTML / JSON /
  * SVG / text before inscribing is a direct fee win. ord recognises a
@@ -3863,39 +3862,31 @@ declare function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateI
  * serves it back with a matching HTTP `Content-Encoding` header, so the
  * viewing browser transparently decompresses it (see cat21-ord
  * `src/subcommand/server/r.rs`). Browsers always send `Accept-Encoding:
- * gzip, deflate, br`, so a `content_encoding: gzip` body renders
- * everywhere ordinals do.
+ * gzip, deflate, br`, so both `gzip` and `br` bodies render everywhere
+ * ordinals do; brotli typically lands ~15-20% smaller than gzip on
+ * text/SVG/JSON.
  *
- * # Codec: gzip, via the native Compression Streams API
+ * # Codecs: native first, wasm brotli only where forced
  *
- * `CompressionStream('gzip')` / `DecompressionStream('gzip')` are native
- * in every target runtime (Node 18+, Chrome/Edge 80+, Safari 16.4+,
- * Firefox 113+). That gives us a browser-capable compressor with NO
- * dependency and NO bundler surface: unlike a wasm encoder, a native
- * global is not an import, so webpack / Angular / esbuild leave it
- * untouched (nothing to resolve, no `.wasm` to fetch via
- * `new URL(..., import.meta.url)`).
+ * - **gzip** — native `CompressionStream('gzip')` everywhere (Node 18+,
+ *   all modern browsers). The universal baseline.
+ * - **brotli, native** — `CompressionStream('brotli')` where the runtime
+ *   has it: Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+ (brotli was
+ *   added to the WHATWG Compression Standard in 2026). Zero dependency,
+ *   no fetch.
+ * - **brotli, wasm fallback** — Chrome/Edge (Blink) deliberately don't
+ *   ship the brotli compression dictionary, so there is no native encoder
+ *   there. For those runtimes {@link assessCompression} uses the reference
+ *   Rust brotli compiled to wasm (see {@link ./brotli-wasm-encoder}), but
+ *   ONLY when the caller passes `brotliWasmUrl`. The `.wasm` is a hosted
+ *   PACKAGE ASSET the consumer serves from its own origin and is fetched
+ *   on demand — it never bloats the JS bundle. Omit the URL and Chrome
+ *   simply falls back to gzip.
  *
- * ## Why gzip and not brotli
- *
- * These bytes land on Bitcoin permanently: a single encoder bug corrupts
- * an inscription forever. gzip is the platform's battle-tested zlib, not
- * our code, so that entire risk class is absent by construction. brotli
- * is deliberately NOT offered on the encode side: the Compression Streams
- * API has no brotli encoder, there is no reference-derived pure-JS brotli
- * *encoder* to port (only decoders exist), and a hand-written one could
- * not be certified byte-exact against adversarial inputs to the standard
- * that immutable on-chain data demands. Decoding brotli is a solved
- * problem and lives in `ordpool-parser` (`brotliDecode`), which is where a
- * consumer verifies an existing `content_encoding: br` inscription.
- *
- * ## Future-shaped for a second codec
- *
- * {@link assessCompression} evaluates a list of codecs and returns the
- * smallest result, so adding a trustworthy brotli encoder later is a
- * one-line registration in {@link CODECS} plus widening the returned
- * `bestEncoding`. The `CompressionAssessment.bestEncoding` union already
- * carries `'br'` for that day; nothing here produces it today.
+ * Immutable-data safety: every encoder here is the platform's zlib or the
+ * reference Rust brotli — never hand-rolled — so an encoder bug can't
+ * corrupt an inscription. Decoding lives in `ordpool-parser`
+ * (`brotliDecode` / native `DecompressionStream`).
  *
  * # Async on purpose
  *
@@ -3929,6 +3920,14 @@ type InscriptionContentEncoding = typeof INSCRIPTION_CONTENT_ENCODINGS[number];
  */
 declare function compressGzip(body: Uint8Array): Promise<Uint8Array>;
 /**
+ * Whether the runtime has a native `CompressionStream('brotli')` encoder:
+ * true on Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+; false on
+ * Chrome/Edge (Blink), which deliberately don't ship the brotli compression
+ * dictionary. Construction throws synchronously for an unsupported format,
+ * so this is a cheap sync feature test.
+ */
+declare function nativeBrotliAvailable(): boolean;
+/**
  * Decompress a gzip `body` via the native Compression Streams API. The
  * inverse of {@link compressGzip}; used to verify a `content_encoding:
  * 'gzip'` body recovers its original bytes.
@@ -3956,8 +3955,9 @@ interface CompressionAssessment {
     /**
      * The winning codec's `content_encoding` tag value when `worthIt`, else
      * `'none'` (inscribe `compressed` — the original bytes — uncompressed,
-     * no `content_encoding` tag). The `'br'` case is reserved for a future
-     * brotli encoder; nothing produces it today.
+     * no `content_encoding` tag). `'br'` is produced where a brotli encoder
+     * is available: native `CompressionStream('brotli')`, or the wasm encoder
+     * when the caller passes `brotliWasmUrl`.
      */
     bestEncoding: 'none' | InscriptionContentEncoding;
     /** Byte length of the original body. */
@@ -3985,10 +3985,20 @@ interface AssessCompressionOptions {
      * body. A consumer with different economics can override it.
      */
     minSavedPercent?: number;
+    /**
+     * URL of a hosted `brotli_wasm_bg.wasm` (shipped in this package under
+     * `wasm/`; the consumer app copies it to its own origin and passes that
+     * URL). ONLY used on runtimes WITHOUT native `CompressionStream('brotli')`
+     * — i.e. Chrome/Edge — to fetch + instantiate the wasm brotli encoder on
+     * demand (once, cached). Omit it and Chrome/Edge simply fall back to gzip;
+     * Safari/Firefox/Node use native brotli and never touch this.
+     */
+    brotliWasmUrl?: string;
 }
 /**
  * Assess whether inscribing `bytes` compressed is worth it, trying every
- * registered codec (gzip today) and returning the smallest winner. Pure
+ * available codec (gzip, plus brotli where an encoder exists) and returning
+ * the smallest winner. Pure
  * assessment: emits NO envelope tag, makes NO inscribe-specific
  * assumptions, and returns everything the caller needs to decide. Generic
  * enough for cubes-frontend to call on arbitrary cube HTML.
@@ -4001,9 +4011,8 @@ interface AssessCompressionOptions {
  *     sets `worthIt = savedBytes > 0 && savedPercent >= minSavedPercent`.
  *     The `savedBytes > 0` term also guards the "compressed output larger
  *     than the original → not worth it" case. On a size tie the earlier
- *     codec in {@link CODECS} wins (gzip: native decode everywhere,
- *     smaller trust surface). The winning bytes are returned so the caller
- *     reuses them (never compresses twice).
+ *     codec wins (gzip; see {@link buildCodecs}). The winning bytes are
+ *     returned so the caller reuses them (never compresses twice).
  */
 declare function assessCompression(bytes: Uint8Array, contentType?: string, options?: AssessCompressionOptions): Promise<CompressionAssessment>;
 
@@ -5000,5 +5009,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, AssessCompressionOptions, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CompressionAssessment, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };

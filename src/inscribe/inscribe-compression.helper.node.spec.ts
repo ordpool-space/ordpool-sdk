@@ -16,13 +16,14 @@
  */
 
 import { describe, expect, it } from '@jest/globals';
-import { gunzipSync, gzipSync } from 'node:zlib';
+import { brotliDecompressSync, gunzipSync, gzipSync } from 'node:zlib';
 import { gzipDecode } from 'ordpool-parser';
 
 import {
   assessCompression,
   compressGzip,
   decompressGzip,
+  nativeBrotliAvailable,
 } from './inscribe-compression.helper';
 
 const enc = (s: string) => new TextEncoder().encode(s);
@@ -106,20 +107,24 @@ describe('compressGzip / decompressGzip: byte-exact round-trip', () => {
 
 describe('assessCompression', () => {
 
-  it('reports worthIt + bestEncoding gzip for compressible text with a reusable body', async () => {
+  it('picks native brotli (bestEncoding br) over gzip on compressible text', async () => {
+    // Node 24 has native CompressionStream('brotli'), so assessCompression
+    // returns the smaller brotli output, not gzip.
     const body = enc('tip the maintainer '.repeat(300));
     const a = await assessCompression(body, 'text/html');
     expect(a.worthIt).toBe(true);
-    expect(a.bestEncoding).toBe('gzip');
+    expect(a.bestEncoding).toBe('br');
     expect(a.originalSize).toBe(body.length);
     expect(a.compressedSize).toBeLessThan(body.length);
     // compressedSize is the size of the returned `compressed` bytes.
     expect(a.compressedSize).toBe(a.compressed.length);
     expect(a.savedBytes).toBe(a.originalSize - a.compressedSize);
     expect(a.savedPercent).toBeCloseTo((a.savedBytes / a.originalSize) * 100, 1);
-    // The returned compressed body decompresses back to the original, so
-    // the caller inscribes it directly with contentEncoding: a.bestEncoding.
-    expect(await gzipDecode(a.compressed)).toEqual(body);
+    // The winning brotli body decodes (independent node:zlib) back to the
+    // original, so the caller inscribes it with contentEncoding: 'br'.
+    expect(new Uint8Array(brotliDecompressSync(Buffer.from(a.compressed)))).toEqual(body);
+    // And it beats the gzip candidate (brotli's whole reason for being here).
+    expect(a.compressedSize).toBeLessThanOrEqual((await compressGzip(body)).length);
   });
 
   it('reports NOT worthIt (bestEncoding none) for already-compressed high-entropy bytes', async () => {
@@ -175,12 +180,16 @@ describe('assessCompression', () => {
     expect(high.compressedSize).toBe(body.length);
   });
 
-  it('treats an unknown content type as compressible (runs gzip)', async () => {
+  it('treats an unknown content type as compressible (runs a compressor)', async () => {
     const body = enc('cube '.repeat(400));
     const a = await assessCompression(body); // no content type at all
     expect(a.worthIt).toBe(true);
-    expect(a.bestEncoding).toBe('gzip');
+    expect(a.bestEncoding).toBe('br'); // node has native brotli
     expect(a.compressed).not.toBe(body); // a fresh compressed array
+  });
+
+  it('nativeBrotliAvailable() is true on this runtime (Node 24)', () => {
+    expect(nativeBrotliAvailable()).toBe(true);
   });
 
   it('reports 0% saved for an empty body without dividing by zero', async () => {

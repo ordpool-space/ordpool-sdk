@@ -27,6 +27,7 @@
     "dist-core",
     "src",
     "e2e",
+    "wasm",
     "*.js",
     "*.json"
   ],
@@ -48,6 +49,7 @@
     "test:e2e:playwright": "playwright test --config=e2e/playwright/playwright.config.ts",
     "e2e:harness:build": "node e2e/playwright/build-harness.js",
     "e2e:harness:serve": "node e2e/playwright/fixtures-server.js",
+    "gen:brotli-wasm": "node scripts/gen-brotli-wasm.mjs",
     "create-link": "npm run build && cd dist && npm link"
   },
   "keywords": [
@@ -87,6 +89,7 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^20.14.9",
     "babel-jest": "^30.4.1",
+    "brotli-wasm": "3.0.1",
     "esbuild": "^0.24.0",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",

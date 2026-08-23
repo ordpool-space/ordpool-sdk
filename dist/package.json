@@ -30,6 +30,7 @@
     "dist-core",
     "src",
     "e2e",
+    "wasm",
     "*.js",
     "*.json"
   ],

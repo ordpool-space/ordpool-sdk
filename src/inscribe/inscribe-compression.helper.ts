@@ -1,6 +1,5 @@
 /**
- * Isomorphic inscription-body compression (browser + Node), zero runtime
- * dependencies.
+ * Isomorphic inscription-body compression (browser + Node).
  *
  * Inscription bytes go on-chain at real sat/vB; compressing HTML / JSON /
  * SVG / text before inscribing is a direct fee win. ord recognises a
@@ -8,39 +7,31 @@
  * serves it back with a matching HTTP `Content-Encoding` header, so the
  * viewing browser transparently decompresses it (see cat21-ord
  * `src/subcommand/server/r.rs`). Browsers always send `Accept-Encoding:
- * gzip, deflate, br`, so a `content_encoding: gzip` body renders
- * everywhere ordinals do.
+ * gzip, deflate, br`, so both `gzip` and `br` bodies render everywhere
+ * ordinals do; brotli typically lands ~15-20% smaller than gzip on
+ * text/SVG/JSON.
  *
- * # Codec: gzip, via the native Compression Streams API
+ * # Codecs: native first, wasm brotli only where forced
  *
- * `CompressionStream('gzip')` / `DecompressionStream('gzip')` are native
- * in every target runtime (Node 18+, Chrome/Edge 80+, Safari 16.4+,
- * Firefox 113+). That gives us a browser-capable compressor with NO
- * dependency and NO bundler surface: unlike a wasm encoder, a native
- * global is not an import, so webpack / Angular / esbuild leave it
- * untouched (nothing to resolve, no `.wasm` to fetch via
- * `new URL(..., import.meta.url)`).
+ * - **gzip** — native `CompressionStream('gzip')` everywhere (Node 18+,
+ *   all modern browsers). The universal baseline.
+ * - **brotli, native** — `CompressionStream('brotli')` where the runtime
+ *   has it: Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+ (brotli was
+ *   added to the WHATWG Compression Standard in 2026). Zero dependency,
+ *   no fetch.
+ * - **brotli, wasm fallback** — Chrome/Edge (Blink) deliberately don't
+ *   ship the brotli compression dictionary, so there is no native encoder
+ *   there. For those runtimes {@link assessCompression} uses the reference
+ *   Rust brotli compiled to wasm (see {@link ./brotli-wasm-encoder}), but
+ *   ONLY when the caller passes `brotliWasmUrl`. The `.wasm` is a hosted
+ *   PACKAGE ASSET the consumer serves from its own origin and is fetched
+ *   on demand — it never bloats the JS bundle. Omit the URL and Chrome
+ *   simply falls back to gzip.
  *
- * ## Why gzip and not brotli
- *
- * These bytes land on Bitcoin permanently: a single encoder bug corrupts
- * an inscription forever. gzip is the platform's battle-tested zlib, not
- * our code, so that entire risk class is absent by construction. brotli
- * is deliberately NOT offered on the encode side: the Compression Streams
- * API has no brotli encoder, there is no reference-derived pure-JS brotli
- * *encoder* to port (only decoders exist), and a hand-written one could
- * not be certified byte-exact against adversarial inputs to the standard
- * that immutable on-chain data demands. Decoding brotli is a solved
- * problem and lives in `ordpool-parser` (`brotliDecode`), which is where a
- * consumer verifies an existing `content_encoding: br` inscription.
- *
- * ## Future-shaped for a second codec
- *
- * {@link assessCompression} evaluates a list of codecs and returns the
- * smallest result, so adding a trustworthy brotli encoder later is a
- * one-line registration in {@link CODECS} plus widening the returned
- * `bestEncoding`. The `CompressionAssessment.bestEncoding` union already
- * carries `'br'` for that day; nothing here produces it today.
+ * Immutable-data safety: every encoder here is the platform's zlib or the
+ * reference Rust brotli — never hand-rolled — so an encoder bug can't
+ * corrupt an inscription. Decoding lives in `ordpool-parser`
+ * (`brotliDecode` / native `DecompressionStream`).
  *
  * # Async on purpose
  *
@@ -57,6 +48,8 @@
  * coupling. This file ships in `dist-core`, so both browser consumers
  * import it from `ordpool-sdk/core`.
  */
+
+import { compressBrotliWasm } from './brotli-wasm-encoder';
 
 /**
  * Body encodings the inscribe builder can tag on-chain (`content_encoding`,
@@ -80,25 +73,59 @@ export type InscriptionContentEncoding = typeof INSCRIPTION_CONTENT_ENCODINGS[nu
 const MAX_DECOMPRESSED_SIZE = 1 * 1024 * 1024;
 
 /**
+ * The native Compression Streams formats we drive. `'brotli'` was added to
+ * the WHATWG Compression Standard in 2026 and is live in Safari 18.4+ /
+ * Firefox 147+ / Node 24.7+ / Deno 2.7+.
+ */
+type StreamCompressionFormat = 'gzip' | 'brotli';
+
+async function compressViaCompressionStream(
+  body: Uint8Array,
+  format: StreamCompressionFormat,
+): Promise<Uint8Array> {
+  if (!ArrayBuffer.isView(body)) {
+    throw new Error('compress: body must be a Uint8Array');
+  }
+  if (typeof CompressionStream === 'undefined') {
+    throw new Error(
+      `${format} compression is not supported in this environment. For Node.js, upgrade to version 18 or higher.`,
+    );
+  }
+  const input = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  // `as BufferSource`: TS 5.7+ typed-array workaround (Uint8Array's backing
+  // buffer is `ArrayBufferLike`, which BlobPart won't accept). `as unknown as
+  // CompressionFormat`: lib.dom.d.ts still types the enum as gzip/deflate
+  // only, predating 'brotli' in the 2026 spec.
+  const stream = new Blob([input as BufferSource])
+    .stream()
+    .pipeThrough(new CompressionStream(format as unknown as CompressionFormat));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/**
  * Compress `body` with gzip via the native Compression Streams API. Works
  * in the browser AND Node. Returns a fresh `Uint8Array` (gzip stream:
  * magic `1f 8b`).
  */
 export async function compressGzip(body: Uint8Array): Promise<Uint8Array> {
-  if (!ArrayBuffer.isView(body)) {
-    throw new Error('compressGzip: body must be a Uint8Array');
+  return compressViaCompressionStream(body, 'gzip');
+}
+
+/**
+ * Whether the runtime has a native `CompressionStream('brotli')` encoder:
+ * true on Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+; false on
+ * Chrome/Edge (Blink), which deliberately don't ship the brotli compression
+ * dictionary. Construction throws synchronously for an unsupported format,
+ * so this is a cheap sync feature test.
+ */
+export function nativeBrotliAvailable(): boolean {
+  if (typeof CompressionStream === 'undefined') return false;
+  try {
+    new CompressionStream('brotli' as unknown as CompressionFormat);
+    return true;
+  } catch {
+    return false;
   }
-  if (typeof CompressionStream === 'undefined') {
-    throw new Error(
-      'gzip compression is not supported in this environment. For Node.js, upgrade to version 18 or higher.',
-    );
-  }
-  const input = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-  // `as BufferSource` is the TS 5.7+ typed-array workaround (a Uint8Array's
-  // backing buffer is `ArrayBufferLike`, which BlobPart won't accept).
-  const stream = new Blob([input as BufferSource]).stream().pipeThrough(new CompressionStream('gzip'));
-  const out = new Uint8Array(await new Response(stream).arrayBuffer());
-  return out;
 }
 
 /**
@@ -156,19 +183,34 @@ export async function decompressGzip(body: Uint8Array): Promise<Uint8Array> {
   return result;
 }
 
-/**
- * The compressors {@link assessCompression} tries. One entry today (gzip);
- * a trustworthy brotli encoder would slot in here with `encoding: 'br'`
- * and the comparison logic below picks the smaller automatically.
- */
+/** brotli quality on the wasm path (max; matches ord's encoders). */
+const BROTLI_WASM_QUALITY = 11;
+
 interface Codec {
   encoding: Exclude<InscriptionContentEncoding, never>;
   compress: (bytes: Uint8Array) => Promise<Uint8Array>;
 }
 
-const CODECS: readonly Codec[] = [
-  { encoding: 'gzip', compress: compressGzip },
-];
+/**
+ * The compressors {@link assessCompression} tries, chosen per call:
+ *   - `gzip` always (native Compression Streams; universal).
+ *   - `br` via native `CompressionStream('brotli')` when the runtime has it
+ *     (Safari / Firefox / Node) — zero dependency, no fetch.
+ *   - else `br` via the wasm encoder IF the caller passed `brotliWasmUrl`
+ *     (Chrome / Edge path: fetch + instantiate the hosted wasm on demand).
+ * assessCompression runs them all and keeps the smallest output; ties go to
+ * the earlier entry (gzip), so it stays first.
+ */
+function buildCodecs(options: AssessCompressionOptions): Codec[] {
+  const codecs: Codec[] = [{ encoding: 'gzip', compress: compressGzip }];
+  if (nativeBrotliAvailable()) {
+    codecs.push({ encoding: 'br', compress: (b) => compressViaCompressionStream(b, 'brotli') });
+  } else if (options.brotliWasmUrl) {
+    const url = options.brotliWasmUrl;
+    codecs.push({ encoding: 'br', compress: (b) => compressBrotliWasm(b, BROTLI_WASM_QUALITY, url) });
+  }
+  return codecs;
+}
 
 /**
  * Content types whose payload is already compressed, so re-compressing
@@ -227,8 +269,9 @@ export interface CompressionAssessment {
   /**
    * The winning codec's `content_encoding` tag value when `worthIt`, else
    * `'none'` (inscribe `compressed` — the original bytes — uncompressed,
-   * no `content_encoding` tag). The `'br'` case is reserved for a future
-   * brotli encoder; nothing produces it today.
+   * no `content_encoding` tag). `'br'` is produced where a brotli encoder
+   * is available: native `CompressionStream('brotli')`, or the wasm encoder
+   * when the caller passes `brotliWasmUrl`.
    */
   bestEncoding: 'none' | InscriptionContentEncoding;
   /** Byte length of the original body. */
@@ -257,11 +300,21 @@ export interface AssessCompressionOptions {
    * body. A consumer with different economics can override it.
    */
   minSavedPercent?: number;
+  /**
+   * URL of a hosted `brotli_wasm_bg.wasm` (shipped in this package under
+   * `wasm/`; the consumer app copies it to its own origin and passes that
+   * URL). ONLY used on runtimes WITHOUT native `CompressionStream('brotli')`
+   * — i.e. Chrome/Edge — to fetch + instantiate the wasm brotli encoder on
+   * demand (once, cached). Omit it and Chrome/Edge simply fall back to gzip;
+   * Safari/Firefox/Node use native brotli and never touch this.
+   */
+  brotliWasmUrl?: string;
 }
 
 /**
  * Assess whether inscribing `bytes` compressed is worth it, trying every
- * registered codec (gzip today) and returning the smallest winner. Pure
+ * available codec (gzip, plus brotli where an encoder exists) and returning
+ * the smallest winner. Pure
  * assessment: emits NO envelope tag, makes NO inscribe-specific
  * assumptions, and returns everything the caller needs to decide. Generic
  * enough for cubes-frontend to call on arbitrary cube HTML.
@@ -274,9 +327,8 @@ export interface AssessCompressionOptions {
  *     sets `worthIt = savedBytes > 0 && savedPercent >= minSavedPercent`.
  *     The `savedBytes > 0` term also guards the "compressed output larger
  *     than the original → not worth it" case. On a size tie the earlier
- *     codec in {@link CODECS} wins (gzip: native decode everywhere,
- *     smaller trust surface). The winning bytes are returned so the caller
- *     reuses them (never compresses twice).
+ *     codec wins (gzip; see {@link buildCodecs}). The winning bytes are
+ *     returned so the caller reuses them (never compresses twice).
  */
 export async function assessCompression(
   bytes: Uint8Array,
@@ -302,10 +354,10 @@ export async function assessCompression(
     };
   }
 
-  // Run every codec; keep the smallest output. CODECS order breaks ties
-  // (first-declared wins), so leave gzip first.
+  // Run every available codec; keep the smallest output. Codec order breaks
+  // ties (gzip first).
   const candidates = await Promise.all(
-    CODECS.map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })),
+    buildCodecs(options).map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })),
   );
   let best = candidates[0];
   for (const candidate of candidates) {
