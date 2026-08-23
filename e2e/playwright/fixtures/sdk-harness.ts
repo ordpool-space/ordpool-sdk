@@ -1183,13 +1183,18 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
 
     // 2) reveal — the wallet signs input 0 (parent, P2TR key-path at the
     // ordinals address); input 1 (commit) is already finalized with the
-    // ephemeral key. Same BIP-86 network quirk as transfer/acceptOffer:
-    // cat21wallet derives its ordinals key by the network arg, so sign
-    // with mainnet to match the parent's tapInternalKey (schnorr commits
-    // to script bytes, not the bech32 HRP).
+    // ephemeral key. The parent's tapInternalKey is the wallet's MAINNET
+    // BIP-86 ordinals key. Index-based signers (Leather family) derive
+    // their signing key from the network arg, so they must sign with the
+    // network whose BIP-86 key matches. BIP-84 payment keys are network-
+    // invariant, BIP-86 taproot keys are not — so cat21wallet (regtest
+    // signer network) needs an explicit mainnet override for the taproot
+    // input, while leather already carries mainnet as its signer network.
+    // Schnorr commits to script bytes, not the bech32 HRP, so the regtest
+    // PSBT verifies against the mainnet-derived signature.
     const walletSignNetwork = input.walletType === KnownOrdinalWalletType.cat21wallet
       ? Network.Mainnet
-      : Network.Regtest;
+      : sNetwork;
     let capturedRevealHex: string | undefined;
     await firstValueFrom(signer.signChildRevealParentInputs({
       psbtBytes: built.revealPsbt,
