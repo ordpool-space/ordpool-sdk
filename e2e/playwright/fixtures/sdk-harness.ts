@@ -1167,6 +1167,8 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     });
 
     // 1) commit — funding input at paymentAddress, SIGHASH_ALL.
+    // eslint-disable-next-line no-console
+    console.log('[child] commit-sign-start');
     let capturedCommitHex: string | undefined;
     await firstValueFrom(signer.signSingleFundingInput({
       psbtBytes: built.commitPsbt,
@@ -1174,6 +1176,8 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
       network: sNetwork,
       broadcast: (txHex: string) => {
         capturedCommitHex = txHex;
+        // eslint-disable-next-line no-console
+        console.log('[child] commit-signed');
         return of(computeTxidFromHex(txHex));
       },
     }));
@@ -1195,6 +1199,8 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     const walletSignNetwork = input.walletType === KnownOrdinalWalletType.cat21wallet
       ? Network.Mainnet
       : sNetwork;
+    // eslint-disable-next-line no-console
+    console.log('[child] reveal-sign-start');
     let capturedRevealHex: string | undefined;
     await firstValueFrom(signer.signChildRevealParentInputs({
       psbtBytes: built.revealPsbt,
@@ -1203,6 +1209,8 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
       network: walletSignNetwork,
       broadcast: (txHex: string) => {
         capturedRevealHex = txHex;
+        // eslint-disable-next-line no-console
+        console.log('[child] reveal-signed');
         return of(computeTxidFromHex(txHex));
       },
     }));
