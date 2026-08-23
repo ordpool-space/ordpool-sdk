@@ -24,7 +24,7 @@ import { phantomConnector } from '../../../src/wallet/connectors/phantom.connect
 import { albyConnector } from '../../../src/wallet/connectors/alby.connector';
 import { findSignerOrThrow } from '../../../src/wallet/signers';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
-import { createInscribeTransactions } from '../../../src/inscribe/inscription.service.helper';
+import { createInscribeTransactions, createChildInscribeTransactions } from '../../../src/inscribe/inscription.service.helper';
 import { buildCat21TransferPsbt } from '../../../src/cat21-transfer/cat21-transfer.helper';
 import { buildCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { Network, toScureNetwork } from '../../../src/network';
@@ -56,6 +56,7 @@ declare global {
        */
       runOperation(input: RunOperationMintInput): Promise<RunOperationMintResult>;
       runOperation(input: RunOperationInscribeInput): Promise<RunOperationInscribeResult>;
+      runOperation(input: RunOperationInscribeChildInput): Promise<RunOperationInscribeChildResult>;
       runOperation(input: RunOperationTransferInput): Promise<RunOperationTransferResult>;
       runOperation(input: RunOperationCreateOfferInput): Promise<RunOperationCreateOfferResult>;
       runOperation(input: RunOperationAcceptOfferInput): Promise<RunOperationAcceptOfferResult>;
@@ -250,6 +251,43 @@ export interface RunOperationInscribeInput extends RunOperationFundingInput {
 }
 
 /**
+ * Child inscribe — the wallet owns a PARENT inscription at its ordinals
+ * (Taproot) address; this operation inscribes a CHILD whose reveal also
+ * spends the parent UTXO (proving control) and returns it to the same
+ * ordinals address, which is what makes ord recognise the provenance
+ * link. Two wallet signatures: the commit funding input
+ * (`signSingleFundingInput`) then the reveal's parent input
+ * (`signChildRevealParentInputs`, P2TR key-path at the ordinals address,
+ * with the ephemeral commit input already finalized).
+ *
+ * `utxo`/`paymentPublicKey` fund the commit (same as a normal inscribe);
+ * `parentUtxo`/`parentReturnAddress` carry the parent's on-the-wire UTXO
+ * bytes + where it returns.
+ */
+export interface RunOperationInscribeChildInput extends RunOperationFundingInput {
+  kind: 'inscribe-child';
+  /** Wallet identifier — string-equivalent to KnownOrdinalWalletType. */
+  walletType: `${KnownOrdinalWalletType}`;
+  /** Where the CHILD inscription lands. */
+  recipientAddress: string;
+  bodyHex: string;
+  contentType?: string;
+  feeRatePerVbyte: number;
+  /** The parent inscription id (`<txid>i<index>`) — the `parent` tag. */
+  parentInscriptionId: string;
+  /** The parent inscription's current UTXO (P2TR at the ordinals address). */
+  parentUtxo: {
+    txid: string;
+    vout: number;
+    value: number;
+    scriptPubKeyHex: string;
+    tapInternalKeyHex: string;
+  };
+  /** Where the parent returns — the wallet's ordinals address. */
+  parentReturnAddress: string;
+}
+
+/**
  * Cat21 transfer — the wallet currently owns a cat at its ordinals
  * (Taproot) address; this operation moves the cat to `recipientAddress`
  * and returns change to `senderChangeAddress`. The signer drives a
@@ -380,6 +418,7 @@ export interface RunOperationAcceptOfferResult {
 export type RunOperationInput =
   | RunOperationMintInput
   | RunOperationInscribeInput
+  | RunOperationInscribeChildInput
   | RunOperationTransferInput
   | RunOperationCreateOfferInput
   | RunOperationAcceptOfferInput;
@@ -417,9 +456,31 @@ export interface RunOperationInscribeResult {
   ephemeralPubkeyXonlyHex: string;
 }
 
+export interface RunOperationInscribeChildResult {
+  kind: 'inscribe-child';
+  /** Wallet-signed commit wire-tx hex. */
+  commitHex: string;
+  /**
+   * Reveal wire-tx hex: input 0 (parent) signed by the WALLET, input 1
+   * (commit) pre-finalized with the ephemeral key.
+   */
+  revealHex: string;
+  /** Computed commit txid (SegWit witness-independent). */
+  commitTxid: string;
+  /** Computed reveal txid (witness-independent). */
+  revealTxid: string;
+  /** The child's inscription id (`<revealTxid>i0`). */
+  childInscriptionId: string;
+  /** Ephemeral bearer key as hex. */
+  ephemeralPrivKeyHex: string;
+  /** Ephemeral x-only pubkey as hex. */
+  ephemeralPubkeyXonlyHex: string;
+}
+
 export type RunOperationResult =
   | RunOperationMintResult
   | RunOperationInscribeResult
+  | RunOperationInscribeChildResult
   | RunOperationTransferResult
   | RunOperationCreateOfferResult
   | RunOperationAcceptOfferResult;
@@ -1073,6 +1134,85 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
       kind: 'mint',
       txHex: capturedTxHex,
       expectedTxid: expectedTxidFromUnsignedPsbt(psbtBytes),
+    };
+  }
+
+  if (input.kind === 'inscribe-child') {
+    const fundingOutput: TxnOutput = {
+      txid:  input.utxo.txid,
+      vout:  input.utxo.vout,
+      value: input.utxo.value,
+      status: { confirmed: true },
+    };
+    const built = createChildInscribeTransactions({
+      paymentOutput: fundingOutput,
+      paymentPublicKey: paymentPubkey,
+      paymentAddress: input.paymentAddress,
+      recipientAddress: input.recipientAddress,
+      body: hexToBytes(input.bodyHex),
+      contentType: input.contentType,
+      feeRatePerVbyte: input.feeRatePerVbyte,
+      parentInscriptionId: input.parentInscriptionId,
+      parentUtxo: {
+        utxo: {
+          txid:  input.parentUtxo.txid,
+          vout:  input.parentUtxo.vout,
+          value: input.parentUtxo.value,
+          scriptPubKey:   hexToBytes(input.parentUtxo.scriptPubKeyHex),
+          tapInternalKey: hexToBytes(input.parentUtxo.tapInternalKeyHex),
+        },
+        returnAddress: input.parentReturnAddress,
+      },
+      network: Network.Regtest,
+    });
+
+    // 1) commit — funding input at paymentAddress, SIGHASH_ALL.
+    let capturedCommitHex: string | undefined;
+    await firstValueFrom(signer.signSingleFundingInput({
+      psbtBytes: built.commitPsbt,
+      paymentAddress: walletPaymentAddress,
+      network: sNetwork,
+      broadcast: (txHex: string) => {
+        capturedCommitHex = txHex;
+        return of(computeTxidFromHex(txHex));
+      },
+    }));
+    if (!capturedCommitHex) {
+      throw new Error('runOperation(inscribe-child): commit signer never invoked the broadcast callback');
+    }
+
+    // 2) reveal — the wallet signs input 0 (parent, P2TR key-path at the
+    // ordinals address); input 1 (commit) is already finalized with the
+    // ephemeral key. Same BIP-86 network quirk as transfer/acceptOffer:
+    // cat21wallet derives its ordinals key by the network arg, so sign
+    // with mainnet to match the parent's tapInternalKey (schnorr commits
+    // to script bytes, not the bech32 HRP).
+    const walletSignNetwork = input.walletType === KnownOrdinalWalletType.cat21wallet
+      ? Network.Mainnet
+      : Network.Regtest;
+    let capturedRevealHex: string | undefined;
+    await firstValueFrom(signer.signChildRevealParentInputs({
+      psbtBytes: built.revealPsbt,
+      ordinalsAddress: input.parentReturnAddress,
+      network: walletSignNetwork,
+      broadcast: (txHex: string) => {
+        capturedRevealHex = txHex;
+        return of(computeTxidFromHex(txHex));
+      },
+    }));
+    if (!capturedRevealHex) {
+      throw new Error('runOperation(inscribe-child): reveal signer never invoked the broadcast callback');
+    }
+
+    return {
+      kind: 'inscribe-child',
+      commitHex: capturedCommitHex,
+      revealHex: capturedRevealHex,
+      commitTxid: built.commitTxid,
+      revealTxid: built.revealTxid,
+      childInscriptionId: `${built.revealTxid}i0`,
+      ephemeralPrivKeyHex: bytesToHex(built.ephemeral.privKey),
+      ephemeralPubkeyXonlyHex: bytesToHex(built.ephemeral.pubkeyXonly),
     };
   }
 
