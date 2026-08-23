@@ -150,6 +150,7 @@ test.beforeAll(async () => {
       `--load-extension=${EXT_PATH}`,
       '--no-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-blink-features=AutomationControlled',
     ],
   });
 
@@ -157,7 +158,21 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  const onboardPage = await context.newPage();
+  // OKX auto-opens its onboarding page on extension load; adopt it if it
+  // appears, else fall back to a fresh page. Extend the hook timeout —
+  // OKX onboarding (iframe seed form + "Secure your wallet" new page)
+  // runs well past the default per-test timeout.
+  let onboardPage: Page | undefined;
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch {
+    /* fall back below */
+  }
+  test.setTimeout(240_000);
+  if (!onboardPage) onboardPage = await context.newPage();
   await onboardOkx(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
