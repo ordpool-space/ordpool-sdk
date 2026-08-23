@@ -268,7 +268,22 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
     },
   );
   await approveSignPopup(context, '02-child-commit-sign');
-  await approveSignPopup(context, '03-child-reveal-parent-sign');
+  // DIAGNOSTIC: if the reveal (parent-input) sign popup never appears,
+  // surface OKX's actual signPsbt rejection from the child op instead of
+  // masking it with the popup-timeout error.
+  let childErr: Error | undefined;
+  childPromise.catch((e) => { childErr = e as Error; });
+  try {
+    await approveSignPopup(context, '03-child-reveal-parent-sign');
+  } catch (popupErr) {
+    await new Promise(r => setTimeout(r, 3000)); // let the child op settle
+    // eslint-disable-next-line no-console
+    console.log(`[okx-child] OKX signPsbt(reveal) error: ${childErr?.message ?? '(still pending / none)'}`);
+    throw new Error(
+      `[okx-child] reveal parent-input sign popup absent. ` +
+      `OKX signPsbt error: ${childErr?.message ?? '(pending/none)'} | popup: ${(popupErr as Error).message}`,
+    );
+  }
   const child = await childPromise;
   if (child.kind !== 'inscribe-child') throw new Error('expected inscribe-child result');
   expect(child.childInscriptionId).toBe(`${child.revealTxid}i0`);
