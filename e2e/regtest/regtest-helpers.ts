@@ -412,10 +412,23 @@ export function ordCli(...args: string[]): string {
  * `ord wallet …` requires `--name <NAME>` + `--server-url <URL>` on the
  * wallet subcommand (NOT global). Inside the container the running
  * ord-server is reachable at localhost:8080.
+ *
+ * `--no-sync`: ord's wallet constructor refuses to run when the ord
+ * server is even a few blocks behind bitcoind ("`ord server` N blocks
+ * behind `bitcoind`"). Jest runs the regtest spec FILES in parallel
+ * workers against ONE shared bitcoind, so a sibling spec mining blocks
+ * makes the tip a moving target while this wallet command runs — the
+ * guard then fires on address derivation or tx construction that don't
+ * depend on the exact tip. Every caller that needs the server actually
+ * caught up gates it explicitly with `waitForOrdSync` /
+ * `waitForOrdStockSync` before READING an inscription, so dropping the
+ * constructor's tip check here is safe: the wallet still uses whatever
+ * the server has already indexed.
  */
 function ordWalletCli(walletName: string, ...subcommandArgs: string[]): string {
   return ordCli(
     'wallet',
+    '--no-sync',
     '--name', walletName,
     '--server-url', 'http://localhost:8080',
     ...subcommandArgs,
