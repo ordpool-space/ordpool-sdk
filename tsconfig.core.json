@@ -69,6 +69,7 @@
     "src/inscribe/inscription-cbor.ts",
     "src/inscribe/inscription-commit.helper.ts",
     "src/inscribe/inscription-reveal.helper.ts",
+    "src/inscribe/inscription-child-reveal.helper.ts",
     "src/inscribe/inscription-input-adapter.ts",
     "src/inscribe/inscription-fee.helper.ts",
     "src/inscribe/inscription.service.helper.ts",

@@ -3744,6 +3744,121 @@ declare function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeReveal
 declare function deriveRevealPubkeyXonly(privKey: Uint8Array): Uint8Array;
 
 /**
+ * Layer-1 builder for a **child** inscription's reveal transaction —
+ * ord provenance (parent/child), the trustless way to prove a child was
+ * created by the owner of the parent.
+ *
+ * # What makes a valid parent link (ord spec, verified against
+ * `inscription_updater.rs` + `plan.rs`)
+ *
+ * ord recognises `P` as the parent of child `C` iff BOTH hold:
+ *   1. `C`'s envelope carries the `parent` tag (0x03) = P's inscription
+ *      id (this builder's caller emits that via the envelope, same as a
+ *      normal inscribe).
+ *   2. **P's UTXO is spent as an input of C's reveal transaction.** The
+ *      indexer builds `potential_parents` from the inscriptions present
+ *      in the tx and drops any declared parent not in that set
+ *      (`inscription_updater.rs:253-269`). Emitting the tag WITHOUT
+ *      spending P produces a valid child with NO recognised parent.
+ *
+ * # Topology (matches ord's own wallet, `plan.rs:392-425`)
+ *
+ * ```
+ * Inputs:   [ parent UTXO (0),           commit output (1) ]
+ * Outputs:  [ parent RETURN (0, = P val), child recipient (1, 546) , tip? ]
+ * ```
+ *
+ * FIFO sat-tracking makes this correct with NO pointer:
+ *   - Input 0 (parent, P sats) → global `[0..P)` → Output 0 → the parent
+ *     inscription RETURNS to its owner. Nothing is lost.
+ *   - Input 1 (commit) first sat → global `P` → Output 1 → the child
+ *     inscription lands on its recipient (the default offset is "first
+ *     sat of the inscription's own input", `inscription_updater.rs:207-211`).
+ *
+ * Because the child's envelope is on a non-first input (input 1), ord
+ * marks it `Curse::NotInFirstInput` → **post-jubilee that is a normal,
+ * positively-numbered inscription with the `Vindicated` charm** (mainnet
+ * + our regtest are post-jubilee). This is exactly how ord's own
+ * `wallet inscribe --parent` produces children; the charm is cosmetic and
+ * provenance is unaffected.
+ *
+ * # Two signers
+ *
+ * The reveal is co-signed:
+ *   - **Commit input (1)** — the ephemeral key, script-path via the
+ *     envelope leaf, finalized here (SIGHASH_DEFAULT over the whole tx).
+ *   - **Parent input (0)** — the parent OWNER's wallet (P2TR key-path).
+ *     Left UNSIGNED in the returned PSBT; the orchestrator hands it to
+ *     the wallet, which signs input 0, then we finalize + broadcast.
+ * Both sign SIGHASH_ALL/DEFAULT over the same fixed inputs+outputs, so
+ * order is irrelevant and neither invalidates the other.
+ */
+/** A parent inscription being spent + returned by the child reveal. */
+interface ChildRevealParent {
+    /** The parent inscription's current UTXO (P2TR — an ordinals address). */
+    utxo: {
+        txid: string;
+        vout: number;
+        /** Sat value at the parent UTXO; the parent RETURNS with exactly this value. */
+        value: number;
+        /** scriptPubKey of the parent UTXO (P2TR). */
+        scriptPubKey: Uint8Array;
+        /** x-only internal key of the parent's P2TR address (for wallet key-path signing). */
+        tapInternalKey: Uint8Array;
+    };
+    /**
+     * Where the parent inscription returns to — the owner's ordinals
+     * address. For the in-wallet case this is the SAME wallet that owns
+     * the parent (the inscription goes back where it came from).
+     */
+    returnAddress: string;
+}
+interface ChildInscribeRevealArgs {
+    /** Commit txid (the child's commit; same commit builder as a normal inscribe). */
+    commitTxid: string;
+    /** Commit output index — always 0. */
+    commitVout: number;
+    /** Sat value at the commit output (funds child postage + reveal fee + tip). */
+    commitOutputValueSats: number;
+    /** scriptPubKey of the commit output. */
+    commitOutputScript: Uint8Array;
+    /** Taptree spend metadata from the commit builder. */
+    taproot: {
+        internalKey: Uint8Array;
+        tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
+    };
+    /** 32-byte ephemeral private key (same key embedded in the envelope). */
+    ephemeralPrivKey: Uint8Array;
+    /** The parent inscription spent + returned by this reveal. */
+    parent: ChildRevealParent;
+    /** Address the CHILD inscription lands on (P2TR recommended). */
+    recipientAddress: string;
+    /** Optional tip output, appended after the child output. */
+    tip?: {
+        address: string;
+        value: number;
+    };
+    network: Network;
+}
+interface ChildInscribeRevealResult {
+    /**
+     * Reveal PSBT bytes. Input 0 (parent) is UNSIGNED — the wallet signs
+     * it. Input 1 (commit) is already finalized with the ephemeral
+     * signature. Finalize input 0 after the wallet signs, then broadcast.
+     */
+    revealPsbt: Uint8Array;
+    /** Reveal txid (witness-independent; stable before the wallet signs). */
+    revealTxid: string;
+    /** Reveal vsize (fully-signed) for fee math. */
+    revealVsize: number;
+}
+/**
+ * Build the child reveal PSBT: parent input (unsigned) + commit input
+ * (ephemeral-finalized), parent-return output + child output.
+ */
+declare function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): ChildInscribeRevealResult;
+
+/**
  * Layer-2 input adapter for the CAT-21 inscribe pipeline. Thin wrapper
  * over the shared `prepareCat21Input` (same body the mint / transfer /
  * offer adapters delegate to). Turns a raw funding UTXO + the wallet's
@@ -4286,6 +4401,82 @@ interface CreateInscribeTransactionsResult {
  * storage semantic.
  */
 declare function createInscribeTransactions(args: CreateInscribeTransactionsArgs): CreateInscribeTransactionsResult;
+/**
+ * Args for {@link createChildInscribeTransactions}. Same content +
+ * funding shape as a normal inscribe, plus the parent to spend. The
+ * base `parent` string tag is replaced by an explicit pair: the
+ * `parentInscriptionId` (the `parent` tag value) and the `parentUtxo`
+ * (the UTXO the reveal spends + where it returns).
+ */
+interface CreateChildInscribeTransactionsArgs extends Omit<CreateInscribeTransactionsArgs, 'parent'> {
+    /**
+     * The parent inscription id (`<txid>i<index>`) — emitted as the
+     * `parent` tag (0x03). This is the inscription's IDENTITY, which may
+     * differ from `parentUtxo`'s outpoint if the parent has been
+     * transferred since it was inscribed.
+     */
+    parentInscriptionId: string;
+    /**
+     * The parent inscription's CURRENT UTXO (spent by the reveal to prove
+     * control) + the address it returns to. For the in-wallet case both
+     * belong to the connected wallet.
+     */
+    parentUtxo: ChildRevealParent;
+}
+interface CreateChildInscribeTransactionsResult {
+    /** Unsigned commit PSBT — the wallet signs its funding input. */
+    commitPsbt: Uint8Array;
+    /** Commit txid (witness-independent; stable before signing). */
+    commitTxid: string;
+    /**
+     * Child reveal PSBT. Input 0 (parent) is UNSIGNED — the wallet signs
+     * it (P2TR key-path). Input 1 (commit) is already finalized with the
+     * ephemeral signature. Finalize input 0 after the wallet signs.
+     */
+    revealPsbt: Uint8Array;
+    /** Reveal txid (witness-independent). */
+    revealTxid: string;
+    /** Commit-tx P2TR address. */
+    commitAddress: string;
+    /** Fee + vsize + funding math. */
+    fees: {
+        commitFeeSats: number;
+        revealFeeSats: number;
+        totalFeeSats: number;
+        commitVsize: number;
+        revealVsize: number;
+        combinedVsize: number;
+        commitOutputValueSats: number;
+        fundingRequirementSats: number;
+    };
+    /** Ephemeral bearer key for the commit output (see createInscribeTransactions). */
+    ephemeral: {
+        privKey: Uint8Array;
+        pubkeyXonly: Uint8Array;
+    };
+    /** The parent that must be signed on the reveal, echoed for the orchestrator. */
+    parent: ChildRevealParent;
+}
+/**
+ * Build the commit + CHILD reveal pair for an ord parent/child
+ * inscription. Same commit as a normal inscribe (envelope carries the
+ * `parent` tag); the reveal additionally SPENDS the parent UTXO and
+ * RETURNS it to the owner, which is what makes ord recognise the parent
+ * link (see {@link buildChildInscribeRevealTx}). The reveal is returned
+ * as a PSBT because its parent input needs the wallet's signature.
+ */
+declare function createChildInscribeTransactions(args: CreateChildInscribeTransactionsArgs): CreateChildInscribeTransactionsResult;
+/**
+ * Turn the convenience args (pointer, metadata, metaprotocol, parent,
+ * delegate, rune, note, contentEncoding, properties, propertyEncoding)
+ * into ord envelope fields in the exact byte form ord expects. Each
+ * value is validated here; large CBOR payloads (metadata / properties)
+ * are chunked across repeated same-tag fields so no single push
+ * exceeds the 520-byte cap. Field ORDER doesn't affect the resolved
+ * inscription (ord indexes by tag), but a stable order keeps the
+ * encoded envelope diff-friendly.
+ */
+declare function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnvelopeField[];
 
 /**
  * Inscribe broadcast helper.
@@ -5009,5 +5200,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
-export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, AssessCompressionOptions, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CompressionAssessment, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, AssessCompressionOptions, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, CompressionAssessment, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };

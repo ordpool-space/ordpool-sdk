@@ -8140,6 +8140,104 @@ function deriveRevealPubkeyXonly(privKey) {
     return schnorr.getPublicKey(privKey);
 }
 
+/**
+ * Build the child reveal PSBT: parent input (unsigned) + commit input
+ * (ephemeral-finalized), parent-return output + child output.
+ */
+function buildChildInscribeRevealTx(args) {
+    const scureNetwork = toScureNetwork(args.network);
+    const postageSats = INSCRIBE_POSTAGE_SATS;
+    const tipValueSats = args.tip?.value ?? 0;
+    if (tipValueSats < 0 || !Number.isInteger(tipValueSats)) {
+        throw new Error('tip.value must be a non-negative integer');
+    }
+    if (args.ephemeralPrivKey.length !== 32) {
+        throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
+    }
+    if (!Number.isInteger(args.parent.utxo.value) || args.parent.utxo.value < postageSats) {
+        throw new Error(`parent.utxo.value must be an integer >= ${postageSats} (its sats are preserved on return); ` +
+            `got ${args.parent.utxo.value}`);
+    }
+    if (args.parent.utxo.tapInternalKey.length !== 32) {
+        throw new Error('parent.utxo.tapInternalKey must be a 32-byte x-only key (P2TR parent)');
+    }
+    const parentValue = args.parent.utxo.value;
+    // The reveal miner fee is the leftover after the parent returns its own
+    // sats and the child + tip are funded. commitOutputValue funds child
+    // postage + reveal fee + tip; the parent's sats pass straight through.
+    const revealFeeSats = (parentValue + args.commitOutputValueSats)
+        - parentValue - postageSats - tipValueSats;
+    if (revealFeeSats < 0) {
+        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`);
+    }
+    const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
+    // Input 0: parent UTXO (P2TR key-path). Left UNSIGNED — the wallet
+    // signs it. witnessUtxo + tapInternalKey are what a wallet needs to
+    // produce the key-path signature. SIGHASH_DEFAULT (omit sighashType)
+    // per the SDK-wide BIP-341 wire-equivalent rule.
+    tx.addInput({
+        txid: args.parent.utxo.txid,
+        index: args.parent.utxo.vout,
+        witnessUtxo: {
+            script: args.parent.utxo.scriptPubKey,
+            amount: BigInt(parentValue),
+        },
+        tapInternalKey: args.parent.utxo.tapInternalKey,
+    });
+    // Input 1: commit P2TR output, spent script-path via the envelope leaf.
+    tx.addInput({
+        txid: args.commitTxid,
+        index: args.commitVout,
+        witnessUtxo: {
+            script: args.commitOutputScript,
+            amount: BigInt(args.commitOutputValueSats),
+        },
+        tapInternalKey: args.taproot.internalKey,
+        tapLeafScript: args.taproot.tapLeafScript,
+    });
+    // Output 0: parent RETURN — the parent inscription goes back to its
+    // owner with exactly its incoming value (FIFO: input 0 → output 0).
+    tx.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
+    // Output 1: child recipient (546). FIFO puts the child here (the commit
+    // input's first sat is global `parentValue`, which lands in output 1).
+    tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+    // Output 2 (optional): tip, after the child.
+    if (args.tip !== undefined && tipValueSats > 0) {
+        tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+    }
+    // Ephemeral script-path finalization of the COMMIT input (index 1).
+    // SIGHASH_DEFAULT commits to ALL inputs + outputs, so the sighash needs
+    // every prevout script + amount (parent AND commit). Manual finalize
+    // mirrors the single-input reveal helper; see its comment for the
+    // trailing-version-byte handling on the leaf script.
+    const [cbStruct, leafScriptWithVersion] = args.taproot.tapLeafScript[0];
+    const bareLeafScript = leafScriptWithVersion.subarray(0, -1);
+    const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
+    const commitInputIndex = 1;
+    const sighash = tx.preimageWitnessV1(commitInputIndex, [args.parent.utxo.scriptPubKey, args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(parentValue), BigInt(args.commitOutputValueSats)], undefined, bareLeafScript, leafVersion);
+    const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
+    const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
+    tx.updateInput(commitInputIndex, {
+        finalScriptWitness: [signature, bareLeafScript, controlBlock],
+    }, true);
+    assertCat21LockTime(tx.lockTime);
+    // Measure vsize + txid on a fully-signed CLONE: set a dummy 64-byte
+    // key-path witness on the parent input (SIGHASH_DEFAULT P2TR witness is
+    // exactly a 64-byte Schnorr sig, so the size is exact regardless of the
+    // real signature). The txid is witness-independent, so the clone's id
+    // equals what the wallet-signed reveal will produce.
+    const clone = btc.Transaction.fromPSBT(tx.toPSBT(0));
+    clone.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] }, true);
+    clone.updateInput(commitInputIndex, {
+        finalScriptWitness: [signature, bareLeafScript, controlBlock],
+    }, true);
+    return {
+        revealPsbt: tx.toPSBT(0),
+        revealTxid: clone.id,
+        revealVsize: clone.vsize,
+    };
+}
+
 function prepareInscribeFundingInput(args) {
     return prepareCat21Input(args);
 }
@@ -8426,6 +8524,191 @@ function createInscribeTransactions(args) {
             outputValueSats: commit.commitOutputValueSats,
             envelopeScript: envelope,
         },
+    };
+}
+/**
+ * Build the commit + CHILD reveal pair for an ord parent/child
+ * inscription. Same commit as a normal inscribe (envelope carries the
+ * `parent` tag); the reveal additionally SPENDS the parent UTXO and
+ * RETURNS it to the owner, which is what makes ord recognise the parent
+ * link (see {@link buildChildInscribeRevealTx}). The reveal is returned
+ * as a PSBT because its parent input needs the wallet's signature.
+ */
+function createChildInscribeTransactions(args) {
+    if (args.feeRatePerVbyte <= 0) {
+        throw new Error('feeRatePerVbyte must be positive');
+    }
+    if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
+        throw new Error(`Legacy P2PKH payment addresses are not supported for inscribing ` +
+            `(would lock the postage — see isInscribeSupportedPaymentAddress). ` +
+            `Switch the wallet to Native SegWit or Taproot and retry.`);
+    }
+    if (args.tip !== undefined) {
+        if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
+            throw new Error('tip.value must be a non-negative integer');
+        }
+        if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
+            throw new Error('tip.address must be a non-empty string');
+        }
+    }
+    if (typeof args.parentInscriptionId !== 'string' || args.parentInscriptionId.length === 0) {
+        throw new Error('parentInscriptionId must be a non-empty string');
+    }
+    const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
+    const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
+    // Envelope with the parent tag (0x03) synthesised from parentInscriptionId.
+    const autoFields = synthesizeEnvelopeFields({ ...args, parent: args.parentInscriptionId });
+    const mergedFields = autoFields.length === 0
+        ? (args.envelopeFields ?? [])
+        : [...autoFields, ...(args.envelopeFields ?? [])];
+    const envelope = buildInscriptionEnvelope({
+        revealPubkeyXonly: ephemeralPubkeyXonly,
+        contentType: args.contentType,
+        body: args.body,
+        fields: mergedFields,
+    });
+    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
+    const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);
+    const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
+    const tipValueSats = args.tip?.value ?? 0;
+    const simFundingInput = prepareInscribeFundingInput({
+        utxo: args.paymentOutput,
+        paymentPublicKey: args.paymentPublicKey,
+        paymentAddress: args.paymentAddress,
+        isSimulation: true,
+        network: args.network,
+    });
+    // Child reveal vsize is deterministic (parent input + commit input, two
+    // outputs); measure it once via a sim child reveal to get the reveal fee.
+    // The commit builder throws `Funding insufficient` when the funding UTXO
+    // can't cover the commit output + fee; re-cast to the child-typed message
+    // (same translation the parent createInscribeTransactions does).
+    let revealVsize;
+    let revealFeeSats;
+    let commitFeeSats;
+    let commitVsize;
+    let commitOutputValueSats;
+    try {
+        const placeholderCommit = buildInscribeCommitPsbt({
+            fundingInput: simFundingInput,
+            senderChangeAddress: args.paymentAddress,
+            envelopeScript: envelope,
+            ephemeralPubkeyXonly,
+            commitFeeSats: 0,
+            revealFeeReserveSats: 0,
+            tipValueSats: args.tip?.value,
+            walletType: args.walletType,
+            changeDustLimitSats,
+            network: args.network,
+        });
+        const simChildReveal = buildChildInscribeRevealTx({
+            commitTxid: '0'.repeat(64),
+            commitVout: 0,
+            commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
+            commitOutputScript: placeholderCommit.commitOutputScript,
+            taproot: placeholderCommit.taproot,
+            ephemeralPrivKey: dummyEphemeralPriv,
+            parent: args.parentUtxo,
+            recipientAddress: args.recipientAddress,
+            tip: args.tip,
+            network: args.network,
+        });
+        revealVsize = simChildReveal.revealVsize;
+        revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
+        // Commit two-pass with revealFeeReserve = the CHILD reveal fee.
+        const twoPass = twoPassFeeSimulation({
+            feeRatePerVbyte: args.feeRatePerVbyte,
+            simulate: (feeSats) => {
+                const commit = buildInscribeCommitPsbt({
+                    fundingInput: simFundingInput,
+                    senderChangeAddress: args.paymentAddress,
+                    envelopeScript: envelope,
+                    ephemeralPubkeyXonly,
+                    commitFeeSats: feeSats,
+                    revealFeeReserveSats: revealFeeSats,
+                    tipValueSats: args.tip?.value,
+                    walletType: args.walletType,
+                    changeDustLimitSats,
+                    network: args.network,
+                });
+                const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
+                tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+                tx.finalize();
+                return { vsize: tx.vsize, commit };
+            },
+        });
+        commitFeeSats = twoPass.finalFeeSats;
+        commitVsize = twoPass.vsize;
+        commitOutputValueSats = twoPass.finalSimulation.commit.commitOutputValueSats;
+    }
+    catch (err) {
+        if (err instanceof Error && /Funding insufficient/.test(err.message)) {
+            throw new Error(`Insufficient funds for child inscribe: funding UTXO has ${args.paymentOutput.value} ` +
+                `sats, not enough for the commit output + fees`);
+        }
+        throw err;
+    }
+    const fundingRequirementSats = commitOutputValueSats + commitFeeSats;
+    if (args.paymentOutput.value < fundingRequirementSats) {
+        throw new Error(`Insufficient funds for child inscribe: funding UTXO has ${args.paymentOutput.value} ` +
+            `sats, need ${fundingRequirementSats} (commit fee ${commitFeeSats} + commit output ` +
+            `${commitOutputValueSats})`);
+    }
+    // Real commit + a sim commit to read the witness-independent commit txid.
+    const realFundingInput = prepareInscribeFundingInput({
+        utxo: args.paymentOutput,
+        paymentPublicKey: args.paymentPublicKey,
+        paymentAddress: args.paymentAddress,
+        isSimulation: false,
+        network: args.network,
+    });
+    const commitArgsBase = {
+        senderChangeAddress: args.paymentAddress,
+        envelopeScript: envelope,
+        ephemeralPubkeyXonly,
+        commitFeeSats,
+        revealFeeReserveSats: revealFeeSats,
+        tipValueSats: args.tip?.value,
+        walletType: args.walletType,
+        changeDustLimitSats,
+        network: args.network,
+    };
+    const commit = buildInscribeCommitPsbt({ fundingInput: realFundingInput, ...commitArgsBase });
+    const simCommit = buildInscribeCommitPsbt({ fundingInput: simFundingInput, ...commitArgsBase });
+    const simTx = btc.Transaction.fromPSBT(simCommit.commitPsbt);
+    simTx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+    simTx.finalize();
+    const commitTxid = simTx.id;
+    const reveal = buildChildInscribeRevealTx({
+        commitTxid,
+        commitVout: 0,
+        commitOutputValueSats: commit.commitOutputValueSats,
+        commitOutputScript: commit.commitOutputScript,
+        taproot: commit.taproot,
+        ephemeralPrivKey,
+        parent: args.parentUtxo,
+        recipientAddress: args.recipientAddress,
+        tip: args.tip,
+        network: args.network,
+    });
+    return {
+        commitPsbt: commit.commitPsbt,
+        commitTxid,
+        revealPsbt: reveal.revealPsbt,
+        revealTxid: reveal.revealTxid,
+        commitAddress: commit.commitAddress,
+        fees: {
+            commitFeeSats,
+            revealFeeSats,
+            totalFeeSats: commitFeeSats + revealFeeSats,
+            commitVsize,
+            revealVsize,
+            combinedVsize: commitVsize + revealVsize,
+            commitOutputValueSats,
+            fundingRequirementSats,
+        },
+        ephemeral: { privKey: ephemeralPrivKey, pubkeyXonly: ephemeralPubkeyXonly },
+        parent: args.parentUtxo,
     };
 }
 /**
@@ -10207,5 +10490,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
 //# sourceMappingURL=ordpool-sdk.mjs.map

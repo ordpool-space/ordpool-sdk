@@ -30,8 +30,13 @@ import {
 } from './inscription-reveal.helper';
 import {
   simulateInscribeFees,
+  twoPassFeeSimulation,
   type SimulateInscribeFeesResult,
 } from './inscription-fee.helper';
+import {
+  buildChildInscribeRevealTx,
+  type ChildRevealParent,
+} from './inscription-child-reveal.helper';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper';
 
 /**
@@ -488,6 +493,264 @@ export function createInscribeTransactions(
 }
 
 /**
+ * Args for {@link createChildInscribeTransactions}. Same content +
+ * funding shape as a normal inscribe, plus the parent to spend. The
+ * base `parent` string tag is replaced by an explicit pair: the
+ * `parentInscriptionId` (the `parent` tag value) and the `parentUtxo`
+ * (the UTXO the reveal spends + where it returns).
+ */
+export interface CreateChildInscribeTransactionsArgs
+  extends Omit<CreateInscribeTransactionsArgs, 'parent'> {
+  /**
+   * The parent inscription id (`<txid>i<index>`) — emitted as the
+   * `parent` tag (0x03). This is the inscription's IDENTITY, which may
+   * differ from `parentUtxo`'s outpoint if the parent has been
+   * transferred since it was inscribed.
+   */
+  parentInscriptionId: string;
+  /**
+   * The parent inscription's CURRENT UTXO (spent by the reveal to prove
+   * control) + the address it returns to. For the in-wallet case both
+   * belong to the connected wallet.
+   */
+  parentUtxo: ChildRevealParent;
+}
+
+export interface CreateChildInscribeTransactionsResult {
+  /** Unsigned commit PSBT — the wallet signs its funding input. */
+  commitPsbt: Uint8Array;
+  /** Commit txid (witness-independent; stable before signing). */
+  commitTxid: string;
+  /**
+   * Child reveal PSBT. Input 0 (parent) is UNSIGNED — the wallet signs
+   * it (P2TR key-path). Input 1 (commit) is already finalized with the
+   * ephemeral signature. Finalize input 0 after the wallet signs.
+   */
+  revealPsbt: Uint8Array;
+  /** Reveal txid (witness-independent). */
+  revealTxid: string;
+  /** Commit-tx P2TR address. */
+  commitAddress: string;
+  /** Fee + vsize + funding math. */
+  fees: {
+    commitFeeSats: number;
+    revealFeeSats: number;
+    totalFeeSats: number;
+    commitVsize: number;
+    revealVsize: number;
+    combinedVsize: number;
+    commitOutputValueSats: number;
+    fundingRequirementSats: number;
+  };
+  /** Ephemeral bearer key for the commit output (see createInscribeTransactions). */
+  ephemeral: { privKey: Uint8Array; pubkeyXonly: Uint8Array };
+  /** The parent that must be signed on the reveal, echoed for the orchestrator. */
+  parent: ChildRevealParent;
+}
+
+/**
+ * Build the commit + CHILD reveal pair for an ord parent/child
+ * inscription. Same commit as a normal inscribe (envelope carries the
+ * `parent` tag); the reveal additionally SPENDS the parent UTXO and
+ * RETURNS it to the owner, which is what makes ord recognise the parent
+ * link (see {@link buildChildInscribeRevealTx}). The reveal is returned
+ * as a PSBT because its parent input needs the wallet's signature.
+ */
+export function createChildInscribeTransactions(
+  args: CreateChildInscribeTransactionsArgs,
+): CreateChildInscribeTransactionsResult {
+  if (args.feeRatePerVbyte <= 0) {
+    throw new Error('feeRatePerVbyte must be positive');
+  }
+  if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
+    throw new Error(
+      `Legacy P2PKH payment addresses are not supported for inscribing ` +
+      `(would lock the postage — see isInscribeSupportedPaymentAddress). ` +
+      `Switch the wallet to Native SegWit or Taproot and retry.`,
+    );
+  }
+  if (args.tip !== undefined) {
+    if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
+      throw new Error('tip.value must be a non-negative integer');
+    }
+    if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
+      throw new Error('tip.address must be a non-empty string');
+    }
+  }
+  if (typeof args.parentInscriptionId !== 'string' || args.parentInscriptionId.length === 0) {
+    throw new Error('parentInscriptionId must be a non-empty string');
+  }
+
+  const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
+  const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
+
+  // Envelope with the parent tag (0x03) synthesised from parentInscriptionId.
+  const autoFields = synthesizeEnvelopeFields({ ...args, parent: args.parentInscriptionId });
+  const mergedFields: ReadonlyArray<OrdEnvelopeField> = autoFields.length === 0
+    ? (args.envelopeFields ?? [])
+    : [...autoFields, ...(args.envelopeFields ?? [])];
+  const envelope = buildInscriptionEnvelope({
+    revealPubkeyXonly: ephemeralPubkeyXonly,
+    contentType: args.contentType,
+    body: args.body,
+    fields: mergedFields,
+  });
+
+  const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
+  const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);
+  const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
+  const tipValueSats = args.tip?.value ?? 0;
+
+  const simFundingInput = prepareInscribeFundingInput({
+    utxo: args.paymentOutput,
+    paymentPublicKey: args.paymentPublicKey,
+    paymentAddress: args.paymentAddress,
+    isSimulation: true,
+    network: args.network,
+  });
+
+  // Child reveal vsize is deterministic (parent input + commit input, two
+  // outputs); measure it once via a sim child reveal to get the reveal fee.
+  // The commit builder throws `Funding insufficient` when the funding UTXO
+  // can't cover the commit output + fee; re-cast to the child-typed message
+  // (same translation the parent createInscribeTransactions does).
+  let revealVsize: number;
+  let revealFeeSats: number;
+  let commitFeeSats: number;
+  let commitVsize: number;
+  let commitOutputValueSats: number;
+  try {
+    const placeholderCommit = buildInscribeCommitPsbt({
+      fundingInput: simFundingInput,
+      senderChangeAddress: args.paymentAddress,
+      envelopeScript: envelope,
+      ephemeralPubkeyXonly,
+      commitFeeSats: 0,
+      revealFeeReserveSats: 0,
+      tipValueSats: args.tip?.value,
+      walletType: args.walletType,
+      changeDustLimitSats,
+      network: args.network,
+    });
+    const simChildReveal = buildChildInscribeRevealTx({
+      commitTxid: '0'.repeat(64),
+      commitVout: 0,
+      commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
+      commitOutputScript: placeholderCommit.commitOutputScript,
+      taproot: placeholderCommit.taproot,
+      ephemeralPrivKey: dummyEphemeralPriv,
+      parent: args.parentUtxo,
+      recipientAddress: args.recipientAddress,
+      tip: args.tip,
+      network: args.network,
+    });
+    revealVsize = simChildReveal.revealVsize;
+    revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
+
+    // Commit two-pass with revealFeeReserve = the CHILD reveal fee.
+    const twoPass = twoPassFeeSimulation({
+      feeRatePerVbyte: args.feeRatePerVbyte,
+      simulate: (feeSats: number) => {
+        const commit = buildInscribeCommitPsbt({
+          fundingInput: simFundingInput,
+          senderChangeAddress: args.paymentAddress,
+          envelopeScript: envelope,
+          ephemeralPubkeyXonly,
+          commitFeeSats: feeSats,
+          revealFeeReserveSats: revealFeeSats,
+          tipValueSats: args.tip?.value,
+          walletType: args.walletType,
+          changeDustLimitSats,
+          network: args.network,
+        });
+        const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
+        tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+        tx.finalize();
+        return { vsize: tx.vsize, commit };
+      },
+    });
+    commitFeeSats = twoPass.finalFeeSats;
+    commitVsize = twoPass.vsize;
+    commitOutputValueSats = twoPass.finalSimulation.commit.commitOutputValueSats;
+  } catch (err) {
+    if (err instanceof Error && /Funding insufficient/.test(err.message)) {
+      throw new Error(
+        `Insufficient funds for child inscribe: funding UTXO has ${args.paymentOutput.value} ` +
+        `sats, not enough for the commit output + fees`,
+      );
+    }
+    throw err;
+  }
+  const fundingRequirementSats = commitOutputValueSats + commitFeeSats;
+  if (args.paymentOutput.value < fundingRequirementSats) {
+    throw new Error(
+      `Insufficient funds for child inscribe: funding UTXO has ${args.paymentOutput.value} ` +
+      `sats, need ${fundingRequirementSats} (commit fee ${commitFeeSats} + commit output ` +
+      `${commitOutputValueSats})`,
+    );
+  }
+
+  // Real commit + a sim commit to read the witness-independent commit txid.
+  const realFundingInput = prepareInscribeFundingInput({
+    utxo: args.paymentOutput,
+    paymentPublicKey: args.paymentPublicKey,
+    paymentAddress: args.paymentAddress,
+    isSimulation: false,
+    network: args.network,
+  });
+  const commitArgsBase = {
+    senderChangeAddress: args.paymentAddress,
+    envelopeScript: envelope,
+    ephemeralPubkeyXonly,
+    commitFeeSats,
+    revealFeeReserveSats: revealFeeSats,
+    tipValueSats: args.tip?.value,
+    walletType: args.walletType,
+    changeDustLimitSats,
+    network: args.network,
+  };
+  const commit = buildInscribeCommitPsbt({ fundingInput: realFundingInput, ...commitArgsBase });
+  const simCommit = buildInscribeCommitPsbt({ fundingInput: simFundingInput, ...commitArgsBase });
+  const simTx = btc.Transaction.fromPSBT(simCommit.commitPsbt);
+  simTx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+  simTx.finalize();
+  const commitTxid = simTx.id;
+
+  const reveal = buildChildInscribeRevealTx({
+    commitTxid,
+    commitVout: 0,
+    commitOutputValueSats: commit.commitOutputValueSats,
+    commitOutputScript: commit.commitOutputScript,
+    taproot: commit.taproot,
+    ephemeralPrivKey,
+    parent: args.parentUtxo,
+    recipientAddress: args.recipientAddress,
+    tip: args.tip,
+    network: args.network,
+  });
+
+  return {
+    commitPsbt: commit.commitPsbt,
+    commitTxid,
+    revealPsbt: reveal.revealPsbt,
+    revealTxid: reveal.revealTxid,
+    commitAddress: commit.commitAddress,
+    fees: {
+      commitFeeSats,
+      revealFeeSats,
+      totalFeeSats: commitFeeSats + revealFeeSats,
+      commitVsize,
+      revealVsize,
+      combinedVsize: commitVsize + revealVsize,
+      commitOutputValueSats,
+      fundingRequirementSats,
+    },
+    ephemeral: { privKey: ephemeralPrivKey, pubkeyXonly: ephemeralPubkeyXonly },
+    parent: args.parentUtxo,
+  };
+}
+
+/**
  * Turn the convenience args (pointer, metadata, metaprotocol, parent,
  * delegate, rune, note, contentEncoding, properties, propertyEncoding)
  * into ord envelope fields in the exact byte form ord expects. Each
@@ -497,7 +760,7 @@ export function createInscribeTransactions(
  * inscription (ord indexes by tag), but a stable order keeps the
  * encoded envelope diff-friendly.
  */
-function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnvelopeField[] {
+export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnvelopeField[] {
   const fields: OrdEnvelopeField[] = [];
 
   if (args.pointer !== undefined) {

@@ -572,6 +572,12 @@ export interface StockOrdInscription {
   content_type?: string | null;
   /** Body length in bytes — useful for size assertions. */
   content_length?: number | null;
+  /** Parent inscription ids (ord provenance). Present + non-empty on a child. */
+  parents?: string[];
+  /** Charms on the inscription (e.g. 'vindicated', 'cursed'). */
+  charms?: string[];
+  /** Current satpoint `<txid>:<vout>:<offset>`. */
+  satpoint?: string;
 }
 
 /**

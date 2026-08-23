@@ -129,6 +129,7 @@ export * from './inscribe/inscription-envelope';
 export * from './inscribe/inscription-cbor';
 export * from './inscribe/inscription-commit.helper';
 export * from './inscribe/inscription-reveal.helper';
+export * from './inscribe/inscription-child-reveal.helper';
 export * from './inscribe/inscription-input-adapter';
 export * from './inscribe/inscription-fee.helper';
 export * from './inscribe/inscription.service.helper';
