@@ -108,6 +108,9 @@ describe('inscribeChildAndBroadcast orchestrator', () => {
     expect(signChildRevealParentInputs).toHaveBeenCalledTimes(1);
     const revealArgs = signChildRevealParentInputs.mock.calls[0][0] as any;
     expect(revealArgs.ordinalsAddress).toBe(parent.returnAddress);
+    // The ordinals pubkey (the parent's Taproot internal key) is threaded
+    // so address-filter signers can shim the correct wallet-side address.
+    expect(revealArgs.ordinalsPublicKey).toBe(hex.encode(schnorr.getPublicKey(PARENT_PRIV)));
     // It's the child reveal PSBT: parent input (0) + commit input (1).
     const revealPsbt = btc.Transaction.fromPSBT(revealArgs.psbtBytes);
     expect(revealPsbt.inputsLength).toBe(2);

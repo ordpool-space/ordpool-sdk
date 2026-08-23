@@ -129,6 +129,18 @@ export interface PsbtSigningTarget {
   indexes: number[];
   /** Per-row SIGHASH override. Defaults to SIGHASH_ALL on every cat-flow we ship today. */
   sigHash?: number;
+  /**
+   * Per-row public key (hex) used by the address-filter signers
+   * (Unisat/Wizz/OKX) to compute the wallet-side (mainnet) address for
+   * this row's `toSignInputs` filter. Defaults to the flow's
+   * `paymentPublicKey`. Set it when a row signs at an address derived
+   * from a DIFFERENT key than the payment key — e.g. the child reveal's
+   * parent input, which is a Taproot key-path at the ordinals address
+   * (derived from the ordinals pubkey, not the payment pubkey). Ignored
+   * by index-based signers (Leather / cat21-wallet) that sign by
+   * position off the PSBT rather than by an address filter.
+   */
+  publicKey?: string;
 }
 
 /**
@@ -256,6 +268,14 @@ export interface SignChildRevealParentInputsArgs {
   psbtBytes: Uint8Array;
   /** The parent inscription's address — where it lives + returns to. */
   ordinalsAddress: string;
+  /**
+   * The ordinals address's public key (hex). Address-filter signers
+   * (Unisat/Wizz/OKX) need it to compute their wallet-side (mainnet)
+   * ordinals address for the `toSignInputs` filter — the parent input
+   * is a Taproot key-path at the ordinals address, keyed differently
+   * from the payment address. Index-based signers ignore it.
+   */
+  ordinalsPublicKey: string;
   network: Network;
   broadcast(txHex: string): Observable<string>;
   promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;

@@ -21,7 +21,7 @@ type WithSigningMap = { signingMap: ReadonlyArray<PsbtSigningTarget> };
  */
 export function resolveSigningTargets(
   input: WithSigningMap
-): ReadonlyArray<Required<PsbtSigningTarget>> {
+): ReadonlyArray<{ address: string; indexes: number[]; sigHash: number; publicKey?: string }> {
   if (!input.signingMap || input.signingMap.length === 0) {
     throw new Error('signingMap is empty — pass at least one (address, indexes) row');
   }
@@ -29,5 +29,9 @@ export function resolveSigningTargets(
     address: row.address,
     indexes: row.indexes,
     sigHash: row.sigHash ?? btc.SigHash.ALL,
+    // Preserved for the address-filter signers to shim this row's
+    // wallet-side address with the correct key (defaults to the flow's
+    // paymentPublicKey at the signer when undefined).
+    publicKey: row.publicKey,
   }));
 }

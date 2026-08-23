@@ -140,6 +140,11 @@ export function inscribeChildAndBroadcast(
         signer.signChildRevealParentInputs({
           psbtBytes: built.revealPsbt,
           ordinalsAddress: args.parentUtxo.returnAddress,
+          // The parent input is a Taproot key-path at the ordinals
+          // address; its internal key IS the ordinals x-only pubkey.
+          // Address-filter signers need it to shim the correct
+          // wallet-side address (see SignChildRevealParentInputsArgs).
+          ordinalsPublicKey: hex.encode(args.parentUtxo.utxo.tapInternalKey),
           network: args.network,
           broadcast: args.broadcast,
           promptForSignedPsbt: args.promptForSignedPsbt,

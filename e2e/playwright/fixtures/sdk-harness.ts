@@ -1199,6 +1199,7 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     await firstValueFrom(signer.signChildRevealParentInputs({
       psbtBytes: built.revealPsbt,
       ordinalsAddress: input.parentReturnAddress,
+      ordinalsPublicKey: input.parentUtxo.tapInternalKeyHex,
       network: walletSignNetwork,
       broadcast: (txHex: string) => {
         capturedRevealHex = txHex;

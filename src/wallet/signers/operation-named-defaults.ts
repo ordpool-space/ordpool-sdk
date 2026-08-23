@@ -80,7 +80,7 @@ export function operationNamedDefaults(
       // at input 1. Sign only input 0; input 1 is already witnessed.
       return legacy.signMultiInputAndBroadcast({
         psbtBytes: input.psbtBytes,
-        signingMap: [{ address: input.ordinalsAddress, indexes: [0] }],
+        signingMap: [{ address: input.ordinalsAddress, indexes: [0], publicKey: input.ordinalsPublicKey }],
         network: input.network,
         broadcast: input.broadcast,
         promptForSignedPsbt: input.promptForSignedPsbt,

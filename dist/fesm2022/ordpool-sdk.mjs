@@ -1990,7 +1990,7 @@ function operationNamedDefaults(legacy) {
             // at input 1. Sign only input 0; input 1 is already witnessed.
             return legacy.signMultiInputAndBroadcast({
                 psbtBytes: input.psbtBytes,
-                signingMap: [{ address: input.ordinalsAddress, indexes: [0] }],
+                signingMap: [{ address: input.ordinalsAddress, indexes: [0], publicKey: input.ordinalsPublicKey }],
                 network: input.network,
                 broadcast: input.broadcast,
                 promptForSignedPsbt: input.promptForSignedPsbt,
@@ -2209,6 +2209,10 @@ function resolveSigningTargets(input) {
         address: row.address,
         indexes: row.indexes,
         sigHash: row.sigHash ?? btc.SigHash.ALL,
+        // Preserved for the address-filter signers to shim this row's
+        // wallet-side address with the correct key (defaults to the flow's
+        // paymentPublicKey at the signer when undefined).
+        publicKey: row.publicKey,
     }));
 }
 
@@ -2505,7 +2509,7 @@ const legacy$5 = {
         const targets = resolveSigningTargets(input);
         const toSignInputs = [];
         for (const t of targets) {
-            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, input.paymentPublicKey);
+            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
             }
@@ -2518,7 +2522,7 @@ const legacy$5 = {
         const targets = resolveSigningTargets(input);
         const toSignInputs = [];
         for (const t of targets) {
-            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, input.paymentPublicKey);
+            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
             }
@@ -2768,7 +2772,7 @@ const legacy$2 = {
         const targets = resolveSigningTargets(input);
         const toSignInputs = [];
         for (const t of targets) {
-            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, input.paymentPublicKey);
+            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
             }
@@ -2781,7 +2785,7 @@ const legacy$2 = {
         const targets = resolveSigningTargets(input);
         const toSignInputs = [];
         for (const t of targets) {
-            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, input.paymentPublicKey);
+            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
             }
@@ -2835,7 +2839,7 @@ const legacy$1 = {
         const targets = resolveSigningTargets(input);
         const toSignInputs = [];
         for (const t of targets) {
-            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, input.paymentPublicKey);
+            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
             }
@@ -2848,7 +2852,7 @@ const legacy$1 = {
         const targets = resolveSigningTargets(input);
         const toSignInputs = [];
         for (const t of targets) {
-            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, input.paymentPublicKey);
+            const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
                 toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
             }
@@ -9074,6 +9078,11 @@ function inscribeChildAndBroadcast(args) {
         }).pipe(switchMap(({ txId: commitTxId }) => signer.signChildRevealParentInputs({
             psbtBytes: built.revealPsbt,
             ordinalsAddress: args.parentUtxo.returnAddress,
+            // The parent input is a Taproot key-path at the ordinals
+            // address; its internal key IS the ordinals x-only pubkey.
+            // Address-filter signers need it to shim the correct
+            // wallet-side address (see SignChildRevealParentInputsArgs).
+            ordinalsPublicKey: hex.encode(args.parentUtxo.utxo.tapInternalKey),
             network: args.network,
             broadcast: args.broadcast,
             promptForSignedPsbt: args.promptForSignedPsbt,
