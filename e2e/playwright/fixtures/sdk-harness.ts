@@ -1203,7 +1203,8 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     console.log('[child] reveal-sign-start');
     let capturedRevealHex: string | undefined;
     await firstValueFrom(signer.signChildRevealParentInputs({
-      psbtBytes: built.revealPsbt,
+      psbtBytes: built.revealPsbtForWallet,
+      finalizePsbtBytes: built.revealPsbt,
       ordinalsAddress: input.parentReturnAddress,
       ordinalsPublicKey: input.parentUtxo.tapInternalKeyHex,
       network: walletSignNetwork,

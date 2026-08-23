@@ -167,13 +167,16 @@ describe('inscribe child (ord provenance) roundtrip on regtest', () => {
     });
     await signAndBroadcastCommit(child.commitPsbt, child.commitTxid);
 
-    // Sign the child reveal's PARENT input (0) with the wallet key, then
-    // finalize BOTH inputs: input 0 from the key-path sig, input 1 from the
-    // ephemeral tapScriptSig (via its tapLeafScript). This mirrors the
-    // production extract path (extractWireTxFromPsbt → finalize → extract).
+    // Mirror production signChildRevealParentInputs: the "wallet" signs the
+    // PARENT input (0) on the BARE wallet-facing PSBT (input 1 has no
+    // envelope tap-leaf), then that signature is merged into the full PSBT
+    // and BOTH inputs finalize (input 1 from its ephemeral tapScriptSig).
+    const walletFacing = btc.Transaction.fromPSBT(child.revealPsbtForWallet);
+    walletFacing.signIdx(walletKey, 0);
+    const in0 = walletFacing.getInput(0);
+    const keySig = in0.tapKeySig ?? in0.finalScriptWitness![0];
     const revealTx = btc.Transaction.fromPSBT(child.revealPsbt, { allowUnknownInputs: true });
-    revealTx.signIdx(walletKey, 0);
-    expect(revealTx.getInput(0).tapKeySig).toBeDefined();
+    revealTx.updateInput(0, { tapKeySig: keySig }, true);
     revealTx.finalize();
     const childRevealTxid = await postTx(revealTx.hex);
     expect(childRevealTxid).toBe(child.revealTxid);

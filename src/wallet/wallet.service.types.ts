@@ -265,7 +265,21 @@ export interface SignOfferAcceptArgs {
  * broadcast. Same one-ordinals-input topology as `signOfferAccept`.
  */
 export interface SignChildRevealParentInputsArgs {
+  /**
+   * The reveal PSBT the WALLET signs. Input 1 is a BARE Taproot input
+   * (no envelope tap-leaf), so every wallet's signPsbt handles it — some
+   * hang or reject a PSBT carrying a non-standard tap-leaf on an input
+   * they aren't asked to sign. The wallet signs input 0 (the parent).
+   */
   psbtBytes: Uint8Array;
+  /**
+   * The FULL reveal PSBT (input 1 carries the ephemeral tapScriptSig +
+   * envelope tapLeafScript). The wallet's input-0 signature is merged onto
+   * this, then BOTH inputs finalize and the wire tx broadcasts. Input 0's
+   * signature is valid here because its sighash commits to input 1's
+   * prevout, not the PSBT metadata that differs between the two.
+   */
+  finalizePsbtBytes: Uint8Array;
   /** The parent inscription's address — where it lives + returns to. */
   ordinalsAddress: string;
   /**

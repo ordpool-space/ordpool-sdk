@@ -536,11 +536,19 @@ export interface CreateChildInscribeTransactionsResult {
   /** Commit txid (witness-independent; stable before signing). */
   commitTxid: string;
   /**
-   * Child reveal PSBT. Input 0 (parent) is UNSIGNED — the wallet signs
-   * it (P2TR key-path). Input 1 (commit) is already finalized with the
-   * ephemeral signature. Finalize input 0 after the wallet signs.
+   * The FULL child reveal PSBT (for finalize + broadcast). Input 0 (parent)
+   * is unsigned; input 1 (commit) carries the ephemeral tapScriptSig +
+   * envelope tapLeafScript. The wallet signs input 0 on
+   * `revealPsbtForWallet`; its signature merges here and both inputs
+   * finalize.
    */
   revealPsbt: Uint8Array;
+  /**
+   * The reveal PSBT the WALLET signs — same consensus tx as `revealPsbt`,
+   * but input 1 is a BARE Taproot input (no envelope tap-leaf) so every
+   * wallet's signPsbt handles it. See `ChildInscribeRevealResult`.
+   */
+  revealPsbtForWallet: Uint8Array;
   /** Reveal txid (witness-independent). */
   revealTxid: string;
   /** Commit-tx P2TR address. */
@@ -748,6 +756,7 @@ export function createChildInscribeTransactions(
     commitPsbt: commit.commitPsbt,
     commitTxid,
     revealPsbt: reveal.revealPsbt,
+    revealPsbtForWallet: reveal.revealPsbtForWallet,
     revealTxid: reveal.revealTxid,
     commitAddress: commit.commitAddress,
     fees: {

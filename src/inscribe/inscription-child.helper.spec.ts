@@ -113,6 +113,33 @@ describe('createChildInscribeTransactions — reveal topology', () => {
     expect(tx.hex.length).toBeGreaterThan(0); // serialises to a wire tx
   });
 
+  it('wallet-facing reveal has a BARE input 1; its input-0 sig merges into the full PSBT', () => {
+    // The production flow: the wallet signs input 0 on the BARE PSBT (no
+    // envelope tap-leaf — so address-filter wallets do not choke), then
+    // that signature is merged into the full PSBT and BOTH inputs finalize.
+    const { revealPsbt, revealPsbtForWallet } = build();
+
+    const wf = btc.Transaction.fromPSBT(revealPsbtForWallet);
+    expect(wf.inputsLength).toBe(2);
+    expect(wf.getInput(1).tapScriptSig).toBeUndefined();   // stripped
+    expect(wf.getInput(1).tapLeafScript).toBeUndefined();  // stripped
+
+    // Wallet signs input 0 (key-path) on the bare PSBT.
+    wf.signIdx(PARENT_PRIV, 0);
+    const in0 = wf.getInput(0);
+    const keySig = in0.tapKeySig ?? in0.finalScriptWitness![0];
+
+    // Merge the key-path sig onto the FULL PSBT (input 1 has the ephemeral
+    // tapScriptSig), then finalize both — the input-0 sig is valid here
+    // because the sighash commits to input 1's prevout, not PSBT metadata.
+    const full = btc.Transaction.fromPSBT(revealPsbt, { allowUnknownInputs: true });
+    full.updateInput(0, { tapKeySig: keySig }, true);
+    full.finalize();
+    expect(full.getInput(0).finalScriptWitness!.length).toBe(1); // key-path [sig]
+    expect(full.getInput(1).finalScriptWitness!.length).toBe(3); // script-path [sig, script, cb]
+    expect(full.hex.length).toBeGreaterThan(0);
+  });
+
   it('reveal outputs: parent RETURN (0) preserves the parent value, child (1) = 546', () => {
     const reveal = btc.Transaction.fromPSBT(build().revealPsbt);
     expect(reveal.outputsLength).toBe(2);

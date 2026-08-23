@@ -1,5 +1,7 @@
-import { Observable } from 'rxjs';
+import * as btc from '@scure/btc-signer';
+import { Observable, map, switchMap } from 'rxjs';
 
+import { extractWireTxFromPsbt } from '../psbt-extract';
 import {
   SignChildRevealParentInputsArgs,
   SignOfferAcceptArgs,
@@ -75,16 +77,38 @@ export function operationNamedDefaults(
     },
 
     signChildRevealParentInputs(input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> {
-      // The child reveal has the parent inscription at input 0 (P2TR
-      // key-path, the ordinals address) and the ephemeral-finalized commit
-      // at input 1. Sign only input 0; input 1 is already witnessed.
-      return legacy.signMultiInputAndBroadcast({
+      // The wallet signs ONLY input 0 (parent, P2TR key-path) on the
+      // BARE wallet-facing PSBT — input 1 there has no envelope tap-leaf,
+      // which some signPsbt implementations hang on / reject. We use
+      // signPsbtOnly (not …AndBroadcast) so we can, after the wallet
+      // returns, merge input 0's signature into the FULL PSBT (whose input
+      // 1 carries the ephemeral tapScriptSig + envelope leaf), finalize
+      // BOTH inputs, and broadcast the wire tx ourselves.
+      return legacy.signPsbtOnly({
         psbtBytes: input.psbtBytes,
         signingMap: [{ address: input.ordinalsAddress, indexes: [0], publicKey: input.ordinalsPublicKey }],
         network: input.network,
-        broadcast: input.broadcast,
         promptForSignedPsbt: input.promptForSignedPsbt,
-      });
+      }).pipe(
+        switchMap((signedWalletFacing) => {
+          const walletSigned = btc.Transaction.fromPSBT(signedWalletFacing);
+          const in0 = walletSigned.getInput(0);
+          // Input 0 is a P2TR key-path spend whose witness is exactly the
+          // 64/65-byte Schnorr sig. Take it from the raw tapKeySig, or (if
+          // the wallet auto-finalized) the single element of the witness.
+          const keySig = in0.tapKeySig ?? in0.finalScriptWitness?.[0];
+          if (!keySig) {
+            throw new Error('child reveal: wallet did not sign the parent input (index 0)');
+          }
+          // Carry the sig onto the FULL PSBT as a tapKeySig so the shared
+          // finalize builds input 0's key-path witness alongside input 1's
+          // script-path witness (from its ephemeral tapScriptSig).
+          const full = btc.Transaction.fromPSBT(input.finalizePsbtBytes, { allowUnknownInputs: true });
+          full.updateInput(0, { tapKeySig: keySig }, true);
+          const wireHex = extractWireTxFromPsbt(full.toPSBT(0));
+          return input.broadcast(wireHex).pipe(map((txId) => ({ txId })));
+        }),
+      );
     },
 
     signOfferCreatePsbt(input: SignOfferCreatePsbtArgs): Observable<Uint8Array> {

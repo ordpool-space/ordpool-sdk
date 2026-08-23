@@ -1935,6 +1935,90 @@ function detectInstalledWallets(win, connectors = walletConnectors) {
 const BIP341_KEYPATH_SIGHASHES = [0x00, 0x01];
 
 /**
+ * Finalize a signed PSBT (if needed) and extract the wire-format
+ * raw transaction hex.
+ *
+ * Used by every wallet signer in `src/wallet/signers/` and by the
+ * Pipeline B harness in `e2e/playwright/fixtures/`. Encodes the
+ * SDK-wide "WE finalize, WE broadcast" convention (see
+ * `/Work/ordpool/WALLETS.md`):
+ *
+ *  1. Wallets sign and hand back a PSBT (preferably with partial
+ *     sigs, where the wallet API exposes a "don't finalize" option).
+ *  2. `@scure/btc-signer.finalize()` combines partial sigs into
+ *     `finalScriptWitness`. Some wallets always finalize themselves
+ *     (Leather v6.x has no opt-out, Unisat with `autoFinalized:true`)
+ *     — finalize() throws "Not enough partial sign" in that case;
+ *     safe to ignore because the wallet's pre-populated witness is
+ *     already in place. Re-throw anything else.
+ *  3. `extract()` produces the wire-format bytes; we serialise to hex.
+ */
+function extractWireTxFromPsbt(signedPsbtBytes) {
+    // allowUnknownInputs: the child-inscribe reveal's commit input is a
+    // Taproot SCRIPT-PATH spend of the ord envelope leaf — a non-standard
+    // ("unknown") script. scure's finalize() refuses to build a witness for
+    // an unknown tapLeafScript unless this opt is set. No effect on standard
+    // inputs (P2WPKH / P2TR key-path), so it's inert for mint/transfer/offer.
+    const tx = btc.Transaction.fromPSBT(signedPsbtBytes, { allowUnknownInputs: true });
+    try {
+        tx.finalize();
+    }
+    catch (e) {
+        const detail = e instanceof Error ? e.message : String(e);
+        // Two failure modes look the same to scure ("Not enough partial
+        // sign") but mean opposite things:
+        //   (A) Some wallets (Leather v6.x, Unisat autoFinalized:true)
+        //       return a PSBT where every input already carries a
+        //       `finalScriptWitness`. scure throws because it can't
+        //       find partialSig fields, but the wire tx is complete.
+        //   (B) A different signing path stripped inputs 1..N sigs
+        //       (some wallets don't preserve inputs they didn't sign).
+        //       scure throws for the same reason, but tx.hex would have
+        //       empty witnesses on those inputs — broadcast lands in
+        //       mempool as `mandatory-script-verify-flag-failed`.
+        //
+        // Distinguish by checking which inputs are actually missing their
+        // finalized script. A legacy (P2PKH) input carries a
+        // `finalScriptSig` and NO witness; a segwit input carries a
+        // `finalScriptWitness`. An input is only truly missing when it has
+        // neither. If none are missing (A), swallow. If any are (B),
+        // re-throw with scure's message plus the input indexes so the
+        // caller can surface something actionable ("your wallet dropped
+        // signatures on input N") instead of a downstream script-verify
+        // failure that looks like our own bug.
+        const missing = [];
+        for (let i = 0; i < tx.inputsLength; i++) {
+            const input = tx.getInput(i);
+            const hasWitness = !!input.finalScriptWitness && input.finalScriptWitness.length > 0;
+            const hasScriptSig = !!input.finalScriptSig && input.finalScriptSig.length > 0;
+            if (!hasWitness && !hasScriptSig) {
+                missing.push(i);
+            }
+        }
+        if (missing.length > 0) {
+            throw new Error(`PSBT finalize failed on input(s) ${missing.join(', ')} of ${tx.inputsLength}: ${detail}`);
+        }
+        // All inputs have a witness — the wallet pre-finalized. Ignore
+        // scure's throw and proceed with the wire tx.
+    }
+    return tx.hex;
+}
+/**
+ * Final 3 steps of every wallet signer's `signAndBroadcast`:
+ * extract wire-tx hex from the wallet's signed PSBT, hand it to
+ * the caller-supplied broadcast callback, wrap the resulting
+ * txid in the `{ txId }` shape.
+ *
+ * Pins the "WE broadcast" convention: the broadcast endpoint is
+ * the SDK's call, not the wallet's vendor backend. All three
+ * production signers + the Pipeline B harness route through here.
+ */
+function broadcastSignedPsbt(input, signedPsbtBytes) {
+    const txHex = extractWireTxFromPsbt(signedPsbtBytes);
+    return input.broadcast(txHex).pipe(map(txId => ({ txId })));
+}
+
+/**
  * Default operation-named methods, delegating to a signer's existing
  * legacy generic methods (`signAndBroadcast`, `signMultiInputAndBroadcast`,
  * `signPsbtOnly`) with a HARDCODED signing topology per operation.
@@ -1985,16 +2069,36 @@ function operationNamedDefaults(legacy) {
             });
         },
         signChildRevealParentInputs(input) {
-            // The child reveal has the parent inscription at input 0 (P2TR
-            // key-path, the ordinals address) and the ephemeral-finalized commit
-            // at input 1. Sign only input 0; input 1 is already witnessed.
-            return legacy.signMultiInputAndBroadcast({
+            // The wallet signs ONLY input 0 (parent, P2TR key-path) on the
+            // BARE wallet-facing PSBT — input 1 there has no envelope tap-leaf,
+            // which some signPsbt implementations hang on / reject. We use
+            // signPsbtOnly (not …AndBroadcast) so we can, after the wallet
+            // returns, merge input 0's signature into the FULL PSBT (whose input
+            // 1 carries the ephemeral tapScriptSig + envelope leaf), finalize
+            // BOTH inputs, and broadcast the wire tx ourselves.
+            return legacy.signPsbtOnly({
                 psbtBytes: input.psbtBytes,
                 signingMap: [{ address: input.ordinalsAddress, indexes: [0], publicKey: input.ordinalsPublicKey }],
                 network: input.network,
-                broadcast: input.broadcast,
                 promptForSignedPsbt: input.promptForSignedPsbt,
-            });
+            }).pipe(switchMap((signedWalletFacing) => {
+                const walletSigned = btc.Transaction.fromPSBT(signedWalletFacing);
+                const in0 = walletSigned.getInput(0);
+                // Input 0 is a P2TR key-path spend whose witness is exactly the
+                // 64/65-byte Schnorr sig. Take it from the raw tapKeySig, or (if
+                // the wallet auto-finalized) the single element of the witness.
+                const keySig = in0.tapKeySig ?? in0.finalScriptWitness?.[0];
+                if (!keySig) {
+                    throw new Error('child reveal: wallet did not sign the parent input (index 0)');
+                }
+                // Carry the sig onto the FULL PSBT as a tapKeySig so the shared
+                // finalize builds input 0's key-path witness alongside input 1's
+                // script-path witness (from its ephemeral tapScriptSig).
+                const full = btc.Transaction.fromPSBT(input.finalizePsbtBytes, { allowUnknownInputs: true });
+                full.updateInput(0, { tapKeySig: keySig }, true);
+                const wireHex = extractWireTxFromPsbt(full.toPSBT(0));
+                return input.broadcast(wireHex).pipe(map((txId) => ({ txId })));
+            }));
         },
         signOfferCreatePsbt(input) {
             const paymentIndexes = Array.from({ length: input.fundingInputCount }, (_, i) => i + 1);
@@ -2112,90 +2216,6 @@ const albySigner = {
     ...operationNamedDefaults(legacy$9),
     signMessage: unsupportedSignMessage('Alby'),
 };
-
-/**
- * Finalize a signed PSBT (if needed) and extract the wire-format
- * raw transaction hex.
- *
- * Used by every wallet signer in `src/wallet/signers/` and by the
- * Pipeline B harness in `e2e/playwright/fixtures/`. Encodes the
- * SDK-wide "WE finalize, WE broadcast" convention (see
- * `/Work/ordpool/WALLETS.md`):
- *
- *  1. Wallets sign and hand back a PSBT (preferably with partial
- *     sigs, where the wallet API exposes a "don't finalize" option).
- *  2. `@scure/btc-signer.finalize()` combines partial sigs into
- *     `finalScriptWitness`. Some wallets always finalize themselves
- *     (Leather v6.x has no opt-out, Unisat with `autoFinalized:true`)
- *     — finalize() throws "Not enough partial sign" in that case;
- *     safe to ignore because the wallet's pre-populated witness is
- *     already in place. Re-throw anything else.
- *  3. `extract()` produces the wire-format bytes; we serialise to hex.
- */
-function extractWireTxFromPsbt(signedPsbtBytes) {
-    // allowUnknownInputs: the child-inscribe reveal's commit input is a
-    // Taproot SCRIPT-PATH spend of the ord envelope leaf — a non-standard
-    // ("unknown") script. scure's finalize() refuses to build a witness for
-    // an unknown tapLeafScript unless this opt is set. No effect on standard
-    // inputs (P2WPKH / P2TR key-path), so it's inert for mint/transfer/offer.
-    const tx = btc.Transaction.fromPSBT(signedPsbtBytes, { allowUnknownInputs: true });
-    try {
-        tx.finalize();
-    }
-    catch (e) {
-        const detail = e instanceof Error ? e.message : String(e);
-        // Two failure modes look the same to scure ("Not enough partial
-        // sign") but mean opposite things:
-        //   (A) Some wallets (Leather v6.x, Unisat autoFinalized:true)
-        //       return a PSBT where every input already carries a
-        //       `finalScriptWitness`. scure throws because it can't
-        //       find partialSig fields, but the wire tx is complete.
-        //   (B) A different signing path stripped inputs 1..N sigs
-        //       (some wallets don't preserve inputs they didn't sign).
-        //       scure throws for the same reason, but tx.hex would have
-        //       empty witnesses on those inputs — broadcast lands in
-        //       mempool as `mandatory-script-verify-flag-failed`.
-        //
-        // Distinguish by checking which inputs are actually missing their
-        // finalized script. A legacy (P2PKH) input carries a
-        // `finalScriptSig` and NO witness; a segwit input carries a
-        // `finalScriptWitness`. An input is only truly missing when it has
-        // neither. If none are missing (A), swallow. If any are (B),
-        // re-throw with scure's message plus the input indexes so the
-        // caller can surface something actionable ("your wallet dropped
-        // signatures on input N") instead of a downstream script-verify
-        // failure that looks like our own bug.
-        const missing = [];
-        for (let i = 0; i < tx.inputsLength; i++) {
-            const input = tx.getInput(i);
-            const hasWitness = !!input.finalScriptWitness && input.finalScriptWitness.length > 0;
-            const hasScriptSig = !!input.finalScriptSig && input.finalScriptSig.length > 0;
-            if (!hasWitness && !hasScriptSig) {
-                missing.push(i);
-            }
-        }
-        if (missing.length > 0) {
-            throw new Error(`PSBT finalize failed on input(s) ${missing.join(', ')} of ${tx.inputsLength}: ${detail}`);
-        }
-        // All inputs have a witness — the wallet pre-finalized. Ignore
-        // scure's throw and proceed with the wire tx.
-    }
-    return tx.hex;
-}
-/**
- * Final 3 steps of every wallet signer's `signAndBroadcast`:
- * extract wire-tx hex from the wallet's signed PSBT, hand it to
- * the caller-supplied broadcast callback, wrap the resulting
- * txid in the `{ txId }` shape.
- *
- * Pins the "WE broadcast" convention: the broadcast endpoint is
- * the SDK's call, not the wallet's vendor backend. All three
- * production signers + the Pipeline B harness route through here.
- */
-function broadcastSignedPsbt(input, signedPsbtBytes) {
-    const txHex = extractWireTxFromPsbt(signedPsbtBytes);
-    return input.broadcast(txHex).pipe(map(txId => ({ txId })));
-}
 
 /**
  * Normalises a signingMap to a non-empty array of fully-defaulted
@@ -8270,13 +8290,37 @@ function buildChildInscribeRevealTx(args) {
     // exactly a 64-byte Schnorr sig, so the size is exact regardless of the
     // real signature). The txid is witness-independent, so the clone's id
     // equals what the wallet-signed reveal will produce.
-    const clone = btc.Transaction.fromPSBT(tx.toPSBT(0));
+    const clone = btc.Transaction.fromPSBT(tx.toPSBT(0), { allowUnknownInputs: true });
     clone.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] }, true);
     clone.updateInput(commitInputIndex, {
         finalScriptWitness: [signature, bareLeafScript, controlBlock],
     }, true);
+    // Wallet-facing PSBT: same consensus tx (inputs/outputs/locktime), but
+    // input 1 is a BARE Taproot input — witnessUtxo only, no tapLeafScript /
+    // tapScriptSig. The wallet signs input 0 here without ever parsing the
+    // ord envelope tap-leaf (which hangs / is rejected by some signPsbt
+    // implementations). Rebuilt fresh because scure's updateInput merges
+    // and cannot clear an already-set field.
+    const walletFacing = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
+    walletFacing.addInput({
+        txid: args.parent.utxo.txid,
+        index: args.parent.utxo.vout,
+        witnessUtxo: { script: args.parent.utxo.scriptPubKey, amount: BigInt(parentValue) },
+        tapInternalKey: args.parent.utxo.tapInternalKey,
+    });
+    walletFacing.addInput({
+        txid: args.commitTxid,
+        index: args.commitVout,
+        witnessUtxo: { script: args.commitOutputScript, amount: BigInt(args.commitOutputValueSats) },
+    });
+    walletFacing.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
+    walletFacing.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+    if (args.tip !== undefined && tipValueSats > 0) {
+        walletFacing.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+    }
     return {
         revealPsbt: tx.toPSBT(0),
+        revealPsbtForWallet: walletFacing.toPSBT(0),
         revealTxid: clone.id,
         revealVsize: clone.vsize,
     };
@@ -8743,6 +8787,7 @@ function createChildInscribeTransactions(args) {
         commitPsbt: commit.commitPsbt,
         commitTxid,
         revealPsbt: reveal.revealPsbt,
+        revealPsbtForWallet: reveal.revealPsbtForWallet,
         revealTxid: reveal.revealTxid,
         commitAddress: commit.commitAddress,
         fees: {
@@ -9093,7 +9138,10 @@ function inscribeChildAndBroadcast(args) {
             broadcast: captureAndBroadcast,
             promptForSignedPsbt: args.promptForSignedPsbt,
         }).pipe(switchMap(({ txId: commitTxId }) => signer.signChildRevealParentInputs({
-            psbtBytes: built.revealPsbt,
+            // Wallet signs input 0 on the BARE PSBT (no envelope tap-leaf);
+            // its signature is merged into the full PSBT to finalize.
+            psbtBytes: built.revealPsbtForWallet,
+            finalizePsbtBytes: built.revealPsbt,
             ordinalsAddress: args.parentUtxo.returnAddress,
             // The parent input is a Taproot key-path at the ordinals
             // address; its internal key IS the ordinals x-only pubkey.

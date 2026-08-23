@@ -111,16 +111,19 @@ describe('inscribeChildAndBroadcast orchestrator', () => {
     // The ordinals pubkey (the parent's Taproot internal key) is threaded
     // so address-filter signers can shim the correct wallet-side address.
     expect(revealArgs.ordinalsPublicKey).toBe(hex.encode(schnorr.getPublicKey(PARENT_PRIV)));
-    // It's the child reveal PSBT: parent input (0) + commit input (1).
-    const revealPsbt = btc.Transaction.fromPSBT(revealArgs.psbtBytes);
-    expect(revealPsbt.inputsLength).toBe(2);
-    expect(revealPsbt.getInput(0).finalScriptWitness).toBeUndefined(); // wallet signs it
-    // Input 1 (commit) carries the ephemeral script-path sig as a PARTIAL
-    // (tapScriptSig), not a finalized witness — so address-filter wallets
-    // accept the PSBT. Both inputs finalize at the extract step.
-    expect(revealPsbt.getInput(1).finalScriptWitness).toBeUndefined();
-    expect(revealPsbt.getInput(1).tapScriptSig).toBeDefined();
-    expect(revealPsbt.getInput(1).tapScriptSig!.length).toBe(1);
+    // psbtBytes is the WALLET-FACING reveal PSBT: parent input (0) +
+    // commit input (1), but input 1 is BARE (no envelope tap-leaf) so
+    // every wallet's signPsbt handles it.
+    const walletPsbt = btc.Transaction.fromPSBT(revealArgs.psbtBytes);
+    expect(walletPsbt.inputsLength).toBe(2);
+    expect(walletPsbt.getInput(0).finalScriptWitness).toBeUndefined(); // wallet signs it
+    expect(walletPsbt.getInput(1).tapScriptSig).toBeUndefined();       // stripped
+    expect(walletPsbt.getInput(1).tapLeafScript).toBeUndefined();      // stripped
+    // finalizePsbtBytes is the FULL reveal PSBT: input 1 carries the
+    // ephemeral script-path sig as a partial tapScriptSig for the merge.
+    const fullPsbt = btc.Transaction.fromPSBT(revealArgs.finalizePsbtBytes, { allowUnknownInputs: true });
+    expect(fullPsbt.getInput(1).tapScriptSig).toBeDefined();
+    expect(fullPsbt.getInput(1).tapScriptSig!.length).toBe(1);
   });
 
   it('broadcasts commit then reveal, and threads the txids into the result', async () => {

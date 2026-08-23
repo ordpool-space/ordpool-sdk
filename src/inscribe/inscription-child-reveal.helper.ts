@@ -104,11 +104,26 @@ export interface ChildInscribeRevealArgs {
 
 export interface ChildInscribeRevealResult {
   /**
-   * Reveal PSBT bytes. Input 0 (parent) is UNSIGNED — the wallet signs
-   * it. Input 1 (commit) is already finalized with the ephemeral
-   * signature. Finalize input 0 after the wallet signs, then broadcast.
+   * The FULL reveal PSBT, used to FINALIZE + broadcast (not to hand to
+   * the wallet). Input 0 (parent) is unsigned; input 1 (commit) carries
+   * the ephemeral script-path signature as a partial tapScriptSig + the
+   * envelope tapLeafScript. After the wallet signs input 0 on
+   * `revealPsbtForWallet`, its signature is merged here and BOTH inputs
+   * finalize (input 1 from the tapScriptSig).
    */
   revealPsbt: Uint8Array;
+  /**
+   * The reveal PSBT the WALLET signs. Byte-identical to `revealPsbt` in
+   * its consensus fields (inputs, outputs, locktime) so input 0's sighash
+   * matches, but input 1 is a BARE Taproot input (witnessUtxo only) — no
+   * envelope tapLeafScript, no tapScriptSig. Some wallets' signPsbt hang
+   * or reject when a PSBT contains a non-standard tap-leaf script on an
+   * input they aren't even asked to sign; stripping it lets every wallet
+   * sign input 0 cleanly. Input 0's signature is valid on `revealPsbt`
+   * because the sighash commits to input 1's prevout (from witnessUtxo),
+   * not its PSBT metadata.
+   */
+  revealPsbtForWallet: Uint8Array;
   /** Reveal txid (witness-independent; stable before the wallet signs). */
   revealTxid: string;
   /** Reveal vsize (fully-signed) for fee math. */
@@ -235,14 +250,39 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   // exactly a 64-byte Schnorr sig, so the size is exact regardless of the
   // real signature). The txid is witness-independent, so the clone's id
   // equals what the wallet-signed reveal will produce.
-  const clone = btc.Transaction.fromPSBT(tx.toPSBT(0));
+  const clone = btc.Transaction.fromPSBT(tx.toPSBT(0), { allowUnknownInputs: true });
   clone.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] }, true);
   clone.updateInput(commitInputIndex, {
     finalScriptWitness: [signature, bareLeafScript, controlBlock],
   }, true);
 
+  // Wallet-facing PSBT: same consensus tx (inputs/outputs/locktime), but
+  // input 1 is a BARE Taproot input — witnessUtxo only, no tapLeafScript /
+  // tapScriptSig. The wallet signs input 0 here without ever parsing the
+  // ord envelope tap-leaf (which hangs / is rejected by some signPsbt
+  // implementations). Rebuilt fresh because scure's updateInput merges
+  // and cannot clear an already-set field.
+  const walletFacing = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
+  walletFacing.addInput({
+    txid: args.parent.utxo.txid,
+    index: args.parent.utxo.vout,
+    witnessUtxo: { script: args.parent.utxo.scriptPubKey, amount: BigInt(parentValue) },
+    tapInternalKey: args.parent.utxo.tapInternalKey,
+  });
+  walletFacing.addInput({
+    txid: args.commitTxid,
+    index: args.commitVout,
+    witnessUtxo: { script: args.commitOutputScript, amount: BigInt(args.commitOutputValueSats) },
+  });
+  walletFacing.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
+  walletFacing.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+  if (args.tip !== undefined && tipValueSats > 0) {
+    walletFacing.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+  }
+
   return {
     revealPsbt: tx.toPSBT(0),
+    revealPsbtForWallet: walletFacing.toPSBT(0),
     revealTxid: clone.id,
     revealVsize: clone.vsize,
   };

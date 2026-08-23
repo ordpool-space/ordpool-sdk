@@ -138,7 +138,10 @@ export function inscribeChildAndBroadcast(
     }).pipe(
       switchMap(({ txId: commitTxId }) =>
         signer.signChildRevealParentInputs({
-          psbtBytes: built.revealPsbt,
+          // Wallet signs input 0 on the BARE PSBT (no envelope tap-leaf);
+          // its signature is merged into the full PSBT to finalize.
+          psbtBytes: built.revealPsbtForWallet,
+          finalizePsbtBytes: built.revealPsbt,
           ordinalsAddress: args.parentUtxo.returnAddress,
           // The parent input is a Taproot key-path at the ordinals
           // address; its internal key IS the ordinals x-only pubkey.
