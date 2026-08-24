@@ -77,7 +77,10 @@ describe('unisatSigner.signSingleFundingInput', () => {
     expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), {
       autoFinalized: false,
       toSignInputs: [
-        { index: 0, address: 'bc1pordinals', sighashTypes: [btc.SigHash.ALL] },
+        // Taproot ordinals input: whitelist DEFAULT (0x00) + ALL (0x01), since
+        // a Taproot key-path input is commonly encoded SIGHASH_DEFAULT.
+        { index: 0, address: 'bc1pordinals', sighashTypes: [btc.SigHash.DEFAULT, btc.SigHash.ALL] },
+        // P2WPKH payment inputs: exactly ALL (0x00 is Taproot-only).
         { index: 1, address: 'bc1qpayment', sighashTypes: [btc.SigHash.ALL] },
         { index: 2, address: 'bc1qpayment', sighashTypes: [btc.SigHash.ALL] },
       ],

@@ -24,17 +24,21 @@ export const BIP341_KEYPATH_SIGHASHES: readonly number[] = [0x00, 0x01];
 
 /**
  * Per-input `sighashTypes` whitelist for a Unisat-family `toSignInputs`
- * entry. When the target sighash is SIGHASH_ALL (0x01) — the default
- * every operation resolves to when it doesn't ask for a special
- * sighash — a Taproot key-path input is commonly encoded as
- * SIGHASH_DEFAULT (0x00) in the PSBT, so whitelist BOTH (see
- * `BIP341_KEYPATH_SIGHASHES`). Otherwise (an explicit non-ALL sighash,
- * e.g. offer SINGLE|ANYONECANPAY) whitelist exactly that value.
+ * entry. When the target sighash is SIGHASH_ALL (0x01) AND the input is a
+ * Taproot address, whitelist BOTH SIGHASH_DEFAULT (0x00) and ALL (0x01):
+ * a Taproot key-path input is commonly encoded as SIGHASH_DEFAULT (0x00)
+ * in the PSBT, and the two commit to identical wire bytes (see
+ * `BIP341_KEYPATH_SIGHASHES`). Otherwise — a non-Taproot input (P2WPKH /
+ * P2SH), or an explicit non-ALL sighash (e.g. offer SINGLE|ANYONECANPAY)
+ * — whitelist exactly that value. SIGHASH_DEFAULT (0x00) is a Taproot-only
+ * concept, so it must NOT appear in a P2WPKH input's whitelist.
  *
- * Widening ALL to `[0x00, 0x01]` is harmless for non-Taproot inputs:
- * a P2WPKH input carries explicit 0x01, which is in the list; the
- * extra 0x00 never matches it.
+ * `address` is the mainnet-shimmed signing address the wallet validates
+ * against; Taproot is detected by the `1p` witness-v1 HRP separator
+ * (`bc1p` / `tb1p` / `bcrt1p`). Omit it to widen unconditionally (the
+ * single-Taproot-input paths that always pass a Taproot address).
  */
-export function keypathSighashWhitelist(sigHash: number): number[] {
-  return sigHash === 0x01 ? [...BIP341_KEYPATH_SIGHASHES] : [sigHash];
+export function keypathSighashWhitelist(sigHash: number, address?: string): number[] {
+  const isTaproot = address === undefined || /^(bc|tb|bcrt)1p/.test(address);
+  return sigHash === 0x01 && isTaproot ? [...BIP341_KEYPATH_SIGHASHES] : [sigHash];
 }

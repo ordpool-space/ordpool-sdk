@@ -12,6 +12,7 @@ import { describe, expect, it } from '@jest/globals';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
+import { InscriptionParserService } from 'ordpool-parser';
 
 import { Network, toScureNetwork } from '../network';
 import { encodeInscriptionId } from './inscription-envelope';
@@ -241,5 +242,163 @@ describe('buildChildInscribeRevealTx — guards', () => {
       recipientAddress: recipientAddress(),
       network: NETWORK,
     })).toThrow(/ephemeralPrivKey must be 32 bytes/);
+  });
+});
+
+/**
+ * OKX-owned-commit "real-key" child reveal — node correctness proof.
+ *
+ * OKX's closed signPsbt preview refuses any PSBT with an input it doesn't
+ * own, so the child reveal's commit input must be OWNED by OKX: its
+ * ordinals key is the envelope leaf key AND the commit's taproot internal
+ * key. OKX then signs input 0 (key-path, tweaked) AND input 1 (script-path,
+ * raw) in one call. There is no ephemeral bearer key.
+ *
+ * This proof does NOT mock the wallet: it simulates OKX by signing BOTH
+ * inputs with one KNOWN key (KNOWN_PRIV stands in for OKX's single BIP-86
+ * ordinals key, payment === ordinals), finalizes, and asserts the reveal is
+ * byte-valid and ord-parseable.
+ */
+describe('createChildInscribeTransactions — OKX-owned-commit mode (real-key)', () => {
+  const KNOWN_PRIV = new Uint8Array(32).fill(0x77);
+  const OKX_XONLY = schnorr.getPublicKey(KNOWN_PRIV);
+  const OKX_ADDRESS = btc.p2tr(OKX_XONLY, undefined, scureNetwork, true).address!;
+  const OKX_PAYMENT_PUBKEY = secp256k1.getPublicKey(KNOWN_PRIV, true);
+  const CHILD_BODY = '<html><body>okx child</body></html>';
+  const CHILD_CONTENT_TYPE = 'text/html';
+
+  function okxParentUtxo(value = 546) {
+    const p = btc.p2tr(OKX_XONLY, undefined, scureNetwork, true);
+    return {
+      utxo: {
+        txid: 'a'.repeat(64), vout: 0, value,
+        scriptPubKey: p.script,
+        tapInternalKey: OKX_XONLY,
+      },
+      returnAddress: p.address!,
+    };
+  }
+
+  function buildOkx(overrides: Partial<CreateChildInscribeTransactionsArgs> = {}) {
+    return createChildInscribeTransactions({
+      paymentOutput: { txid: 'd'.repeat(64), vout: 0, value: 100_000, status: { confirmed: true } },
+      paymentPublicKey: OKX_PAYMENT_PUBKEY,
+      paymentAddress: OKX_ADDRESS,
+      recipientAddress: OKX_ADDRESS,
+      body: new TextEncoder().encode(CHILD_BODY),
+      contentType: CHILD_CONTENT_TYPE,
+      feeRatePerVbyte: 8,
+      parentInscriptionId: PARENT_INSCRIPTION_ID,
+      parentUtxo: okxParentUtxo(),
+      revealKeyXOnly: OKX_XONLY,
+      network: NETWORK,
+      ...overrides,
+    });
+  }
+
+  it('the wallet-facing reveal has input 1 UNSIGNED with a tapLeafScript + the wallet key (no ephemeral tapScriptSig)', () => {
+    const built = buildOkx();
+    const ownedPsbt = built.revealPsbtForOwnedCommit;
+    if (!ownedPsbt) throw new Error('OKX mode must return revealPsbtForOwnedCommit');
+
+    const psbt = btc.Transaction.fromPSBT(ownedPsbt, { allowUnknownInputs: true });
+    expect(psbt.inputsLength).toBe(2);
+
+    // Input 0 (parent) unsigned — the wallet key-path-signs it.
+    expect(psbt.getInput(0).finalScriptWitness).toBeUndefined();
+    expect(psbt.getInput(0).tapKeySig).toBeUndefined();
+
+    // Input 1 (commit) unsigned but wallet-signable: carries the envelope
+    // tapLeafScript + the wallet's ordinals key as tapInternalKey, and NO
+    // SDK-produced tapScriptSig (the SDK holds no key for it).
+    const commitIn = psbt.getInput(1);
+    expect(commitIn.tapScriptSig).toBeUndefined();
+    expect(commitIn.tapLeafScript).toBeDefined();
+    expect(commitIn.tapInternalKey).toBeDefined();
+    expect(hex.encode(commitIn.tapInternalKey!)).toBe(hex.encode(OKX_XONLY));
+
+    // The envelope leaf embeds the wallet's key as `<OKX_XONLY> OP_CHECKSIG`
+    // (0x20 = 32-byte push, 0xac = OP_CHECKSIG).
+    const leafBytes = commitIn.tapLeafScript![0][1];
+    expect(hex.encode(leafBytes).startsWith('20' + hex.encode(OKX_XONLY) + 'ac')).toBe(true);
+
+    // Bonus-cat locktime + FIFO output topology (unchanged HARD RULES).
+    expect(psbt.lockTime).toBe(21);
+    expect(psbt.getOutput(0).amount).toBe(546n);  // parent return
+    expect(psbt.getOutput(1).amount).toBe(546n);  // child recipient
+  });
+
+  it('OKX signs BOTH inputs with ONE key → byte-valid, ord-parseable reveal (input 0 key-path tweaked, input 1 script-path raw)', () => {
+    const built = buildOkx();
+    const ownedPsbt = built.revealPsbtForOwnedCommit;
+    if (!ownedPsbt) throw new Error('OKX mode must return revealPsbtForOwnedCommit');
+
+    const tx = btc.Transaction.fromPSBT(ownedPsbt, { allowUnknownInputs: true });
+
+    // Simulate OKX input 0: key-path spend with the TWEAKED known key.
+    // scure's signIdx applies the BIP-86 taproot tweak for a key-path P2TR
+    // input (tapInternalKey set, no leaf), exactly as OKX's tweaked signer.
+    tx.signIdx(KNOWN_PRIV, 0);
+
+    // Simulate OKX input 1: SCRIPT-PATH spend over the envelope leaf with
+    // the RAW (untweaked) known key — mirrors the builder's manual
+    // preimageWitnessV1 + schnorr.sign, but signed by the wallet's key. The
+    // SIGHASH_DEFAULT sighash commits to BOTH prevouts (parent + commit).
+    const commitLeaf = tx.getInput(1).tapLeafScript!;
+    const leafBytes = commitLeaf[0][1];
+    const bareLeafScript = leafBytes.subarray(0, -1);
+    const leafVersion = leafBytes[leafBytes.length - 1] ?? 0xc0;
+
+    const in0 = tx.getInput(0);
+    const in1 = tx.getInput(1);
+    const sighash = tx.preimageWitnessV1(
+      1,
+      [in0.witnessUtxo!.script, in1.witnessUtxo!.script],
+      btc.SignatureHash.DEFAULT,
+      [in0.witnessUtxo!.amount, in1.witnessUtxo!.amount],
+      undefined,
+      bareLeafScript,
+      leafVersion,
+    );
+    const scriptPathSig = schnorr.sign(sighash, KNOWN_PRIV);
+    const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
+    tx.updateInput(1, {
+      tapScriptSig: [[{ pubKey: OKX_XONLY, leafHash }, scriptPathSig]],
+    }, true);
+
+    // Finalize BOTH inputs and serialise to a wire tx.
+    tx.finalize();
+
+    const w0 = tx.getInput(0).finalScriptWitness!;
+    const w1 = tx.getInput(1).finalScriptWitness!;
+    expect(w0.length).toBe(1);                 // key-path: [schnorr sig]
+    expect([64, 65]).toContain(w0[0].length);
+    expect(w1.length).toBe(3);                 // script-path: [sig, envelopeScript, controlBlock]
+    expect(hex.encode(w1[0])).toBe(hex.encode(scriptPathSig));
+    expect(tx.lockTime).toBe(21);
+    expect(tx.hex.length).toBeGreaterThan(0);  // serialises to a wire tx
+    expect(tx.id).toBe(built.revealTxid);      // witness-independent txid matches the builder
+
+    // ord-parseable: the child inscription decodes from input 1's witness,
+    // with the correct contentType, body, and parent tag.
+    const witness = w1.map((w) => hex.encode(w));
+    const parsed = InscriptionParserService.parse({ txid: tx.id, vin: [{ witness }] });
+    expect(parsed.length).toBe(1);
+    expect(parsed[0].contentType).toBe(CHILD_CONTENT_TYPE);
+    expect(new TextDecoder().decode(parsed[0].getDataRaw())).toBe(CHILD_BODY);
+    expect(parsed[0].getParents()).toContain(PARENT_INSCRIPTION_ID);
+  });
+
+  it('rejects a non-32-byte revealKeyXOnly', () => {
+    expect(() => buildOkx({ revealKeyXOnly: new Uint8Array(31) }))
+      .toThrow(/revealKeyXOnly must be a 32-byte x-only key/);
+  });
+
+  it('ephemeral mode is unchanged: no revealPsbtForOwnedCommit, input 1 carries the ephemeral tapScriptSig', () => {
+    const built = build(); // top-level ephemeral builder (no revealKeyXOnly)
+    expect(built.revealPsbtForOwnedCommit).toBeUndefined();
+    const full = btc.Transaction.fromPSBT(built.revealPsbt, { allowUnknownInputs: true });
+    expect(full.getInput(1).tapScriptSig).toBeDefined();
+    expect(built.ephemeral.privKey.length).toBe(32);
   });
 });

@@ -72,7 +72,7 @@ const legacy = {
     for (const t of targets) {
       const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
       }
     }
 
@@ -89,7 +89,7 @@ const legacy = {
     for (const t of targets) {
       const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
       }
     }
     return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(

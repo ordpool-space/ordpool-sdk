@@ -91,8 +91,23 @@ export interface ChildInscribeRevealArgs {
     internalKey: Uint8Array;
     tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
   };
-  /** 32-byte ephemeral private key (same key embedded in the envelope). */
-  ephemeralPrivKey: Uint8Array;
+  /**
+   * 32-byte ephemeral private key (same key embedded in the envelope).
+   * Required in the DEFAULT (ephemeral) mode — the SDK script-path-signs
+   * input 1 with it. Omitted in OKX-owned-commit mode (`revealKeyXOnly`
+   * set), where the WALLET holds the key and signs input 1 itself.
+   */
+  ephemeralPrivKey?: Uint8Array;
+  /**
+   * OKX-owned-commit mode. When set (32-byte x-only), the envelope leaf
+   * key AND the commit's taproot internal key are the WALLET's OWN
+   * ordinals key, so the wallet can script-path-sign input 1 in the same
+   * signPsbt call that key-path-signs input 0. The SDK holds no private
+   * key for input 1 and leaves it UNSIGNED (witnessUtxo + tapInternalKey
+   * = revealKeyXOnly + tapLeafScript). Mutually exclusive with the
+   * ephemeral signing path; `ephemeralPrivKey` is ignored when set.
+   */
+  revealKeyXOnly?: Uint8Array;
   /** The parent inscription spent + returned by this reveal. */
   parent: ChildRevealParent;
   /** Address the CHILD inscription lands on (P2TR recommended). */
@@ -124,6 +139,17 @@ export interface ChildInscribeRevealResult {
    * not its PSBT metadata.
    */
   revealPsbtForWallet: Uint8Array;
+  /**
+   * OKX-owned-commit mode only (`revealKeyXOnly` set). The single reveal
+   * PSBT the wallet signs: BOTH inputs unsigned, input 1 carrying
+   * witnessUtxo + tapInternalKey (= the wallet's ordinals key) +
+   * tapLeafScript (the envelope leaf). The wallet signs input 0 key-path
+   * (tweaked) and input 1 script-path (raw) in one call; the SDK finalizes
+   * + broadcasts it directly. `undefined` in the default ephemeral mode.
+   * In OKX mode `revealPsbt` and `revealPsbtForWallet` mirror this same
+   * PSBT (there is no bare/full split — the wallet owns both inputs).
+   */
+  revealPsbtForOwnedCommit?: Uint8Array;
   /** Reveal txid (witness-independent; stable before the wallet signs). */
   revealTxid: string;
   /** Reveal vsize (fully-signed) for fee math. */
@@ -141,8 +167,22 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   if (tipValueSats < 0 || !Number.isInteger(tipValueSats)) {
     throw new Error('tip.value must be a non-negative integer');
   }
-  if (args.ephemeralPrivKey.length !== 32) {
-    throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
+  // Two build modes:
+  //   - DEFAULT (ephemeral): the SDK holds a throwaway key, embeds its
+  //     x-only pubkey in the envelope + commit internal key, and
+  //     script-path-signs input 1 itself (partial tapScriptSig).
+  //   - OKX-owned-commit (`revealKeyXOnly` set): the envelope + commit
+  //     internal key ARE the wallet's own ordinals key, so the wallet
+  //     script-path-signs input 1 in the SAME signPsbt call that key-path-
+  //     signs input 0. The SDK holds no private key for input 1 and leaves
+  //     it UNSIGNED (witnessUtxo + tapInternalKey + tapLeafScript).
+  const okxOwnedCommitMode = args.revealKeyXOnly !== undefined;
+  if (args.revealKeyXOnly !== undefined) {
+    if (args.revealKeyXOnly.length !== 32) {
+      throw new Error(`revealKeyXOnly must be a 32-byte x-only key; got ${args.revealKeyXOnly.length}`);
+    }
+  } else if (args.ephemeralPrivKey === undefined || args.ephemeralPrivKey.length !== 32) {
+    throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey?.length}`);
   }
   if (!Number.isInteger(args.parent.utxo.value) || args.parent.utxo.value < postageSats) {
     throw new Error(
@@ -207,61 +247,101 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
     tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
   }
 
-  // Ephemeral script-path finalization of the COMMIT input (index 1).
-  // SIGHASH_DEFAULT commits to ALL inputs + outputs, so the sighash needs
-  // every prevout script + amount (parent AND commit). Manual finalize
-  // mirrors the single-input reveal helper; see its comment for the
-  // trailing-version-byte handling on the leaf script.
+  // Leaf spend metadata (shared by both modes). The trailing-version-byte
+  // handling mirrors the single-input reveal helper.
   const [cbStruct, leafScriptWithVersion] = args.taproot.tapLeafScript[0];
   const bareLeafScript = leafScriptWithVersion.subarray(0, -1);
   const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
-  const commitInputIndex = 1;
-  const sighash = tx.preimageWitnessV1(
-    commitInputIndex,
-    [args.parent.utxo.scriptPubKey, args.commitOutputScript],
-    btc.SignatureHash.DEFAULT,
-    [BigInt(parentValue), BigInt(args.commitOutputValueSats)],
-    undefined,
-    bareLeafScript,
-    leafVersion,
-  );
-  const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
   const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
-  // Attach the ephemeral script-path signature as a PARTIAL sig
-  // (tapScriptSig), NOT a finalScriptWitness. A PSBT that hands a wallet
-  // an already-FINALIZED sibling input is rejected by the address-filter
-  // signers (Unisat/Wizz/OKX) — their signPsbt won't produce a signing
-  // prompt for such a PSBT. Left partial, every input is unfinalized when
-  // the wallet sees it; the wallet signs input 0, and the shared
-  // extract-wire-tx step finalizes BOTH inputs (input 0 from the wallet's
-  // key-path sig, input 1 from this tapScriptSig via the tapLeafScript
-  // set above). Index-based signers (Leather / cat21-wallet) reach the
-  // same finalized witness. The measurement clone below still finalizes
-  // input 1 directly so revealTxid / revealVsize are exact.
-  const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
-  tx.updateInput(commitInputIndex, {
-    tapScriptSig: [[{ pubKey: args.taproot.internalKey, leafHash }, signature]],
-  }, true);
+  const commitInputIndex = 1;
+
+  // Commit-input (index 1) signing differs by mode. `commitWitnessSig` is
+  // the 64-byte Schnorr script-path signature that goes into the witness;
+  // in OKX mode it is a placeholder used only to size the measurement clone.
+  let commitWitnessSig: Uint8Array;
+  if (okxOwnedCommitMode) {
+    // OKX-owned-commit: the SDK cannot sign input 1 — it holds no private
+    // key for `revealKeyXOnly` (the wallet's own ordinals key). Leave input
+    // 1 UNSIGNED, carrying its witnessUtxo + tapInternalKey + tapLeafScript
+    // (added above), so the wallet script-path-signs it in the same signPsbt
+    // call that key-path-signs input 0. The dummy 64-byte sig is used ONLY
+    // to size the measurement clone below: a SIGHASH_DEFAULT P2TR
+    // script-path witness carries exactly a 64-byte Schnorr sig, so the
+    // vsize is exact regardless of the real (wallet-produced) signature.
+    commitWitnessSig = new Uint8Array(64);
+  } else {
+    // Ephemeral script-path signing of the COMMIT input. SIGHASH_DEFAULT
+    // commits to ALL inputs + outputs, so the sighash needs every prevout
+    // script + amount (parent AND commit). Manual finalize mirrors the
+    // single-input reveal helper.
+    const ephemeralPrivKey = args.ephemeralPrivKey;
+    if (ephemeralPrivKey === undefined) {
+      throw new Error('ephemeralPrivKey is required when revealKeyXOnly is not set');
+    }
+    const sighash = tx.preimageWitnessV1(
+      commitInputIndex,
+      [args.parent.utxo.scriptPubKey, args.commitOutputScript],
+      btc.SignatureHash.DEFAULT,
+      [BigInt(parentValue), BigInt(args.commitOutputValueSats)],
+      undefined,
+      bareLeafScript,
+      leafVersion,
+    );
+    commitWitnessSig = schnorr.sign(sighash, ephemeralPrivKey);
+    // Attach the ephemeral script-path signature as a PARTIAL sig
+    // (tapScriptSig), NOT a finalScriptWitness. A PSBT that hands a wallet
+    // an already-FINALIZED sibling input is rejected by the address-filter
+    // signers (Unisat/Wizz) — their signPsbt won't produce a signing prompt
+    // for such a PSBT. Left partial, every input is unfinalized when the
+    // wallet sees it; the wallet signs input 0, and the shared
+    // extract-wire-tx step finalizes BOTH inputs (input 0 from the wallet's
+    // key-path sig, input 1 from this tapScriptSig via the tapLeafScript
+    // set above). Index-based signers (Leather / cat21-wallet) reach the
+    // same finalized witness. The measurement clone below still finalizes
+    // input 1 directly so revealTxid / revealVsize are exact.
+    const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
+    tx.updateInput(commitInputIndex, {
+      tapScriptSig: [[{ pubKey: args.taproot.internalKey, leafHash }, commitWitnessSig]],
+    }, true);
+  }
 
   assertCat21LockTime(tx.lockTime);
 
-  // Measure vsize + txid on a fully-signed CLONE: set a dummy 64-byte
-  // key-path witness on the parent input (SIGHASH_DEFAULT P2TR witness is
-  // exactly a 64-byte Schnorr sig, so the size is exact regardless of the
-  // real signature). The txid is witness-independent, so the clone's id
-  // equals what the wallet-signed reveal will produce.
+  // Measure vsize + txid on a fully-signed CLONE: dummy 64-byte key-path
+  // witness on the parent input + the script-path witness on the commit
+  // (real ephemeral sig, or a dummy in OKX mode). A SIGHASH_DEFAULT P2TR
+  // witness is exactly a 64-byte Schnorr sig, so the size is exact
+  // regardless of the real signature. The txid is witness-independent, so
+  // the clone's id equals what the signed reveal will produce.
   const clone = btc.Transaction.fromPSBT(tx.toPSBT(0), { allowUnknownInputs: true });
   clone.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] }, true);
   clone.updateInput(commitInputIndex, {
-    finalScriptWitness: [signature, bareLeafScript, controlBlock],
+    finalScriptWitness: [commitWitnessSig, bareLeafScript, controlBlock],
   }, true);
 
-  // Wallet-facing PSBT: same consensus tx (inputs/outputs/locktime), but
-  // input 1 is a BARE Taproot input — witnessUtxo only, no tapLeafScript /
-  // tapScriptSig. The wallet signs input 0 here without ever parsing the
-  // ord envelope tap-leaf (which hangs / is rejected by some signPsbt
-  // implementations). Rebuilt fresh because scure's updateInput merges
-  // and cannot clear an already-set field.
+  const revealPsbt = tx.toPSBT(0);
+
+  if (okxOwnedCommitMode) {
+    // `tx` already carries both inputs UNSIGNED, input 1 with its
+    // tapLeafScript + tapInternalKey — exactly the PSBT the wallet signs
+    // AND the SDK finalizes. No bare/full split: the wallet owns both
+    // inputs, so it signs input 0 key-path and input 1 script-path in one
+    // call.
+    return {
+      revealPsbt,
+      revealPsbtForWallet: revealPsbt,
+      revealPsbtForOwnedCommit: revealPsbt,
+      revealTxid: clone.id,
+      revealVsize: clone.vsize,
+    };
+  }
+
+  // Wallet-facing PSBT (ephemeral mode): same consensus tx (inputs/outputs/
+  // locktime), but input 1 is a BARE Taproot input — witnessUtxo only, no
+  // tapLeafScript / tapScriptSig. The wallet signs input 0 here without ever
+  // parsing the ord envelope tap-leaf (which hangs / is rejected by some
+  // signPsbt implementations). Rebuilt fresh because scure's updateInput
+  // merges and cannot clear an already-set field.
   const walletFacing = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
   walletFacing.addInput({
     txid: args.parent.utxo.txid,
@@ -281,8 +361,9 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   }
 
   return {
-    revealPsbt: tx.toPSBT(0),
+    revealPsbt,
     revealPsbtForWallet: walletFacing.toPSBT(0),
+    revealPsbtForOwnedCommit: undefined,
     revealTxid: clone.id,
     revealVsize: clone.vsize,
   };

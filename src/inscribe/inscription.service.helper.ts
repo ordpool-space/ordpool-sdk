@@ -528,6 +528,17 @@ export interface CreateChildInscribeTransactionsArgs
    * belong to the connected wallet.
    */
   parentUtxo: ChildRevealParent;
+  /**
+   * OKX-owned-commit mode. When set (32-byte x-only), the child's commit
+   * uses this key as BOTH the envelope leaf key and the taproot internal
+   * key, so the wallet OWNS the commit input and can script-path-sign it.
+   * Pass the wallet's OWN ordinals x-only pubkey. Only OKX needs this — its
+   * closed signPsbt preview refuses a PSBT with a foreign input; every
+   * other wallet uses the default ephemeral-key path (leave unset). When
+   * set, the result's `revealPsbtForOwnedCommit` is the single PSBT the
+   * wallet signs (both inputs) and the SDK finalizes.
+   */
+  revealKeyXOnly?: Uint8Array;
 }
 
 export interface CreateChildInscribeTransactionsResult {
@@ -549,6 +560,15 @@ export interface CreateChildInscribeTransactionsResult {
    * wallet's signPsbt handles it. See `ChildInscribeRevealResult`.
    */
   revealPsbtForWallet: Uint8Array;
+  /**
+   * OKX-owned-commit mode only (`revealKeyXOnly` set on the args). The
+   * single reveal PSBT the wallet signs: BOTH inputs unsigned, input 1
+   * carrying the envelope tapLeafScript + the wallet's ordinals key as its
+   * tapInternalKey. The wallet signs input 0 key-path (tweaked) and input 1
+   * script-path (raw) in ONE call; the SDK finalizes + broadcasts it.
+   * `undefined` in the default ephemeral mode.
+   */
+  revealPsbtForOwnedCommit?: Uint8Array;
   /** Reveal txid (witness-independent). */
   revealTxid: string;
   /** Commit-tx P2TR address. */
@@ -603,8 +623,21 @@ export function createChildInscribeTransactions(
     throw new Error('parentInscriptionId must be a non-empty string');
   }
 
-  const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
-  const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
+  // Default (ephemeral) mode generates a throwaway key; OKX-owned-commit
+  // mode (`revealKeyXOnly` set) uses the wallet's OWN ordinals key so the
+  // wallet can script-path-sign the commit input itself.
+  let ephemeralPrivKey: Uint8Array | undefined;
+  let ephemeralPubkeyXonly: Uint8Array;
+  if (args.revealKeyXOnly !== undefined) {
+    if (args.revealKeyXOnly.length !== 32) {
+      throw new Error(`revealKeyXOnly must be a 32-byte x-only key; got ${args.revealKeyXOnly.length}`);
+    }
+    ephemeralPrivKey = undefined;
+    ephemeralPubkeyXonly = args.revealKeyXOnly;
+  } else {
+    ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
+    ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
+  }
 
   // Envelope with the parent tag (0x03) synthesised from parentInscriptionId.
   const autoFields = synthesizeEnvelopeFields({ ...args, parent: args.parentInscriptionId });
@@ -662,6 +695,7 @@ export function createChildInscribeTransactions(
       commitOutputScript: placeholderCommit.commitOutputScript,
       taproot: placeholderCommit.taproot,
       ephemeralPrivKey: dummyEphemeralPriv,
+      revealKeyXOnly: args.revealKeyXOnly,
       parent: args.parentUtxo,
       recipientAddress: args.recipientAddress,
       tip: args.tip,
@@ -746,6 +780,7 @@ export function createChildInscribeTransactions(
     commitOutputScript: commit.commitOutputScript,
     taproot: commit.taproot,
     ephemeralPrivKey,
+    revealKeyXOnly: args.revealKeyXOnly,
     parent: args.parentUtxo,
     recipientAddress: args.recipientAddress,
     tip: args.tip,
@@ -757,6 +792,7 @@ export function createChildInscribeTransactions(
     commitTxid,
     revealPsbt: reveal.revealPsbt,
     revealPsbtForWallet: reveal.revealPsbtForWallet,
+    revealPsbtForOwnedCommit: reveal.revealPsbtForOwnedCommit,
     revealTxid: reveal.revealTxid,
     commitAddress: commit.commitAddress,
     fees: {
@@ -769,7 +805,11 @@ export function createChildInscribeTransactions(
       commitOutputValueSats,
       fundingRequirementSats,
     },
-    ephemeral: { privKey: ephemeralPrivKey, pubkeyXonly: ephemeralPubkeyXonly },
+    // In OKX-owned-commit mode there is no ephemeral bearer key — the
+    // wallet holds the commit key — so privKey is empty. In the default
+    // ephemeral mode it carries the throwaway key (persist or forfeit
+    // reveal-side flexibility).
+    ephemeral: { privKey: ephemeralPrivKey ?? new Uint8Array(0), pubkeyXonly: ephemeralPubkeyXonly },
     parent: args.parentUtxo,
   };
 }

@@ -1172,8 +1172,22 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
         },
         returnAddress: input.parentReturnAddress,
       },
+      // OKX-only real-key path: make the commit input OWNED by OKX (its
+      // ordinals x-only key is the envelope leaf + commit internal key), so
+      // OKX signs BOTH reveal inputs in one signPsbt call. OKX is single-
+      // address (payment === ordinals), so the parent's tapInternalKey IS
+      // OKX's ordinals key. Mirrors inscribeChildAndBroadcast; every other
+      // wallet leaves this unset and uses the ephemeral-key path.
+      revealKeyXOnly: input.walletType === KnownOrdinalWalletType.okx
+        ? hexToBytes(input.parentUtxo.tapInternalKeyHex)
+        : undefined,
       network: Network.Regtest,
     });
+
+    // OKX-owned-commit mode returns ONE reveal PSBT the wallet signs (both
+    // inputs) and the SDK finalizes; `revealPsbtForOwnedCommit` is set only
+    // then, so `??` selects the right pair without re-checking wallet type.
+    const ownedCommitReveal = built.revealPsbtForOwnedCommit;
 
     // 1) commit — funding input at paymentAddress, SIGHASH_ALL.
     // eslint-disable-next-line no-console
@@ -1213,8 +1227,11 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     let capturedRevealHex: string | undefined;
     try {
       await firstValueFrom(signer.signChildRevealParentInputs({
-        psbtBytes: built.revealPsbtForWallet,
-        finalizePsbtBytes: built.revealPsbt,
+        // Default: wallet signs input 0 on the BARE PSBT; the sig is merged
+        // into the full PSBT to finalize. OKX: the owned-commit PSBT is both
+        // the sign target (wallet signs both inputs) and the finalize target.
+        psbtBytes: ownedCommitReveal ?? built.revealPsbtForWallet,
+        finalizePsbtBytes: ownedCommitReveal ?? built.revealPsbt,
         ordinalsAddress: input.parentReturnAddress,
         ordinalsPublicKey: input.parentUtxo.tapInternalKeyHex,
         network: walletSignNetwork,

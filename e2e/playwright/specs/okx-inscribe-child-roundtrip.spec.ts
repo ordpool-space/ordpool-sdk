@@ -21,15 +21,22 @@ import { onboardOkx } from '../onboard-okx';
 
 /**
  * OKX PARENT/CHILD inscribe roundtrip on regtest — proof that the real
- * OKX binary signs the child reveal's Taproot parent input alongside a
- * pre-finalized ephemeral sibling.
+ * OKX binary signs BOTH inputs of the child reveal in one signPsbt call.
  *
- * OKX (default BIP-86 Taproot) is single-address: payment === ordinals,
- * one `bcrt1p` address. Its plain inscribe already signs a Taproot
- * key-path funding input at that address, so the child's parent input
- * is the SAME signing operation at the SAME address — only now with the
- * commit input already finalized at index 1. Everything (commit funding,
- * parent, child) lives on the one Taproot address.
+ * OKX's closed signPsbt preview decodes the whole PSBT and refuses any
+ * input it doesn't own, so the default ephemeral-keyed commit input never
+ * renders OKX's approval popup. The SDK's OKX path instead makes the
+ * commit input OWNED by OKX: the ord envelope leaf + the commit's Taproot
+ * internal key are OKX's own ordinals x-only key (`revealKeyXOnly` — OKX
+ * is single-address BIP-86 Taproot, payment === ordinals, so the parent's
+ * tapInternalKey IS that key). OKX then signs input 0 (parent, P2TR
+ * key-path, tweaked key) and input 1 (commit, SCRIPT-PATH over the
+ * envelope leaf, raw untweaked key) atomically — SIGHASH_ALL, no
+ * ANYONECANPAY, so the reveal is not griefable. The SDK finalizes both
+ * inputs and broadcasts.
+ *
+ * Everything (commit funding, parent, child, commit key) lives on the one
+ * `bcrt1p` Taproot address.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
@@ -203,21 +210,6 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme (regtest-harness limitation, not an SDK or mainnet defect): OKX's
-// pre-sign approval decodes the PSBT via its backend before rendering the
-// sign popup. On the two-input child reveal, input 1 is the ephemeral
-// commit UTXO: foreign to OKX and, on regtest, unresolvable to OKX's
-// mainnet-only backend, so signPsbt stalls in the pre-sign decode and the
-// reveal popup never renders. OKX's signing core would skip input 1 (it
-// is not in toSignInputs, okx/js-wallet-sdk psbtSign.ts) — the block is
-// the backend-backed pre-sign decode, not the signing. The SDK builds a
-// correct reveal: the identical PSBT is signed by the index-based wallets
-// (cat21wallet, Leather) and by Xverse via modern signPsbt (all green),
-// and by the SDK regtest e2e against stock ord; OKX signs multi-input
-// PSBTs on mainnet (buyer-signs-own-inputs, the marketplace pattern).
-// Neither the taproot sighash-whitelist fix nor presenting input 1
-// finalized changed the regtest outcome. Un-fixme once the harness mocks
-// OKX's pre-sign decode backend on regtest.
 test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
