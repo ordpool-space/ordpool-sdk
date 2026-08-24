@@ -7,12 +7,14 @@ import { BIP341_KEYPATH_SIGHASHES, keypathSighashWhitelist } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignChildRevealParentInputsArgs,
   SignMessageArgs,
   SignMessageResult,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { signChildRevealShowingCommitKey } from './child-reveal-finalize.helper';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 import { wrapSignMessage } from './wrap-sign-message';
@@ -137,4 +139,9 @@ export const okxSigner: WalletSigner = {
       okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' }),
     );
   },
+
+  // OKX's dApp preview requires every Taproot input to carry a public
+  // key; show the commit input its internal key so the preview renders.
+  signChildRevealParentInputs: (input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> =>
+    signChildRevealShowingCommitKey((i) => legacy.signPsbtOnly(i), input),
 };
