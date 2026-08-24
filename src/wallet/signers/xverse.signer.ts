@@ -1,19 +1,21 @@
 import { base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { defer, from, Observable, map, switchMap } from 'rxjs';
-import Wallet, { MessageSigningProtocols, signTransaction } from 'sats-connect';
+import Wallet, { MessageSigningProtocols, request, signTransaction } from 'sats-connect';
 
 import { toBitcoinNetworkType } from '../../network';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignChildRevealParentInputsArgs,
   SignMessageArgs,
   SignMessageResult,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 import { wrapSignMessage } from './wrap-sign-message';
@@ -139,9 +141,56 @@ function callXverseSignMessage(address: string, message: string): Promise<string
   });
 }
 
+/**
+ * Modern sats-connect `signPsbt` via the low-level `request` helper
+ * (re-exported from `@sats-connect/core`), NOT the default
+ * `Wallet.request` method — the latter wraps calls in sats-connect's
+ * in-page UI (`loadSelector`/`walletOpen`) that a programmatic caller
+ * can't dismiss. Bare `request` reaches `provider.request('signPsbt',
+ * …)` directly.
+ *
+ * `signInputs` is `Record<address, number[]>` — the wallet signs only
+ * the listed input indexes and leaves every other input (here the
+ * foreign ephemeral-commit input) untouched, the marketplace multi-
+ * input pattern. `signPsbt` carries no per-request network; it follows
+ * the wallet's active network (regtest in the e2e seed).
+ */
+function callXverseSignPsbtModern(
+  psbtBytes: Uint8Array,
+  signInputs: Record<string, number[]>,
+): Observable<Uint8Array> {
+  const psbt = base64.encode(psbtBytes);
+  return from(request('signPsbt', { psbt, signInputs, broadcast: false })).pipe(
+    map((resp) => {
+      if (resp.status !== 'success') {
+        throw new Error(
+          `Xverse signPsbt failed: ${resp.error?.message ?? 'unknown error'} (code ${resp.error?.code ?? '?'})`,
+        );
+      }
+      return base64.decode(resp.result.psbt);
+    }),
+  );
+}
+
 export const xverseSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.xverse,
   ...operationNamedDefaults(legacy),
   signMessage: (input: SignMessageArgs): Observable<SignMessageResult> =>
     wrapSignMessage(() => callXverseSignMessage(input.address, input.message)),
+
+  /**
+   * Child-inscription reveal: the wallet signs ONLY input 0 (its parent
+   * P2TR UTXO) via modern `signPsbt` with `signInputs` scoped to the
+   * ordinals address; the foreign ephemeral-commit input 1 is left
+   * alone. The legacy `signTransaction` path (used by the generic
+   * `signPsbtOnly`) stalls on the foreign input, so this operation is
+   * overridden onto modern `signPsbt`. The signed input-0 key-path
+   * signature is then merged into the full reveal PSBT and broadcast by
+   * the shared tail.
+   */
+  signChildRevealParentInputs: (input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> =>
+    callXverseSignPsbtModern(input.psbtBytes, { [input.ordinalsAddress]: [0] }).pipe(
+      switchMap((signedWalletFacing) =>
+        mergeParentSigAndBroadcast(signedWalletFacing, input.finalizePsbtBytes, input.broadcast)),
+    ),
 };

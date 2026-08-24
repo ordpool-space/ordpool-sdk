@@ -5,7 +5,7 @@ import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import * as i0 from '@angular/core';
 import { InjectionToken, inject, Injectable, signal, computed } from '@angular/core';
 import { from, map, Observable, switchMap, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
-import Wallet, { AddressPurpose, addListener, getAddress, signTransaction, MessageSigningProtocols } from 'sats-connect';
+import Wallet, { AddressPurpose, addListener, getAddress, signTransaction, MessageSigningProtocols, request } from 'sats-connect';
 import { sha256 } from '@noble/hashes/sha2';
 import { concatBytes } from '@noble/hashes/utils';
 import { HttpClient } from '@angular/common/http';
@@ -2019,6 +2019,36 @@ function broadcastSignedPsbt(input, signedPsbtBytes) {
 }
 
 /**
+ * Shared tail for the child-inscription reveal, wallet-agnostic.
+ *
+ * The wallet signs ONLY input 0 (the parent, a P2TR key-path spend) on
+ * the BARE wallet-facing PSBT — input 1 there has no envelope tap-leaf,
+ * which some `signPsbt` implementations reject. This function takes the
+ * wallet-signed bare PSBT, lifts input 0's Schnorr key-path signature,
+ * carries it onto the FULL PSBT (whose input 1 carries the ephemeral
+ * tapScriptSig + envelope leaf), finalizes BOTH inputs, and broadcasts
+ * the wire tx.
+ *
+ * Input 0 is a P2TR key-path spend whose witness is exactly the 64/65-byte
+ * Schnorr sig — read it from the raw `tapKeySig`, or (if the wallet
+ * auto-finalized) the single element of the finalized witness. The FULL
+ * PSBT is parsed with `allowUnknownInputs` because input 1's envelope
+ * tap-leaf is a non-standard script scure won't recognize as owned.
+ */
+function mergeParentSigAndBroadcast(signedWalletFacing, finalizePsbtBytes, broadcast) {
+    const walletSigned = btc.Transaction.fromPSBT(signedWalletFacing);
+    const in0 = walletSigned.getInput(0);
+    const keySig = in0.tapKeySig ?? in0.finalScriptWitness?.[0];
+    if (!keySig) {
+        throw new Error('child reveal: wallet did not sign the parent input (index 0)');
+    }
+    const full = btc.Transaction.fromPSBT(finalizePsbtBytes, { allowUnknownInputs: true });
+    full.updateInput(0, { tapKeySig: keySig }, true);
+    const wireHex = extractWireTxFromPsbt(full.toPSBT(0));
+    return broadcast(wireHex).pipe(map((txId) => ({ txId })));
+}
+
+/**
  * Default operation-named methods, delegating to a signer's existing
  * legacy generic methods (`signAndBroadcast`, `signMultiInputAndBroadcast`,
  * `signPsbtOnly`) with a HARDCODED signing topology per operation.
@@ -2081,24 +2111,7 @@ function operationNamedDefaults(legacy) {
                 signingMap: [{ address: input.ordinalsAddress, indexes: [0], publicKey: input.ordinalsPublicKey }],
                 network: input.network,
                 promptForSignedPsbt: input.promptForSignedPsbt,
-            }).pipe(switchMap((signedWalletFacing) => {
-                const walletSigned = btc.Transaction.fromPSBT(signedWalletFacing);
-                const in0 = walletSigned.getInput(0);
-                // Input 0 is a P2TR key-path spend whose witness is exactly the
-                // 64/65-byte Schnorr sig. Take it from the raw tapKeySig, or (if
-                // the wallet auto-finalized) the single element of the witness.
-                const keySig = in0.tapKeySig ?? in0.finalScriptWitness?.[0];
-                if (!keySig) {
-                    throw new Error('child reveal: wallet did not sign the parent input (index 0)');
-                }
-                // Carry the sig onto the FULL PSBT as a tapKeySig so the shared
-                // finalize builds input 0's key-path witness alongside input 1's
-                // script-path witness (from its ephemeral tapScriptSig).
-                const full = btc.Transaction.fromPSBT(input.finalizePsbtBytes, { allowUnknownInputs: true });
-                full.updateInput(0, { tapKeySig: keySig }, true);
-                const wireHex = extractWireTxFromPsbt(full.toPSBT(0));
-                return input.broadcast(wireHex).pipe(map((txId) => ({ txId })));
-            }));
+            }).pipe(switchMap((signedWalletFacing) => mergeParentSigAndBroadcast(signedWalletFacing, input.finalizePsbtBytes, input.broadcast)));
         },
         signOfferCreatePsbt(input) {
             const paymentIndexes = Array.from({ length: input.fundingInputCount }, (_, i) => i + 1);
@@ -2980,10 +2993,44 @@ function callXverseSignMessage(address, message) {
         return resp.result.signature;
     });
 }
+/**
+ * Modern sats-connect `signPsbt` via the low-level `request` helper
+ * (re-exported from `@sats-connect/core`), NOT the default
+ * `Wallet.request` method — the latter wraps calls in sats-connect's
+ * in-page UI (`loadSelector`/`walletOpen`) that a programmatic caller
+ * can't dismiss. Bare `request` reaches `provider.request('signPsbt',
+ * …)` directly.
+ *
+ * `signInputs` is `Record<address, number[]>` — the wallet signs only
+ * the listed input indexes and leaves every other input (here the
+ * foreign ephemeral-commit input) untouched, the marketplace multi-
+ * input pattern. `signPsbt` carries no per-request network; it follows
+ * the wallet's active network (regtest in the e2e seed).
+ */
+function callXverseSignPsbtModern(psbtBytes, signInputs) {
+    const psbt = base64.encode(psbtBytes);
+    return from(request('signPsbt', { psbt, signInputs, broadcast: false })).pipe(map((resp) => {
+        if (resp.status !== 'success') {
+            throw new Error(`Xverse signPsbt failed: ${resp.error?.message ?? 'unknown error'} (code ${resp.error?.code ?? '?'})`);
+        }
+        return base64.decode(resp.result.psbt);
+    }));
+}
 const xverseSigner = {
     providerId: KnownOrdinalWalletType.xverse,
     ...operationNamedDefaults(legacy),
     signMessage: (input) => wrapSignMessage(() => callXverseSignMessage(input.address, input.message)),
+    /**
+     * Child-inscription reveal: the wallet signs ONLY input 0 (its parent
+     * P2TR UTXO) via modern `signPsbt` with `signInputs` scoped to the
+     * ordinals address; the foreign ephemeral-commit input 1 is left
+     * alone. The legacy `signTransaction` path (used by the generic
+     * `signPsbtOnly`) stalls on the foreign input, so this operation is
+     * overridden onto modern `signPsbt`. The signed input-0 key-path
+     * signature is then merged into the full reveal PSBT and broadcast by
+     * the shared tail.
+     */
+    signChildRevealParentInputs: (input) => callXverseSignPsbtModern(input.psbtBytes, { [input.ordinalsAddress]: [0] }).pipe(switchMap((signedWalletFacing) => mergeParentSigAndBroadcast(signedWalletFacing, input.finalizePsbtBytes, input.broadcast))),
 };
 
 /**

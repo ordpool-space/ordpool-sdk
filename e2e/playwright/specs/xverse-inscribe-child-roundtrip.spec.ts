@@ -80,7 +80,10 @@ async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>
     timeoutMs: 120_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText(/review transaction/i).first().waitFor({ state: 'visible', timeout: 120_000 });
+      // The legacy signTransaction popup reads "Review transaction"; the
+      // modern signPsbt popup may head with "Sign transaction" / "Sign
+      // PSBT" / "Confirm transaction". Match any of them.
+      await p.getByText(/(review|sign|confirm)\b.*\b(transaction|psbt)/i).first().waitFor({ state: 'visible', timeout: 120_000 });
       return true;
     },
   });
@@ -88,17 +91,18 @@ async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>
   await approval.waitForFunction(() => {
     const buttons = Array.from(document.querySelectorAll('button'));
     return buttons.some(b => {
-      if (!/^confirm$/i.test(b.textContent?.trim() ?? '')) return false;
+      if (!/^(confirm|sign|approve)$/i.test(b.textContent?.trim() ?? '')) return false;
       if (b.hasAttribute('disabled')) return false;
       const style = getComputedStyle(b);
       return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
     });
   }, undefined, { timeout: 30_000, polling: 250 });
   knownPages.add(approval);
-  // Click Confirm; the popup closing signals the sign completed. Retry a
-  // few times — Xverse's Confirm sometimes needs a second dispatch.
+  // Click the confirm/sign button; the popup closing signals the sign
+  // completed. Retry a few times — Xverse's button sometimes needs a
+  // second dispatch.
   for (let attempt = 0; attempt < 4 && !approval.isClosed(); attempt++) {
-    await approval.getByRole('button', { name: /^confirm$/i }).first().click({ force: true }).catch(() => undefined);
+    await approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first().click({ force: true }).catch(() => undefined);
     const closed = await new Promise<boolean>((res) => {
       if (approval.isClosed()) return res(true);
       const t = setTimeout(() => res(false), 15_000);
@@ -148,24 +152,19 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme: like the other address-based signers, Xverse cannot sign the
-// two-input child reveal. It signs the single-input commit fine, but on
-// the reveal (input 0 = the wallet's parent UTXO, input 1 = the foreign
-// ephemeral-commit UTXO) sats-connect's signTransaction renders no
-// "Review transaction" popup and the call never settles. The adapter is
-// correct (signPsbtOnly → callXverseSignTransaction with inputsToSign=[0]);
-// sats-connect itself stalls on the PSBT's foreign input. This mirrors
-// OKX exactly (proven three input-1 ways there), confirming the split:
-// INDEX-based signers (cat21-wallet, Leather — both green) sign the
-// parent input by position and ignore the foreign commit input; ADDRESS-
-// based signers (Xverse, OKX, Unisat, Wizz) validate the whole PSBT and
-// hang on the input they don't own. The child topology structurally
-// REQUIRES that foreign commit input (ord links parent→child only when
-// the reveal spends the parent, and the envelope reveal needs the
-// ephemeral key), so no SDK change makes an address-based wallet sign it.
-// Wallet limitation, not an SDK defect; the identical reveal is signed by
-// the index-based wallets and the SDK regtest e2e against stock ord.
-test.fixme('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+// Xverse signs the two-input child reveal via modern sats-connect
+// `signPsbt` with `signInputs` scoped to the ordinals address: the wallet
+// signs ONLY input 0 (its parent P2TR UTXO) and leaves the foreign
+// ephemeral-commit input 1 alone — the marketplace multi-input pattern.
+// The wallet is handed the BARE reveal PSBT (input 1 stripped of its
+// envelope tap-leaf), returns input 0's key-path signature, and the SDK
+// merges it into the full reveal PSBT and broadcasts. The legacy
+// `signTransaction` path stalls on the foreign input, so the Xverse
+// signer overrides `signChildRevealParentInputs` onto modern `signPsbt`
+// (`xverse.signer.ts`). Xverse's regtest key (coin_type=1) is loaded
+// because the seed dir is regtest-active, so `signPsbt` (no per-request
+// network) targets regtest.
+test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   // ── Unlock ──
