@@ -1202,19 +1202,30 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
     // eslint-disable-next-line no-console
     console.log('[child] reveal-sign-start');
     let capturedRevealHex: string | undefined;
-    await firstValueFrom(signer.signChildRevealParentInputs({
-      psbtBytes: built.revealPsbtForWallet,
-      finalizePsbtBytes: built.revealPsbt,
-      ordinalsAddress: input.parentReturnAddress,
-      ordinalsPublicKey: input.parentUtxo.tapInternalKeyHex,
-      network: walletSignNetwork,
-      broadcast: (txHex: string) => {
-        capturedRevealHex = txHex;
-        // eslint-disable-next-line no-console
-        console.log('[child] reveal-signed');
-        return of(computeTxidFromHex(txHex));
-      },
-    }));
+    try {
+      await firstValueFrom(signer.signChildRevealParentInputs({
+        psbtBytes: built.revealPsbtForWallet,
+        finalizePsbtBytes: built.revealPsbt,
+        ordinalsAddress: input.parentReturnAddress,
+        ordinalsPublicKey: input.parentUtxo.tapInternalKeyHex,
+        network: walletSignNetwork,
+        broadcast: (txHex: string) => {
+          capturedRevealHex = txHex;
+          // eslint-disable-next-line no-console
+          console.log('[child] reveal-signed');
+          return of(computeTxidFromHex(txHex));
+        },
+      }));
+    } catch (e) {
+      const detail = typeof e === 'string'
+        ? e
+        : (e && (e as { message?: string }).message)
+          ? (e as { message: string }).message
+          : JSON.stringify(e, Object.getOwnPropertyNames((e as object) ?? {}));
+      // eslint-disable-next-line no-console
+      console.log('[child] reveal-sign-error: ' + detail);
+      throw e;
+    }
     if (!capturedRevealHex) {
       throw new Error('runOperation(inscribe-child): reveal signer never invoked the broadcast callback');
     }
