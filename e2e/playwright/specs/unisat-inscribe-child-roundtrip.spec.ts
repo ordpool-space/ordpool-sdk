@@ -23,16 +23,18 @@ import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-p
  * real Unisat binary signs the child reveal's Taproot parent input
  * alongside a pre-finalized ephemeral sibling.
  *
- * Unisat is single-KEY, dual-ADDRESS: one compressed pubkey yields the
- * bcrt1q (BIP-84) payment address AND the bcrt1p (BIP-86) ordinals
- * address (the same x-only key). The commit funds from the segwit
- * payment address; the PARENT lands on the Taproot ordinals address so
- * Unisat's own key signs it back out on the child reveal. Same
- * network-agnostic-keys trick as `unisat-inscribe-roundtrip.spec.ts`:
- * Unisat ships only mainnet/signet/testnet, so we onboard on mainnet,
- * fund the regtest-encoded address derived from the same pubkey, and
- * ask Unisat to sign the regtest-encoded PSBTs (script bytes are
- * HRP-free).
+ * Unisat signs only with its ACTIVE account key (formatOptionsToSignInputs
+ * throws 'invalid address in toSignInput' when a toSignInput.address is not
+ * the active account address). Real ordinals users run Taproot, so we
+ * onboard on the BIP-86 Taproot (P2TR) address type: the single active key
+ * is the taproot key, and paymentAddress === ordinalsAddress === the bcrt1p
+ * taproot address. The commit funds from that address AND the PARENT lands
+ * on it, so the one active key signs both the commit funding input and the
+ * child reveal's parent P2TR input. Same network-agnostic-keys trick as
+ * `unisat-inscribe-roundtrip.spec.ts`: Unisat ships only
+ * mainnet/signet/testnet, so we onboard on mainnet, fund the
+ * regtest-encoded address derived from the same pubkey, and ask Unisat to
+ * sign the regtest-encoded PSBTs (script bytes are HRP-free).
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
@@ -100,6 +102,15 @@ async function onboardUnisat(page: Page): Promise<void> {
   }
   await page.getByTestId('mnemonic-import-continue-button').click();
 
+  // Pick the BIP-86 Taproot address type (card index 2) so Unisat's
+  // single active account IS the taproot key. Real ordinals users are on
+  // Taproot, and the child reveal's parent input is a P2TR spend that
+  // only the active-type key can sign. Guarded so a differing card layout
+  // doesn't break onboarding.
+  const taprootCard = page.getByTestId('address-type-card-2');
+  if (await taprootCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await taprootCard.click();
+  }
   const addressTypeContinue = page.getByTestId('address-type-continue-button');
   if (await addressTypeContinue.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await addressTypeContinue.click();
@@ -184,45 +195,6 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // DIAGNOSTIC (passthrough, NOT a mock): log Unisat's pre-sign decode
-  // request + REAL response. The Sign button enables iff
-  // decodedPsbt.inputInfos.length > 0, which comes only from
-  // POST wallet-api.unisat.io/v5/tx/decode2. The green single-input
-  // commit sign and the failing two-input reveal both hit it in this run,
-  // so their responses diff-reveal exactly why the two-input case is
-  // rejected. route.fetch()+fulfill returns the server's real bytes.
-  await context.route('**/wallet-api.unisat.io/**', async (route) => {
-    const req = route.request();
-    try {
-      const resp = await route.fetch();
-      const body = await resp.text();
-      // eslint-disable-next-line no-console
-      console.log(`[uni-api] ${req.method()} ${req.url()} -> ${resp.status()}\n  REQ=${(req.postData() ?? '').slice(0, 1200)}\n  RESP=${body.slice(0, 1500)}`);
-      await route.fulfill({ response: resp, body });
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.log(`[uni-api] ${req.method()} ${req.url()} -> FETCH-ERROR ${(e as Error).message}`);
-      await route.continue();
-    }
-  });
-  // Backup capture in case decode2 originates from the service worker and
-  // the route above does not intercept it.
-  context.on('request', (r) => {
-    const u = r.url();
-    if (u.includes('unisat.io') || u.includes('/tx/decode')) {
-      // eslint-disable-next-line no-console
-      console.log(`[uni-req] ${r.method()} ${u} :: ${(r.postData() ?? '').slice(0, 1200)}`);
-    }
-  });
-  context.on('response', async (r) => {
-    const u = r.url();
-    if (u.includes('wallet-api.unisat.io') || u.includes('/tx/decode')) {
-      const body = await r.text().catch(() => '<no-body>');
-      // eslint-disable-next-line no-console
-      console.log(`[uni-resp] ${r.status()} ${u} :: ${body.slice(0, 1500)}`);
-    }
-  });
-
   const onboardPage = await context.newPage();
   await onboardUnisat(onboardPage);
   await shot(onboardPage, '00-onboarded');
@@ -232,21 +204,12 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme (regtest-harness limitation, not an SDK or mainnet defect):
-// Unisat's pre-sign approval decodes the PSBT via its backend (api.unisat
-// .io) before enabling Sign. On the two-input child reveal, input 1 is
-// the ephemeral commit UTXO: foreign to the wallet and, on regtest,
-// unresolvable to Unisat's mainnet-only backend, so the reveal signPsbt
-// rejects before a popup renders. Unisat's signing core would skip input
-// 1 (it is not in toSignInputs, unisat-wallet wallet.ts) — the block is
-// the backend-backed pre-sign decode, not the signing. The SDK builds a
-// correct reveal: the identical PSBT is signed by the index-based wallets
-// (cat21wallet, Leather) and by Xverse via modern signPsbt (all green),
-// and by the SDK regtest e2e against stock ord; Unisat signs multi-input
-// PSBTs on mainnet (buyer-signs-own-inputs, the marketplace pattern).
-// Neither the taproot sighash-whitelist fix nor presenting input 1
-// finalized changed the regtest outcome. Un-fixme once the harness mocks
-// the wallet's pre-sign decode backend on regtest.
+// Unisat signs the child reveal in Taproot (P2TR) mode. Onboarded on the
+// BIP-86 Taproot address type, Unisat has a single active taproot key that
+// signs BOTH the commit funding input and the child reveal's parent P2TR
+// input. The commit funds from, and the parent lands on, the same bcrt1p
+// taproot address, so `formatOptionsToSignInputs` matches every
+// toSignInput.address against the one active account address and signs.
 test('inscribe a parent then a child via Unisat: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
@@ -269,18 +232,20 @@ test('inscribe a parent then a child via Unisat: wallet signs the Taproot reveal
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
 
-  // Single-KEY, dual-ADDRESS: the bcrt1q payment address and the bcrt1p
-  // ordinals address both derive from the connect-returned payment
-  // pubkey (x-only for the Taproot leg), so the parent's tapInternalKey
-  // is that same key and Unisat signs it back out on the child reveal.
+  // Taproot-active Unisat: the single active account is the BIP-86
+  // taproot key, so wallet.paymentPublicKey is that taproot pubkey and
+  // Unisat's paymentAddress === ordinalsAddress === the bcrt1p taproot
+  // address. Fund the commit FROM, and land the parent ON, that same
+  // bcrt1p address so the one active key signs both the commit funding
+  // input and the child reveal's parent P2TR input.
   const regtestNetwork = toScureNetwork(Network.Regtest);
   const regtest = await harness.evaluate(
     (pk: string) => window.ordpoolSdkHarness.deriveRegtestAddresses(pk),
     wallet.paymentPublicKey,
   );
-  const paymentAddress = regtest.paymentAddress;
+  const paymentAddress = regtest.ordinalsAddress;
   const ordinalsAddress = regtest.ordinalsAddress;
-  expect(paymentAddress).toMatch(/^bcrt1q/);
+  expect(paymentAddress).toMatch(/^bcrt1p/);
   expect(ordinalsAddress).toMatch(/^bcrt1p/);
   const ordinalsXOnlyHex = xOnlyHex(wallet.paymentPublicKey);
   expect(ordinalsXOnlyHex.length, 'x-only ordinals pubkey').toBe(64);

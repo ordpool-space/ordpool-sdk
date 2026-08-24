@@ -1047,13 +1047,22 @@ function walletSidePaymentAddressFor(
     case KnownOrdinalWalletType.alby:
       // Regtest-native wallets see the bcrt1* address as-is.
       return paymentAddress;
-    case KnownOrdinalWalletType.okx: {
-      // OKX default = BIP-86 P2TR. Translate to mainnet bc1p.
-      const xonly = paymentPublicKey.slice(1, 33);
-      return p2tr(xonly, undefined, toScureNetwork(Network.Mainnet)).address!;
-    }
     default: {
-      // All other mainnet-only wallets default to BIP-84 P2WPKH funding.
+      // Mainnet-only wallets validate toSignInputs[i].address against
+      // their own address set, so we hand them the mainnet address of
+      // the SAME script type as the regtest funding address — matched by
+      // the funding address prefix. Taproot funding (bcrt1p: OKX default,
+      // Unisat in P2TR mode) → mainnet bc1p; BIP-84 SegWit funding
+      // (bcrt1q) → mainnet bc1q.
+      const isTaproot =
+        paymentAddress.startsWith('bcrt1p') ||
+        paymentAddress.startsWith('tb1p') ||
+        paymentAddress.startsWith('bc1p');
+      if (isTaproot) {
+        const xonly =
+          paymentPublicKey.length === 33 ? paymentPublicKey.slice(1, 33) : paymentPublicKey;
+        return p2tr(xonly, undefined, toScureNetwork(Network.Mainnet)).address!;
+      }
       return p2wpkh(paymentPublicKey, toScureNetwork(Network.Mainnet)).address!;
     }
   }
