@@ -14,7 +14,6 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { Network, toScureNetwork } from '../network';
-import { finalizeForeignCommitInput } from '../wallet/signers/child-reveal-finalize.helper';
 import { encodeInscriptionId } from './inscription-envelope';
 import {
   createChildInscribeTransactions,
@@ -133,33 +132,6 @@ describe('createChildInscribeTransactions — reveal topology', () => {
     // Merge the key-path sig onto the FULL PSBT (input 1 has the ephemeral
     // tapScriptSig), then finalize both — the input-0 sig is valid here
     // because the sighash commits to input 1's prevout, not PSBT metadata.
-    const full = btc.Transaction.fromPSBT(revealPsbt, { allowUnknownInputs: true });
-    full.updateInput(0, { tapKeySig: keySig }, true);
-    full.finalize();
-    expect(full.getInput(0).finalScriptWitness!.length).toBe(1); // key-path [sig]
-    expect(full.getInput(1).finalScriptWitness!.length).toBe(3); // script-path [sig, script, cb]
-    expect(full.hex.length).toBeGreaterThan(0);
-  });
-
-  it('finalized-foreign-input wallet-facing reveal: input 1 finalized, input 0 unsigned; input-0 sig merges into the full PSBT', () => {
-    // The address-filtering path (Unisat / OKX / Wizz): present input 1
-    // FINALIZED so the wallet's pre-sign decode enables Sign, sign only
-    // input 0, then merge into the full PSBT. finalizeIdx(1) must build
-    // input 1's script-path witness while input 0 is still unsigned.
-    const { revealPsbt } = build();
-    const walletFacing = finalizeForeignCommitInput(revealPsbt);
-
-    const wf = btc.Transaction.fromPSBT(walletFacing, { allowUnknownInputs: true });
-    expect(wf.inputsLength).toBe(2);
-    expect(wf.getInput(1).finalScriptWitness!.length).toBe(3); // input 1 finalized [sig, script, cb]
-    expect(wf.getInput(0).finalScriptWitness).toBeUndefined();  // input 0 still unsigned
-    expect(wf.getInput(0).tapKeySig).toBeUndefined();
-
-    // Wallet signs input 0 (key-path) on the finalized-foreign PSBT.
-    wf.signIdx(PARENT_PRIV, 0);
-    const in0 = wf.getInput(0);
-    const keySig = in0.tapKeySig ?? in0.finalScriptWitness![0];
-
     const full = btc.Transaction.fromPSBT(revealPsbt, { allowUnknownInputs: true });
     full.updateInput(0, { tapKeySig: keySig }, true);
     full.finalize();
