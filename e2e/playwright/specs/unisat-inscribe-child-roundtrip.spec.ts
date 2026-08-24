@@ -17,29 +17,36 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
-import { onboardOkx } from '../onboard-okx';
 
 /**
- * OKX PARENT/CHILD inscribe roundtrip on regtest — proof that the real
- * OKX binary signs the child reveal's Taproot parent input alongside a
- * pre-finalized ephemeral sibling.
+ * Unisat PARENT/CHILD inscribe roundtrip on regtest: proof that the
+ * real Unisat binary signs the child reveal's Taproot parent input
+ * alongside a pre-finalized ephemeral sibling.
  *
- * OKX (default BIP-86 Taproot) is single-address: payment === ordinals,
- * one `bcrt1p` address. Its plain inscribe already signs a Taproot
- * key-path funding input at that address, so the child's parent input
- * is the SAME signing operation at the SAME address — only now with the
- * commit input already finalized at index 1. Everything (commit funding,
- * parent, child) lives on the one Taproot address.
+ * Unisat is single-KEY, dual-ADDRESS: one compressed pubkey yields the
+ * bcrt1q (BIP-84) payment address AND the bcrt1p (BIP-86) ordinals
+ * address (the same x-only key). The commit funds from the segwit
+ * payment address; the PARENT lands on the Taproot ordinals address so
+ * Unisat's own key signs it back out on the child reveal. Same
+ * network-agnostic-keys trick as `unisat-inscribe-roundtrip.spec.ts`:
+ * Unisat ships only mainnet/signet/testnet, so we onboard on mainnet,
+ * fund the regtest-encoded address derived from the same pubkey, and
+ * ask Unisat to sign the regtest-encoded PSBTs (script bytes are
+ * HRP-free).
  */
 
-const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
+const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
+const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
+const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
+const TEST_PASSWORD = 'TestPassword123!';
+
 const FUND_AMOUNT_BTC = 0.001;
 const CAT21_POSTAGE_SATS = 546;
-const PARENT_BODY_TEXT = 'okx PARENT collection root';
-const CHILD_BODY_TEXT = 'okx CHILD of the collection';
+const PARENT_BODY_TEXT = 'unisat PARENT collection root';
+const CHILD_BODY_TEXT = 'unisat CHILD of the collection';
 const CONTENT_TYPE = 'text/plain;charset=utf-8';
 
 let context: BrowserContext;
@@ -47,7 +54,7 @@ let extensionId: string;
 
 async function shot(p: Page, name: string): Promise<void> {
   await p.screenshot({
-    path: path.resolve(RESULTS_DIR, `okx-inscribe-child-${name}.png`),
+    path: path.resolve(RESULTS_DIR, `unisat-inscribe-child-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
 }
@@ -66,65 +73,85 @@ function bytesHex(b: Uint8Array): string {
   for (let i = 0; i < b.length; i++) out += b[i].toString(16).padStart(2, '0');
   return out;
 }
+/** Normalise a pubkey hex to x-only (32 bytes): drop the 0x02/0x03 parity byte if present. */
 function xOnlyHex(pubHex: string): string {
   const s = pubHex.startsWith('0x') ? pubHex.slice(2) : pubHex;
   return s.length === 66 ? s.slice(2) : s;
 }
 
-const SIGN_HEADING = /Signature request|Confirm Trade|Asset transfer pending/i;
+async function onboardUnisat(page: Page): Promise<void> {
+  await page.setViewportSize({ width: 400, height: 800 });
+  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
+
+  await expect(page.getByTestId('welcome-title')).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId('import-wallet-button').click();
+
+  await expect(page.getByTestId('create-password-input')).toBeVisible({ timeout: 15_000 });
+  await page.getByTestId('create-password-input').fill(TEST_PASSWORD);
+  await page.getByTestId('create-password-confirm-input').fill(TEST_PASSWORD);
+  await page.getByTestId('create-password-continue-button').click();
+
+  await expect(page.getByTestId('restore-wallet-type-option-0')).toBeVisible({ timeout: 10_000 });
+  await page.getByTestId('restore-wallet-type-option-0').click();
+
+  await expect(page.getByTestId('mnemonic-import-word-0')).toBeVisible({ timeout: 15_000 });
+  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
+    await page.getByTestId(`mnemonic-import-word-${i}`).fill(TEST_MNEMONIC_WORDS[i]);
+  }
+  await page.getByTestId('mnemonic-import-continue-button').click();
+
+  const addressTypeContinue = page.getByTestId('address-type-continue-button');
+  if (await addressTypeContinue.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await addressTypeContinue.click();
+  }
+
+  const noticeCheckbox = page.getByTestId('notice-checkbox-1');
+  if (await noticeCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    await noticeCheckbox.click();
+    const noticeOk = page.getByTestId('notice-ok-button');
+    if (await noticeOk.isEnabled({ timeout: 3_000 }).catch(() => false)) {
+      await noticeOk.click();
+    }
+  }
+
+  await expect(page.getByTestId('tab-home')).toBeVisible({ timeout: 30_000 });
+}
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
     isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText('Connect account').first().waitFor({ state: 'visible', timeout: 60_000 });
+      await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
       return true;
     },
   });
-  await approval.getByRole('button', { name: /^connect$/i }).first().click();
+  await approval.getByText(/^Connect$/).first().click();
 }
 
 /**
- * Approve ONE OKX sign popup and wait for its sign heading to clear, so
- * a subsequent call polls the NEXT request rather than re-approving the
- * one just confirmed (OKX reuses pages + exposes no per-request testid).
+ * Wait for a Unisat sign popup, approve it, and register it in
+ * `knownPages` so the NEXT call skips it (the child flow fires two
+ * sequential popups: commit funding, then the reveal parent input).
  */
-async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  let approval: Page | null = null;
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (SIGN_HEADING.test(text)) { approval = p; break; }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (!approval) throw new Error('OKX sign popup never showed the sign heading within 120s');
+async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag: string): Promise<void> {
+  const approval = await waitForApprovalPopup({
+    context: ctx,
+    knownPages,
+    timeoutMs: 90_000,
+    isApproval: async (p) => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      await p.getByTestId('sign-psbt-button')
+        .waitFor({ state: 'visible', timeout: 90_000 });
+      return true;
+    },
+  });
   await shot(approval, tag);
-
-  const promo = approval.getByText('Asset transfer pending');
-  if (await promo.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
-    if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await closeBtn.click({ force: true }).catch(() => undefined);
-    }
-    await promo.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
-  }
-
-  await approval.getByText('Confirm', { exact: true }).first().click();
-  // Wait for this request's heading to disappear so the next poll can't
-  // re-detect the request we just confirmed.
-  await approval.waitForFunction(
-    () => !/Signature request|Confirm Trade/i.test(document.body.innerText || ''),
-    undefined,
-    { timeout: 30_000 },
-  ).catch(() => undefined);
+  await approval.getByTestId('sign-psbt-button').click();
+  knownPages.add(approval);
 }
 
+/** Fund the wallet's payment address with a fresh UTXO and return it. */
 async function fundPaymentAddress(paymentAddress: string): Promise<{ txid: string; vout: number; value: number }> {
   const fundTxid = rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', paymentAddress, String(FUND_AMOUNT_BTC)).trim();
   await waitForElectrsSync(mineBlocks(1));
@@ -137,7 +164,7 @@ async function fundPaymentAddress(paymentAddress: string): Promise<{ txid: strin
 
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
-    throw new Error(`OKX extension not unpacked at ${EXT_PATH}.`);
+    throw new Error(`Unisat extension not unpacked at ${EXT_PATH}.`);
   }
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
@@ -150,7 +177,6 @@ test.beforeAll(async () => {
       `--load-extension=${EXT_PATH}`,
       '--no-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-blink-features=AutomationControlled',
     ],
   });
 
@@ -158,22 +184,8 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // OKX auto-opens its onboarding page on extension load; adopt it if it
-  // appears, else fall back to a fresh page. Extend the hook timeout —
-  // OKX onboarding (iframe seed form + "Secure your wallet" new page)
-  // runs well past the default per-test timeout.
-  let onboardPage: Page | undefined;
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    /* fall back below */
-  }
-  test.setTimeout(240_000);
-  if (!onboardPage) onboardPage = await context.newPage();
-  await onboardOkx(onboardPage, extensionId);
+  const onboardPage = await context.newPage();
+  await onboardUnisat(onboardPage);
   await shot(onboardPage, '00-onboarded');
 });
 
@@ -181,16 +193,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// OKX signs the two-input child reveal via native signPsbt with
-// toSignInputs scoped to input 0 (its parent P2TR UTXO). Per OKX's
-// open-source signing core (okx/js-wallet-sdk psbtSign.ts: `if
-// (signInputMap.size > 0 && !signInputMap.has(i)) continue`) the foreign
-// ephemeral-commit input 1 is skipped, not signed. The parent input is a
-// taproot key-path spend encoded SIGHASH_DEFAULT (0x00); the signer
-// whitelists both 0x00 and 0x01 for it (keypathSighashWhitelist), the
-// same guard the single-input commit sign uses. The signed input-0
-// key-path signature is merged into the full reveal PSBT and broadcast.
-test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+test('inscribe a parent then a child via Unisat: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();
@@ -207,36 +210,46 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   );
 
   const connectKnownPages = new Set(context.pages());
-  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
+  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectUnisat());
   await approveConnectPopup(context, connectKnownPages);
-  const walletMainnet = await connectResultPromise;
+  const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
 
-  // Single-address BIP-86 Taproot: payment === ordinals === bcrt1p, one key.
+  // Single-KEY, dual-ADDRESS: the bcrt1q payment address and the bcrt1p
+  // ordinals address both derive from the connect-returned payment
+  // pubkey (x-only for the Taproot leg), so the parent's tapInternalKey
+  // is that same key and Unisat signs it back out on the child reveal.
   const regtestNetwork = toScureNetwork(Network.Regtest);
-  const ordinalsXOnlyHex = xOnlyHex(walletMainnet.paymentPublicKey);
-  expect(ordinalsXOnlyHex.length, 'x-only pubkey').toBe(64);
-  const taprootAddress = btc.p2tr(hexBytes(ordinalsXOnlyHex), undefined, regtestNetwork).address!;
-  expect(taprootAddress).toMatch(/^bcrt1p/);
-  const scriptPubKeyHex = bytesHex(btc.p2tr(hexBytes(ordinalsXOnlyHex), undefined, regtestNetwork).script);
+  const regtest = await harness.evaluate(
+    (pk: string) => window.ordpoolSdkHarness.deriveRegtestAddresses(pk),
+    wallet.paymentPublicKey,
+  );
+  const paymentAddress = regtest.paymentAddress;
+  const ordinalsAddress = regtest.ordinalsAddress;
+  expect(paymentAddress).toMatch(/^bcrt1q/);
+  expect(ordinalsAddress).toMatch(/^bcrt1p/);
+  const ordinalsXOnlyHex = xOnlyHex(wallet.paymentPublicKey);
+  expect(ordinalsXOnlyHex.length, 'x-only ordinals pubkey').toBe(64);
+  const parentScriptPubKeyHex = bytesHex(btc.p2tr(hexBytes(ordinalsXOnlyHex), undefined, regtestNetwork).script);
 
-  // ── Step 1: inscribe the PARENT (1 popup, Taproot funding) ──
-  const parentFunding = await fundPaymentAddress(taprootAddress);
+  // ── Step 1: inscribe the PARENT at the ordinals address (1 popup) ──
+  const parentFunding = await fundPaymentAddress(paymentAddress);
+  const parentSignKnown = new Set(context.pages());
   const parentPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
     {
       kind: 'inscribe' as const,
-      walletType: 'okx' as const,
+      walletType: 'unisat' as const,
       utxo: parentFunding,
-      paymentAddress: taprootAddress,
-      paymentPublicKey: walletMainnet.paymentPublicKey,
-      recipientAddress: taprootAddress,
+      paymentAddress,
+      paymentPublicKey: wallet.paymentPublicKey,
+      recipientAddress: ordinalsAddress,
       bodyHex: utf8ToHex(PARENT_BODY_TEXT),
       contentType: CONTENT_TYPE,
       feeRatePerVbyte: 5,
     },
   );
-  await approveSignPopup(context, '01-parent-commit-sign');
+  await approveSignPopup(context, parentSignKnown, '01-parent-commit-sign');
   const parent = await parentPromise;
   if (parent.kind !== 'inscribe') throw new Error('expected inscribe result for parent');
 
@@ -251,22 +264,23 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   await waitForTxConfirmed(parentRevealTxid);
   const parentInscriptionId = `${parentRevealTxid}i0`;
 
-  const ordUtxosAfterParent = await getUtxos(taprootAddress);
+  const ordUtxosAfterParent = await getUtxos(ordinalsAddress);
   const parentUtxo = ordUtxosAfterParent.find(u => u.txid === parentRevealTxid && u.vout === 0);
-  if (!parentUtxo) throw new Error('parent inscription UTXO not found at taproot address');
+  if (!parentUtxo) throw new Error('parent inscription UTXO not found at ordinalsAddress');
   expect(parentUtxo.value).toBe(CAT21_POSTAGE_SATS);
 
   // ── Step 2: inscribe the CHILD (2 popups: commit + reveal parent) ──
-  const childFunding = await fundPaymentAddress(taprootAddress);
+  const childFunding = await fundPaymentAddress(paymentAddress);
+  const childSignKnown = new Set(context.pages());
   const childPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
     {
       kind: 'inscribe-child' as const,
-      walletType: 'okx' as const,
+      walletType: 'unisat' as const,
       utxo: childFunding,
-      paymentAddress: taprootAddress,
-      paymentPublicKey: walletMainnet.paymentPublicKey,
-      recipientAddress: taprootAddress,
+      paymentAddress,
+      paymentPublicKey: wallet.paymentPublicKey,
+      recipientAddress: ordinalsAddress,
       bodyHex: utf8ToHex(CHILD_BODY_TEXT),
       contentType: CONTENT_TYPE,
       feeRatePerVbyte: 5,
@@ -275,29 +289,14 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
         txid: parentUtxo.txid,
         vout: parentUtxo.vout,
         value: parentUtxo.value,
-        scriptPubKeyHex: scriptPubKeyHex,
+        scriptPubKeyHex: parentScriptPubKeyHex,
         tapInternalKeyHex: ordinalsXOnlyHex,
       },
-      parentReturnAddress: taprootAddress,
+      parentReturnAddress: ordinalsAddress,
     },
   );
-  await approveSignPopup(context, '02-child-commit-sign');
-  // DIAGNOSTIC: if the reveal (parent-input) sign popup never appears,
-  // surface OKX's actual signPsbt rejection from the child op instead of
-  // masking it with the popup-timeout error.
-  let childErr: Error | undefined;
-  childPromise.catch((e) => { childErr = e as Error; });
-  try {
-    await approveSignPopup(context, '03-child-reveal-parent-sign');
-  } catch (popupErr) {
-    await new Promise(r => setTimeout(r, 3000)); // let the child op settle
-    // eslint-disable-next-line no-console
-    console.log(`[okx-child] OKX signPsbt(reveal) error: ${childErr?.message ?? '(still pending / none)'}`);
-    throw new Error(
-      `[okx-child] reveal parent-input sign popup absent. ` +
-      `OKX signPsbt error: ${childErr?.message ?? '(pending/none)'} | popup: ${(popupErr as Error).message}`,
-    );
-  }
+  await approveSignPopup(context, childSignKnown, '02-child-commit-sign');
+  await approveSignPopup(context, childSignKnown, '03-child-reveal-parent-sign');
   const child = await childPromise;
   if (child.kind !== 'inscribe-child') throw new Error('expected inscribe-child result');
   expect(child.childInscriptionId).toBe(`${child.revealTxid}i0`);
@@ -307,6 +306,8 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   await waitForElectrsSync(mineBlocks(1));
   await waitForTxConfirmed(childCommitTxid);
 
+  // The reveal confirming proves Unisat signed input 0 (the parent
+  // P2TR key-path) correctly; a bad signature is rejected here.
   const childRevealTxid = await postTx(child.revealHex);
   expect(childRevealTxid).toBe(child.revealTxid);
   await waitForElectrsSync(mineBlocks(1));
@@ -323,12 +324,12 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   expect(parsed[0].getParents()).toContain(parentInscriptionId);
 
   // ── Step 4: on-chain, the parent RETURNED to the wallet (nothing lost) ──
-  const ordUtxosAfterChild = await getUtxos(taprootAddress);
+  const ordUtxosAfterChild = await getUtxos(ordinalsAddress);
   const parentReturn = ordUtxosAfterChild.find(u => u.txid === childRevealTxid && u.vout === 0);
-  if (!parentReturn) throw new Error('parent-return UTXO not found after child reveal');
+  if (!parentReturn) throw new Error('parent-return UTXO not found at ordinalsAddress after child reveal');
   expect(parentReturn.value).toBe(CAT21_POSTAGE_SATS);
   const childUtxo = ordUtxosAfterChild.find(u => u.txid === childRevealTxid && u.vout === 1);
-  if (!childUtxo) throw new Error('child UTXO not found at taproot address');
+  if (!childUtxo) throw new Error('child UTXO not found at ordinalsAddress');
   expect(childUtxo.value).toBe(CAT21_POSTAGE_SATS);
   expect(ordUtxosAfterChild.find(u => u.txid === parentRevealTxid && u.vout === 0)).toBeUndefined();
 });

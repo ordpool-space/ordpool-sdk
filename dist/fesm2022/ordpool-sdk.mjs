@@ -1933,6 +1933,22 @@ function detectInstalledWallets(win, connectors = walletConnectors) {
  * constant is exclusively for Taproot-capable signing paths.
  */
 const BIP341_KEYPATH_SIGHASHES = [0x00, 0x01];
+/**
+ * Per-input `sighashTypes` whitelist for a Unisat-family `toSignInputs`
+ * entry. When the target sighash is SIGHASH_ALL (0x01) — the default
+ * every operation resolves to when it doesn't ask for a special
+ * sighash — a Taproot key-path input is commonly encoded as
+ * SIGHASH_DEFAULT (0x00) in the PSBT, so whitelist BOTH (see
+ * `BIP341_KEYPATH_SIGHASHES`). Otherwise (an explicit non-ALL sighash,
+ * e.g. offer SINGLE|ANYONECANPAY) whitelist exactly that value.
+ *
+ * Widening ALL to `[0x00, 0x01]` is harmless for non-Taproot inputs:
+ * a P2WPKH input carries explicit 0x01, which is in the list; the
+ * extra 0x00 never matches it.
+ */
+function keypathSighashWhitelist(sigHash) {
+    return sigHash === 0x01 ? [...BIP341_KEYPATH_SIGHASHES] : [sigHash];
+}
 
 /**
  * Finalize a signed PSBT (if needed) and extract the wire-format
@@ -2549,7 +2565,7 @@ const legacy$5 = {
         for (const t of targets) {
             const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
-                toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
+                toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
             }
         }
         return from(okxBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
@@ -2562,7 +2578,7 @@ const legacy$5 = {
         for (const t of targets) {
             const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
-                toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
+                toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
             }
         }
         return from(okxBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(map((signedPsbtHex) => hex.decode(signedPsbtHex)));
@@ -2812,7 +2828,7 @@ const legacy$2 = {
         for (const t of targets) {
             const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
-                toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
+                toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
             }
         }
         return from(unisat.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
@@ -2825,7 +2841,7 @@ const legacy$2 = {
         for (const t of targets) {
             const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
-                toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
+                toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
             }
         }
         return from(unisat.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(map((signedPsbtHex) => hex.decode(signedPsbtHex)));
@@ -2879,7 +2895,7 @@ const legacy$1 = {
         for (const t of targets) {
             const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
-                toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
+                toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
             }
         }
         return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))));
@@ -2892,7 +2908,7 @@ const legacy$1 = {
         for (const t of targets) {
             const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey);
             for (const i of t.indexes) {
-                toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
+                toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
             }
         }
         return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(map((signedPsbtHex) => hex.decode(signedPsbtHex)));

@@ -3,6 +3,7 @@ import { from, map, Observable, switchMap } from 'rxjs';
 
 import { walletSidePaymentAddress } from '../network-address-shim';
 import { broadcastSignedPsbt } from '../psbt-extract';
+import { keypathSighashWhitelist } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -94,7 +95,7 @@ const legacy = {
     for (const t of targets) {
       const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
       }
     }
 
@@ -112,7 +113,7 @@ const legacy = {
     for (const t of targets) {
       const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey);
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: addr, sighashTypes: [t.sigHash] });
+        toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash) });
       }
     }
 
