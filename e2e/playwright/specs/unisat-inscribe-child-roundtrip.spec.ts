@@ -184,6 +184,45 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
+  // DIAGNOSTIC (passthrough, NOT a mock): log Unisat's pre-sign decode
+  // request + REAL response. The Sign button enables iff
+  // decodedPsbt.inputInfos.length > 0, which comes only from
+  // POST wallet-api.unisat.io/v5/tx/decode2. The green single-input
+  // commit sign and the failing two-input reveal both hit it in this run,
+  // so their responses diff-reveal exactly why the two-input case is
+  // rejected. route.fetch()+fulfill returns the server's real bytes.
+  await context.route('**/wallet-api.unisat.io/**', async (route) => {
+    const req = route.request();
+    try {
+      const resp = await route.fetch();
+      const body = await resp.text();
+      // eslint-disable-next-line no-console
+      console.log(`[uni-api] ${req.method()} ${req.url()} -> ${resp.status()}\n  REQ=${(req.postData() ?? '').slice(0, 1200)}\n  RESP=${body.slice(0, 1500)}`);
+      await route.fulfill({ response: resp, body });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.log(`[uni-api] ${req.method()} ${req.url()} -> FETCH-ERROR ${(e as Error).message}`);
+      await route.continue();
+    }
+  });
+  // Backup capture in case decode2 originates from the service worker and
+  // the route above does not intercept it.
+  context.on('request', (r) => {
+    const u = r.url();
+    if (u.includes('unisat.io') || u.includes('/tx/decode')) {
+      // eslint-disable-next-line no-console
+      console.log(`[uni-req] ${r.method()} ${u} :: ${(r.postData() ?? '').slice(0, 1200)}`);
+    }
+  });
+  context.on('response', async (r) => {
+    const u = r.url();
+    if (u.includes('wallet-api.unisat.io') || u.includes('/tx/decode')) {
+      const body = await r.text().catch(() => '<no-body>');
+      // eslint-disable-next-line no-console
+      console.log(`[uni-resp] ${r.status()} ${u} :: ${body.slice(0, 1500)}`);
+    }
+  });
+
   const onboardPage = await context.newPage();
   await onboardUnisat(onboardPage);
   await shot(onboardPage, '00-onboarded');
@@ -208,7 +247,7 @@ test.afterAll(async () => {
 // Neither the taproot sighash-whitelist fix nor presenting input 1
 // finalized changed the regtest outcome. Un-fixme once the harness mocks
 // the wallet's pre-sign decode backend on regtest.
-test.fixme('inscribe a parent then a child via Unisat: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+test('inscribe a parent then a child via Unisat: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();
