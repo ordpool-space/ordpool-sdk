@@ -1,5 +1,5 @@
-import { from, Observable } from 'rxjs';
-import Wallet, { addListener, AddressPurpose, BitcoinNetworkType } from 'sats-connect';
+import { Observable } from 'rxjs';
+import { addListener, AddressPurpose, getAddress } from 'sats-connect';
 
 import { Network, toBitcoinNetworkType } from '../../network';
 import {
@@ -17,15 +17,15 @@ import {
 
 
 /**
- * Xverse — sats-connect v4 modern RPC (`Wallet.request(method, params)`).
+ * Xverse — sats-connect v1 transport.
  *
- * `wallet_connect` establishes the session ON the requested network and
- * returns the ordinals + payment addresses in one call. Setting the
- * session network here is what makes the later `signPsbt` (in
- * `xverse.signer.ts`) sign against the right network — the modern
- * `signPsbt` has no per-request network arg (unlike the deprecated
- * `signTransaction` it replaced); it uses the session network established
- * at connect.
+ * Namespace: `window.XverseProviders.BitcoinProvider`. We invoke
+ * indirectly via the `getAddress` helper from `sats-connect`, which
+ * walks `window.btc_providers[]` (v3 registry) but falls back to
+ * `window.XverseProviders.BitcoinProvider` for the v1 era.
+ *
+ * The v3 RPC bump (`provider.request(method, params)`) lands in
+ * Phase 2 of the wallet-roster plan; today's code is callback-style.
  */
 export const xverseConnector: WalletConnector = {
   providerId: KnownOrdinalWalletType.xverse,
@@ -37,23 +37,34 @@ export const xverseConnector: WalletConnector = {
   },
 
   connect(network: Network): Observable<WalletInfo> {
-    return from(
-      Wallet.request('wallet_connect', {
-        addresses: [AddressPurpose.Ordinals, AddressPurpose.Payment],
-        message: 'Please share your address for receiving Ordinals and payments.',
-        // Our BitcoinNetworkType is structurally identical to sats-connect's
-        // (same wire strings) but declared separately (network.ts stays free
-        // of the sats-connect import); cast at the boundary.
-        network: toBitcoinNetworkType(network) as unknown as BitcoinNetworkType,
-      }).then((resp) => {
-        if (resp.status !== 'success') {
-          throw new Error(
-            `Xverse wallet_connect failed: ${resp.error?.message ?? 'unknown error'} (code ${resp.error?.code ?? '?'})`,
-          );
-        }
-        return parseXverseAddressResponse({ addresses: resp.result.addresses } as unknown as XverseAddressResponse);
-      }),
-    );
+    return new Observable<WalletInfo>((observer) => {
+      getAddress({
+        payload: {
+          purposes: [AddressPurpose.Ordinals, AddressPurpose.Payment],
+          message: 'Please share your address for receiving Ordinals and payments.',
+          network: {
+            // sats-connect's BitcoinNetworkType is structurally identical
+            // to ours (the same wire-protocol strings), but TS 5.7+ treats
+            // them as distinct types because they're declared in different
+            // modules. Our `network.ts` deliberately doesn't import from
+            // sats-connect (it would drag axios into the /core bundle); the
+            // runtime strings agree exactly. Cast at the boundary.
+            type: toBitcoinNetworkType(network) as unknown as Parameters<typeof getAddress>[0]['payload']['network']['type'],
+          },
+        },
+        onFinish: (response) => {
+          try {
+            observer.next(parseXverseAddressResponse(response as XverseAddressResponse));
+            observer.complete();
+          } catch (error) {
+            observer.error(error);
+          }
+        },
+        onCancel: () => {
+          observer.error(new Error('Request was cancelled'));
+        },
+      });
+    });
   },
 
   /**

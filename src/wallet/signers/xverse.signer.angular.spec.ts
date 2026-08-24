@@ -1,94 +1,96 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import { base64 } from '@scure/base';
+import * as btc from '@scure/btc-signer';
 import { firstValueFrom, lastValueFrom, of } from 'rxjs';
+import { BitcoinNetworkType, SignTransactionOptions, SignTransactionResponse } from 'sats-connect';
 
 import { Network } from '../../network';
 
 // Mocks must be in place BEFORE the signer-under-test is imported.
-// Xverse now signs via the modern `Wallet.request('signPsbt', ...)` RPC;
-// mock the default export's `request` (and the named `request`, sharing
-// the same fn) so `Wallet.request` in the signer resolves to it.
 jest.mock('sats-connect', () => {
   const actual = jest.requireActual('sats-connect') as Record<string, unknown>;
-  const requestMock = jest.fn();
   return {
-    __esModule: true,
     ...actual,
-    request: requestMock,
-    default: { ...((actual.default as object) ?? {}), request: requestMock },
+    signTransaction: jest.fn(),
   };
 });
 jest.mock('../psbt-extract', () => ({
   broadcastSignedPsbt: jest.fn(() => of({ txId: 'TXID-FROM-BROADCAST' })),
 }));
-import Wallet from 'sats-connect';
+import { signTransaction } from 'sats-connect';
 import { broadcastSignedPsbt } from '../psbt-extract';
 
 import { xverseSigner } from './xverse.signer';
 
 
-describe('xverseSigner — sats-connect signPsbt (modern RPC API)', () => {
+describe('xverseSigner.signSingleFundingInput', () => {
 
-  const requestMock = (Wallet as unknown as { request: jest.Mock }).request;
+  const signTransactionMock = signTransaction as unknown as jest.Mock;
   const broadcastSignedPsbtMock = broadcastSignedPsbt as unknown as jest.Mock;
 
-  const ok = (psbt: string) => Promise.resolve({ status: 'success', result: { psbt } });
-
   beforeEach(() => {
-    requestMock.mockReset();
+    signTransactionMock.mockReset();
     broadcastSignedPsbtMock.mockReset();
     broadcastSignedPsbtMock.mockReturnValue(of({ txId: 'TXID-FROM-BROADCAST' }));
   });
 
-  it('signSingleFundingInput: requests signPsbt for input 0 at the payment address WITHOUT broadcasting, then extracts + broadcasts via the callback', async () => {
-    requestMock.mockReturnValue(ok('cHNidP8B'));
+  it('asks sats-connect to sign WITHOUT broadcasting, extracts the wire tx, and hands it to the caller\'s broadcast callback', async () => {
+    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
+      // With broadcast:false Xverse returns the signed PSBT in
+      // base64 instead of a txId.
+      args.onFinish({ psbtBase64: 'cHNidP8B' } as SignTransactionResponse);
+    }) as never);
 
     const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0xab]);
+    const broadcastCallback = jest.fn((_rawTxHex: string) => of('UNUSED'));
+
     const input = {
       psbtBytes: unsignedBytes,
       paymentAddress: 'bc1qpayment',
       network: Network.Mainnet,
-      broadcast: jest.fn((_h: string) => of('UNUSED')) as never,
+      broadcast: broadcastCallback as never,
     };
     const result = await firstValueFrom(xverseSigner.signSingleFundingInput(input));
 
-    expect(requestMock).toHaveBeenCalledTimes(1);
-    const [method, params] = requestMock.mock.calls[0] as [string, { psbt: string; signInputs: Record<string, number[]>; broadcast: boolean }];
-    expect(method).toBe('signPsbt');
-    expect(params.psbt).toBe(base64.encode(unsignedBytes));
+    expect(signTransactionMock).toHaveBeenCalledTimes(1);
+    const args = signTransactionMock.mock.calls[0][0] as SignTransactionOptions;
+    expect(args.payload.psbtBase64).toBe(base64.encode(unsignedBytes));
     // WE-broadcast convention: ask for sign-only.
-    expect(params.broadcast).toBe(false);
-    expect(params.signInputs).toEqual({ 'bc1qpayment': [0] });
+    expect(args.payload.broadcast).toBe(false);
+    expect(args.payload.network.type).toBe(BitcoinNetworkType.Mainnet);
+    expect(args.payload.inputsToSign).toBeDefined();
+    expect(args.payload.inputsToSign![0].address).toBe('bc1qpayment');
+    expect(args.payload.inputsToSign![0].signingIndexes).toEqual([0]);
+    expect(args.payload.inputsToSign![0].sigHash).toBe(btc.SigHash.ALL);
 
-    // Signer hands the decoded signed PSBT to the shared broadcast helper.
+    // Signer hands the decoded PSBT to the shared broadcast helper.
     expect(broadcastSignedPsbtMock).toHaveBeenCalledTimes(1);
     expect(broadcastSignedPsbtMock).toHaveBeenCalledWith(input, base64.decode('cHNidP8B'));
+
+    // Result.txId is what the broadcast helper returned.
     expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST' });
   });
 
-  it('multi-input: signInputs lists ONLY the wallet\'s own indexes, so a foreign input (e.g. the child-reveal ephemeral commit) is left unsigned', async () => {
-    requestMock.mockReturnValue(ok('cHNidP8B'));
+  it('when network is Testnet4, maps to the literal "Testnet4" string (Xverse v2 mode-equality check rejects bare "Testnet")', async () => {
+    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
+      args.onFinish({ psbtBase64: 'cHNidP8B' } as SignTransactionResponse);
+    }) as never);
 
-    // signOfferAccept is a public op-named method that signs ONLY input 0
-    // at the ordinals address (the seller's cat / the child reveal's
-    // parent-input topology). The PSBT's other input(s) — e.g. index 1,
-    // the ephemeral commit or a buyer's pre-signed input — are absent from
-    // signInputs, so Xverse signs input 0 and leaves the rest.
-    await firstValueFrom(xverseSigner.signOfferAccept({
+    await firstValueFrom(xverseSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
-      ordinalsAddress: 'bc1pordinals',
-      network: Network.Mainnet,
+      paymentAddress: 'tb1qpayment',
+      network: Network.Testnet4,
       broadcast: () => of('tx'),
     }));
 
-    const [method, params] = requestMock.mock.calls[0] as [string, { signInputs: Record<string, number[]>; broadcast: boolean }];
-    expect(method).toBe('signPsbt');
-    expect(params.signInputs).toEqual({ 'bc1pordinals': [0] });
-    expect(params.broadcast).toBe(false);
+    const args = signTransactionMock.mock.calls[0][0] as SignTransactionOptions;
+    expect(args.payload.network.type).toBe('Testnet4');
   });
 
-  it('when signPsbt returns status "error", the adapter throws with the wallet message + code', async () => {
-    requestMock.mockReturnValue(Promise.resolve({ status: 'error', error: { message: 'User rejected the request', code: 4001 } }));
+  it('when sats-connect onFinish returns a response without psbtBase64, the adapter errors (PSBT missing means signing failed)', async () => {
+    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
+      args.onFinish({} as SignTransactionResponse);
+    }) as never);
 
     const result$ = xverseSigner.signSingleFundingInput({
       psbtBytes: new Uint8Array(8),
@@ -97,11 +99,28 @@ describe('xverseSigner — sats-connect signPsbt (modern RPC API)', () => {
       broadcast: () => of('unused'),
     });
 
-    await expect(lastValueFrom(result$)).rejects.toThrow(/Xverse signPsbt failed: User rejected the request \(code 4001\)/);
+    await expect(lastValueFrom(result$)).rejects.toThrow('Xverse signTransaction returned without psbtBase64');
+  });
+
+  it('when sats-connect calls onCancel, the adapter throws an error to the caller', async () => {
+    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
+      args.onCancel();
+    }) as never);
+
+    const result$ = xverseSigner.signSingleFundingInput({
+      psbtBytes: new Uint8Array(8),
+      paymentAddress: 'bc1qpayment',
+      network: Network.Mainnet,
+      broadcast: () => of('unused'),
+    });
+
+    await expect(lastValueFrom(result$)).rejects.toThrow('Request was cancelled');
   });
 
   it('when broadcastSignedPsbt errors (e.g. mempool rejected), the adapter propagates the error', async () => {
-    requestMock.mockReturnValue(ok('cHNidP8B'));
+    signTransactionMock.mockImplementation(((args: SignTransactionOptions) => {
+      args.onFinish({ psbtBase64: 'cHNidP8B' } as SignTransactionResponse);
+    }) as never);
     broadcastSignedPsbtMock.mockImplementation(() => {
       throw new Error('mempool full');
     });
