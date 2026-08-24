@@ -4,8 +4,8 @@ import { Script } from '@scure/btc-signer';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import * as i0 from '@angular/core';
 import { InjectionToken, inject, Injectable, signal, computed } from '@angular/core';
-import { from, map, Observable, switchMap, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
-import Wallet, { AddressPurpose, addListener, getAddress, signTransaction, MessageSigningProtocols } from 'sats-connect';
+import { from, map, switchMap, Observable, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
+import Wallet, { AddressPurpose, addListener, MessageSigningProtocols } from 'sats-connect';
 import { sha256 } from '@noble/hashes/sha2';
 import { concatBytes } from '@noble/hashes/utils';
 import { HttpClient } from '@angular/common/http';
@@ -1730,15 +1730,15 @@ const wizzConnector = {
 };
 
 /**
- * Xverse — sats-connect v1 transport.
+ * Xverse — sats-connect v4 modern RPC (`Wallet.request(method, params)`).
  *
- * Namespace: `window.XverseProviders.BitcoinProvider`. We invoke
- * indirectly via the `getAddress` helper from `sats-connect`, which
- * walks `window.btc_providers[]` (v3 registry) but falls back to
- * `window.XverseProviders.BitcoinProvider` for the v1 era.
- *
- * The v3 RPC bump (`provider.request(method, params)`) lands in
- * Phase 2 of the wallet-roster plan; today's code is callback-style.
+ * `wallet_connect` establishes the session ON the requested network and
+ * returns the ordinals + payment addresses in one call. Setting the
+ * session network here is what makes the later `signPsbt` (in
+ * `xverse.signer.ts`) sign against the right network — the modern
+ * `signPsbt` has no per-request network arg (unlike the deprecated
+ * `signTransaction` it replaced); it uses the session network established
+ * at connect.
  */
 const xverseConnector = {
     providerId: KnownOrdinalWalletType.xverse,
@@ -1748,35 +1748,19 @@ const xverseConnector = {
         return isXverseInstalled(win);
     },
     connect(network) {
-        return new Observable((observer) => {
-            getAddress({
-                payload: {
-                    purposes: [AddressPurpose.Ordinals, AddressPurpose.Payment],
-                    message: 'Please share your address for receiving Ordinals and payments.',
-                    network: {
-                        // sats-connect's BitcoinNetworkType is structurally identical
-                        // to ours (the same wire-protocol strings), but TS 5.7+ treats
-                        // them as distinct types because they're declared in different
-                        // modules. Our `network.ts` deliberately doesn't import from
-                        // sats-connect (it would drag axios into the /core bundle); the
-                        // runtime strings agree exactly. Cast at the boundary.
-                        type: toBitcoinNetworkType(network),
-                    },
-                },
-                onFinish: (response) => {
-                    try {
-                        observer.next(parseXverseAddressResponse(response));
-                        observer.complete();
-                    }
-                    catch (error) {
-                        observer.error(error);
-                    }
-                },
-                onCancel: () => {
-                    observer.error(new Error('Request was cancelled'));
-                },
-            });
-        });
+        return from(Wallet.request('wallet_connect', {
+            addresses: [AddressPurpose.Ordinals, AddressPurpose.Payment],
+            message: 'Please share your address for receiving Ordinals and payments.',
+            // Our BitcoinNetworkType is structurally identical to sats-connect's
+            // (same wire strings) but declared separately (network.ts stays free
+            // of the sats-connect import); cast at the boundary.
+            network: toBitcoinNetworkType(network),
+        }).then((resp) => {
+            if (resp.status !== 'success') {
+                throw new Error(`Xverse wallet_connect failed: ${resp.error?.message ?? 'unknown error'} (code ${resp.error?.code ?? '?'})`);
+            }
+            return parseXverseAddressResponse({ addresses: resp.result.addresses });
+        }));
     },
     /**
      * sats-connect v4+ exposes three event types: `accountChange`,
@@ -2892,67 +2876,52 @@ const wizzSigner = {
 };
 
 /**
- * Xverse — sats-connect v4 `signTransaction` (callback-style).
+ * Xverse — sats-connect v4 `Wallet.request('signPsbt', ...)`, the modern
+ * RPC API. The deprecated callback-style `signTransaction` (with its
+ * explicit `network` + per-input `sigHash`) is gone.
  *
- * Per the SDK-wide "WE broadcast" convention (see
- * `/Work/ordpool/WALLETS.md`): we ask Xverse to sign only
- * (`broadcast: false`), extract the wire-format tx ourselves, and
- * hand it to `input.broadcast(rawTxHex)`. The caller's broadcast
- * callback decides the endpoint — electrs, api.ordpool.space, or
- * a future non-standard-relay path. NEVER mempool.space (host-banned,
- * see workspace `CLAUDE.md`).
+ * `signInputs` maps address → the input indexes to sign; the wallet
+ * signs ONLY those and leaves every other input untouched — which is
+ * how multi-input PSBTs (a marketplace sale, or our child-inscribe
+ * reveal whose input 1 is the ephemeral commit) get signed. The
+ * per-input sighash rides on the PSBT (SIGHASH_ALL on segwit funding
+ * inputs, SIGHASH_DEFAULT on taproot), so no explicit sighash arg.
  *
- * Migration to sats-connect v3+ `provider.request('signPsbt', ...)`
- * is a separate stream.
+ * The network is NOT a per-request arg here (unlike signTransaction); it
+ * comes from the session `wallet_connect` established in
+ * `xverse.connector.ts`.
+ *
+ * Per the SDK-wide "WE broadcast" convention (`/Work/ordpool/WALLETS.md`):
+ * always `broadcast: false`, extract the wire tx ourselves, hand it to
+ * `input.broadcast(rawTxHex)`. NEVER mempool.space (host-banned, see
+ * workspace `CLAUDE.md`).
  */
-function callXverseSignTransaction(psbtBytes, inputsToSign, network, message) {
-    const psbtBase64 = base64.encode(psbtBytes);
-    return new Observable((observer) => {
-        signTransaction({
-            payload: {
-                network: { type: network },
-                message,
-                psbtBase64,
-                broadcast: false,
-                inputsToSign,
-            },
-            onFinish: (response) => {
-                const signed = response.psbtBase64;
-                if (!signed) {
-                    observer.error(new Error('Xverse signTransaction returned without psbtBase64'));
-                    return;
-                }
-                observer.next(signed);
-                observer.complete();
-            },
-            onCancel: () => observer.error(new Error('Request was cancelled')),
-        });
-    });
+function callXverseSignPsbt(psbtBytes, signInputs) {
+    const psbt = base64.encode(psbtBytes);
+    return from(Wallet.request('signPsbt', { psbt, signInputs, broadcast: false }).then((resp) => {
+        if (resp.status !== 'success') {
+            throw new Error(`Xverse signPsbt failed: ${resp.error?.message ?? 'unknown error'} (code ${resp.error?.code ?? '?'})`);
+        }
+        return resp.result.psbt; // base64 signed PSBT
+    }));
+}
+/** Collapse resolved signing targets into signPsbt's address→indexes map. */
+function toSignInputs(targets) {
+    const signInputs = {};
+    for (const t of targets) {
+        signInputs[t.address] = [...(signInputs[t.address] ?? []), ...t.indexes];
+    }
+    return signInputs;
 }
 const legacy = {
     signAndBroadcast(input) {
-        const networkType = toBitcoinNetworkType(input.network);
-        return callXverseSignTransaction(input.psbtBytes, [{ address: input.paymentAddress, signingIndexes: [0], sigHash: btc.SigHash.ALL }], networkType, 'Sign Transaction (CAT-21 Mint)').pipe(switchMap((signedPsbtBase64) => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))));
+        return callXverseSignPsbt(input.psbtBytes, { [input.paymentAddress]: [0] }).pipe(switchMap((signedPsbtBase64) => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))));
     },
     signMultiInputAndBroadcast(input) {
-        const networkType = toBitcoinNetworkType(input.network);
-        const targets = resolveSigningTargets(input);
-        const inputsToSign = targets.map((t) => ({
-            address: t.address,
-            signingIndexes: t.indexes,
-            sigHash: t.sigHash,
-        }));
-        return callXverseSignTransaction(input.psbtBytes, inputsToSign, networkType, 'Sign CAT-21 transaction').pipe(switchMap((signedPsbtBase64) => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))));
+        return callXverseSignPsbt(input.psbtBytes, toSignInputs(resolveSigningTargets(input))).pipe(switchMap((signedPsbtBase64) => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))));
     },
     signPsbtOnly(input) {
-        const networkType = toBitcoinNetworkType(input.network);
-        const targets = resolveSigningTargets(input);
-        const inputsToSign = targets.map((t) => ({
-            address: t.address,
-            signingIndexes: t.indexes,
-            sigHash: t.sigHash,
-        }));
-        return callXverseSignTransaction(input.psbtBytes, inputsToSign, networkType, 'Sign CAT-21 buy offer (no broadcast)').pipe(map((signedPsbtBase64) => base64.decode(signedPsbtBase64)));
+        return callXverseSignPsbt(input.psbtBytes, toSignInputs(resolveSigningTargets(input))).pipe(map((signedPsbtBase64) => base64.decode(signedPsbtBase64)));
     },
 };
 /**
