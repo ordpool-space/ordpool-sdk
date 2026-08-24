@@ -29,6 +29,7 @@
     "src/network.ts",
     "src/wallet/wallet.service.types.ts",
     "src/wallet/wallet-logos.ts",
+    "src/wallet/wallet-capabilities.ts",
     "src/wallet/network-address-shim.ts",
     "src/wallet/address-types.ts",
     "src/cat21-mint/cat21.service.helper.ts",

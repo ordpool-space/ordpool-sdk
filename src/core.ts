@@ -57,6 +57,7 @@ export {
 //     consumer — Angular or plain-Node bot — can opt into the
 //     compile-time protection at critical boundaries.
 export * from './wallet/address-types';
+export * from './wallet/wallet-capabilities';
 
 // --- CAT-21 mint (PSBT-build helpers; the Angular Cat21Service that
 //     orchestrates is at the main entry only). ---

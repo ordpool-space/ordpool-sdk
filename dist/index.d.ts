@@ -978,6 +978,114 @@ declare function toPaymentAddress(s: string): PaymentAddress;
 declare function eitherAsString(addr: OrdinalsAddress | PaymentAddress | string): string;
 
 /**
+ * Wallet capability matrix — the single source of truth for "which wallet
+ * can do what, on which platform, and how well proven".
+ *
+ * Consumers (ordpool.space, cat21.space, cubes.haushoppe.art) use this to
+ * render a wallet picker that only offers wallets that can actually serve
+ * the current user: filtered by platform (desktop extension vs mobile
+ * in-app browser) and by the operation the user is about to perform
+ * (mint, transfer, offer, inscription, collection child-inscribe).
+ *
+ * The data is curated, not auto-derived: platform availability is a
+ * real-world fact about each wallet (verified against official developer
+ * docs), and the support level reflects our own regtest e2e evidence.
+ * See CHILD-INSCRIBE-WALLET-SUPPORT.md and the three consumer handover
+ * docs for the reasoning behind each row.
+ */
+/** A Bitcoin operation the SDK can drive through a wallet. Maps 1:1 to an orchestrator. */
+declare enum WalletCapability {
+    Cat21Mint = "cat21-mint",
+    Cat21Transfer = "cat21-transfer",
+    Cat21OfferCreate = "cat21-offer-create",
+    Cat21OfferAccept = "cat21-offer-accept",
+    Inscription = "inscription",
+    InscriptionParentChild = "inscription-parent-child",
+    SignMessage = "sign-message"
+}
+/**
+ * Where a wallet's provider is reachable BY THIS SDK.
+ *
+ * `Mobile` means the wallet exposes its injected provider inside its own
+ * mobile in-app dApp browser (so our connect/sign path works there),
+ * NOT merely that the wallet ships a mobile app. A wallet whose mobile
+ * app only connects via a custom deep-link protocol (e.g. `unisat://`)
+ * is NOT `Mobile` here, because the SDK's injected-provider path does not
+ * work in that app.
+ */
+declare enum WalletPlatform {
+    Desktop = "desktop",
+    Mobile = "mobile"
+}
+/** How well a wallet's support for a capability is established. */
+declare enum CapabilitySupport {
+    /** A real regtest e2e roundtrip signs + broadcasts this operation, green in CI. */
+    Proven = "proven",
+    /** The signer implements it and is unit-tested, but no e2e roundtrip exists yet. */
+    Adapter = "adapter",
+    /** The wallet cannot do this operation (a documented wallet-side block). */
+    Unsupported = "unsupported"
+}
+interface WalletCapabilityStatus {
+    support: CapabilitySupport;
+    /** Short, user-actionable constraint (e.g. "requires the active address type to be Taproot"). */
+    caveat?: string;
+}
+interface WalletMatrixEntry {
+    wallet: KnownOrdinalWalletType;
+    label: string;
+    platforms: readonly WalletPlatform[];
+    /**
+     * `injected` — the wallet signs in-page via its provider.
+     * `watch-only` — no signing key in the browser; the SDK builds a PSBT
+     * the user signs elsewhere (Sparrow, Coldcard, Ledger, …).
+     */
+    signingMode: 'injected' | 'watch-only';
+    /** Capabilities not listed default to {@link CapabilitySupport.Unsupported}. */
+    capabilities: Partial<Record<WalletCapability, WalletCapabilityStatus>>;
+    /** Wallet-level caveat spanning capabilities (address-type default, mobile entry mechanism, backend). */
+    note?: string;
+}
+/**
+ * The matrix. One row per wallet the SDK ships a signer for.
+ *
+ * Support levels are grounded in the regtest wallet-matrix e2e
+ * (`e2e/playwright/specs/*`): an operation is `Proven` only where a real
+ * extension signs it green in CI. Everything the signer implements but no
+ * e2e exercises is `Adapter`. Platform values are verified against each
+ * wallet's official developer docs.
+ */
+declare const WALLET_MATRIX: readonly WalletMatrixEntry[];
+/** The matrix row for a wallet, or `undefined` if the SDK ships no signer for it. */
+declare function walletMatrixEntry(wallet: KnownOrdinalWalletType): WalletMatrixEntry | undefined;
+/**
+ * The wallet's support for a capability. Total function: a capability the
+ * wallet does not list (or an unknown wallet) resolves to
+ * {@link CapabilitySupport.Unsupported}.
+ */
+declare function capabilityOf(wallet: KnownOrdinalWalletType, capability: WalletCapability): WalletCapabilityStatus;
+/**
+ * True if the wallet can do the capability (support is not Unsupported)
+ * on the given platform (omit `platform` to ignore the platform filter).
+ */
+declare function supportsCapability(wallet: KnownOrdinalWalletType, capability: WalletCapability, platform?: WalletPlatform): boolean;
+/**
+ * Every wallet a consumer should offer for a capability, in matrix order.
+ *
+ * @param capability the operation the user is about to perform.
+ * @param opts.platform restrict to wallets reachable on this platform.
+ * @param opts.minSupport lowest support level to include (default
+ *   `Adapter`: everything the SDK implements; pass `Proven` for
+ *   regtest-verified only).
+ */
+declare function walletsSupporting(capability: WalletCapability, opts?: {
+    platform?: WalletPlatform;
+    minSupport?: CapabilitySupport;
+}): WalletMatrixEntry[];
+/** Every wallet reachable on a platform, in matrix order. */
+declare function walletsForPlatform(platform: WalletPlatform): WalletMatrixEntry[];
+
+/**
  * Runtime config the cat21-mint services need. Provided by the
  * consumer's DI; the SDK doesn't know about specific environments.
  *
@@ -5344,5 +5452,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature };
-export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, AssessCompressionOptions, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, CompressionAssessment, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletMatrixEntry, walletsForPlatform, walletsSupporting };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, AssessCompressionOptions, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, CompressionAssessment, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletCapabilityStatus, WalletConnector, WalletInfo, WalletMatrixEntry, WindowLike, XverseAddressResponse };
