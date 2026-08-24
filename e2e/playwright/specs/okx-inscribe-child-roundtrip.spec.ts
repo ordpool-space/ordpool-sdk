@@ -158,6 +158,28 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
+  // DIAGNOSTIC (passthrough, NOT a mock): log OKX's non-local network
+  // activity to see whether/why the two-input reveal popup never renders.
+  context.on('request', (r) => {
+    const u = r.url();
+    if (!u.startsWith('chrome-extension') && !u.includes('127.0.0.1') && !u.includes('localhost')) {
+      // eslint-disable-next-line no-console
+      console.log(`[okx-req] ${r.method()} ${u} :: ${(r.postData() ?? '').slice(0, 700)}`);
+    }
+  });
+  context.on('response', async (r) => {
+    const u = r.url();
+    if (!u.startsWith('chrome-extension') && !u.includes('127.0.0.1') && !u.includes('localhost')) {
+      const body = await r.text().catch(() => '<no-body>');
+      // eslint-disable-next-line no-console
+      console.log(`[okx-resp] ${r.status()} ${u} :: ${body.slice(0, 900)}`);
+    }
+  });
+  context.on('requestfailed', (r) => {
+    // eslint-disable-next-line no-console
+    console.log(`[okx-reqfail] ${r.method()} ${r.url()} :: ${r.failure()?.errorText}`);
+  });
+
   // OKX auto-opens its onboarding page on extension load; adopt it if it
   // appears, else fall back to a fresh page. Extend the hook timeout —
   // OKX onboarding (iframe seed form + "Secure your wallet" new page)
@@ -196,7 +218,7 @@ test.afterAll(async () => {
 // Neither the taproot sighash-whitelist fix nor presenting input 1
 // finalized changed the regtest outcome. Un-fixme once the harness mocks
 // OKX's pre-sign decode backend on regtest.
-test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();

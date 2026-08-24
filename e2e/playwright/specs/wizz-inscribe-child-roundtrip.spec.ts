@@ -21,17 +21,21 @@ import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-p
 /**
  * Wizz PARENT/CHILD inscribe roundtrip on regtest: proof that the real
  * Wizz binary signs the child reveal's Taproot parent input alongside a
- * pre-finalized ephemeral sibling. Wizz is a Unisat fork, so the address
- * model and sign path match Unisat's.
+ * pre-finalized ephemeral sibling. Wizz is a Unisat fork with the same
+ * active-account-key-only signing model.
  *
- * Wizz is single-KEY, dual-ADDRESS: one compressed pubkey yields the
- * bcrt1q (BIP-84) payment address AND the bcrt1p (BIP-86) ordinals
- * address (the same x-only key). The commit funds from the segwit
- * payment address; the PARENT lands on the Taproot ordinals address so
- * Wizz's own key signs it back out on the child reveal. Same
- * network-agnostic-keys trick as `wizz-inscribe-roundtrip.spec.ts`: Wizz
- * runs on mainnet but its script-hash matching is HRP-independent, so a
- * regtest-encoded PSBT signs cleanly.
+ * Wizz signs only with its ACTIVE account key (formatOptionsToSignInputs
+ * rejects any toSignInput.address that isn't the active account address).
+ * Real ordinals users run Taproot, so we onboard on the BIP-86 Taproot
+ * (P2TR) address type: the single active key is the taproot key, and
+ * paymentAddress === ordinalsAddress === the bcrt1p taproot address. The
+ * commit funds from that address AND the PARENT lands on it, so the one
+ * active key signs both the commit funding input and the child reveal's
+ * parent P2TR input. Same network-agnostic-keys trick as
+ * `wizz-inscribe-roundtrip.spec.ts`: Wizz ships only mainnet, so we
+ * onboard on mainnet, fund the regtest-encoded address derived from the
+ * same pubkey, and ask Wizz to sign the regtest-encoded PSBTs (script
+ * bytes are HRP-free).
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
@@ -103,11 +107,22 @@ async function onboardWizz(page: Page): Promise<void> {
   }
   await page.getByRole('button', { name: /^continue$/i }).first().click();
 
-  await expect(page.getByText('Native Segwit (P2WPKH)', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
-  await page.getByText('Native Segwit (P2WPKH)', { exact: true }).first().click({ force: true });
+  // Pick the BIP-86 Taproot (P2TR) address type so Wizz's single active
+  // account IS the taproot key. Real ordinals users run Taproot, and the
+  // child reveal's parent input is a P2TR spend that only the active-type
+  // key can sign. Wizz strips data-testid from its build, so the row is
+  // matched by its exact text label (same mechanism as wizz-matrix.spec.ts's
+  // P2TR variant). Guarded with isVisible so a differing onboarding layout
+  // doesn't break the flow.
+  const taprootRow = page.getByText('Taproot (P2TR)', { exact: true }).first();
+  if (await taprootRow.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await taprootRow.click({ force: true });
+  }
   const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-  await continueBtn.scrollIntoViewIfNeeded();
-  await continueBtn.click();
+  if (await continueBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    await continueBtn.scrollIntoViewIfNeeded();
+    await continueBtn.click();
+  }
 
   await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
   const checkboxes = page.locator('label.ant-checkbox-wrapper');
@@ -212,22 +227,14 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme (regtest-harness limitation, not an SDK or mainnet defect):
-// Wizz's pre-sign approval decodes the PSBT via its backend before
-// enabling Sign. On the two-input child reveal, input 1 is the ephemeral
-// commit UTXO: foreign to the wallet and, on regtest, unresolvable to
-// Wizz's mainnet-only backend, so the reveal popup renders with Sign
-// disabled ("Failed to load balance"). Wizz's Unisat-family signing core
-// would skip input 1 (it is not in toSignInputs) — the block is the
-// backend-backed pre-sign decode, not the signing. The SDK builds a
-// correct reveal: the identical PSBT is signed by the index-based wallets
-// (cat21wallet, Leather) and by Xverse via modern signPsbt (all green),
-// and by the SDK regtest e2e against stock ord; Wizz signs multi-input
-// PSBTs on mainnet (buyer-signs-own-inputs, the marketplace pattern).
-// Neither the taproot sighash-whitelist fix nor presenting input 1
-// finalized changed the regtest outcome. Un-fixme once the harness mocks
-// the wallet's pre-sign decode backend on regtest.
-test.fixme('inscribe a parent then a child via Wizz: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+// Wizz signs the child reveal in Taproot (P2TR) mode. Wizz is a Unisat
+// fork with the same active-account-key-only signing core. Onboarded on
+// the BIP-86 Taproot address type, Wizz has a single active taproot key
+// that signs BOTH the commit funding input and the child reveal's parent
+// P2TR input. The commit funds from, and the parent lands on, the same
+// bcrt1p taproot address, so `formatOptionsToSignInputs` matches every
+// toSignInput.address against the one active account address and signs.
+test('inscribe a parent then a child via Wizz: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();
@@ -249,18 +256,20 @@ test.fixme('inscribe a parent then a child via Wizz: wallet signs the Taproot re
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
 
-  // Single-KEY, dual-ADDRESS: the bcrt1q payment address and the bcrt1p
-  // ordinals address both derive from the connect-returned payment
-  // pubkey (x-only for the Taproot leg), so the parent's tapInternalKey
-  // is that same key and Wizz signs it back out on the child reveal.
+  // Taproot-active Wizz: the single active account is the BIP-86 taproot
+  // key, so wallet.paymentPublicKey is that taproot pubkey and Wizz's
+  // paymentAddress === ordinalsAddress === the bcrt1p taproot address.
+  // Fund the commit FROM, and land the parent ON, that same bcrt1p
+  // address so the one active key signs both the commit funding input
+  // and the child reveal's parent P2TR input.
   const regtestNetwork = toScureNetwork(Network.Regtest);
   const regtest = await harness.evaluate(
     (pk: string) => window.ordpoolSdkHarness.deriveRegtestAddresses(pk),
     wallet.paymentPublicKey,
   );
-  const paymentAddress = regtest.paymentAddress;
+  const paymentAddress = regtest.ordinalsAddress;
   const ordinalsAddress = regtest.ordinalsAddress;
-  expect(paymentAddress).toMatch(/^bcrt1q/);
+  expect(paymentAddress).toMatch(/^bcrt1p/);
   expect(ordinalsAddress).toMatch(/^bcrt1p/);
   const ordinalsXOnlyHex = xOnlyHex(wallet.paymentPublicKey);
   expect(ordinalsXOnlyHex.length, 'x-only ordinals pubkey').toBe(64);
