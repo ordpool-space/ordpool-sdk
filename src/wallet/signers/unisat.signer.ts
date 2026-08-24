@@ -7,12 +7,14 @@ import { keypathSighashWhitelist } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignChildRevealParentInputsArgs,
   SignMessageArgs,
   SignMessageResult,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { signChildRevealViaFinalizedForeignInput } from './child-reveal-finalize.helper';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 import { wrapSignMessage } from './wrap-sign-message';
@@ -138,4 +140,9 @@ export const unisatSigner: WalletSigner = {
     const unisat = (window as unknown as { unisat: UnisatRpc }).unisat;
     return wrapSignMessage(() => unisat.signMessage(input.message, 'bip322-simple'));
   },
+
+  // Address-filtering wallet: present the ephemeral-commit input finalized
+  // so its pre-sign decode enables Sign; sign only input 0.
+  signChildRevealParentInputs: (input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> =>
+    signChildRevealViaFinalizedForeignInput((i) => legacy.signPsbtOnly(i), input),
 };

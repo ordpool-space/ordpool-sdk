@@ -7,10 +7,12 @@ import { keypathSighashWhitelist } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
+  SignChildRevealParentInputsArgs,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types';
+import { signChildRevealViaFinalizedForeignInput } from './child-reveal-finalize.helper';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { unsupportedSignMessage } from './unsupported-sign-message';
 import { resolveSigningTargets } from './signing-targets.helper';
@@ -102,4 +104,9 @@ export const wizzSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.wizz,
   ...operationNamedDefaults(legacy),
   signMessage: unsupportedSignMessage('Wizz'),
+
+  // Address-filtering wallet: present the ephemeral-commit input finalized
+  // so its pre-sign decode enables Sign; sign only input 0.
+  signChildRevealParentInputs: (input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> =>
+    signChildRevealViaFinalizedForeignInput((i) => legacy.signPsbtOnly(i), input),
 };

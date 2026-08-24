@@ -2052,7 +2052,7 @@ function broadcastSignedPsbt(input, signedPsbtBytes) {
  * tap-leaf is a non-standard script scure won't recognize as owned.
  */
 function mergeParentSigAndBroadcast(signedWalletFacing, finalizePsbtBytes, broadcast) {
-    const walletSigned = btc.Transaction.fromPSBT(signedWalletFacing);
+    const walletSigned = btc.Transaction.fromPSBT(signedWalletFacing, { allowUnknownInputs: true });
     const in0 = walletSigned.getInput(0);
     const keySig = in0.tapKeySig ?? in0.finalScriptWitness?.[0];
     if (!keySig) {
@@ -2062,6 +2062,40 @@ function mergeParentSigAndBroadcast(signedWalletFacing, finalizePsbtBytes, broad
     full.updateInput(0, { tapKeySig: keySig }, true);
     const wireHex = extractWireTxFromPsbt(full.toPSBT(0));
     return broadcast(wireHex).pipe(map((txId) => ({ txId })));
+}
+/**
+ * Wallet-facing reveal PSBT with the ephemeral-commit input (index 1)
+ * presented as FINALIZED, for address-filtering wallets (Unisat / OKX /
+ * Wizz) whose pre-sign approval UI runs a decode that can't attribute a
+ * bare, unowned input on regtest and leaves the Sign button disabled. A
+ * finalized input is complete, so the wallet only needs to sign input 0.
+ *
+ * Input 1's finalScriptWitness is built from the ephemeral tapScriptSig +
+ * envelope leaf already carried on the full reveal PSBT. Input 0 stays
+ * unsigned. Input 0's Taproot key-path sighash commits to input 1's
+ * prevout / amount / scriptPubKey (identical here to the full PSBT), not
+ * to input 1's witness, so the signature the wallet returns is valid when
+ * merged onto the full PSBT.
+ */
+function finalizeForeignCommitInput(fullPsbtBytes) {
+    const tx = btc.Transaction.fromPSBT(fullPsbtBytes, { allowUnknownInputs: true });
+    tx.finalizeIdx(1);
+    return tx.toPSBT(0);
+}
+/**
+ * `signChildRevealParentInputs` for address-filtering wallets: sign input
+ * 0 on the finalized-foreign-input wallet-facing PSBT (see
+ * `finalizeForeignCommitInput`), then merge input 0's key-path signature
+ * onto the full reveal PSBT and broadcast.
+ */
+function signChildRevealViaFinalizedForeignInput(signPsbtOnly, input) {
+    const walletFacing = finalizeForeignCommitInput(input.finalizePsbtBytes);
+    return signPsbtOnly({
+        psbtBytes: walletFacing,
+        signingMap: [{ address: input.ordinalsAddress, indexes: [0], publicKey: input.ordinalsPublicKey }],
+        network: input.network,
+        promptForSignedPsbt: input.promptForSignedPsbt,
+    }).pipe(switchMap((signed) => mergeParentSigAndBroadcast(signed, input.finalizePsbtBytes, input.broadcast)));
 }
 
 /**
@@ -2598,6 +2632,9 @@ const okxSigner = {
         const okxBtc = window.okxwallet.bitcoin;
         return wrapSignMessage(() => okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' }));
     },
+    // Address-filtering wallet: present the ephemeral-commit input finalized
+    // so its pre-sign decode enables Sign; sign only input 0.
+    signChildRevealParentInputs: (input) => signChildRevealViaFinalizedForeignInput((i) => legacy$5.signPsbtOnly(i), input),
 };
 
 /**
@@ -2862,6 +2899,9 @@ const unisatSigner = {
         const unisat = window.unisat;
         return wrapSignMessage(() => unisat.signMessage(input.message, 'bip322-simple'));
     },
+    // Address-filtering wallet: present the ephemeral-commit input finalized
+    // so its pre-sign decode enables Sign; sign only input 0.
+    signChildRevealParentInputs: (input) => signChildRevealViaFinalizedForeignInput((i) => legacy$2.signPsbtOnly(i), input),
 };
 
 /**
@@ -2918,6 +2958,9 @@ const wizzSigner = {
     providerId: KnownOrdinalWalletType.wizz,
     ...operationNamedDefaults(legacy$1),
     signMessage: unsupportedSignMessage('Wizz'),
+    // Address-filtering wallet: present the ephemeral-commit input finalized
+    // so its pre-sign decode enables Sign; sign only input 0.
+    signChildRevealParentInputs: (input) => signChildRevealViaFinalizedForeignInput((i) => legacy$1.signPsbtOnly(i), input),
 };
 
 /**
