@@ -113,15 +113,6 @@ export function inscribeChildAndBroadcast(
         minimalTagPush: args.minimalTagPush,
         parentInscriptionId: args.parentInscriptionId,
         parentUtxo: args.parentUtxo,
-        // OKX-only real-key path: make the commit input OWNED by OKX (its
-        // ordinals x-only key is the envelope leaf + commit internal key)
-        // so OKX signs both reveal inputs in one signPsbt call. OKX is
-        // single-address (payment === ordinals), so the parent's
-        // tapInternalKey IS OKX's ordinals key. Every other wallet leaves
-        // this unset and uses the default ephemeral-key path.
-        revealKeyXOnly: args.walletType === KnownOrdinalWalletType.okx
-          ? args.parentUtxo.utxo.tapInternalKey
-          : undefined,
         network: args.network,
       });
     } catch (err) {
@@ -129,14 +120,6 @@ export function inscribeChildAndBroadcast(
     }
 
     const signer = findSignerOrThrow(args.walletType);
-
-    // OKX-owned-commit mode returns ONE reveal PSBT the wallet signs (both
-    // inputs) and the SDK finalizes. Every other wallet gets the bare
-    // wallet-facing PSBT (input 0) + the full finalize PSBT (input 1
-    // ephemeral-signed) split. `revealPsbtForOwnedCommit` is only set in
-    // OKX mode, so the `??` selects the right pair without re-checking the
-    // wallet type.
-    const ownedCommitReveal = built.revealPsbtForOwnedCommit;
 
     const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
       if (args.onCommitSigned) {
@@ -155,12 +138,10 @@ export function inscribeChildAndBroadcast(
     }).pipe(
       switchMap(({ txId: commitTxId }) =>
         signer.signChildRevealParentInputs({
-          // Default: wallet signs input 0 on the BARE PSBT (no envelope
-          // tap-leaf); its signature is merged into the full PSBT to
-          // finalize. OKX: the owned-commit PSBT is both the sign target
-          // (wallet signs both inputs) and the finalize target.
-          psbtBytes: ownedCommitReveal ?? built.revealPsbtForWallet,
-          finalizePsbtBytes: ownedCommitReveal ?? built.revealPsbt,
+          // Wallet signs input 0 on the BARE PSBT (no envelope tap-leaf);
+          // its signature is merged into the full PSBT to finalize.
+          psbtBytes: built.revealPsbtForWallet,
+          finalizePsbtBytes: built.revealPsbt,
           ordinalsAddress: args.parentUtxo.returnAddress,
           // The parent input is a Taproot key-path at the ordinals
           // address; its internal key IS the ordinals x-only pubkey.

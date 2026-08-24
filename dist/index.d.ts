@@ -3839,23 +3839,8 @@ interface ChildInscribeRevealArgs {
         internalKey: Uint8Array;
         tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
     };
-    /**
-     * 32-byte ephemeral private key (same key embedded in the envelope).
-     * Required in the DEFAULT (ephemeral) mode — the SDK script-path-signs
-     * input 1 with it. Omitted in OKX-owned-commit mode (`revealKeyXOnly`
-     * set), where the WALLET holds the key and signs input 1 itself.
-     */
-    ephemeralPrivKey?: Uint8Array;
-    /**
-     * OKX-owned-commit mode. When set (32-byte x-only), the envelope leaf
-     * key AND the commit's taproot internal key are the WALLET's OWN
-     * ordinals key, so the wallet can script-path-sign input 1 in the same
-     * signPsbt call that key-path-signs input 0. The SDK holds no private
-     * key for input 1 and leaves it UNSIGNED (witnessUtxo + tapInternalKey
-     * = revealKeyXOnly + tapLeafScript). Mutually exclusive with the
-     * ephemeral signing path; `ephemeralPrivKey` is ignored when set.
-     */
-    revealKeyXOnly?: Uint8Array;
+    /** 32-byte ephemeral private key (same key embedded in the envelope). */
+    ephemeralPrivKey: Uint8Array;
     /** The parent inscription spent + returned by this reveal. */
     parent: ChildRevealParent;
     /** Address the CHILD inscription lands on (P2TR recommended). */
@@ -3889,17 +3874,6 @@ interface ChildInscribeRevealResult {
      * not its PSBT metadata.
      */
     revealPsbtForWallet: Uint8Array;
-    /**
-     * OKX-owned-commit mode only (`revealKeyXOnly` set). The single reveal
-     * PSBT the wallet signs: BOTH inputs unsigned, input 1 carrying
-     * witnessUtxo + tapInternalKey (= the wallet's ordinals key) +
-     * tapLeafScript (the envelope leaf). The wallet signs input 0 key-path
-     * (tweaked) and input 1 script-path (raw) in one call; the SDK finalizes
-     * + broadcasts it directly. `undefined` in the default ephemeral mode.
-     * In OKX mode `revealPsbt` and `revealPsbtForWallet` mirror this same
-     * PSBT (there is no bare/full split — the wallet owns both inputs).
-     */
-    revealPsbtForOwnedCommit?: Uint8Array;
     /** Reveal txid (witness-independent; stable before the wallet signs). */
     revealTxid: string;
     /** Reveal vsize (fully-signed) for fee math. */
@@ -4493,17 +4467,6 @@ interface CreateChildInscribeTransactionsArgs extends Omit<CreateInscribeTransac
      * belong to the connected wallet.
      */
     parentUtxo: ChildRevealParent;
-    /**
-     * OKX-owned-commit mode. When set (32-byte x-only), the child's commit
-     * uses this key as BOTH the envelope leaf key and the taproot internal
-     * key, so the wallet OWNS the commit input and can script-path-sign it.
-     * Pass the wallet's OWN ordinals x-only pubkey. Only OKX needs this — its
-     * closed signPsbt preview refuses a PSBT with a foreign input; every
-     * other wallet uses the default ephemeral-key path (leave unset). When
-     * set, the result's `revealPsbtForOwnedCommit` is the single PSBT the
-     * wallet signs (both inputs) and the SDK finalizes.
-     */
-    revealKeyXOnly?: Uint8Array;
 }
 interface CreateChildInscribeTransactionsResult {
     /** Unsigned commit PSBT — the wallet signs its funding input. */
@@ -4524,15 +4487,6 @@ interface CreateChildInscribeTransactionsResult {
      * wallet's signPsbt handles it. See `ChildInscribeRevealResult`.
      */
     revealPsbtForWallet: Uint8Array;
-    /**
-     * OKX-owned-commit mode only (`revealKeyXOnly` set on the args). The
-     * single reveal PSBT the wallet signs: BOTH inputs unsigned, input 1
-     * carrying the envelope tapLeafScript + the wallet's ordinals key as its
-     * tapInternalKey. The wallet signs input 0 key-path (tweaked) and input 1
-     * script-path (raw) in ONE call; the SDK finalizes + broadcasts it.
-     * `undefined` in the default ephemeral mode.
-     */
-    revealPsbtForOwnedCommit?: Uint8Array;
     /** Reveal txid (witness-independent). */
     revealTxid: string;
     /** Commit-tx P2TR address. */

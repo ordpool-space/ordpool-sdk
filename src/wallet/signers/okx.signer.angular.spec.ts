@@ -88,3 +88,26 @@ describe('okxSigner.signSingleFundingInput', () => {
     await expect(firstValueFrom(result$)).rejects.toThrow('txn-mempool-conflict');
   });
 });
+
+describe('okxSigner.signChildRevealParentInputs', () => {
+  // OKX cannot sign the ord parent/child reveal: its signPsbt preview
+  // matches inputs by wallet-address, and the reveal's envelope-tweaked
+  // commit input is never an OKX address, so the real wallet hangs. The
+  // adapter fails fast with an actionable message instead. This pins OUR
+  // adapter behaviour (no wallet involved) — the wallet-side proof is the
+  // fixmed e2e in okx-inscribe-child-roundtrip.spec.ts.
+  it('rejects with an actionable "not supported on OKX" error, naming the working operations', async () => {
+    const result$ = okxSigner.signChildRevealParentInputs({
+      psbtBytes: new Uint8Array(8),
+      finalizePsbtBytes: new Uint8Array(8),
+      ordinalsAddress: 'bc1pordinals',
+      ordinalsPublicKey: '02'.padEnd(66, '0'),
+      network: Network.Mainnet,
+      broadcast: () => of('UNUSED'),
+    });
+
+    await expect(firstValueFrom(result$)).rejects.toThrow(
+      /OKX does not support collection .*Mint, transfer, and offer work on OKX/s,
+    );
+  });
+});

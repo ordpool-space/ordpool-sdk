@@ -20,23 +20,29 @@ import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-p
 import { onboardOkx } from '../onboard-okx';
 
 /**
- * OKX PARENT/CHILD inscribe roundtrip on regtest — proof that the real
- * OKX binary signs BOTH inputs of the child reveal in one signPsbt call.
+ * OKX PARENT/CHILD inscribe on regtest — fixmed: OKX cannot sign the
+ * child reveal, wallet-side.
  *
- * OKX's closed signPsbt preview decodes the whole PSBT and refuses any
- * input it doesn't own, so the default ephemeral-keyed commit input never
- * renders OKX's approval popup. The SDK's OKX path instead makes the
- * commit input OWNED by OKX: the ord envelope leaf + the commit's Taproot
- * internal key are OKX's own ordinals x-only key (`revealKeyXOnly` — OKX
- * is single-address BIP-86 Taproot, payment === ordinals, so the parent's
- * tapInternalKey IS that key). OKX then signs input 0 (parent, P2TR
- * key-path, tweaked key) and input 1 (commit, SCRIPT-PATH over the
- * envelope leaf, raw untweaked key) atomically — SIGHASH_ALL, no
- * ANYONECANPAY, so the reveal is not griefable. The SDK finalizes both
- * inputs and broadcasts.
+ * The reveal spends the parent (input 0, an OKX key-path input) AND the
+ * ord envelope commit (input 1, a script-path spend). OKX's closed
+ * signPsbt preview renders every input by matching its scriptPubKey to a
+ * wallet address; input 1's output key is OKX's internal key TWEAKED by
+ * the envelope tree, so it is never an OKX address and the preview hangs
+ * with no popup and no error. That scriptPubKey cannot be omitted either:
+ * the parent input's taproot SIGHASH_ALL signature commits to every
+ * input's scriptPubKey (BIP-341), so OKX needs it in the PSBT to sign the
+ * parent at all. Four PSBT variants (bare wallet-facing, tapInternalKey-
+ * attached, input-1 finalized, OKX-owned-commit real key) all hang
+ * identically; verified against v4.1.0. No signPsbt option reaches past
+ * the preview.
  *
- * Everything (commit funding, parent, child, commit key) lives on the one
- * `bcrt1p` Taproot address.
+ * The SDK builds a CORRECT reveal: the byte-identical PSBT is signed by
+ * cat21wallet, Leather, Xverse, Unisat, and Wizz (all green). The block is
+ * entirely inside OKX, so `okxSigner.signChildRevealParentInputs` fails
+ * fast with an actionable error (pinned in okx.signer.angular.spec.ts)
+ * rather than hanging. OKX stays fully green for mint, transfer, offer,
+ * and plain inscribe. Un-fixme only if OKX changes its preview to sign a
+ * script-path input named by publicKey.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
@@ -165,28 +171,6 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  // DIAGNOSTIC (passthrough, NOT a mock): log OKX's non-local network
-  // activity to see whether/why the two-input reveal popup never renders.
-  context.on('request', (r) => {
-    const u = r.url();
-    if (!u.startsWith('chrome-extension') && !u.includes('127.0.0.1') && !u.includes('localhost')) {
-      // eslint-disable-next-line no-console
-      console.log(`[okx-req] ${r.method()} ${u} :: ${(r.postData() ?? '').slice(0, 700)}`);
-    }
-  });
-  context.on('response', async (r) => {
-    const u = r.url();
-    if (!u.startsWith('chrome-extension') && !u.includes('127.0.0.1') && !u.includes('localhost')) {
-      const body = await r.text().catch(() => '<no-body>');
-      // eslint-disable-next-line no-console
-      console.log(`[okx-resp] ${r.status()} ${u} :: ${body.slice(0, 900)}`);
-    }
-  });
-  context.on('requestfailed', (r) => {
-    // eslint-disable-next-line no-console
-    console.log(`[okx-reqfail] ${r.method()} ${r.url()} :: ${r.failure()?.errorText}`);
-  });
-
   // OKX auto-opens its onboarding page on extension load; adopt it if it
   // appears, else fall back to a fresh page. Extend the hook timeout —
   // OKX onboarding (iframe seed form + "Secure your wallet" new page)
@@ -210,15 +194,10 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();
-  // DIAGNOSTIC: surface the harness page's console (the inscribe-child op
-  // logs commit-sign-start / commit-signed / reveal-sign-start /
-  // reveal-signed) so CI shows exactly how far the child op got.
-  // eslint-disable-next-line no-console
-  harness.on('console', (m) => console.log(`[H] ${m.text()}`));
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
@@ -302,22 +281,7 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
     },
   );
   await approveSignPopup(context, '02-child-commit-sign');
-  // DIAGNOSTIC: if the reveal (parent-input) sign popup never appears,
-  // surface OKX's actual signPsbt rejection from the child op instead of
-  // masking it with the popup-timeout error.
-  let childErr: Error | undefined;
-  childPromise.catch((e) => { childErr = e as Error; });
-  try {
-    await approveSignPopup(context, '03-child-reveal-parent-sign');
-  } catch (popupErr) {
-    await new Promise(r => setTimeout(r, 3000)); // let the child op settle
-    // eslint-disable-next-line no-console
-    console.log(`[okx-child] OKX signPsbt(reveal) error: ${childErr?.message ?? '(still pending / none)'}`);
-    throw new Error(
-      `[okx-child] reveal parent-input sign popup absent. ` +
-      `OKX signPsbt error: ${childErr?.message ?? '(pending/none)'} | popup: ${(popupErr as Error).message}`,
-    );
-  }
+  await approveSignPopup(context, '03-child-reveal-parent-sign');
   const child = await childPromise;
   if (child.kind !== 'inscribe-child') throw new Error('expected inscribe-child result');
   expect(child.childInscriptionId).toBe(`${child.revealTxid}i0`);
