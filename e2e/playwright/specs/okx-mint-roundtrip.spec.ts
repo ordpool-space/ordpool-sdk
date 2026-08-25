@@ -122,11 +122,20 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   }
 
   await shot(approval, '03b-post-modal-dismiss');
-  // OKX renders "Confirm Trade" immediately but keeps the Confirm button
-  // disabled (loading spinner) until its preview finishes loading the tx
-  // amount from OKX's backend — slow on a regtest tx. Wait up to 60s for
-  // the button to enable rather than the 15s action default.
-  await approval.getByText('Confirm', { exact: true }).first().click({ timeout: 60_000 });
+  // OKX renders the sign popup with a Confirm button that may sit behind a
+  // preview spinner. Wait for it to become actionable; if it never does,
+  // capture the stuck state and try a forced click (in case it is only
+  // visually disabled by an overlay, not a real `disabled` attribute).
+  const confirmBtn = approval.getByText('Confirm', { exact: true }).first();
+  try {
+    await confirmBtn.click({ timeout: 45_000 });
+  } catch {
+    await shot(approval, '03c-confirm-stuck');
+    // eslint-disable-next-line no-console
+    console.log('[okx-mint:diag] Confirm not actionable in 45s; body=' +
+      (await approval.locator('body').innerText().catch(() => '')).slice(0, 400).replace(/\n/g, ' | '));
+    await confirmBtn.click({ force: true });
+  }
 }
 
 test.beforeAll(async () => {
@@ -215,7 +224,7 @@ test.afterAll(async () => {
 // SDK adapter is correct (proven green in ede4991). Un-fixme when OKX's
 // preview enables Confirm for regtest txs again. Mint coverage otherwise:
 // cat21wallet, Xverse, Unisat, Leather, Wizz, Alby.
-test.fixme('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
+test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 
   const harness = await context.newPage();
