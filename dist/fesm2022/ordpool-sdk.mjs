@@ -3104,6 +3104,14 @@ const xverseSigner = {
      * signature is then merged into the full reveal PSBT and broadcast by
      * the shared tail.
      */
+    signChildRevealParentInputs: (input) => {
+        // Input 0 (the parent P2TR key-path) already carries its tapInternalKey
+        // on the bare wallet-facing PSBT, so signPsbt signs it directly; input 1
+        // (the foreign ephemeral-commit) is left untouched. Merge input 0's
+        // signature onto the FULL reveal PSBT (input 1 there carries the envelope
+        // tapLeafScript + tapScriptSig) so both inputs finalize before broadcast.
+        return callXverseSignPsbtModern(input.psbtBytes, { [input.ordinalsAddress]: [0] }).pipe(switchMap((signedBare) => mergeParentSigAndBroadcast(signedBare, input.finalizePsbtBytes, input.broadcast)));
+    },
     /**
      * Transfer, offer-accept, offer-create all route onto modern `signPsbt`
      * for the same reason as child-reveal: Xverse's legacy `signTransaction`

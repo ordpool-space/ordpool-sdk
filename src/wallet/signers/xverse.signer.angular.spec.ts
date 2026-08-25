@@ -12,13 +12,23 @@ jest.mock('sats-connect', () => {
   return {
     ...actual,
     signTransaction: jest.fn(),
+    request: jest.fn(),
   };
 });
 jest.mock('../psbt-extract', () => ({
   broadcastSignedPsbt: jest.fn(() => of({ txId: 'TXID-FROM-BROADCAST' })),
+  extractWireTxFromPsbt: jest.fn(() => '00'),
 }));
-import { signTransaction } from 'sats-connect';
+jest.mock('./child-reveal-finalize.helper', () => {
+  const actual = jest.requireActual('./child-reveal-finalize.helper') as Record<string, unknown>;
+  return {
+    ...actual,
+    mergeParentSigAndBroadcast: jest.fn(),
+  };
+});
+import { signTransaction, request } from 'sats-connect';
 import { broadcastSignedPsbt } from '../psbt-extract';
+import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
 
 import { xverseSigner } from './xverse.signer';
 
@@ -133,5 +143,50 @@ describe('xverseSigner.signSingleFundingInput', () => {
     });
 
     await expect(lastValueFrom(result$)).rejects.toThrow('mempool full');
+  });
+});
+
+describe('xverseSigner.signChildRevealParentInputs', () => {
+  const requestMock = request as unknown as jest.Mock;
+  const mergeMock = mergeParentSigAndBroadcast as unknown as jest.Mock;
+
+  beforeEach(() => {
+    requestMock.mockReset();
+    mergeMock.mockReset();
+  });
+
+  it('routes the child-reveal parent input onto modern signPsbt (not legacy signTransaction), signs ONLY input 0 at the ordinals address, then merges into the FULL reveal psbt and broadcasts', async () => {
+    // The legacy signTransaction path hangs on the reveal's foreign
+    // ephemeral-commit input 1; this override signs input 0 alone via
+    // modern signPsbt and leaves the foreign input to the SDK's finalize.
+    requestMock.mockResolvedValue({ status: 'success', result: { psbt: 'c2lnbmVk' } } as never); // base64("signed")
+    mergeMock.mockReturnValue(of({ txId: 'CHILD-REVEAL-TXID' }) as never);
+
+    const bareBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
+    const fullBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x02]);
+    const broadcastCallback = jest.fn((_hex: string) => of('UNUSED'));
+
+    const result = await firstValueFrom(xverseSigner.signChildRevealParentInputs({
+      psbtBytes: bareBytes,
+      finalizePsbtBytes: fullBytes,
+      ordinalsAddress: 'bcrt1pordinals',
+      ordinalsPublicKey: '02'.padEnd(66, 'a'),
+      network: Network.Regtest,
+      broadcast: broadcastCallback as never,
+    }));
+
+    // Modern signPsbt, sign-only, scoped to input 0 at the ordinals address.
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(requestMock.mock.calls[0][0]).toBe('signPsbt');
+    const payload = requestMock.mock.calls[0][1] as { psbt: string; signInputs: Record<string, number[]>; broadcast: boolean };
+    expect(payload.psbt).toBe(base64.encode(bareBytes));
+    expect(payload.signInputs).toEqual({ 'bcrt1pordinals': [0] });
+    expect(payload.broadcast).toBe(false);
+
+    // The wallet's input-0 signature is merged into the FULL psbt, not the bare one.
+    expect(mergeMock).toHaveBeenCalledTimes(1);
+    expect(mergeMock).toHaveBeenCalledWith(base64.decode('c2lnbmVk'), fullBytes, broadcastCallback);
+
+    expect(result).toEqual({ txId: 'CHILD-REVEAL-TXID' });
   });
 });
