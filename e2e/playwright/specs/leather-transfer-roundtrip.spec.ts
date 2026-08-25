@@ -156,8 +156,19 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   await shot(approval, tag);
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
   await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  await confirmBtn.click();
   knownPages.add(approval);
+  try {
+    await confirmBtn.click({ timeout: 10_000 });
+  } catch (e) {
+    // Leather closes the sign popup the instant it accepts the click, so the
+    // click can race that close ("Target page/context/browser closed"). The
+    // click registered before the close, so a close-race means approved. A
+    // genuine non-approval surfaces downstream: the signer never invokes the
+    // broadcast callback and runOperation throws.
+    if (!/(target page|context or browser).*closed|has been closed/i.test(e instanceof Error ? e.message : String(e))) {
+      throw e;
+    }
+  }
 }
 
 test.beforeAll(async () => {
