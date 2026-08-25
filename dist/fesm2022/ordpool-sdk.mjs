@@ -8674,11 +8674,10 @@ function buildChildInscribeRevealTx(args) {
         throw new Error('parent.utxo.tapInternalKey must be a 32-byte x-only key (P2TR parent)');
     }
     const parentValue = args.parent.utxo.value;
-    // The reveal miner fee is the leftover after the parent returns its own
-    // sats and the child + tip are funded. commitOutputValue funds child
-    // postage + reveal fee + tip; the parent's sats pass straight through.
-    const revealFeeSats = (parentValue + args.commitOutputValueSats)
-        - parentValue - postageSats - tipValueSats;
+    // The reveal miner fee is the leftover after the child + tip are funded
+    // from the commit output. The parent's sats pass straight through
+    // (input 0 -> output 0), so they never enter the fee arithmetic.
+    const revealFeeSats = args.commitOutputValueSats - postageSats - tipValueSats;
     if (revealFeeSats < 0) {
         throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`);
     }
@@ -9006,6 +9005,11 @@ function createInscribeTransactions(args) {
         isSimulation: true,
         network: args.network,
     });
+    // The change-output dust floor must match the real commit build below,
+    // or the fee simulation quotes a different commit topology (absorb-vs-
+    // emit change) than the tx the wallet actually signs. Thread the real
+    // per-address minimum into BOTH.
+    const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
     let fees;
     try {
         fees = simulateInscribeFees({
@@ -9018,6 +9022,7 @@ function createInscribeTransactions(args) {
             senderChangeAddress: args.paymentAddress,
             recipientAddress: args.recipientAddress,
             ephemeralPubkeyXonly,
+            changeDustLimitSats,
             tip: args.tip,
             walletType: args.walletType,
             network: args.network,
@@ -9039,8 +9044,7 @@ function createInscribeTransactions(args) {
             `(commit fee ${fees.commitFeeSats} + commit output value ` +
             `${fees.commitOutputValueSats})`);
     }
-    // Layer-1 build at resolved fees.
-    const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
+    // Layer-1 build at resolved fees (same changeDustLimitSats as the sim).
     const commit = buildInscribeCommitPsbt({
         fundingInput: realFundingInput,
         senderChangeAddress: args.paymentAddress,
@@ -9130,6 +9134,18 @@ function createChildInscribeTransactions(args) {
     }
     if (typeof args.parentInscriptionId !== 'string' || args.parentInscriptionId.length === 0) {
         throw new Error('parentInscriptionId must be a non-empty string');
+    }
+    if (args.pointer !== undefined) {
+        // The child lands on its own output (vout[1]) via FIFO sat-tracking
+        // with NO pointer: input 1's first sat is at global offset = parent
+        // value = the start of output 1 (see inscription-child-reveal.helper.ts).
+        // synthesizeEnvelopeFields validates a pointer against the plain
+        // single-output topology (inscription at vout[0]), which does NOT hold
+        // for the child reveal (vout[0] = parent return). A pointer accepted
+        // there would relocate the child onto the parent's returned UTXO, so
+        // it is refused rather than silently misplaced.
+        throw new Error('pointer is not supported for child inscriptions; the child lands on ' +
+            'its own output (vout[1]) via FIFO sat-tracking.');
     }
     const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
     const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
@@ -9376,11 +9392,10 @@ function synthesizeEnvelopeFields(args) {
  *    wins; the second response is logged but does not influence the
  *    return. "Our job is done" the moment one endpoint reports
  *    acceptance.
- *  - Per `OSS-INSCRIBERS.md` Q1+Q2: no journal, no retry. The
- *    ephemeral key is zeroed in `createInscribeTransactions` BEFORE
- *    this helper runs; if both endpoints reject the package, the
- *    inscription is unrecoverable from this process and the caller
- *    surfaces a final error to the user.
+ *  - Per `OSS-INSCRIBERS.md` Q1+Q2: no journal, no retry. If both
+ *    endpoints reject the package, this call surfaces a final error;
+ *    recovery is the caller's responsibility using the returned bearer
+ *    ephemeral key (`result.ephemeral.privKey`) and the reveal bytes.
  *  - `testmempoolaccept` is intentionally NOT pre-flighted. The
  *    real submission IS the test; pre-flighting doubles request
  *    volume for no benefit (acceptance has the same edge cases
@@ -10713,8 +10728,17 @@ async function assessCompression(bytes, contentType, options = {}) {
         };
     }
     // Run every available codec; keep the smallest output. Codec order breaks
-    // ties (gzip first).
-    const candidates = await Promise.all(buildCodecs(options).map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })));
+    // ties (gzip first). A codec may reject at runtime (e.g. the wasm brotli
+    // fetch/instantiate fails on Chrome when brotliWasmUrl 404s) — drop the
+    // failed ones and keep the rest, so a bad wasm URL degrades to gzip
+    // (native, always present) instead of failing the whole assessment.
+    const settled = await Promise.allSettled(buildCodecs(options).map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })));
+    const candidates = settled.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+    if (candidates.length === 0) {
+        // gzip is native everywhere (Node 18+, all browsers), so this is
+        // unreachable in practice; guard anyway for a clear error.
+        throw new Error('assessCompression: every compression codec failed');
+    }
     let best = candidates[0];
     for (const candidate of candidates) {
         if (candidate.out.length < best.out.length)

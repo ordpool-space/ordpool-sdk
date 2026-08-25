@@ -155,11 +155,10 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   }
 
   const parentValue = args.parent.utxo.value;
-  // The reveal miner fee is the leftover after the parent returns its own
-  // sats and the child + tip are funded. commitOutputValue funds child
-  // postage + reveal fee + tip; the parent's sats pass straight through.
-  const revealFeeSats = (parentValue + args.commitOutputValueSats)
-    - parentValue - postageSats - tipValueSats;
+  // The reveal miner fee is the leftover after the child + tip are funded
+  // from the commit output. The parent's sats pass straight through
+  // (input 0 -> output 0), so they never enter the fee arithmetic.
+  const revealFeeSats = args.commitOutputValueSats - postageSats - tipValueSats;
   if (revealFeeSats < 0) {
     throw new Error(
       `commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`,

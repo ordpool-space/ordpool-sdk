@@ -201,6 +201,11 @@ describe('createChildInscribeTransactions — fee + funding', () => {
   it('rejects an empty parentInscriptionId', () => {
     expect(() => build({ parentInscriptionId: '' })).toThrow(/parentInscriptionId/);
   });
+
+  it('rejects a pointer: the child lands on vout[1] via FIFO, and a pointer validated against the plain single-output topology would relocate it onto the parent-return UTXO', () => {
+    expect(() => build({ pointer: 0 })).toThrow(/pointer is not supported for child inscriptions/);
+    expect(() => build({ pointer: 546 })).toThrow(/pointer is not supported for child inscriptions/);
+  });
 });
 
 describe('buildChildInscribeRevealTx — guards', () => {

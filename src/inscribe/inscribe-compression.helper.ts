@@ -355,10 +355,19 @@ export async function assessCompression(
   }
 
   // Run every available codec; keep the smallest output. Codec order breaks
-  // ties (gzip first).
-  const candidates = await Promise.all(
+  // ties (gzip first). A codec may reject at runtime (e.g. the wasm brotli
+  // fetch/instantiate fails on Chrome when brotliWasmUrl 404s) — drop the
+  // failed ones and keep the rest, so a bad wasm URL degrades to gzip
+  // (native, always present) instead of failing the whole assessment.
+  const settled = await Promise.allSettled(
     buildCodecs(options).map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })),
   );
+  const candidates = settled.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
+  if (candidates.length === 0) {
+    // gzip is native everywhere (Node 18+, all browsers), so this is
+    // unreachable in practice; guard anyway for a clear error.
+    throw new Error('assessCompression: every compression codec failed');
+  }
   let best = candidates[0];
   for (const candidate of candidates) {
     if (candidate.out.length < best.out.length) best = candidate;

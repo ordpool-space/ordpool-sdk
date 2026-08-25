@@ -20,7 +20,12 @@ export interface AgentPolicy {
   floorPriceSatsPerCat: number;
   /**
    * Counterparty allowlist. Empty array = allow any counterparty.
-   * Non-empty = strict allowlist (Bitcoin address match).
+   * Non-empty = strict allowlist matched by EXACT address string (not
+   * canonical-equivalent). Configure it with the exact address form the
+   * wallet emits. Exact match is intentional for a safeguard: it can only
+   * ever deny more, never let an unlisted counterparty through a casing or
+   * encoding variation (a different encoding of a LISTED address is the
+   * same allowed party, so nothing legitimate is lost by requiring it).
    */
   allowedCounterparties: string[];
   /**

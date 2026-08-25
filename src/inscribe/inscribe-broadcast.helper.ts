@@ -18,11 +18,10 @@
  *    wins; the second response is logged but does not influence the
  *    return. "Our job is done" the moment one endpoint reports
  *    acceptance.
- *  - Per `OSS-INSCRIBERS.md` Q1+Q2: no journal, no retry. The
- *    ephemeral key is zeroed in `createInscribeTransactions` BEFORE
- *    this helper runs; if both endpoints reject the package, the
- *    inscription is unrecoverable from this process and the caller
- *    surfaces a final error to the user.
+ *  - Per `OSS-INSCRIBERS.md` Q1+Q2: no journal, no retry. If both
+ *    endpoints reject the package, this call surfaces a final error;
+ *    recovery is the caller's responsibility using the returned bearer
+ *    ephemeral key (`result.ephemeral.privKey`) and the reveal bytes.
  *  - `testmempoolaccept` is intentionally NOT pre-flighted. The
  *    real submission IS the test; pre-flighting doubles request
  *    volume for no benefit (acceptance has the same edge cases

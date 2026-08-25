@@ -436,6 +436,11 @@ export function createInscribeTransactions(
     isSimulation: true,
     network: args.network,
   });
+  // The change-output dust floor must match the real commit build below,
+  // or the fee simulation quotes a different commit topology (absorb-vs-
+  // emit change) than the tx the wallet actually signs. Thread the real
+  // per-address minimum into BOTH.
+  const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
   let fees: SimulateInscribeFeesResult;
   try {
     fees = simulateInscribeFees({
@@ -448,6 +453,7 @@ export function createInscribeTransactions(
       senderChangeAddress: args.paymentAddress,
       recipientAddress: args.recipientAddress,
       ephemeralPubkeyXonly,
+      changeDustLimitSats,
       tip: args.tip,
       walletType: args.walletType,
       network: args.network,
@@ -472,8 +478,7 @@ export function createInscribeTransactions(
     );
   }
 
-  // Layer-1 build at resolved fees.
-  const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
+  // Layer-1 build at resolved fees (same changeDustLimitSats as the sim).
   const commit = buildInscribeCommitPsbt({
     fundingInput: realFundingInput,
     senderChangeAddress: args.paymentAddress,
@@ -640,6 +645,20 @@ export function createChildInscribeTransactions(
   }
   if (typeof args.parentInscriptionId !== 'string' || args.parentInscriptionId.length === 0) {
     throw new Error('parentInscriptionId must be a non-empty string');
+  }
+  if (args.pointer !== undefined) {
+    // The child lands on its own output (vout[1]) via FIFO sat-tracking
+    // with NO pointer: input 1's first sat is at global offset = parent
+    // value = the start of output 1 (see inscription-child-reveal.helper.ts).
+    // synthesizeEnvelopeFields validates a pointer against the plain
+    // single-output topology (inscription at vout[0]), which does NOT hold
+    // for the child reveal (vout[0] = parent return). A pointer accepted
+    // there would relocate the child onto the parent's returned UTXO, so
+    // it is refused rather than silently misplaced.
+    throw new Error(
+      'pointer is not supported for child inscriptions; the child lands on ' +
+      'its own output (vout[1]) via FIFO sat-tracking.',
+    );
   }
 
   const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
