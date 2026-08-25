@@ -99,10 +99,9 @@ describe('walletsSupporting', () => {
       ]);
   });
 
-  it('parent-child, adapter+ (default): every wallet (none Unsupported)', () => {
+  it('parent-child, adapter+ (default): all except Alby (the only Unsupported)', () => {
     expect(ids(walletsSupporting(WalletCapability.InscriptionParentChild)))
       .toEqual([
-        KnownOrdinalWalletType.alby,
         KnownOrdinalWalletType.binance,
         KnownOrdinalWalletType.cat21wallet,
         KnownOrdinalWalletType.leather,

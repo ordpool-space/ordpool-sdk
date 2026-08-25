@@ -219,7 +219,10 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
         caveat: 'Alby WebBTC signPsbt signs EVERY input with one Taproot key and finalizes, so it chokes on the buyer\'s foreign P2WPKH input',
       },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
-      [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.InscriptionParentChild]: {
+        support: CapabilitySupport.Unsupported,
+        caveat: 'Alby WebBTC signPsbt signs EVERY input with one Taproot key and has no per-input selection, so signChildRevealParentInputs cannot leave the ephemeral commit input; the SDK refuses it up front (same limit as Alby offers)',
+      },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
     note: 'On-chain via the WebBTC provider, signed with the Alby account master key (no Alby Hub needed). Ensure the account is Taproot (bc1p): Alby may default to native SegWit (bc1q), which cannot hold cats. No mobile dApp browser (Alby Go is Lightning-only).',

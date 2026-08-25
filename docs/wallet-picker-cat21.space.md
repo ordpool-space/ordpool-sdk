@@ -88,8 +88,8 @@ const candidates = walletsSupporting(
   WalletCapability.InscriptionParentChild,
   { platform: WalletPlatform.Desktop },
 );
-// → Cat21 Wallet, Xverse, Leather, UniSat, Wizz  (OKX is excluded: it
-//   cannot sign the reveal; Alby/others are adapter-level)
+// → Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX, xpub  (Alby is
+//   excluded: no per-input signing. OKX child works, its e2e just flakes.)
 ```
 
 ## Caveats you MUST surface
@@ -104,11 +104,18 @@ show it:
   connected address type; if it is not Taproot, block the action and tell
   the user to switch to Taproot (P2TR) in their wallet and reconnect.
 - **OKX + collections**: `capabilityOf(okx, InscriptionParentChild)` is
-  `Unsupported`. Hide or disable the collection action on OKX and show the
-  caveat. OKX is fine for mint / transfer / offer / plain inscribe.
-- **Alby**: on-chain via WebBTC master key (no Alby Hub needed), but Alby
-  may default to a **native-SegWit** address that cannot hold cats. Verify
-  the connected address is Taproot (`bc1p`) before proceeding.
+  `Proven` with a caveat. The child operation works (signs input 0 like the
+  other address-based wallets); the OKX extension is just occasionally
+  unstable, so surface a note that it may need a retry rather than hiding the
+  action. OKX is fully supported for mint / transfer / offer / plain inscribe.
+- **Alby + offers / collections**: both `Cat21OfferCreate` / `Cat21OfferAccept`
+  and `InscriptionParentChild` are `Unsupported` on Alby. Its WebBTC `signPsbt`
+  signs every input with one Taproot key and has no per-input selection, so it
+  cannot leave a counterparty's or the ephemeral commit input alone. Hide those
+  actions on Alby; mint / transfer / plain inscribe work.
+- **Alby address type**: Alby may default to a **native-SegWit** address that
+  cannot hold cats. Verify the connected address is Taproot (`bc1p`) before
+  proceeding.
 - **Watch-only (xpub)**: `signingMode === 'watch-only'`. There is no
   in-page signing; the flow ends by handing the user a PSBT to sign in
   their own wallet (Sparrow, Coldcard, Ledger, …). Present it as an export
@@ -123,8 +130,8 @@ show it:
    on `Mobile` only, so a `walletsForPlatform(Desktop)` picker drops it
    automatically.
 4. Gate the collections (parent/child) action per wallet via
-   `capabilityOf(w, InscriptionParentChild)` — OKX unsupported;
-   UniSat/Wizz need the Taproot-address check.
+   `capabilityOf(w, InscriptionParentChild)` — Alby unsupported; OKX carries a
+   retry caveat; UniSat/Wizz need the Taproot-address check.
 5. Badge every caveat from the matrix rather than hardcoding wallet notes
    in the frontend (they now live in one place and are updated with the
    SDK).

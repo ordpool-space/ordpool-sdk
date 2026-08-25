@@ -82,9 +82,11 @@ hardcoding wallet notes.
 If a future cube drop uses ord parent/child provenance (a collection
 parent with child cubes), switch that flow's capability to
 `InscriptionParentChild` and the matrix handles the fallout automatically:
-OKX becomes `Unsupported` (hide it), and UniSat / Wizz gain the
-active-Taproot-address caveat (block until the user's active address type
-is Taproot). See `CHILD-INSCRIBE-WALLET-SUPPORT.md` for the mechanism.
+Alby becomes `Unsupported` (hide it), OKX carries a retry caveat (its child
+operation is proven, its e2e just flakes on OKX-extension crashes), and
+UniSat / Wizz gain the active-Taproot-address caveat (block until the user's
+active address type is Taproot). See `CHILD-INSCRIBE-WALLET-SUPPORT.md` for
+the mechanism.
 
 ## Migration checklist
 

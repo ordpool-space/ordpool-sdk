@@ -455,9 +455,8 @@ test.afterAll(async () => {
 //     unit test stays (pure function on a documented response
 //     shape).
 //
-// Skip these e2e specs until Phantom completes (3). Re-enable
-// by removing test.skip and confirming the SW responds to
-// btc_requestAccounts (or whatever the successor method is).
+// This spec is ACTIVE (not skipped): it pins the reality below and flips
+// red if Phantom ships the SW btc_* handlers, signalling a rewrite.
 // EMPIRICAL CONFIRMATION (iter 82, 2026-06-06): re-vendored
 // Phantom v26.16.0 from current Chrome Web Store. Disassembly is
 // byte-identical to v26.14.0 in the relevant paths (Bn renamed

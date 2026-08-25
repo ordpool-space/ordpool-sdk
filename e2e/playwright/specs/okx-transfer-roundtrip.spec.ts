@@ -44,10 +44,11 @@ import { Network, toScureNetwork } from '../../../src/network';
  *    CAT-21 (every cat-touching tx we build re-mints).
  *
  * OKX is address-based, single-address BIP-86 Taproot: the whole cat
- * flow (cat + funding + change) rides one `bcrt1p`. The child-reveal
- * spec is `test.fixme`d because OKX can't render an envelope commit
- * input; transfer has no envelope input (every input is at an
- * OKX-owned address), so OKX's signPsbt preview handles it.
+ * flow (cat + funding + change) rides one `bcrt1p`, so OKX's signPsbt
+ * handles the transfer's inputs (all at OKX-owned addresses). The
+ * child-reveal spec is fixmed only for OKX-extension e2e instability,
+ * not a signing limit; its operation is proven (both signs complete).
+ * See okx-inscribe-child-roundtrip.spec.ts.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
