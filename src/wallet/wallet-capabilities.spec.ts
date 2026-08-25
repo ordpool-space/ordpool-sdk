@@ -134,6 +134,28 @@ describe('walletsSupporting', () => {
         KnownOrdinalWalletType.xverse,
       ]);
   });
+
+  it('transfer proven: cat21wallet, xverse, leather, unisat, wizz, alby (real regtest roundtrips)', () => {
+    expect(ids(walletsSupporting(WalletCapability.Cat21Transfer, { minSupport: CapabilitySupport.Proven })))
+      .toEqual([
+        KnownOrdinalWalletType.alby,
+        KnownOrdinalWalletType.cat21wallet,
+        KnownOrdinalWalletType.leather,
+        KnownOrdinalWalletType.unisat,
+        KnownOrdinalWalletType.wizz,
+        KnownOrdinalWalletType.xverse,
+      ]);
+  });
+
+  it('offer-accept proven: cat21wallet, leather, unisat, wizz (xverse accept-offer is adapter; alby/okx offers unsupported)', () => {
+    expect(ids(walletsSupporting(WalletCapability.Cat21OfferAccept, { minSupport: CapabilitySupport.Proven })))
+      .toEqual([
+        KnownOrdinalWalletType.cat21wallet,
+        KnownOrdinalWalletType.leather,
+        KnownOrdinalWalletType.unisat,
+        KnownOrdinalWalletType.wizz,
+      ]);
+  });
 });
 
 describe('walletsForPlatform', () => {

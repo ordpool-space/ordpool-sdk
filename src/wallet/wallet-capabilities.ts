@@ -110,9 +110,12 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     signingMode: 'injected',
     capabilities: {
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferAccept]: {
+        support: CapabilitySupport.Adapter,
+        caveat: 'Xverse signPsbt hangs on the buyer\'s pre-signed input; the bare-sign-then-merge fix is identified but not yet shipped (see the fixmed xverse-accept-offer e2e)',
+      },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
@@ -126,9 +129,9 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     signingMode: 'injected',
     capabilities: {
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
@@ -142,9 +145,9 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     signingMode: 'injected',
     capabilities: {
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
@@ -158,9 +161,9 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     signingMode: 'injected',
     capabilities: {
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
@@ -174,9 +177,18 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     signingMode: 'injected',
     capabilities: {
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.Cat21Transfer]: {
+        support: CapabilitySupport.Adapter,
+        caveat: 'No foreign input and the adapter is correct, but currently unverifiable in CI — see the OKX note',
+      },
+      [WalletCapability.Cat21OfferCreate]: {
+        support: CapabilitySupport.Unsupported,
+        caveat: 'OKX\'s closed signPsbt preview cannot render a not-owned input; a buy-offer PSBT always carries a foreign input (same limit as child-inscribe)',
+      },
+      [WalletCapability.Cat21OfferAccept]: {
+        support: CapabilitySupport.Unsupported,
+        caveat: 'OKX\'s closed signPsbt preview cannot render a not-owned input; the buyer\'s pre-signed funding input is foreign (same limit as child-inscribe)',
+      },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: {
         support: CapabilitySupport.Unsupported,
@@ -184,7 +196,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
     },
-    note: 'Mobile support is the OKX App\'s built-in dApp browser, which the OKX docs state is compatible with the injected window.okxwallet provider path (Bitcoin included).',
+    note: 'Mobile support is the OKX App\'s built-in dApp browser, which the OKX docs state is compatible with the injected window.okxwallet provider path (Bitcoin included). Mint + Inscription were proven green in an earlier CI run, but OKX signing is currently unverifiable in CI: OKX\'s sign-popup preview will not enable Confirm for a regtest tx (it stays on a loading spinner while it fetches the amount from OKX\'s backend, which cannot resolve a regtest tx) — an OKX-side/environmental issue, not a code defect. The signing e2e specs are fixmed until OKX\'s preview enables Confirm for regtest txs again.',
   },
   {
     wallet: KnownOrdinalWalletType.phantom,
@@ -209,9 +221,15 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     signingMode: 'injected',
     capabilities: {
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Adapter },
-      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferCreate]: {
+        support: CapabilitySupport.Unsupported,
+        caveat: 'Alby WebBTC signPsbt signs EVERY input with one Taproot key and finalizes, so it cannot sign or skip the offer PSBT\'s foreign P2WPKH input',
+      },
+      [WalletCapability.Cat21OfferAccept]: {
+        support: CapabilitySupport.Unsupported,
+        caveat: 'Alby WebBTC signPsbt signs EVERY input with one Taproot key and finalizes, so it chokes on the buyer\'s foreign P2WPKH input',
+      },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Adapter },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
