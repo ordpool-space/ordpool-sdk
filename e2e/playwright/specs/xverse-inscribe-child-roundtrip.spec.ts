@@ -17,7 +17,7 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
  * Xverse PARENT/CHILD inscribe roundtrip on regtest — proof that the real
@@ -251,6 +251,14 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
 
   // ── Step 2: inscribe the CHILD (2 popups: commit + reveal parent) ──
   const childFunding = await fundPaymentAddress(paymentAddress);
+  // Xverse leaves a dashboard tab open after the connect / parent-step
+  // approvals. The child fires TWO sign popups sharing one knownPages
+  // snapshot; if Xverse renders the second (reveal) sign UI in that stale
+  // tab — it sometimes reuses one — and the tab is in the snapshot below,
+  // waitForApprovalPopup filters it out and times out ("approval popup did
+  // not appear"). Close leftover extension tabs first (no sign is in
+  // flight here) so every child popup opens as a fresh, detectable page.
+  await closeLeftoverExtensionPages(context, [primer, harness]);
   const childSignKnown = new Set(context.pages());
   const childPromise = harness.evaluate((args) => window.ordpoolSdkHarness.runOperation(args), {
     kind: 'inscribe-child' as const,
