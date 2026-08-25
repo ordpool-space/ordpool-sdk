@@ -206,6 +206,10 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   test.setTimeout(600_000);
 
   const harness = await context.newPage();
+  // Forward the harness page's console so the [child] commit/reveal-sign
+  // progress markers surface in CI (diagnostic for where the op stalls).
+  // eslint-disable-next-line no-console
+  harness.on('console', (m) => console.log(`[H] ${m.text()}`));
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
@@ -294,7 +298,12 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   let childDone = false;
   const settledChild = childPromise.then(
     (v) => { childDone = true; return v; },
-    (e) => { childDone = true; throw e; },
+    (e) => {
+      childDone = true;
+      // eslint-disable-next-line no-console
+      console.log('[okx-child:diag] childPromise rejected: ' + ((e as Error)?.message ?? String(e)));
+      throw e;
+    },
   );
   await approveSignPopup(context, '02-child-commit-sign', () => childDone);
   await approveSignPopup(context, '03-child-reveal-parent-sign', () => childDone);
