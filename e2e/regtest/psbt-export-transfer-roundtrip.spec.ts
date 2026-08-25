@@ -73,12 +73,22 @@ function bitcoinCliPsbtWallet(...args: string[]): string {
   return rpc('-rpcwallet=' + PSBT_WALLET, ...args);
 }
 
-/** walletprocesspsbt with sign+finalize; asserts completeness. */
+/**
+ * walletprocesspsbt with sign+finalize; asserts completeness.
+ *
+ * `sighashtype=ALL` is required: the SDK builders store
+ * PSBT_IN_SIGHASH_TYPE = ALL (0x01) on every input, and Core's default
+ * ("DEFAULT", 0x00) conflicts with that on TAPROOT inputs — Core rejects
+ * the whole PSBT with "Specified sighash value does not match value
+ * stored in PSBT". Passing ALL matches the stored value on both the
+ * taproot cat input and the P2WPKH funding input.
+ */
 function externalWalletSign(unsignedPsbtBase64: string): string {
   const processed = JSON.parse(bitcoinCliPsbtWallet(
     '-named', 'walletprocesspsbt',
     `psbt=${unsignedPsbtBase64}`,
     'sign=true',
+    'sighashtype=ALL',
     'finalize=true',
   ));
   expect(processed.complete).toBe(true);
