@@ -150,7 +150,7 @@ describe('walletsSupporting', () => {
       ]);
   });
 
-  it('offer-accept proven: cat21wallet, leather, unisat, wizz, xverse, okx (alby offers unsupported)', () => {
+  it('offer-accept proven: cat21wallet, leather, unisat, wizz, xverse, okx, xpub (alby offers unsupported)', () => {
     expect(ids(walletsSupporting(WalletCapability.Cat21OfferAccept, { minSupport: CapabilitySupport.Proven })))
       .toEqual([
         KnownOrdinalWalletType.cat21wallet,
@@ -158,6 +158,7 @@ describe('walletsSupporting', () => {
         KnownOrdinalWalletType.okx,
         KnownOrdinalWalletType.unisat,
         KnownOrdinalWalletType.wizz,
+        KnownOrdinalWalletType.xpub,
         KnownOrdinalWalletType.xverse,
       ]);
   });

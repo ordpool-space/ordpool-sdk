@@ -4008,13 +4008,13 @@ const WALLET_MATRIX = [
         capabilities: {
             [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
             [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
-            [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Adapter },
-            [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Adapter },
+            [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
+            [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
             [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
             [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Adapter },
             [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
         },
-        note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing. Mint, inscribe, and transfer are proven on regtest with bitcoin-cli walletprocesspsbt as the external signer (e2e/regtest/psbt-export-*.spec.ts); the other flows share the same export-sign-import path but have no roundtrip yet.',
+        note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing. Mint, inscribe, transfer, and both offer roles (buyer partial-sign, seller accept) are proven on regtest with bitcoin-cli walletprocesspsbt as the external signer (e2e/regtest/psbt-export-*.spec.ts).',
     },
 ];
 const SUPPORT_RANK = {
