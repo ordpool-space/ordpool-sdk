@@ -143,7 +143,12 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
     await promo.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
   }
 
-  await approval.getByText('Confirm', { exact: true }).first().click();
+  // Close-race guard: OKX may complete the sign and shut the popup while the
+  // click is in flight ("guid not bound" / target-closed). The sign already
+  // succeeded in that case, so swallow the click error; the caller's
+  // operation-promise await settles the true outcome.
+  await approval.getByText('Confirm', { exact: true }).first().click()
+    .catch(() => undefined);
   // Wait for this request's heading to disappear so the next poll can't
   // re-detect the request we just confirmed.
   await approval.waitForFunction(

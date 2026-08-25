@@ -130,7 +130,8 @@ async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void>
     await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
   }
   await shot(approval, `${tag}-post-modal-dismiss`);
-  await approval.getByText('Confirm', { exact: true }).first().click();
+  await approval.getByText('Confirm', { exact: true }).first().click()
+    .catch(() => undefined); // close-race: OKX may finish the sign and shut the popup mid-click
 }
 
 test.beforeAll(async () => {

@@ -144,7 +144,8 @@ async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void>
   // Fallback for the rare case OKX shows an interactive sign popup: wait for
   // Confirm to become actionable, then click. OKX usually auto-signs for the
   // connected dApp, so this is seldom reached.
-  await approval.getByText('Confirm', { exact: true }).first().click({ timeout: 60_000 });
+  await approval.getByText('Confirm', { exact: true }).first().click({ timeout: 60_000 })
+    .catch(() => undefined); // close-race: OKX may finish the sign and shut the popup mid-click
 }
 
 test.beforeAll(async () => {
