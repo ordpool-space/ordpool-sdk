@@ -4511,8 +4511,10 @@ interface CreateInscribeTransactionsResult {
     /** Unsigned commit PSBT — hand to the user's wallet for signing. */
     commitPsbt: Uint8Array;
     /**
-     * Computed txid of the commit. SegWit txids are witness-independent,
-     * so this matches what the wallet-signed commit will produce.
+     * Computed txid of the commit, matching what the wallet-signed commit
+     * will produce. Witness inputs (P2WPKH / P2TR) are witness-independent;
+     * P2SH-P2WPKH is reconstructed from the real redeemScript. See
+     * deriveUnsignedCommitTxid.
      */
     commitTxid: string;
     /** Signed, finalized reveal-tx hex. Self-contained; broadcast as-is. */
@@ -4580,7 +4582,7 @@ interface CreateChildInscribeTransactionsArgs extends Omit<CreateInscribeTransac
 interface CreateChildInscribeTransactionsResult {
     /** Unsigned commit PSBT — the wallet signs its funding input. */
     commitPsbt: Uint8Array;
-    /** Commit txid (witness-independent; stable before signing). */
+    /** Commit txid, stable before signing (see deriveUnsignedCommitTxid). */
     commitTxid: string;
     /**
      * The FULL child reveal PSBT (for finalize + broadcast). Input 0 (parent)

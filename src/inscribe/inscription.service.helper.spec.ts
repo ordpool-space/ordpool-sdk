@@ -708,3 +708,58 @@ describe('createInscribeTransactions', () => {
     expect(a.ephemeral.privKey).not.toEqual(b.ephemeral.privKey);
   });
 });
+
+describe('commit txid must equal the real signed commit (regression: P2SH-P2WPKH postage-lock fix)', () => {
+  // The reveal is pre-bound to result.commitTxid. Sign the returned commit
+  // PSBT exactly as the wallet would, finalize, and read the on-chain txid:
+  // the two MUST match or the reveal spends a non-existent output and the
+  // postage locks. For P2SH-P2WPKH the redeemScript push lives in the
+  // scriptSig (part of the txid), so a dummy-keyed derivation would bind the
+  // reveal to the wrong txid — this pins the real-redeemScript reconstruction.
+  function realCommitTxid(commitPsbt: Uint8Array, priv: Uint8Array): string {
+    const tx = btc.Transaction.fromPSBT(commitPsbt);
+    tx.signIdx(priv, 0, [btc.SigHash.ALL]);
+    tx.finalize();
+    return tx.id;
+  }
+
+  it('P2SH-P2WPKH (Nested SegWit) funding: reveal binds to the REAL commit txid', () => {
+    const priv = new Uint8Array(32).fill(0x5a);
+    const pub = secp256k1.getPublicKey(priv, true);
+    const paymentAddress = btc.p2sh(btc.p2wpkh(pub, scureNetwork), scureNetwork).address!;
+    expect(paymentAddress.startsWith('3')).toBe(true);
+
+    const result = createInscribeTransactions({
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey: pub,
+      paymentAddress,
+      recipientAddress: recipientAddress(),
+      body: new TextEncoder().encode('p2sh inscribe'),
+      contentType: 'text/plain',
+      feeRatePerVbyte: 5,
+      network: NETWORK,
+    });
+
+    expect(result.commitTxid).toBe(realCommitTxid(result.commitPsbt, priv));
+  });
+
+  it('P2WPKH (Native SegWit) funding: control — commit txid still matches (witness-independent path unaffected)', () => {
+    const priv = new Uint8Array(32).fill(0x3c);
+    const pub = secp256k1.getPublicKey(priv, true);
+    const paymentAddress = btc.p2wpkh(pub, scureNetwork).address!;
+    expect(paymentAddress.startsWith('bc1q')).toBe(true);
+
+    const result = createInscribeTransactions({
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey: pub,
+      paymentAddress,
+      recipientAddress: recipientAddress(),
+      body: new TextEncoder().encode('segwit inscribe'),
+      contentType: 'text/plain',
+      feeRatePerVbyte: 5,
+      network: NETWORK,
+    });
+
+    expect(result.commitTxid).toBe(realCommitTxid(result.commitPsbt, priv));
+  });
+});

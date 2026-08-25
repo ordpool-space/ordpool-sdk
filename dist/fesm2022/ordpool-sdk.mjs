@@ -8900,6 +8900,39 @@ function simulateInscribeFees(args) {
 }
 
 /**
+ * Compute the commit transaction's txid BEFORE the wallet signs it.
+ *
+ * The reveal spends the commit's output, so its input must reference the
+ * exact txid the real wallet-signed commit will have. For witness funding
+ * inputs (P2WPKH / P2TR) the scriptSig is empty, so the txid is witness-
+ * independent and finalizing the dummy-keyed simulation commit yields the
+ * real txid byte-for-byte.
+ *
+ * For P2SH-P2WPKH (Nested SegWit) the redeemScript push lives in the
+ * scriptSig, which IS part of the non-witness txid — so the dummy pubkey
+ * used during simulation would produce a DIFFERENT txid than the real
+ * commit, the reveal would reference a non-existent output, and the
+ * postage would lock. The real scriptSig is fully determined by the real
+ * payment pubkey (`push(p2wpkh(pubkey))`, no signature required), so
+ * override input 0's scriptSig with it before reading the txid.
+ *
+ * P2PKH is excluded upstream by `isInscribeSupportedPaymentAddress`: its
+ * scriptSig carries the actual signature, which is not knowable until the
+ * wallet signs, so its commit txid genuinely cannot be predicted.
+ */
+function deriveUnsignedCommitTxid(simCommitPsbt, paymentAddress, paymentPublicKey, network) {
+    const scureNetwork = toScureNetwork(network);
+    const simTx = btc.Transaction.fromPSBT(simCommitPsbt);
+    const { dummyPrivateKey } = getDummyKeypair(scureNetwork);
+    simTx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+    simTx.finalize();
+    if (getAddressFormat(paymentAddress) === 'P2SH???') {
+        const redeemScript = btc.p2wpkh(paymentPublicKey, scureNetwork).script;
+        simTx.updateInput(0, { finalScriptSig: btc.Script.encode([redeemScript]) }, true);
+    }
+    return simTx.id;
+}
+/**
  * Build the inscribe commit + reveal pair for the given content.
  * Pure function modulo `randomPrivateKey`.
  *
@@ -8912,14 +8945,14 @@ function createInscribeTransactions(args) {
         throw new Error('feeRatePerVbyte must be positive');
     }
     // Refuse P2PKH funding inputs. The reveal is pre-built against the
-    // commit's SIMULATION txid — witness-independent for segwit inputs
-    // but NOT for legacy P2PKH, where the real signature lives in
-    // `scriptSig` and changes the txid. A P2PKH inscribe would land
-    // the commit but the reveal would broadcast against a non-existent
-    // txid, locking the postage in the commit output forever (the
-    // ephemeral reveal key is not returned to the caller). Consumers
-    // should gate the UI with `isInscribeSupportedPaymentAddress` so
-    // this throw is unreachable in practice.
+    // commit txid from deriveUnsignedCommitTxid, which reconstructs the
+    // pre-signing scriptSig from the payment pubkey: empty for witness
+    // inputs (P2WPKH / P2TR) and a deterministic redeemScript push for
+    // P2SH-P2WPKH. Legacy P2PKH cannot be predicted — its scriptSig carries
+    // the actual signature, unknowable until the wallet signs — so a P2PKH
+    // inscribe would land the commit but bind the reveal to a non-existent
+    // txid, locking the postage. Consumers should gate the UI with
+    // `isInscribeSupportedPaymentAddress` so this throw is unreachable.
     if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
         throw new Error(`Legacy P2PKH payment addresses are not supported for inscribing ` +
             `(would lock the postage — see isInscribeSupportedPaymentAddress). ` +
@@ -9020,14 +9053,11 @@ function createInscribeTransactions(args) {
         changeDustLimitSats,
         network: args.network,
     });
-    // The reveal's input outpoint references the commit's txid.
-    // scure 1.2.x's `.id` requires a finalized tx; the real commit
-    // is unsigned because the user's wallet hasn't signed yet. We
-    // build a SIMULATION-mode commit at the same fees against the
-    // dummy-keyed funding input, dummy-sign it, finalize, read its
-    // txid. SegWit txid is witness-independent, so the sim txid
-    // equals what the wallet-signed real commit will produce
-    // byte-for-byte at the same inputs/outputs.
+    // The reveal's input outpoint references the commit's txid, which must
+    // be known BEFORE the wallet signs. Build a simulation-mode commit at
+    // the same fees against the dummy-keyed funding input, then derive the
+    // txid via deriveUnsignedCommitTxid (which reconstructs the real
+    // P2SH-P2WPKH scriptSig so the reveal binds to the correct output).
     const simCommit = buildInscribeCommitPsbt({
         fundingInput: simulationFundingInput,
         senderChangeAddress: args.paymentAddress,
@@ -9040,11 +9070,7 @@ function createInscribeTransactions(args) {
         changeDustLimitSats,
         network: args.network,
     });
-    const simTx = btc.Transaction.fromPSBT(simCommit.commitPsbt);
-    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
-    simTx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-    simTx.finalize();
-    const commitTxidUnsigned = simTx.id;
+    const commitTxidUnsigned = deriveUnsignedCommitTxid(simCommit.commitPsbt, args.paymentAddress, args.paymentPublicKey, args.network);
     const reveal = buildInscribeRevealTx({
         commitTxid: commitTxidUnsigned,
         commitVout: 0,
@@ -9227,10 +9253,7 @@ function createChildInscribeTransactions(args) {
     };
     const commit = buildInscribeCommitPsbt({ fundingInput: realFundingInput, ...commitArgsBase });
     const simCommit = buildInscribeCommitPsbt({ fundingInput: simFundingInput, ...commitArgsBase });
-    const simTx = btc.Transaction.fromPSBT(simCommit.commitPsbt);
-    simTx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-    simTx.finalize();
-    const commitTxid = simTx.id;
+    const commitTxid = deriveUnsignedCommitTxid(simCommit.commitPsbt, args.paymentAddress, args.paymentPublicKey, args.network);
     const reveal = buildChildInscribeRevealTx({
         commitTxid,
         commitVout: 0,
