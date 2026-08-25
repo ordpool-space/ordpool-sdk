@@ -2480,12 +2480,13 @@ declare const CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS = 546;
  */
 interface BuildCat21TransferArgs {
     /**
-     * Which wallet will sign this PSBT. Determines the input sequence:
-     *   - `cat21wallet`: sequence = 0xfffffffd (RBF on; our accelerate
-     *     flow preserves `lockTime=21` through replacement).
-     *   - any other wallet: sequence = 0xfffffffe (RBF off; third-party
-     *     accelerate UIs can't fire on this tx and accidentally drop
-     *     the marker on replacement).
+     * The signing wallet type. Currently unused for sequence-picking:
+     * transfers ship `sequence = 0xfffffffd` (RBF on) for EVERY wallet
+     * (see `cat21-sequence.ts`). Unlike a mint, the cat is already on
+     * chain, so a third-party accelerate UI that RBF-replaces this tx
+     * only risks a missed bonus mint, not a cat loss — not worth
+     * degrading fee-bump UX to prevent. Kept for API symmetry with the
+     * mint and offer builders.
      */
     walletType: KnownOrdinalWalletType;
     network: Network;
