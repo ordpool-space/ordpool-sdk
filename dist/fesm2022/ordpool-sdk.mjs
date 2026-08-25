@@ -3935,7 +3935,10 @@ const WALLET_MATRIX = [
             [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
             [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
             [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
-            [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
+            [WalletCapability.InscriptionParentChild]: {
+                support: CapabilitySupport.Proven,
+                caveat: 'Operation proven on regtest (both signs complete, valid child inscription); the child e2e is flaky (~2/3) from OKX extension instability on the two back-to-back signPsbt calls and is fixmed pending stabilisation.',
+            },
             [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
         },
         note: 'OKX is single-address BIP-86 Taproot. Every cat21 operation (mint, transfer, offer create/accept, inscribe, and parent/child inscribe) is proven on the regtest e2e via the mainnet-address shim: the P2TR script hash is HRP-independent, so OKX signs the regtest input against its mainnet account, and signPsbt resolves for the connected dApp (it auto-approves without an interactive Confirm; the offer/child flows sign only the wallet\'s own input and leave the foreign one). Mobile support is the OKX App\'s built-in dApp browser, compatible with the injected window.okxwallet provider path (Bitcoin included).',
