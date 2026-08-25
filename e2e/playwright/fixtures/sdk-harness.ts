@@ -406,6 +406,8 @@ export interface RunOperationAcceptOfferInput {
   psbtHex: string;
   /** The wallet's ordinals (Taproot) address — where the cat (input 0) lives. */
   ordinalsAddress: string;
+  /** The wallet's ordinals x-only (or 33-byte) pubkey hex — input 0's internal key. */
+  ordinalsPublicKey: string;
 }
 
 export interface RunOperationAcceptOfferResult {
@@ -1467,6 +1469,7 @@ async function runAcceptOfferOperation(
   await firstValueFrom(signer.signOfferAccept({
     psbtBytes,
     ordinalsAddress: input.ordinalsAddress,
+    ordinalsPublicKey: input.ordinalsPublicKey,
     network:         walletSignNetwork,
     broadcast: (txHex: string) => {
       capturedTxHex = txHex;

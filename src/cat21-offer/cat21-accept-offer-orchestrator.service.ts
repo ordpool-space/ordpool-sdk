@@ -313,6 +313,7 @@ export class Cat21AcceptOfferOrchestrator {
         .signOfferAccept({
           psbtBytes: offer.psbtBytes,
           ordinalsAddress: wallet.ordinalsAddress,
+          ordinalsPublicKey: wallet.ordinalsPublicKey,
           network: this.network,
           broadcast: (txHex) => this.cat21.postTransaction(txHex),
         })

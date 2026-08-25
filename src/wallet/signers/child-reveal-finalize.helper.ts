@@ -20,6 +20,44 @@ import { extractWireTxFromPsbt } from '../psbt-extract';
  * PSBT is parsed with `allowUnknownInputs` because input 1's envelope
  * tap-leaf is a non-standard script scure won't recognize as owned.
  */
+/**
+ * Prepare the wallet-facing PSBT for an offer-ACCEPT where the seller wallet
+ * signs ONLY its cat input 0. Some wallets' modern `signPsbt` (Xverse) hang
+ * on a PSBT whose input is already signed by another party, and refuse a
+ * Taproot key-path input that carries no `tapInternalKey`. Rebuild a bare
+ * copy that mirrors the proven child-reveal shape:
+ *   - input 0 (the seller's cat) gains its `tapInternalKey`, so the wallet
+ *     recognises the Taproot key-path spend of its own ordinals key;
+ *   - every other input is reduced to its `witnessUtxo` (the buyer's
+ *     partial sig stripped), so nothing foreign is pre-signed.
+ * Version, lockTime and every input's outpoint + sequence are copied
+ * verbatim so the wallet's SIGHASH_ALL signature over input 0 stays valid
+ * for the full tx. The signed input-0 key-path sig is then merged onto the
+ * full buyer-signed PSBT via {@link mergeParentSigAndBroadcast}, and both
+ * inputs finalize.
+ */
+export function prepareOfferAcceptWalletFacing(
+  fullPsbtBytes: Uint8Array,
+  sellerOrdinalsXOnly: Uint8Array,
+): Uint8Array {
+  const full = btc.Transaction.fromPSBT(fullPsbtBytes, { allowUnknownInputs: true });
+  const bare = new btc.Transaction({
+    version: full.version,
+    lockTime: full.lockTime,
+    allowUnknownInputs: true,
+    allowLegacyWitnessUtxo: true,
+  });
+  for (let i = 0; i < full.inputsLength; i++) {
+    const inp = full.getInput(i);
+    const base = { txid: inp.txid, index: inp.index, sequence: inp.sequence, witnessUtxo: inp.witnessUtxo };
+    bare.addInput(i === 0 ? { ...base, tapInternalKey: sellerOrdinalsXOnly } : base);
+  }
+  for (let i = 0; i < full.outputsLength; i++) {
+    bare.addOutput(full.getOutput(i));
+  }
+  return bare.toPSBT(0);
+}
+
 export function mergeParentSigAndBroadcast(
   signedWalletFacing: Uint8Array,
   finalizePsbtBytes: Uint8Array,

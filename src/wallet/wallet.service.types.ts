@@ -252,6 +252,14 @@ export interface SignTransferArgs {
 export interface SignOfferAcceptArgs {
   psbtBytes: Uint8Array;
   ordinalsAddress: string;
+  /**
+   * The seller's ordinals x-only (or 33-byte) pubkey hex — the internal key
+   * of the Taproot cat input 0. Address-filter signers use it to shim the
+   * wallet-side address; the Xverse override also injects it as input 0's
+   * `tapInternalKey` on the bare wallet-facing PSBT (see
+   * `prepareOfferAcceptWalletFacing`).
+   */
+  ordinalsPublicKey: string;
   network: Network;
   broadcast(txHex: string): Observable<string>;
   promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;

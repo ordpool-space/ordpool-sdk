@@ -2055,6 +2055,40 @@ function broadcastSignedPsbt(input, signedPsbtBytes) {
  * PSBT is parsed with `allowUnknownInputs` because input 1's envelope
  * tap-leaf is a non-standard script scure won't recognize as owned.
  */
+/**
+ * Prepare the wallet-facing PSBT for an offer-ACCEPT where the seller wallet
+ * signs ONLY its cat input 0. Some wallets' modern `signPsbt` (Xverse) hang
+ * on a PSBT whose input is already signed by another party, and refuse a
+ * Taproot key-path input that carries no `tapInternalKey`. Rebuild a bare
+ * copy that mirrors the proven child-reveal shape:
+ *   - input 0 (the seller's cat) gains its `tapInternalKey`, so the wallet
+ *     recognises the Taproot key-path spend of its own ordinals key;
+ *   - every other input is reduced to its `witnessUtxo` (the buyer's
+ *     partial sig stripped), so nothing foreign is pre-signed.
+ * Version, lockTime and every input's outpoint + sequence are copied
+ * verbatim so the wallet's SIGHASH_ALL signature over input 0 stays valid
+ * for the full tx. The signed input-0 key-path sig is then merged onto the
+ * full buyer-signed PSBT via {@link mergeParentSigAndBroadcast}, and both
+ * inputs finalize.
+ */
+function prepareOfferAcceptWalletFacing(fullPsbtBytes, sellerOrdinalsXOnly) {
+    const full = btc.Transaction.fromPSBT(fullPsbtBytes, { allowUnknownInputs: true });
+    const bare = new btc.Transaction({
+        version: full.version,
+        lockTime: full.lockTime,
+        allowUnknownInputs: true,
+        allowLegacyWitnessUtxo: true,
+    });
+    for (let i = 0; i < full.inputsLength; i++) {
+        const inp = full.getInput(i);
+        const base = { txid: inp.txid, index: inp.index, sequence: inp.sequence, witnessUtxo: inp.witnessUtxo };
+        bare.addInput(i === 0 ? { ...base, tapInternalKey: sellerOrdinalsXOnly } : base);
+    }
+    for (let i = 0; i < full.outputsLength; i++) {
+        bare.addOutput(full.getOutput(i));
+    }
+    return bare.toPSBT(0);
+}
 function mergeParentSigAndBroadcast(signedWalletFacing, finalizePsbtBytes, broadcast) {
     const walletSigned = btc.Transaction.fromPSBT(signedWalletFacing);
     const in0 = walletSigned.getInput(0);
@@ -3051,6 +3085,11 @@ function callXverseSignPsbtModern(psbtBytes, signInputs) {
         return base64.decode(resp.result.psbt);
     }));
 }
+/** Decode an x-only (64-hex) or compressed (66-hex) pubkey to 32 x-only bytes. */
+function xOnlyBytes(pubHex) {
+    const s = pubHex.startsWith('0x') ? pubHex.slice(2) : pubHex;
+    return hex.decode(s.length === 66 ? s.slice(2) : s);
+}
 const xverseSigner = {
     providerId: KnownOrdinalWalletType.xverse,
     ...operationNamedDefaults(legacy),
@@ -3083,11 +3122,16 @@ const xverseSigner = {
             [input.paymentAddress]: paymentIndexes,
         }).pipe(switchMap((signedPsbt) => input.broadcast(extractWireTxFromPsbt(signedPsbt)).pipe(map((txId) => ({ txId })))));
     },
-    signOfferAccept: (input) => 
-    // Xverse signs ONLY input 0 (its cat, P2TR key-path); input 1 (buyer)
-    // is already signed, so the returned PSBT is complete — finalize both
-    // and broadcast the wire tx.
-    callXverseSignPsbtModern(input.psbtBytes, { [input.ordinalsAddress]: [0] }).pipe(switchMap((signedPsbt) => input.broadcast(extractWireTxFromPsbt(signedPsbt)).pipe(map((txId) => ({ txId }))))),
+    signOfferAccept: (input) => {
+        // Xverse's modern signPsbt hangs on a PSBT whose input 1 is already
+        // buyer-signed, and refuses a Taproot input 0 that carries no
+        // tapInternalKey. Reshape to the proven child-reveal form — input 0
+        // gains its tapInternalKey, input 1 is stripped to its witnessUtxo —
+        // sign ONLY input 0, then merge that sig onto the full buyer-signed PSBT
+        // so both inputs finalize.
+        const bare = prepareOfferAcceptWalletFacing(input.psbtBytes, xOnlyBytes(input.ordinalsPublicKey));
+        return callXverseSignPsbtModern(bare, { [input.ordinalsAddress]: [0] }).pipe(switchMap((signedBare) => mergeParentSigAndBroadcast(signedBare, input.psbtBytes, input.broadcast)));
+    },
     signOfferCreatePsbt: (input) => {
         // Xverse (buyer) signs ONLY its funding inputs 1..N; input 0 (the
         // seller's cat) stays unsigned for the seller to sign later. Return the
@@ -6410,6 +6454,7 @@ class Cat21AcceptOfferOrchestrator {
                 .signOfferAccept({
                 psbtBytes: offer.psbtBytes,
                 ordinalsAddress: wallet.ordinalsAddress,
+                ordinalsPublicKey: wallet.ordinalsPublicKey,
                 network: this.network,
                 broadcast: (txHex) => this.cat21.postTransaction(txHex),
             })

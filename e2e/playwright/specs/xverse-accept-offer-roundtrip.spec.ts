@@ -174,19 +174,15 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme (Xverse-specific, fix identified — deferred): Xverse's modern
-// signPsbt HANGS (10-min test timeout, confirmed on CI run 32797046889)
-// when the PSBT's input 1 is already signed by the buyer. Transfer,
-// create-offer (foreign but UNSIGNED input) and child-reveal all sign fine
-// via the same bare `request('signPsbt')` path — the buyer's pre-signed
-// foreign input is the specific trigger. The fix is the bare-sign-then-merge
-// pattern (like signChildRevealParentInputs): present Xverse a copy with
-// input 1 reduced to its witnessUtxo (buyer sig stripped), sign input 0,
-// then merge input 0's key-path sig back onto the full buyer-signed PSBT and
-// finalize. That rebuild must preserve version + lockTime=21 + sequence
-// exactly or the merged sig is invalid, so it needs a local PSBT test before
-// shipping. Un-fixme once signOfferAccept does the strip+merge for Xverse.
-test.fixme('accept a CAT-21 buy offer on regtest via Xverse (seller): mint, buyer builds PSBT, Xverse signs input 0, verify via electrs/parser', async () => {
+// Xverse's modern signPsbt hangs when input 1 is the buyer's already-signed
+// foreign input, and refuses a Taproot input 0 with no tapInternalKey. The
+// signOfferAccept override reshapes the PSBT to the proven child-reveal form
+// (prepareOfferAcceptWalletFacing: input 0 gains its tapInternalKey, input 1
+// stripped to its witnessUtxo), signs ONLY input 0, then merges that sig
+// onto the full buyer-signed PSBT so both inputs finalize. The strip+merge
+// mechanics are pinned by src/cat21-offer/xverse-offer-accept-prepare.spec.ts;
+// this spec proves the real Xverse binary signs input 0 on the bare copy.
+test('accept a CAT-21 buy offer on regtest via Xverse (seller): mint, buyer builds PSBT, Xverse signs input 0, verify via electrs/parser', async () => {
   test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
@@ -350,6 +346,7 @@ test.fixme('accept a CAT-21 buy offer on regtest via Xverse (seller): mint, buye
     walletType: 'xverse' as const,
     psbtHex: bytesHex(buyerSignedPsbtBytes),
     ordinalsAddress: wallet.ordinalsAddress,
+    ordinalsPublicKey: ordinalsXOnlyHex,
   });
   await approveXverseSignPopup(context, acceptSignKnown, '02-accept-sign');
   const accepted = await acceptPromise;

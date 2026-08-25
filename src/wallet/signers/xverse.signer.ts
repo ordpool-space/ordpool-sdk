@@ -1,4 +1,4 @@
-import { base64 } from '@scure/base';
+import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { defer, from, Observable, map, switchMap } from 'rxjs';
 import Wallet, { MessageSigningProtocols, request, signTransaction } from 'sats-connect';
@@ -18,7 +18,7 @@ import {
   SignTransferArgs,
   WalletSigner,
 } from '../wallet.service.types';
-import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
+import { mergeParentSigAndBroadcast, prepareOfferAcceptWalletFacing } from './child-reveal-finalize.helper';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { resolveSigningTargets } from './signing-targets.helper';
 import { wrapSignMessage } from './wrap-sign-message';
@@ -175,6 +175,12 @@ function callXverseSignPsbtModern(
   );
 }
 
+/** Decode an x-only (64-hex) or compressed (66-hex) pubkey to 32 x-only bytes. */
+function xOnlyBytes(pubHex: string): Uint8Array {
+  const s = pubHex.startsWith('0x') ? pubHex.slice(2) : pubHex;
+  return hex.decode(s.length === 66 ? s.slice(2) : s);
+}
+
 export const xverseSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.xverse,
   ...operationNamedDefaults(legacy),
@@ -214,15 +220,19 @@ export const xverseSigner: WalletSigner = {
     );
   },
 
-  signOfferAccept: (input: SignOfferAcceptArgs): Observable<{ txId: string }> =>
-    // Xverse signs ONLY input 0 (its cat, P2TR key-path); input 1 (buyer)
-    // is already signed, so the returned PSBT is complete — finalize both
-    // and broadcast the wire tx.
-    callXverseSignPsbtModern(input.psbtBytes, { [input.ordinalsAddress]: [0] }).pipe(
-      switchMap((signedPsbt) => input.broadcast(extractWireTxFromPsbt(signedPsbt)).pipe(
-        map((txId) => ({ txId })),
-      )),
-    ),
+  signOfferAccept: (input: SignOfferAcceptArgs): Observable<{ txId: string }> => {
+    // Xverse's modern signPsbt hangs on a PSBT whose input 1 is already
+    // buyer-signed, and refuses a Taproot input 0 that carries no
+    // tapInternalKey. Reshape to the proven child-reveal form — input 0
+    // gains its tapInternalKey, input 1 is stripped to its witnessUtxo —
+    // sign ONLY input 0, then merge that sig onto the full buyer-signed PSBT
+    // so both inputs finalize.
+    const bare = prepareOfferAcceptWalletFacing(input.psbtBytes, xOnlyBytes(input.ordinalsPublicKey));
+    return callXverseSignPsbtModern(bare, { [input.ordinalsAddress]: [0] }).pipe(
+      switchMap((signedBare) =>
+        mergeParentSigAndBroadcast(signedBare, input.psbtBytes, input.broadcast)),
+    );
+  },
 
   signOfferCreatePsbt: (input: SignOfferCreatePsbtArgs): Observable<Uint8Array> => {
     // Xverse (buyer) signs ONLY its funding inputs 1..N; input 0 (the
