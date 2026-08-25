@@ -112,10 +112,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
       [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
       [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21OfferAccept]: {
-        support: CapabilitySupport.Adapter,
-        caveat: 'Xverse signPsbt hangs on the buyer\'s pre-signed input; the bare-sign-then-merge fix is identified but not yet shipped (see the fixmed xverse-accept-offer e2e)',
-      },
+      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
