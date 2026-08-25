@@ -46,10 +46,9 @@ describe('capabilityOf', () => {
       .toBe(CapabilitySupport.Proven);
   });
 
-  it('OKX parent-child is Unsupported, with the signPsbt-preview caveat', () => {
-    const status = capabilityOf(KnownOrdinalWalletType.okx, WalletCapability.InscriptionParentChild);
-    expect(status.support).toBe(CapabilitySupport.Unsupported);
-    expect(status.caveat).toMatch(/signPsbt preview/);
+  it('OKX parent-child is Proven (regtest child roundtrip signs the reveal parent input)', () => {
+    expect(capabilityOf(KnownOrdinalWalletType.okx, WalletCapability.InscriptionParentChild).support)
+      .toBe(CapabilitySupport.Proven);
   });
 
   it('UniSat and Wizz parent-child are Proven but carry the active-Taproot-address caveat', () => {
@@ -74,11 +73,11 @@ describe('supportsCapability (platform-aware)', () => {
       .toBe(true);
   });
 
-  it('OKX parent-child is false everywhere (wallet cannot do it)', () => {
+  it('OKX parent-child is true (proven on regtest)', () => {
     expect(supportsCapability(KnownOrdinalWalletType.okx, WalletCapability.InscriptionParentChild))
-      .toBe(false);
+      .toBe(true);
     expect(supportsCapability(KnownOrdinalWalletType.okx, WalletCapability.InscriptionParentChild, WalletPlatform.Desktop))
-      .toBe(false);
+      .toBe(true);
   });
 
   it('UniSat parent-child is true on desktop', () => {
@@ -88,24 +87,26 @@ describe('supportsCapability (platform-aware)', () => {
 });
 
 describe('walletsSupporting', () => {
-  it('parent-child, proven only: exactly cat21wallet, xverse, leather, unisat, wizz', () => {
+  it('parent-child, proven only: cat21wallet, xverse, leather, unisat, wizz, okx', () => {
     expect(ids(walletsSupporting(WalletCapability.InscriptionParentChild, { minSupport: CapabilitySupport.Proven })))
       .toEqual([
         KnownOrdinalWalletType.cat21wallet,
         KnownOrdinalWalletType.leather,
+        KnownOrdinalWalletType.okx,
         KnownOrdinalWalletType.unisat,
         KnownOrdinalWalletType.wizz,
         KnownOrdinalWalletType.xverse,
       ]);
   });
 
-  it('parent-child, adapter+ (default): all except OKX (the only Unsupported)', () => {
+  it('parent-child, adapter+ (default): every wallet (none Unsupported)', () => {
     expect(ids(walletsSupporting(WalletCapability.InscriptionParentChild)))
       .toEqual([
         KnownOrdinalWalletType.alby,
         KnownOrdinalWalletType.binance,
         KnownOrdinalWalletType.cat21wallet,
         KnownOrdinalWalletType.leather,
+        KnownOrdinalWalletType.okx,
         KnownOrdinalWalletType.phantom,
         KnownOrdinalWalletType.unisat,
         KnownOrdinalWalletType.wizz,
@@ -114,10 +115,11 @@ describe('walletsSupporting', () => {
       ]);
   });
 
-  it('parent-child on mobile: xverse, phantom, binance, xpub (OKX excluded as Unsupported)', () => {
+  it('parent-child on mobile: xverse, okx, phantom, binance, xpub', () => {
     expect(ids(walletsSupporting(WalletCapability.InscriptionParentChild, { platform: WalletPlatform.Mobile })))
       .toEqual([
         KnownOrdinalWalletType.binance,
+        KnownOrdinalWalletType.okx,
         KnownOrdinalWalletType.phantom,
         KnownOrdinalWalletType.xpub,
         KnownOrdinalWalletType.xverse,
@@ -135,23 +137,25 @@ describe('walletsSupporting', () => {
       ]);
   });
 
-  it('transfer proven: cat21wallet, xverse, leather, unisat, wizz, alby (real regtest roundtrips)', () => {
+  it('transfer proven: cat21wallet, xverse, leather, unisat, wizz, alby, okx (real regtest roundtrips)', () => {
     expect(ids(walletsSupporting(WalletCapability.Cat21Transfer, { minSupport: CapabilitySupport.Proven })))
       .toEqual([
         KnownOrdinalWalletType.alby,
         KnownOrdinalWalletType.cat21wallet,
         KnownOrdinalWalletType.leather,
+        KnownOrdinalWalletType.okx,
         KnownOrdinalWalletType.unisat,
         KnownOrdinalWalletType.wizz,
         KnownOrdinalWalletType.xverse,
       ]);
   });
 
-  it('offer-accept proven: cat21wallet, leather, unisat, wizz, xverse (alby/okx offers unsupported)', () => {
+  it('offer-accept proven: cat21wallet, leather, unisat, wizz, xverse, okx (alby offers unsupported)', () => {
     expect(ids(walletsSupporting(WalletCapability.Cat21OfferAccept, { minSupport: CapabilitySupport.Proven })))
       .toEqual([
         KnownOrdinalWalletType.cat21wallet,
         KnownOrdinalWalletType.leather,
+        KnownOrdinalWalletType.okx,
         KnownOrdinalWalletType.unisat,
         KnownOrdinalWalletType.wizz,
         KnownOrdinalWalletType.xverse,

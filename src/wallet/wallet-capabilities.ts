@@ -174,26 +174,14 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     signingMode: 'injected',
     capabilities: {
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21Transfer]: {
-        support: CapabilitySupport.Adapter,
-        caveat: 'No foreign input and the adapter is correct, but currently unverifiable in CI — see the OKX note',
-      },
-      [WalletCapability.Cat21OfferCreate]: {
-        support: CapabilitySupport.Unsupported,
-        caveat: 'OKX\'s closed signPsbt preview cannot render a not-owned input; a buy-offer PSBT always carries a foreign input (same limit as child-inscribe)',
-      },
-      [WalletCapability.Cat21OfferAccept]: {
-        support: CapabilitySupport.Unsupported,
-        caveat: 'OKX\'s closed signPsbt preview cannot render a not-owned input; the buyer\'s pre-signed funding input is foreign (same limit as child-inscribe)',
-      },
+      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
-      [WalletCapability.InscriptionParentChild]: {
-        support: CapabilitySupport.Unsupported,
-        caveat: 'OKX\'s signPsbt preview cannot render the reveal\'s script-path commit input; see CHILD-INSCRIBE-WALLET-SUPPORT.md',
-      },
+      [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
     },
-    note: 'Mobile support is the OKX App\'s built-in dApp browser, which the OKX docs state is compatible with the injected window.okxwallet provider path (Bitcoin included). Mint + Inscription were proven green in an earlier CI run, but OKX signing is currently unverifiable in CI: OKX\'s sign-popup preview will not enable Confirm for a regtest tx (it stays on a loading spinner while it fetches the amount from OKX\'s backend, which cannot resolve a regtest tx) — an OKX-side/environmental issue, not a code defect. The signing e2e specs are fixmed until OKX\'s preview enables Confirm for regtest txs again.',
+    note: 'OKX is single-address BIP-86 Taproot. Every cat21 operation (mint, transfer, offer create/accept, inscribe, and parent/child inscribe) is proven on the regtest e2e via the mainnet-address shim: the P2TR script hash is HRP-independent, so OKX signs the regtest input against its mainnet account, and signPsbt resolves for the connected dApp (it auto-approves without an interactive Confirm; the offer/child flows sign only the wallet\'s own input and leave the foreign one). Mobile support is the OKX App\'s built-in dApp browser, compatible with the injected window.okxwallet provider path (Bitcoin included).',
   },
   {
     wallet: KnownOrdinalWalletType.phantom,
