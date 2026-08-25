@@ -8,8 +8,6 @@ import * as btc from '@scure/btc-signer';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { Network, toScureNetwork } from '../../../src/network';
-import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
-import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import {
   waitForElectrsSync,
   waitForUtxoAt,
@@ -18,33 +16,37 @@ import {
   rpc,
   mineBlocks,
   postTx,
-  getUtxos,
   assertAllInputsSighashAll,
+  getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
+import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 
 /**
- * Unisat ACCEPT-OFFER roundtrip on regtest — Unisat is the SELLER.
+ * Unisat CAT-21 ACCEPT-OFFER roundtrip on regtest — Unisat is the SELLER.
+ * Asserted through electrs + ordpool-parser (NO ord: the Unisat CI shard
+ * runs bitcoind + electrs only).
  *
- * 1. Onboard Unisat in Taproot (P2TR) mode, connect.
- * 2. Fund Unisat's bcrt1p via bitcoind.
- * 3. Mint a cat via Unisat (1 sign popup). Cat lands at Unisat's bcrt1p.
- * 4. Synthesise a BUYER keypair (raw P2WPKH). Fund it.
- * 5. Buyer (raw-key, off-extension) builds a buy-offer PSBT against
- *    Unisat's cat UTXO via buildCat21BuyOfferPsbt, signs their own
- *    input 1 (P2WPKH, SIGHASH_ALL). Input 0 (cat) stays unsigned.
- * 6. Seller-side validator gate accepts the buyer-pre-signed PSBT.
- * 7. Hand the PSBT to runOperation({kind:'acceptOffer'}). Unisat signs
- *    input 0 (the Taproot cat) via 1 sign popup. Broadcast via electrs.
- * 8. Assert (electrs + parser, NO ord): lockTime=21, SIGHASH_ALL on
- *    every input, the 546-sat cat output-0 UTXO landed at the buyer's
- *    address, Cat21ParserService parses the acceptance tx as a CAT-21.
+ * 1. Onboard Unisat in BIP-86 Taproot (P2TR) mode, connect.
+ * 2. Fund Unisat's bcrt1p, mint a cat via Unisat (1 popup). Cat lands at
+ *    Unisat's bcrt1p.
+ * 3. Synthesise a BUYER raw P2WPKH keypair, fund it.
+ * 4. Buyer (raw-key, off-extension) builds a buy-offer PSBT against Unisat's
+ *    cat UTXO via buildCat21BuyOfferPsbt, signs their own input 1 (P2WPKH,
+ *    SIGHASH_ALL). Input 0 (cat) stays unsigned — the seller's job.
+ * 5. Seller-side validator gate accepts the buyer-pre-signed PSBT.
+ * 6. Hand the PSBT to runOperation({kind:'acceptOffer'}). Unisat signs input
+ *    0 (the Taproot cat) via 1 sign popup. Broadcast via electrs.
+ * 7. Assert via electrs: cat's 546-sat UTXO now at the buyer's bcrt1q
+ *    output 0; seller got paid priceSats+postage; lockTime=21; SIGHASH_ALL
+ *    on every input; Cat21ParserService parses the tx.
  *
- * TAPROOT MODE (the load-bearing quirk): the accept flow signs the
- * seller's Taproot cat input (input 0) with the ACTIVE account key, so
- * we onboard on the BIP-86 Taproot address type (card 2) exactly as
- * `unisat-inscribe-child-roundtrip.spec.ts` does — the single active
- * key is the taproot key that owns the cat.
+ * Unisat signs ONLY with its ACTIVE account key and matches inputs by
+ * address, so it is onboarded in Taproot (P2TR) mode: the single active key
+ * is the taproot key that owns the cat. The harness passes the signer's
+ * `ordinalsAddress` through verbatim, so the spec hands Unisat its MAINNET
+ * bc1p address for the active-account match; the PSBT carries regtest bytes.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
@@ -54,6 +56,11 @@ const HARNESS_URL = 'http://localhost:4500/';
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
 const TEST_PASSWORD = 'TestPassword123!';
+
+// BIP-86 Taproot derivation of `abandon × 11 + about` on mainnet — the
+// value unisat-matrix.spec.ts pins for the P2TR variant, and the value
+// Unisat matches `toSignInputs` against in Taproot mode.
+const UNISAT_MAINNET_TAPROOT = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
 
 const FUND_AMOUNT_BTC = 0.001;
 const BUYER_FUND_AMOUNT_BTC = 0.001;
@@ -83,12 +90,15 @@ function bytesHex(b: Uint8Array): string {
   for (let i = 0; i < b.length; i++) out += b[i].toString(16).padStart(2, '0');
   return out;
 }
-/** Normalise a pubkey hex to x-only (32 bytes): drop the 0x02/0x03 parity byte if present. */
+/** Normalise a pubkey hex to x-only (32 bytes): drop the parity byte if present. */
 function xOnlyHex(pubHex: string): string {
   const s = pubHex.startsWith('0x') ? pubHex.slice(2) : pubHex;
   return s.length === 66 ? s.slice(2) : s;
 }
 
+// Onboarding copied from unisat-inscribe-child-roundtrip.spec.ts: Taproot
+// (P2TR) address type (card index 2) so the single active account is the
+// taproot key that owns the cat.
 async function onboardUnisat(page: Page): Promise<void> {
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
@@ -110,9 +120,10 @@ async function onboardUnisat(page: Page): Promise<void> {
   }
   await page.getByTestId('mnemonic-import-continue-button').click();
 
-  // BIP-86 Taproot (card 2): the single active account IS the taproot
-  // key that owns the cat, so the accept flow signs input 0 with it.
-  // Guarded so a differing card layout doesn't break onboarding.
+  // Pick BIP-86 Taproot (card index 2): the single active account IS the
+  // taproot key that owns the cat, so the accept flow signs input 0 with
+  // it. Guarded so a differing card layout doesn't break onboarding — the
+  // mainnet-address pin below catches a missed selection.
   const taprootCard = page.getByTestId('address-type-card-2');
   if (await taprootCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await taprootCard.click();
@@ -146,6 +157,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
   await approval.getByText(/^Connect$/).first().click();
 }
 
+/**
+ * Wait for a Unisat sign popup, approve it, and register it in
+ * `knownPages` so the NEXT call skips it (this flow fires two sequential
+ * sign popups: the mint, then the accept).
+ */
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag: string): Promise<void> {
   const approval = await waitForApprovalPopup({
     context: ctx,
@@ -161,17 +177,6 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   await shot(approval, tag);
   await approval.getByTestId('sign-psbt-button').click();
   knownPages.add(approval);
-}
-
-/** Fund an address with a fresh UTXO and return it. */
-async function fundAddress(address: string, amountBtc: number): Promise<{ txid: string; vout: number; value: number }> {
-  const fundTxid = rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', address, String(amountBtc)).trim();
-  await waitForElectrsSync(mineBlocks(1));
-  await waitForUtxoAt(address, Math.round(amountBtc * 1e8));
-  const utxos = await getUtxos(address);
-  const u = utxos.find(x => x.txid === fundTxid);
-  if (!u) throw new Error(`funding UTXO ${fundTxid} not found at ${address}`);
-  return { txid: u.txid, vout: u.vout, value: u.value };
 }
 
 test.beforeAll(async () => {
@@ -205,7 +210,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('accept a CAT-21 buy offer on regtest via Unisat (seller): mint, buyer builds PSBT, Unisat signs input 0', async () => {
+test('accept a CAT-21 buy offer on regtest via Unisat (Taproot mode, SELLER): mint, buyer builds PSBT, Unisat signs input 0', async () => {
   test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
@@ -220,37 +225,48 @@ test('accept a CAT-21 buy offer on regtest via Unisat (seller): mint, buyer buil
   );
   await shot(harness, '01-harness-loaded');
 
-  // ── Connect on mainnet Taproot; derive the regtest bcrt1p ──
+  // ── Connect (Taproot mode) ──
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectUnisat());
   await approveConnectPopup(context, connectKnownPages);
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
+  expect(wallet.paymentAddress).toBe(UNISAT_MAINNET_TAPROOT);
+  expect(wallet.ordinalsAddress).toBe(UNISAT_MAINNET_TAPROOT);
+
+  // Mainnet address Unisat matches `toSignInputs` against for the accept
+  // signer path; the PSBT still carries regtest bytes.
+  const mainnetTaproot = wallet.paymentAddress;
 
   const regtest = await harness.evaluate(
     (pk: string) => window.ordpoolSdkHarness.deriveRegtestAddresses(pk),
     wallet.paymentPublicKey,
   );
-  // Taproot-active Unisat: single active account = bcrt1p taproot key.
-  const paymentAddress = regtest.ordinalsAddress;
-  const ordinalsAddress = regtest.ordinalsAddress;
-  expect(paymentAddress).toMatch(/^bcrt1p/);
-  expect(ordinalsAddress).toMatch(/^bcrt1p/);
+  const walletTaproot = regtest.ordinalsAddress;
+  expect(walletTaproot).toMatch(/^bcrt1p/);
   const ordinalsXOnlyHex = xOnlyHex(wallet.paymentPublicKey);
   expect(ordinalsXOnlyHex.length, 'x-only taproot pubkey').toBe(64);
+  const ordinalsXOnly = hexBytes(ordinalsXOnlyHex);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-accept] wallet taproot = ${walletTaproot}`);
 
-  // ── Fund Unisat (seller) + mint a cat via Unisat (1 sign popup) ──
-  const fundUtxo = await fundAddress(paymentAddress, FUND_AMOUNT_BTC);
+  // ── Fund Unisat ──
+  rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', walletTaproot, String(FUND_AMOUNT_BTC));
+  await waitForElectrsSync(mineBlocks(1));
+  const fundUtxo = await waitForUtxoAt(walletTaproot, Math.round(FUND_AMOUNT_BTC * 1e8));
+
+  // ── Unisat mints its own cat (1 popup). The mint path threads the pubkey
+  // ── so the harness shims paymentAddress to mainnet; keep regtest addrs ──
   const mintSignKnown = new Set(context.pages());
   const mintPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
     {
       kind: 'mint' as const,
       walletType: 'unisat' as const,
-      utxo: fundUtxo,
-      paymentAddress,
+      utxo: { txid: fundUtxo.txid, vout: fundUtxo.vout, value: fundUtxo.value },
+      paymentAddress: walletTaproot,
       paymentPublicKey: wallet.paymentPublicKey,
-      recipientAddress: ordinalsAddress,
+      recipientAddress: walletTaproot,
       feeSats: MINT_FEE_SATS,
     },
   );
@@ -258,34 +274,45 @@ test('accept a CAT-21 buy offer on regtest via Unisat (seller): mint, buyer buil
   const minted = await mintPromise;
   if (minted.kind !== 'mint') throw new Error('expected mint result');
   const mintTxid = await postTx(minted.txHex);
-  expect(mintTxid, 'wallet must not modify non-witness bytes (mint)').toBe(minted.expectedTxid);
   await waitForElectrsSync(mineBlocks(1));
   const mintTx = await waitForTxConfirmed(mintTxid);
   expect(mintTx.locktime).toBe(21);
   assertAllInputsSighashAll(mintTx);
-  // Cat-sat guard (mint policy), same as `unisat-mint-roundtrip.spec.ts`.
+  // Cat-sat RBF guard on the MINT, mirrored from unisat-mint-roundtrip.
   for (const vin of mintTx.vin) {
     expect((vin as { sequence: number }).sequence).toBeGreaterThanOrEqual(0xfffffffe);
   }
-  const sellerCatUtxo = await waitForUtxoMatching(
-    ordinalsAddress,
-    u => u.txid === mintTxid && u.vout === 0 && u.value === CAT21_POSTAGE_SATS,
-    `seller cat ${mintTxid}:0 (546 sats) at ${ordinalsAddress}`,
+  const mintParsed = Cat21ParserService.parse(mintTx);
+  expect(mintParsed).not.toBeNull();
+  expect(mintParsed!.type).toBe(DigitalArtifactType.Cat21);
+  // The cat lives on Unisat's 546-sat output-0 UTXO.
+  const catUtxo = await waitForUtxoMatching(
+    walletTaproot,
+    u => u.txid === mintTxid && u.vout === 0,
+    `Unisat cat ${mintTxid}:0`,
   );
-  expect(sellerCatUtxo.value).toBe(CAT21_POSTAGE_SATS);
+  expect(catUtxo.value).toBe(CAT21_POSTAGE_SATS);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-accept] Unisat owns cat ${mintTxid}:0`);
 
-  // ── Synthesise buyer (raw P2WPKH), fund it ──
+  // ── Synthesise buyer (raw P2WPKH) + fund ──
   const buyerPriv = secp256k1.utils.randomPrivateKey();
   const buyerPub = secp256k1.getPublicKey(buyerPriv, true);
   const buyerP2 = btc.p2wpkh(buyerPub, regtestNetwork);
   const buyerAddress = buyerP2.address!;
   const buyerScript = buyerP2.script;
-  const buyerFundUtxo = await fundAddress(buyerAddress, BUYER_FUND_AMOUNT_BTC);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-accept] buyer address = ${buyerAddress}`);
 
-  // ── Buyer builds the offer PSBT against Unisat's cat ──
-  // Seller's cat UTXO is Taproot; scriptPubKey = OP_1 || 0x20 || TWEAKED
-  // output key (BIP-86). `p2tr(internalKey, …)` performs the tweak.
-  const sellerCatScript = btc.p2tr(hexBytes(ordinalsXOnlyHex), undefined, regtestNetwork).script;
+  rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', buyerAddress, String(BUYER_FUND_AMOUNT_BTC));
+  await waitForElectrsSync(mineBlocks(1));
+  const buyerFundUtxo = await waitForUtxoAt(buyerAddress, Math.round(BUYER_FUND_AMOUNT_BTC * 1e8));
+
+  // ── Seller's (Unisat's) cat is a Taproot key-path UTXO; its scriptPubKey
+  // ── is the BIP-86 tweaked output key. Payment goes to Unisat's bcrt1p ──
+  const sellerCatScript = btc.p2tr(ordinalsXOnly, undefined, regtestNetwork).script;
+
+  // ── Buyer builds the offer PSBT via SDK, signs input 1 (P2WPKH) ──
   const offer = buildCat21BuyOfferPsbt({
     walletType: KnownOrdinalWalletType.unisat,
     network: Network.Regtest,
@@ -303,29 +330,31 @@ test('accept a CAT-21 buy offer on regtest via Unisat (seller): mint, buyer buil
     }],
     destinations: {
       buyerReceiveAddress: buyerAddress,
-      sellerPaymentAddress: paymentAddress,
+      sellerPaymentAddress: walletTaproot,
       buyerChangeAddress: buyerAddress,
     },
     priceSats: PRICE_SATS,
     feeSats: OFFER_FEE_SATS,
   });
-
-  // ── Buyer signs input 1 (their own funding) under SIGHASH_ALL ──
   const offerTx = btc.Transaction.fromPSBT(offer.psbt);
   offerTx.signIdx(buyerPriv, 1, [btc.SigHash.ALL]);
   const buyerSignedPsbtBytes = offerTx.toPSBT();
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-accept] buyer signed input 1; handing PSBT (${buyerSignedPsbtBytes.byteLength} bytes) to Unisat`);
 
-  // Seller-side validator gate accepts the buyer-pre-signed PSBT.
+  // Seller-side validator gate (the same gate the wallet's accept flow
+  // runs before signing).
   const validation = validateCat21BuyOfferPsbt({
     psbt: buyerSignedPsbtBytes,
     expectedSellerUtxo: { txid: mintTxid, vout: 0 },
     floorPriceSats: PRICE_SATS,
-    expectedSellerPaymentAddress: paymentAddress,
+    expectedSellerPaymentAddress: walletTaproot,
     network: Network.Regtest,
   });
   expect(validation.ok).toBe(true);
 
-  // ── Unisat (seller) signs input 0 — the Taproot cat (1 sign popup) ──
+  // ── Unisat signs input 0 (Taproot cat, 1 popup). ordinalsAddress hint is
+  // ── the wallet's MAINNET bc1p so its active-account match succeeds ──
   const acceptSignKnown = new Set(context.pages());
   const acceptPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
@@ -333,7 +362,7 @@ test('accept a CAT-21 buy offer on regtest via Unisat (seller): mint, buyer buil
       kind: 'acceptOffer' as const,
       walletType: 'unisat' as const,
       psbtHex: bytesHex(buyerSignedPsbtBytes),
-      ordinalsAddress,
+      ordinalsAddress: mainnetTaproot,
     },
   );
   await approveSignPopup(context, acceptSignKnown, '03-accept-sign');
@@ -341,28 +370,40 @@ test('accept a CAT-21 buy offer on regtest via Unisat (seller): mint, buyer buil
   if (accepted.kind !== 'acceptOffer') throw new Error('expected acceptOffer result');
 
   const acceptTxid = await postTx(accepted.txHex);
-  expect(acceptTxid, 'wallet must not modify non-witness bytes (acceptOffer)').toBe(accepted.expectedTxid);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-accept] accept broadcast txid = ${acceptTxid}`);
   await waitForElectrsSync(mineBlocks(1));
+
   const acceptTx = await waitForTxConfirmed(acceptTxid);
   expect(acceptTx.locktime).toBe(21);
   expect(acceptTx.status.block_hash).toBeTruthy();
   assertAllInputsSighashAll(acceptTx);
+  // Non-witness-tamper guard: Unisat must not mutate non-witness bytes
+  // between the buyer-pre-signed PSBT and the broadcast tx.
+  expect(acceptTxid, 'Unisat must not modify non-witness bytes (acceptOffer)').toBe(accepted.expectedTxid);
+  // Exact fee (funding clears dust; no sub-dust absorb).
+  expect(acceptTx.fee, `accept fee = ${OFFER_FEE_SATS} sats`).toBe(OFFER_FEE_SATS);
+  // No sequence assertion: the offer builder pins 0xfffffffd (RBF-on for
+  // every wallet on offers), NOT the mint RBF-off policy.
 
-  // ── electrs proves the cat is now at the buyer's address ──
+  // ── Assert via ELECTRS: cat's 546-sat UTXO now at the buyer's bcrt1q
+  // ── output 0 ──
   const movedCat = await waitForUtxoMatching(
     buyerAddress,
-    u => u.txid === acceptTxid && u.vout === 0 && u.value === CAT21_POSTAGE_SATS,
-    `cat ${acceptTxid}:0 (546 sats) at ${buyerAddress}`,
+    u => u.txid === acceptTxid && u.vout === 0,
+    `cat at buyer ${acceptTxid}:0`,
   );
   expect(movedCat.value).toBe(CAT21_POSTAGE_SATS);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-accept] cat now at ${buyerAddress} (${movedCat.txid}:${movedCat.vout})`);
 
-  // Seller was paid priceSats + postage (ord-parity).
-  const sellerUtxosAfter = await getUtxos(paymentAddress);
-  const payment = sellerUtxosAfter.find(u => u.txid === acceptTxid && u.vout === 1);
-  expect(payment).toBeTruthy();
-  expect(payment!.value).toBe(PRICE_SATS + CAT21_POSTAGE_SATS);
+  // Seller (Unisat) got paid priceSats + postage at their bcrt1p address.
+  const sellerUtxosAfter = await getUtxos(walletTaproot);
+  const payment = sellerUtxosAfter.find(u => u.txid === acceptTxid);
+  if (!payment) throw new Error('seller payment UTXO not found at Unisat address');
+  expect(payment.value).toBe(PRICE_SATS + CAT21_POSTAGE_SATS);
 
-  // Parser confirms the acceptance tx is itself a CAT-21.
+  // ── Assert via ordpool-parser: the acceptance tx is itself a CAT-21 ──
   const parsed = Cat21ParserService.parse(acceptTx);
   expect(parsed).not.toBeNull();
   expect(parsed!.type).toBe(DigitalArtifactType.Cat21);

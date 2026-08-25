@@ -196,7 +196,17 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('create a CAT-21 buy-offer on regtest via Alby (buyer): seller raw-key mints, Alby signs its funding input, seller signs input 0', async () => {
+// fixme (genuine Alby wallet limitation, not an SDK defect): Alby's WebBTC
+// signPsbt signs EVERY input with the account's single Taproot key and
+// returns a FINALIZED tx (verified against Alby's bundle; confirmed on
+// regtest CI: "Input #0 is not of type Taproot"). A buy-offer PSBT always
+// carries a foreign non-Taproot input (here the seller's P2WPKH cat input
+// at index 0), which Alby cannot skip or leave for the counterparty — so
+// Alby cannot produce the buyer-partial signature the offer flow needs.
+// Alby transfer (all inputs Alby-owned Taproot) is proven; only multi-party
+// offers are blocked, wallet-side. Un-fixme only if Alby adds per-input
+// selection to signPsbt.
+test.fixme('create a CAT-21 buy-offer on regtest via Alby (buyer): seller raw-key mints, Alby signs its funding input, seller signs input 0', async () => {
   test.setTimeout(300_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 

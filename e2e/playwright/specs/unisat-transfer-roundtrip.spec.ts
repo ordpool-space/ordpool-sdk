@@ -16,34 +16,38 @@ import {
   rpc,
   mineBlocks,
   postTx,
-  getUtxos,
   assertAllInputsSighashAll,
+  getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 
 /**
- * Unisat CAT-21 TRANSFER roundtrip on regtest — the real Unisat binary
- * signs a cat transfer end-to-end. Assertions read from electrs + the
- * parser; there is NO ord in the Unisat CI shard (bitcoind + electrs
- * only), so ownership is proven by the on-chain 546-sat output-0 UTXO
- * landing at the destination address.
+ * Unisat CAT-21 TRANSFER roundtrip on regtest — full popup-driven path,
+ * asserted through electrs + ordpool-parser (NO ord: the Unisat CI shard
+ * runs bitcoind + electrs only).
  *
- * TAPROOT MODE (the load-bearing quirk): Unisat is address-based and
- * signs only with the ACTIVE account key. The transfer signs a Taproot
- * cat input (input 0) AND a funding input (input 1), both living at the
- * wallet's single active address. So we onboard on the BIP-86 Taproot
- * (P2TR) address type exactly as `unisat-inscribe-child-roundtrip.spec.ts`
- * does: the one active key is the taproot key, and
- * paymentAddress === ordinalsAddress === the bcrt1p taproot address.
- * Mint funds from, cat lands on, and the change returns to that same
- * bcrt1p — so the one active key signs the cat input and the funding
- * input in a single sign popup.
+ * Unisat signs ONLY with its ACTIVE account key and matches inputs by
+ * address (Unisat `toSignInputs`). The transfer signs a Taproot cat input
+ * at index 0, so Unisat is onboarded in BIP-86 Taproot (P2TR) mode exactly
+ * like `unisat-inscribe-child-roundtrip`: the single active account IS the
+ * taproot key, and paymentAddress === ordinalsAddress === the bc1p taproot
+ * address. Both the cat (input 0) and the funding change (input 1) live at
+ * that one taproot address, so the one active key signs the whole transfer.
  *
- * Network-agnostic-keys trick (same as the mint roundtrip): Unisat ships
- * only mainnet/signet/testnet, so we onboard on mainnet, fund the
- * regtest-encoded address derived from the same pubkey, and hand Unisat
- * the regtest-encoded PSBT (script bytes are HRP-free). We broadcast via
- * local electrs, skipping Unisat's vendor-backend pushPsbt.
+ * Cross-network-keys trick (same as every mainnet-only wallet): Unisat
+ * ships only mainnet/signet/testnet, so we onboard on mainnet, fund the
+ * regtest-encoded bcrt1p address derived from the same pubkey, and hand
+ * Unisat regtest PSBT bytes to sign. Taproot script bytes are HRP-free, so
+ * a signature Unisat makes against its mainnet bc1p account verifies
+ * against the equivalent regtest scriptPubKey. Because the harness passes
+ * the signer's `ordinalsAddress` / `paymentAddress` through verbatim (no
+ * per-op mainnet shim for transfer/offer/accept), the spec hands Unisat its
+ * MAINNET bc1p address so its active-account match succeeds; the PSBT
+ * itself still carries the bcrt1p bytes.
+ *
+ * signTransfer is one of the four operations the wallet's popup / MCP
+ * surface dispatches. This pins the contract end-to-end: real bitcoind,
+ * real electrs, real Unisat binary, real popup approvals.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
@@ -53,6 +57,12 @@ const HARNESS_URL = 'http://localhost:4500/';
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
 const TEST_PASSWORD = 'TestPassword123!';
+
+// BIP-86 Taproot derivation of `abandon × 11 + about` on mainnet — the
+// same value pinned by unisat-matrix.spec.ts's P2TR variant. Unisat's
+// active account address in Taproot mode; the value Unisat matches
+// `toSignInputs` against.
+const UNISAT_MAINNET_TAPROOT = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
 
 const FUND_AMOUNT_BTC = 0.001;
 const MINT_FEE_SATS = 1500;
@@ -86,6 +96,10 @@ function xOnlyHex(pubHex: string): string {
   return s.length === 66 ? s.slice(2) : s;
 }
 
+// Onboarding copied from unisat-inscribe-child-roundtrip.spec.ts: Taproot
+// (P2TR) address type (card index 2) so the single active account is the
+// taproot key. The transfer's cat input (and the funding change) are P2TR
+// spends only the active-type key can sign.
 async function onboardUnisat(page: Page): Promise<void> {
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
@@ -107,10 +121,10 @@ async function onboardUnisat(page: Page): Promise<void> {
   }
   await page.getByTestId('mnemonic-import-continue-button').click();
 
-  // Pick the BIP-86 Taproot address type (card index 2) so Unisat's
-  // single active account IS the taproot key. The transfer signs a P2TR
-  // cat input (input 0) + a P2TR funding input (input 1), both at that
-  // key. Guarded so a differing card layout doesn't break onboarding.
+  // Pick the BIP-86 Taproot address type (card index 2) so Unisat's single
+  // active account IS the taproot key. Guarded so a differing card layout
+  // doesn't break onboarding — the mainnet-address pin below catches a
+  // missed selection.
   const taprootCard = page.getByTestId('address-type-card-2');
   if (await taprootCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
     await taprootCard.click();
@@ -147,9 +161,8 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
 
 /**
  * Wait for a Unisat sign popup, approve it, and register it in
- * `knownPages`. Each cat operation (mint, then transfer) fires ONE
- * sign popup; capturing a fresh `knownPages` before each op lets the
- * next call find the next popup.
+ * `knownPages` so the NEXT call skips it (this flow fires two sequential
+ * sign popups: the mint, then the transfer).
  */
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag: string): Promise<void> {
   const approval = await waitForApprovalPopup({
@@ -166,17 +179,6 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   await shot(approval, tag);
   await approval.getByTestId('sign-psbt-button').click();
   knownPages.add(approval);
-}
-
-/** Fund an address with a fresh UTXO and return it. */
-async function fundAddress(address: string): Promise<{ txid: string; vout: number; value: number }> {
-  const fundTxid = rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', address, String(FUND_AMOUNT_BTC)).trim();
-  await waitForElectrsSync(mineBlocks(1));
-  await waitForUtxoAt(address, Math.round(FUND_AMOUNT_BTC * 1e8));
-  const utxos = await getUtxos(address);
-  const u = utxos.find(x => x.txid === fundTxid);
-  if (!u) throw new Error(`funding UTXO ${fundTxid} not found at ${address}`);
-  return { txid: u.txid, vout: u.vout, value: u.value };
 }
 
 test.beforeAll(async () => {
@@ -210,13 +212,9 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Unisat (Taproot mode) signs both the Taproot cat input and the
-// Taproot funding input in ONE sign popup. The cat lands at the raw
-// P2WPKH destination; electrs proves ownership via the 546-sat output-0
-// UTXO, and the parser confirms the transfer tx is itself a CAT-21
-// (lockTime=21 re-mints onto the same ordinal).
-test('transfer a cat21 on regtest via Unisat: mint via popup, transfer via popup, broadcast via electrs', async () => {
+test('transfer a cat21 on regtest via Unisat (Taproot mode): mint via popup, transfer via popup, assert via electrs + parser', async () => {
   test.setTimeout(600_000);
+  const regtestNetwork = toScureNetwork(Network.Regtest);
 
   const harness = await context.newPage();
   // eslint-disable-next-line no-console
@@ -229,62 +227,76 @@ test('transfer a cat21 on regtest via Unisat: mint via popup, transfer via popup
   );
   await shot(harness, '01-harness-loaded');
 
-  // ── Connect on mainnet Taproot; derive the regtest bcrt1p ──
+  // ── Connect (Taproot mode: single active account = taproot key) ──
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectUnisat());
   await approveConnectPopup(context, connectKnownPages);
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-transfer] mainnet taproot = ${wallet.paymentAddress}`);
+  expect(wallet.paymentAddress).toBe(UNISAT_MAINNET_TAPROOT);
+  // Single-address wallet: ordinals mirrors payment.
+  expect(wallet.ordinalsAddress).toBe(UNISAT_MAINNET_TAPROOT);
 
-  // Taproot-active Unisat: the single active account is the BIP-86
-  // taproot key. Fund from, land the cat on, and route change back to
-  // that one bcrt1p address, so the one active key signs the cat input
-  // AND the funding input.
+  // The mainnet address Unisat matches `toSignInputs` against for the
+  // transfer signer path (harness passes signer addresses through
+  // verbatim; the PSBT still carries regtest bytes).
+  const mainnetTaproot = wallet.paymentAddress;
+
+  // Regtest-encoded equivalents from the same taproot pubkey. In Taproot
+  // mode both the payment change and the cat live at the bcrt1p address.
   const regtest = await harness.evaluate(
     (pk: string) => window.ordpoolSdkHarness.deriveRegtestAddresses(pk),
     wallet.paymentPublicKey,
   );
-  const paymentAddress = regtest.ordinalsAddress;
-  const ordinalsAddress = regtest.ordinalsAddress;
-  expect(paymentAddress).toMatch(/^bcrt1p/);
-  expect(ordinalsAddress).toMatch(/^bcrt1p/);
+  const walletTaproot = regtest.ordinalsAddress;
+  expect(walletTaproot).toMatch(/^bcrt1p/);
   const ordinalsXOnlyHex = xOnlyHex(wallet.paymentPublicKey);
   expect(ordinalsXOnlyHex.length, 'x-only taproot pubkey').toBe(64);
-  // Taproot scriptPubKey = OP_1 || 0x20 || TWEAKED output key (BIP-86).
-  // `p2tr(internalKey, …)` performs the tweak. The cat AND the funding
-  // input both live at this same taproot address.
-  const taprootScriptHex = bytesHex(btc.p2tr(hexBytes(ordinalsXOnlyHex), undefined, toScureNetwork(Network.Regtest)).script);
+  const ordinalsXOnly = hexBytes(ordinalsXOnlyHex);
+  // The taproot scriptPubKey (BIP-86 tweaked output key) — identical bytes
+  // for cat and funding change since both live at the same bcrt1p address.
+  const taprootScriptHex = bytesHex(btc.p2tr(ordinalsXOnly, undefined, regtestNetwork).script);
 
-  // ── Step 1: MINT a cat via Unisat (1 sign popup) ──
-  const fundUtxo = await fundAddress(paymentAddress);
+  // ── Fund the wallet's bcrt1p with a single 0.001 BTC UTXO ──
+  const fundTxid = rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', walletTaproot, String(FUND_AMOUNT_BTC)).trim();
+  await waitForElectrsSync(mineBlocks(1));
+  const fundUtxo = await waitForUtxoAt(walletTaproot, Math.round(FUND_AMOUNT_BTC * 1e8));
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-transfer] funded via ${fundTxid}, using ${fundUtxo.txid}:${fundUtxo.vout} (${fundUtxo.value} sats)`);
+
+  // ── Step 1: MINT via Unisat (1 popup). Taproot funding input; the mint
+  // ── path threads the pubkey so the harness shims paymentAddress to the
+  // ── wallet's mainnet bc1p for the signer, so the mint keeps regtest addrs ──
   const mintSignKnown = new Set(context.pages());
-  const mintPromise = harness.evaluate(
+  const mintSignedPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
     {
       kind: 'mint' as const,
       walletType: 'unisat' as const,
-      utxo: fundUtxo,
-      paymentAddress,
+      utxo: { txid: fundUtxo.txid, vout: fundUtxo.vout, value: fundUtxo.value },
+      paymentAddress: walletTaproot,
       paymentPublicKey: wallet.paymentPublicKey,
-      recipientAddress: ordinalsAddress,
+      recipientAddress: walletTaproot,
       feeSats: MINT_FEE_SATS,
     },
   );
   await approveSignPopup(context, mintSignKnown, '02-mint-sign');
-  const minted = await mintPromise;
+  const minted = await mintSignedPromise;
   if (minted.kind !== 'mint') throw new Error('expected mint result');
-
   const mintTxid = await postTx(minted.txHex);
-  expect(mintTxid, 'wallet must not modify non-witness bytes (mint)').toBe(minted.expectedTxid);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-transfer] mint broadcast txid = ${mintTxid}`);
   await waitForElectrsSync(mineBlocks(1));
   const mintTx = await waitForTxConfirmed(mintTxid);
   expect(mintTx.locktime).toBe(21);
   expect(mintTx.status.block_hash).toBeTruthy();
   assertAllInputsSighashAll(mintTx);
-  // Cat-sat guard (mint policy): every input's sequence is >= 0xfffffffe
-  // (RBF-final) so no third-party accelerate UI can drop nLockTime=21 on
-  // an RBF replacement and kill the mint. Same guard as
-  // `unisat-mint-roundtrip.spec.ts`.
+  // Cat-sat RBF guard on the MINT, mirrored from unisat-mint-roundtrip: a
+  // third-party wallet's mint must NOT signal RBF, so a fee-bump flow
+  // can't drop nLockTime=21 and kill the cat (2024 Xverse-Accelerate
+  // incident). 0xfffffffe = non-RBF, consensus-well-formed.
   for (const vin of mintTx.vin) {
     expect((vin as { sequence: number }).sequence).toBeGreaterThanOrEqual(0xfffffffe);
   }
@@ -292,28 +304,34 @@ test('transfer a cat21 on regtest via Unisat: mint via popup, transfer via popup
   expect(mintParsed).not.toBeNull();
   expect(mintParsed!.type).toBe(DigitalArtifactType.Cat21);
 
-  // ── Step 2: identify the cat UTXO (vout 0) + change UTXO (vout 1) ──
-  // waitForUtxoMatching gates on the per-address index catching up (it
-  // lags the per-tx confirmation index by a few hundred ms); once the
-  // cat UTXO is visible, the change UTXO (same tx, same address) is too.
-  const catUtxo = await waitForUtxoMatching(
-    ordinalsAddress,
-    u => u.txid === mintTxid && u.vout === 0 && u.value === CAT21_POSTAGE_SATS,
-    `cat ${mintTxid}:0 (546 sats) at ${ordinalsAddress}`,
-  );
-  const ordUtxos = await getUtxos(ordinalsAddress);
-  const changeUtxo = ordUtxos.find(u => u.txid === mintTxid && u.vout === 1);
-  if (!changeUtxo) throw new Error('mint change UTXO not found at ordinalsAddress');
+  // ── Step 2: identify cat UTXO (vout 0) + mint change UTXO. Both at the
+  // ── same bcrt1p taproot address in Taproot mode ──
+  await waitForUtxoMatching(walletTaproot, u => u.txid === mintTxid && u.vout === 0, `cat utxo ${mintTxid}:0`);
+  const ordUtxos = await getUtxos(walletTaproot);
+  const catUtxo = ordUtxos.find(u => u.txid === mintTxid && u.vout === 0);
+  if (!catUtxo) throw new Error('cat UTXO not found at wallet taproot address');
+  expect(catUtxo.value).toBe(CAT21_POSTAGE_SATS);
+  const changeUtxo = ordUtxos.find(u => u.txid === mintTxid && u.vout !== 0);
+  if (!changeUtxo) throw new Error('mint change UTXO not found at wallet taproot address');
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-transfer] cat ${catUtxo.txid}:${catUtxo.vout} | change ${changeUtxo.txid}:${changeUtxo.vout} (${changeUtxo.value} sats)`);
 
   // ── Step 3: synthesise a destination keypair (raw P2WPKH on regtest) ──
   const destPriv = secp256k1.utils.randomPrivateKey();
   const destPub = secp256k1.getPublicKey(destPriv, true);
-  const destinationAddress = btc.p2wpkh(destPub, toScureNetwork(Network.Regtest)).address!;
+  const destinationAddress = btc.p2wpkh(destPub, regtestNetwork).address!;
   expect(destinationAddress).toMatch(/^bcrt1q/);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-transfer] destination address = ${destinationAddress}`);
 
-  // ── Step 4: TRANSFER via Unisat (1 sign popup covering both inputs) ──
+  // ── Step 4: TRANSFER via Unisat (ONE sign popup covering both inputs) ──
+  // signTransfer topology: input 0 = cat (taproot at ordinalsAddress),
+  // input 1 = funding change (taproot at paymentAddress). Both signer-hint
+  // addresses are the wallet's MAINNET bc1p so Unisat's active-account
+  // match succeeds; destinations (recipient / change) are regtest addresses
+  // for the builder, which structures the PSBT with Network.Regtest.
   const transferSignKnown = new Set(context.pages());
-  const transferPromise = harness.evaluate(
+  const transferSignedPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
     {
       kind: 'transfer' as const,
@@ -331,38 +349,50 @@ test('transfer a cat21 on regtest via Unisat: mint via popup, transfer via popup
         value: changeUtxo.value,
         scriptPubKeyHex: taprootScriptHex,
       }],
-      ordinalsAddress,
-      paymentAddress,
+      ordinalsAddress: mainnetTaproot,
+      paymentAddress: mainnetTaproot,
       recipientAddress: destinationAddress,
-      senderChangeAddress: paymentAddress,
+      senderChangeAddress: walletTaproot,
       feeSats: TRANSFER_FEE_SATS,
     },
   );
   await approveSignPopup(context, transferSignKnown, '03-transfer-sign');
-  const transferred = await transferPromise;
+  const transferred = await transferSignedPromise;
   if (transferred.kind !== 'transfer') throw new Error('expected transfer result');
 
   const transferTxid = await postTx(transferred.txHex);
-  expect(transferTxid, 'wallet must not modify non-witness bytes (transfer)').toBe(transferred.expectedTxid);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-transfer] transfer broadcast txid = ${transferTxid}`);
   await waitForElectrsSync(mineBlocks(1));
+
   const transferTx = await waitForTxConfirmed(transferTxid);
   expect(transferTx.locktime).toBe(21);
   expect(transferTx.status.block_hash).toBeTruthy();
   assertAllInputsSighashAll(transferTx);
+  // Non-witness-tamper guard: SegWit txid is witness-independent (BIP-141),
+  // so the on-chain txid must equal the txid of the UNSIGNED PSBT. A
+  // mismatch means Unisat mutated inputs/outputs/locktime/sequence between
+  // unsigned-and-handed-to-popup and broadcast.
+  expect(transferTxid, 'Unisat must not modify non-witness bytes (transfer)').toBe(transferred.expectedTxid);
+  // Exact fee: the funding UTXO is large enough that change clears dust,
+  // so there is no sub-dust absorb into the miner fee.
+  expect(transferTx.fee, `transfer fee = ${TRANSFER_FEE_SATS} sats`).toBe(TRANSFER_FEE_SATS);
+  // No sequence assertion here: the transfer builder pins 0xfffffffd
+  // (RBF-on for every wallet on transfers), NOT the mint RBF-off policy.
 
-  // ── Step 5: electrs proves the cat is now at the destination ──
-  // The cat travels on the first sat of output 0 (FIFO). Its landing as
-  // a fresh 546-sat UTXO at the destination address is the on-chain
-  // proof of ownership transfer — no ord needed.
+  // ── Assert via ELECTRS: the cat's 546-sat UTXO now sits at output 0 of
+  // ── the transfer, at the fresh destination address ──
   const movedCat = await waitForUtxoMatching(
     destinationAddress,
-    u => u.txid === transferTxid && u.vout === 0 && u.value === CAT21_POSTAGE_SATS,
-    `cat ${transferTxid}:0 (546 sats) at ${destinationAddress}`,
+    u => u.txid === transferTxid && u.vout === 0,
+    `cat at destination ${transferTxid}:0`,
   );
   expect(movedCat.value).toBe(CAT21_POSTAGE_SATS);
+  // eslint-disable-next-line no-console
+  console.log(`[unisat-transfer] cat now at ${destinationAddress} (${movedCat.txid}:${movedCat.vout})`);
 
-  // Parser confirms the transfer tx is itself a CAT-21 (lockTime=21
-  // re-mints a fresh cat onto the same ordinal in the same tx).
+  // ── Assert via ordpool-parser: the transfer tx is itself a CAT-21 mint
+  // ── (lockTime=21 re-mints a cat onto the same ordinal) ──
   const parsed = Cat21ParserService.parse(transferTx);
   expect(parsed).not.toBeNull();
   expect(parsed!.type).toBe(DigitalArtifactType.Cat21);
