@@ -4006,15 +4006,15 @@ const WALLET_MATRIX = [
         platforms: [WalletPlatform.Desktop, WalletPlatform.Mobile],
         signingMode: 'watch-only',
         capabilities: {
-            [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Adapter },
+            [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
             [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Adapter },
             [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Adapter },
             [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Adapter },
-            [WalletCapability.Inscription]: { support: CapabilitySupport.Adapter },
+            [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
             [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Adapter },
             [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
         },
-        note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing.',
+        note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing. Mint and inscribe are proven on regtest with bitcoin-cli walletprocesspsbt as the external signer (e2e/regtest/psbt-export-*.spec.ts); the other flows share the same export-sign-import path but have no roundtrip yet.',
     },
 ];
 const SUPPORT_RANK = {
