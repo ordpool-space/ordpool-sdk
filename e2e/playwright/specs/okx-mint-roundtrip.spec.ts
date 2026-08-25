@@ -122,7 +122,11 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   }
 
   await shot(approval, '03b-post-modal-dismiss');
-  await approval.getByText('Confirm', { exact: true }).first().click();
+  // OKX renders "Confirm Trade" immediately but keeps the Confirm button
+  // disabled (loading spinner) until its preview finishes loading the tx
+  // amount from OKX's backend — slow on a regtest tx. Wait up to 60s for
+  // the button to enable rather than the 15s action default.
+  await approval.getByText('Confirm', { exact: true }).first().click({ timeout: 60_000 });
 }
 
 test.beforeAll(async () => {

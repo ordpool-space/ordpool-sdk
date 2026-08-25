@@ -140,7 +140,9 @@ async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void>
     await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
   }
   await shot(approval, `${tag}-post-modal-dismiss`);
-  await approval.getByText('Confirm', { exact: true }).first().click();
+  // OKX keeps Confirm disabled (spinner) until its preview finishes loading
+  // the tx amount from its backend — slow on a regtest tx. Wait up to 60s.
+  await approval.getByText('Confirm', { exact: true }).first().click({ timeout: 60_000 });
 }
 
 test.beforeAll(async () => {
