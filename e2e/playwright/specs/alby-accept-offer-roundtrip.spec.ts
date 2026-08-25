@@ -204,7 +204,7 @@ test.afterAll(async () => {
 // buyer input. Alby transfer (all inputs Alby-owned Taproot) is proven;
 // only multi-party offers are blocked, wallet-side. Un-fixme only if Alby
 // adds per-input selection to signPsbt.
-test.fixme('accept a CAT-21 buy offer on regtest via Alby (seller): mint, buyer builds + signs input 1, Alby signs input 0', async () => {
+test('accept a CAT-21 buy offer on regtest via Alby (seller): mint, buyer builds + signs input 1, Alby signs input 0', async () => {
   test.setTimeout(300_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
@@ -343,6 +343,11 @@ test.fixme('accept a CAT-21 buy offer on regtest via Alby (seller): mint, buyer 
   //    unsigned-tx bytes (and thus the txid) are unchanged. ──
   const sellerReady = btc.Transaction.fromPSBT(buyerSignedPsbtBytes);
   sellerReady.updateInput(0, { tapInternalKey: albyXOnly }, true);
+  // EMPIRICAL: finalize the buyer's foreign input 1 (from its SIGHASH_ALL
+  // partialSig) BEFORE Alby signs, to test whether Alby's forEach-signTaproot
+  // signPsbt skips an already-finalized input and signs only input 0 (the
+  // cat), instead of trying to Taproot-sign the buyer's finalized P2WPKH.
+  sellerReady.finalizeIdx(1);
   const sellerReadyPsbtBytes = sellerReady.toPSBT();
 
   // ── Alby (seller) signs input 0, finalizes, returns wire tx ──
