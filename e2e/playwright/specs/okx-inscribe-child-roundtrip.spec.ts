@@ -31,12 +31,11 @@ import { onboardOkx } from '../onboard-okx';
  * commit and reveal-parent signs completing and a valid child inscription
  * (ordpool-parser confirms the parent link).
  *
- * The wrinkle is stability, not capability: the OKX extension crashes the
- * browser context ("guid not bound" / "context closed") ~2/3 of the time on
- * EITHER child sign during this 3-sign flow (parent-commit, child-commit,
- * child-reveal). The reveal-gate + leftover-page cleanup (step 2) reduce but
- * do not eliminate it, so the test is fixmed (see its note) while the operation
- * stays proven.
+ * OKX is bimodal at every interaction (popup that must be approved, or
+ * silent completion for the connected dApp), so every popup wait in this
+ * spec runs concurrently with its operation promise and exits on a
+ * done-flag; leftover OKX pages are cleared after every sign. See the note
+ * above the test for the full interaction model.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
@@ -80,17 +79,31 @@ function xOnlyHex(pubHex: string): string {
 
 const SIGN_HEADING = /Signature request|Confirm Trade|Asset transfer pending/i;
 
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText('Connect account').first().waitFor({ state: 'visible', timeout: 60_000 });
-      return true;
-    },
-  });
-  await approval.getByRole('button', { name: /^connect$/i }).first().click();
+/**
+ * Approve the OKX "Connect account" popup, tolerating both of OKX's modes:
+ * an already-approved dApp auto-connects (the popup flashes shut or never
+ * opens — `done` flips and we return), and a fresh dApp shows the popup
+ * (we click Connect, swallowing the close-race if OKX dismisses it mid-click).
+ */
+async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, done: () => boolean): Promise<void> {
+  const approval = await Promise.race([
+    waitForApprovalPopup({
+      context: ctx,
+      knownPages,
+      isApproval: async (p) => {
+        if (!p.url().startsWith('chrome-extension://')) return false;
+        await p.getByText('Connect account').first().waitFor({ state: 'visible', timeout: 60_000 });
+        return true;
+      },
+    }),
+    (async () => {
+      while (!done()) await new Promise(r => setTimeout(r, 250));
+      return null;
+    })(),
+  ]);
+  if (!approval) return; // auto-connected, no popup to approve
+  await approval.getByRole('button', { name: /^connect$/i }).first().click()
+    .catch(() => undefined); // popup closed as OKX auto-approved: fine
 }
 
 /**
@@ -196,20 +209,17 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme (OKX extension instability, NOT an OKX-can't-sign limit): the OKX
-// child OPERATION is proven correct (run 32874847932 / 5f61bce: the [child]
-// logs show both the commit and reveal-parent signs complete and produce a
-// valid child inscription). But the e2e is flaky ~2/3: the OKX extension
-// crashes the browser context ("Object with guid ... was not bound" / "Target
-// page, context or browser has been closed") on EITHER child sign,
-// non-deterministically, during this 3-sign flow (parent-commit, child-commit,
-// child-reveal). The reveal-gate + leftover-page cleanup below (step 2) was
-// tried and did NOT cure it: on run 32885320185 the crash moved to the
-// child-commit sign, which never even reached commit-signed. This is an
-// extension-level browser teardown, not a timing race a settle can fix; the
-// SDK signer no longer throws (the op works). Re-fixmed with fresh evidence;
-// the gate is kept as a partial mitigation.
-test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+// OKX is bimodal at every interaction: it either shows an approval popup
+// (connect / sign) that MUST be clicked, or completes silently for the
+// connected dApp. Each popup wait therefore runs CONCURRENTLY with the
+// operation promise and exits on a done-flag; awaiting the operation before
+// approving deadlocks the popup mode, and strictly awaiting a popup times out
+// in the silent mode. Leftover OKX pages are cleared after every sign (the
+// same hygiene the stable okx-transfer spec uses), and the reveal gate
+// sequences the child's two signs. The operation itself is proven: both signs
+// complete and produce a valid child inscription (ordpool-parser confirms the
+// parent link).
+test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();
@@ -225,8 +235,10 @@ test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot rev
   );
 
   const connectKnownPages = new Set(context.pages());
-  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
-  await approveConnectPopup(context, connectKnownPages);
+  let connectDone = false;
+  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx())
+    .then((r) => { connectDone = true; return r; });
+  await approveConnectPopup(context, connectKnownPages, () => connectDone);
   const walletMainnet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
 
@@ -254,9 +266,19 @@ test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot rev
       feeRatePerVbyte: 5,
     },
   );
-  await approveSignPopup(context, '01-parent-commit-sign');
-  const parent = await parentPromise;
+  // OKX either shows a sign popup (approve it) or signs silently for the
+  // connected dApp (parentDone flips and the popup wait exits) — handle both.
+  let parentDone = false;
+  const settledParent = parentPromise.then(
+    (v) => { parentDone = true; return v; },
+    (e) => { parentDone = true; throw e; },
+  );
+  await approveSignPopup(context, '01-parent-commit-sign', () => parentDone);
+  const parent = await settledParent;
   if (parent.kind !== 'inscribe') throw new Error('expected inscribe result for parent');
+  // Clear OKX's leftover popup/notification pages before the child's signs
+  // (the stable okx-transfer spec does the same between its two signs).
+  await closeLeftoverExtensionPages(context, connectKnownPages);
 
   const parentCommitTxid = await postTx(parent.commitHex);
   expect(parentCommitTxid).toBe(parent.commitTxid);
@@ -276,20 +298,23 @@ test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot rev
 
   // ── Step 2: inscribe the CHILD (2 popups: commit + reveal parent) ──
   const childFunding = await fundPaymentAddress(taprootAddress);
-  // Stabilise the two back-to-back child signPsbt calls: OKX's bridge crashes
-  // ~2/3 of the time ("guid not bound" / "context closed") when the reveal
-  // sign fires right after the commit sign. Arm the reveal gate so the harness
-  // pauses between them; it is opened below only after the commit sign has
-  // settled and OKX's leftover notification pages are cleared.
+  // The reveal gate sequences the child's two signs: the harness pauses after
+  // the commit sign and we release the reveal only once the commit has settled
+  // and OKX's leftover pages are cleared, so the reveal fires into an idle
+  // wallet. Popup approval below runs CONCURRENTLY with each sign, because OKX
+  // either shows a sign popup (must be approved for the sign to complete) or
+  // signs silently (the done-flag exits the popup wait) — awaiting the sign
+  // BEFORE approving would deadlock the popup mode.
   await harness.evaluate(() => {
     let open!: () => void;
     const gate = new Promise<void>((resolve) => { open = resolve; });
     (window as unknown as { __ordpoolRevealGate?: { wait: () => Promise<void>; open: () => void } }).__ordpoolRevealGate = { wait: () => gate, open };
   });
+  let commitSignedFlag = false;
   const commitSigned = harness.waitForEvent('console', {
     predicate: (m) => m.text().includes('[child] commit-signed'),
     timeout: 120_000,
-  }).catch(() => undefined);
+  }).then(() => { commitSignedFlag = true; }).catch(() => undefined);
   const childPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
     {
@@ -313,9 +338,8 @@ test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot rev
       parentReturnAddress: taprootAddress,
     },
   );
-  // OKX auto-approves signPsbt for the connected dapp without a persistent
-  // interactive popup on this version, so drive completion from the operation
-  // promise and treat popup approval as best-effort (approve one if it shows).
+  // Track completion so the concurrent popup waits can exit in OKX's
+  // silent-sign mode (see the interaction-model note above the test).
   let childDone = false;
   const settledChild = childPromise.then(
     (v) => { childDone = true; return v; },
@@ -326,14 +350,17 @@ test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot rev
       throw e;
     },
   );
-  // Commit sign done → clear OKX's leftover popup/notification pages (settle +
-  // remove anything mid-crash), then release the reveal sign into an idle OKX.
-  await commitSigned;
+  // Approve the commit popup concurrently with the sign (exits when OKX
+  // auto-signed instead), then wait for the commit sign to settle. Racing
+  // settledChild covers an early rejection (build error) so we don't sit out
+  // the commitSigned timeout.
+  await approveSignPopup(context, '02-child-commit-sign', () => commitSignedFlag || childDone);
+  await Promise.race([commitSigned, settledChild.then(() => undefined, () => undefined)]);
+  // Commit sign settled → clear leftover pages, release the reveal, approve
+  // its popup (if OKX shows one).
   await closeLeftoverExtensionPages(context, [harness]);
   await harness.evaluate(() =>
     (window as unknown as { __ordpoolRevealGate?: { open: () => void } }).__ordpoolRevealGate?.open());
-
-  await approveSignPopup(context, '02-child-commit-sign', () => childDone);
   await approveSignPopup(context, '03-child-reveal-parent-sign', () => childDone);
   const child = await settledChild;
   if (child.kind !== 'inscribe-child') throw new Error('expected inscribe-child result');
