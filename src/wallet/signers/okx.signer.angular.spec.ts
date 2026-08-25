@@ -7,7 +7,12 @@ import { Network } from '../../network';
 jest.mock('../psbt-extract', () => ({
   broadcastSignedPsbt: jest.fn(() => of({ txId: 'TXID-FROM-BROADCAST' })),
 }));
+jest.mock('./child-reveal-finalize.helper', () => {
+  const actual = jest.requireActual('./child-reveal-finalize.helper') as Record<string, unknown>;
+  return { ...actual, mergeParentSigAndBroadcast: jest.fn() };
+});
 import { broadcastSignedPsbt } from '../psbt-extract';
+import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
 
 import { okxSigner } from './okx.signer';
 
@@ -90,24 +95,52 @@ describe('okxSigner.signSingleFundingInput', () => {
 });
 
 describe('okxSigner.signChildRevealParentInputs', () => {
-  // OKX cannot sign the ord parent/child reveal: its signPsbt preview
-  // matches inputs by wallet-address, and the reveal's envelope-tweaked
-  // commit input is never an OKX address, so the real wallet hangs. The
-  // adapter fails fast with an actionable message instead. This pins OUR
-  // adapter behaviour (no wallet involved) — the wallet-side proof is the
-  // fixmed e2e in okx-inscribe-child-roundtrip.spec.ts.
-  it('rejects with an actionable "not supported on OKX" error, naming the working operations', async () => {
-    const result$ = okxSigner.signChildRevealParentInputs({
-      psbtBytes: new Uint8Array(8),
-      finalizePsbtBytes: new Uint8Array(8),
+  // OKX signs the child reveal via the shared default: it is handed the
+  // BARE PSBT (input 1 stripped of the ord envelope leaf, so a plain
+  // witnessUtxo) and signs ONLY input 0 at the ordinals address via
+  // signPsbt; the SDK merges that signature into the full PSBT. Same shape
+  // as the offer flows. Wallet-side proof: the regtest e2e in
+  // okx-inscribe-child-roundtrip.spec.ts.
+  let signPsbtMock: jest.Mock;
+  const mergeMock = mergeParentSigAndBroadcast as unknown as jest.Mock;
+
+  beforeEach(() => {
+    signPsbtMock = jest.fn();
+    (window as unknown as { okxwallet: { bitcoin: { signPsbt: jest.Mock } } }).okxwallet = {
+      bitcoin: { signPsbt: signPsbtMock },
+    };
+    mergeMock.mockReset();
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { okxwallet?: unknown }).okxwallet;
+  });
+
+  it('signs ONLY input 0 at the ordinals address on the bare PSBT via signPsbt, then merges into the full PSBT', async () => {
+    const bare = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x0a]);
+    const full = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x0b]);
+    signPsbtMock.mockResolvedValue('70736274ff0a' as never);
+    mergeMock.mockReturnValue(of({ txId: 'CHILD-TXID' }));
+    const broadcast = ((_hex: string) => of('UNUSED')) as never;
+
+    const result = await firstValueFrom(okxSigner.signChildRevealParentInputs({
+      psbtBytes: bare,
+      finalizePsbtBytes: full,
       ordinalsAddress: 'bc1pordinals',
       ordinalsPublicKey: '02'.padEnd(66, '0'),
       network: Network.Mainnet,
-      broadcast: () => of('UNUSED'),
-    });
+      broadcast,
+    }));
 
-    await expect(firstValueFrom(result$)).rejects.toThrow(
-      /OKX does not support collection .*Mint, transfer, and offer work on OKX/s,
-    );
+    expect(signPsbtMock).toHaveBeenCalledTimes(1);
+    const [psbtArg, opts] = signPsbtMock.mock.calls[0] as [string, { autoFinalized: boolean; toSignInputs: { index: number; address?: string }[] }];
+    expect(psbtArg).toBe(hex.encode(bare));
+    expect(opts.autoFinalized).toBe(false);
+    expect(opts.toSignInputs).toEqual([expect.objectContaining({ index: 0, address: 'bc1pordinals' })]);
+
+    // The signed bare-PSBT bytes are merged into the FULL reveal PSBT.
+    expect(mergeMock).toHaveBeenCalledTimes(1);
+    expect(mergeMock).toHaveBeenCalledWith(hex.decode('70736274ff0a'), full, broadcast);
+    expect(result).toEqual({ txId: 'CHILD-TXID' });
   });
 });

@@ -194,7 +194,7 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();

@@ -1,5 +1,5 @@
 import { hex } from '@scure/base';
-import { from, map, Observable, switchMap, throwError } from 'rxjs';
+import { from, map, Observable, switchMap } from 'rxjs';
 
 import { walletSidePaymentAddress } from '../network-address-shim';
 import { broadcastSignedPsbt } from '../psbt-extract';
@@ -7,7 +7,6 @@ import { BIP341_KEYPATH_SIGHASHES, keypathSighashWhitelist } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
-  SignChildRevealParentInputsArgs,
   SignMessageArgs,
   SignMessageResult,
   SignMultiInputAndBroadcastInput,
@@ -139,22 +138,11 @@ export const okxSigner: WalletSigner = {
     );
   },
 
-  // OKX cannot sign the ord parent/child reveal. Its closed signPsbt
-  // preview renders every input by matching scriptPubKey to a wallet
-  // address; the reveal's commit input is a script-path spend of the ord
-  // envelope leaf, whose output key is the internal key TWEAKED by the
-  // envelope tree, so it is never an OKX address and the preview hangs.
-  // That input's scriptPubKey cannot be omitted either: the parent input's
-  // taproot SIGHASH_ALL signature commits to every input's scriptPubKey
-  // (BIP-341), so OKX needs it in the PSBT to sign the parent at all. No
-  // signPsbt option reaches past the preview (verified against v4.1.0).
-  // Fail fast with an actionable message instead of hanging. Mint,
-  // transfer, offer, and plain inscribe all work on OKX; only collection
-  // (parent/child) inscribing is blocked, wallet-side.
-  signChildRevealParentInputs: (_input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> =>
-    throwError(() => new Error(
-      'OKX does not support collection (parent/child) inscriptions: its signPsbt ' +
-      'preview cannot render the reveal\'s script-path commit input. Mint, transfer, ' +
-      'and offer work on OKX; use a different wallet for parent/child inscriptions.',
-    )),
+  // signChildRevealParentInputs falls through to operationNamedDefaults:
+  // the wallet is handed the BARE reveal PSBT (input 1 stripped of the ord
+  // envelope tap-leaf, so it is a plain witnessUtxo, not a script-path
+  // spend) and signs ONLY input 0 (the parent, at the ordinals address) via
+  // signPsbtOnly; the SDK merges that signature into the full PSBT. Same
+  // path Unisat/Wizz use, and the same "sign my input, leave the foreign
+  // one" shape as the offer flows that pass on OKX.
 };
