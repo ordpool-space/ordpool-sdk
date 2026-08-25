@@ -17,7 +17,7 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { waitForApprovalPopup } from '../approval-popup';
 
 /**
  * Xverse PARENT/CHILD inscribe roundtrip on regtest — proof that the real
@@ -251,14 +251,20 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
 
   // ── Step 2: inscribe the CHILD (2 popups: commit + reveal parent) ──
   const childFunding = await fundPaymentAddress(paymentAddress);
-  // Xverse leaves a dashboard tab open after the connect / parent-step
-  // approvals. The child fires TWO sign popups sharing one knownPages
-  // snapshot; if Xverse renders the second (reveal) sign UI in that stale
-  // tab — it sometimes reuses one — and the tab is in the snapshot below,
-  // waitForApprovalPopup filters it out and times out ("approval popup did
-  // not appear"). Close leftover extension tabs first (no sign is in
-  // flight here) so every child popup opens as a fresh, detectable page.
-  await closeLeftoverExtensionPages(context, [primer, harness]);
+  // Arm a gate the harness awaits BETWEEN the commit sign and the reveal
+  // sign. Xverse's modern signPsbt request (the reveal) hangs — no popup,
+  // request never resolves — if it is issued while the preceding commit
+  // popup is still closing. The harness blocks on this gate after the
+  // commit sign; we open it below only once we have approved AND closed
+  // the commit popup, so the reveal request always fires into an idle
+  // wallet. (Only this spec arms the gate; other wallets' child specs
+  // leave it unset and the harness proceeds without waiting.)
+  await harness.evaluate(() => {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    (window as unknown as { __ordpoolRevealGate?: { wait: () => Promise<void>; open: () => void } })
+      .__ordpoolRevealGate = { wait: () => gate, open };
+  });
   const childSignKnown = new Set(context.pages());
   const childPromise = harness.evaluate((args) => window.ordpoolSdkHarness.runOperation(args), {
     kind: 'inscribe-child' as const,
@@ -281,6 +287,10 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
     parentReturnAddress: ordinalsAddress,
   });
   await approveXverseSignPopup(context, childSignKnown, '02-child-commit-sign');
+  // Commit popup approved + closed → release the harness to fire the reveal
+  // signPsbt request into an idle wallet (see the gate rationale above).
+  await harness.evaluate(() =>
+    (window as unknown as { __ordpoolRevealGate?: { open: () => void } }).__ordpoolRevealGate?.open());
   await approveXverseSignPopup(context, childSignKnown, '03-child-reveal-parent-sign');
   const child = await childPromise;
   if (child.kind !== 'inscribe-child') throw new Error('expected inscribe-child result');

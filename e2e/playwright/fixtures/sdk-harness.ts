@@ -1196,6 +1196,17 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
       throw new Error('runOperation(inscribe-child): commit signer never invoked the broadcast callback');
     }
 
+    // Optional reveal gate: a spec may require the commit popup to be fully
+    // closed before the reveal sign fires. Xverse's modern signPsbt request
+    // hangs (no popup, never resolves) if issued while a prior sign popup is
+    // still closing; the spec arms __ordpoolRevealGate and opens it once it
+    // has approved + closed the commit popup. Specs that don't arm it
+    // proceed immediately (unchanged for the other wallets' child specs).
+    const revealGate = (window as unknown as { __ordpoolRevealGate?: { wait: () => Promise<void> } }).__ordpoolRevealGate;
+    if (revealGate) {
+      await revealGate.wait();
+    }
+
     // 2) reveal — the wallet signs input 0 (parent, P2TR key-path at the
     // ordinals address); input 1 (commit) is already finalized with the
     // ephemeral key. The parent's tapInternalKey is the wallet's MAINNET
