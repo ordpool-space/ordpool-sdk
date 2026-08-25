@@ -4,7 +4,7 @@ import { defer, from, Observable, map, switchMap } from 'rxjs';
 import Wallet, { MessageSigningProtocols, request, signTransaction } from 'sats-connect';
 
 import { toBitcoinNetworkType } from '../../network';
-import { broadcastSignedPsbt } from '../psbt-extract';
+import { broadcastSignedPsbt, extractWireTxFromPsbt } from '../psbt-extract';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -12,7 +12,10 @@ import {
   SignMessageArgs,
   SignMessageResult,
   SignMultiInputAndBroadcastInput,
+  SignOfferAcceptArgs,
+  SignOfferCreatePsbtArgs,
   SignPsbtOnlyInput,
+  SignTransferArgs,
   WalletSigner,
 } from '../wallet.service.types';
 import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
@@ -188,9 +191,44 @@ export const xverseSigner: WalletSigner = {
    * signature is then merged into the full reveal PSBT and broadcast by
    * the shared tail.
    */
-  signChildRevealParentInputs: (input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> =>
+  /**
+   * Transfer, offer-accept, offer-create all route onto modern `signPsbt`
+   * for the same reason as child-reveal: Xverse's legacy `signTransaction`
+   * stalls on a multi-input PSBT (and hard-hangs when an input is foreign,
+   * as both offer PSBTs carry — the seller's unsigned cat input on create,
+   * the buyer's pre-signed funding input on accept). Bare `request(
+   * 'signPsbt', { signInputs })` signs only the listed indexes and leaves
+   * the rest untouched — the marketplace pattern. `signInputs` addresses
+   * are the wallet's active-network (regtest in the e2e seed) addresses,
+   * matching the child-reveal override.
+   */
+  signTransfer: (input: SignTransferArgs): Observable<{ txId: string }> => {
+    const paymentIndexes = Array.from({ length: input.fundingInputCount }, (_, i) => i + 1);
+    return callXverseSignPsbtModern(input.psbtBytes, {
+      [input.ordinalsAddress]: [0],
+      [input.paymentAddress]: paymentIndexes,
+    }).pipe(
+      switchMap((signedPsbt) => input.broadcast(extractWireTxFromPsbt(signedPsbt)).pipe(
+        map((txId) => ({ txId })),
+      )),
+    );
+  },
+
+  signOfferAccept: (input: SignOfferAcceptArgs): Observable<{ txId: string }> =>
+    // Xverse signs ONLY input 0 (its cat, P2TR key-path); input 1 (buyer)
+    // is already signed, so the returned PSBT is complete — finalize both
+    // and broadcast the wire tx.
     callXverseSignPsbtModern(input.psbtBytes, { [input.ordinalsAddress]: [0] }).pipe(
-      switchMap((signedWalletFacing) =>
-        mergeParentSigAndBroadcast(signedWalletFacing, input.finalizePsbtBytes, input.broadcast)),
+      switchMap((signedPsbt) => input.broadcast(extractWireTxFromPsbt(signedPsbt)).pipe(
+        map((txId) => ({ txId })),
+      )),
     ),
+
+  signOfferCreatePsbt: (input: SignOfferCreatePsbtArgs): Observable<Uint8Array> => {
+    // Xverse (buyer) signs ONLY its funding inputs 1..N; input 0 (the
+    // seller's cat) stays unsigned for the seller to sign later. Return the
+    // partial PSBT bytes; no broadcast on this path.
+    const paymentIndexes = Array.from({ length: input.fundingInputCount }, (_, i) => i + 1);
+    return callXverseSignPsbtModern(input.psbtBytes, { [input.paymentAddress]: paymentIndexes });
+  },
 };
