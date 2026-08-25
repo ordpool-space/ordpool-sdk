@@ -34,9 +34,8 @@ import {
 } from './wallet.service.types';
 
 
-// Re-exports for backwards compatibility — these used to live here
-// before the pure-logic extraction. Consumers still import them from
-// this module.
+// Re-exports kept for backward compatibility: consumers import these from
+// this module, though the implementations live in wallet.service.helper.
 export { leatherOrdinalsAddressType, leatherPaymentAddressType } from './wallet.service.helper';
 
 export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';

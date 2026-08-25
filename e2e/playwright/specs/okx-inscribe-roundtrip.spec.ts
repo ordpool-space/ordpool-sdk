@@ -84,8 +84,9 @@ async function approveSignPopup(ctx: BrowserContext): Promise<void> {
     await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
   }
 
-  // OKX keeps Confirm disabled (spinner) until its preview finishes loading
-  // the tx amount from its backend — slow on a regtest tx. Wait up to 60s.
+  // Fallback for the rare case OKX shows an interactive sign popup: wait for
+  // Confirm to become actionable, then click. OKX usually auto-signs for the
+  // connected dApp, so this is seldom reached.
   await approval.getByText('Confirm', { exact: true }).first().click({ timeout: 60_000 });
 }
 
@@ -129,12 +130,10 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme (OKX-side environmental, NOT an SDK defect): OKX's sign popup keeps
-// Confirm disabled (loading spinner) because its preview can't load the tx
-// amount for a regtest tx from OKX's backend — Confirm never enables. Same
-// stuck state as okx-mint (screenshot: CI run 32797046889; 60s wait did not
-// help); hits the unchanged okx-inscribe (green in ede4991), so not a code
-// regression. Un-fixme when OKX's preview enables Confirm for regtest txs.
+// OKX signs the commit for the connected dApp via signPsbt (the SDK shims the
+// regtest input to OKX's mainnet address); it resolves without an interactive
+// Confirm on this version. The reveal is ephemeral-key-signed, so this is a
+// single OKX sign. The old "Confirm never enables for regtest" note was wrong.
 test('inscribe an artifact on regtest via OKX: build commit+reveal in SDK, sign commit in popup (BIP-86 Taproot, regtest PSBT), broadcast both via local electrs', async () => {
   test.setTimeout(360_000);
 

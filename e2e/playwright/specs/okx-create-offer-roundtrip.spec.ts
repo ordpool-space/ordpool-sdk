@@ -176,15 +176,11 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme: OKX cannot sign this — the same wallet-side limitation as the child
-// reveal. A buy-offer PSBT always carries a FOREIGN input (here the seller's
-// unsigned cat input at index 0), and OKX's closed signPsbt preview cannot
-// render a PSBT that contains a not-owned input (proven for the child reveal:
-// signPsbt hangs with no popup). OKX transfer/mint/inscribe — every input
-// OKX-owned — work; only PSBTs with a foreign input are blocked, wallet-side.
-// (A hanging signPsbt also poisons the shared OKX shard, so fixme-ing this
-// keeps the shard's mint/inscribe/transfer specs green.) Un-fixme only if
-// OKX's preview learns to render a not-owned input.
+// OKX (buyer) signs ONLY its funding input 1 and leaves the seller's unsigned
+// cat input 0 (foreign) untouched, the marketplace "sign my input" pattern.
+// OKX handles the foreign input fine: the SDK shims the regtest input to OKX's
+// mainnet address and scopes signPsbt to the wallet's own input via
+// toSignInputs. The "OKX cannot render a not-owned input" note was wrong.
 test('build + sign a CAT-21 buy-offer on regtest via OKX (buyer): seller raw-key mints, OKX signs input 1, seller signs input 0, assert via electrs', async () => {
   test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);

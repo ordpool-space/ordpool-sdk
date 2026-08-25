@@ -141,8 +141,9 @@ async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void>
     await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
   }
   await shot(approval, `${tag}-post-modal-dismiss`);
-  // OKX keeps Confirm disabled (spinner) until its preview finishes loading
-  // the tx amount from its backend — slow on a regtest tx. Wait up to 60s.
+  // Fallback for the rare case OKX shows an interactive sign popup: wait for
+  // Confirm to become actionable, then click. OKX usually auto-signs for the
+  // connected dApp, so this is seldom reached.
   await approval.getByText('Confirm', { exact: true }).first().click({ timeout: 60_000 });
 }
 
@@ -186,13 +187,10 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme (OKX-side environmental, NOT an SDK defect): blocked at the very
-// first (mint) sign popup by the same stuck OKX preview as okx-mint — Confirm
-// never enables for a regtest tx (screenshot: CI run 32797046889; 60s wait
-// did not help). The transfer PSBT itself is OKX-signable (both inputs
-// OKX-owned, no foreign input, unlike the offers); it cannot be exercised
-// while OKX's sign popup can't confirm any regtest tx. Un-fixme with the
-// other OKX signing specs when OKX's preview enables Confirm again.
+// OKX signs both the mint and the transfer via signPsbt for the connected
+// dApp (both inputs OKX-owned; the SDK shims to OKX's mainnet address).
+// Signing resolves without an interactive Confirm on this version. The old
+// "Confirm never enables for regtest" note was wrong.
 test('transfer a cat21 on regtest via OKX: mint via popup, transfer via popup (toSignInputs [0,1]), broadcast, assert via electrs', async () => {
   test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
