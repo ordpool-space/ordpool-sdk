@@ -190,3 +190,60 @@ describe('xverseSigner.signChildRevealParentInputs', () => {
     expect(result).toEqual({ txId: 'CHILD-REVEAL-TXID' });
   });
 });
+
+describe('xverseSigner.signTransfer', () => {
+  const requestMock = request as unknown as jest.Mock;
+
+  beforeEach(() => { requestMock.mockReset(); });
+
+  it('routes transfer onto modern signPsbt (not legacy signTransaction): input 0 at the ordinals address + funding inputs 1..N at the payment address, sign-only, then broadcasts the extracted wire tx', async () => {
+    requestMock.mockResolvedValue({ status: 'success', result: { psbt: 'c2lnbmVk' } } as never);
+    const bytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x10]);
+    const broadcast = jest.fn((_hex: string) => of('TRANSFER-TXID'));
+
+    const result = await firstValueFrom(xverseSigner.signTransfer({
+      psbtBytes: bytes,
+      ordinalsAddress: 'bcrt1pord',
+      paymentAddress: 'bcrt1qpay',
+      fundingInputCount: 2,
+      network: Network.Regtest,
+      broadcast: broadcast as never,
+    }));
+
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(requestMock.mock.calls[0][0]).toBe('signPsbt');
+    const payload = requestMock.mock.calls[0][1] as { psbt: string; signInputs: Record<string, number[]>; broadcast: boolean };
+    expect(payload.psbt).toBe(base64.encode(bytes));
+    expect(payload.signInputs).toEqual({ 'bcrt1pord': [0], 'bcrt1qpay': [1, 2] });
+    expect(payload.broadcast).toBe(false);
+    // WE-broadcast convention: the extracted wire tx (mocked '00') goes to the caller's callback.
+    expect(broadcast).toHaveBeenCalledWith('00');
+    expect(result).toEqual({ txId: 'TRANSFER-TXID' });
+  });
+});
+
+describe('xverseSigner.signOfferCreatePsbt', () => {
+  const requestMock = request as unknown as jest.Mock;
+
+  beforeEach(() => { requestMock.mockReset(); });
+
+  it('routes offer-create onto modern signPsbt (not legacy signTransaction): buyer signs ONLY funding inputs 1..N at the payment address (input 0 = seller cat untouched), returns partial-sig bytes, no broadcast', async () => {
+    requestMock.mockResolvedValue({ status: 'success', result: { psbt: 'c2lnbmVk' } } as never); // base64("signed")
+    const bytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x20]);
+
+    const signed = await firstValueFrom(xverseSigner.signOfferCreatePsbt({
+      psbtBytes: bytes,
+      paymentAddress: 'bcrt1qpay',
+      fundingInputCount: 1,
+      network: Network.Regtest,
+    }));
+
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(requestMock.mock.calls[0][0]).toBe('signPsbt');
+    const payload = requestMock.mock.calls[0][1] as { psbt: string; signInputs: Record<string, number[]>; broadcast: boolean };
+    expect(payload.signInputs).toEqual({ 'bcrt1qpay': [1] });
+    expect(payload.broadcast).toBe(false);
+    // Returns the signed partial PSBT bytes verbatim (no broadcast on this path).
+    expect(signed).toEqual(base64.decode('c2lnbmVk'));
+  });
+});
