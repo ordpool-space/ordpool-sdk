@@ -20,29 +20,21 @@ import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-p
 import { onboardOkx } from '../onboard-okx';
 
 /**
- * OKX PARENT/CHILD inscribe on regtest — fixmed: OKX cannot sign the
- * child reveal, wallet-side.
+ * OKX PARENT/CHILD inscribe on regtest.
  *
- * The reveal spends the parent (input 0, an OKX key-path input) AND the
- * ord envelope commit (input 1, a script-path spend). OKX's closed
- * signPsbt preview renders every input by matching its scriptPubKey to a
- * wallet address; input 1's output key is OKX's internal key TWEAKED by
- * the envelope tree, so it is never an OKX address and the preview hangs
- * with no popup and no error. That scriptPubKey cannot be omitted either:
- * the parent input's taproot SIGHASH_ALL signature commits to every
- * input's scriptPubKey (BIP-341), so OKX needs it in the PSBT to sign the
- * parent at all. Four PSBT variants (bare wallet-facing, tapInternalKey-
- * attached, input-1 finalized, OKX-owned-commit real key) all hang
- * identically; verified against v4.1.0. No signPsbt option reaches past
- * the preview.
+ * The reveal spends the parent (input 0, an OKX key-path Taproot input) plus
+ * the ord envelope commit (input 1). OKX is handed the BARE reveal PSBT (input
+ * 1 stripped of the envelope tap-leaf, so a plain witnessUtxo) and signs ONLY
+ * input 0 at the ordinals address via signPsbt; the SDK merges that signature
+ * into the full PSBT. Same "sign my input, leave the foreign one" shape as the
+ * offer flows, and it works on OKX v4.1.0: the [child] logs show both the
+ * commit and reveal-parent signs completing and a valid child inscription
+ * (ordpool-parser confirms the parent link).
  *
- * The SDK builds a CORRECT reveal: the byte-identical PSBT is signed by
- * cat21wallet, Leather, Xverse, Unisat, and Wizz (all green). The block is
- * entirely inside OKX, so `okxSigner.signChildRevealParentInputs` fails
- * fast with an actionable error (pinned in okx.signer.angular.spec.ts)
- * rather than hanging. OKX stays fully green for mint, transfer, offer,
- * and plain inscribe. Un-fixme only if OKX changes its preview to sign a
- * script-path input named by publicKey.
+ * The one wrinkle is stability, not capability: OKX's bridge crashes ("guid
+ * not bound" / "context closed") when the commit and reveal signPsbt calls
+ * fire back-to-back, so the reveal is gated behind the commit sign settling
+ * plus a leftover-page cleanup (step 2).
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
@@ -202,18 +194,13 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// fixme (e2e flake, NOT an OKX-can't-sign limit): the OKX child OPERATION is
-// proven correct — on run 32874847932 the harness [child] logs show both the
-// commit sign and the reveal-parent sign complete and produce a valid child
-// inscription (ordpool-parser confirms the parent link). But the e2e is flaky
-// ~2/3: it passed on 5f61bce and failed on 15cbe1f and e28c6f5, all with the
-// same OKX-extension crash on the two back-to-back signPsbt calls ("Object
-// with guid ... was not bound in the connection" / "Target page, context or
-// browser has been closed"). retries=2 does not cover a ~2/3 rate. The SDK
-// signer no longer throws (the op works); this e2e is fixmed until the
-// dual-sign flow is stabilised (a settle/gate between the two signs, or
-// splitting the op so the commit confirms before the reveal signs).
-test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
+// The OKX child fires two signPsbt calls (commit, then reveal-parent). OKX's
+// bridge crashes ("guid not bound" / "context closed") when they fire
+// back-to-back, so the reveal is gated behind the commit sign settling plus a
+// leftover-page cleanup (see step 2). The operation itself is proven: both
+// signs complete and produce a valid child inscription (ordpool-parser
+// confirms the parent link).
+test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
   test.setTimeout(600_000);
 
   const harness = await context.newPage();
@@ -280,6 +267,20 @@ test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot rev
 
   // ── Step 2: inscribe the CHILD (2 popups: commit + reveal parent) ──
   const childFunding = await fundPaymentAddress(taprootAddress);
+  // Stabilise the two back-to-back child signPsbt calls: OKX's bridge crashes
+  // ~2/3 of the time ("guid not bound" / "context closed") when the reveal
+  // sign fires right after the commit sign. Arm the reveal gate so the harness
+  // pauses between them; it is opened below only after the commit sign has
+  // settled and OKX's leftover notification pages are cleared.
+  await harness.evaluate(() => {
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    (window as unknown as { __ordpoolRevealGate?: { wait: () => Promise<void>; open: () => void } }).__ordpoolRevealGate = { wait: () => gate, open };
+  });
+  const commitSigned = harness.waitForEvent('console', {
+    predicate: (m) => m.text().includes('[child] commit-signed'),
+    timeout: 120_000,
+  }).catch(() => undefined);
   const childPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
     {
@@ -316,6 +317,13 @@ test.fixme('inscribe a parent then a child via OKX: wallet signs the Taproot rev
       throw e;
     },
   );
+  // Commit sign done → clear OKX's leftover popup/notification pages (settle +
+  // remove anything mid-crash), then release the reveal sign into an idle OKX.
+  await commitSigned;
+  await closeLeftoverExtensionPages(context, [harness]);
+  await harness.evaluate(() =>
+    (window as unknown as { __ordpoolRevealGate?: { open: () => void } }).__ordpoolRevealGate?.open());
+
   await approveSignPopup(context, '02-child-commit-sign', () => childDone);
   await approveSignPopup(context, '03-child-reveal-parent-sign', () => childDone);
   const child = await settledChild;
