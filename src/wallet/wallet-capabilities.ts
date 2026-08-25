@@ -178,10 +178,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
       [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
-      [WalletCapability.InscriptionParentChild]: {
-        support: CapabilitySupport.Proven,
-        caveat: 'Operation proven on regtest (both signs complete, valid child inscription); the child e2e is flaky ~2/3 because the OKX extension crashes the browser context on either sign during the 3-sign child flow, and a reveal-gate + page cleanup did not cure it, so the e2e is fixmed while the op stays proven.',
-      },
+      [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
     },
     note: 'OKX is single-address BIP-86 Taproot. Every cat21 operation (mint, transfer, offer create/accept, inscribe, and parent/child inscribe) is proven on the regtest e2e via the mainnet-address shim: the P2TR script hash is HRP-independent, so OKX signs the regtest input against its mainnet account, and signPsbt resolves for the connected dApp (it auto-approves without an interactive Confirm; the offer/child flows sign only the wallet\'s own input and leave the foreign one). Mobile support is the OKX App\'s built-in dApp browser, compatible with the injected window.okxwallet provider path (Bitcoin included).',
@@ -254,10 +251,10 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
       [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
-      [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing. Mint, inscribe, transfer, and both offer roles (buyer partial-sign, seller accept) are proven on regtest with bitcoin-cli walletprocesspsbt as the external signer (e2e/regtest/psbt-export-*.spec.ts).',
+    note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing. Every operation (mint, inscribe, transfer, both offer roles, parent/child inscribe) is proven on regtest with bitcoin-cli walletprocesspsbt as the external signer (e2e/regtest/psbt-export-*.spec.ts).',
   },
 ];
 

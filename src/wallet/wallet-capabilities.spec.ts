@@ -87,7 +87,7 @@ describe('supportsCapability (platform-aware)', () => {
 });
 
 describe('walletsSupporting', () => {
-  it('parent-child, proven only: cat21wallet, xverse, leather, unisat, wizz, okx', () => {
+  it('parent-child, proven only: cat21wallet, xverse, leather, unisat, wizz, okx, xpub', () => {
     expect(ids(walletsSupporting(WalletCapability.InscriptionParentChild, { minSupport: CapabilitySupport.Proven })))
       .toEqual([
         KnownOrdinalWalletType.cat21wallet,
@@ -95,6 +95,7 @@ describe('walletsSupporting', () => {
         KnownOrdinalWalletType.okx,
         KnownOrdinalWalletType.unisat,
         KnownOrdinalWalletType.wizz,
+        KnownOrdinalWalletType.xpub,
         KnownOrdinalWalletType.xverse,
       ]);
   });
