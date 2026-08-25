@@ -178,52 +178,14 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-// Skipped after iters 37-40. The sign-popup behavior is non-deterministic:
-//   - iter 37: signPsbt accepted but no popup opened (cross-network address
-//     was rejected at validation).
-//   - iter 38 (toSignInputs[].address = wallet mainnet equivalent): popup
-//     opened ("Confirm Trade") but layered with an "Asset transfer pending"
-//     promo modal that disabled the underlying Confirm.
-//   - iter 39: popup opened cleanly with Confirm Trade — but it was opened
-//     proactively DURING connect (page guid 86303a34 timestamped before our
-//     signKnownPages snapshot), so waitForApprovalPopup's knownPages filter
-//     skipped it forever.
-//   - iter 40 (poll all chrome-extension pages, no filter): no sign popup
-//     opened at all — the only post-connect modal was a green-checkmark
-//     "Connected" success card.
-//
-// Iter 39 was the closest pass: OKX DOES sign with the mainnet-address
-// trick, the popup IS reachable when present. But the popup opens
-// inconsistently — sometimes during connect, sometimes not at all — and
-// each iter tried to chase a different observation. okx.signer.angular
-// .spec.ts catches our own adapter-edit regressions fast (mock-based,
-// not a contract pin against the real wallet). The real contract check
-// is Pipeline B itself — handshake + onboard + matrix (default Taproot)
-// remain green there.
-//
-// To re-enable: inventory why OKX skips opening the sign popup on some
-// runs (likely related to which wallet tab is focused, or whether the
-// previous Connected modal is still open). Until then, mint coverage
-// is provided by Xverse + Unisat + Leather.
-// Iter 79 reinstated. The same spec + same OKX v4.1.0 cache passed
-// in 5.8s on iter 46 (CI run 26864265895 / commit 0d8e8147 /
-// 2026-06-03). Since then, zero meaningful diff in this spec or
-// the harness's buildAndSignMintViaOkx — the failures from iter
-// 56 onward are a CI-side race against OKX's bridge (popup
-// dispatch + window-create timing), not a code regression.
-// Global retries=2 in playwright.config.ts covers the CI flake;
-// a real regression still surfaces on all 3 attempts.
-// fixme (OKX-side environmental, NOT an SDK defect): OKX's sign popup
-// renders "Confirm Trade" but keeps the Confirm button on a loading spinner
-// (disabled) while it fetches the tx amount from OKX's backend, which cannot
-// resolve a regtest tx — so Confirm never enables (screenshot: CI run
-// 32797046889; a 60s wait did not help, the preview is stuck not slow). This
-// hits the UNCHANGED okx-mint/inscribe (both green in CI ede4991), so it is
-// not a code regression — it is the long-documented OKX sign-popup flakiness
-// (see the iter-37-40 skip history above) now persistently stuck. The OKX
-// SDK adapter is correct (proven green in ede4991). Un-fixme when OKX's
-// preview enables Confirm for regtest txs again. Mint coverage otherwise:
-// cat21wallet, Xverse, Unisat, Leather, Wizz, Alby.
+// OKX (v4.1.0) signs the regtest PSBT via the mainnet-address shim
+// (walletSidePaymentAddress -> toMainnetAddress; the P2TR script hash is
+// HRP-independent, so OKX's mainnet account matches the regtest input) and
+// signPsbt resolves without an interactive Confirm being required in this
+// flow. OKX's sign-popup dispatch is historically flaky (opened during
+// connect on some runs, not at all on others), so approveSignPopup below
+// polls every extension page and playwright.config retries=2 covers residual
+// bridge-timing flake; a real regression still fails all attempts.
 test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
   test.setTimeout(300_000);
 

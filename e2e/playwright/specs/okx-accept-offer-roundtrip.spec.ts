@@ -182,7 +182,7 @@ test.afterAll(async () => {
 // signPsbt also poisons the shared OKX shard, so fixme-ing this keeps the
 // shard's mint/inscribe/transfer specs green.) Un-fixme only if OKX's preview
 // learns to render a not-owned input.
-test.fixme('accept a CAT-21 buy offer on regtest via OKX (seller): mint, buyer builds PSBT, OKX signs input 0, assert via electrs', async () => {
+test('accept a CAT-21 buy offer on regtest via OKX (seller): mint, buyer builds PSBT, OKX signs input 0, assert via electrs', async () => {
   test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 

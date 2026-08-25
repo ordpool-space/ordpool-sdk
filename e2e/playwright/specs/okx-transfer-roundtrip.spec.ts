@@ -192,7 +192,7 @@ test.afterAll(async () => {
 // OKX-owned, no foreign input, unlike the offers); it cannot be exercised
 // while OKX's sign popup can't confirm any regtest tx. Un-fixme with the
 // other OKX signing specs when OKX's preview enables Confirm again.
-test.fixme('transfer a cat21 on regtest via OKX: mint via popup, transfer via popup (toSignInputs [0,1]), broadcast, assert via electrs', async () => {
+test('transfer a cat21 on regtest via OKX: mint via popup, transfer via popup (toSignInputs [0,1]), broadcast, assert via electrs', async () => {
   test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
