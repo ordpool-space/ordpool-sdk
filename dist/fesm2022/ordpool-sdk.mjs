@@ -3937,7 +3937,7 @@ const WALLET_MATRIX = [
             [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
             [WalletCapability.InscriptionParentChild]: {
                 support: CapabilitySupport.Proven,
-                caveat: 'Operation proven on regtest (both signs complete, valid child inscription); the child e2e is flaky (~2/3) from OKX extension instability on the two back-to-back signPsbt calls and is fixmed pending stabilisation.',
+                caveat: 'Operation proven on regtest (both signs complete, valid child inscription); the child e2e is flaky ~2/3 because the OKX extension crashes the browser context on either sign during the 3-sign child flow, and a reveal-gate + page cleanup did not cure it, so the e2e is fixmed while the op stays proven.',
             },
             [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
         },
