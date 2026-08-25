@@ -104,10 +104,15 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
  * a subsequent call polls the NEXT request rather than re-approving the
  * one just confirmed (OKX reuses pages + exposes no per-request testid).
  */
-async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void> {
+async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () => boolean): Promise<void> {
   const deadline = Date.now() + 120_000;
   let approval: Page | null = null;
   while (Date.now() < deadline) {
+    // Best-effort: current OKX auto-approves signPsbt for the connected dapp
+    // without a persistent interactive popup (same as mint/transfer/offers),
+    // so if the operation already completed, stop polling — there is no popup
+    // to approve.
+    if (isDone?.()) return;
     for (const p of ctx.pages()) {
       if (!p.url().startsWith('chrome-extension://')) continue;
       const text = await p.locator('body').innerText().catch(() => '');
@@ -116,7 +121,10 @@ async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void>
     if (approval) break;
     await new Promise(r => setTimeout(r, 500));
   }
-  if (!approval) throw new Error('OKX sign popup never showed the sign heading within 120s');
+  if (!approval) {
+    if (isDone?.()) return;
+    throw new Error('OKX sign popup never showed the sign heading within 120s');
+  }
   await shot(approval, tag);
 
   const promo = approval.getByText('Asset transfer pending');
@@ -280,9 +288,17 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
       parentReturnAddress: taprootAddress,
     },
   );
-  await approveSignPopup(context, '02-child-commit-sign');
-  await approveSignPopup(context, '03-child-reveal-parent-sign');
-  const child = await childPromise;
+  // OKX auto-approves signPsbt for the connected dapp without a persistent
+  // interactive popup on this version, so drive completion from the operation
+  // promise and treat popup approval as best-effort (approve one if it shows).
+  let childDone = false;
+  const settledChild = childPromise.then(
+    (v) => { childDone = true; return v; },
+    (e) => { childDone = true; throw e; },
+  );
+  await approveSignPopup(context, '02-child-commit-sign', () => childDone);
+  await approveSignPopup(context, '03-child-reveal-parent-sign', () => childDone);
+  const child = await settledChild;
   if (child.kind !== 'inscribe-child') throw new Error('expected inscribe-child result');
   expect(child.childInscriptionId).toBe(`${child.revealTxid}i0`);
 
