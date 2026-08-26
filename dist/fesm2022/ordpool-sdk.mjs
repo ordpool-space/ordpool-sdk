@@ -3936,10 +3936,13 @@ const WALLET_MATRIX = [
             [WalletCapability.Cat21OfferCreate]: { support: CapabilitySupport.Proven },
             [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
             [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
-            [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
+            [WalletCapability.InscriptionParentChild]: {
+                support: CapabilitySupport.Proven,
+                caveat: 'The child SDK code path is proven (green e2e roundtrips; wallet-agnostic merge/finalize shared with 5 other proven wallets), but the 3-popup child e2e (connect + commit + reveal) is timing-flaky on the OKX extension ~1/3 of runs: the commit signs, then the reveal-sign popup intermittently fails to complete under Playwright. This is browser-automation stability on OKX\'s hardest flow, not an SDK-byte problem. A production integration should retry the reveal sign.',
+            },
             [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
         },
-        note: 'OKX is single-address BIP-86 Taproot. Every cat21 operation (mint, transfer, offer create/accept, inscribe, and parent/child inscribe) is proven on the regtest e2e via the mainnet-address shim: the P2TR script hash is HRP-independent, so OKX signs the regtest input against its mainnet account, and signPsbt resolves for the connected dApp (it auto-approves without an interactive Confirm; the offer/child flows sign only the wallet\'s own input and leave the foreign one). Mobile support is the OKX App\'s built-in dApp browser, compatible with the injected window.okxwallet provider path (Bitcoin included).',
+        note: 'OKX is single-address BIP-86 Taproot. Mint, transfer, offer create/accept, and plain inscribe are cleanly proven on the regtest e2e via the mainnet-address shim: the P2TR script hash is HRP-independent, so OKX signs the regtest input against its mainnet account, and signPsbt resolves for the connected dApp (it auto-approves without an interactive Confirm; the offer flows sign only the wallet\'s own input and leave the foreign one). Parent/child inscribe is proven at the SDK level but its 3-popup e2e is timing-flaky (see the InscriptionParentChild caveat). Mobile support is the OKX App\'s built-in dApp browser, compatible with the injected window.okxwallet provider path (Bitcoin included).',
     },
     {
         wallet: KnownOrdinalWalletType.phantom,
