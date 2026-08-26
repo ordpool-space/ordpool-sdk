@@ -97,6 +97,23 @@ hardcoding wallet notes in the frontend.
 4. Keep the picker scoped to `Cat21Mint` (and any other capability the page
    truly uses) so you don't advertise operations the mint page can't drive.
 
+## Deep integration + shared UX (required)
+
+Read `docs/wallet-picker-ux-shared.md` (same repo) before building. It is
+binding for all three consumer sites and specifies:
+
+1. **Capability messaging beyond the picker**: mint is Proven everywhere,
+   but the info popover still shows the wallet's FULL capability list, so
+   a user learns e.g. that their Alby cannot trade cats before they head
+   to cat21.space.
+2. **The info icon** on every wallet row in the connect box (next to the
+   wallet name, also on Download and watch-only rows): placement, popover
+   structure, and the exact shared wording tables.
+3. **The alignment workflow**: implement your own version first, then
+   STOP; the maintainer reviews; only after that review cross-check the
+   sister implementations (cat21.space, cubes) and PROPOSE your alignment
+   ideas, never silently edit them.
+
 ## What stays yours
 
 - Platform detection and any mobile deep-link UX.

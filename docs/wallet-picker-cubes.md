@@ -97,6 +97,23 @@ parent/child. See `CHILD-INSCRIBE-WALLET-SUPPORT.md` for the mechanism.
    wallets; the matrix is the picker-side counterpart.
 3. Phantom is desktop-hidden via the platform filter; no special case.
 
+## Deep integration + shared UX (required)
+
+Read `docs/wallet-picker-ux-shared.md` (same repo) before building. It is
+binding for all three consumer sites and specifies:
+
+1. **Capability messaging beyond the picker**: plain inscriptions work on
+   every wallet; if cubes ever gain a parent/child flow, an Alby user
+   must see the collection action DISABLED with the matrix-sourced
+   reason, not a vanished button.
+2. **The info icon** on every wallet row in the connect box (next to the
+   wallet name, also on Download and watch-only rows): placement, popover
+   structure, and the exact shared wording tables.
+3. **The alignment workflow**: implement your own version first, then
+   STOP; the maintainer reviews; only after that review cross-check the
+   sister implementations (cat21.space, ordpool `/cat21-mint`) and
+   PROPOSE your alignment ideas, never silently edit them.
+
 ## What stays yours
 
 - Platform detection and any mobile deep-link UX.

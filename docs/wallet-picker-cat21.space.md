@@ -106,8 +106,11 @@ show it:
 - **Alby + offers / collections**: both `Cat21OfferCreate` / `Cat21OfferAccept`
   and `InscriptionParentChild` are `Unsupported` on Alby. Its WebBTC `signPsbt`
   signs every input with one Taproot key and has no per-input selection, so it
-  cannot leave a counterparty's or the ephemeral commit input alone. Hide those
-  actions on Alby; mint / transfer / plain inscribe work.
+  cannot leave a counterparty's or the ephemeral commit input alone. In the
+  picker those actions exclude Alby automatically; on an already-connected
+  Alby session render sell/buy/collection buttons DISABLED with the reason
+  (see the shared UX doc), never silently hidden. Mint / transfer / plain
+  inscribe work.
 - **Alby address type**: Alby may default to a **native-SegWit** address that
   cannot hold cats. Verify the connected address is Taproot (`bc1p`) before
   proceeding.
@@ -130,6 +133,24 @@ show it:
 5. Badge every caveat from the matrix rather than hardcoding wallet notes
    in the frontend (they now live in one place and are updated with the
    SDK).
+
+## Deep integration + shared UX (required)
+
+Read `docs/wallet-picker-ux-shared.md` (same repo) before building. It is
+binding for all three consumer sites and specifies:
+
+1. **Capability messaging beyond the picker**: a connected Alby user must
+   see WHY the sell/buy and collection buttons are disabled (with the
+   matrix-sourced reason and alternatives), not an emptier UI. Same
+   pattern for the UniSat/Wizz Taproot pre-check.
+2. **The info icon** on every wallet row in the connect box (next to the
+   wallet name, also on Download and watch-only rows): a clickable
+   popover showing what the current action needs and everything the
+   wallet supports, with the exact shared wording tables.
+3. **The alignment workflow**: implement your own version first, then
+   STOP; the maintainer reviews; only after that review cross-check the
+   sister implementations (ordpool `/cat21-mint`, cubes) and PROPOSE your
+   alignment ideas, never silently edit them.
 
 ## What stays yours
 
