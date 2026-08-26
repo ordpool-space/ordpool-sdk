@@ -180,7 +180,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: {
         support: CapabilitySupport.Proven,
-        caveat: 'The child SDK code path is proven (wallet-agnostic merge/finalize, shared with 5 other proven wallets), and on OKX both signs (commit + reveal) now complete reliably every run. A residual Playwright teardown race remains: OKX tears its popup pages down the instant it auto-approves, and the harness\'s page-poll occasionally reads a just-closed page after both signs succeed, so the 3-popup child e2e passes on retry ~1/3 of runs rather than first-try. This is browser-automation stability on OKX\'s hardest flow, not an SDK-byte or signing problem.',
+        caveat: 'The child SDK code path is proven (wallet-agnostic merge/finalize, shared with 5 other proven wallets), and on OKX both signs (commit + reveal) complete reliably every run; the closed-page races in the harness (page-close-between-signs, approveSignPopup, closeLeftoverExtensionPages) are fixed, so the 3-popup child e2e is usually first-try green. A residual environmental flake remains at the CI level: the OKX extension occasionally fails to load/inject in a given headed-chromium run, failing all attempts fast before signing — a browser-automation/extension-load reliability issue, not an SDK-byte or signing problem. retries:2 absorbs it in the common case.',
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
     },
