@@ -95,7 +95,28 @@ component). Identical across sites: the placement, the structure and
 order, the icon semantics, the wording tables, and the data source (the
 matrix, never hardcoded).
 
-## 3. Alignment workflow (follow exactly)
+## 3. Mobile in-app-browser deep links (verified registry)
+
+On a plain mobile browser no wallet provider is injected, so the picker
+can't connect. Bounce the user into a wallet's in-app browser via the
+SDK's `walletInAppBrowserDeepLink(wallet, targetUrl)` — one shared,
+docs-verified registry so the three sites don't each hardcode (and drift
+on) schemes:
+
+```ts
+import { walletInAppBrowserDeepLink } from 'ordpool-sdk/core';
+const link = walletInAppBrowserDeepLink(wallet, currentPageUrl);
+if (link) showOpenInWalletButton(link);   // else omit the affordance
+```
+
+Only schemes verified against the wallet's official docs are populated
+(Xverse today: `https://connect.xverse.app/browser?url=…`, verified
+2026-08-26). Every other wallet returns `null` — the consumer hides the
+button rather than send the user to a guessed URL. Do NOT hardcode a
+scheme in the frontend; if you find a wallet's documented scheme, add it
+to the SDK registry (with the doc citation), not to one site.
+
+## 4. Alignment workflow (follow exactly)
 
 1. **Implement your own version** from your handover doc plus this shared
    spec. Then **STOP**. Do not read or modify the sister implementations

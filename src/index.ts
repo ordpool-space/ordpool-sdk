@@ -28,6 +28,7 @@ export {
 // Branded Bitcoin address types — see core.ts for the rationale.
 export * from './wallet/address-types';
 export * from './wallet/wallet-capabilities';
+export * from './wallet/wallet-deeplink';
 export * from './wallet/xpub/derive-watch-only';
 export * from './wallet/xpub/scan-watch-only';
 
