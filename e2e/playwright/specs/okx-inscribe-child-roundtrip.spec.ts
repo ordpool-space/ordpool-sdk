@@ -361,9 +361,14 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   // the commitSigned timeout.
   await approveSignPopup(context, '02-child-commit-sign', () => commitSignedFlag || childDone);
   await Promise.race([commitSigned, settledChild.then(() => undefined, () => undefined)]);
-  // Commit sign settled → clear leftover pages, release the reveal, approve
-  // its popup (if OKX shows one).
-  await closeLeftoverExtensionPages(context, [harness]);
+  // Commit sign settled → release the reveal, approve its popup (if OKX shows
+  // one). We deliberately do NOT close OKX's extension pages here: OKX
+  // auto-approves signPsbt through its service worker (not a page), and
+  // force-closing its pages between the commit and the reveal severed the
+  // provider state the reveal's signPsbt needs — the [child] logs showed the
+  // commit signing but the reveal never firing (fast-fail with "guid not
+  // bound"). Page-clearing is a popup-flow hygiene the auto-approving OKX
+  // flow doesn't need.
   await harness.evaluate(() =>
     (window as unknown as { __ordpoolRevealGate?: { open: () => void } }).__ordpoolRevealGate?.open());
   await approveSignPopup(context, '03-child-reveal-parent-sign', () => childDone);
