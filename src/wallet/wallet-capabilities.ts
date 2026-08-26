@@ -257,7 +257,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing. Every operation (mint, inscribe, transfer, both offer roles, parent/child inscribe) is proven on regtest with bitcoin-cli walletprocesspsbt as the external signer (e2e/regtest/psbt-export-*.spec.ts).',
+    note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing. Connect with WalletService.connectXpub (pastes an account xpub/ypub/zpub/tpub, derives + scans + auto-picks the identity; pass scriptType=p2tr for a plain-xpub taproot account). Every operation (mint, inscribe, transfer, both offer roles, parent/child inscribe) is proven on regtest with bitcoin-cli walletprocesspsbt as the external signer (e2e/regtest/psbt-export-*.spec.ts); the connect→scan→mint→broadcast chain (single-account Taproot, P2TR funding) is proven end to end in e2e/regtest/watch-only-mint-roundtrip.spec.ts.',
   },
 ];
 

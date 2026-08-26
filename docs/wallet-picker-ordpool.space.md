@@ -83,6 +83,10 @@ but two still apply:
 - **Watch-only (xpub)**: `signingMode === 'watch-only'` — no in-page
   signing; the mint ends by handing the user a PSBT to sign elsewhere.
   Present it as an export step, not a "Connect" button.
+  **Wired now**: connect with `WalletService.connectXpub` (Angular) or
+  compose `scanWatchOnly` from `/core` (cubes); full contract +
+  probe-wiring in `wallet-picker-watch-only-shared.md`. Proven end to end
+  on regtest (pasted xpub → scan → mint → broadcast).
 
 Read `capabilityOf(w, Cat21Mint).caveat` and the entry `note` rather than
 hardcoding wallet notes in the frontend.

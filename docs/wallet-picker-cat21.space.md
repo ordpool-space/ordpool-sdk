@@ -120,6 +120,10 @@ show it:
   in-page signing; the flow ends by handing the user a PSBT to sign in
   their own wallet (Sparrow, Coldcard, Ledger, …). Present it as an export
   step, not a "Connect" button.
+  **Wired now**: connect with `WalletService.connectXpub` (Angular) or
+  compose `scanWatchOnly` from `/core` (cubes); full contract +
+  probe-wiring in `wallet-picker-watch-only-shared.md`. Proven end to end
+  on regtest (pasted xpub → scan → mint → broadcast).
 
 ## Migration checklist
 

@@ -62,7 +62,7 @@ site, in the same place:
   1. **Header**: the entry `label`, platform badges from `platforms`, and
      a signing-mode line: `injected` = "Signs in your browser",
      `watch-only` = "You sign in your own wallet (Sparrow, Coldcard,
-     Ledger, ...)".
+     Ledger, ...)" (full flow: `wallet-picker-watch-only-shared.md`).
   2. **What this action needs**: the current page action's capability and
      this wallet's status for it, using the wording table below.
   3. **Everything this wallet can do here**: all seven capabilities as a
