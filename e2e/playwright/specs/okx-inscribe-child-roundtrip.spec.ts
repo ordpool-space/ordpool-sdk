@@ -254,6 +254,19 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
     { timeout: 15_000 },
   );
 
+  // Extension-readiness gate. On some CI runs the OKX content script injects
+  // window.okxwallet.bitcoin a beat after the harness page loads; calling
+  // connectOkx() before the BTC provider is present fails fast (the
+  // environmental flake behind the residual child failures — all attempts
+  // die at ~5s before any sign). Wait for the provider so a slow injection
+  // is tolerated instead of failing the run.
+  await harness.waitForFunction(
+    () => typeof (window as unknown as { okxwallet?: { bitcoin?: { connect?: unknown } } })
+      .okxwallet?.bitcoin?.connect === 'function',
+    undefined,
+    { timeout: 45_000 },
+  );
+
   const connectKnownPages = new Set(context.pages());
   let connectDone = false;
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx())
