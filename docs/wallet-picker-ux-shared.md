@@ -12,6 +12,11 @@ Two different mechanisms. Do not mix them:
 - **Platform mismatches HIDE.** A wallet that is not reachable on the
   current platform (Phantom on desktop, UniSat on mobile) never appears.
   There is nothing to explain: the user cannot use it here.
+  The matrix `platforms` list is the single authority for this; the SDK's
+  `hiddenFromPicker` flag is only a desktop-detection convenience pinned to
+  the matrix (a wallet is hidden iff the matrix marks it non-Desktop). A
+  mobile-in-app picker reads `walletsForPlatform(Mobile)` — where Phantom /
+  Binance DO appear — and must not consult `hiddenFromPicker`.
 - **Capability gaps EXPLAIN.** A wallet that works on this platform but
   cannot do a specific action must not make that action silently vanish.
   The user learns why it is unavailable and which wallet to use instead.
