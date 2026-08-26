@@ -1,4 +1,4 @@
-import { KnownOrdinalWalletType } from './wallet.service.types';
+import { KnownOrdinalWalletType, KnownOrdinalWallets } from './wallet.service.types';
 
 /**
  * Wallet capability matrix — the single source of truth for "which wallet
@@ -89,7 +89,7 @@ const TAPROOT_ACTIVE_ADDRESS = 'requires the wallet\'s active address type to be
 export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   {
     wallet: KnownOrdinalWalletType.cat21wallet,
-    label: 'Cat21 Wallet',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.cat21wallet].label,
     platforms: [WalletPlatform.Desktop],
     signingMode: 'injected',
     capabilities: {
@@ -105,7 +105,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   },
   {
     wallet: KnownOrdinalWalletType.xverse,
-    label: 'Xverse',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.xverse].label,
     platforms: [WalletPlatform.Desktop, WalletPlatform.Mobile],
     signingMode: 'injected',
     capabilities: {
@@ -121,7 +121,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   },
   {
     wallet: KnownOrdinalWalletType.leather,
-    label: 'Leather',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.leather].label,
     platforms: [WalletPlatform.Desktop],
     signingMode: 'injected',
     capabilities: {
@@ -137,7 +137,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   },
   {
     wallet: KnownOrdinalWalletType.unisat,
-    label: 'UniSat',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.unisat].label,
     platforms: [WalletPlatform.Desktop],
     signingMode: 'injected',
     capabilities: {
@@ -153,7 +153,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   },
   {
     wallet: KnownOrdinalWalletType.wizz,
-    label: 'Wizz',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.wizz].label,
     platforms: [WalletPlatform.Desktop],
     signingMode: 'injected',
     capabilities: {
@@ -169,7 +169,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   },
   {
     wallet: KnownOrdinalWalletType.okx,
-    label: 'OKX',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.okx].label,
     platforms: [WalletPlatform.Desktop, WalletPlatform.Mobile],
     signingMode: 'injected',
     capabilities: {
@@ -185,7 +185,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   },
   {
     wallet: KnownOrdinalWalletType.phantom,
-    label: 'Phantom',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.phantom].label,
     platforms: [WalletPlatform.Mobile],
     signingMode: 'injected',
     capabilities: {
@@ -201,7 +201,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   },
   {
     wallet: KnownOrdinalWalletType.alby,
-    label: 'Alby',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.alby].label,
     platforms: [WalletPlatform.Desktop],
     signingMode: 'injected',
     capabilities: {
@@ -222,11 +222,11 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'On-chain via the WebBTC provider, signed with the Alby account master key (no Alby Hub needed). Ensure the account is Taproot (bc1p): Alby may default to native SegWit (bc1q), which cannot hold cats. No mobile dApp browser (Alby Go is Lightning-only).',
+    note: 'On-chain via the WebBTC provider, signed with the Alby account master key (no Alby Hub needed). Signing constraint: Alby Taproot-signs EVERY input in a PSBT with its single Taproot key, so every input must be a Taproot UTXO; a non-Taproot input fails with "is not of type Taproot". Any address type can HOLD a cat (the cat travels with its sat). No mobile dApp browser (Alby Go is Lightning-only).',
   },
   {
     wallet: KnownOrdinalWalletType.binance,
-    label: 'Binance Web3 Wallet',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.binance].label,
     platforms: [WalletPlatform.Mobile],
     signingMode: 'injected',
     capabilities: {
@@ -242,7 +242,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   },
   {
     wallet: KnownOrdinalWalletType.xpub,
-    label: 'Watch-only (xpub)',
+    label: KnownOrdinalWallets[KnownOrdinalWalletType.xpub].label,
     platforms: [WalletPlatform.Desktop, WalletPlatform.Mobile],
     signingMode: 'watch-only',
     capabilities: {

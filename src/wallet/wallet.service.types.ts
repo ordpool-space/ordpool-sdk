@@ -491,7 +491,7 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
   },
   [KnownOrdinalWalletType.unisat]: {
     type: KnownOrdinalWalletType.unisat,
-    label: 'Unisat',
+    label: 'UniSat',
     // subLabel: '(not fully supported)',
     logo: walletLogos.unisat,
     downloadLink: 'https://unisat.io/download'
@@ -530,7 +530,7 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
   },
   [KnownOrdinalWalletType.binance]: {
     type: KnownOrdinalWalletType.binance,
-    label: 'Binance Wallet',
+    label: 'Binance Web3 Wallet',
     logo: walletLogos.binance,
     downloadLink: 'https://www.binance.com/en/web3wallet',
     // Binance Web3 Wallet v1.17.2 (disassembled 2026-06-12) injects
@@ -546,7 +546,7 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
   },
   [KnownOrdinalWalletType.cat21wallet]: {
     type: KnownOrdinalWalletType.cat21wallet,
-    label: 'CAT-21 wallet',
+    label: 'Cat21 Wallet',
     subLabel: 'Our own hot wallet for active cat trading.',
     logo: walletLogos.cat21wallet,
     downloadLink: 'https://github.com/ordpool-space/cat21-wallet',

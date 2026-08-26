@@ -147,7 +147,7 @@ const KnownOrdinalWallets = {
     },
     [KnownOrdinalWalletType.unisat]: {
         type: KnownOrdinalWalletType.unisat,
-        label: 'Unisat',
+        label: 'UniSat',
         // subLabel: '(not fully supported)',
         logo: walletLogos.unisat,
         downloadLink: 'https://unisat.io/download'
@@ -186,7 +186,7 @@ const KnownOrdinalWallets = {
     },
     [KnownOrdinalWalletType.binance]: {
         type: KnownOrdinalWalletType.binance,
-        label: 'Binance Wallet',
+        label: 'Binance Web3 Wallet',
         logo: walletLogos.binance,
         downloadLink: 'https://www.binance.com/en/web3wallet',
         // Binance Web3 Wallet v1.17.2 (disassembled 2026-06-12) injects
@@ -202,7 +202,7 @@ const KnownOrdinalWallets = {
     },
     [KnownOrdinalWalletType.cat21wallet]: {
         type: KnownOrdinalWalletType.cat21wallet,
-        label: 'CAT-21 wallet',
+        label: 'Cat21 Wallet',
         subLabel: 'Our own hot wallet for active cat trading.',
         logo: walletLogos.cat21wallet,
         downloadLink: 'https://github.com/ordpool-space/cat21-wallet',
@@ -3846,7 +3846,7 @@ const TAPROOT_ACTIVE_ADDRESS = 'requires the wallet\'s active address type to be
 const WALLET_MATRIX = [
     {
         wallet: KnownOrdinalWalletType.cat21wallet,
-        label: 'Cat21 Wallet',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.cat21wallet].label,
         platforms: [WalletPlatform.Desktop],
         signingMode: 'injected',
         capabilities: {
@@ -3862,7 +3862,7 @@ const WALLET_MATRIX = [
     },
     {
         wallet: KnownOrdinalWalletType.xverse,
-        label: 'Xverse',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.xverse].label,
         platforms: [WalletPlatform.Desktop, WalletPlatform.Mobile],
         signingMode: 'injected',
         capabilities: {
@@ -3878,7 +3878,7 @@ const WALLET_MATRIX = [
     },
     {
         wallet: KnownOrdinalWalletType.leather,
-        label: 'Leather',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.leather].label,
         platforms: [WalletPlatform.Desktop],
         signingMode: 'injected',
         capabilities: {
@@ -3894,7 +3894,7 @@ const WALLET_MATRIX = [
     },
     {
         wallet: KnownOrdinalWalletType.unisat,
-        label: 'UniSat',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.unisat].label,
         platforms: [WalletPlatform.Desktop],
         signingMode: 'injected',
         capabilities: {
@@ -3910,7 +3910,7 @@ const WALLET_MATRIX = [
     },
     {
         wallet: KnownOrdinalWalletType.wizz,
-        label: 'Wizz',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.wizz].label,
         platforms: [WalletPlatform.Desktop],
         signingMode: 'injected',
         capabilities: {
@@ -3926,7 +3926,7 @@ const WALLET_MATRIX = [
     },
     {
         wallet: KnownOrdinalWalletType.okx,
-        label: 'OKX',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.okx].label,
         platforms: [WalletPlatform.Desktop, WalletPlatform.Mobile],
         signingMode: 'injected',
         capabilities: {
@@ -3942,7 +3942,7 @@ const WALLET_MATRIX = [
     },
     {
         wallet: KnownOrdinalWalletType.phantom,
-        label: 'Phantom',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.phantom].label,
         platforms: [WalletPlatform.Mobile],
         signingMode: 'injected',
         capabilities: {
@@ -3958,7 +3958,7 @@ const WALLET_MATRIX = [
     },
     {
         wallet: KnownOrdinalWalletType.alby,
-        label: 'Alby',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.alby].label,
         platforms: [WalletPlatform.Desktop],
         signingMode: 'injected',
         capabilities: {
@@ -3979,11 +3979,11 @@ const WALLET_MATRIX = [
             },
             [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
         },
-        note: 'On-chain via the WebBTC provider, signed with the Alby account master key (no Alby Hub needed). Ensure the account is Taproot (bc1p): Alby may default to native SegWit (bc1q), which cannot hold cats. No mobile dApp browser (Alby Go is Lightning-only).',
+        note: 'On-chain via the WebBTC provider, signed with the Alby account master key (no Alby Hub needed). Signing constraint: Alby Taproot-signs EVERY input in a PSBT with its single Taproot key, so every input must be a Taproot UTXO; a non-Taproot input fails with "is not of type Taproot". Any address type can HOLD a cat (the cat travels with its sat). No mobile dApp browser (Alby Go is Lightning-only).',
     },
     {
         wallet: KnownOrdinalWalletType.binance,
-        label: 'Binance Web3 Wallet',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.binance].label,
         platforms: [WalletPlatform.Mobile],
         signingMode: 'injected',
         capabilities: {
@@ -3999,7 +3999,7 @@ const WALLET_MATRIX = [
     },
     {
         wallet: KnownOrdinalWalletType.xpub,
-        label: 'Watch-only (xpub)',
+        label: KnownOrdinalWallets[KnownOrdinalWalletType.xpub].label,
         platforms: [WalletPlatform.Desktop, WalletPlatform.Mobile],
         signingMode: 'watch-only',
         capabilities: {

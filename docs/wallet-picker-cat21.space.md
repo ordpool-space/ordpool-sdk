@@ -111,9 +111,11 @@ show it:
   Alby session render sell/buy/collection buttons DISABLED with the reason
   (see the shared UX doc), never silently hidden. Mint / transfer / plain
   inscribe work.
-- **Alby address type**: Alby may default to a **native-SegWit** address that
-  cannot hold cats. Verify the connected address is Taproot (`bc1p`) before
-  proceeding.
+- **Alby funding is Taproot-only (a SIGNING constraint, not a holding
+  one)**: Alby's WebBTC signs every input with its single Taproot key, so
+  every input in an Alby-signed PSBT must be a Taproot UTXO (a non-Taproot
+  input fails with "is not of type Taproot"). Any address type can HOLD a
+  cat; the cat travels with its sat.
 - **Watch-only (xpub)**: `signingMode === 'watch-only'`. There is no
   in-page signing; the flow ends by handing the user a PSBT to sign in
   their own wallet (Sparrow, Coldcard, Ledger, …). Present it as an export

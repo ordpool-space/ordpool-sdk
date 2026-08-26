@@ -67,9 +67,11 @@ Inscription itself has no per-wallet blocker in the matrix, but two
 wallet-level notes apply:
 
 - **Alby**: signs on-chain via WebBTC with the account master key (no Alby
-  Hub needed), but may default to a native-SegWit address. A cube
-  inscription is held on a Taproot output; verify the connected address is
-  Taproot (`bc1p`) before inscribing.
+  Hub needed). Signing constraint: it Taproot-signs every input with one
+  Taproot key, so the commit's funding input must be a Taproot UTXO (a
+  non-Taproot input fails to sign). The inscription itself lands on a
+  Taproot commit output by protocol design; the recipient address can be
+  any type.
 - **Watch-only (xpub)**: `signingMode === 'watch-only'` — no in-page
   signing; the flow ends by handing the user a PSBT to sign in their own
   wallet. Present it as an export step, not a "Connect" button.

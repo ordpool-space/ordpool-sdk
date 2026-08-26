@@ -76,8 +76,10 @@ Mint is the least caveat-heavy operation (every listed wallet supports it),
 but two still apply:
 
 - **Alby**: signs on-chain via WebBTC with the account master key (no Alby
-  Hub needed), but may default to a native-SegWit address that cannot hold
-  a cat. Verify the connected address is Taproot (`bc1p`) before minting.
+  Hub needed). Signing constraint: it Taproot-signs every input with one
+  Taproot key, so the mint's funding input must be a Taproot UTXO (a
+  non-Taproot input fails to sign). Any address type can HOLD a cat; do
+  NOT block minting on the recipient's address type.
 - **Watch-only (xpub)**: `signingMode === 'watch-only'` — no in-page
   signing; the mint ends by handing the user a PSBT to sign elsewhere.
   Present it as an export step, not a "Connect" button.
