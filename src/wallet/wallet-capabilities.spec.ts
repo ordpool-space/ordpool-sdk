@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { KnownOrdinalWalletType } from './wallet.service.types';
+import { KnownOrdinalWalletType, KnownOrdinalWallets } from './wallet.service.types';
 import { walletSigners } from './signers';
 import {
   WALLET_MATRIX,
@@ -37,6 +37,23 @@ describe('WALLET_MATRIX / signer registry consistency', () => {
       KnownOrdinalWalletType.xpub,
       KnownOrdinalWalletType.xverse,
     ]);
+  });
+});
+
+describe('hiddenFromPicker is consistent with the matrix platforms (single authority)', () => {
+  // The matrix `platforms` list is the single source of truth for where a
+  // wallet is reachable. `hiddenFromPicker` is only a desktop-detection-
+  // bucket convenience (wallet.service.ts filters `wallets$` by it so a
+  // desktop-broken binary never surfaces in the "install this" list). The
+  // two must never disagree: a wallet is hidden IFF it is not
+  // desktop-reachable per the matrix. A mobile-in-app picker reads
+  // `walletsForPlatform(Mobile)` and ignores hiddenFromPicker.
+  it('a wallet is hiddenFromPicker IFF the matrix says it is not Desktop-reachable', () => {
+    for (const entry of WALLET_MATRIX) {
+      const hidden = KnownOrdinalWallets[entry.wallet].hiddenFromPicker === true;
+      const desktopReachable = entry.platforms.includes(WalletPlatform.Desktop);
+      expect(hidden).toBe(!desktopReachable);
+    }
   });
 });
 
