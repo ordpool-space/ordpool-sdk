@@ -3397,6 +3397,228 @@ function writeVarInt(n) {
     throw new Error(`varint too large for the tiny writer: ${n}`);
 }
 
+/**
+ * Watch-only address derivation from an account-level extended public
+ * key (xpub / ypub / zpub / tpub / upub / vpub).
+ *
+ * This is the missing first layer of the watch-only ("xpub") wallet:
+ * the SDK already builds + signs + broadcasts a watch-only PSBT
+ * (`psbtExportSigner`, proven in `e2e/regtest/psbt-export-*.spec.ts`),
+ * but a consumer picker had no way to turn a pasted extended key into
+ * the `{ ordinalsAddress, paymentAddress, publicKey }` identity every
+ * operation needs. This derives those addresses so all three consumer
+ * sites (cat21.space, ordpool.space, cubes) share ONE derivation and
+ * cannot disagree on which address a given xpub maps to.
+ *
+ * Supports both wallet exports the CAT-21 HOWTO targets — Electrum and
+ * Sparrow — plus Coldcard / Ledger / Trezor, because they all export
+ * the same BIP-32 account-level extended keys. Script type is carried
+ * in the SLIP-132 version-byte prefix where the wallet uses one
+ * (ypub/zpub/upub/vpub); plain xpub/tpub are script-type-ambiguous
+ * (BIP-44 legacy vs BIP-86 taproot share the same version bytes), so
+ * the caller supplies `scriptType` for those.
+ *
+ * Pure + Angular-free (lives in `/core`): no I/O. The scan/auto-pick
+ * step that picks WHICH derived address is the active identity takes
+ * these outputs plus a UTXO-fetch callback; see the scan helper.
+ */
+const base58checkSha256 = base58check(sha256);
+/**
+ * SLIP-132 extended-public-key version bytes → implied script type +
+ * network. Sources: BIP-32 (xpub/tpub, 0x0488b21e / 0x043587cf) and
+ * SLIP-132 (ypub/zpub/upub/vpub). Taproot (BIP-86) has NO SLIP-132
+ * prefix — Sparrow/Electrum export a taproot account as a plain
+ * xpub/tpub — so 0x0488b21e / 0x043587cf are ambiguous (BIP-44 legacy
+ * vs BIP-86 taproot) and map to `scriptType: undefined`.
+ */
+const VERSION_BYTES = {
+    0x0488b21e: { scriptType: undefined, mainnet: true }, // xpub
+    0x049d7cb2: { scriptType: 'p2sh-p2wpkh', mainnet: true }, // ypub (BIP-49)
+    0x04b24746: { scriptType: 'p2wpkh', mainnet: true }, // zpub (BIP-84)
+    0x043587cf: { scriptType: undefined, mainnet: false }, // tpub
+    0x044a5262: { scriptType: 'p2sh-p2wpkh', mainnet: false }, // upub (BIP-49 testnet)
+    0x045f1cf6: { scriptType: 'p2wpkh', mainnet: false }, // vpub (BIP-84 testnet)
+};
+/**
+ * Standard BIP-32 version bytes per network. HDKey.fromExtendedKey
+ * checks the key's version against these, so we normalize the SLIP-132
+ * prefix to the network's standard public bytes AND pass the matching
+ * versions (its default is mainnet-only, which rejects a tpub).
+ */
+const STANDARD_VERSIONS = {
+    mainnet: { private: 0x0488ade4, public: 0x0488b21e },
+    testnet: { private: 0x04358394, public: 0x043587cf },
+};
+function isMainnetKeyPrefix(network) {
+    return network === Network.Mainnet;
+}
+/**
+ * Read the 4 version bytes, validate them against the network, resolve
+ * the script type, and normalize the key to standard BIP-32 version
+ * bytes so `HDKey.fromExtendedKey` accepts it (the key material is
+ * identical; only the SLIP-132 version bytes differ).
+ */
+function parseAccountKey(extendedPublicKey, network, scriptTypeOverride) {
+    let payload;
+    try {
+        payload = base58checkSha256.decode(extendedPublicKey);
+    }
+    catch {
+        throw new Error('Watch-only: not a valid base58check extended key');
+    }
+    if (payload.length !== 78) {
+        throw new Error(`Watch-only: extended key has wrong length (${payload.length}, expected 78)`);
+    }
+    const version = (payload[0] << 24) | (payload[1] << 16) | (payload[2] << 8) | payload[3];
+    const info = VERSION_BYTES[version >>> 0];
+    if (!info) {
+        throw new Error(`Watch-only: unrecognised extended-key prefix (version 0x${version.toString(16)})`);
+    }
+    const wantMainnet = isMainnetKeyPrefix(network);
+    if (info.mainnet !== wantMainnet) {
+        throw new Error(`Watch-only: key is a ${info.mainnet ? 'mainnet' : 'testnet'} extended key but network is ${network}`);
+    }
+    let scriptType;
+    if (info.scriptType) {
+        if (scriptTypeOverride && scriptTypeOverride !== info.scriptType) {
+            throw new Error(`Watch-only: key prefix implies ${info.scriptType} but scriptType=${scriptTypeOverride} was given`);
+        }
+        scriptType = info.scriptType;
+    }
+    else {
+        if (!scriptTypeOverride) {
+            throw new Error('Watch-only: this key prefix (xpub/tpub) is script-type-ambiguous; pass scriptType (p2tr for a taproot account, p2pkh for legacy)');
+        }
+        scriptType = scriptTypeOverride;
+    }
+    // Normalize version bytes to the network's standard xpub/tpub so
+    // HDKey parses SLIP-132 prefixes (ypub/zpub/upub/vpub) too.
+    const versions = wantMainnet ? STANDARD_VERSIONS.mainnet : STANDARD_VERSIONS.testnet;
+    const normalized = payload.slice();
+    normalized[0] = (versions.public >>> 24) & 0xff;
+    normalized[1] = (versions.public >>> 16) & 0xff;
+    normalized[2] = (versions.public >>> 8) & 0xff;
+    normalized[3] = versions.public & 0xff;
+    // HDKey defaults to mainnet versions; pass the network's explicitly
+    // so a normalized tpub is not rejected with "Version mismatch".
+    const hd = HDKey.fromExtendedKey(base58checkSha256.encode(normalized), versions);
+    return { hd, scriptType };
+}
+/** Encode a compressed pubkey as an address in the requested script type + network. */
+function encodeAddress(publicKey, scriptType, scureNetwork) {
+    switch (scriptType) {
+        case 'p2tr':
+            return btc.p2tr(publicKey.slice(1, 33), undefined, scureNetwork, true).address;
+        case 'p2wpkh':
+            return btc.p2wpkh(publicKey, scureNetwork).address;
+        case 'p2sh-p2wpkh':
+            return btc.p2sh(btc.p2wpkh(publicKey, scureNetwork), scureNetwork).address;
+        case 'p2pkh':
+            return btc.p2pkh(publicKey, scureNetwork).address;
+    }
+}
+/**
+ * Derive a run of watch-only addresses from an account extended public
+ * key. Non-hardened `chain/index` children are derivable from a public
+ * key alone (no private key), which is exactly why a watch-only xpub
+ * works.
+ */
+function deriveWatchOnlyAddresses(args) {
+    const chain = args.chain ?? 0;
+    const startIndex = args.startIndex ?? 0;
+    const count = args.count ?? 20;
+    if (count < 0)
+        throw new Error('Watch-only: count must be non-negative');
+    if (startIndex < 0)
+        throw new Error('Watch-only: startIndex must be non-negative');
+    const { hd, scriptType } = parseAccountKey(args.extendedPublicKey, args.network, args.scriptType);
+    const scureNetwork = toScureNetwork(args.network);
+    const chainNode = hd.deriveChild(chain);
+    const out = [];
+    for (let i = 0; i < count; i++) {
+        const index = startIndex + i;
+        const child = chainNode.deriveChild(index);
+        if (!child.publicKey)
+            throw new Error(`Watch-only: no public key at ${chain}/${index}`);
+        out.push({
+            address: encodeAddress(child.publicKey, scriptType, scureNetwork),
+            publicKeyHex: hex.encode(child.publicKey),
+            path: `${chain}/${index}`,
+            chain,
+            index,
+        });
+    }
+    return out;
+}
+/** Resolve the effective script type for an extended key without deriving. */
+function watchOnlyScriptType(extendedPublicKey, network, scriptTypeOverride) {
+    return parseAccountKey(extendedPublicKey, network, scriptTypeOverride).scriptType;
+}
+
+/**
+ * Watch-only scan / auto-pick (layer 2 of the xpub contract).
+ *
+ * Layer 1 (`deriveWatchOnlyAddresses`) turns an account extended key
+ * into a run of receive addresses. This layer probes those addresses
+ * for on-chain state and picks the wallet's active identity, so a
+ * consumer doesn't have to make the user choose an index by hand: a
+ * cat can sit at any derivation index (the Genesis Cat is not
+ * necessarily at index 0), and index-0-only would miss it.
+ *
+ * Pure + Angular-free (in `/core`): the actual UTXO / cat lookup is a
+ * consumer-provided `probe` callback (wired to electrs + the cat
+ * index), so this helper holds only the derive → rank logic and all
+ * three consumer sites share one identical auto-pick. The regtest
+ * proof (`e2e/regtest/watch-only-scan-roundtrip.spec.ts`) wires the
+ * probe to real electrs + ordpool-parser.
+ *
+ * v1 identity model: single-account Taproot, the same model OKX
+ * already proves in this codebase (one BIP-86 account, ordinals +
+ * payment both derived from it). The pick is split per role because a
+ * user's cat and their spendable funds can live at different indexes
+ * of the same account:
+ *   - ordinals identity = the cat-bearing address, else receive index 0
+ *   - payment identity   = the highest-funded address, else receive index 0
+ */
+/**
+ * Derive the receive window, probe every address, and auto-pick the
+ * ordinals + payment identities. Probes run concurrently.
+ */
+async function scanWatchOnly(args) {
+    const gapLimit = args.gapLimit ?? 20;
+    if (gapLimit < 1)
+        throw new Error('Watch-only scan: gapLimit must be >= 1');
+    const derived = deriveWatchOnlyAddresses({
+        extendedPublicKey: args.extendedPublicKey,
+        network: args.network,
+        scriptType: args.scriptType,
+        chain: 0, // receive chain
+        startIndex: 0,
+        count: gapLimit,
+    });
+    const probes = await Promise.all(derived.map((a) => args.probe(a.address)));
+    const scanned = derived.map((address, i) => ({ address, probe: probes[i] }));
+    const fallback = derived[0]; // receive index 0 is always the default identity
+    // Ordinals: the first (lowest-index) cat-bearing address.
+    const catBearer = scanned.find((s) => s.probe.hasCat);
+    const ordinals = catBearer?.address ?? fallback;
+    const ordinalsReason = catBearer ? 'cat' : 'default';
+    // Payment: the address with the most spendable sats. Ties resolve to
+    // the lowest index (find scans in derivation order).
+    let best;
+    for (const s of scanned) {
+        if (!s.probe.funded)
+            continue;
+        const sats = s.probe.fundedSats ?? 0;
+        const bestSats = best?.probe.fundedSats ?? 0;
+        if (!best || sats > bestSats)
+            best = s;
+    }
+    const payment = best?.address ?? fallback;
+    const paymentReason = best ? 'funds' : 'default';
+    return { scanned, ordinals, payment, ordinalsReason, paymentReason };
+}
+
 const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
 /**
  * Guard that a parsed `LAST_CONNECTED_WALLET` payload has the fields
@@ -3562,6 +3784,50 @@ class WalletService {
     connectFakeWallet(walletInfo) {
         this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo));
         this.connectedWallet$.next(walletInfo);
+    }
+    /**
+     * Connect a watch-only wallet from a pasted account extended public
+     * key (xpub / ypub / zpub / tpub / …). No signing key enters the
+     * browser: the SDK derives the wallet's identity from the public key,
+     * and the user signs each operation's PSBT in their own wallet
+     * (Sparrow, Electrum, Coldcard, Ledger, Trezor, …) via the
+     * export/paste bridge (`promptForSignedPsbt` on the operation calls).
+     *
+     * Derives the receive window and auto-picks the active identity by
+     * probing on-chain state, because a cat can sit at any derivation
+     * index (the Genesis Cat is not necessarily at index 0). The `probe`
+     * callback is consumer-wired to electrs (+ the cat index): the SDK
+     * owns the derive + rank, the consumer owns the I/O, so all three
+     * consumer sites share one identical derivation and auto-pick.
+     *
+     * v1 identity model is single-account Taproot (the same model OKX
+     * proves in this codebase). `scriptType` is required only for a
+     * script-type-ambiguous prefix (plain xpub/tpub — pass `p2tr` for a
+     * taproot account); SLIP-132 prefixes (ypub/zpub/…) imply it.
+     *
+     * Emits the assembled `WalletInfo` and pushes it to
+     * `connectedWallet$`, exactly like `connectWallet`, so every existing
+     * consumer flow treats a watch-only wallet like any other connected
+     * wallet. Account-change arming is a no-op (there is no injected
+     * provider to subscribe to).
+     */
+    connectXpub(args) {
+        return from(scanWatchOnly({
+            extendedPublicKey: args.extendedPublicKey,
+            network: this.network,
+            scriptType: args.scriptType,
+            gapLimit: args.gapLimit,
+            probe: args.probe,
+        })).pipe(map((scan) => ({
+            type: KnownOrdinalWalletType.xpub,
+            ordinalsAddress: scan.ordinals.address,
+            ordinalsPublicKey: scan.ordinals.publicKeyHex,
+            paymentAddress: scan.payment.address,
+            paymentPublicKey: scan.payment.publicKeyHex,
+            // The watch-only signer (psbtExportSigner) ships, so mint flows
+            // that gate on this proceed to the export/paste bridge.
+            signingSupported: true,
+        })), tap(info => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info))), tap(info => this.connectedWallet$.next(info)), tap(info => this.armAccountChangeSubscription(info.type)));
     }
     disconnectWallet() {
         this.tearDownAccountChangeSubscription();
@@ -4071,228 +4337,6 @@ function walletsSupporting(capability, opts = {}) {
 /** Every wallet reachable on a platform, in matrix order. */
 function walletsForPlatform(platform) {
     return WALLET_MATRIX.filter(e => e.platforms.includes(platform));
-}
-
-/**
- * Watch-only address derivation from an account-level extended public
- * key (xpub / ypub / zpub / tpub / upub / vpub).
- *
- * This is the missing first layer of the watch-only ("xpub") wallet:
- * the SDK already builds + signs + broadcasts a watch-only PSBT
- * (`psbtExportSigner`, proven in `e2e/regtest/psbt-export-*.spec.ts`),
- * but a consumer picker had no way to turn a pasted extended key into
- * the `{ ordinalsAddress, paymentAddress, publicKey }` identity every
- * operation needs. This derives those addresses so all three consumer
- * sites (cat21.space, ordpool.space, cubes) share ONE derivation and
- * cannot disagree on which address a given xpub maps to.
- *
- * Supports both wallet exports the CAT-21 HOWTO targets — Electrum and
- * Sparrow — plus Coldcard / Ledger / Trezor, because they all export
- * the same BIP-32 account-level extended keys. Script type is carried
- * in the SLIP-132 version-byte prefix where the wallet uses one
- * (ypub/zpub/upub/vpub); plain xpub/tpub are script-type-ambiguous
- * (BIP-44 legacy vs BIP-86 taproot share the same version bytes), so
- * the caller supplies `scriptType` for those.
- *
- * Pure + Angular-free (lives in `/core`): no I/O. The scan/auto-pick
- * step that picks WHICH derived address is the active identity takes
- * these outputs plus a UTXO-fetch callback; see the scan helper.
- */
-const base58checkSha256 = base58check(sha256);
-/**
- * SLIP-132 extended-public-key version bytes → implied script type +
- * network. Sources: BIP-32 (xpub/tpub, 0x0488b21e / 0x043587cf) and
- * SLIP-132 (ypub/zpub/upub/vpub). Taproot (BIP-86) has NO SLIP-132
- * prefix — Sparrow/Electrum export a taproot account as a plain
- * xpub/tpub — so 0x0488b21e / 0x043587cf are ambiguous (BIP-44 legacy
- * vs BIP-86 taproot) and map to `scriptType: undefined`.
- */
-const VERSION_BYTES = {
-    0x0488b21e: { scriptType: undefined, mainnet: true }, // xpub
-    0x049d7cb2: { scriptType: 'p2sh-p2wpkh', mainnet: true }, // ypub (BIP-49)
-    0x04b24746: { scriptType: 'p2wpkh', mainnet: true }, // zpub (BIP-84)
-    0x043587cf: { scriptType: undefined, mainnet: false }, // tpub
-    0x044a5262: { scriptType: 'p2sh-p2wpkh', mainnet: false }, // upub (BIP-49 testnet)
-    0x045f1cf6: { scriptType: 'p2wpkh', mainnet: false }, // vpub (BIP-84 testnet)
-};
-/**
- * Standard BIP-32 version bytes per network. HDKey.fromExtendedKey
- * checks the key's version against these, so we normalize the SLIP-132
- * prefix to the network's standard public bytes AND pass the matching
- * versions (its default is mainnet-only, which rejects a tpub).
- */
-const STANDARD_VERSIONS = {
-    mainnet: { private: 0x0488ade4, public: 0x0488b21e },
-    testnet: { private: 0x04358394, public: 0x043587cf },
-};
-function isMainnetKeyPrefix(network) {
-    return network === Network.Mainnet;
-}
-/**
- * Read the 4 version bytes, validate them against the network, resolve
- * the script type, and normalize the key to standard BIP-32 version
- * bytes so `HDKey.fromExtendedKey` accepts it (the key material is
- * identical; only the SLIP-132 version bytes differ).
- */
-function parseAccountKey(extendedPublicKey, network, scriptTypeOverride) {
-    let payload;
-    try {
-        payload = base58checkSha256.decode(extendedPublicKey);
-    }
-    catch {
-        throw new Error('Watch-only: not a valid base58check extended key');
-    }
-    if (payload.length !== 78) {
-        throw new Error(`Watch-only: extended key has wrong length (${payload.length}, expected 78)`);
-    }
-    const version = (payload[0] << 24) | (payload[1] << 16) | (payload[2] << 8) | payload[3];
-    const info = VERSION_BYTES[version >>> 0];
-    if (!info) {
-        throw new Error(`Watch-only: unrecognised extended-key prefix (version 0x${version.toString(16)})`);
-    }
-    const wantMainnet = isMainnetKeyPrefix(network);
-    if (info.mainnet !== wantMainnet) {
-        throw new Error(`Watch-only: key is a ${info.mainnet ? 'mainnet' : 'testnet'} extended key but network is ${network}`);
-    }
-    let scriptType;
-    if (info.scriptType) {
-        if (scriptTypeOverride && scriptTypeOverride !== info.scriptType) {
-            throw new Error(`Watch-only: key prefix implies ${info.scriptType} but scriptType=${scriptTypeOverride} was given`);
-        }
-        scriptType = info.scriptType;
-    }
-    else {
-        if (!scriptTypeOverride) {
-            throw new Error('Watch-only: this key prefix (xpub/tpub) is script-type-ambiguous; pass scriptType (p2tr for a taproot account, p2pkh for legacy)');
-        }
-        scriptType = scriptTypeOverride;
-    }
-    // Normalize version bytes to the network's standard xpub/tpub so
-    // HDKey parses SLIP-132 prefixes (ypub/zpub/upub/vpub) too.
-    const versions = wantMainnet ? STANDARD_VERSIONS.mainnet : STANDARD_VERSIONS.testnet;
-    const normalized = payload.slice();
-    normalized[0] = (versions.public >>> 24) & 0xff;
-    normalized[1] = (versions.public >>> 16) & 0xff;
-    normalized[2] = (versions.public >>> 8) & 0xff;
-    normalized[3] = versions.public & 0xff;
-    // HDKey defaults to mainnet versions; pass the network's explicitly
-    // so a normalized tpub is not rejected with "Version mismatch".
-    const hd = HDKey.fromExtendedKey(base58checkSha256.encode(normalized), versions);
-    return { hd, scriptType };
-}
-/** Encode a compressed pubkey as an address in the requested script type + network. */
-function encodeAddress(publicKey, scriptType, scureNetwork) {
-    switch (scriptType) {
-        case 'p2tr':
-            return btc.p2tr(publicKey.slice(1, 33), undefined, scureNetwork, true).address;
-        case 'p2wpkh':
-            return btc.p2wpkh(publicKey, scureNetwork).address;
-        case 'p2sh-p2wpkh':
-            return btc.p2sh(btc.p2wpkh(publicKey, scureNetwork), scureNetwork).address;
-        case 'p2pkh':
-            return btc.p2pkh(publicKey, scureNetwork).address;
-    }
-}
-/**
- * Derive a run of watch-only addresses from an account extended public
- * key. Non-hardened `chain/index` children are derivable from a public
- * key alone (no private key), which is exactly why a watch-only xpub
- * works.
- */
-function deriveWatchOnlyAddresses(args) {
-    const chain = args.chain ?? 0;
-    const startIndex = args.startIndex ?? 0;
-    const count = args.count ?? 20;
-    if (count < 0)
-        throw new Error('Watch-only: count must be non-negative');
-    if (startIndex < 0)
-        throw new Error('Watch-only: startIndex must be non-negative');
-    const { hd, scriptType } = parseAccountKey(args.extendedPublicKey, args.network, args.scriptType);
-    const scureNetwork = toScureNetwork(args.network);
-    const chainNode = hd.deriveChild(chain);
-    const out = [];
-    for (let i = 0; i < count; i++) {
-        const index = startIndex + i;
-        const child = chainNode.deriveChild(index);
-        if (!child.publicKey)
-            throw new Error(`Watch-only: no public key at ${chain}/${index}`);
-        out.push({
-            address: encodeAddress(child.publicKey, scriptType, scureNetwork),
-            publicKeyHex: hex.encode(child.publicKey),
-            path: `${chain}/${index}`,
-            chain,
-            index,
-        });
-    }
-    return out;
-}
-/** Resolve the effective script type for an extended key without deriving. */
-function watchOnlyScriptType(extendedPublicKey, network, scriptTypeOverride) {
-    return parseAccountKey(extendedPublicKey, network, scriptTypeOverride).scriptType;
-}
-
-/**
- * Watch-only scan / auto-pick (layer 2 of the xpub contract).
- *
- * Layer 1 (`deriveWatchOnlyAddresses`) turns an account extended key
- * into a run of receive addresses. This layer probes those addresses
- * for on-chain state and picks the wallet's active identity, so a
- * consumer doesn't have to make the user choose an index by hand: a
- * cat can sit at any derivation index (the Genesis Cat is not
- * necessarily at index 0), and index-0-only would miss it.
- *
- * Pure + Angular-free (in `/core`): the actual UTXO / cat lookup is a
- * consumer-provided `probe` callback (wired to electrs + the cat
- * index), so this helper holds only the derive → rank logic and all
- * three consumer sites share one identical auto-pick. The regtest
- * proof (`e2e/regtest/watch-only-scan-roundtrip.spec.ts`) wires the
- * probe to real electrs + ordpool-parser.
- *
- * v1 identity model: single-account Taproot, the same model OKX
- * already proves in this codebase (one BIP-86 account, ordinals +
- * payment both derived from it). The pick is split per role because a
- * user's cat and their spendable funds can live at different indexes
- * of the same account:
- *   - ordinals identity = the cat-bearing address, else receive index 0
- *   - payment identity   = the highest-funded address, else receive index 0
- */
-/**
- * Derive the receive window, probe every address, and auto-pick the
- * ordinals + payment identities. Probes run concurrently.
- */
-async function scanWatchOnly(args) {
-    const gapLimit = args.gapLimit ?? 20;
-    if (gapLimit < 1)
-        throw new Error('Watch-only scan: gapLimit must be >= 1');
-    const derived = deriveWatchOnlyAddresses({
-        extendedPublicKey: args.extendedPublicKey,
-        network: args.network,
-        scriptType: args.scriptType,
-        chain: 0, // receive chain
-        startIndex: 0,
-        count: gapLimit,
-    });
-    const probes = await Promise.all(derived.map((a) => args.probe(a.address)));
-    const scanned = derived.map((address, i) => ({ address, probe: probes[i] }));
-    const fallback = derived[0]; // receive index 0 is always the default identity
-    // Ordinals: the first (lowest-index) cat-bearing address.
-    const catBearer = scanned.find((s) => s.probe.hasCat);
-    const ordinals = catBearer?.address ?? fallback;
-    const ordinalsReason = catBearer ? 'cat' : 'default';
-    // Payment: the address with the most spendable sats. Ties resolve to
-    // the lowest index (find scans in derivation order).
-    let best;
-    for (const s of scanned) {
-        if (!s.probe.funded)
-            continue;
-        const sats = s.probe.fundedSats ?? 0;
-        const bestSats = best?.probe.fundedSats ?? 0;
-        if (!best || sats > bestSats)
-            best = s;
-    }
-    const payment = best?.address ?? fallback;
-    const paymentReason = best ? 'funds' : 'default';
-    return { scanned, ordinals, payment, ordinalsReason, paymentReason };
 }
 
 const cat21Config = new InjectionToken('cat21Config');

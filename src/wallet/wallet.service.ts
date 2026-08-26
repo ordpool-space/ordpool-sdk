@@ -2,6 +2,7 @@ import { inject, Injectable } from '@angular/core';
 import {
   BehaviorSubject,
   distinctUntilChanged,
+  from,
   map,
   Observable,
   of,
@@ -22,6 +23,8 @@ import { storage } from '../storage-like';
 import { detectInstalledWallets, walletConnectors } from './connectors';
 import { findSignerOrThrow } from './signers';
 import { verifyBip322Signature } from './verify-bip322-signature';
+import { WatchOnlyScriptType } from './xpub/derive-watch-only';
+import { AddressProbe, scanWatchOnly } from './xpub/scan-watch-only';
 import {
   KnownOrdinalWallet,
   KnownOrdinalWalletType,
@@ -237,6 +240,61 @@ export class WalletService {
   connectFakeWallet(walletInfo: WalletInfo): void {
     this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(walletInfo));
     this.connectedWallet$.next(walletInfo);
+  }
+
+  /**
+   * Connect a watch-only wallet from a pasted account extended public
+   * key (xpub / ypub / zpub / tpub / …). No signing key enters the
+   * browser: the SDK derives the wallet's identity from the public key,
+   * and the user signs each operation's PSBT in their own wallet
+   * (Sparrow, Electrum, Coldcard, Ledger, Trezor, …) via the
+   * export/paste bridge (`promptForSignedPsbt` on the operation calls).
+   *
+   * Derives the receive window and auto-picks the active identity by
+   * probing on-chain state, because a cat can sit at any derivation
+   * index (the Genesis Cat is not necessarily at index 0). The `probe`
+   * callback is consumer-wired to electrs (+ the cat index): the SDK
+   * owns the derive + rank, the consumer owns the I/O, so all three
+   * consumer sites share one identical derivation and auto-pick.
+   *
+   * v1 identity model is single-account Taproot (the same model OKX
+   * proves in this codebase). `scriptType` is required only for a
+   * script-type-ambiguous prefix (plain xpub/tpub — pass `p2tr` for a
+   * taproot account); SLIP-132 prefixes (ypub/zpub/…) imply it.
+   *
+   * Emits the assembled `WalletInfo` and pushes it to
+   * `connectedWallet$`, exactly like `connectWallet`, so every existing
+   * consumer flow treats a watch-only wallet like any other connected
+   * wallet. Account-change arming is a no-op (there is no injected
+   * provider to subscribe to).
+   */
+  connectXpub(args: {
+    extendedPublicKey: string;
+    scriptType?: WatchOnlyScriptType;
+    gapLimit?: number;
+    probe: (address: string) => Promise<AddressProbe>;
+  }): Observable<WalletInfo> {
+    return from(scanWatchOnly({
+      extendedPublicKey: args.extendedPublicKey,
+      network: this.network,
+      scriptType: args.scriptType,
+      gapLimit: args.gapLimit,
+      probe: args.probe,
+    })).pipe(
+      map((scan): WalletInfo => ({
+        type: KnownOrdinalWalletType.xpub,
+        ordinalsAddress: scan.ordinals.address,
+        ordinalsPublicKey: scan.ordinals.publicKeyHex,
+        paymentAddress: scan.payment.address,
+        paymentPublicKey: scan.payment.publicKeyHex,
+        // The watch-only signer (psbtExportSigner) ships, so mint flows
+        // that gate on this proceed to the export/paste bridge.
+        signingSupported: true,
+      })),
+      tap(info => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info))),
+      tap(info => this.connectedWallet$.next(info)),
+      tap(info => this.armAccountChangeSubscription(info.type)),
+    );
   }
 
   disconnectWallet(): void {

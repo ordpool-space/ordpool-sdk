@@ -783,6 +783,144 @@ declare const storage: InjectionToken<StorageLike>;
  */
 declare const bitcoinNetwork: InjectionToken<Network>;
 
+/**
+ * Watch-only address derivation from an account-level extended public
+ * key (xpub / ypub / zpub / tpub / upub / vpub).
+ *
+ * This is the missing first layer of the watch-only ("xpub") wallet:
+ * the SDK already builds + signs + broadcasts a watch-only PSBT
+ * (`psbtExportSigner`, proven in `e2e/regtest/psbt-export-*.spec.ts`),
+ * but a consumer picker had no way to turn a pasted extended key into
+ * the `{ ordinalsAddress, paymentAddress, publicKey }` identity every
+ * operation needs. This derives those addresses so all three consumer
+ * sites (cat21.space, ordpool.space, cubes) share ONE derivation and
+ * cannot disagree on which address a given xpub maps to.
+ *
+ * Supports both wallet exports the CAT-21 HOWTO targets — Electrum and
+ * Sparrow — plus Coldcard / Ledger / Trezor, because they all export
+ * the same BIP-32 account-level extended keys. Script type is carried
+ * in the SLIP-132 version-byte prefix where the wallet uses one
+ * (ypub/zpub/upub/vpub); plain xpub/tpub are script-type-ambiguous
+ * (BIP-44 legacy vs BIP-86 taproot share the same version bytes), so
+ * the caller supplies `scriptType` for those.
+ *
+ * Pure + Angular-free (lives in `/core`): no I/O. The scan/auto-pick
+ * step that picks WHICH derived address is the active identity takes
+ * these outputs plus a UTXO-fetch callback; see the scan helper.
+ */
+
+/** The four address encodings a watch-only export can use. */
+type WatchOnlyScriptType = 'p2tr' | 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh';
+/** A single derived receive/change address with the material an operation needs. */
+interface WatchOnlyAddress {
+    /** Encoded address in the requested script type + network. */
+    address: string;
+    /** 33-byte compressed public key at this path, hex. */
+    publicKeyHex: string;
+    /** Path relative to the supplied account key, e.g. "0/3" (chain/index). */
+    path: string;
+    /** 0 = external/receive chain, 1 = internal/change chain. */
+    chain: 0 | 1;
+    index: number;
+}
+interface DeriveWatchOnlyArgs {
+    /** Account-level extended PUBLIC key (xpub/ypub/zpub/tpub/upub/vpub). */
+    extendedPublicKey: string;
+    network: Network;
+    /**
+     * Required when the prefix is ambiguous (plain xpub/tpub). For
+     * SLIP-132 prefixes (ypub/zpub/upub/vpub) the script type is implied;
+     * passing a conflicting value throws.
+     */
+    scriptType?: WatchOnlyScriptType;
+    /** 0 = receive (default), 1 = change. */
+    chain?: 0 | 1;
+    /** First index to derive (default 0). */
+    startIndex?: number;
+    /** How many consecutive indexes to derive (default 20, the BIP-44 gap limit). */
+    count?: number;
+}
+/**
+ * Derive a run of watch-only addresses from an account extended public
+ * key. Non-hardened `chain/index` children are derivable from a public
+ * key alone (no private key), which is exactly why a watch-only xpub
+ * works.
+ */
+declare function deriveWatchOnlyAddresses(args: DeriveWatchOnlyArgs): WatchOnlyAddress[];
+/** Resolve the effective script type for an extended key without deriving. */
+declare function watchOnlyScriptType(extendedPublicKey: string, network: Network, scriptTypeOverride?: WatchOnlyScriptType): WatchOnlyScriptType;
+
+/**
+ * Watch-only scan / auto-pick (layer 2 of the xpub contract).
+ *
+ * Layer 1 (`deriveWatchOnlyAddresses`) turns an account extended key
+ * into a run of receive addresses. This layer probes those addresses
+ * for on-chain state and picks the wallet's active identity, so a
+ * consumer doesn't have to make the user choose an index by hand: a
+ * cat can sit at any derivation index (the Genesis Cat is not
+ * necessarily at index 0), and index-0-only would miss it.
+ *
+ * Pure + Angular-free (in `/core`): the actual UTXO / cat lookup is a
+ * consumer-provided `probe` callback (wired to electrs + the cat
+ * index), so this helper holds only the derive → rank logic and all
+ * three consumer sites share one identical auto-pick. The regtest
+ * proof (`e2e/regtest/watch-only-scan-roundtrip.spec.ts`) wires the
+ * probe to real electrs + ordpool-parser.
+ *
+ * v1 identity model: single-account Taproot, the same model OKX
+ * already proves in this codebase (one BIP-86 account, ordinals +
+ * payment both derived from it). The pick is split per role because a
+ * user's cat and their spendable funds can live at different indexes
+ * of the same account:
+ *   - ordinals identity = the cat-bearing address, else receive index 0
+ *   - payment identity   = the highest-funded address, else receive index 0
+ */
+
+/** On-chain state of one address, as reported by the consumer's probe. */
+interface AddressProbe {
+    /** Address holds at least one spendable (non-cat) UTXO. */
+    funded: boolean;
+    /** Total spendable value in sats — picks the best payment address. */
+    fundedSats?: number;
+    /** Address currently holds a CAT-21 cat UTXO. */
+    hasCat?: boolean;
+}
+interface ScannedAddress {
+    address: WatchOnlyAddress;
+    probe: AddressProbe;
+}
+interface WatchOnlyScanResult {
+    /** Every derived receive address in the scanned window, with its probe. */
+    scanned: ScannedAddress[];
+    /** Best ordinals identity: first cat-bearing address, else receive index 0. */
+    ordinals: WatchOnlyAddress;
+    /** Best payment identity: highest-funded address, else receive index 0. */
+    payment: WatchOnlyAddress;
+    /** Why `ordinals` was chosen. */
+    ordinalsReason: 'cat' | 'default';
+    /** Why `payment` was chosen. */
+    paymentReason: 'funds' | 'default';
+}
+interface ScanWatchOnlyArgs {
+    extendedPublicKey: string;
+    network: Network;
+    /** Required for a script-type-ambiguous prefix (plain xpub/tpub). */
+    scriptType?: WatchOnlyScriptType;
+    /** How many receive addresses to derive + probe (default 20, the gap limit). */
+    gapLimit?: number;
+    /**
+     * Consumer-provided on-chain lookup for one address. Wire to electrs
+     * `/address/:a/utxo` (funded/fundedSats) + the cat index / ordpool-parser
+     * (hasCat). Called once per derived address; may run concurrently.
+     */
+    probe: (address: string) => Promise<AddressProbe>;
+}
+/**
+ * Derive the receive window, probe every address, and auto-pick the
+ * ordinals + payment identities. Probes run concurrently.
+ */
+declare function scanWatchOnly(args: ScanWatchOnlyArgs): Promise<WatchOnlyScanResult>;
+
 declare const leatherOrdinalsAddressType = "p2tr";
 declare const leatherPaymentAddressType = "p2wpkh";
 
@@ -840,6 +978,38 @@ declare class WalletService {
     };
     connectWallet(key: KnownOrdinalWalletType): Observable<WalletInfo>;
     connectFakeWallet(walletInfo: WalletInfo): void;
+    /**
+     * Connect a watch-only wallet from a pasted account extended public
+     * key (xpub / ypub / zpub / tpub / …). No signing key enters the
+     * browser: the SDK derives the wallet's identity from the public key,
+     * and the user signs each operation's PSBT in their own wallet
+     * (Sparrow, Electrum, Coldcard, Ledger, Trezor, …) via the
+     * export/paste bridge (`promptForSignedPsbt` on the operation calls).
+     *
+     * Derives the receive window and auto-picks the active identity by
+     * probing on-chain state, because a cat can sit at any derivation
+     * index (the Genesis Cat is not necessarily at index 0). The `probe`
+     * callback is consumer-wired to electrs (+ the cat index): the SDK
+     * owns the derive + rank, the consumer owns the I/O, so all three
+     * consumer sites share one identical derivation and auto-pick.
+     *
+     * v1 identity model is single-account Taproot (the same model OKX
+     * proves in this codebase). `scriptType` is required only for a
+     * script-type-ambiguous prefix (plain xpub/tpub — pass `p2tr` for a
+     * taproot account); SLIP-132 prefixes (ypub/zpub/…) imply it.
+     *
+     * Emits the assembled `WalletInfo` and pushes it to
+     * `connectedWallet$`, exactly like `connectWallet`, so every existing
+     * consumer flow treats a watch-only wallet like any other connected
+     * wallet. Account-change arming is a no-op (there is no injected
+     * provider to subscribe to).
+     */
+    connectXpub(args: {
+        extendedPublicKey: string;
+        scriptType?: WatchOnlyScriptType;
+        gapLimit?: number;
+        probe: (address: string) => Promise<AddressProbe>;
+    }): Observable<WalletInfo>;
     disconnectWallet(): void;
     /**
      * Sign a UTF-8 message with the connected wallet's ordinals key via
@@ -1084,144 +1254,6 @@ declare function walletsSupporting(capability: WalletCapability, opts?: {
 }): WalletMatrixEntry[];
 /** Every wallet reachable on a platform, in matrix order. */
 declare function walletsForPlatform(platform: WalletPlatform): WalletMatrixEntry[];
-
-/**
- * Watch-only address derivation from an account-level extended public
- * key (xpub / ypub / zpub / tpub / upub / vpub).
- *
- * This is the missing first layer of the watch-only ("xpub") wallet:
- * the SDK already builds + signs + broadcasts a watch-only PSBT
- * (`psbtExportSigner`, proven in `e2e/regtest/psbt-export-*.spec.ts`),
- * but a consumer picker had no way to turn a pasted extended key into
- * the `{ ordinalsAddress, paymentAddress, publicKey }` identity every
- * operation needs. This derives those addresses so all three consumer
- * sites (cat21.space, ordpool.space, cubes) share ONE derivation and
- * cannot disagree on which address a given xpub maps to.
- *
- * Supports both wallet exports the CAT-21 HOWTO targets — Electrum and
- * Sparrow — plus Coldcard / Ledger / Trezor, because they all export
- * the same BIP-32 account-level extended keys. Script type is carried
- * in the SLIP-132 version-byte prefix where the wallet uses one
- * (ypub/zpub/upub/vpub); plain xpub/tpub are script-type-ambiguous
- * (BIP-44 legacy vs BIP-86 taproot share the same version bytes), so
- * the caller supplies `scriptType` for those.
- *
- * Pure + Angular-free (lives in `/core`): no I/O. The scan/auto-pick
- * step that picks WHICH derived address is the active identity takes
- * these outputs plus a UTXO-fetch callback; see the scan helper.
- */
-
-/** The four address encodings a watch-only export can use. */
-type WatchOnlyScriptType = 'p2tr' | 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh';
-/** A single derived receive/change address with the material an operation needs. */
-interface WatchOnlyAddress {
-    /** Encoded address in the requested script type + network. */
-    address: string;
-    /** 33-byte compressed public key at this path, hex. */
-    publicKeyHex: string;
-    /** Path relative to the supplied account key, e.g. "0/3" (chain/index). */
-    path: string;
-    /** 0 = external/receive chain, 1 = internal/change chain. */
-    chain: 0 | 1;
-    index: number;
-}
-interface DeriveWatchOnlyArgs {
-    /** Account-level extended PUBLIC key (xpub/ypub/zpub/tpub/upub/vpub). */
-    extendedPublicKey: string;
-    network: Network;
-    /**
-     * Required when the prefix is ambiguous (plain xpub/tpub). For
-     * SLIP-132 prefixes (ypub/zpub/upub/vpub) the script type is implied;
-     * passing a conflicting value throws.
-     */
-    scriptType?: WatchOnlyScriptType;
-    /** 0 = receive (default), 1 = change. */
-    chain?: 0 | 1;
-    /** First index to derive (default 0). */
-    startIndex?: number;
-    /** How many consecutive indexes to derive (default 20, the BIP-44 gap limit). */
-    count?: number;
-}
-/**
- * Derive a run of watch-only addresses from an account extended public
- * key. Non-hardened `chain/index` children are derivable from a public
- * key alone (no private key), which is exactly why a watch-only xpub
- * works.
- */
-declare function deriveWatchOnlyAddresses(args: DeriveWatchOnlyArgs): WatchOnlyAddress[];
-/** Resolve the effective script type for an extended key without deriving. */
-declare function watchOnlyScriptType(extendedPublicKey: string, network: Network, scriptTypeOverride?: WatchOnlyScriptType): WatchOnlyScriptType;
-
-/**
- * Watch-only scan / auto-pick (layer 2 of the xpub contract).
- *
- * Layer 1 (`deriveWatchOnlyAddresses`) turns an account extended key
- * into a run of receive addresses. This layer probes those addresses
- * for on-chain state and picks the wallet's active identity, so a
- * consumer doesn't have to make the user choose an index by hand: a
- * cat can sit at any derivation index (the Genesis Cat is not
- * necessarily at index 0), and index-0-only would miss it.
- *
- * Pure + Angular-free (in `/core`): the actual UTXO / cat lookup is a
- * consumer-provided `probe` callback (wired to electrs + the cat
- * index), so this helper holds only the derive → rank logic and all
- * three consumer sites share one identical auto-pick. The regtest
- * proof (`e2e/regtest/watch-only-scan-roundtrip.spec.ts`) wires the
- * probe to real electrs + ordpool-parser.
- *
- * v1 identity model: single-account Taproot, the same model OKX
- * already proves in this codebase (one BIP-86 account, ordinals +
- * payment both derived from it). The pick is split per role because a
- * user's cat and their spendable funds can live at different indexes
- * of the same account:
- *   - ordinals identity = the cat-bearing address, else receive index 0
- *   - payment identity   = the highest-funded address, else receive index 0
- */
-
-/** On-chain state of one address, as reported by the consumer's probe. */
-interface AddressProbe {
-    /** Address holds at least one spendable (non-cat) UTXO. */
-    funded: boolean;
-    /** Total spendable value in sats — picks the best payment address. */
-    fundedSats?: number;
-    /** Address currently holds a CAT-21 cat UTXO. */
-    hasCat?: boolean;
-}
-interface ScannedAddress {
-    address: WatchOnlyAddress;
-    probe: AddressProbe;
-}
-interface WatchOnlyScanResult {
-    /** Every derived receive address in the scanned window, with its probe. */
-    scanned: ScannedAddress[];
-    /** Best ordinals identity: first cat-bearing address, else receive index 0. */
-    ordinals: WatchOnlyAddress;
-    /** Best payment identity: highest-funded address, else receive index 0. */
-    payment: WatchOnlyAddress;
-    /** Why `ordinals` was chosen. */
-    ordinalsReason: 'cat' | 'default';
-    /** Why `payment` was chosen. */
-    paymentReason: 'funds' | 'default';
-}
-interface ScanWatchOnlyArgs {
-    extendedPublicKey: string;
-    network: Network;
-    /** Required for a script-type-ambiguous prefix (plain xpub/tpub). */
-    scriptType?: WatchOnlyScriptType;
-    /** How many receive addresses to derive + probe (default 20, the gap limit). */
-    gapLimit?: number;
-    /**
-     * Consumer-provided on-chain lookup for one address. Wire to electrs
-     * `/address/:a/utxo` (funded/fundedSats) + the cat index / ordpool-parser
-     * (hasCat). Called once per derived address; may run concurrently.
-     */
-    probe: (address: string) => Promise<AddressProbe>;
-}
-/**
- * Derive the receive window, probe every address, and auto-pick the
- * ordinals + payment identities. Probes run concurrently.
- */
-declare function scanWatchOnly(args: ScanWatchOnlyArgs): Promise<WatchOnlyScanResult>;
 
 /**
  * Runtime config the cat21-mint services need. Provided by the
