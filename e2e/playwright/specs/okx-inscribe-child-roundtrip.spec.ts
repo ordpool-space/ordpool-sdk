@@ -121,8 +121,23 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
     // to approve.
     if (isDone?.()) return;
     for (const p of ctx.pages()) {
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '');
+      // OKX tears its own popup/extension pages down the instant it
+      // auto-approves; a page enumerated here can be closed by the time we
+      // touch it. `p.url()` on a closed page throws "guid not bound" (NOT
+      // caught by the innerText .catch), which was the residual child flake
+      // after both signs already completed. Re-check isDone (the operation
+      // may have finished mid-scan), skip closed pages, and wrap the access
+      // so a page closing between the isClosed() check and the read is
+      // swallowed instead of failing the test.
+      if (isDone?.()) return;
+      if (p.isClosed()) continue;
+      let text = '';
+      try {
+        if (!p.url().startsWith('chrome-extension://')) continue;
+        text = await p.locator('body').innerText().catch(() => '');
+      } catch {
+        continue;
+      }
       if (SIGN_HEADING.test(text)) { approval = p; break; }
     }
     if (approval) break;

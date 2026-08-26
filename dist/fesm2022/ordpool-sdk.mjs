@@ -4205,7 +4205,7 @@ const WALLET_MATRIX = [
             [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
             [WalletCapability.InscriptionParentChild]: {
                 support: CapabilitySupport.Proven,
-                caveat: 'The child SDK code path is proven (green e2e roundtrips; wallet-agnostic merge/finalize shared with 5 other proven wallets), but the 3-popup child e2e (connect + commit + reveal) is timing-flaky on the OKX extension ~1/3 of runs: the commit signs, then the reveal-sign popup intermittently fails to complete under Playwright. This is browser-automation stability on OKX\'s hardest flow, not an SDK-byte problem. A production integration should retry the reveal sign.',
+                caveat: 'The child SDK code path is proven (wallet-agnostic merge/finalize, shared with 5 other proven wallets), and on OKX both signs (commit + reveal) now complete reliably every run. A residual Playwright teardown race remains: OKX tears its popup pages down the instant it auto-approves, and the harness\'s page-poll occasionally reads a just-closed page after both signs succeed, so the 3-popup child e2e passes on retry ~1/3 of runs rather than first-try. This is browser-automation stability on OKX\'s hardest flow, not an SDK-byte or signing problem.',
             },
             [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
         },
