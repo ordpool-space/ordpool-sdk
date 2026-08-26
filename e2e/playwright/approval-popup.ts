@@ -111,7 +111,18 @@ export async function closeLeftoverExtensionPages(
   const keepSet = new Set(keep);
   for (const p of context.pages()) {
     if (keepSet.has(p)) continue;
-    if (!p.url().startsWith('chrome-extension://')) continue;
+    // OKX (and other wallets) tear their own pages down the instant they
+    // auto-approve, so a page enumerated here can already be closing.
+    // `p.url()` on a closed page throws "guid not bound" — uncaught, that
+    // failed the whole spec during the connect/commit cleanup, before the
+    // flow even reached the next sign. Skip closed pages and swallow a page
+    // that closes between the isClosed() check and the url() read.
+    if (p.isClosed()) continue;
+    try {
+      if (!p.url().startsWith('chrome-extension://')) continue;
+    } catch {
+      continue;
+    }
     await p.close().catch(() => undefined);
   }
 }
