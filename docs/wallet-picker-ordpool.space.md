@@ -97,6 +97,32 @@ hardcoding wallet notes in the frontend.
 4. Keep the picker scoped to `Cat21Mint` (and any other capability the page
    truly uses) so you don't advertise operations the mint page can't drive.
 
+## Parent/child (collections): what is proven, if ordpool grows that surface
+
+ordpool's wallet surface today is the mint page, but the SDK's parent/child
+(ord provenance) support is now proven broadly, so gate any future inscribe
+or collections surface with `WalletCapability.InscriptionParentChild` and
+you inherit this state:
+
+- **Proven on regtest for seven wallets**: Cat21 Wallet, Xverse, Leather,
+  UniSat, Wizz, OKX, and the watch-only (xpub) path. Each runs a real child
+  roundtrip: the wallet signs the reveal's Taproot parent input on a BARE
+  wallet-facing PSBT (the ord envelope is stripped, so the wallet never has
+  to understand it), the SDK merges that signature into the full reveal,
+  finalizes both inputs, broadcasts, and stock ord confirms the provenance
+  link plus the parent returning to its owner at 546 sats.
+- **Watch-only included**: the external wallet (bitcoin-cli
+  walletprocesspsbt as the BIP-174 stand-in for Sparrow/Coldcard/Ledger)
+  partial-signs the bare reveal with finalize=false; the SDK does the rest.
+- **Alby is the only Unsupported**: its signPsbt signs every input with one
+  Taproot key and has no per-input selection, so it cannot leave the
+  ephemeral commit input alone. Show the action disabled with the reason
+  (shared UX doc), never a vanished button.
+- **UniSat / Wizz caveat**: the active wallet address type must be Taproot
+  (P2TR) or the reveal sign fails with `invalid address in toSignInput`.
+- Full mechanism and per-wallet notes: `CHILD-INSCRIBE-WALLET-SUPPORT.md`
+  in the SDK repo.
+
 ## Deep integration + shared UX (required)
 
 Read `docs/wallet-picker-ux-shared.md` (same repo) before building. It is
