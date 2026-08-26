@@ -4591,7 +4591,11 @@ function txToPendingMint(tx, seenAt) {
         txid: tx.txid,
         vsize,
         fee: tx.fee,
-        feeRate: Math.round((tx.fee / vsize) * 10) / 10,
+        // Guard a degenerate weight=0 feed entry: vsize 0 would make fee/vsize
+        // NaN (fee 0) or Infinity (fee > 0). Real mempool txs always have
+        // positive weight, so this only shields a malformed entry from
+        // poisoning the pending-mints list with a non-finite feeRate.
+        feeRate: vsize > 0 ? Math.round((tx.fee / vsize) * 10) / 10 : 0,
         // A CAT-21 mint's vout[0] is the recipient address output, but an
         // OP_RETURN vout[0] (or an empty vout) has no address; fall back to
         // '' rather than assert non-null.
@@ -6160,6 +6164,27 @@ class Cat21CreateOfferOrchestrator {
     priceSatsSubject = new BehaviorSubject(null);
     feeRateSubject = new BehaviorSubject(null);
     selectedFundingUtxoSubject = new BehaviorSubject(null);
+    // Subject mirrors of the target/seller/buyer-receive signals. The buy-offer
+    // fee depends on all three (the seller cat input's script, the seller
+    // payout output's script, and the buyer receive output's script all change
+    // the vsize), so simulation$ must re-fire when any change. BehaviorSubject
+    // (not toObservable) for the same plain-Injector reason as the other mirrors.
+    targetCatSubject = new BehaviorSubject(null);
+    sellerPaymentAddressSubject = new BehaviorSubject(null);
+    buyerReceiveAddressSubject = new BehaviorSubject(null);
+    /** Write-through: keep each signal and its RxJS-mirror subject in lockstep. */
+    writeTargetCat(v) {
+        this.targetCat.set(v);
+        this.targetCatSubject.next(v);
+    }
+    writeSellerPaymentAddress(v) {
+        this.sellerPaymentAddress.set(v);
+        this.sellerPaymentAddressSubject.next(v);
+    }
+    writeBuyerReceiveAddress(v) {
+        this.buyerReceiveAddress.set(v);
+        this.buyerReceiveAddressSubject.next(v);
+    }
     // --- Output state -------------------------------------------------------
     state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
     errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
@@ -6187,12 +6212,12 @@ class Cat21CreateOfferOrchestrator {
             this.lastWalletAddress = w.ordinalsAddress;
             // Default buyerReceive to the connected wallet's ordinals address.
             if (!this.buyerReceiveAddress())
-                this.buyerReceiveAddress.set(w.ordinalsAddress);
+                this.writeBuyerReceiveAddress(w.ordinalsAddress);
             return;
         }
         this.lastWalletAddress = w.ordinalsAddress;
         this.resetFormFields();
-        this.buyerReceiveAddress.set(w.ordinalsAddress);
+        this.writeBuyerReceiveAddress(w.ordinalsAddress);
     });
     // --- Derived streams ----------------------------------------------------
     /**
@@ -6222,10 +6247,17 @@ class Cat21CreateOfferOrchestrator {
         this.priceSatsSubject,
         this.feeRateSubject,
         this.selectedFundingUtxoSubject,
-    ]).pipe(map(([fundingUtxos, wallet, priceSats, feeRate, selected]) => this.computeSimulation(fundingUtxos, wallet, priceSats, feeRate, selected)), shareReplay({ bufferSize: 1, refCount: true }));
+        this.targetCatSubject,
+        this.sellerPaymentAddressSubject,
+        this.buyerReceiveAddressSubject,
+    ]).pipe(
+    // computeSimulation reads target/seller/buyerReceive from their signals
+    // (written in lockstep with the subjects above); the extra sources are
+    // present to RE-FIRE the stream when any of them change.
+    map(([fundingUtxos, wallet, priceSats, feeRate, selected]) => this.computeSimulation(fundingUtxos, wallet, priceSats, feeRate, selected)), shareReplay({ bufferSize: 1, refCount: true }));
     // --- Commands -----------------------------------------------------------
     setTargetCat(cat) {
-        this.targetCat.set(cat);
+        this.writeTargetCat(cat);
     }
     /**
      * Set the seller's PAYMENT address (where sale proceeds land). The
@@ -6237,7 +6269,7 @@ class Cat21CreateOfferOrchestrator {
      * "Never derive a payment address from an on-chain lookup".
      */
     setSellerPaymentAddress(address) {
-        this.sellerPaymentAddress.set(address);
+        this.writeSellerPaymentAddress(address);
     }
     setPriceSats(price) {
         if (!Number.isFinite(price) || price <= 0)
@@ -6247,7 +6279,7 @@ class Cat21CreateOfferOrchestrator {
         this.priceSatsSubject.next(floored);
     }
     setBuyerReceiveAddress(address) {
-        this.buyerReceiveAddress.set(address && address.trim() ? address.trim() : null);
+        this.writeBuyerReceiveAddress(address && address.trim() ? address.trim() : null);
     }
     setFeeRate(rate) {
         if (!Number.isFinite(rate) || rate <= 0)
@@ -6349,7 +6381,7 @@ class Cat21CreateOfferOrchestrator {
         this.offerArtifact.set(null);
         const w = this.connectedWallet();
         if (w) {
-            this.buyerReceiveAddress.set(w.ordinalsAddress);
+            this.writeBuyerReceiveAddress(w.ordinalsAddress);
             this.state.set('ready');
         }
         else {
@@ -6362,8 +6394,8 @@ class Cat21CreateOfferOrchestrator {
         this.lastFundingUtxosSnapshot = u;
     });
     resetFormFields() {
-        this.targetCat.set(null);
-        this.sellerPaymentAddress.set(null);
+        this.writeTargetCat(null);
+        this.writeSellerPaymentAddress(null);
         this.priceSats.set(null);
         this.priceSatsSubject.next(null);
         // Don't clear buyerReceiveAddress here — the walletChangeSub
@@ -6976,6 +7008,10 @@ class Cat21TransferOrchestrator {
     catUtxoSubject = new BehaviorSubject(null);
     feeRateSubject = new BehaviorSubject(null);
     selectedFundingUtxoSubject = new BehaviorSubject(null);
+    // The recipient's script type changes the transfer's output vsize (P2TR
+    // vs P2WPKH vs legacy), so the quoted fee depends on it. simulation$ must
+    // re-fire when the recipient changes, hence a subject alongside the signal.
+    recipientAddressSubject = new BehaviorSubject(null);
     // --- Output state -------------------------------------------------------
     state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
     errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
@@ -7059,14 +7095,21 @@ class Cat21TransferOrchestrator {
         this.catUtxoSubject,
         this.feeRateSubject,
         this.selectedFundingUtxoSubject,
-    ]).pipe(map(([fundingUtxos, wallet, cat, feeRate, selected]) => this.computeSimulation(fundingUtxos, wallet, cat, feeRate, selected)), shareReplay({ bufferSize: 1, refCount: true }));
+        this.recipientAddressSubject,
+    ]).pipe(
+    // computeSimulation reads the recipient from its signal (set synchronously
+    // in setRecipientAddress before the subject emits, so it's current here);
+    // the recipient source is present to RE-FIRE the stream on recipient change.
+    map(([fundingUtxos, wallet, cat, feeRate, selected]) => this.computeSimulation(fundingUtxos, wallet, cat, feeRate, selected)), shareReplay({ bufferSize: 1, refCount: true }));
     // --- Commands -----------------------------------------------------------
     setCatUtxo(cat) {
         this.catUtxo.set(cat);
         this.catUtxoSubject.next(cat);
     }
     setRecipientAddress(address) {
-        this.recipientAddress.set(address && address.trim() ? address.trim() : null);
+        const value = address && address.trim() ? address.trim() : null;
+        this.recipientAddress.set(value);
+        this.recipientAddressSubject.next(value);
     }
     setFeeRate(rate) {
         if (!Number.isFinite(rate) || rate <= 0)
@@ -7184,6 +7227,7 @@ class Cat21TransferOrchestrator {
         this.catUtxo.set(null);
         this.catUtxoSubject.next(null);
         this.recipientAddress.set(null);
+        this.recipientAddressSubject.next(null);
         this.feeRate.set(null);
         this.feeRateSubject.next(null);
         this.selectedFundingUtxo.set(null);
@@ -11430,6 +11474,17 @@ function evaluateAgentPolicy(policy, action) {
     // address fails CLOSED: a malformed intent that dropped the
     // counterparty must not slip past the allowlist (matching the
     // fail-closed posture of the numeric shape guards above).
+    //
+    // Matching is EXACT string equality, by design. This is intentionally
+    // STRICTER than the on-chain `validateCat21Operation` gate, which
+    // compares by decoded scriptPubKey (allowlistContainsAddress): a
+    // script-equivalent-but-textually-different address is allowed there
+    // but denied here. That asymmetry is fail-closed (this policy only ever
+    // makes the agent MORE restrictive, never less), and keeping the policy
+    // gate a pure string/shape guard avoids threading a Bitcoin network into
+    // it. Consumers must list counterparties in the exact form the action
+    // will carry; the authoritative script-level allow happens at the
+    // operation gate.
     if (policy.allowedCounterparties.length > 0 && action.kind !== 'cat21_mint') {
         if (action.counterpartyAddress === undefined ||
             !policy.allowedCounterparties.includes(action.counterpartyAddress)) {

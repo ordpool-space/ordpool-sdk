@@ -2396,6 +2396,13 @@ declare class Cat21CreateOfferOrchestrator {
     private readonly priceSatsSubject;
     private readonly feeRateSubject;
     private readonly selectedFundingUtxoSubject;
+    private readonly targetCatSubject;
+    private readonly sellerPaymentAddressSubject;
+    private readonly buyerReceiveAddressSubject;
+    /** Write-through: keep each signal and its RxJS-mirror subject in lockstep. */
+    private writeTargetCat;
+    private writeSellerPaymentAddress;
+    private writeBuyerReceiveAddress;
     readonly state: _angular_core.WritableSignal<CreateOfferState>;
     readonly errorMessage: _angular_core.WritableSignal<string>;
     /**
@@ -2810,6 +2817,7 @@ declare class Cat21TransferOrchestrator {
     private readonly catUtxoSubject;
     private readonly feeRateSubject;
     private readonly selectedFundingUtxoSubject;
+    private readonly recipientAddressSubject;
     readonly state: _angular_core.WritableSignal<TransferState>;
     readonly errorMessage: _angular_core.WritableSignal<string>;
     readonly successTxId: _angular_core.WritableSignal<string>;

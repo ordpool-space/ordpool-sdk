@@ -132,6 +132,10 @@ export class Cat21TransferOrchestrator {
   private readonly catUtxoSubject = new BehaviorSubject<Cat21Holding | null>(null);
   private readonly feeRateSubject = new BehaviorSubject<number | null>(null);
   private readonly selectedFundingUtxoSubject = new BehaviorSubject<TxnOutput | null>(null);
+  // The recipient's script type changes the transfer's output vsize (P2TR
+  // vs P2WPKH vs legacy), so the quoted fee depends on it. simulation$ must
+  // re-fire when the recipient changes, hence a subject alongside the signal.
+  private readonly recipientAddressSubject = new BehaviorSubject<string | null>(null);
 
   // --- Output state -------------------------------------------------------
 
@@ -232,7 +236,11 @@ export class Cat21TransferOrchestrator {
     this.catUtxoSubject,
     this.feeRateSubject,
     this.selectedFundingUtxoSubject,
+    this.recipientAddressSubject,
   ]).pipe(
+    // computeSimulation reads the recipient from its signal (set synchronously
+    // in setRecipientAddress before the subject emits, so it's current here);
+    // the recipient source is present to RE-FIRE the stream on recipient change.
     map(([fundingUtxos, wallet, cat, feeRate, selected]) =>
       this.computeSimulation(fundingUtxos, wallet, cat, feeRate, selected),
     ),
@@ -247,7 +255,9 @@ export class Cat21TransferOrchestrator {
   }
 
   setRecipientAddress(address: string | null): void {
-    this.recipientAddress.set(address && address.trim() ? address.trim() : null);
+    const value = address && address.trim() ? address.trim() : null;
+    this.recipientAddress.set(value);
+    this.recipientAddressSubject.next(value);
   }
 
   setFeeRate(rate: number): void {
@@ -381,6 +391,7 @@ export class Cat21TransferOrchestrator {
     this.catUtxo.set(null);
     this.catUtxoSubject.next(null);
     this.recipientAddress.set(null);
+    this.recipientAddressSubject.next(null);
     this.feeRate.set(null);
     this.feeRateSubject.next(null);
     this.selectedFundingUtxo.set(null);

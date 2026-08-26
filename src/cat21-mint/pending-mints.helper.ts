@@ -32,7 +32,11 @@ export function txToPendingMint(tx: MempoolTx, seenAt: string): PendingMint {
     txid: tx.txid,
     vsize,
     fee: tx.fee,
-    feeRate: Math.round((tx.fee / vsize) * 10) / 10,
+    // Guard a degenerate weight=0 feed entry: vsize 0 would make fee/vsize
+    // NaN (fee 0) or Infinity (fee > 0). Real mempool txs always have
+    // positive weight, so this only shields a malformed entry from
+    // poisoning the pending-mints list with a non-finite feeRate.
+    feeRate: vsize > 0 ? Math.round((tx.fee / vsize) * 10) / 10 : 0,
     // A CAT-21 mint's vout[0] is the recipient address output, but an
     // OP_RETURN vout[0] (or an empty vout) has no address; fall back to
     // '' rather than assert non-null.

@@ -138,6 +138,28 @@ export class Cat21CreateOfferOrchestrator {
   private readonly priceSatsSubject = new BehaviorSubject<number | null>(null);
   private readonly feeRateSubject = new BehaviorSubject<number | null>(null);
   private readonly selectedFundingUtxoSubject = new BehaviorSubject<TxnOutput | null>(null);
+  // Subject mirrors of the target/seller/buyer-receive signals. The buy-offer
+  // fee depends on all three (the seller cat input's script, the seller
+  // payout output's script, and the buyer receive output's script all change
+  // the vsize), so simulation$ must re-fire when any change. BehaviorSubject
+  // (not toObservable) for the same plain-Injector reason as the other mirrors.
+  private readonly targetCatSubject = new BehaviorSubject<BuyOfferTargetCat | null>(null);
+  private readonly sellerPaymentAddressSubject = new BehaviorSubject<PaymentAddress | null>(null);
+  private readonly buyerReceiveAddressSubject = new BehaviorSubject<string | null>(null);
+
+  /** Write-through: keep each signal and its RxJS-mirror subject in lockstep. */
+  private writeTargetCat(v: BuyOfferTargetCat | null): void {
+    this.targetCat.set(v);
+    this.targetCatSubject.next(v);
+  }
+  private writeSellerPaymentAddress(v: PaymentAddress | null): void {
+    this.sellerPaymentAddress.set(v);
+    this.sellerPaymentAddressSubject.next(v);
+  }
+  private writeBuyerReceiveAddress(v: string | null): void {
+    this.buyerReceiveAddress.set(v);
+    this.buyerReceiveAddressSubject.next(v);
+  }
 
   // --- Output state -------------------------------------------------------
 
@@ -168,12 +190,12 @@ export class Cat21CreateOfferOrchestrator {
     if (this.lastWalletAddress === null || this.lastWalletAddress === w.ordinalsAddress) {
       this.lastWalletAddress = w.ordinalsAddress;
       // Default buyerReceive to the connected wallet's ordinals address.
-      if (!this.buyerReceiveAddress()) this.buyerReceiveAddress.set(w.ordinalsAddress);
+      if (!this.buyerReceiveAddress()) this.writeBuyerReceiveAddress(w.ordinalsAddress);
       return;
     }
     this.lastWalletAddress = w.ordinalsAddress;
     this.resetFormFields();
-    this.buyerReceiveAddress.set(w.ordinalsAddress);
+    this.writeBuyerReceiveAddress(w.ordinalsAddress);
   });
 
   // --- Derived streams ----------------------------------------------------
@@ -216,7 +238,13 @@ export class Cat21CreateOfferOrchestrator {
     this.priceSatsSubject,
     this.feeRateSubject,
     this.selectedFundingUtxoSubject,
+    this.targetCatSubject,
+    this.sellerPaymentAddressSubject,
+    this.buyerReceiveAddressSubject,
   ]).pipe(
+    // computeSimulation reads target/seller/buyerReceive from their signals
+    // (written in lockstep with the subjects above); the extra sources are
+    // present to RE-FIRE the stream when any of them change.
     map(([fundingUtxos, wallet, priceSats, feeRate, selected]) =>
       this.computeSimulation(fundingUtxos, wallet, priceSats, feeRate, selected),
     ),
@@ -226,7 +254,7 @@ export class Cat21CreateOfferOrchestrator {
   // --- Commands -----------------------------------------------------------
 
   setTargetCat(cat: BuyOfferTargetCat | null): void {
-    this.targetCat.set(cat);
+    this.writeTargetCat(cat);
   }
 
   /**
@@ -239,7 +267,7 @@ export class Cat21CreateOfferOrchestrator {
    * "Never derive a payment address from an on-chain lookup".
    */
   setSellerPaymentAddress(address: PaymentAddress | null): void {
-    this.sellerPaymentAddress.set(address);
+    this.writeSellerPaymentAddress(address);
   }
 
   setPriceSats(price: number): void {
@@ -250,7 +278,7 @@ export class Cat21CreateOfferOrchestrator {
   }
 
   setBuyerReceiveAddress(address: string | null): void {
-    this.buyerReceiveAddress.set(address && address.trim() ? address.trim() : null);
+    this.writeBuyerReceiveAddress(address && address.trim() ? address.trim() : null);
   }
 
   setFeeRate(rate: number): void {
@@ -364,7 +392,7 @@ export class Cat21CreateOfferOrchestrator {
     this.offerArtifact.set(null);
     const w = this.connectedWallet();
     if (w) {
-      this.buyerReceiveAddress.set(w.ordinalsAddress);
+      this.writeBuyerReceiveAddress(w.ordinalsAddress);
       this.state.set('ready');
     } else {
       this.state.set('idle');
@@ -380,8 +408,8 @@ export class Cat21CreateOfferOrchestrator {
   });
 
   private resetFormFields(): void {
-    this.targetCat.set(null);
-    this.sellerPaymentAddress.set(null);
+    this.writeTargetCat(null);
+    this.writeSellerPaymentAddress(null);
     this.priceSats.set(null);
     this.priceSatsSubject.next(null);
     // Don't clear buyerReceiveAddress here — the walletChangeSub

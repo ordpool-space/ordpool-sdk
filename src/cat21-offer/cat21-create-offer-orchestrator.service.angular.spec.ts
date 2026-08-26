@@ -113,6 +113,29 @@ describe('Cat21CreateOfferOrchestrator', () => {
       expect(orchestrator.sellerPaymentAddress()).toBeNull();
     });
 
+    it('simulation$ re-emits when target / seller-payment / buyer-receive change (all drive the fee)', async () => {
+      const fundingUtxo: TxnOutput = { txid: 'f'.repeat(64), vout: 0, value: 200_000, status: { confirmed: true } };
+      const { orchestrator, walletSubject } = buildOrchestrator({ utxos: [fundingUtxo] });
+      walletSubject.next(wallet());
+      orchestrator.setPriceSats(21_000);
+      orchestrator.setFeeRate(10);
+
+      const emissions: unknown[] = [];
+      const sub = orchestrator.simulation$.subscribe(v => emissions.push(v));
+      await Promise.resolve();
+
+      // Each of the three previously-missing sources must re-fire the stream.
+      let count = emissions.length;
+      expect(count).toBeGreaterThan(0);
+      orchestrator.setTargetCat(target());
+      expect(emissions.length).toBeGreaterThan(count); count = emissions.length;
+      orchestrator.setSellerPaymentAddress(SELLER_PAYMENT);
+      expect(emissions.length).toBeGreaterThan(count); count = emissions.length;
+      orchestrator.setBuyerReceiveAddress('bc1qbuyerreceive');
+      expect(emissions.length).toBeGreaterThan(count);
+      sub.unsubscribe();
+    });
+
     it('toPaymentAddress upstream of the setter rejects garbage', () => {
       // Shape validation is the branded constructor's job; the setter
       // only sees well-formed values. Pinning the constructor's

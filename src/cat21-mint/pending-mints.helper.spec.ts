@@ -92,6 +92,14 @@ describe('txToPendingMint', () => {
     expect(txToPendingMint(mintTx({ weight: 600, fee: 1234 }), '2026-06-08T12:00:00.000Z'))
       .toMatchObject({ vsize: 150, feeRate: 8.2 });
   });
+
+  it('yields a finite feeRate (0) on a degenerate weight=0 entry instead of NaN/Infinity', () => {
+    // weight 0 → vsize 0; without the guard fee/vsize is Infinity (fee>0) or NaN (fee=0).
+    expect(txToPendingMint(mintTx({ weight: 0, fee: 1500 }), '2026-06-08T12:00:00.000Z'))
+      .toMatchObject({ vsize: 0, feeRate: 0 });
+    expect(txToPendingMint(mintTx({ weight: 0, fee: 0 }), '2026-06-08T12:00:00.000Z'))
+      .toMatchObject({ vsize: 0, feeRate: 0 });
+  });
 });
 
 

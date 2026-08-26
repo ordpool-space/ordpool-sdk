@@ -101,6 +101,17 @@ export function evaluateAgentPolicy(
   // address fails CLOSED: a malformed intent that dropped the
   // counterparty must not slip past the allowlist (matching the
   // fail-closed posture of the numeric shape guards above).
+  //
+  // Matching is EXACT string equality, by design. This is intentionally
+  // STRICTER than the on-chain `validateCat21Operation` gate, which
+  // compares by decoded scriptPubKey (allowlistContainsAddress): a
+  // script-equivalent-but-textually-different address is allowed there
+  // but denied here. That asymmetry is fail-closed (this policy only ever
+  // makes the agent MORE restrictive, never less), and keeping the policy
+  // gate a pure string/shape guard avoids threading a Bitcoin network into
+  // it. Consumers must list counterparties in the exact form the action
+  // will carry; the authoritative script-level allow happens at the
+  // operation gate.
   if (policy.allowedCounterparties.length > 0 && action.kind !== 'cat21_mint') {
     if (
       action.counterpartyAddress === undefined ||

@@ -128,6 +128,26 @@ describe('Cat21TransferOrchestrator', () => {
       expect(orchestrator.feeRate()).toBe(5);
     });
 
+    it('simulation$ re-emits when the recipient changes (recipient script type drives the fee)', async () => {
+      const { orchestrator, walletSubject, cat21 } = buildOrchestrator();
+      cat21.getUtxos.mockReturnValue(of([utxo()]));
+      walletSubject.next(wallet());
+      orchestrator.setCatUtxo(cat());
+      orchestrator.setFeeRate(10);
+
+      const emissions: unknown[] = [];
+      const sub = orchestrator.simulation$.subscribe(v => emissions.push(v));
+      await Promise.resolve();
+      const before = emissions.length;
+      expect(before).toBeGreaterThan(0); // combineLatest is live
+
+      // Changing ONLY the recipient must re-fire the stream. Before the fix
+      // recipientAddress was not a combineLatest source, so this stayed put.
+      orchestrator.setRecipientAddress('bc1qdifferentrecipient');
+      expect(emissions.length).toBeGreaterThan(before);
+      sub.unsubscribe();
+    });
+
     it('clears writables when the wallet flips to a different ordinals address', () => {
       const { orchestrator, walletSubject, cat21 } = buildOrchestrator();
       cat21.getUtxos.mockReturnValue(of([utxo()]));
