@@ -29,6 +29,7 @@ export {
 export * from './wallet/address-types';
 export * from './wallet/wallet-capabilities';
 export * from './wallet/xpub/derive-watch-only';
+export * from './wallet/xpub/scan-watch-only';
 
 // --- cat21 mint pipeline (PSBT builder, simulator, broadcaster) ---
 export * from './cat21-mint/cat21-sdk-config';

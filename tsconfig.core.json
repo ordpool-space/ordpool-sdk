@@ -31,6 +31,7 @@
     "src/wallet/wallet-logos.ts",
     "src/wallet/wallet-capabilities.ts",
     "src/wallet/xpub/derive-watch-only.ts",
+    "src/wallet/xpub/scan-watch-only.ts",
     "src/wallet/network-address-shim.ts",
     "src/wallet/address-types.ts",
     "src/cat21-mint/cat21.service.helper.ts",
