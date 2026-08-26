@@ -4114,8 +4114,16 @@ const VERSION_BYTES = {
     0x044a5262: { scriptType: 'p2sh-p2wpkh', mainnet: false }, // upub (BIP-49 testnet)
     0x045f1cf6: { scriptType: 'p2wpkh', mainnet: false }, // vpub (BIP-84 testnet)
 };
-/** Standard BIP-32 public version bytes that HDKey.fromExtendedKey accepts. */
-const STANDARD_PUBLIC_VERSION = { mainnet: 0x0488b21e, testnet: 0x043587cf };
+/**
+ * Standard BIP-32 version bytes per network. HDKey.fromExtendedKey
+ * checks the key's version against these, so we normalize the SLIP-132
+ * prefix to the network's standard public bytes AND pass the matching
+ * versions (its default is mainnet-only, which rejects a tpub).
+ */
+const STANDARD_VERSIONS = {
+    mainnet: { private: 0x0488ade4, public: 0x0488b21e },
+    testnet: { private: 0x04358394, public: 0x043587cf },
+};
 function isMainnetKeyPrefix(network) {
     return network === Network.Mainnet;
 }
@@ -4158,14 +4166,17 @@ function parseAccountKey(extendedPublicKey, network, scriptTypeOverride) {
         }
         scriptType = scriptTypeOverride;
     }
-    // Normalize version bytes to standard xpub/tpub so HDKey parses it.
+    // Normalize version bytes to the network's standard xpub/tpub so
+    // HDKey parses SLIP-132 prefixes (ypub/zpub/upub/vpub) too.
+    const versions = wantMainnet ? STANDARD_VERSIONS.mainnet : STANDARD_VERSIONS.testnet;
     const normalized = payload.slice();
-    const std = wantMainnet ? STANDARD_PUBLIC_VERSION.mainnet : STANDARD_PUBLIC_VERSION.testnet;
-    normalized[0] = (std >>> 24) & 0xff;
-    normalized[1] = (std >>> 16) & 0xff;
-    normalized[2] = (std >>> 8) & 0xff;
-    normalized[3] = std & 0xff;
-    const hd = HDKey.fromExtendedKey(base58checkSha256.encode(normalized));
+    normalized[0] = (versions.public >>> 24) & 0xff;
+    normalized[1] = (versions.public >>> 16) & 0xff;
+    normalized[2] = (versions.public >>> 8) & 0xff;
+    normalized[3] = versions.public & 0xff;
+    // HDKey defaults to mainnet versions; pass the network's explicitly
+    // so a normalized tpub is not rejected with "Version mismatch".
+    const hd = HDKey.fromExtendedKey(base58checkSha256.encode(normalized), versions);
     return { hd, scriptType };
 }
 /** Encode a compressed pubkey as an address in the requested script type + network. */

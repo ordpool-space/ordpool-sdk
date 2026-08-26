@@ -86,6 +86,27 @@ describe('deriveWatchOnlyAddresses — official BIP test vectors', () => {
     expect(fromZpub[0].address).toMatch(/^bc1q/); // native segwit
   });
 
+  // Testnet/regtest path: a tpub must parse (HDKey defaults to mainnet
+  // versions; the helper passes testnet versions explicitly). Regression
+  // guard for the "Version mismatch" on tpub that mainnet-only vectors
+  // missed. Re-versioning the mainnet xpub to tpub keeps the same key, so
+  // the regtest address is the same x-only key under the bcrt HRP.
+  it('derives a regtest (tpub) taproot address without a version mismatch', () => {
+    const tpub = reversion(BIP86_ACCOUNT_XPUB, 0x043587cf);
+    const [a0] = deriveWatchOnlyAddresses({
+      extendedPublicKey: tpub,
+      network: Network.Regtest,
+      scriptType: 'p2tr',
+      count: 1,
+    });
+    expect(a0.address).toMatch(/^bcrt1p/);
+    // Same x-only key as the mainnet vector (bech32m payload equal, HRP differs).
+    const [m0] = deriveWatchOnlyAddresses({
+      extendedPublicKey: BIP86_ACCOUNT_XPUB, network: Network.Mainnet, scriptType: 'p2tr', count: 1,
+    });
+    expect(a0.publicKeyHex).toBe(m0.publicKeyHex);
+  });
+
   it('returns the compressed pubkey and gap-limit run length', () => {
     const run = deriveWatchOnlyAddresses({
       extendedPublicKey: BIP86_ACCOUNT_XPUB,
