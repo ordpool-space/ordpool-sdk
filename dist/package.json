@@ -50,6 +50,7 @@
     "@angular/core": ">=20",
     "@noble/curves": ">=1",
     "@scure/base": ">=1",
+    "@scure/bip32": "1.4.x",
     "@scure/btc-signer": "1.2.x",
     "rxjs": ">=7",
     "sats-connect": ">=4"

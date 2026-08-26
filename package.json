@@ -1,7 +1,7 @@
 {
   "name": "ordpool-sdk",
   "version": "0.1.0",
-  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool — REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Angular library; built with ng-packagr.",
+  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool \u2014 REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Angular library; built with ng-packagr.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ordpool-space/ordpool-sdk.git"
@@ -68,6 +68,7 @@
     "@angular/core": ">=20",
     "@noble/curves": ">=1",
     "@scure/base": ">=1",
+    "@scure/bip32": "1.4.x",
     "@scure/btc-signer": "1.2.x",
     "rxjs": ">=7",
     "sats-connect": ">=4"
@@ -85,6 +86,7 @@
     "@noble/hashes": "^1.4.0",
     "@playwright/test": "^1.50.0",
     "@scure/base": "^1.1.5",
+    "@scure/bip32": "1.4.0",
     "@scure/btc-signer": "1.2.1",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.14.9",

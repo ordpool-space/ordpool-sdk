@@ -58,6 +58,7 @@ export {
 //     compile-time protection at critical boundaries.
 export * from './wallet/address-types';
 export * from './wallet/wallet-capabilities';
+export * from './wallet/xpub/derive-watch-only';
 
 // --- CAT-21 mint (PSBT-build helpers; the Angular Cat21Service that
 //     orchestrates is at the main entry only). ---
