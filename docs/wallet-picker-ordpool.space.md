@@ -50,11 +50,9 @@ demote the rest, split by support level:
 ```ts
 const proven  = walletsSupporting(WalletCapability.Cat21Mint,
   { platform: WalletPlatform.Desktop, minSupport: CapabilitySupport.Proven });
-// → Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX, Alby
-const adapter = walletsSupporting(WalletCapability.Cat21Mint,
-  { platform: WalletPlatform.Desktop })
-  .filter(e => !proven.includes(e));
-// → Watch-only(xpub)  (implemented, no e2e roundtrip)
+// → Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX, Alby, Watch-only(xpub)
+// (every desktop wallet's mint is Proven — the Adapter remainder is empty;
+//  the watch-only path is proven via bitcoin-cli walletprocesspsbt)
 ```
 
 ## Platform detection (yours)

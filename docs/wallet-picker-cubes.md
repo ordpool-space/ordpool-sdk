@@ -44,10 +44,10 @@ const candidates = walletsSupporting(
 Then cross-reference with the cubes flow's existing runtime provider
 detection to mark each candidate installed vs "get the extension".
 
-Every desktop injected wallet supports `Inscription` (proven for Cat21
-Wallet, Xverse, Leather, UniSat, Wizz, OKX, Alby; adapter-level for
-watch-only). Phantom and Binance are mobile-only and are correctly excluded
-by the desktop platform filter.
+Every desktop wallet supports `Inscription`, proven on regtest for all of
+them: Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX, Alby, and the
+watch-only path (via bitcoin-cli walletprocesspsbt). Phantom and Binance are
+mobile-only and are correctly excluded by the desktop platform filter.
 
 ## Platform detection (yours)
 
@@ -82,11 +82,10 @@ hardcoding wallet notes.
 If a future cube drop uses ord parent/child provenance (a collection
 parent with child cubes), switch that flow's capability to
 `InscriptionParentChild` and the matrix handles the fallout automatically:
-Alby becomes `Unsupported` (hide it), OKX carries a retry caveat (its child
-operation is proven, its e2e just flakes on OKX-extension crashes), and
-UniSat / Wizz gain the active-Taproot-address caveat (block until the user's
-active address type is Taproot). See `CHILD-INSCRIBE-WALLET-SUPPORT.md` for
-the mechanism.
+Alby becomes `Unsupported` (hide it), and UniSat / Wizz gain the
+active-Taproot-address caveat (block until the user's active address type is
+Taproot). Every other wallet, including OKX and watch-only, is proven for
+parent/child. See `CHILD-INSCRIBE-WALLET-SUPPORT.md` for the mechanism.
 
 ## Migration checklist
 
