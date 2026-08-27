@@ -3,6 +3,11 @@
 **To:** the cat21.space, ordpool.space, and cubes frontend sessions.
 **From:** the ordpool-sdk session.
 
+> **Read `HANDOVER-ADDENDUM-watch-only-unblocked.md` alongside this.** It
+> fixes a watch-only gap both cat21.space and ordpool.space found after
+> `2a7d0c1` (the cat21 orchestrators now thread `promptForSignedPsbt`) and
+> re-pins the SDK to `e3412e6`.
+
 The SDK's wallet layer is final and proven. This orients you; the
 detailed, binding specs are linked below. Read your site's section, then
 the two shared specs, then build.
@@ -11,7 +16,7 @@ the two shared specs, then build.
 
 ```jsonc
 // package.json
-"ordpool-sdk": "github:ordpool-space/ordpool-sdk#2a7d0c1"
+"ordpool-sdk": "github:ordpool-space/ordpool-sdk#e3412e6"
 ```
 
 Then update the lockfile and commit `package.json` + the lockfile together
