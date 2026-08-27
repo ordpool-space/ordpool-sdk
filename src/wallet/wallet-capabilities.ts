@@ -117,7 +117,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
     },
-    note: 'Mobile support means inside the Xverse in-app browser (deep-link via connect.xverse.app/browser?url=), where the same sats-connect provider is injected; not the default mobile browser.',
+    note: 'On mobile, open this site inside the Xverse in-app browser (not the default mobile browser).',
   },
   {
     wallet: KnownOrdinalWalletType.leather,
@@ -133,7 +133,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
     },
-    note: 'Desktop extension only. The Leather mobile app\'s in-app browser is a curated Stacks-DeFi directory and does not inject LeatherProvider for arbitrary sites. Ordinals/BRC-20 remain supported, though Leather\'s positioning has pivoted to Bitcoin DeFi/yield.',
+    note: 'Desktop extension only. Ordinals and BRC-20 are supported; the Leather mobile app does not work with this site.',
   },
   {
     wallet: KnownOrdinalWalletType.unisat,
@@ -149,7 +149,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
     },
-    note: 'Desktop extension only for this SDK. The UniSat mobile app connects via the unisat:// deep-link protocol, not an injected window.unisat, so the SDK\'s provider path does not work there.',
+    note: 'Desktop extension only. The UniSat mobile app is not supported here.',
   },
   {
     wallet: KnownOrdinalWalletType.wizz,
@@ -165,7 +165,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'Desktop extension only. No documented mobile in-app dApp browser that injects window.wizz.',
+    note: 'Desktop extension only.',
   },
   {
     wallet: KnownOrdinalWalletType.okx,
@@ -180,11 +180,11 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: {
         support: CapabilitySupport.Proven,
-        caveat: 'The child SDK code path is proven (wallet-agnostic merge/finalize, shared with 5 other proven wallets), and on OKX both signs (commit + reveal) complete reliably every run; the closed-page races in the harness (page-close-between-signs, approveSignPopup, closeLeftoverExtensionPages) are fixed, so the 3-popup child e2e is usually first-try green. A residual environmental flake remains at the CI level: the OKX extension occasionally fails to load/inject in a given headed-chromium run, failing all attempts fast before signing — a browser-automation/extension-load reliability issue, not an SDK-byte or signing problem. retries:2 absorbs it in the common case.',
+        caveat: 'Collections use three approvals in a row on OKX and can occasionally not complete the first time; if that happens, just try again.',
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
     },
-    note: 'OKX is single-address BIP-86 Taproot. Mint, transfer, offer create/accept, and plain inscribe are cleanly proven on the regtest e2e via the mainnet-address shim: the P2TR script hash is HRP-independent, so OKX signs the regtest input against its mainnet account, and signPsbt resolves for the connected dApp (it auto-approves without an interactive Confirm; the offer flows sign only the wallet\'s own input and leave the foreign one). Parent/child inscribe is proven at the SDK level but its 3-popup e2e is timing-flaky (see the InscriptionParentChild caveat). Mobile support is the OKX App\'s built-in dApp browser, compatible with the injected window.okxwallet provider path (Bitcoin included).',
+    note: 'Signs with your Taproot (bc1p) account. Supports mint, send, buy and sell, and inscribe. Works in the desktop extension and in the OKX mobile app browser.',
   },
   {
     wallet: KnownOrdinalWalletType.phantom,
@@ -200,7 +200,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Adapter },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'The desktop extension ships its Bitcoin provider dormant, so detect returns false and Phantom is hidden on desktop. Only the Phantom mobile in-app browser exposes window.phantom.bitcoin. No regtest roundtrip exists (CI runs the desktop binary), so mobile signing is adapter-level, not proven.',
+    note: 'Phantom\'s Bitcoin wallet is only available in the Phantom mobile app browser, not the desktop extension.',
   },
   {
     wallet: KnownOrdinalWalletType.alby,
@@ -212,20 +212,20 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
       [WalletCapability.Cat21OfferCreate]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby WebBTC signPsbt signs EVERY input with one Taproot key and finalizes, so it cannot sign or skip the offer PSBT\'s foreign P2WPKH input',
+        caveat: 'Alby cannot create offers: it signs every input in a transaction with your one key, so it cannot co-sign an offer alongside the buyer.',
       },
       [WalletCapability.Cat21OfferAccept]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby WebBTC signPsbt signs EVERY input with one Taproot key and finalizes, so it chokes on the buyer\'s foreign P2WPKH input',
+        caveat: 'Alby cannot accept offers: it signs every input with your one key, so it cannot co-sign the trade with the seller.',
       },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby WebBTC signPsbt signs EVERY input with one Taproot key and has no per-input selection, so signChildRevealParentInputs cannot leave the ephemeral commit input; the SDK refuses it up front (same limit as Alby offers)',
+        caveat: 'Alby cannot build collections: it signs every input with your one key, so it cannot leave the helper input unsigned. Plain inscriptions work.',
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'On-chain via the WebBTC provider, signed with the Alby account master key (no Alby Hub needed). Signing constraint: Alby Taproot-signs EVERY input in a PSBT with its single Taproot key, so every input must be a Taproot UTXO; a non-Taproot input fails with "is not of type Taproot". Any address type can HOLD a cat (the cat travels with its sat). No mobile dApp browser (Alby Go is Lightning-only).',
+    note: 'Signs on-chain with your Alby account key (no Alby Hub needed). Every input it signs must come from your Taproot (bc1p) account. Any address type can hold a cat. No mobile browser support.',
   },
   {
     wallet: KnownOrdinalWalletType.binance,
@@ -241,7 +241,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Adapter },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'The Bitcoin provider (window.binancew3w.bitcoin) is documented for the Binance Web3 Wallet in-app dApp browser (mobile); the browser extension is not documented to inject the Bitcoin provider. Adapter-level across the board (no regtest roundtrip).',
+    note: 'Bitcoin support is in the Binance Web3 Wallet mobile app browser. The browser extension does not expose a Bitcoin wallet.',
   },
   {
     wallet: KnownOrdinalWalletType.xpub,
@@ -257,7 +257,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'Watch-only via BIP-32 xpub paste. Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …). Platform-agnostic; no in-page signing. Connect with WalletService.connectXpub (pastes an account xpub/ypub/zpub/tpub, derives + scans + auto-picks the identity; pass scriptType=p2tr for a plain-xpub taproot account). Every operation (mint, inscribe, transfer, both offer roles, parent/child inscribe) is proven on regtest with bitcoin-cli walletprocesspsbt as the external signer (e2e/regtest/psbt-export-*.spec.ts); the connect→scan→mint→broadcast chain (single-account Taproot, P2TR funding) is proven end to end in e2e/regtest/watch-only-mint-roundtrip.spec.ts.',
+    note: 'Watch-only via extended public key (xpub / ypub / zpub / tpub). Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …); nothing is signed in the browser. Paste your account key to connect; for a plain xpub, choose the Taproot account type. Works on desktop and mobile.',
   },
 ];
 
