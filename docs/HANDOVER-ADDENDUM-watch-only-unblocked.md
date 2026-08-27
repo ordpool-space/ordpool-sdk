@@ -25,13 +25,17 @@ That was the right call. Thank you.
 
 - All four cat21 orchestrators now accept an optional `promptForSignedPsbt`
   on their action method and thread it to the signer, matching inscribe.
-- **Proof**: `watch-only-mint-orchestrator-roundtrip.spec.ts` drives a real
-  regtest mint through the PUBLIC `Cat21Service.createCat21Transaction(…,
-  promptForSignedPsbt)` (pasted xpub → scan → orchestrator + callback →
-  offline sign → broadcast → confirmed CAT-21), plus a negative test that
-  omitting the callback throws. Transfer/offer thread the identical
-  type-checked callback; their signers are independently regtest-proven to
-  consume it (`psbt-export-*.spec.ts`).
+- **Proof (two layers, at the right level for each):**
+  - *End-to-end signer path* — already node-regtest-proven:
+    `watch-only-mint-roundtrip.spec.ts` (pasted xpub → scan → build → sign →
+    broadcast → confirmed CAT-21). `createCat21Transaction` calls exactly
+    this signer.
+  - *Orchestrator forwards the callback* — browser (jsdom) tests, because
+    the orchestrators are Angular `@Injectable`s and can't load in the node
+    regtest harness. Positive (the callback fires with the built PSBT) +
+    negative (omitting it throws `/promptForSignedPsbt/`) for mint
+    (`createCat21Transaction`), transfer, and create-offer. accept-offer
+    threads the identical verified one-liner as its sibling create-offer.
 - `wallet-picker-watch-only-shared.md` now shows the concrete per-operation
   wiring (no more "already on the args" hand-wave).
 

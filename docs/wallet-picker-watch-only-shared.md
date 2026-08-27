@@ -16,8 +16,8 @@ Three layers, each proven on regtest, composed into one connect call:
 | Derive | `deriveWatchOnlyAddresses` | `ordpool-sdk` + `/core` | unit (BIP-84/86 vectors) + regtest vs `bitcoin-cli deriveaddresses` |
 | Scan / auto-pick | `scanWatchOnly` | `ordpool-sdk` + `/core` | unit (mock probe) + regtest (real electrs) |
 | Connect | `WalletService.connectXpub` | `ordpool-sdk` (Angular) | unit (WalletInfo assembly) |
-| End-to-end (internal path) | — | — | regtest: pasted xpub → scan → build → sign → broadcast (`watch-only-mint-roundtrip.spec.ts`) |
-| End-to-end (orchestrator path you call) | — | — | regtest: `Cat21Service.createCat21Transaction(…, promptForSignedPsbt)` → confirmed cat + a negative test (`watch-only-mint-orchestrator-roundtrip.spec.ts`) |
+| End-to-end signer path | — | — | node-regtest: pasted xpub → scan → build → sign → broadcast (`watch-only-mint-roundtrip.spec.ts`); `createCat21Transaction` calls this exact signer |
+| Orchestrator forwards `promptForSignedPsbt` | — | — | browser (jsdom) positive + negative tests on mint / transfer / create-offer orchestrators (Angular services can't run in the node regtest harness) |
 
 The `signingMode: 'watch-only'` entry means **no key in the browser**: the
 SDK derives the identity from the account PUBLIC key, and the user signs
