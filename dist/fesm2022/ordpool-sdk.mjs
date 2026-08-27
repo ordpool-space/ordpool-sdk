@@ -4770,7 +4770,11 @@ class Cat21Service {
      * mempool tracking after broadcast is the consumer's job (see
      * `pendingMints$`).
      */
-    createCat21Transaction(walletType, recipientAddress, paymentOutput, paymentAddress, paymentPublicKey, transactionFee) {
+    createCat21Transaction(walletType, recipientAddress, paymentOutput, paymentAddress, paymentPublicKey, transactionFee, 
+    // Watch-only (xpub) signers bridge to user-mediated signing via this
+    // export/paste callback; injected browser-wallet signers ignore it.
+    // Required for a `xpub` wallet — psbtExportSigner throws without it.
+    promptForSignedPsbt) {
         // create the real transaction
         const { tx } = createTransaction(walletType, recipientAddress, paymentOutput, paymentPublicKey, paymentAddress, transactionFee, false, // no simulation
         this.network);
@@ -4788,6 +4792,7 @@ class Cat21Service {
             paymentPublicKey: hex.encode(paymentPublicKey),
             network: this.network,
             broadcast: (txHex) => this.postTransaction(txHex),
+            promptForSignedPsbt,
         });
         return result;
     }
@@ -5054,7 +5059,10 @@ class Cat21MintOrchestrator {
      * state to `minting` → `success` (with `successTxId`) or `error`
      * (with `errorMessage`).
      */
-    mint() {
+    mint(
+    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
+    // wallets ignore it. A watch-only mint throws without it (psbtExportSigner).
+    promptForSignedPsbt) {
         const wallet = this.connectedWallet();
         const feeRate = this.feeRate();
         const selected = this.selectedUtxo();
@@ -5088,7 +5096,7 @@ class Cat21MintOrchestrator {
         this.errorMessage.set(null);
         this.successTxId.set(null);
         return this.cat21
-            .createCat21Transaction(wallet.type, wallet.ordinalsAddress, selected, wallet.paymentAddress, hex.decode(wallet.paymentPublicKey), transactionFee)
+            .createCat21Transaction(wallet.type, wallet.ordinalsAddress, selected, wallet.paymentAddress, hex.decode(wallet.paymentPublicKey), transactionFee, promptForSignedPsbt)
             .pipe(tap(({ txId }) => {
             this.successTxId.set(txId);
             this.state.set('success');
@@ -6317,7 +6325,10 @@ class Cat21CreateOfferOrchestrator {
      * **Does NOT broadcast** — the offer is incomplete until the seller
      * signs input 0 in their own accept flow.
      */
-    createOffer() {
+    createOffer(
+    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
+    // wallets ignore it. A watch-only offer-create throws without it.
+    promptForSignedPsbt) {
         const wallet = this.connectedWallet();
         const target = this.targetCat();
         const sellerAddress = this.sellerPaymentAddress();
@@ -6367,6 +6378,7 @@ class Cat21CreateOfferOrchestrator {
             paymentAddress: wallet.paymentAddress,
             fundingInputCount: 1,
             network: this.network,
+            promptForSignedPsbt,
         })
             .pipe(tap((signedPsbtBytes) => {
             const artifact = {
@@ -6782,7 +6794,10 @@ class Cat21AcceptOfferOrchestrator {
      * broadcast. Requires a validated paste (`state === 'parsed'`) and
      * a connected wallet.
      */
-    acceptOffer() {
+    acceptOffer(
+    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
+    // wallets ignore it. A watch-only offer-accept throws without it.
+    promptForSignedPsbt) {
         const wallet = this.connectedWallet();
         const offer = this.parsedOffer();
         if (!wallet)
@@ -6801,6 +6816,7 @@ class Cat21AcceptOfferOrchestrator {
                 ordinalsPublicKey: wallet.ordinalsPublicKey,
                 network: this.network,
                 broadcast: (txHex) => this.cat21.postTransaction(txHex),
+                promptForSignedPsbt,
             })
                 .pipe(tap(({ txId }) => {
                 this.successTxId.set(txId);
@@ -7148,7 +7164,10 @@ class Cat21TransferOrchestrator {
      *
      * State transitions: ready → transferring → success | error.
      */
-    transfer() {
+    transfer(
+    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
+    // wallets ignore it. A watch-only transfer throws without it.
+    promptForSignedPsbt) {
         const wallet = this.connectedWallet();
         const cat = this.catUtxo();
         const recipient = this.recipientAddress();
@@ -7199,6 +7218,7 @@ class Cat21TransferOrchestrator {
                 fundingInputCount: 1,
                 network: this.network,
                 broadcast: (txHex) => this.cat21.postTransaction(txHex),
+                promptForSignedPsbt,
             }).pipe(tap(({ txId }) => {
                 this.successTxId.set(txId);
                 this.state.set('success');

@@ -303,7 +303,11 @@ export class Cat21CreateOfferOrchestrator {
    * **Does NOT broadcast** — the offer is incomplete until the seller
    * signs input 0 in their own accept flow.
    */
-  createOffer(): Observable<{ base64: string; hex: string }> {
+  createOffer(
+    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
+    // wallets ignore it. A watch-only offer-create throws without it.
+    promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Observable<string>,
+  ): Observable<{ base64: string; hex: string }> {
     const wallet = this.connectedWallet();
     const target = this.targetCat();
     const sellerAddress = this.sellerPaymentAddress();
@@ -358,6 +362,7 @@ export class Cat21CreateOfferOrchestrator {
         paymentAddress: wallet.paymentAddress,
         fundingInputCount: 1,
         network: this.network,
+        promptForSignedPsbt,
       })
       .pipe(
         tap((signedPsbtBytes) => {

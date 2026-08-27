@@ -1366,7 +1366,10 @@ declare class Cat21Service {
      * mempool tracking after broadcast is the consumer's job (see
      * `pendingMints$`).
      */
-    createCat21Transaction(walletType: KnownOrdinalWalletType, recipientAddress: string, paymentOutput: TxnOutput, paymentAddress: string, paymentPublicKey: Uint8Array, transactionFee: bigint): Observable<{
+    createCat21Transaction(walletType: KnownOrdinalWalletType, recipientAddress: string, paymentOutput: TxnOutput, paymentAddress: string, paymentPublicKey: Uint8Array, transactionFee: bigint, promptForSignedPsbt?: (unsigned: {
+        base64: string;
+        hex: string;
+    }) => Observable<string>): Observable<{
         txId: string;
     }>;
     /**
@@ -1583,7 +1586,10 @@ declare class Cat21MintOrchestrator {
      * state to `minting` → `success` (with `successTxId`) or `error`
      * (with `errorMessage`).
      */
-    mint(): Observable<{
+    mint(promptForSignedPsbt?: (unsigned: {
+        base64: string;
+        hex: string;
+    }) => Observable<string>): Observable<{
         txId: string;
     }>;
     /**
@@ -2467,7 +2473,10 @@ declare class Cat21CreateOfferOrchestrator {
      * **Does NOT broadcast** — the offer is incomplete until the seller
      * signs input 0 in their own accept flow.
      */
-    createOffer(): Observable<{
+    createOffer(promptForSignedPsbt?: (unsigned: {
+        base64: string;
+        hex: string;
+    }) => Observable<string>): Observable<{
         base64: string;
         hex: string;
     }>;
@@ -2630,7 +2639,10 @@ declare class Cat21AcceptOfferOrchestrator {
      * broadcast. Requires a validated paste (`state === 'parsed'`) and
      * a connected wallet.
      */
-    acceptOffer(): Observable<{
+    acceptOffer(promptForSignedPsbt?: (unsigned: {
+        base64: string;
+        hex: string;
+    }) => Observable<string>): Observable<{
         txId: string;
     }>;
     /** Wipe paste + parse result. Keeps the wallet connected. */
@@ -2880,7 +2892,10 @@ declare class Cat21TransferOrchestrator {
      *
      * State transitions: ready → transferring → success | error.
      */
-    transfer(): Observable<{
+    transfer(promptForSignedPsbt?: (unsigned: {
+        base64: string;
+        hex: string;
+    }) => Observable<string>): Observable<{
         txId: string;
     }>;
     /**

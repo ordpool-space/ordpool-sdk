@@ -225,7 +225,12 @@ export class Cat21Service {
     paymentOutput: TxnOutput,
     paymentAddress: string,
     paymentPublicKey: Uint8Array,
-    transactionFee: bigint
+    transactionFee: bigint,
+
+    // Watch-only (xpub) signers bridge to user-mediated signing via this
+    // export/paste callback; injected browser-wallet signers ignore it.
+    // Required for a `xpub` wallet — psbtExportSigner throws without it.
+    promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Observable<string>,
   ): Observable<{ txId: string }> {
 
     // create the real transaction
@@ -256,6 +261,7 @@ export class Cat21Service {
       paymentPublicKey: hex.encode(paymentPublicKey),
       network: this.network,
       broadcast: (txHex: string) => this.postTransaction(txHex),
+      promptForSignedPsbt,
     });
 
     return result;

@@ -283,7 +283,11 @@ export class Cat21TransferOrchestrator {
    *
    * State transitions: ready → transferring → success | error.
    */
-  transfer(): Observable<{ txId: string }> {
+  transfer(
+    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
+    // wallets ignore it. A watch-only transfer throws without it.
+    promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Observable<string>,
+  ): Observable<{ txId: string }> {
     const wallet = this.connectedWallet();
     const cat = this.catUtxo();
     const recipient = this.recipientAddress();
@@ -341,6 +345,7 @@ export class Cat21TransferOrchestrator {
         fundingInputCount: 1,
         network: this.network,
         broadcast: (txHex) => this.cat21.postTransaction(txHex),
+        promptForSignedPsbt,
       }).pipe(
         tap(({ txId }) => {
           this.successTxId.set(txId);

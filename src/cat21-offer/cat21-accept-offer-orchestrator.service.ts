@@ -297,7 +297,11 @@ export class Cat21AcceptOfferOrchestrator {
    * broadcast. Requires a validated paste (`state === 'parsed'`) and
    * a connected wallet.
    */
-  acceptOffer(): Observable<{ txId: string }> {
+  acceptOffer(
+    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
+    // wallets ignore it. A watch-only offer-accept throws without it.
+    promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Observable<string>,
+  ): Observable<{ txId: string }> {
     const wallet = this.connectedWallet();
     const offer = this.parsedOffer();
     if (!wallet) return throwError(() => new Error('No wallet connected'));
@@ -316,6 +320,7 @@ export class Cat21AcceptOfferOrchestrator {
           ordinalsPublicKey: wallet.ordinalsPublicKey,
           network: this.network,
           broadcast: (txHex) => this.cat21.postTransaction(txHex),
+          promptForSignedPsbt,
         })
         .pipe(
           tap(({ txId }) => {

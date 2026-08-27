@@ -220,7 +220,11 @@ export class Cat21MintOrchestrator {
    * state to `minting` → `success` (with `successTxId`) or `error`
    * (with `errorMessage`).
    */
-  mint(): Observable<{ txId: string }> {
+  mint(
+    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
+    // wallets ignore it. A watch-only mint throws without it (psbtExportSigner).
+    promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Observable<string>,
+  ): Observable<{ txId: string }> {
     const wallet = this.connectedWallet();
     const feeRate = this.feeRate();
     const selected = this.selectedUtxo();
@@ -268,6 +272,7 @@ export class Cat21MintOrchestrator {
         wallet.paymentAddress,
         hex.decode(wallet.paymentPublicKey),
         transactionFee,
+        promptForSignedPsbt,
       )
       .pipe(
         tap(({ txId }) => {
