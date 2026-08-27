@@ -8,7 +8,7 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { WalletService } from '../wallet/wallet.service';
-import { WalletInfo } from '../wallet/wallet.service.types';
+import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { cat21Config } from '../cat21-mint/cat21-sdk-config';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
@@ -322,6 +322,41 @@ describe('Cat21CreateOfferOrchestrator', () => {
 
       await expect(firstValueFrom(orchestrator.createOffer())).rejects.toThrow('Insufficient funds');
       expect(orchestrator.state()).toBe('error');
+    });
+  });
+
+  describe('createOffer() watch-only promptForSignedPsbt threading', () => {
+    const fund = (): TxnOutput[] => [{
+      txid: 'b'.repeat(64), vout: 0, value: 200_000,
+      status: { confirmed: true, block_height: 800_000, block_hash: '', block_time: 0 },
+    }];
+
+    it('createOffer(prompt) threads the callback to the watch-only signer (it fires)', async () => {
+      const { orchestrator, walletSubject } = buildOrchestrator({ utxos: fund() });
+      walletSubject.next(wallet({ type: KnownOrdinalWalletType.xpub }));
+      await firstValueFrom(orchestrator.simulation$);
+      orchestrator.setTargetCat(target());
+      orchestrator.setSellerPaymentAddress(SELLER_PAYMENT);
+      orchestrator.setPriceSats(21_000);
+      orchestrator.setFeeRate(5);
+      await firstValueFrom(orchestrator.simulation$);
+
+      const prompt = jest.fn((u: { base64: string; hex: string }) => of(u.base64));
+      await firstValueFrom(orchestrator.createOffer(prompt)).catch(() => undefined);
+      expect(prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('a watch-only offer-create WITHOUT the callback errors on the missing bridge', async () => {
+      const { orchestrator, walletSubject } = buildOrchestrator({ utxos: fund() });
+      walletSubject.next(wallet({ type: KnownOrdinalWalletType.xpub }));
+      await firstValueFrom(orchestrator.simulation$);
+      orchestrator.setTargetCat(target());
+      orchestrator.setSellerPaymentAddress(SELLER_PAYMENT);
+      orchestrator.setPriceSats(21_000);
+      orchestrator.setFeeRate(5);
+      await firstValueFrom(orchestrator.simulation$);
+
+      await expect(firstValueFrom(orchestrator.createOffer())).rejects.toThrow(/promptForSignedPsbt/);
     });
   });
 

@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import { HttpClient } from '@angular/common/http';
 import { Injector, runInInjectionContext } from '@angular/core';
 import { firstValueFrom, Observable, of, throwError } from 'rxjs';
+import { hex } from '@scure/base';
+import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { cat21Config } from './cat21-sdk-config';
 import { Cat21Service } from './cat21.service';
 import { MempoolTx, RecommendedFees, TxnOutput } from './cat21.service.types';
@@ -349,5 +352,57 @@ describe('Cat21Service.recommendedFees$', () => {
 
     subA.unsubscribe();
     subB.unsubscribe();
+  });
+});
+
+
+describe('Cat21Service.createCat21Transaction — watch-only promptForSignedPsbt threading', () => {
+
+  // A valid Taproot payment identity so createTransaction builds a real
+  // P2TR-funded mint PSBT (the xpub/watch-only funding shape).
+  const paymentPublicKey = hex.decode('0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798');
+  const xOnly = paymentPublicKey.slice(1, 33);
+  const paymentAddress = btc.p2tr(xOnly, undefined, btc.NETWORK, true).address!;
+  const recipientAddress = paymentAddress; // self-recipient is fine for a build test
+  const paymentOutput: TxnOutput = {
+    txid: 'c'.repeat(64), vout: 0, value: 100_000, status: { confirmed: true },
+  };
+
+  it('threads promptForSignedPsbt to the watch-only signer (the callback fires)', async () => {
+    const { service } = buildService();
+    // The bridge: the SDK builds the PSBT and hands it here. We assert only
+    // that the orchestrator reached the signer and invoked the callback;
+    // returning the unsigned PSBT lets finalize fail AFTER the call, which is
+    // irrelevant to the threading assertion.
+    const prompt = jest.fn((unsigned: { base64: string; hex: string }) => of(unsigned.base64));
+
+    await firstValueFrom(service.createCat21Transaction(
+      KnownOrdinalWalletType.xpub,
+      recipientAddress,
+      paymentOutput,
+      paymentAddress,
+      paymentPublicKey,
+      BigInt(2_000),
+      prompt,
+    )).catch(() => undefined); // finalize/broadcast may fail; the callback already fired
+
+    expect(prompt).toHaveBeenCalledTimes(1);
+    // It was handed the built PSBT to sign.
+    const arg = prompt.mock.calls[0][0];
+    expect(typeof arg.base64).toBe('string');
+    expect(typeof arg.hex).toBe('string');
+  });
+
+  it('a watch-only mint WITHOUT the callback throws the load-bearing error', async () => {
+    const { service } = buildService();
+    await expect(firstValueFrom(service.createCat21Transaction(
+      KnownOrdinalWalletType.xpub,
+      recipientAddress,
+      paymentOutput,
+      paymentAddress,
+      paymentPublicKey,
+      BigInt(2_000),
+      // no promptForSignedPsbt
+    ))).rejects.toThrow(/promptForSignedPsbt/);
   });
 });

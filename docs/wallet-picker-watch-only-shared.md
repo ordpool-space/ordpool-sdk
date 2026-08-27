@@ -16,12 +16,14 @@ Three layers, each proven on regtest, composed into one connect call:
 | Derive | `deriveWatchOnlyAddresses` | `ordpool-sdk` + `/core` | unit (BIP-84/86 vectors) + regtest vs `bitcoin-cli deriveaddresses` |
 | Scan / auto-pick | `scanWatchOnly` | `ordpool-sdk` + `/core` | unit (mock probe) + regtest (real electrs) |
 | Connect | `WalletService.connectXpub` | `ordpool-sdk` (Angular) | unit (WalletInfo assembly) |
-| End-to-end | — | — | regtest: pasted xpub → scan → mint → broadcast (`watch-only-mint-roundtrip.spec.ts`) |
+| End-to-end (internal path) | — | — | regtest: pasted xpub → scan → build → sign → broadcast (`watch-only-mint-roundtrip.spec.ts`) |
+| End-to-end (orchestrator path you call) | — | — | regtest: `Cat21Service.createCat21Transaction(…, promptForSignedPsbt)` → confirmed cat + a negative test (`watch-only-mint-orchestrator-roundtrip.spec.ts`) |
 
 The `signingMode: 'watch-only'` entry means **no key in the browser**: the
 SDK derives the identity from the account PUBLIC key, and the user signs
-each operation's PSBT in their own wallet via the export/paste bridge
-(`promptForSignedPsbt`, already on every operation's args).
+each operation's PSBT in their own wallet via the export/paste bridge —
+you pass a `promptForSignedPsbt` callback to each operation's action
+method (see "The signing bridge" below).
 
 ## The connect flow (Angular consumers: cat21.space, ordpool.space)
 
@@ -35,8 +37,10 @@ const info = await firstValueFrom(walletService.connectXpub({
   gapLimit: 20,                  // optional (default 20)
   probe: (address) => yourElectrsProbe(address),
 }));
-// info is a normal WalletInfo on connectedWallet$ — every existing flow
-// (mint / transfer / offer / inscribe) now works with it unchanged.
+// info is a normal WalletInfo on connectedWallet$. Every action then works
+// the same as any wallet, EXCEPT you pass a promptForSignedPsbt callback to
+// the action method (injected wallets ignore it; a watch-only wallet needs
+// it — see "The signing bridge").
 ```
 
 **You wire `probe`** (the SDK owns derive + rank; the consumer owns I/O):
@@ -75,13 +79,36 @@ const scan = await scanWatchOnly({ extendedPublicKey, network, scriptType: 'p2tr
 
 ## The signing bridge (every operation)
 
-The row's action is **not** "Connect" — it is an **export step**. After
-connect, each operation the user runs builds a PSBT and calls
-`promptForSignedPsbt({ base64, hex })`; you render "download / copy this
-PSBT, sign it in your wallet, paste the signed PSBT back", and resolve the
-callback with the pasted signed PSBT. The SDK finalizes + broadcasts. This
-is the same bridge the regtest specs drive with `bitcoin-cli
-walletprocesspsbt` standing in for Sparrow / Electrum / Coldcard.
+The row's action is **not** "Connect" — it is an **export step**. You pass a
+`promptForSignedPsbt` callback as the argument to each operation's action
+method. The SDK builds the PSBT and invokes your callback with
+`{ base64, hex }`; you render "download / copy this PSBT, sign it in your
+wallet, paste the signed PSBT back", and resolve the callback with the pasted
+signed PSBT. The SDK finalizes + broadcasts (or, for offer-create, returns
+the partial-signed artifact). Injected browser wallets ignore the callback,
+so you can pass it unconditionally.
+
+The callback is on **all four cat21 orchestrators + inscribe** (SDK
+`>= f83fe40`):
+
+```ts
+const prompt = (unsigned: { base64: string; hex: string }): Observable<string> =>
+  showExportPasteUi(unsigned);   // resolve with the user's pasted signed PSBT
+
+mintOrchestrator.mint(prompt);                       // Cat21MintOrchestrator
+transferOrchestrator.transfer(prompt);               // Cat21TransferOrchestrator
+createOfferOrchestrator.createOffer(prompt);         // Cat21CreateOfferOrchestrator
+acceptOfferOrchestrator.acceptOffer(prompt);         // Cat21AcceptOfferOrchestrator
+cat21Service.createCat21Transaction(…, prompt);      // the low-level mint entry
+```
+
+Same bridge the regtest specs drive with `bitcoin-cli walletprocesspsbt`
+standing in for Sparrow / Electrum / Coldcard. **Do not omit the callback for
+a watch-only wallet** — `psbtExportSigner` throws "Watch-only signing requires
+a promptForSignedPsbt callback" without it. The mint orchestrator path is
+proven end to end on regtest; transfer/offer thread the identical callback to
+their signers, which are themselves regtest-proven to consume it
+(`psbt-export-*.spec.ts`).
 
 ## UX (extends `wallet-picker-ux-shared.md`)
 

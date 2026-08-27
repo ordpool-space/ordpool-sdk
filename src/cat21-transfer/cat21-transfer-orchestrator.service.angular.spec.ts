@@ -1,8 +1,11 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { Injector, runInInjectionContext } from '@angular/core';
 import { BehaviorSubject, Subject, firstValueFrom, of, throwError } from 'rxjs';
+import { hex } from '@scure/base';
+import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { WalletService } from '../wallet/wallet.service';
@@ -213,6 +216,44 @@ describe('Cat21TransferOrchestrator', () => {
       orchestrator.setCatUtxo(cat());
       orchestrator.setRecipientAddress('bc1qrecipient');
       await expect(firstValueFrom(orchestrator.transfer())).rejects.toThrow('No fee rate set');
+    });
+  });
+
+  describe('transfer() watch-only promptForSignedPsbt threading', () => {
+    // A real P2WPKH payment address so buildTransferPsbt can derive the
+    // funding input; the default fixture's ordinals address is already a
+    // valid taproot address (used as the self-recipient here).
+    const payAddr = btc.p2wpkh(
+      hex.decode('0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b'),
+      btc.NETWORK,
+    ).address!;
+
+    it('transfer(prompt) threads the callback to the watch-only signer (it fires)', async () => {
+      const { orchestrator, walletSubject, cat21 } = buildOrchestrator();
+      const w = wallet({ type: KnownOrdinalWalletType.xpub, paymentAddress: payAddr });
+      cat21.getUtxos.mockReturnValue(of([utxo({ value: 100_000 })]));
+      walletSubject.next(w);
+      orchestrator.setCatUtxo(cat());
+      orchestrator.setRecipientAddress(w.ordinalsAddress); // valid taproot recipient
+      orchestrator.setFeeRate(10);
+
+      const prompt = jest.fn((u: { base64: string; hex: string }) => of(u.base64));
+      // finalize/broadcast may fail after the callback; the threading is
+      // proven the moment the orchestrator invokes it.
+      await firstValueFrom(orchestrator.transfer(prompt)).catch(() => undefined);
+      expect(prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('a watch-only transfer WITHOUT the callback errors on the missing bridge', async () => {
+      const { orchestrator, walletSubject, cat21 } = buildOrchestrator();
+      const w = wallet({ type: KnownOrdinalWalletType.xpub, paymentAddress: payAddr });
+      cat21.getUtxos.mockReturnValue(of([utxo({ value: 100_000 })]));
+      walletSubject.next(w);
+      orchestrator.setCatUtxo(cat());
+      orchestrator.setRecipientAddress(w.ordinalsAddress);
+      orchestrator.setFeeRate(10);
+
+      await expect(firstValueFrom(orchestrator.transfer())).rejects.toThrow(/promptForSignedPsbt/);
     });
   });
 });
