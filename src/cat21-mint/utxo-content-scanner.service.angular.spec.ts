@@ -75,10 +75,10 @@ describe('UtxoContentScanner catSat', () => {
     expect(state.content.catSat).toBeNull();
   });
 
-  it('leaves catSat null when ord supplied no sat ranges', async () => {
+  it('leaves catSat null only when NEITHER instance has sat ranges', async () => {
     const { scanner } = buildScanner(
-      // An output ord has not sat-indexed. The cat is still flagged; only the
-      // link target is unavailable.
+      // Neither the full ord nor cat21-ord returned sat ranges for this
+      // output. The cat is still flagged; only the sat link is unavailable.
       { value: 546, inscriptions: [], runes: null },
       { value: 546, cats: [CAT_ID] }
     );
@@ -88,5 +88,21 @@ describe('UtxoContentScanner catSat', () => {
     if (state.kind !== 'scanned-with-assets') throw new Error('expected assets');
     expect(state.content.catIds).toEqual([CAT_ID]);
     expect(state.content.catSat).toBeNull();
+  });
+
+  it('sources catSat from cat21-ord (authoritative) when the full ord has not indexed the output', async () => {
+    const { scanner } = buildScanner(
+      // Full ord lagging: no sat ranges for this output yet.
+      { value: 546, inscriptions: [], runes: null },
+      // cat21-ord (--index-sats) is the cat indexer and has the sat.
+      { value: 546, cats: [CAT_ID], sat_ranges: [[GENESIS_SAT, 596964966601111]] }
+    );
+
+    const state = await firstValueFrom(scanner.scan(OUTPOINT));
+
+    if (state.kind !== 'scanned-with-assets') throw new Error('expected assets');
+    expect(state.content.catIds).toEqual([CAT_ID]);
+    // Before the fix this was null (catSat read only from the full ord).
+    expect(state.content.catSat).toBe(GENESIS_SAT);
   });
 });
