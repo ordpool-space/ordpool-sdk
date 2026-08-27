@@ -103,7 +103,13 @@ export class UtxoContentScanner {
         if (inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat) {
           return { kind: 'scanned-clean' };
         }
-        const catSat = catIds.length > 0 ? firstSat(ord.sat_ranges) : null;
+        // Source the cat's sat from cat21-ord (the cat indexer, authoritative
+        // and always in step with `cats`); fall back to the full ord only if
+        // cat21-ord didn't return ranges. Reading it from the full ord alone
+        // yielded catSat=null whenever that instance hadn't indexed the output.
+        const catSat = catIds.length > 0
+          ? (firstSat(cat21Ord.sat_ranges) ?? firstSat(ord.sat_ranges))
+          : null;
         const content: UtxoContent = { outpoint, inscriptionIds, runes, catIds, catSat, rareSat };
         return { kind: 'scanned-with-assets', content };
       }),

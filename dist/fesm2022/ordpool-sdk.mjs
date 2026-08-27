@@ -5119,13 +5119,22 @@ class Cat21MintOrchestrator {
         const out = [];
         for (const utxo of utxos) {
             try {
-                // Layer-3 two-pass: pass-1 measures vsize with placeholder fee,
+                // Layer-3 two-pass: pass-1 measures vsize with a placeholder fee,
                 // pass-2 re-measures after change-vs-dust resolves. `finalSimulation`
-                // is the pass-2 result — exactly the simulation we'd display.
-                const { finalSimulation: simulation } = twoPassFeeSimulation({
+                // is the pass-2 result; `finalFeeSats` is the authoritative fee
+                // (rate × pass-2 vsize) — exactly what mint() charges
+                // (createCat21Transaction is called with it).
+                const { finalSimulation, finalFeeSats } = twoPassFeeSimulation({
                     simulate: (feeSats) => this.cat21.simulateTransaction(wallet.type, wallet.ordinalsAddress, utxo, wallet.paymentAddress, paymentPublicKey, BigInt(feeSats)),
                     feeRatePerVbyte: feeRate,
                 });
+                // Normalize the DISPLAYED fee to the charged fee. finalSimulation is
+                // built with the provisional (pass-1-vsize) fee, which equals
+                // finalFeeSats in the common case but diverges when the change output
+                // crosses the dust threshold between passes; the grid must never quote
+                // a fee different from what mint() charges. (In the divergent case the
+                // change is absorbed to 0 in both, so only the fee field needs it.)
+                const simulation = { ...finalSimulation, finalTransactionFee: BigInt(finalFeeSats) };
                 out.push({ utxo, simulation, insufficient: false });
             }
             catch {
@@ -5485,7 +5494,13 @@ class UtxoContentScanner {
             if (inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat) {
                 return { kind: 'scanned-clean' };
             }
-            const catSat = catIds.length > 0 ? firstSat(ord.sat_ranges) : null;
+            // Source the cat's sat from cat21-ord (the cat indexer, authoritative
+            // and always in step with `cats`); fall back to the full ord only if
+            // cat21-ord didn't return ranges. Reading it from the full ord alone
+            // yielded catSat=null whenever that instance hadn't indexed the output.
+            const catSat = catIds.length > 0
+                ? (firstSat(cat21Ord.sat_ranges) ?? firstSat(ord.sat_ranges))
+                : null;
             const content = { outpoint, inscriptionIds, runes, catIds, catSat, rareSat };
             return { kind: 'scanned-with-assets', content };
         }), catchError((err) => {

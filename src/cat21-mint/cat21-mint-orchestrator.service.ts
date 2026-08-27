@@ -309,10 +309,12 @@ export class Cat21MintOrchestrator {
     const out: UtxoSimulation[] = [];
     for (const utxo of utxos) {
       try {
-        // Layer-3 two-pass: pass-1 measures vsize with placeholder fee,
+        // Layer-3 two-pass: pass-1 measures vsize with a placeholder fee,
         // pass-2 re-measures after change-vs-dust resolves. `finalSimulation`
-        // is the pass-2 result — exactly the simulation we'd display.
-        const { finalSimulation: simulation } = twoPassFeeSimulation({
+        // is the pass-2 result; `finalFeeSats` is the authoritative fee
+        // (rate × pass-2 vsize) — exactly what mint() charges
+        // (createCat21Transaction is called with it).
+        const { finalSimulation, finalFeeSats } = twoPassFeeSimulation({
           simulate: (feeSats) => this.cat21.simulateTransaction(
             wallet.type,
             wallet.ordinalsAddress,
@@ -323,6 +325,13 @@ export class Cat21MintOrchestrator {
           ),
           feeRatePerVbyte: feeRate,
         });
+        // Normalize the DISPLAYED fee to the charged fee. finalSimulation is
+        // built with the provisional (pass-1-vsize) fee, which equals
+        // finalFeeSats in the common case but diverges when the change output
+        // crosses the dust threshold between passes; the grid must never quote
+        // a fee different from what mint() charges. (In the divergent case the
+        // change is absorbed to 0 in both, so only the fee field needs it.)
+        const simulation = { ...finalSimulation, finalTransactionFee: BigInt(finalFeeSats) };
         out.push({ utxo, simulation, insufficient: false });
       } catch {
         // simulateTransaction throws on "Insufficient funds for

@@ -1721,6 +1721,14 @@ interface OrdOutputResponse {
  */
 interface Cat21OrdOutputResponse {
     cats?: string[];
+    /**
+     * cat21-ord runs with `--index-sats`, so its `/output` carries the same
+     * `sat_ranges` a full ord does. This is the AUTHORITATIVE source for a
+     * cat's sat (cat21-ord is the cat indexer); the full-ord instance can lag
+     * on an output it hasn't indexed yet, so the scanner reads the cat's sat
+     * from here first.
+     */
+    sat_ranges?: ReadonlyArray<readonly [number, number]>;
 }
 /**
  * Aggregated content found at a single UTXO. Populated only when at
