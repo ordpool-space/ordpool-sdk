@@ -10191,7 +10191,11 @@ class InscribeMintOrchestrator {
      * Transitions state to `minting` → `success` (with `successResult`)
      * or `error` (with `errorMessage`).
      */
-    mint() {
+    mint(
+    // Watch-only (xpub) wallets sign the commit via this export/paste bridge;
+    // injected wallets ignore it. A watch-only inscribe throws without it
+    // (psbtExportSigner). Same contract as the four cat21 orchestrators.
+    promptForSignedPsbt) {
         const wallet = this.connectedWallet();
         const feeRate = this.feeRate();
         const selected = this.selectedUtxo();
@@ -10233,6 +10237,7 @@ class InscribeMintOrchestrator {
             minimalTagPush: content.minimalTagPush,
             network: this.network,
             broadcast: (txHex) => this.cat21.postTransaction(txHex),
+            promptForSignedPsbt,
         }).pipe(tap((result) => {
             this.successResult.set(result);
             this.state.set('success');

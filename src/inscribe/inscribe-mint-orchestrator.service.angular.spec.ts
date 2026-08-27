@@ -9,7 +9,7 @@ import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
 import { WalletService } from '../wallet/wallet.service';
-import { WalletInfo } from '../wallet/wallet.service.types';
+import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types';
 import { makeXverseWallet } from '../testing/fixtures';
 
 import {
@@ -266,6 +266,33 @@ describe('InscribeMintOrchestrator — mint() guards', () => {
 
     await expect(firstValueFrom(orchestrator.mint())).rejects.toThrow('No inscription content set');
     utxoSub.unsubscribe();
+  });
+});
+
+
+describe('InscribeMintOrchestrator — watch-only promptForSignedPsbt threading', () => {
+  const setup = () => {
+    const { orchestrator, walletSubject, cat21 } = buildOrchestrator();
+    cat21.getUtxos.mockReturnValue(of([utxo()]));
+    walletSubject.next(wallet({ type: KnownOrdinalWalletType.xpub }));
+    orchestrator.setFeeRate(5);
+    orchestrator.setSelectedUtxo(utxo({ value: 200_000 }));
+    orchestrator.setContent(content());
+    return orchestrator;
+  };
+
+  it('mint(prompt) threads the callback to the watch-only signer (it fires with the built commit PSBT)', async () => {
+    const orchestrator = setup();
+    // Returning the unsigned PSBT lets finalize fail AFTER the call; the
+    // threading is proven the moment the orchestrator invokes the callback.
+    const prompt = jest.fn((u: { base64: string; hex: string }) => of(u.base64));
+    await firstValueFrom(orchestrator.mint(prompt)).catch(() => undefined);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('a watch-only inscribe WITHOUT the callback errors on the missing bridge', async () => {
+    const orchestrator = setup();
+    await expect(firstValueFrom(orchestrator.mint())).rejects.toThrow(/promptForSignedPsbt/);
   });
 });
 

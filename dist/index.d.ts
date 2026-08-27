@@ -5354,7 +5354,10 @@ declare class InscribeMintOrchestrator {
      * Transitions state to `minting` → `success` (with `successResult`)
      * or `error` (with `errorMessage`).
      */
-    mint(): Observable<InscribeAndBroadcastResult>;
+    mint(promptForSignedPsbt?: (unsigned: {
+        base64: string;
+        hex: string;
+    }) => Observable<string>): Observable<InscribeAndBroadcastResult>;
     /**
      * Wipe form state back to a fresh mint (typically the "Mint another"
      * button on the success screen). Keeps the wallet connected.
