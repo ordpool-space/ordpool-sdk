@@ -1,14 +1,17 @@
 import { inject, Injectable } from '@angular/core';
 import {
   BehaviorSubject,
+  defer,
   distinctUntilChanged,
   from,
   map,
   Observable,
   of,
   Subject,
+  switchMap,
   take,
   tap,
+  throwError,
   timer,
 } from 'rxjs';
 
@@ -290,25 +293,57 @@ export class WalletService {
       gapLimit: args.gapLimit,
       probe: args.probe,
     })).pipe(
-      map((scan): WalletInfo => {
+      switchMap((scan) => {
         const pick = args.pickIdentity
           ? args.pickIdentity(scan)
           : { ordinals: scan.ordinals, payment: scan.payment };
-        return {
-          type: KnownOrdinalWalletType.xpub,
-          ordinalsAddress: pick.ordinals.address,
-          ordinalsPublicKey: pick.ordinals.publicKeyHex,
-          paymentAddress: pick.payment.address,
-          paymentPublicKey: pick.payment.publicKeyHex,
-          // The watch-only signer (psbtExportSigner) ships, so mint flows
-          // that gate on this proceed to the export/paste bridge.
-          signingSupported: true,
-        };
+        return this.connectFromScan(scan, pick);
       }),
-      tap(info => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info))),
-      tap(info => this.connectedWallet$.next(info)),
-      tap(info => this.armAccountChangeSubscription(info.type)),
     );
+  }
+
+  /**
+   * Connect a watch-only wallet from an ALREADY-COMPLETED scan and a chosen
+   * identity: the second half of {@link connectXpub}, split out so a consumer
+   * can run an INTERACTIVE review between scan and connect (scan, show the
+   * auto-picked addresses, let the user override the funding/ordinals address,
+   * then connect the confirmed pick) without re-scanning or re-implementing
+   * the `WalletInfo` assembly — the exact place the ordinals/payment split
+   * drifts if each consumer hand-rolls it.
+   *
+   * The chosen addresses MUST come from `scan.scanned` (derived from the same
+   * account key), so a watch-only identity is never an on-chain-lookup value.
+   * Emits an error if either address is absent from the scan.
+   *
+   * Assembles the `WalletInfo`, persists it, and pushes it to
+   * `connectedWallet$`, exactly like `connectXpub` / `connectWallet`.
+   */
+  connectFromScan(
+    scan: WatchOnlyScanResult,
+    identity: { ordinals: WatchOnlyAddress; payment: WatchOnlyAddress },
+  ): Observable<WalletInfo> {
+    return defer(() => {
+      const scanned = new Set(scan.scanned.map(s => s.address.address));
+      if (!scanned.has(identity.ordinals.address) || !scanned.has(identity.payment.address)) {
+        return throwError(() => new Error(
+          'connectFromScan: chosen ordinals/payment addresses must come from scan.scanned',
+        ));
+      }
+      const info: WalletInfo = {
+        type: KnownOrdinalWalletType.xpub,
+        ordinalsAddress: identity.ordinals.address,
+        ordinalsPublicKey: identity.ordinals.publicKeyHex,
+        paymentAddress: identity.payment.address,
+        paymentPublicKey: identity.payment.publicKeyHex,
+        // The watch-only signer (psbtExportSigner) ships, so mint flows that
+        // gate on this proceed to the export/paste bridge.
+        signingSupported: true,
+      };
+      this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info));
+      this.connectedWallet$.next(info);
+      this.armAccountChangeSubscription(info.type);
+      return of(info);
+    });
   }
 
   disconnectWallet(): void {

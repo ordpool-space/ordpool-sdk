@@ -1022,6 +1022,26 @@ declare class WalletService {
             payment: WatchOnlyAddress;
         };
     }): Observable<WalletInfo>;
+    /**
+     * Connect a watch-only wallet from an ALREADY-COMPLETED scan and a chosen
+     * identity: the second half of {@link connectXpub}, split out so a consumer
+     * can run an INTERACTIVE review between scan and connect (scan, show the
+     * auto-picked addresses, let the user override the funding/ordinals address,
+     * then connect the confirmed pick) without re-scanning or re-implementing
+     * the `WalletInfo` assembly — the exact place the ordinals/payment split
+     * drifts if each consumer hand-rolls it.
+     *
+     * The chosen addresses MUST come from `scan.scanned` (derived from the same
+     * account key), so a watch-only identity is never an on-chain-lookup value.
+     * Emits an error if either address is absent from the scan.
+     *
+     * Assembles the `WalletInfo`, persists it, and pushes it to
+     * `connectedWallet$`, exactly like `connectXpub` / `connectWallet`.
+     */
+    connectFromScan(scan: WatchOnlyScanResult, identity: {
+        ordinals: WatchOnlyAddress;
+        payment: WatchOnlyAddress;
+    }): Observable<WalletInfo>;
     disconnectWallet(): void;
     /**
      * Sign a UTF-8 message with the connected wallet's ordinals key via

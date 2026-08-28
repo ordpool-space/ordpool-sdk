@@ -5,7 +5,7 @@ import { Network } from '../network';
 import { WalletService } from './wallet.service';
 import { KnownOrdinalWalletType } from './wallet.service.types';
 import { deriveWatchOnlyAddresses } from './xpub/derive-watch-only';
-import { AddressProbe } from './xpub/scan-watch-only';
+import { AddressProbe, WatchOnlyScanResult } from './xpub/scan-watch-only';
 
 const BIP86_ACCOUNT_XPUB =
   'xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ';
@@ -108,5 +108,39 @@ describe('WalletService.connectXpub', () => {
       extendedPublicKey: BIP86_ACCOUNT_XPUB, // plain xpub, no scriptType
       probe: () => Promise.resolve({ funded: false }),
     }))).rejects.toThrow(/ambiguous/);
+  });
+
+  it('connectFromScan assembles + pushes a WalletInfo from a user-chosen identity', async () => {
+    const [a0, a1, a2] = receive(3);
+    const { service, setValue, next } = newService();
+    const scan: WatchOnlyScanResult = {
+      scanned: [a0, a1, a2].map((address) => ({ address, probe: { funded: false } })),
+      ordinals: a0, payment: a0, ordinalsReason: 'default', paymentReason: 'default',
+    };
+
+    // The interactive two-step flow: user reviewed the scan and chose index 2
+    // for ordinals, index 1 for payment.
+    const info = await firstValueFrom(service.connectFromScan(scan, { ordinals: a2, payment: a1 }));
+
+    expect(info.type).toBe(KnownOrdinalWalletType.xpub);
+    expect(info.ordinalsAddress).toBe(a2.address);
+    expect(info.ordinalsPublicKey).toBe(a2.publicKeyHex);
+    expect(info.paymentAddress).toBe(a1.address);
+    expect(info.paymentPublicKey).toBe(a1.publicKeyHex);
+    expect(next).toHaveBeenCalledWith(info);
+    expect(setValue).toHaveBeenCalledTimes(1);
+  });
+
+  it('connectFromScan rejects an identity address that is not in the scan', async () => {
+    const [a0, a1] = receive(2);
+    const outside = receive(5)[4]; // index 4, outside the 2-address scan
+    const { service } = newService();
+    const scan: WatchOnlyScanResult = {
+      scanned: [a0, a1].map((address) => ({ address, probe: { funded: false } })),
+      ordinals: a0, payment: a0, ordinalsReason: 'default', paymentReason: 'default',
+    };
+
+    await expect(firstValueFrom(service.connectFromScan(scan, { ordinals: outside, payment: a1 })))
+      .rejects.toThrow(/must come from scan\.scanned/);
   });
 });
