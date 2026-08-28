@@ -194,18 +194,3 @@ export function runeNamesFromContent(content: UtxoContent): string[] {
  */
 export const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10_000;
 
-/**
- * Funding floor in sats for the empty-state hint in the mint flow.
- * Derived from the user's currently-picked fee rate using a
- * conservative ~200 vB reference vsize (real CAT-21 mints are
- * ~150–170 vB depending on wallet type), rounded up to the next 100
- * sat so the displayed number reads cleanly. At 1 sat/vB that's
- * ~800 sat; at 5 sat/vB ~1600; at 100 sat/vB ~20,600.
- *
- * The SDK's actual viable-UTXO check is dynamic per-PSBT; this helper
- * just stops the user-facing hint from quoting launch-era numbers
- * (10k or 200k sat) when current mainnet fees are much lower.
- */
-export function calculateRecommendedFundingSats(feeRatePerVb: number): number {
-  return Math.ceil((546 + 200 * feeRatePerVb) / 100) * 100;
-}

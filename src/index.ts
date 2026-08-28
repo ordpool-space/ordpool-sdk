@@ -44,6 +44,7 @@ export * from './cat21-mint/cat21-api.service';
 export * from './cat21-mint/cat21-mint-orchestrator.service';
 export * from './cat21-mint/cat21-mint-input-adapter';
 export * from './cat21-mint/utxo-content.types';
+export * from './cat21-mint/recommended-funding.helper';
 export * from './cat21-mint/utxo-content-scanner.service';
 export * from './cat21-mint/sat-rarity.helper';
 

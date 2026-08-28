@@ -1607,19 +1607,6 @@ declare function runeNamesFromContent(content: UtxoContent): string[];
  * math.
  */
 declare const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10000;
-/**
- * Funding floor in sats for the empty-state hint in the mint flow.
- * Derived from the user's currently-picked fee rate using a
- * conservative ~200 vB reference vsize (real CAT-21 mints are
- * ~150–170 vB depending on wallet type), rounded up to the next 100
- * sat so the displayed number reads cleanly. At 1 sat/vB that's
- * ~800 sat; at 5 sat/vB ~1600; at 100 sat/vB ~20,600.
- *
- * The SDK's actual viable-UTXO check is dynamic per-PSBT; this helper
- * just stops the user-facing hint from quoting launch-era numbers
- * (10k or 200k sat) when current mainnet fees are much lower.
- */
-declare function calculateRecommendedFundingSats(feeRatePerVb: number): number;
 
 /**
  * Pure classification of one outpoint's ordinals content, shared by the
@@ -2064,6 +2051,18 @@ type Cat21MintFundingInput = Cat21PreparedInput;
  * lives in a single place.
  */
 declare function prepareMintInputForWallet(paymentOutput: TxnOutput, paymentPublicKey: Uint8Array, paymentAddress: string, isSimulation: boolean, network: Network): Cat21MintFundingInput;
+
+/**
+ * Funding floor in sats for the empty-state hint in the mint flow: the cat
+ * postage plus the miner fee for a representative mint at the given fee rate,
+ * rounded up to the next 100 sat so the displayed number reads cleanly.
+ *
+ * The tx vsize is MEASURED from a simulated mint (`computePsbtVsize`), not a
+ * hardcoded vbyte guess. The actual viable-UTXO check remains dynamic
+ * per-PSBT in the mint orchestrator; this helper only keeps the user-facing
+ * hint honest at the current fee rate.
+ */
+declare function calculateRecommendedFundingSats(feeRatePerVb: number): number;
 
 /**
  * UTXOs at or below this value are auto-scanned by callers that respect

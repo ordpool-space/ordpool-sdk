@@ -43,6 +43,7 @@
     "src/cat21-mint/cat21-mint.helper.ts",
     "src/cat21-mint/cat21-mint-input-adapter.ts",
     "src/cat21-mint/utxo-content.types.ts",
+    "src/cat21-mint/recommended-funding.helper.ts",
     "src/cat21-mint/sat-rarity.helper.ts",
     "src/cat21-mint/utxo-content.classify.ts",
     "src/cat21-fee/fee-simulation.helper.ts",

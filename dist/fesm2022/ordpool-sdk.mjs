@@ -4719,21 +4719,6 @@ function runeNamesFromContent(content) {
  * math.
  */
 const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10_000;
-/**
- * Funding floor in sats for the empty-state hint in the mint flow.
- * Derived from the user's currently-picked fee rate using a
- * conservative ~200 vB reference vsize (real CAT-21 mints are
- * ~150–170 vB depending on wallet type), rounded up to the next 100
- * sat so the displayed number reads cleanly. At 1 sat/vB that's
- * ~800 sat; at 5 sat/vB ~1600; at 100 sat/vB ~20,600.
- *
- * The SDK's actual viable-UTXO check is dynamic per-PSBT; this helper
- * just stops the user-facing hint from quoting launch-era numbers
- * (10k or 200k sat) when current mainnet fees are much lower.
- */
-function calculateRecommendedFundingSats(feeRatePerVb) {
-    return Math.ceil((546 + 200 * feeRatePerVb) / 100) * 100;
-}
 
 /**
  * Pure classification of one outpoint's ordinals content, shared by the
@@ -5673,6 +5658,107 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
         }], ctorParameters: () => [] });
 
 /**
+ * Fake taproot key-path witness: a single 64-byte schnorr signature.
+ * `.vsize` measures the same whether the bytes are a real signature or
+ * zero-fill, so a module-scoped constant is fine (read-only downstream
+ * in scure's `updateInput`).
+ */
+const DUMMY_TAPROOT_KEYPATH_WITNESS = new Uint8Array(64);
+/**
+ * Fake P2WPKH witness: `<sig ~72><pubkey 33>`. Used as the fallback
+ * for any non-taproot non-signable input. A DER-encoded ECDSA sig with
+ * a sighash byte is up to ~72 bytes; erring on the larger side means we
+ * over- rather than under-estimate the fee for that input.
+ */
+const DUMMY_P2WPKH_WITNESS = [new Uint8Array(72), new Uint8Array(33)];
+/**
+ * Size the dummy witness for a non-signable input by its scriptPubKey.
+ * A cat can be held on a taproot (Xverse/Leather) OR a native-segwit
+ * (Unisat/Wizz) ordinals address; faking a taproot 64-byte witness on a
+ * real P2WPKH input under-counts ~11 vB and underpays the fee. Read the
+ * input's own scriptPubKey (from its witnessUtxo) and match the witness
+ * shape. Unknown/absent script falls back to the larger P2WPKH shape.
+ */
+function dummyWitnessForNonSignable(script) {
+    // P2TR scriptPubKey: OP_1 (0x51) PUSH32 (0x20) <32-byte key> = 34 bytes.
+    if (script && script.length === 34 && script[0] === 0x51 && script[1] === 0x20) {
+        return [DUMMY_TAPROOT_KEYPATH_WITNESS];
+    }
+    return DUMMY_P2WPKH_WITNESS;
+}
+/**
+ * Return `tx.vsize` for a freshly-built PSBT by dummy-signing every
+ * signable input and attaching a fake witness to any `nonSignableInputs`.
+ *
+ * scure's `.vsize` throws "Transaction is not finalized" on any input
+ * that isn't finalized; this helper handles both the "we're the signer
+ * of everything" case (mint, transfer) and the "we're the buyer, seller
+ * signs later" case (buy-offer create).
+ */
+function computePsbtVsize(args) {
+    const tx = btc.Transaction.fromPSBT(args.psbt);
+    const { dummyPrivateKey } = getDummyKeypair(args.network);
+    const nonSignable = args.nonSignableInputs ? new Set(args.nonSignableInputs) : null;
+    for (let i = 0; i < tx.inputsLength; i++) {
+        if (nonSignable?.has(i)) {
+            const script = tx.getInput(i).witnessUtxo?.script;
+            tx.updateInput(i, { finalScriptWitness: dummyWitnessForNonSignable(script) });
+        }
+        else {
+            tx.signIdx(dummyPrivateKey, i, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+            tx.finalizeIdx(i);
+        }
+    }
+    return tx.vsize;
+}
+
+/**
+ * vsize of a canonical single-taproot-input CAT-21 mint (1 input, cat output
+ * + change output), MEASURED from a real simulated PSBT via
+ * `computePsbtVsize` — never a hardcoded vbyte constant (HQ "never guess
+ * numbers" rule). The shape is deterministic, so we build + measure once and
+ * cache. Taproot is the representative default (Xverse/Leather ordinals
+ * addresses); the hint over- rather than under-funds on the ~11 vB smaller
+ * native-segwit path, which is the safe direction for a funding floor.
+ */
+let cachedMintVsize = null;
+function defaultMintVsize() {
+    if (cachedMintVsize !== null)
+        return cachedMintVsize;
+    const scureNetwork = toScureNetwork(Network.Mainnet);
+    const { dummyPublicKey, addressP2TR } = getDummyKeypair(scureNetwork);
+    const xOnly = dummyPublicKey.slice(1, 33); // compressed pubkey → 32-byte x-only
+    const { psbt } = buildCat21MintPsbt({
+        walletType: KnownOrdinalWalletType.xverse, // any non-cat21wallet default (sequence only)
+        network: Network.Mainnet,
+        fundingInput: {
+            txid: '00'.repeat(32),
+            vout: 0,
+            value: 100_000, // ample: yields a cat output + a change output (1-in, 2-out)
+            scriptPubKey: btc.p2tr(xOnly, undefined, scureNetwork).script,
+            tapInternalKey: xOnly,
+        },
+        destinations: { recipientAddress: addressP2TR, senderChangeAddress: addressP2TR },
+        feeSats: 0,
+    });
+    cachedMintVsize = computePsbtVsize({ psbt, network: scureNetwork });
+    return cachedMintVsize;
+}
+/**
+ * Funding floor in sats for the empty-state hint in the mint flow: the cat
+ * postage plus the miner fee for a representative mint at the given fee rate,
+ * rounded up to the next 100 sat so the displayed number reads cleanly.
+ *
+ * The tx vsize is MEASURED from a simulated mint (`computePsbtVsize`), not a
+ * hardcoded vbyte guess. The actual viable-UTXO check remains dynamic
+ * per-PSBT in the mint orchestrator; this helper only keeps the user-facing
+ * hint honest at the current fee rate.
+ */
+function calculateRecommendedFundingSats(feeRatePerVb) {
+    return Math.ceil((CAT21_POSTAGE_SATS + defaultMintVsize() * feeRatePerVb) / 100) * 100;
+}
+
+/**
  * UTXOs at or below this value are auto-scanned by callers that respect
  * the default policy (the mint-flow components do). Above the threshold
  * a UTXO is overwhelmingly likely to be a plain payment, so we leave it
@@ -6299,61 +6385,6 @@ const CAT21_OFFER_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
 function prepareBuyOfferBuyerInput(args) {
     return prepareCat21Input(args);
-}
-
-/**
- * Fake taproot key-path witness: a single 64-byte schnorr signature.
- * `.vsize` measures the same whether the bytes are a real signature or
- * zero-fill, so a module-scoped constant is fine (read-only downstream
- * in scure's `updateInput`).
- */
-const DUMMY_TAPROOT_KEYPATH_WITNESS = new Uint8Array(64);
-/**
- * Fake P2WPKH witness: `<sig ~72><pubkey 33>`. Used as the fallback
- * for any non-taproot non-signable input. A DER-encoded ECDSA sig with
- * a sighash byte is up to ~72 bytes; erring on the larger side means we
- * over- rather than under-estimate the fee for that input.
- */
-const DUMMY_P2WPKH_WITNESS = [new Uint8Array(72), new Uint8Array(33)];
-/**
- * Size the dummy witness for a non-signable input by its scriptPubKey.
- * A cat can be held on a taproot (Xverse/Leather) OR a native-segwit
- * (Unisat/Wizz) ordinals address; faking a taproot 64-byte witness on a
- * real P2WPKH input under-counts ~11 vB and underpays the fee. Read the
- * input's own scriptPubKey (from its witnessUtxo) and match the witness
- * shape. Unknown/absent script falls back to the larger P2WPKH shape.
- */
-function dummyWitnessForNonSignable(script) {
-    // P2TR scriptPubKey: OP_1 (0x51) PUSH32 (0x20) <32-byte key> = 34 bytes.
-    if (script && script.length === 34 && script[0] === 0x51 && script[1] === 0x20) {
-        return [DUMMY_TAPROOT_KEYPATH_WITNESS];
-    }
-    return DUMMY_P2WPKH_WITNESS;
-}
-/**
- * Return `tx.vsize` for a freshly-built PSBT by dummy-signing every
- * signable input and attaching a fake witness to any `nonSignableInputs`.
- *
- * scure's `.vsize` throws "Transaction is not finalized" on any input
- * that isn't finalized; this helper handles both the "we're the signer
- * of everything" case (mint, transfer) and the "we're the buyer, seller
- * signs later" case (buy-offer create).
- */
-function computePsbtVsize(args) {
-    const tx = btc.Transaction.fromPSBT(args.psbt);
-    const { dummyPrivateKey } = getDummyKeypair(args.network);
-    const nonSignable = args.nonSignableInputs ? new Set(args.nonSignableInputs) : null;
-    for (let i = 0; i < tx.inputsLength; i++) {
-        if (nonSignable?.has(i)) {
-            const script = tx.getInput(i).witnessUtxo?.script;
-            tx.updateInput(i, { finalScriptWitness: dummyWitnessForNonSignable(script) });
-        }
-        else {
-            tx.signIdx(dummyPrivateKey, i, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-            tx.finalizeIdx(i);
-        }
-    }
-    return tx.vsize;
 }
 
 /**

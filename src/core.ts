@@ -79,6 +79,7 @@ export * from './cat21-mint/cat21-mint-input-adapter';
 //     type aliases) belong at core so non-Angular consumers — bots,
 //     cat21-wallet autonomous flows, CLIs — can reach them.
 export * from './cat21-mint/utxo-content.types';
+export * from './cat21-mint/recommended-funding.helper';
 export * from './cat21-mint/sat-rarity.helper';
 
 // --- CAT-21 fee simulation + coin selection (shared across flows) ---
