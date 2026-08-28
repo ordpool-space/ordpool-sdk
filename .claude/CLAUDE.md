@@ -224,6 +224,17 @@ re-dust-validating. **No `postageSats` override on any builder.**
 A future address type with higher dust requirements is a protocol
 event, not a builder argument.
 
+**546 is a BUILDER convention, never a DETECTION rule.** The values
+above describe what our builders MINT and TRANSFER at. Do NOT detect an
+existing cat by its UTXO size: a cat received from a third-party wallet
+can sit on a UTXO of any value, and a 546-sat UTXO is not necessarily a
+cat (regular inscriptions and rare sats are dust-postaged too). Cat
+membership is answered only by the cat index (cat21-ord `/address` ->
+`cat_numbers`, i.e. `catsAtAddress` / `addressHoldsCat`), never by a size
+heuristic. Watch-only spendability likewise excludes cats AND
+inscriptions AND runes AND rare sats via the full ord + cat21-ord
+(`classifyOutpoint` / `makeWatchOnlyProbe`), never by size.
+
 **Why FIFO is load-bearing**: ord assigns the cat to the first sat
 of the first output (ordinal theory). If the cat UTXO is at input
 1 or output 0 is not the cat, the cat lands elsewhere — silently —

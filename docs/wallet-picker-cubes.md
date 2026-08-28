@@ -13,22 +13,29 @@ capability: `Inscription`. It does not mint cats, transfer, or trade, so
 keep the picker scoped to `Inscription` and do not advertise the cat
 operations.
 
-## Import from the core entry
+## Import from the main entry (NOT `/core`)
 
-cubes-frontend is Angular 16; the SDK's Angular bundle is built with a much
-newer Angular. Import the matrix from the **Angular-free** core entry to
-avoid any Angular-version coupling (the matrix is pure data + functions, so
-it lives in core):
+The matrix + watch-only helpers are exported from BOTH `ordpool-sdk` and
+`ordpool-sdk/core`. For cubes, import from the **main `ordpool-sdk` entry**:
 
 ```ts
 import {
   WalletCapability, WalletPlatform, CapabilitySupport,
   walletsSupporting, capabilityOf,
-} from 'ordpool-sdk/core';
+  walletInAppBrowserDeepLink, scanWatchOnly, deriveWatchOnlyAddresses,
+} from 'ordpool-sdk';
 ```
 
-(Use the same entry the cubes flow already imports its SDK inscribe helpers
-from. The matrix is exported from both `ordpool-sdk` and `ordpool-sdk/core`.)
+Why not `/core` here: the genesis cubes e2e workflow
+(`e2e-cubes-regtest.yml`) installs with `npm ci --ignore-scripts`, so the
+SDK's `prepare` step never runs and `dist-core/` (what `/core` maps to, and
+which is NOT checked into git) is never built. `import … from
+'ordpool-sdk/core'` then fails the CI build with `Could not resolve
+"ordpool-sdk/core"`. The main entry's `dist/` IS checked into git and
+resolves with no build step. The matrix is pure data + functions, so the
+Angular fesm bundle loads fine under cubes' Angular 16 with no version
+coupling. Use the same main entry cubes already imports its SDK inscribe
+helpers from.
 
 ## The picker flow
 
@@ -76,7 +83,7 @@ wallet-level notes apply:
   signing; the flow ends by handing the user a PSBT to sign in their own
   wallet. Present it as an export step, not a "Connect" button.
   **Wired now**: connect with `WalletService.connectXpub` (Angular) or
-  compose `scanWatchOnly` from `/core` (cubes); full contract +
+  compose `scanWatchOnly` from the main `ordpool-sdk` entry (cubes); full contract +
   probe-wiring in `wallet-picker-watch-only-shared.md`. Proven end to end
   on regtest (pasted xpub → scan → mint → broadcast).
 

@@ -4446,6 +4446,417 @@ async function addressHoldsCat(address, options) {
     return (await catsAtAddress(address, options)).length > 0;
 }
 
+/**
+ * Ordinal-theory sat rarity math. Pure functions, no I/O — every
+ * classification is derived from the sat number alone.
+ *
+ * Categories (highest rarity wins when multiple apply):
+ *   - `mythic`     — sat 0 (the very first sat of Bitcoin, block 0).
+ *   - `legendary`  — first sat of a cycle (every 6 halvings = 1_260_000 blocks).
+ *   - `epic`       — first sat of a halving block (every 210_000 blocks).
+ *   - `rare`       — first sat of a difficulty adjustment block (every 2016 blocks).
+ *   - `uncommon`   — first sat of any other block.
+ *   - `common`     — every non-first sat.
+ *
+ * Halving epochs shrink block subsidy by half every 210_000 blocks:
+ *   e=0 (blocks 0..209_999):        50 BTC =           5_000_000_000 sat
+ *   e=1 (blocks 210k..419_999):     25 BTC =           2_500_000_000 sat
+ *   e=2 (blocks 420k..629_999):     12.5 BTC =         1_250_000_000 sat
+ *   e=3 (blocks 630k..839_999):     6.25 BTC =           625_000_000 sat
+ *   ...
+ *   e=32 approximately mines the last sat; subsidy becomes 0 sat at e=33.
+ *
+ * We use bigint throughout because the total sat supply (~21e14 sats)
+ * exceeds `Number.MAX_SAFE_INTEGER` (~9e15 fits, but midway math needs
+ * safety) and range-endpoint math is easier without precision loss.
+ */
+const SUBSIDY_EPOCH_0 = 50n * 100000000n;
+const BLOCKS_PER_HALVING = 210_000;
+const DIFFICULTY_ADJUSTMENT_INTERVAL = 2016;
+const BLOCKS_PER_CYCLE = 6 * BLOCKS_PER_HALVING; // 1_260_000
+/** Rarity of the FIRST sat of a given block. Non-first sats are always `common`. */
+function rarityOfBlockFirstSat(block) {
+    if (block === 0)
+        return 'mythic';
+    if (block % BLOCKS_PER_CYCLE === 0)
+        return 'legendary';
+    if (block % BLOCKS_PER_HALVING === 0)
+        return 'epic';
+    if (block % DIFFICULTY_ADJUSTMENT_INTERVAL === 0)
+        return 'rare';
+    return 'uncommon';
+}
+/**
+ * Given a sat number, return the block it was mined in AND the first
+ * sat of that block. If `sat === firstSatOfBlock`, the sat is the
+ * uncommon (or higher) block-first-sat; otherwise it's common.
+ */
+function locateSat(sat) {
+    if (sat < 0n)
+        throw new Error(`sat must be non-negative; got ${sat}`);
+    let epoch = 0;
+    let cumStart = 0n;
+    while (epoch < 33) {
+        const subsidy = SUBSIDY_EPOCH_0 >> BigInt(epoch);
+        if (subsidy === 0n)
+            break;
+        const epochSats = BigInt(BLOCKS_PER_HALVING) * subsidy;
+        if (sat < cumStart + epochSats) {
+            const blockInEpoch = Number((sat - cumStart) / subsidy);
+            const block = epoch * BLOCKS_PER_HALVING + blockInEpoch;
+            const firstSatOfBlock = cumStart + BigInt(blockInEpoch) * subsidy;
+            return { block, firstSatOfBlock, subsidy };
+        }
+        cumStart += epochSats;
+        epoch++;
+    }
+    throw new Error(`sat ${sat} is beyond the maximum supply`);
+}
+/** Rarity of an individual sat. */
+function rarityOfSat(sat) {
+    const { block, firstSatOfBlock } = locateSat(sat);
+    if (sat === firstSatOfBlock)
+        return rarityOfBlockFirstSat(block);
+    return 'common';
+}
+/**
+ * Find the highest-rarity sat inside a half-open range `[start, end)`.
+ *
+ * O(1) in the range width: given the block containing `start` and the
+ * block containing `end-1`, we ask "does this block interval contain
+ * any multiple of X" for each rarity threshold (cycle, halving,
+ * difficulty adjustment). The rarest positive answer wins. No
+ * block-by-block iteration.
+ *
+ * That matters because `sat_ranges` returned by ord can span millions
+ * of blocks for wide UTXO ranges; a walker would be prohibitive.
+ */
+function findRareSatInRange(start, end) {
+    if (end <= start)
+        return null;
+    const startInfo = locateSat(start);
+    const endInfo = locateSat(end - 1n);
+    // Block range that overlaps [start, end). The FIRST-sat of a block
+    // is inside [start, end) iff (a) `start` equals it, OR (b) it belongs
+    // to a block after `startInfo.block`.
+    const startIsBlockFirstSat = start === startInfo.firstSatOfBlock;
+    const firstBlockContributing = startIsBlockFirstSat ? startInfo.block : startInfo.block + 1;
+    const lastBlockContributing = endInfo.block;
+    if (firstBlockContributing > lastBlockContributing)
+        return null;
+    // Walk the rarity ladder top-down and short-circuit.
+    const b1 = firstBlockContributing;
+    const b2 = lastBlockContributing;
+    if (b1 === 0) {
+        return { sat: 0n, block: 0, rarity: 'mythic' };
+    }
+    const legendary = firstMultipleInRange(b1, b2, BLOCKS_PER_CYCLE);
+    if (legendary !== null) {
+        return { sat: firstSatOfBlock(legendary), block: legendary, rarity: 'legendary' };
+    }
+    const epic = firstMultipleInRange(b1, b2, BLOCKS_PER_HALVING);
+    if (epic !== null) {
+        return { sat: firstSatOfBlock(epic), block: epic, rarity: 'epic' };
+    }
+    const rare = firstMultipleInRange(b1, b2, DIFFICULTY_ADJUSTMENT_INTERVAL);
+    if (rare !== null) {
+        return { sat: firstSatOfBlock(rare), block: rare, rarity: 'rare' };
+    }
+    // Any remaining block first-sat is uncommon.
+    return {
+        sat: firstSatOfBlock(b1),
+        block: b1,
+        rarity: 'uncommon',
+    };
+}
+/** Smallest multiple of `step` in `[low, high]` (inclusive), or null. */
+function firstMultipleInRange(low, high, step) {
+    const m = Math.ceil(low / step) * step;
+    return m <= high ? m : null;
+}
+/** First sat of a block, O(1) via epoch arithmetic. */
+function firstSatOfBlock(block) {
+    const epoch = Math.floor(block / BLOCKS_PER_HALVING);
+    // Sum of subsidies of every full prior epoch.
+    let cum = 0n;
+    for (let e = 0; e < epoch; e++) {
+        const s = SUBSIDY_EPOCH_0 >> BigInt(e);
+        cum += BigInt(BLOCKS_PER_HALVING) * s;
+    }
+    const subsidyThisEpoch = SUBSIDY_EPOCH_0 >> BigInt(epoch);
+    const blockInEpoch = block - epoch * BLOCKS_PER_HALVING;
+    return cum + BigInt(blockInEpoch) * subsidyThisEpoch;
+}
+/**
+ * Highest-rarity sat across every `[start, end)` range on a UTXO,
+ * as ord returns them on `/output/{outpoint}` (`sat_ranges`). Returns
+ * null when every range is entirely common — the fast path.
+ */
+const RARITY_RANK = {
+    common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 5,
+};
+function findRareSatInRanges(ranges) {
+    let rarest = null;
+    for (const [start, end] of ranges) {
+        const hit = findRareSatInRange(start, end);
+        if (hit && (rarest === null || RARITY_RANK[hit.rarity] > RARITY_RANK[rarest.rarity])) {
+            rarest = hit;
+            if (hit.rarity === 'mythic')
+                return rarest;
+        }
+    }
+    return rarest;
+}
+
+/**
+ * Asset-detection types for the mint flow's UTXO scanner. We query
+ * BOTH our ord instance (`ord.ordpool.space`, returns regular
+ * inscriptions + runes) AND our cat21-ord (`ord.cat21.space`, returns
+ * CAT-21 cats) per outpoint, merging the answers into one
+ * `UtxoContent`. Rare-sat classification is derived client-side from
+ * ord's `sat_ranges` via `sat-rarity.helper.ts`.
+ *
+ * The detection is content-safety, not fee-math: an inscription at the
+ * dust limit (546 sat) reads as "tiny UTXO" to the picker but carries
+ * arbitrary off-chain value. On single-address wallets, spending such
+ * a UTXO as a mint input sends the asset to the miner as fee. The same
+ * risk applies to a UTXO carrying a rare sat.
+ */
+/**
+ * Skip rare-sat detection when ord returns more than this many
+ * `sat_ranges` tuples on a UTXO. Mixed / heavily-recycled UTXOs can
+ * carry thousands — parsing them all would dominate the scanner's
+ * per-UTXO cost budget. The bandwidth cost of receiving those tuples
+ * is already sunk (ord doesn't let us opt out of `sat_ranges`), but
+ * we can at least skip the parse.
+ *
+ * Below the cap: rarity math is O(1) per tuple, so bounded work.
+ * Above the cap: `rareSat` on `UtxoContent` stays null; the picker
+ * treats the UTXO as "rarity unchecked" rather than "clean".
+ */
+const RARE_SAT_MAX_RANGES = 500;
+/**
+ * Helper for templates — true iff the state name describes a completed
+ * scan (clean, with-assets, or failed). Lets the UI distinguish "we
+ * haven't tried" from "we tried and got an answer".
+ */
+function isScanComplete(s) {
+    return s.kind === 'scanned-clean' || s.kind === 'scanned-with-assets' || s.kind === 'scan-failed';
+}
+/**
+ * Map a UtxoScanState to its display bucket. Drives badge labels,
+ * row-button copy, and the auto-pick priority order.
+ */
+function bucketOf(state) {
+    switch (state.kind) {
+        case 'not-scanned': return 'unscanned';
+        case 'scanning': return 'scanning';
+        case 'scanned-clean': return 'clean';
+        case 'scanned-with-assets': return 'assets';
+        case 'scan-failed': return 'failed';
+    }
+}
+/**
+ * Auto-pick the largest "safe-enough" row from a bucket-annotated list.
+ * Priority: scanned-clean (verified safe) → unscanned (probably-safe big
+ * UTXO) → scan-failed (unknown, better than nothing). NEVER auto-pick
+ * scanned-with-assets — that row requires an explicit "Use anyway"
+ * click from the user.
+ *
+ * Callers pass any row shape that carries a `bucket` field; this
+ * preserves the row type so consumers can use whatever shape they
+ * stored (UtxoSimulation, ViableUtxoRow, etc.).
+ */
+function findAutoPickCandidate(rows) {
+    return rows.find((r) => r.bucket === 'clean')
+        ?? rows.find((r) => r.bucket === 'unscanned')
+        ?? rows.find((r) => r.bucket === 'failed')
+        ?? null;
+}
+/**
+ * Names of every rune balance present on a scanned UTXO. `null` runes
+ * (cat21-ord) or empty object short-circuits to an empty array. Used
+ * by the asset-found UI to render one link per rune.
+ */
+function runeNamesFromContent(content) {
+    return content.runes ? Object.keys(content.runes) : [];
+}
+/**
+ * UTXOs at or below this value on a single-address wallet are flagged
+ * as potentially holding an ordinal-bound asset (inscription, rune,
+ * rare sat, CAT-21 cat). 10k sat is the de-facto industry cut-off:
+ * most ordinal-bearing UTXOs are 546 sat (the dust limit) or slightly
+ * above; almost none exceed 10k. Content-safety heuristics, not fee
+ * math.
+ */
+const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10_000;
+/**
+ * Funding floor in sats for the empty-state hint in the mint flow.
+ * Derived from the user's currently-picked fee rate using a
+ * conservative ~200 vB reference vsize (real CAT-21 mints are
+ * ~150–170 vB depending on wallet type), rounded up to the next 100
+ * sat so the displayed number reads cleanly. At 1 sat/vB that's
+ * ~800 sat; at 5 sat/vB ~1600; at 100 sat/vB ~20,600.
+ *
+ * The SDK's actual viable-UTXO check is dynamic per-PSBT; this helper
+ * just stops the user-facing hint from quoting launch-era numbers
+ * (10k or 200k sat) when current mainnet fees are much lower.
+ */
+function calculateRecommendedFundingSats(feeRatePerVb) {
+    return Math.ceil((546 + 200 * feeRatePerVb) / 100) * 100;
+}
+
+/**
+ * Pure classification of one outpoint's ordinals content, shared by the
+ * Angular `UtxoContentScanner` (HttpClient-backed, cached) and the
+ * Angular-free watch-only probe (`classifyOutpoint` / `makeWatchOnlyProbe`,
+ * fetch-backed). Both fetch the same two ord responses through different
+ * HTTP layers, then hand them here so the "is this UTXO spendable" decision
+ * has ONE implementation and cannot drift between the consumers.
+ *
+ * A UTXO is `clean` (safe to spend as funding) only when it carries no
+ * inscription, no rune, no CAT-21 cat, and no rare sat. Anything else is
+ * ordinals content a watch-only user could burn if it were spent for fees.
+ */
+/**
+ * Merge the full-ord response (inscriptions + runes + sat_ranges) and the
+ * cat21-ord response (cats) into one classification. Pure: no I/O.
+ */
+function classifyUtxoContent(ord, cat21Ord) {
+    const inscriptionIds = ord.inscriptions ?? [];
+    const runes = ord.runes && Object.keys(ord.runes).length > 0 ? ord.runes : null;
+    const catIds = cat21Ord.cats ?? [];
+    const rareSat = detectRareSat(ord.sat_ranges);
+    const clean = inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat;
+    // Source the cat's sat from cat21-ord (the cat indexer, authoritative and
+    // always in step with `cats`); fall back to the full ord only if cat21-ord
+    // returned no ranges. Reading it from the full ord alone yielded catSat=null
+    // whenever that instance had not indexed the output.
+    const catSat = catIds.length > 0
+        ? (firstSat(cat21Ord.sat_ranges) ?? firstSat(ord.sat_ranges))
+        : null;
+    return { clean, inscriptionIds, runes, catIds, catSat, rareSat };
+}
+/**
+ * First sat of the first range, where a CAT-21 cat sits.
+ *
+ * The protocol pins a cat to offset 0 of its output, so the ranges do not
+ * need walking: the opening sat of the first range is the cat's sat. Returns
+ * null when ord supplied no ranges (an output it has not indexed).
+ */
+function firstSat(ranges) {
+    const first = ranges?.[0]?.[0];
+    return typeof first === 'number' ? first : null;
+}
+/**
+ * Turn ord's `sat_ranges` into a rare-sat finding if one exists. Skips the
+ * scan when the range count exceeds `RARE_SAT_MAX_RANGES` — pathological
+ * UTXOs with thousands of ranges would dominate the per-UTXO cost budget.
+ */
+function detectRareSat(ranges) {
+    if (!ranges || ranges.length === 0 || ranges.length > RARE_SAT_MAX_RANGES)
+        return null;
+    const bigints = ranges.map(([start, end]) => [BigInt(start), BigInt(end)]);
+    const hit = findRareSatInRanges(bigints);
+    if (!hit)
+        return null;
+    return { sat: hit.sat.toString(), block: hit.block, rarity: hit.rarity };
+}
+
+/**
+ * Fetch-based, Angular-free classification of one outpoint's ordinals
+ * content. Fires the two ord `/output` requests in parallel (the full ord
+ * for inscriptions + runes + rare sats; cat21-ord for cats) and delegates
+ * the decision to `classifyUtxoContent`, so the "is this UTXO spendable"
+ * logic is shared byte-for-byte with the Angular `UtxoContentScanner`.
+ *
+ * Building block for `makeWatchOnlyProbe`. Throws on any non-2xx from
+ * either ord (the caller decides how to treat an unclassifiable outpoint;
+ * `makeWatchOnlyProbe` excludes it from spendable funds, conservatively).
+ */
+async function classifyOutpoint(outpoint, options) {
+    const [ord, cat21Ord] = await Promise.all([
+        fetchOutput(options.ordApiUrl, outpoint, options.signal),
+        fetchOutput(options.cat21OrdApiUrl, outpoint, options.signal),
+    ]);
+    return { outpoint, ...classifyUtxoContent(ord, cat21Ord) };
+}
+async function fetchOutput(baseUrl, outpoint, signal) {
+    const url = `${baseUrl.replace(/\/+$/, '')}/output/${outpoint}`;
+    const response = await fetch(url, { headers: { Accept: 'application/json' }, signal });
+    if (!response.ok) {
+        throw new Error(`classifyOutpoint: ${url} returned ${response.status}`);
+    }
+    return (await response.json());
+}
+
+/**
+ * The ordinals-safe watch-only probe factory.
+ *
+ * `scanWatchOnly` needs a `probe(address)` that reports, per derived
+ * address, whether it holds a cat (ordinals identity) and how many
+ * SPENDABLE sats it has (payment identity). "Spendable" must exclude every
+ * kind of ordinals content a user could burn: cats, regular inscriptions,
+ * runes, and rare sats. None of those correlate with UTXO size, so the only
+ * honest answer comes from the indexes, never a 546-sat heuristic.
+ *
+ * This is the single shared implementation of that probe, so all consumers
+ * (cat21.space, ordpool.space, cubes) wire ONE factory instead of each
+ * hand-rolling funded/fundedSats and re-introducing size heuristics.
+ *
+ * Per address:
+ *   - `hasCat`  = the cat index (cat21-ord `/address` -> `cat_numbers`)
+ *                 reports at least one cat. Address-level, authoritative.
+ *   - `funded` / `fundedSats` = only UTXOs `classifyOutpoint` confirms clean
+ *                 (no inscription, rune, cat, or rare sat) count as spendable.
+ *                 A UTXO whose classification fails is EXCLUDED, never assumed
+ *                 spendable.
+ */
+/**
+ * Build the ordinals-safe `probe` for {@link scanWatchOnly}. Pure +
+ * Angular-free: native `fetch`, composed from the same `classifyOutpoint`
+ * the Angular `UtxoContentScanner` delegates to.
+ */
+function makeWatchOnlyProbe(config) {
+    return async (address) => {
+        const [utxos, cats] = await Promise.all([
+            fetchUtxos(config.esploraApiUrl, address, config.signal),
+            catsAtAddress(address, { cat21OrdApiUrl: config.cat21OrdApiUrl, signal: config.signal }),
+        ]);
+        const classified = await Promise.all(utxos.map(async (u) => {
+            try {
+                const c = await classifyOutpoint(`${u.txid}:${u.vout}`, {
+                    ordApiUrl: config.ordApiUrl,
+                    cat21OrdApiUrl: config.cat21OrdApiUrl,
+                    signal: config.signal,
+                });
+                return { value: u.value, clean: c.clean };
+            }
+            catch {
+                // Unclassifiable outpoint (ord 404 / network): exclude from
+                // spendable funds rather than risk spending ordinals content.
+                return { value: u.value, clean: false };
+            }
+        }));
+        const spendable = classified.filter((r) => r.clean);
+        return {
+            funded: spendable.length > 0,
+            fundedSats: spendable.reduce((sum, r) => sum + r.value, 0),
+            hasCat: cats.length > 0,
+        };
+    };
+}
+async function fetchUtxos(esploraApiUrl, address, signal) {
+    const url = `${esploraApiUrl.replace(/\/+$/, '')}/address/${encodeURIComponent(address)}/utxo`;
+    const response = await fetch(url, { headers: { Accept: 'application/json' }, signal });
+    if (response.status === 404)
+        return []; // address never seen -> no UTXOs
+    if (!response.ok) {
+        throw new Error(`makeWatchOnlyProbe: ${url} returned ${response.status}`);
+    }
+    return (await response.json());
+}
+
 const cat21Config = new InjectionToken('cat21Config');
 
 /**
@@ -5233,266 +5644,6 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
         }], ctorParameters: () => [] });
 
 /**
- * Asset-detection types for the mint flow's UTXO scanner. We query
- * BOTH our ord instance (`ord.ordpool.space`, returns regular
- * inscriptions + runes) AND our cat21-ord (`ord.cat21.space`, returns
- * CAT-21 cats) per outpoint, merging the answers into one
- * `UtxoContent`. Rare-sat classification is derived client-side from
- * ord's `sat_ranges` via `sat-rarity.helper.ts`.
- *
- * The detection is content-safety, not fee-math: an inscription at the
- * dust limit (546 sat) reads as "tiny UTXO" to the picker but carries
- * arbitrary off-chain value. On single-address wallets, spending such
- * a UTXO as a mint input sends the asset to the miner as fee. The same
- * risk applies to a UTXO carrying a rare sat.
- */
-/**
- * Skip rare-sat detection when ord returns more than this many
- * `sat_ranges` tuples on a UTXO. Mixed / heavily-recycled UTXOs can
- * carry thousands — parsing them all would dominate the scanner's
- * per-UTXO cost budget. The bandwidth cost of receiving those tuples
- * is already sunk (ord doesn't let us opt out of `sat_ranges`), but
- * we can at least skip the parse.
- *
- * Below the cap: rarity math is O(1) per tuple, so bounded work.
- * Above the cap: `rareSat` on `UtxoContent` stays null; the picker
- * treats the UTXO as "rarity unchecked" rather than "clean".
- */
-const RARE_SAT_MAX_RANGES = 500;
-/**
- * Helper for templates — true iff the state name describes a completed
- * scan (clean, with-assets, or failed). Lets the UI distinguish "we
- * haven't tried" from "we tried and got an answer".
- */
-function isScanComplete(s) {
-    return s.kind === 'scanned-clean' || s.kind === 'scanned-with-assets' || s.kind === 'scan-failed';
-}
-/**
- * Map a UtxoScanState to its display bucket. Drives badge labels,
- * row-button copy, and the auto-pick priority order.
- */
-function bucketOf(state) {
-    switch (state.kind) {
-        case 'not-scanned': return 'unscanned';
-        case 'scanning': return 'scanning';
-        case 'scanned-clean': return 'clean';
-        case 'scanned-with-assets': return 'assets';
-        case 'scan-failed': return 'failed';
-    }
-}
-/**
- * Auto-pick the largest "safe-enough" row from a bucket-annotated list.
- * Priority: scanned-clean (verified safe) → unscanned (probably-safe big
- * UTXO) → scan-failed (unknown, better than nothing). NEVER auto-pick
- * scanned-with-assets — that row requires an explicit "Use anyway"
- * click from the user.
- *
- * Callers pass any row shape that carries a `bucket` field; this
- * preserves the row type so consumers can use whatever shape they
- * stored (UtxoSimulation, ViableUtxoRow, etc.).
- */
-function findAutoPickCandidate(rows) {
-    return rows.find((r) => r.bucket === 'clean')
-        ?? rows.find((r) => r.bucket === 'unscanned')
-        ?? rows.find((r) => r.bucket === 'failed')
-        ?? null;
-}
-/**
- * Names of every rune balance present on a scanned UTXO. `null` runes
- * (cat21-ord) or empty object short-circuits to an empty array. Used
- * by the asset-found UI to render one link per rune.
- */
-function runeNamesFromContent(content) {
-    return content.runes ? Object.keys(content.runes) : [];
-}
-/**
- * UTXOs at or below this value on a single-address wallet are flagged
- * as potentially holding an ordinal-bound asset (inscription, rune,
- * rare sat, CAT-21 cat). 10k sat is the de-facto industry cut-off:
- * most ordinal-bearing UTXOs are 546 sat (the dust limit) or slightly
- * above; almost none exceed 10k. Content-safety heuristics, not fee
- * math.
- */
-const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10_000;
-/**
- * Funding floor in sats for the empty-state hint in the mint flow.
- * Derived from the user's currently-picked fee rate using a
- * conservative ~200 vB reference vsize (real CAT-21 mints are
- * ~150–170 vB depending on wallet type), rounded up to the next 100
- * sat so the displayed number reads cleanly. At 1 sat/vB that's
- * ~800 sat; at 5 sat/vB ~1600; at 100 sat/vB ~20,600.
- *
- * The SDK's actual viable-UTXO check is dynamic per-PSBT; this helper
- * just stops the user-facing hint from quoting launch-era numbers
- * (10k or 200k sat) when current mainnet fees are much lower.
- */
-function calculateRecommendedFundingSats(feeRatePerVb) {
-    return Math.ceil((546 + 200 * feeRatePerVb) / 100) * 100;
-}
-
-/**
- * Ordinal-theory sat rarity math. Pure functions, no I/O — every
- * classification is derived from the sat number alone.
- *
- * Categories (highest rarity wins when multiple apply):
- *   - `mythic`     — sat 0 (the very first sat of Bitcoin, block 0).
- *   - `legendary`  — first sat of a cycle (every 6 halvings = 1_260_000 blocks).
- *   - `epic`       — first sat of a halving block (every 210_000 blocks).
- *   - `rare`       — first sat of a difficulty adjustment block (every 2016 blocks).
- *   - `uncommon`   — first sat of any other block.
- *   - `common`     — every non-first sat.
- *
- * Halving epochs shrink block subsidy by half every 210_000 blocks:
- *   e=0 (blocks 0..209_999):        50 BTC =           5_000_000_000 sat
- *   e=1 (blocks 210k..419_999):     25 BTC =           2_500_000_000 sat
- *   e=2 (blocks 420k..629_999):     12.5 BTC =         1_250_000_000 sat
- *   e=3 (blocks 630k..839_999):     6.25 BTC =           625_000_000 sat
- *   ...
- *   e=32 approximately mines the last sat; subsidy becomes 0 sat at e=33.
- *
- * We use bigint throughout because the total sat supply (~21e14 sats)
- * exceeds `Number.MAX_SAFE_INTEGER` (~9e15 fits, but midway math needs
- * safety) and range-endpoint math is easier without precision loss.
- */
-const SUBSIDY_EPOCH_0 = 50n * 100000000n;
-const BLOCKS_PER_HALVING = 210_000;
-const DIFFICULTY_ADJUSTMENT_INTERVAL = 2016;
-const BLOCKS_PER_CYCLE = 6 * BLOCKS_PER_HALVING; // 1_260_000
-/** Rarity of the FIRST sat of a given block. Non-first sats are always `common`. */
-function rarityOfBlockFirstSat(block) {
-    if (block === 0)
-        return 'mythic';
-    if (block % BLOCKS_PER_CYCLE === 0)
-        return 'legendary';
-    if (block % BLOCKS_PER_HALVING === 0)
-        return 'epic';
-    if (block % DIFFICULTY_ADJUSTMENT_INTERVAL === 0)
-        return 'rare';
-    return 'uncommon';
-}
-/**
- * Given a sat number, return the block it was mined in AND the first
- * sat of that block. If `sat === firstSatOfBlock`, the sat is the
- * uncommon (or higher) block-first-sat; otherwise it's common.
- */
-function locateSat(sat) {
-    if (sat < 0n)
-        throw new Error(`sat must be non-negative; got ${sat}`);
-    let epoch = 0;
-    let cumStart = 0n;
-    while (epoch < 33) {
-        const subsidy = SUBSIDY_EPOCH_0 >> BigInt(epoch);
-        if (subsidy === 0n)
-            break;
-        const epochSats = BigInt(BLOCKS_PER_HALVING) * subsidy;
-        if (sat < cumStart + epochSats) {
-            const blockInEpoch = Number((sat - cumStart) / subsidy);
-            const block = epoch * BLOCKS_PER_HALVING + blockInEpoch;
-            const firstSatOfBlock = cumStart + BigInt(blockInEpoch) * subsidy;
-            return { block, firstSatOfBlock, subsidy };
-        }
-        cumStart += epochSats;
-        epoch++;
-    }
-    throw new Error(`sat ${sat} is beyond the maximum supply`);
-}
-/** Rarity of an individual sat. */
-function rarityOfSat(sat) {
-    const { block, firstSatOfBlock } = locateSat(sat);
-    if (sat === firstSatOfBlock)
-        return rarityOfBlockFirstSat(block);
-    return 'common';
-}
-/**
- * Find the highest-rarity sat inside a half-open range `[start, end)`.
- *
- * O(1) in the range width: given the block containing `start` and the
- * block containing `end-1`, we ask "does this block interval contain
- * any multiple of X" for each rarity threshold (cycle, halving,
- * difficulty adjustment). The rarest positive answer wins. No
- * block-by-block iteration.
- *
- * That matters because `sat_ranges` returned by ord can span millions
- * of blocks for wide UTXO ranges; a walker would be prohibitive.
- */
-function findRareSatInRange(start, end) {
-    if (end <= start)
-        return null;
-    const startInfo = locateSat(start);
-    const endInfo = locateSat(end - 1n);
-    // Block range that overlaps [start, end). The FIRST-sat of a block
-    // is inside [start, end) iff (a) `start` equals it, OR (b) it belongs
-    // to a block after `startInfo.block`.
-    const startIsBlockFirstSat = start === startInfo.firstSatOfBlock;
-    const firstBlockContributing = startIsBlockFirstSat ? startInfo.block : startInfo.block + 1;
-    const lastBlockContributing = endInfo.block;
-    if (firstBlockContributing > lastBlockContributing)
-        return null;
-    // Walk the rarity ladder top-down and short-circuit.
-    const b1 = firstBlockContributing;
-    const b2 = lastBlockContributing;
-    if (b1 === 0) {
-        return { sat: 0n, block: 0, rarity: 'mythic' };
-    }
-    const legendary = firstMultipleInRange(b1, b2, BLOCKS_PER_CYCLE);
-    if (legendary !== null) {
-        return { sat: firstSatOfBlock(legendary), block: legendary, rarity: 'legendary' };
-    }
-    const epic = firstMultipleInRange(b1, b2, BLOCKS_PER_HALVING);
-    if (epic !== null) {
-        return { sat: firstSatOfBlock(epic), block: epic, rarity: 'epic' };
-    }
-    const rare = firstMultipleInRange(b1, b2, DIFFICULTY_ADJUSTMENT_INTERVAL);
-    if (rare !== null) {
-        return { sat: firstSatOfBlock(rare), block: rare, rarity: 'rare' };
-    }
-    // Any remaining block first-sat is uncommon.
-    return {
-        sat: firstSatOfBlock(b1),
-        block: b1,
-        rarity: 'uncommon',
-    };
-}
-/** Smallest multiple of `step` in `[low, high]` (inclusive), or null. */
-function firstMultipleInRange(low, high, step) {
-    const m = Math.ceil(low / step) * step;
-    return m <= high ? m : null;
-}
-/** First sat of a block, O(1) via epoch arithmetic. */
-function firstSatOfBlock(block) {
-    const epoch = Math.floor(block / BLOCKS_PER_HALVING);
-    // Sum of subsidies of every full prior epoch.
-    let cum = 0n;
-    for (let e = 0; e < epoch; e++) {
-        const s = SUBSIDY_EPOCH_0 >> BigInt(e);
-        cum += BigInt(BLOCKS_PER_HALVING) * s;
-    }
-    const subsidyThisEpoch = SUBSIDY_EPOCH_0 >> BigInt(epoch);
-    const blockInEpoch = block - epoch * BLOCKS_PER_HALVING;
-    return cum + BigInt(blockInEpoch) * subsidyThisEpoch;
-}
-/**
- * Highest-rarity sat across every `[start, end)` range on a UTXO,
- * as ord returns them on `/output/{outpoint}` (`sat_ranges`). Returns
- * null when every range is entirely common — the fast path.
- */
-const RARITY_RANK = {
-    common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 5,
-};
-function findRareSatInRanges(ranges) {
-    let rarest = null;
-    for (const [start, end] of ranges) {
-        const hit = findRareSatInRange(start, end);
-        if (hit && (rarest === null || RARITY_RANK[hit.rarity] > RARITY_RANK[rarest.rarity])) {
-            rarest = hit;
-            if (hit.rarity === 'mythic')
-                return rarest;
-        }
-    }
-    return rarest;
-}
-
-/**
  * UTXOs at or below this value are auto-scanned by callers that respect
  * the default policy (the mint-flow components do). Above the threshold
  * a UTXO is overwhelmingly likely to be a plain payment, so we leave it
@@ -5564,21 +5715,18 @@ class UtxoContentScanner {
             ord: this.fetchOrd(outpoint),
             cat21Ord: this.fetchCat21Ord(outpoint),
         }).pipe(map(({ ord, cat21Ord }) => {
-            const inscriptionIds = ord.inscriptions ?? [];
-            const runes = ord.runes && Object.keys(ord.runes).length > 0 ? ord.runes : null;
-            const catIds = cat21Ord.cats ?? [];
-            const rareSat = detectRareSat(ord.sat_ranges);
-            if (inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat) {
+            const c = classifyUtxoContent(ord, cat21Ord);
+            if (c.clean) {
                 return { kind: 'scanned-clean' };
             }
-            // Source the cat's sat from cat21-ord (the cat indexer, authoritative
-            // and always in step with `cats`); fall back to the full ord only if
-            // cat21-ord didn't return ranges. Reading it from the full ord alone
-            // yielded catSat=null whenever that instance hadn't indexed the output.
-            const catSat = catIds.length > 0
-                ? (firstSat(cat21Ord.sat_ranges) ?? firstSat(ord.sat_ranges))
-                : null;
-            const content = { outpoint, inscriptionIds, runes, catIds, catSat, rareSat };
+            const content = {
+                outpoint,
+                inscriptionIds: c.inscriptionIds,
+                runes: c.runes,
+                catIds: c.catIds,
+                catSat: c.catSat,
+                rareSat: c.rareSat,
+            };
             return { kind: 'scanned-with-assets', content };
         }), catchError((err) => {
             const message = err instanceof Error ? err.message : String(err);
@@ -5648,32 +5796,6 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
         }] });
 function trimSlash(url) {
     return url.endsWith('/') ? url.slice(0, -1) : url;
-}
-/**
- * First sat of the first range, which is where a CAT-21 cat sits.
- *
- * The protocol pins a cat to offset 0 of its output, so the ranges do not need
- * walking: the opening sat of the first range is the cat's sat. Returns null
- * when ord supplied no ranges, which happens on an output it has not indexed.
- */
-function firstSat(ranges) {
-    const first = ranges?.[0]?.[0];
-    return typeof first === 'number' ? first : null;
-}
-/**
- * Turn ord's `sat_ranges` into a rare-sat finding if one exists.
- * Skips the scan when the range count exceeds `RARE_SAT_MAX_RANGES`
- * — pathological UTXOs with thousands of ranges would dominate the
- * per-UTXO cost budget.
- */
-function detectRareSat(ranges) {
-    if (!ranges || ranges.length === 0 || ranges.length > RARE_SAT_MAX_RANGES)
-        return null;
-    const bigints = ranges.map(([start, end]) => [BigInt(start), BigInt(end)]);
-    const hit = findRareSatInRanges(bigints);
-    if (!hit)
-        return null;
-    return { sat: hit.sat.toString(), block: hit.block, rarity: hit.rarity };
 }
 
 /**
@@ -11624,5 +11746,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map

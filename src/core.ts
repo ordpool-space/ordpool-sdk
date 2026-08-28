@@ -62,6 +62,8 @@ export * from './wallet/wallet-deeplink';
 export * from './wallet/xpub/derive-watch-only';
 export * from './wallet/xpub/scan-watch-only';
 export * from './wallet/xpub/cats-at-address';
+export * from './wallet/xpub/classify-outpoint';
+export * from './wallet/xpub/make-watch-only-probe';
 
 // --- CAT-21 mint (PSBT-build helpers; the Angular Cat21Service that
 //     orchestrates is at the main entry only). ---

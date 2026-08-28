@@ -1344,6 +1344,360 @@ declare function catsAtAddress(address: string, options: CatsAtAddressOptions): 
 declare function addressHoldsCat(address: string, options: CatsAtAddressOptions): Promise<boolean>;
 
 /**
+ * Ordinal-theory sat rarity math. Pure functions, no I/O — every
+ * classification is derived from the sat number alone.
+ *
+ * Categories (highest rarity wins when multiple apply):
+ *   - `mythic`     — sat 0 (the very first sat of Bitcoin, block 0).
+ *   - `legendary`  — first sat of a cycle (every 6 halvings = 1_260_000 blocks).
+ *   - `epic`       — first sat of a halving block (every 210_000 blocks).
+ *   - `rare`       — first sat of a difficulty adjustment block (every 2016 blocks).
+ *   - `uncommon`   — first sat of any other block.
+ *   - `common`     — every non-first sat.
+ *
+ * Halving epochs shrink block subsidy by half every 210_000 blocks:
+ *   e=0 (blocks 0..209_999):        50 BTC =           5_000_000_000 sat
+ *   e=1 (blocks 210k..419_999):     25 BTC =           2_500_000_000 sat
+ *   e=2 (blocks 420k..629_999):     12.5 BTC =         1_250_000_000 sat
+ *   e=3 (blocks 630k..839_999):     6.25 BTC =           625_000_000 sat
+ *   ...
+ *   e=32 approximately mines the last sat; subsidy becomes 0 sat at e=33.
+ *
+ * We use bigint throughout because the total sat supply (~21e14 sats)
+ * exceeds `Number.MAX_SAFE_INTEGER` (~9e15 fits, but midway math needs
+ * safety) and range-endpoint math is easier without precision loss.
+ */
+type SatRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
+/** Rarity of the FIRST sat of a given block. Non-first sats are always `common`. */
+declare function rarityOfBlockFirstSat(block: number): SatRarity;
+/**
+ * Given a sat number, return the block it was mined in AND the first
+ * sat of that block. If `sat === firstSatOfBlock`, the sat is the
+ * uncommon (or higher) block-first-sat; otherwise it's common.
+ */
+declare function locateSat(sat: bigint): {
+    block: number;
+    firstSatOfBlock: bigint;
+    subsidy: bigint;
+};
+/** Rarity of an individual sat. */
+declare function rarityOfSat(sat: bigint): SatRarity;
+/**
+ * Find the highest-rarity sat inside a half-open range `[start, end)`.
+ *
+ * O(1) in the range width: given the block containing `start` and the
+ * block containing `end-1`, we ask "does this block interval contain
+ * any multiple of X" for each rarity threshold (cycle, halving,
+ * difficulty adjustment). The rarest positive answer wins. No
+ * block-by-block iteration.
+ *
+ * That matters because `sat_ranges` returned by ord can span millions
+ * of blocks for wide UTXO ranges; a walker would be prohibitive.
+ */
+declare function findRareSatInRange(start: bigint, end: bigint): {
+    sat: bigint;
+    block: number;
+    rarity: SatRarity;
+} | null;
+declare function findRareSatInRanges(ranges: ReadonlyArray<readonly [bigint, bigint]>): {
+    sat: bigint;
+    block: number;
+    rarity: SatRarity;
+} | null;
+
+/**
+ * Asset-detection types for the mint flow's UTXO scanner. We query
+ * BOTH our ord instance (`ord.ordpool.space`, returns regular
+ * inscriptions + runes) AND our cat21-ord (`ord.cat21.space`, returns
+ * CAT-21 cats) per outpoint, merging the answers into one
+ * `UtxoContent`. Rare-sat classification is derived client-side from
+ * ord's `sat_ranges` via `sat-rarity.helper.ts`.
+ *
+ * The detection is content-safety, not fee-math: an inscription at the
+ * dust limit (546 sat) reads as "tiny UTXO" to the picker but carries
+ * arbitrary off-chain value. On single-address wallets, spending such
+ * a UTXO as a mint input sends the asset to the miner as fee. The same
+ * risk applies to a UTXO carrying a rare sat.
+ */
+
+/**
+ * Raw `/output/{outpoint}` shape returned by ord with the JSON API
+ * enabled. The subset we read here.
+ *
+ * `sat_ranges` — array of `[start, end)` tuples of sat numbers this
+ *   output holds. Can be enormous for wide / mixed UTXOs (thousands
+ *   of tuples, MBs of payload). The scanner gates rare-sat detection
+ *   behind a small-UTXO threshold + range-count cap so the naive
+ *   "fetch everything, scan all ranges" cost doesn't dominate.
+ */
+interface OrdOutputResponse {
+    inscriptions?: string[];
+    runes?: {
+        [runeName: string]: unknown;
+    } | null;
+    sat_ranges?: ReadonlyArray<readonly [number, number]>;
+}
+/**
+ * Same shape from cat21-ord. The fork swaps the `inscriptions` field
+ * for `cats` because `--index-cat21` only indexes CAT-21 fake-
+ * inscriptions and explicitly excludes everything else. Runes are
+ * never indexed by cat21-ord, so the field is always `null` there.
+ */
+interface Cat21OrdOutputResponse {
+    cats?: string[];
+    /**
+     * cat21-ord runs with `--index-sats`, so its `/output` carries the same
+     * `sat_ranges` a full ord does. This is the AUTHORITATIVE source for a
+     * cat's sat (cat21-ord is the cat indexer); the full-ord instance can lag
+     * on an output it hasn't indexed yet, so the scanner reads the cat's sat
+     * from here first.
+     */
+    sat_ranges?: ReadonlyArray<readonly [number, number]>;
+}
+/**
+ * Aggregated content found at a single UTXO. Populated only when at
+ * least one of the asset arrays is non-empty — clean UTXOs use the
+ * `scanned-clean` scan-state variant instead of a `UtxoContent` with
+ * empty arrays.
+ */
+interface UtxoContent {
+    /** "txid:vout" — the outpoint we queried. */
+    outpoint: string;
+    /** Inscription IDs at this outpoint, in ord's standard `{txid}i{index}` format. */
+    inscriptionIds: string[];
+    /**
+     * Rune name → balance object, exactly as ord's `/output/` endpoint
+     * returns it. `null` when the upstream didn't supply a runes field
+     * (cat21-ord) or returned `{}` (no runes here).
+     */
+    runes: {
+        [runeName: string]: unknown;
+    } | null;
+    /** CAT-21 cat IDs at this outpoint, also in `{txid}i{index}` format. */
+    catIds: string[];
+    /**
+     * Sat the cats at this outpoint sit on, or `null` when the outpoint holds
+     * no cats or ord returned no sat ranges.
+     *
+     * CAT-21 pins a cat to offset 0 of its output (FIFO), so every cat here
+     * shares the first sat of the first range. That makes the sat derivable from
+     * the scan alone, with no per-cat lookup, and it is what a UI should link to:
+     * a sat page shows every cat riding that sat and where it sits now, whereas
+     * the mint transaction shows only where a cat started and misleads once it
+     * has moved.
+     */
+    catSat: number | null;
+    /**
+     * Rarest sat inside the UTXO's `sat_ranges`, when the scanner ran
+     * the rare-sat check (small-UTXO gate — see `RARE_SAT_SCAN_MAX_VALUE_SAT`).
+     * `null` when no rare sat was found OR when the check was skipped
+     * for cost reasons (large UTXO, pathological range count).
+     */
+    rareSat: {
+        sat: string;
+        block: number;
+        rarity: SatRarity;
+    } | null;
+}
+/**
+ * Skip rare-sat detection when ord returns more than this many
+ * `sat_ranges` tuples on a UTXO. Mixed / heavily-recycled UTXOs can
+ * carry thousands — parsing them all would dominate the scanner's
+ * per-UTXO cost budget. The bandwidth cost of receiving those tuples
+ * is already sunk (ord doesn't let us opt out of `sat_ranges`), but
+ * we can at least skip the parse.
+ *
+ * Below the cap: rarity math is O(1) per tuple, so bounded work.
+ * Above the cap: `rareSat` on `UtxoContent` stays null; the picker
+ * treats the UTXO as "rarity unchecked" rather than "clean".
+ */
+declare const RARE_SAT_MAX_RANGES = 500;
+/**
+ * Per-UTXO scan state — drives the bucket-and-badge UI in both
+ * frontends.
+ *
+ * - `not-scanned` — default for UTXOs above the auto-scan threshold.
+ *   The picker shows a "Scan anyway" affordance.
+ * - `scanning` — request in flight. Picker disables the row until
+ *   the result lands.
+ * - `scanned-clean` — both ord endpoints returned empty asset arrays.
+ *   Picker marks the row safe; this is the auto-pick candidate.
+ * - `scanned-with-assets` — at least one asset present. Picker shows
+ *   what was found + links + an "Use anyway" override.
+ * - `scan-failed` — at least one endpoint errored. Picker treats the
+ *   row as "unknown safety" — neither auto-pick candidate nor blocked.
+ */
+type UtxoScanState = {
+    kind: 'not-scanned';
+} | {
+    kind: 'scanning';
+} | {
+    kind: 'scanned-clean';
+} | {
+    kind: 'scanned-with-assets';
+    content: UtxoContent;
+} | {
+    kind: 'scan-failed';
+    message: string;
+};
+/**
+ * Helper for templates — true iff the state name describes a completed
+ * scan (clean, with-assets, or failed). Lets the UI distinguish "we
+ * haven't tried" from "we tried and got an answer".
+ */
+declare function isScanComplete(s: UtxoScanState): boolean;
+/**
+ * Picker-display bucket the mint-flow UI bands UTXOs on. Maps 1:1 from
+ * UtxoScanState but as a flat name the template can `@switch` on. Both
+ * consumers (ordpool /cat21-mint and cat21.space /dashboard/mint) bind
+ * the same five values; the SDK owns the type so they can't drift.
+ */
+type UtxoScanBucket = 'clean' | 'unscanned' | 'assets' | 'scanning' | 'failed';
+/**
+ * Map a UtxoScanState to its display bucket. Drives badge labels,
+ * row-button copy, and the auto-pick priority order.
+ */
+declare function bucketOf(state: UtxoScanState): UtxoScanBucket;
+/**
+ * Auto-pick the largest "safe-enough" row from a bucket-annotated list.
+ * Priority: scanned-clean (verified safe) → unscanned (probably-safe big
+ * UTXO) → scan-failed (unknown, better than nothing). NEVER auto-pick
+ * scanned-with-assets — that row requires an explicit "Use anyway"
+ * click from the user.
+ *
+ * Callers pass any row shape that carries a `bucket` field; this
+ * preserves the row type so consumers can use whatever shape they
+ * stored (UtxoSimulation, ViableUtxoRow, etc.).
+ */
+declare function findAutoPickCandidate<T extends {
+    bucket: UtxoScanBucket;
+}>(rows: T[]): T | null;
+/**
+ * Names of every rune balance present on a scanned UTXO. `null` runes
+ * (cat21-ord) or empty object short-circuits to an empty array. Used
+ * by the asset-found UI to render one link per rune.
+ */
+declare function runeNamesFromContent(content: UtxoContent): string[];
+/**
+ * UTXOs at or below this value on a single-address wallet are flagged
+ * as potentially holding an ordinal-bound asset (inscription, rune,
+ * rare sat, CAT-21 cat). 10k sat is the de-facto industry cut-off:
+ * most ordinal-bearing UTXOs are 546 sat (the dust limit) or slightly
+ * above; almost none exceed 10k. Content-safety heuristics, not fee
+ * math.
+ */
+declare const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10000;
+/**
+ * Funding floor in sats for the empty-state hint in the mint flow.
+ * Derived from the user's currently-picked fee rate using a
+ * conservative ~200 vB reference vsize (real CAT-21 mints are
+ * ~150–170 vB depending on wallet type), rounded up to the next 100
+ * sat so the displayed number reads cleanly. At 1 sat/vB that's
+ * ~800 sat; at 5 sat/vB ~1600; at 100 sat/vB ~20,600.
+ *
+ * The SDK's actual viable-UTXO check is dynamic per-PSBT; this helper
+ * just stops the user-facing hint from quoting launch-era numbers
+ * (10k or 200k sat) when current mainnet fees are much lower.
+ */
+declare function calculateRecommendedFundingSats(feeRatePerVb: number): number;
+
+/**
+ * Pure classification of one outpoint's ordinals content, shared by the
+ * Angular `UtxoContentScanner` (HttpClient-backed, cached) and the
+ * Angular-free watch-only probe (`classifyOutpoint` / `makeWatchOnlyProbe`,
+ * fetch-backed). Both fetch the same two ord responses through different
+ * HTTP layers, then hand them here so the "is this UTXO spendable" decision
+ * has ONE implementation and cannot drift between the consumers.
+ *
+ * A UTXO is `clean` (safe to spend as funding) only when it carries no
+ * inscription, no rune, no CAT-21 cat, and no rare sat. Anything else is
+ * ordinals content a watch-only user could burn if it were spent for fees.
+ */
+
+interface UtxoContentClassification {
+    /** No inscription, rune, cat, or rare sat: safe to spend as funding. */
+    clean: boolean;
+    inscriptionIds: string[];
+    runes: {
+        [runeName: string]: unknown;
+    } | null;
+    catIds: string[];
+    /** Sat the cats sit on (offset 0), or null when no cats / no ranges. */
+    catSat: number | null;
+    rareSat: {
+        sat: string;
+        block: number;
+        rarity: SatRarity;
+    } | null;
+}
+
+/**
+ * Fetch-based, Angular-free classification of one outpoint's ordinals
+ * content. Fires the two ord `/output` requests in parallel (the full ord
+ * for inscriptions + runes + rare sats; cat21-ord for cats) and delegates
+ * the decision to `classifyUtxoContent`, so the "is this UTXO spendable"
+ * logic is shared byte-for-byte with the Angular `UtxoContentScanner`.
+ *
+ * Building block for `makeWatchOnlyProbe`. Throws on any non-2xx from
+ * either ord (the caller decides how to treat an unclassifiable outpoint;
+ * `makeWatchOnlyProbe` excludes it from spendable funds, conservatively).
+ */
+
+interface ClassifyOutpointOptions {
+    /** Full ord (inscriptions + runes + rare sats), e.g. `https://ord.ordpool.space`. */
+    ordApiUrl: string;
+    /** cat21-ord (`--index-cat21`, cats), e.g. `https://ord.cat21.space`. */
+    cat21OrdApiUrl: string;
+    signal?: AbortSignal;
+}
+interface OutpointClassification extends UtxoContentClassification {
+    outpoint: string;
+}
+declare function classifyOutpoint(outpoint: string, options: ClassifyOutpointOptions): Promise<OutpointClassification>;
+
+/**
+ * The ordinals-safe watch-only probe factory.
+ *
+ * `scanWatchOnly` needs a `probe(address)` that reports, per derived
+ * address, whether it holds a cat (ordinals identity) and how many
+ * SPENDABLE sats it has (payment identity). "Spendable" must exclude every
+ * kind of ordinals content a user could burn: cats, regular inscriptions,
+ * runes, and rare sats. None of those correlate with UTXO size, so the only
+ * honest answer comes from the indexes, never a 546-sat heuristic.
+ *
+ * This is the single shared implementation of that probe, so all consumers
+ * (cat21.space, ordpool.space, cubes) wire ONE factory instead of each
+ * hand-rolling funded/fundedSats and re-introducing size heuristics.
+ *
+ * Per address:
+ *   - `hasCat`  = the cat index (cat21-ord `/address` -> `cat_numbers`)
+ *                 reports at least one cat. Address-level, authoritative.
+ *   - `funded` / `fundedSats` = only UTXOs `classifyOutpoint` confirms clean
+ *                 (no inscription, rune, cat, or rare sat) count as spendable.
+ *                 A UTXO whose classification fails is EXCLUDED, never assumed
+ *                 spendable.
+ */
+
+interface WatchOnlyProbeConfig {
+    /**
+     * esplora / electrs base for the address UTXO set, e.g.
+     * `https://api.ordpool.space`. Queried at `/address/{address}/utxo`.
+     */
+    esploraApiUrl: string;
+    /** Full ord (inscriptions + runes + rare sats), e.g. `https://ord.ordpool.space`. */
+    ordApiUrl: string;
+    /** cat21-ord (`--index-cat21`, cats), e.g. `https://ord.cat21.space`. */
+    cat21OrdApiUrl: string;
+    signal?: AbortSignal;
+}
+/**
+ * Build the ordinals-safe `probe` for {@link scanWatchOnly}. Pure +
+ * Angular-free: native `fetch`, composed from the same `classifyOutpoint`
+ * the Angular `UtxoContentScanner` delegates to.
+ */
+declare function makeWatchOnlyProbe(config: WatchOnlyProbeConfig): (address: string) => Promise<AddressProbe>;
+
+/**
  * Runtime config the cat21-mint services need. Provided by the
  * consumer's DI; the SDK doesn't know about specific environments.
  *
@@ -1690,264 +2044,6 @@ type Cat21MintFundingInput = Cat21PreparedInput;
  * lives in a single place.
  */
 declare function prepareMintInputForWallet(paymentOutput: TxnOutput, paymentPublicKey: Uint8Array, paymentAddress: string, isSimulation: boolean, network: Network): Cat21MintFundingInput;
-
-/**
- * Ordinal-theory sat rarity math. Pure functions, no I/O — every
- * classification is derived from the sat number alone.
- *
- * Categories (highest rarity wins when multiple apply):
- *   - `mythic`     — sat 0 (the very first sat of Bitcoin, block 0).
- *   - `legendary`  — first sat of a cycle (every 6 halvings = 1_260_000 blocks).
- *   - `epic`       — first sat of a halving block (every 210_000 blocks).
- *   - `rare`       — first sat of a difficulty adjustment block (every 2016 blocks).
- *   - `uncommon`   — first sat of any other block.
- *   - `common`     — every non-first sat.
- *
- * Halving epochs shrink block subsidy by half every 210_000 blocks:
- *   e=0 (blocks 0..209_999):        50 BTC =           5_000_000_000 sat
- *   e=1 (blocks 210k..419_999):     25 BTC =           2_500_000_000 sat
- *   e=2 (blocks 420k..629_999):     12.5 BTC =         1_250_000_000 sat
- *   e=3 (blocks 630k..839_999):     6.25 BTC =           625_000_000 sat
- *   ...
- *   e=32 approximately mines the last sat; subsidy becomes 0 sat at e=33.
- *
- * We use bigint throughout because the total sat supply (~21e14 sats)
- * exceeds `Number.MAX_SAFE_INTEGER` (~9e15 fits, but midway math needs
- * safety) and range-endpoint math is easier without precision loss.
- */
-type SatRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary' | 'mythic';
-/** Rarity of the FIRST sat of a given block. Non-first sats are always `common`. */
-declare function rarityOfBlockFirstSat(block: number): SatRarity;
-/**
- * Given a sat number, return the block it was mined in AND the first
- * sat of that block. If `sat === firstSatOfBlock`, the sat is the
- * uncommon (or higher) block-first-sat; otherwise it's common.
- */
-declare function locateSat(sat: bigint): {
-    block: number;
-    firstSatOfBlock: bigint;
-    subsidy: bigint;
-};
-/** Rarity of an individual sat. */
-declare function rarityOfSat(sat: bigint): SatRarity;
-/**
- * Find the highest-rarity sat inside a half-open range `[start, end)`.
- *
- * O(1) in the range width: given the block containing `start` and the
- * block containing `end-1`, we ask "does this block interval contain
- * any multiple of X" for each rarity threshold (cycle, halving,
- * difficulty adjustment). The rarest positive answer wins. No
- * block-by-block iteration.
- *
- * That matters because `sat_ranges` returned by ord can span millions
- * of blocks for wide UTXO ranges; a walker would be prohibitive.
- */
-declare function findRareSatInRange(start: bigint, end: bigint): {
-    sat: bigint;
-    block: number;
-    rarity: SatRarity;
-} | null;
-declare function findRareSatInRanges(ranges: ReadonlyArray<readonly [bigint, bigint]>): {
-    sat: bigint;
-    block: number;
-    rarity: SatRarity;
-} | null;
-
-/**
- * Asset-detection types for the mint flow's UTXO scanner. We query
- * BOTH our ord instance (`ord.ordpool.space`, returns regular
- * inscriptions + runes) AND our cat21-ord (`ord.cat21.space`, returns
- * CAT-21 cats) per outpoint, merging the answers into one
- * `UtxoContent`. Rare-sat classification is derived client-side from
- * ord's `sat_ranges` via `sat-rarity.helper.ts`.
- *
- * The detection is content-safety, not fee-math: an inscription at the
- * dust limit (546 sat) reads as "tiny UTXO" to the picker but carries
- * arbitrary off-chain value. On single-address wallets, spending such
- * a UTXO as a mint input sends the asset to the miner as fee. The same
- * risk applies to a UTXO carrying a rare sat.
- */
-
-/**
- * Raw `/output/{outpoint}` shape returned by ord with the JSON API
- * enabled. The subset we read here.
- *
- * `sat_ranges` — array of `[start, end)` tuples of sat numbers this
- *   output holds. Can be enormous for wide / mixed UTXOs (thousands
- *   of tuples, MBs of payload). The scanner gates rare-sat detection
- *   behind a small-UTXO threshold + range-count cap so the naive
- *   "fetch everything, scan all ranges" cost doesn't dominate.
- */
-interface OrdOutputResponse {
-    inscriptions?: string[];
-    runes?: {
-        [runeName: string]: unknown;
-    } | null;
-    sat_ranges?: ReadonlyArray<readonly [number, number]>;
-}
-/**
- * Same shape from cat21-ord. The fork swaps the `inscriptions` field
- * for `cats` because `--index-cat21` only indexes CAT-21 fake-
- * inscriptions and explicitly excludes everything else. Runes are
- * never indexed by cat21-ord, so the field is always `null` there.
- */
-interface Cat21OrdOutputResponse {
-    cats?: string[];
-    /**
-     * cat21-ord runs with `--index-sats`, so its `/output` carries the same
-     * `sat_ranges` a full ord does. This is the AUTHORITATIVE source for a
-     * cat's sat (cat21-ord is the cat indexer); the full-ord instance can lag
-     * on an output it hasn't indexed yet, so the scanner reads the cat's sat
-     * from here first.
-     */
-    sat_ranges?: ReadonlyArray<readonly [number, number]>;
-}
-/**
- * Aggregated content found at a single UTXO. Populated only when at
- * least one of the asset arrays is non-empty — clean UTXOs use the
- * `scanned-clean` scan-state variant instead of a `UtxoContent` with
- * empty arrays.
- */
-interface UtxoContent {
-    /** "txid:vout" — the outpoint we queried. */
-    outpoint: string;
-    /** Inscription IDs at this outpoint, in ord's standard `{txid}i{index}` format. */
-    inscriptionIds: string[];
-    /**
-     * Rune name → balance object, exactly as ord's `/output/` endpoint
-     * returns it. `null` when the upstream didn't supply a runes field
-     * (cat21-ord) or returned `{}` (no runes here).
-     */
-    runes: {
-        [runeName: string]: unknown;
-    } | null;
-    /** CAT-21 cat IDs at this outpoint, also in `{txid}i{index}` format. */
-    catIds: string[];
-    /**
-     * Sat the cats at this outpoint sit on, or `null` when the outpoint holds
-     * no cats or ord returned no sat ranges.
-     *
-     * CAT-21 pins a cat to offset 0 of its output (FIFO), so every cat here
-     * shares the first sat of the first range. That makes the sat derivable from
-     * the scan alone, with no per-cat lookup, and it is what a UI should link to:
-     * a sat page shows every cat riding that sat and where it sits now, whereas
-     * the mint transaction shows only where a cat started and misleads once it
-     * has moved.
-     */
-    catSat: number | null;
-    /**
-     * Rarest sat inside the UTXO's `sat_ranges`, when the scanner ran
-     * the rare-sat check (small-UTXO gate — see `RARE_SAT_SCAN_MAX_VALUE_SAT`).
-     * `null` when no rare sat was found OR when the check was skipped
-     * for cost reasons (large UTXO, pathological range count).
-     */
-    rareSat: {
-        sat: string;
-        block: number;
-        rarity: SatRarity;
-    } | null;
-}
-/**
- * Skip rare-sat detection when ord returns more than this many
- * `sat_ranges` tuples on a UTXO. Mixed / heavily-recycled UTXOs can
- * carry thousands — parsing them all would dominate the scanner's
- * per-UTXO cost budget. The bandwidth cost of receiving those tuples
- * is already sunk (ord doesn't let us opt out of `sat_ranges`), but
- * we can at least skip the parse.
- *
- * Below the cap: rarity math is O(1) per tuple, so bounded work.
- * Above the cap: `rareSat` on `UtxoContent` stays null; the picker
- * treats the UTXO as "rarity unchecked" rather than "clean".
- */
-declare const RARE_SAT_MAX_RANGES = 500;
-/**
- * Per-UTXO scan state — drives the bucket-and-badge UI in both
- * frontends.
- *
- * - `not-scanned` — default for UTXOs above the auto-scan threshold.
- *   The picker shows a "Scan anyway" affordance.
- * - `scanning` — request in flight. Picker disables the row until
- *   the result lands.
- * - `scanned-clean` — both ord endpoints returned empty asset arrays.
- *   Picker marks the row safe; this is the auto-pick candidate.
- * - `scanned-with-assets` — at least one asset present. Picker shows
- *   what was found + links + an "Use anyway" override.
- * - `scan-failed` — at least one endpoint errored. Picker treats the
- *   row as "unknown safety" — neither auto-pick candidate nor blocked.
- */
-type UtxoScanState = {
-    kind: 'not-scanned';
-} | {
-    kind: 'scanning';
-} | {
-    kind: 'scanned-clean';
-} | {
-    kind: 'scanned-with-assets';
-    content: UtxoContent;
-} | {
-    kind: 'scan-failed';
-    message: string;
-};
-/**
- * Helper for templates — true iff the state name describes a completed
- * scan (clean, with-assets, or failed). Lets the UI distinguish "we
- * haven't tried" from "we tried and got an answer".
- */
-declare function isScanComplete(s: UtxoScanState): boolean;
-/**
- * Picker-display bucket the mint-flow UI bands UTXOs on. Maps 1:1 from
- * UtxoScanState but as a flat name the template can `@switch` on. Both
- * consumers (ordpool /cat21-mint and cat21.space /dashboard/mint) bind
- * the same five values; the SDK owns the type so they can't drift.
- */
-type UtxoScanBucket = 'clean' | 'unscanned' | 'assets' | 'scanning' | 'failed';
-/**
- * Map a UtxoScanState to its display bucket. Drives badge labels,
- * row-button copy, and the auto-pick priority order.
- */
-declare function bucketOf(state: UtxoScanState): UtxoScanBucket;
-/**
- * Auto-pick the largest "safe-enough" row from a bucket-annotated list.
- * Priority: scanned-clean (verified safe) → unscanned (probably-safe big
- * UTXO) → scan-failed (unknown, better than nothing). NEVER auto-pick
- * scanned-with-assets — that row requires an explicit "Use anyway"
- * click from the user.
- *
- * Callers pass any row shape that carries a `bucket` field; this
- * preserves the row type so consumers can use whatever shape they
- * stored (UtxoSimulation, ViableUtxoRow, etc.).
- */
-declare function findAutoPickCandidate<T extends {
-    bucket: UtxoScanBucket;
-}>(rows: T[]): T | null;
-/**
- * Names of every rune balance present on a scanned UTXO. `null` runes
- * (cat21-ord) or empty object short-circuits to an empty array. Used
- * by the asset-found UI to render one link per rune.
- */
-declare function runeNamesFromContent(content: UtxoContent): string[];
-/**
- * UTXOs at or below this value on a single-address wallet are flagged
- * as potentially holding an ordinal-bound asset (inscription, rune,
- * rare sat, CAT-21 cat). 10k sat is the de-facto industry cut-off:
- * most ordinal-bearing UTXOs are 546 sat (the dust limit) or slightly
- * above; almost none exceed 10k. Content-safety heuristics, not fee
- * math.
- */
-declare const SMALL_UTXO_WARNING_THRESHOLD_SAT = 10000;
-/**
- * Funding floor in sats for the empty-state hint in the mint flow.
- * Derived from the user's currently-picked fee rate using a
- * conservative ~200 vB reference vsize (real CAT-21 mints are
- * ~150–170 vB depending on wallet type), rounded up to the next 100
- * sat so the displayed number reads cleanly. At 1 sat/vB that's
- * ~800 sat; at 5 sat/vB ~1600; at 100 sat/vB ~20,600.
- *
- * The SDK's actual viable-UTXO check is dynamic per-PSBT; this helper
- * just stops the user-facing hint from quoting launch-era numbers
- * (10k or 200k sat) when current mainnet fees are much lower.
- */
-declare function calculateRecommendedFundingSats(feeRatePerVb: number): number;
 
 /**
  * UTXOs at or below this value are auto-scanned by callers that respect
@@ -5751,5 +5847,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
-export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AddressProbe, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, AssessCompressionOptions, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CatsAtAddressOptions, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, CompressionAssessment, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DeriveWatchOnlyArgs, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, ScanWatchOnlyArgs, ScannedAddress, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletCapabilityStatus, WalletConnector, WalletInfo, WalletMatrixEntry, WatchOnlyAddress, WatchOnlyScanResult, WatchOnlyScriptType, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AddressProbe, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AskQueryArgs, AssessCompressionOptions, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CatsAtAddressOptions, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, ClassifyOutpointOptions, CompressionAssessment, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferState, CreateTransactionResult, DeriveWatchOnlyArgs, DummyKeypairResult, ErrorResponse, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintState, OrdEnvelopeField, OrdOutputResponse, OrdTag, OrdinalsAddress, OutpointClassification, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, ScanWatchOnlyArgs, ScannedAddress, SignMessageArgs, SignMessageResult, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferState, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletCapabilityStatus, WalletConnector, WalletInfo, WalletMatrixEntry, WatchOnlyAddress, WatchOnlyProbeConfig, WatchOnlyScanResult, WatchOnlyScriptType, WindowLike, XverseAddressResponse };

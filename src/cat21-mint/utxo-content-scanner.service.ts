@@ -3,11 +3,10 @@ import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Observable, catchError, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
 
 import { cat21Config } from './cat21-sdk-config';
-import { findRareSatInRanges, SatRarity } from './sat-rarity.helper';
+import { classifyUtxoContent } from './utxo-content.classify';
 import {
   Cat21OrdOutputResponse,
   OrdOutputResponse,
-  RARE_SAT_MAX_RANGES,
   UtxoContent,
   UtxoScanState,
 } from './utxo-content.types';
@@ -95,22 +94,18 @@ export class UtxoContentScanner {
       cat21Ord: this.fetchCat21Ord(outpoint),
     }).pipe(
       map(({ ord, cat21Ord }): UtxoScanState => {
-        const inscriptionIds = ord.inscriptions ?? [];
-        const runes = ord.runes && Object.keys(ord.runes).length > 0 ? ord.runes : null;
-        const catIds = cat21Ord.cats ?? [];
-        const rareSat = detectRareSat(ord.sat_ranges);
-
-        if (inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat) {
+        const c = classifyUtxoContent(ord, cat21Ord);
+        if (c.clean) {
           return { kind: 'scanned-clean' };
         }
-        // Source the cat's sat from cat21-ord (the cat indexer, authoritative
-        // and always in step with `cats`); fall back to the full ord only if
-        // cat21-ord didn't return ranges. Reading it from the full ord alone
-        // yielded catSat=null whenever that instance hadn't indexed the output.
-        const catSat = catIds.length > 0
-          ? (firstSat(cat21Ord.sat_ranges) ?? firstSat(ord.sat_ranges))
-          : null;
-        const content: UtxoContent = { outpoint, inscriptionIds, runes, catIds, catSat, rareSat };
+        const content: UtxoContent = {
+          outpoint,
+          inscriptionIds: c.inscriptionIds,
+          runes: c.runes,
+          catIds: c.catIds,
+          catSat: c.catSat,
+          rareSat: c.rareSat,
+        };
         return { kind: 'scanned-with-assets', content };
       }),
       catchError((err: unknown): Observable<UtxoScanState> => {
@@ -185,34 +180,4 @@ export class UtxoContentScanner {
 
 function trimSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
-}
-
-/**
- * First sat of the first range, which is where a CAT-21 cat sits.
- *
- * The protocol pins a cat to offset 0 of its output, so the ranges do not need
- * walking: the opening sat of the first range is the cat's sat. Returns null
- * when ord supplied no ranges, which happens on an output it has not indexed.
- */
-function firstSat(
-  ranges: ReadonlyArray<readonly [number, number]> | undefined
-): number | null {
-  const first = ranges?.[0]?.[0];
-  return typeof first === 'number' ? first : null;
-}
-
-/**
- * Turn ord's `sat_ranges` into a rare-sat finding if one exists.
- * Skips the scan when the range count exceeds `RARE_SAT_MAX_RANGES`
- * — pathological UTXOs with thousands of ranges would dominate the
- * per-UTXO cost budget.
- */
-function detectRareSat(
-  ranges: ReadonlyArray<readonly [number, number]> | undefined,
-): { sat: string; block: number; rarity: SatRarity } | null {
-  if (!ranges || ranges.length === 0 || ranges.length > RARE_SAT_MAX_RANGES) return null;
-  const bigints = ranges.map(([start, end]) => [BigInt(start), BigInt(end)] as [bigint, bigint]);
-  const hit = findRareSatInRanges(bigints);
-  if (!hit) return null;
-  return { sat: hit.sat.toString(), block: hit.block, rarity: hit.rarity };
 }
