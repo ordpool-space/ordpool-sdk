@@ -257,7 +257,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'Watch-only via extended public key (xpub / ypub / zpub / tpub). Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …); nothing is signed in the browser. Paste your account key to connect; for a plain xpub, choose the Taproot account type. Works on desktop and mobile.',
+    note: 'Watch-only via extended public key (xpub / ypub / zpub / tpub). Builds a PSBT you sign in your own wallet (Sparrow, Coldcard, Ledger, …); nothing is signed in the browser. Paste your account key to connect; for a plain xpub, choose the Taproot account type. Works on desktop and mobile.',
   },
 ];
 

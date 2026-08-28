@@ -247,7 +247,7 @@ export class WalletService {
    * key (xpub / ypub / zpub / tpub / …). No signing key enters the
    * browser: the SDK derives the wallet's identity from the public key,
    * and the user signs each operation's PSBT in their own wallet
-   * (Sparrow, Electrum, Coldcard, Ledger, Trezor, …) via the
+   * (Sparrow, Coldcard, Ledger, …) via the
    * export/paste bridge (`promptForSignedPsbt` on the operation calls).
    *
    * Derives the receive window and auto-picks the active identity by

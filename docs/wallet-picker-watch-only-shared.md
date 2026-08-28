@@ -115,7 +115,7 @@ their signers, which are themselves regtest-proven to consume it
 - **Row action label**: `Connect (xpub)` opening the paste UI, then per
   operation an `Export PSBT` step — never a silent in-page sign.
 - **Info popover** (required, per the shared doc): the signing-mode line
-  reads "You sign in your own wallet (Sparrow, Electrum, Coldcard, …)".
+  reads "You sign in your own wallet (Sparrow, Coldcard, Ledger, …)".
 - **Script-type prompt**: if the pasted key is a plain xpub/tpub, ask the
   user for the account type (Taproot recommended for cats) — the SDK
   throws a clear "script-type-ambiguous" error you surface as that prompt.

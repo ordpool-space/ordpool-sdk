@@ -554,7 +554,7 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
   [KnownOrdinalWalletType.xpub]: {
     type: KnownOrdinalWalletType.xpub,
     label: 'Watch-only (xpub)',
-    subLabel: 'Sparrow, Electrum, Coldcard, Ledger, Trezor, …',
+    subLabel: 'Sparrow, Coldcard, Ledger, …',
     logo: walletLogos.xpub,
     downloadLink: '',
   },

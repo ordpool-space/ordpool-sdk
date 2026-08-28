@@ -63,12 +63,15 @@
   ],
   "author": "HAUS HOPPE",
   "license": "MIT",
+  "dependencies": {
+    "@noble/hashes": ">=1",
+    "@scure/base": ">=1",
+    "@scure/bip32": "1.4.x"
+  },
   "peerDependencies": {
     "@angular/common": ">=20",
     "@angular/core": ">=20",
     "@noble/curves": ">=1",
-    "@scure/base": ">=1",
-    "@scure/bip32": "1.4.x",
     "@scure/btc-signer": "1.2.x",
     "rxjs": ">=7",
     "sats-connect": ">=4"

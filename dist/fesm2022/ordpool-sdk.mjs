@@ -211,7 +211,7 @@ const KnownOrdinalWallets = {
     [KnownOrdinalWalletType.xpub]: {
         type: KnownOrdinalWalletType.xpub,
         label: 'Watch-only (xpub)',
-        subLabel: 'Sparrow, Electrum, Coldcard, Ledger, Trezor, …',
+        subLabel: 'Sparrow, Coldcard, Ledger, …',
         logo: walletLogos.xpub,
         downloadLink: '',
     },
@@ -3790,7 +3790,7 @@ class WalletService {
      * key (xpub / ypub / zpub / tpub / …). No signing key enters the
      * browser: the SDK derives the wallet's identity from the public key,
      * and the user signs each operation's PSBT in their own wallet
-     * (Sparrow, Electrum, Coldcard, Ledger, Trezor, …) via the
+     * (Sparrow, Coldcard, Ledger, …) via the
      * export/paste bridge (`promptForSignedPsbt` on the operation calls).
      *
      * Derives the receive window and auto-picks the active identity by
@@ -4287,7 +4287,7 @@ const WALLET_MATRIX = [
             [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
             [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
         },
-        note: 'Watch-only via extended public key (xpub / ypub / zpub / tpub). Builds a PSBT you sign in your own wallet (Sparrow, Electrum, Coldcard, Ledger, Trezor, …); nothing is signed in the browser. Paste your account key to connect; for a plain xpub, choose the Taproot account type. Works on desktop and mobile.',
+        note: 'Watch-only via extended public key (xpub / ypub / zpub / tpub). Builds a PSBT you sign in your own wallet (Sparrow, Coldcard, Ledger, …); nothing is signed in the browser. Paste your account key to connect; for a plain xpub, choose the Taproot account type. Works on desktop and mobile.',
     },
 ];
 const SUPPORT_RANK = {
@@ -4380,6 +4380,70 @@ function walletInAppBrowserDeepLink(wallet, targetUrl) {
             // consumers hide the affordance instead of guessing a URL.
             return null;
     }
+}
+
+/**
+ * Cat-at-address lookup (the CAT-21 half of watch-only ordinals-safety).
+ *
+ * A watch-only scan derives a run of receive addresses and must decide
+ * which one carries the wallet's cat, so the ordinals identity is the
+ * cat-bearing address rather than a blind receive index 0 (the Genesis
+ * Cat is not at index 0). Ownership follows the sat, so the only honest
+ * answer to "does this address hold a CAT-21 cat" comes from a cat index,
+ * never a UTXO-size heuristic.
+ *
+ * This helper reads it from cat21-ord's address index. cat21-ord runs
+ * with `--index-cat21 --index-addresses` at `ord.cat21.space`, and its
+ * `GET /address/{address}` returns (real response, verified):
+ *
+ *   { outputs: string[],          // "txid:vout" outpoints
+ *     cats: string[],             // cat inscription ids "…i0"  (serde-renamed
+ *                                 //   from the Rust `inscriptions` field)
+ *     cat_numbers: number[]|null, // the CAT-21 cat numbers, e.g. [27, 10, 9]
+ *     sat_balance: number,
+ *     runes_balances: … | null }
+ *
+ * `cat_numbers` is the canonical CAT-21 answer, so that is what we read.
+ *
+ * MUST target cat21-ord (`--index-cat21`), NOT the full ord at
+ * `ord.ordpool.space`: the full ord indexes real inscriptions and does
+ * not number cats, so it cannot answer cat membership. The caller passes
+ * `cat21OrdApiUrl` explicitly so the two ord instances can't be miswired.
+ *
+ * Pure + Angular-free (`/core`): native `fetch` + an optional
+ * `AbortSignal`, no axios.
+ */
+/**
+ * The CAT-21 cat numbers currently held at `address`, per cat21-ord's
+ * address index. Empty array when the address holds no cats (including a
+ * `404` for an address cat21-ord has never seen). Throws on any other
+ * non-2xx status or a malformed body.
+ */
+async function catsAtAddress(address, options) {
+    const base = options.cat21OrdApiUrl.replace(/\/+$/, '');
+    const url = `${base}/address/${encodeURIComponent(address)}`;
+    const response = await fetch(url, {
+        // cat21-ord runs with --disable-html: it answers only when the caller
+        // asks for JSON, otherwise 406 before any index read.
+        headers: { Accept: 'application/json' },
+        signal: options.signal,
+    });
+    // An address with no history is a legitimate "no cats", not an error.
+    if (response.status === 404)
+        return [];
+    if (!response.ok) {
+        throw new Error(`catsAtAddress: ${url} returned ${response.status}`);
+    }
+    const info = (await response.json());
+    return info.cat_numbers ?? [];
+}
+/**
+ * Whether `address` currently holds at least one CAT-21 cat, per
+ * cat21-ord. Thin boolean wrapper over {@link catsAtAddress} for the
+ * watch-only scan's `hasCat` probe field.
+ */
+async function addressHoldsCat(address, options) {
+    return (await catsAtAddress(address, options)).length > 0;
 }
 
 const cat21Config = new InjectionToken('cat21Config');
@@ -11560,5 +11624,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, addCat21Input, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map
