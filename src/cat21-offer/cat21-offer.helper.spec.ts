@@ -209,6 +209,32 @@ describe('validateCat21BuyOfferPsbt', () => {
     }
   });
 
+  it('accepts an offer whose seller cat UTXO is NOT 546, recovering the exact price (CAT21-3 lockstep)', () => {
+    // Regression for the removed `sellerInput.value !== 546` rejection: a
+    // non-546 cat is a valid cat. The builder sets output 1 = price + 800; the
+    // validator recovers price = output1 - sellerInputValue = 800 offset =
+    // 21_000, so even the backend's exact-price gate passes. A 546-only bid-POST
+    // fixture would NOT exercise this — this is the gate for the 1b removal.
+    const args = makeBaseArgs({
+      priceSats: 21_000,
+      sellerInput: { ...makeBaseArgs().sellerInput, value: 800 },
+    });
+    const built = buildCat21BuyOfferPsbt(args);
+    const tx = btc.Transaction.fromPSBT(built.psbt);
+    tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+
+    const result = validateCat21BuyOfferPsbt({
+      psbt: tx.toPSBT(),
+      expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+      floorPriceSats: 21_000,
+      expectedExactPrice: 21_000, // the backend bid-POST gate
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+      network: Network.Testnet3,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.pricePaidSats).toBe(21_000);
+  });
+
   it('rejects when the seller UTXO does not match', () => {
     const args = makeBaseArgs();
     const built = buildCat21BuyOfferPsbt(args);
