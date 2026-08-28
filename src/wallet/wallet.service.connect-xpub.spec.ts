@@ -61,6 +61,34 @@ describe('WalletService.connectXpub', () => {
     void a0;
   });
 
+  it('pickIdentity overrides the auto-pick with a user-chosen address from the scan', async () => {
+    const [a0, a1, a2, a3] = receive(4);
+    const { service } = newService();
+    const probe = (address: string): Promise<AddressProbe> => {
+      if (address === a2.address) return Promise.resolve({ funded: false, hasCat: true });
+      if (address === a3.address) return Promise.resolve({ funded: true, fundedSats: 50_000 });
+      return Promise.resolve({ funded: false });
+    };
+
+    // The consumer showed the user the scan and they picked index 1 for
+    // payment instead of the auto-picked richest (index 3).
+    const info = await firstValueFrom(service.connectXpub({
+      extendedPublicKey: BIP86_ACCOUNT_XPUB,
+      scriptType: 'p2tr',
+      gapLimit: 4,
+      probe,
+      pickIdentity: (scan) => ({
+        ordinals: scan.ordinals,                            // keep the auto-picked cat address
+        payment: scan.scanned[1].address,                   // override to index 1
+      }),
+    }));
+
+    expect(info.ordinalsAddress).toBe(a2.address);          // unchanged auto-pick
+    expect(info.paymentAddress).toBe(a1.address);           // the override
+    expect(info.paymentPublicKey).toBe(a1.publicKeyHex);
+    void a0;
+  });
+
   it('defaults both identities to receive index 0 when the chain is empty', async () => {
     const [a0] = receive(1);
     const { service } = newService();

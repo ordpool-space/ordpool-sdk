@@ -3818,16 +3818,21 @@ class WalletService {
             scriptType: args.scriptType,
             gapLimit: args.gapLimit,
             probe: args.probe,
-        })).pipe(map((scan) => ({
-            type: KnownOrdinalWalletType.xpub,
-            ordinalsAddress: scan.ordinals.address,
-            ordinalsPublicKey: scan.ordinals.publicKeyHex,
-            paymentAddress: scan.payment.address,
-            paymentPublicKey: scan.payment.publicKeyHex,
-            // The watch-only signer (psbtExportSigner) ships, so mint flows
-            // that gate on this proceed to the export/paste bridge.
-            signingSupported: true,
-        })), tap(info => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info))), tap(info => this.connectedWallet$.next(info)), tap(info => this.armAccountChangeSubscription(info.type)));
+        })).pipe(map((scan) => {
+            const pick = args.pickIdentity
+                ? args.pickIdentity(scan)
+                : { ordinals: scan.ordinals, payment: scan.payment };
+            return {
+                type: KnownOrdinalWalletType.xpub,
+                ordinalsAddress: pick.ordinals.address,
+                ordinalsPublicKey: pick.ordinals.publicKeyHex,
+                paymentAddress: pick.payment.address,
+                paymentPublicKey: pick.payment.publicKeyHex,
+                // The watch-only signer (psbtExportSigner) ships, so mint flows
+                // that gate on this proceed to the export/paste bridge.
+                signingSupported: true,
+            };
+        }), tap(info => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info))), tap(info => this.connectedWallet$.next(info)), tap(info => this.armAccountChangeSubscription(info.type)));
     }
     disconnectWallet() {
         this.tearDownAccountChangeSubscription();

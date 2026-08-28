@@ -23,8 +23,8 @@ import { storage } from '../storage-like';
 import { detectInstalledWallets, walletConnectors } from './connectors';
 import { findSignerOrThrow } from './signers';
 import { verifyBip322Signature } from './verify-bip322-signature';
-import { WatchOnlyScriptType } from './xpub/derive-watch-only';
-import { AddressProbe, scanWatchOnly } from './xpub/scan-watch-only';
+import { WatchOnlyAddress, WatchOnlyScriptType } from './xpub/derive-watch-only';
+import { AddressProbe, WatchOnlyScanResult, scanWatchOnly } from './xpub/scan-watch-only';
 import {
   KnownOrdinalWallet,
   KnownOrdinalWalletType,
@@ -273,6 +273,15 @@ export class WalletService {
     scriptType?: WatchOnlyScriptType;
     gapLimit?: number;
     probe: (address: string) => Promise<AddressProbe>;
+    /**
+     * Override the auto-picked identity from the scanned window. Use it to
+     * show the user the scan, let them choose a different funding/ordinals
+     * address, and connect with that choice in ONE call (no re-scan). The
+     * addresses MUST come from `scan.scanned` (derived from the same account
+     * key) so the identity is never an on-chain-lookup value. Omit for the
+     * default auto-pick (cat-bearing / highest-funded).
+     */
+    pickIdentity?: (scan: WatchOnlyScanResult) => { ordinals: WatchOnlyAddress; payment: WatchOnlyAddress };
   }): Observable<WalletInfo> {
     return from(scanWatchOnly({
       extendedPublicKey: args.extendedPublicKey,
@@ -281,16 +290,21 @@ export class WalletService {
       gapLimit: args.gapLimit,
       probe: args.probe,
     })).pipe(
-      map((scan): WalletInfo => ({
-        type: KnownOrdinalWalletType.xpub,
-        ordinalsAddress: scan.ordinals.address,
-        ordinalsPublicKey: scan.ordinals.publicKeyHex,
-        paymentAddress: scan.payment.address,
-        paymentPublicKey: scan.payment.publicKeyHex,
-        // The watch-only signer (psbtExportSigner) ships, so mint flows
-        // that gate on this proceed to the export/paste bridge.
-        signingSupported: true,
-      })),
+      map((scan): WalletInfo => {
+        const pick = args.pickIdentity
+          ? args.pickIdentity(scan)
+          : { ordinals: scan.ordinals, payment: scan.payment };
+        return {
+          type: KnownOrdinalWalletType.xpub,
+          ordinalsAddress: pick.ordinals.address,
+          ordinalsPublicKey: pick.ordinals.publicKeyHex,
+          paymentAddress: pick.payment.address,
+          paymentPublicKey: pick.payment.publicKeyHex,
+          // The watch-only signer (psbtExportSigner) ships, so mint flows
+          // that gate on this proceed to the export/paste bridge.
+          signingSupported: true,
+        };
+      }),
       tap(info => this.storageService.setValue(LAST_CONNECTED_WALLET, JSON.stringify(info))),
       tap(info => this.connectedWallet$.next(info)),
       tap(info => this.armAccountChangeSubscription(info.type)),

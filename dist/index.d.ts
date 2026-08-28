@@ -1009,6 +1009,18 @@ declare class WalletService {
         scriptType?: WatchOnlyScriptType;
         gapLimit?: number;
         probe: (address: string) => Promise<AddressProbe>;
+        /**
+         * Override the auto-picked identity from the scanned window. Use it to
+         * show the user the scan, let them choose a different funding/ordinals
+         * address, and connect with that choice in ONE call (no re-scan). The
+         * addresses MUST come from `scan.scanned` (derived from the same account
+         * key) so the identity is never an on-chain-lookup value. Omit for the
+         * default auto-pick (cat-bearing / highest-funded).
+         */
+        pickIdentity?: (scan: WatchOnlyScanResult) => {
+            ordinals: WatchOnlyAddress;
+            payment: WatchOnlyAddress;
+        };
     }): Observable<WalletInfo>;
     disconnectWallet(): void;
     /**
