@@ -2337,9 +2337,8 @@ interface BuildCat21BuyOfferArgs {
     destinations: Cat21OfferDestinations;
     /**
      * Sats paid to the seller (net). The seller's payment output value is
-     * `priceSats + CAT21_POSTAGE_SATS` so the seller is made whole on the
-     * 546 sats they contribute via input 0 (ord-parity, see SDK CLAUDE.md
-     * HARD RULE "cat UTXO is always 546 sats").
+     * `priceSats + sellerInput.value`, so the seller is made whole on whatever
+     * they contribute via input 0 (any UTXO size) and nets exactly priceSats.
      */
     priceSats: number;
     /**
@@ -2949,14 +2948,17 @@ declare function prepareTransferFundingInput(args: PrepareTransferInputArgs): Ca
  * "show me my cats" lookup (ord by ordinals address → list of cat
  * inscriptions → the UTXO each cat sits on).
  *
- * `vout` and `value` are intrinsic to CAT-21 (FIFO at output 0, 546
- * sats) but we carry them on the type so the orchestrator is self-
- * contained and a future protocol change wouldn't break the call
- * shape silently.
+ * `vout` and `value` locate the cat (FIFO at output 0); we carry them on
+ * the type so the orchestrator is self-contained. `value` is read from the
+ * real UTXO — a cat can sit on any size, so never assume 546 here.
  */
 interface Cat21Holding extends CatOutpoint {
     catNumber: number;
-    /** Always 546 sats for a CAT-21 cat UTXO. */
+    /**
+     * The cat UTXO's actual on-chain value. Usually 546 for cats we mint (our
+     * postage convention), but a cat minted by any other transaction can sit on
+     * a UTXO of any size, so read it, never assume 546.
+     */
     value: number;
 }
 /**

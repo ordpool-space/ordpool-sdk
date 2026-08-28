@@ -5925,12 +5925,10 @@ function buildCat21BuyOfferPsbt(args) {
     const postageSats = CAT21_POSTAGE_SATS;
     if (args.priceSats <= 0)
         throw new Error('priceSats must be positive');
-    // HARD RULE: cat UTXO is always 546 sats. See SDK CLAUDE.md. Enforce
-    // structurally so a caller can't smuggle a non-protocol-shaped UTXO
-    // through the offer flow.
-    if (args.sellerInput.value !== CAT21_POSTAGE_SATS) {
-        throw new Error(`sellerInput.value must equal CAT21_POSTAGE_SATS (${CAT21_POSTAGE_SATS}); got ${args.sellerInput.value}`);
-    }
+    // 546 is the postage we CREATE at output 0 (our handy dust floor), NOT a
+    // constraint on the seller's cat UTXO. A cat can sit on a UTXO of any size
+    // (minted by any tx, the minter's choice); the builder uses the real
+    // sellerInput.value and makes the seller whole on it (output 1 below).
     if (args.buyerInputs.length === 0)
         throw new Error('buyerInputs must be non-empty');
     if (args.feeSats < 0)
@@ -5982,20 +5980,19 @@ function buildCat21BuyOfferPsbt(args) {
     }
     // Output 0: cat lands at buyer.
     tx.addOutputAddress(args.destinations.buyerReceiveAddress, BigInt(postageSats), scureNetwork);
-    // Output 1: seller payment. Value is `priceSats + postageSats` so the
-    // seller is made whole on the 546 sats they contribute via input 0 —
-    // matching ord's `wallet offer create` convention. Without the
-    // `+ postageSats`, the seller would silently eat the postage every
-    // time they sell. Net to seller: priceSats.
-    tx.addOutputAddress(args.destinations.sellerPaymentAddress, BigInt(args.priceSats + postageSats), scureNetwork);
-    // Output 2: buyer change when above dust. Buyer pays:
-    //   priceSats + postageSats (to seller) + postageSats (cat output) + feeSats.
-    // The seller's input value flows to output 1; it does NOT subsidise
-    // the buyer's obligation. Buyer's net cost == priceSats + postageSats + feeSats.
-    const obligation = args.priceSats + postageSats * 2 - args.sellerInput.value + args.feeSats;
+    // Output 1: seller payment. Value is `priceSats + sellerInput.value` so the
+    // seller is made whole on WHATEVER they contribute via input 0 (any size,
+    // not just 546) — net to seller is exactly priceSats. Hardcoding
+    // `+ postageSats` here shortchanged a seller whose cat sat on a >546 UTXO.
+    tx.addOutputAddress(args.destinations.sellerPaymentAddress, BigInt(args.priceSats + args.sellerInput.value), scureNetwork);
+    // Output 2: buyer change when above dust. With output 1 = priceSats +
+    // sellerInput.value, the seller's input passes straight back to the seller,
+    // so the buyer funds exactly the cat output (postage) + priceSats + fee,
+    // independent of the cat UTXO's size.
+    const obligation = args.priceSats + postageSats + args.feeSats;
     const changeSats = buyerInputTotalSats - obligation;
     if (changeSats < 0) {
-        throw new Error('Buyer inputs do not cover priceSats + 2*postage + fee - sellerInput.value');
+        throw new Error('Buyer inputs do not cover priceSats + postage + fee');
     }
     // Per-address-type dust floor for the buyer's change output. 546
     // is the conservative cross-type floor (taproot 330, segwit 294,
@@ -6146,16 +6143,13 @@ function validateCat21BuyOfferPsbt(args) {
         sellerInput.index !== args.expectedSellerUtxo.vout) {
         return fail('missing-seller-input', `got ${sellerTxid}:${sellerInput.index}`);
     }
-    // 1b. Seller's input value MUST be 546 sats (the CAT-21 postage
-    //     invariant). Without this assert, a lying `witnessUtxo.amount`
-    //     would skew the `pricePaidSats` calculation below — mempool
-    //     would reject the signed tx (sig-verify-flag-failed against the
-    //     lied amount), so this isn't theft, but it's worse UX than
-    //     stopping the validator here.
+    // 1b. Read the seller's input value for the price calculation below. It can
+    //     be ANY size: a cat sits on whatever UTXO it was minted on, not
+    //     necessarily 546. A buyer who lies about this amount only breaks their
+    //     own tx — the seller signs over the claimed amount, so a wrong amount
+    //     fails sig-verify at mempool — and the floor-price check (step 6)
+    //     protects the seller's net regardless of the claimed value.
     const sellerInputValueSats = Number(sellerInput.witnessUtxo?.amount ?? 0n);
-    if (sellerInputValueSats !== CAT21_POSTAGE_SATS) {
-        return fail('wrong-seller-input-value', `seller input witnessUtxo.amount = ${sellerInputValueSats}, expected ${CAT21_POSTAGE_SATS}`);
-    }
     // 2a. SIGHASH_ALL on every input (PSBT field check). Already-finalised
     //     inputs may have sighashType undefined; for those see 2b below.
     for (let i = 0; i < tx.inputsLength; i++) {
@@ -6253,10 +6247,10 @@ function validateCat21BuyOfferPsbt(args) {
     if (!addressesEquivalent(actualAddress, args.expectedSellerPaymentAddress, scureNetwork)) {
         return fail('payment-output-wrong-address', `expected ${args.expectedSellerPaymentAddress}, got ${actualAddress}`);
     }
-    // 6. Seller payment amount. Output 1's value is `priceSats + postageSats`
-    //    (ord-parity). The seller's net is what's left after their own input
-    //    flows back into the same output — `output1 - sellerInputValue`.
-    //    Compare net-to-seller against the caller's floor.
+    // 6. Seller payment amount. Output 1's value is `priceSats + sellerInputValue`,
+    //    so the seller's net is `output1 - sellerInputValue` = priceSats,
+    //    independent of the cat UTXO's size. Compare net-to-seller against the
+    //    caller's floor.
     const paymentOutputValue = Number(paymentOutput.amount ?? 0n);
     const pricePaidSats = paymentOutputValue - sellerInputValueSats;
     if (pricePaidSats < args.floorPriceSats) {
@@ -7126,11 +7120,13 @@ const CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS = 546;
  * every input SIGHASH_ALL. Coin selection is the caller's job.
  */
 function buildCat21TransferPsbt(args) {
+    // 546 is the postage we CREATE at output 0 (our handy cross-address dust
+    // floor), NOT a constraint on the incoming cat UTXO. A cat can sit on a
+    // UTXO of any size — it is minted by any transaction, not only ours, and
+    // its value is the minter's choice. The builder uses the real
+    // `catUtxo.value` (see the change math below) and sends any surplus above
+    // postage to the sender's change. See SDK CLAUDE.md "cat UTXO size" rule.
     const postageSats = CAT21_POSTAGE_SATS;
-    // HARD RULE: cat UTXO is always exactly 546 sats. See SDK CLAUDE.md.
-    if (args.catUtxo.value !== CAT21_POSTAGE_SATS) {
-        throw new Error(`catUtxo.value must equal CAT21_POSTAGE_SATS (${CAT21_POSTAGE_SATS}); got ${args.catUtxo.value}`);
-    }
     if (args.feeSats < 0)
         throw new Error('feeSats must be non-negative');
     const scureNetwork = toScureNetwork(args.network);

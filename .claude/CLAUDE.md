@@ -200,56 +200,63 @@ or `index.ts`, so no public consumer can reach those methods. Future
 passes can inline the delegation and drop the legacy methods
 entirely from the interface.
 
-## HARD RULE: cat UTXO is always 546 sats, FIFO (input 0 → output 0)
+## HARD RULE: 546 is our cat-OUTPUT size, NOT a constraint on cat inputs, FIFO (input 0 → output 0)
 
-**Every cat-bearing UTXO is exactly 546 sats. Every cat-touching tx
-puts the cat UTXO at input 0 and the cat output at output 0.** No
-overrides. No exceptions.
+**546 sats is the postage WE create at output 0 when we mint, transfer, or
+settle a cat — because it is a handy cross-address dust floor. It is NOT a
+property of cats and NOT a constraint on the cat UTXO coming in.** A cat is
+defined by `nLockTime=21` + ordinal-theory sat tracking; it can be minted on
+a UTXO of ANY size by ANY transaction (not only ours). Offers, transfers, and
+settlements MUST work on whatever size the cat actually sits on. **Rejecting a
+cat UTXO because its value isn't 546 is arbitrary guessing that discards a
+valid cat — a bug, not a rule.**
 
 | Concretely | Value |
 |---|---|
-| Mint output 0 (cat lands here, NEW UTXO) | 546 sats |
-| Transfer input 0 (cat UTXO coming in) | 546 sats |
-| Transfer output 0 (cat UTXO going out) | 546 sats |
-| Offer input 0 (seller's cat UTXO) | 546 sats |
-| Offer output 0 (cat goes to buyer) | 546 sats |
-| Offer output 1 (seller's payment) | `priceSats + 546` (ord-parity; seller is made whole on the postage) |
+| Mint output 0 (cat lands here, NEW UTXO we create) | 546 sats (our convention) |
+| Transfer INPUT 0 (cat UTXO coming in) | **any size** — read the real value |
+| Transfer output 0 (cat UTXO we create) | 546 sats (our convention); surplus → sender change |
+| Offer INPUT 0 (seller's cat UTXO) | **any size** — read the real value |
+| Offer output 0 (cat we send to buyer) | 546 sats (our convention) |
+| Offer output 1 (seller's payment) | `priceSats + sellerInput.value` — seller made whole on WHATEVER they contribute; nets exactly `priceSats` |
 
-**Why 546 and not 330 or 294**: 546 sats is the conservative
-cross-address-type dust floor — taproot 330, segwit 294, p2sh 540
-— 546 clears them all. Pinning a single value across the protocol
-means every cat UTXO is fungible across address types; a cat in a
-P2TR output can be transferred to a P2SH-P2WPKH output without
-re-dust-validating. **No `postageSats` override on any builder.**
-A future address type with higher dust requirements is a protocol
-event, not a builder argument.
+**Why 546 for the outputs WE create**: 546 is the conservative
+cross-address-type dust floor (taproot 330, segwit 294, p2sh 540 — 546 clears
+them all), so a cat we emit is fungible across address types without
+re-dust-validating. That is a choice about OUR outputs, nothing more.
 
-**546 is a BUILDER convention, never a DETECTION rule.** The values
-above describe what our builders MINT and TRANSFER at. Do NOT detect an
-existing cat by its UTXO size: a cat received from a third-party wallet
-can sit on a UTXO of any value, and a 546-sat UTXO is not necessarily a
-cat (regular inscriptions and rare sats are dust-postaged too). Cat
-membership is answered only by the cat index (cat21-ord `/address` ->
-`cat_numbers`, i.e. `catsAtAddress` / `addressHoldsCat`), never by a size
-heuristic. Watch-only spendability likewise excludes cats AND
-inscriptions AND runes AND rare sats via the full ord + cat21-ord
-(`classifyOutpoint` / `makeWatchOnlyProbe`), never by size.
+**Builders use the real INPUT value.** The transfer builder feeds
+`catUtxo.value` into the change math (surplus above the 546 output goes to the
+sender's change). The offer builder pays the seller `priceSats +
+sellerInput.value` and the buyer funds `postage + priceSats + fee`
+(size-independent). The accept-side validator computes net-to-seller as
+`output1 - sellerInputValue` and enforces only the price floor — never that
+the input equals 546.
 
-**Why FIFO is load-bearing**: ord assigns the cat to the first sat
-of the first output (ordinal theory). If the cat UTXO is at input
-1 or output 0 is not the cat, the cat lands elsewhere — silently —
-and the next tx that thinks it spends a cat is actually spending
-the wrong sat. The builders enforce input-0-is-cat and
-output-0-is-cat with hard runtime asserts.
+**546 is never a DETECTION rule either.** Do NOT detect a cat by its UTXO
+size: a 546-sat UTXO is not necessarily a cat (inscriptions and rare sats are
+dust-postaged too), and a cat is not necessarily 546. Cat membership is
+answered only by the cat index (cat21-ord `/address` → `cat_numbers`, i.e.
+`catsAtAddress` / `addressHoldsCat`), never by a size heuristic. Watch-only
+spendability likewise excludes cats AND inscriptions AND runes AND rare sats
+via the full ord + cat21-ord (`classifyOutpoint` / `makeWatchOnlyProbe`),
+never by size.
 
-**Where enforced**:
-- `cat21-offer/cat21-offer.helper.ts`: rejects `sellerInput.value !== 546`.
-- `cat21-transfer/cat21-transfer.helper.ts`: rejects `catUtxo.value !== 546`.
-- `cat21-mint/cat21-mint.helper.ts`: hard-codes output-0 value at 546.
-- All four builders use the shared `CAT21_POSTAGE_SATS = 546` constant.
+**Why FIFO is load-bearing**: ord assigns the cat to the first sat of the
+first output (ordinal theory). The cat must be at input 0 and output 0 must be
+its landing output, or the cat lands elsewhere silently. The builders enforce
+input-0-is-cat and output-0-is-cat. This holds for any input size: FIFO sends
+the first 546 sats — including the cat's first sat — to output 0.
 
-This rule is byte-parity with ord's `wallet offer create` and
-`wallet send` for inscription-bearing UTXOs.
+**Where the OUTPUT convention lives** (546 is created here, never required of inputs):
+- `cat21-mint/cat21-mint.helper.ts`: mint output 0 = 546.
+- `cat21-transfer/cat21-transfer.helper.ts`: transfer output 0 = 546; input any size.
+- `cat21-offer/cat21-offer.helper.ts`: offer output 0 = 546; input any size; output 1 = `priceSats + sellerInput.value`; validator nets `output1 - sellerInputValue`.
+- All builders share `CAT21_POSTAGE_SATS = 546` for the OUTPUTS they create.
+
+The 546-outputs are byte-parity with ord's `wallet offer create` / `wallet
+send` for a 546 inscription UTXO; on a non-546 cat, we make the seller whole
+on their actual input rather than pinning the input to 546.
 
 ## HARD RULE: CAT-21 mints — RBF policy (per-wallet)
 

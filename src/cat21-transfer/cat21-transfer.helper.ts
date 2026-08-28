@@ -82,13 +82,13 @@ export interface BuildCat21TransferResult {
  * every input SIGHASH_ALL. Coin selection is the caller's job.
  */
 export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21TransferResult {
+  // 546 is the postage we CREATE at output 0 (our handy cross-address dust
+  // floor), NOT a constraint on the incoming cat UTXO. A cat can sit on a
+  // UTXO of any size — it is minted by any transaction, not only ours, and
+  // its value is the minter's choice. The builder uses the real
+  // `catUtxo.value` (see the change math below) and sends any surplus above
+  // postage to the sender's change. See SDK CLAUDE.md "cat UTXO size" rule.
   const postageSats = CAT21_POSTAGE_SATS;
-  // HARD RULE: cat UTXO is always exactly 546 sats. See SDK CLAUDE.md.
-  if (args.catUtxo.value !== CAT21_POSTAGE_SATS) {
-    throw new Error(
-      `catUtxo.value must equal CAT21_POSTAGE_SATS (${CAT21_POSTAGE_SATS}); got ${args.catUtxo.value}`
-    );
-  }
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);

@@ -98,7 +98,7 @@ export interface Cat21AcceptOfferIntent {
 export interface Cat21BuyIntent {
   /** Inscription id of the cat to bid on (`<txid>i<index>`). */
   catId: string;
-  /** Net sats offered to the seller (output 1 will be bidSats + 546). */
+  /** Net sats offered to the seller (output 1 will be bidSats + the seller's cat-UTXO value). */
   bidSats: number;
   /** Seller's payout address, from the listing. Where the BTC lands. */
   sellerPaymentAddress: string;

@@ -94,8 +94,9 @@ describe('buildCat21BuyOfferPsbt', () => {
   });
 
   it('emits a change output when buyer change is above the dust floor', () => {
-    // Buyer 50k. Obligation = priceSats (21k) + 2*postage (1092) - sellerInput (546) + fee (1k)
-    //                       = 22 546. Change = 50_000 - 22_546 = 27_454.
+    // Buyer 50k. Obligation = priceSats (21k) + postage (546) + fee (1k) = 22_546.
+    // Change = 50_000 - 22_546 = 27_454. (Seller's input passes back to the seller
+    // via output 1, so it never subsidises the buyer.)
     const result = buildCat21BuyOfferPsbt(makeBaseArgs());
     const tx = btc.Transaction.fromPSBT(result.psbt);
     expect(tx.outputsLength).toBe(3);
@@ -126,13 +127,26 @@ describe('buildCat21BuyOfferPsbt', () => {
     expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({ priceSats: -1 }))).toThrow(/priceSats/);
   });
 
-  it('rejects sellerInput.value != 546 (HARD RULE: cat UTXO is always 546)', () => {
-    expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({
+  it('accepts a seller cat UTXO of any size and makes the seller whole on it', () => {
+    // 546 is our OUTPUT convention, not an input constraint. On an 800-sat cat
+    // UTXO: output 1 = priceSats + 800 (seller nets priceSats); the buyer still
+    // pays postage + price + fee, independent of the cat's size.
+    const big = buildCat21BuyOfferPsbt(makeBaseArgs({
       sellerInput: { ...makeBaseArgs().sellerInput, value: 800 },
-    }))).toThrow(/CAT21_POSTAGE_SATS|546/);
-    expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({
+    }));
+    const bigTx = btc.Transaction.fromPSBT(big.psbt);
+    expect(bigTx.getOutput(0).amount).toBe(BigInt(CAT21_OFFER_POSTAGE_SATS)); // cat output = 546
+    expect(bigTx.getOutput(1).amount).toBe(BigInt(21_000 + 800));             // seller made whole on 800
+    // obligation = price 21_000 + postage 546 + fee 1_000 = 22_546; change = 50_000 - 22_546.
+    expect(big.changeSats).toBe(27_454);
+
+    // Sub-546 cat (330-sat taproot mint): buyer funds the postage top-up; the
+    // seller still nets priceSats and the buyer's cost is unchanged.
+    const small = buildCat21BuyOfferPsbt(makeBaseArgs({
       sellerInput: { ...makeBaseArgs().sellerInput, value: 330 },
-    }))).toThrow(/CAT21_POSTAGE_SATS|546/);
+    }));
+    expect(btc.Transaction.fromPSBT(small.psbt).getOutput(1).amount).toBe(BigInt(21_000 + 330));
+    expect(small.changeSats).toBe(27_454);
   });
 
   it('rejects empty buyerInputs', () => {
@@ -620,16 +634,20 @@ describe('validateCat21BuyOfferPsbt', () => {
     });
   });
 
-  describe('Finding #2 — sellerInput.value enforced exactly at CAT21_POSTAGE_SATS', () => {
+  describe('sellerInput.value — any size (546 is our OUTPUT convention, not an input rule)', () => {
 
-    it('builder rejects when seller UTXO value is below 546 (cat UTXO must be 546)', () => {
-      expect(() =>
-        buildCat21BuyOfferPsbt(
-          makeBaseArgs({
-            sellerInput: { ...makeBaseArgs().sellerInput, value: 100 },
-          })
-        )
-      ).toThrow(/CAT21_POSTAGE_SATS|546/);
+    it('builder accepts a sub-546 seller UTXO and still pays the seller net priceSats', () => {
+      // A cat can sit on a sub-546 UTXO (e.g. a 400-sat taproot mint). The
+      // builder uses the real value: output 1 = priceSats + value (net priceSats);
+      // output 0 stays 546 (our cat-output convention, funded by the buyer).
+      const result = buildCat21BuyOfferPsbt(
+        makeBaseArgs({
+          sellerInput: { ...makeBaseArgs().sellerInput, value: 400 },
+        })
+      );
+      const tx = btc.Transaction.fromPSBT(result.psbt);
+      expect(tx.getOutput(0).amount).toBe(BigInt(CAT21_OFFER_POSTAGE_SATS));
+      expect(tx.getOutput(1).amount).toBe(BigInt(21_000 + 400));
     });
   });
 

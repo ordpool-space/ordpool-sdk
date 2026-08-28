@@ -180,13 +180,23 @@ describe('buildCat21TransferPsbt', () => {
     expect(tx.getInput(0).tapInternalKey).toBeDefined();
   });
 
-  it('rejects a catUtxo whose value is not exactly 546 sats (HARD RULE: cat UTXO is always 546)', () => {
-    expect(() => buildCat21TransferPsbt(makeBaseArgs({
-      catUtxo: { ...makeBaseArgs().catUtxo, value: 545 },
-    }))).toThrow(/CAT21_POSTAGE_SATS|546/);
-    expect(() => buildCat21TransferPsbt(makeBaseArgs({
-      catUtxo: { ...makeBaseArgs().catUtxo, value: 1000 },
-    }))).toThrow(/CAT21_POSTAGE_SATS|546/);
+  it('accepts a cat UTXO of any size (546 is our OUTPUT convention, not an input constraint)', () => {
+    // A cat can be minted on any UTXO size by any transaction, not only ours.
+    // The transfer uses the real catUtxo.value; the surplus above the 546
+    // output goes to the sender's change. Output 0 stays 546 (our convention).
+    // 1_000 cat + 50_000 funding - 546 postage - 1_100 fee = 49_354 change.
+    const big = buildCat21TransferPsbt(makeBaseArgs({
+      catUtxo: { ...makeBaseArgs().catUtxo, value: 1_000 },
+    }));
+    expect(btc.Transaction.fromPSBT(big.psbt).getOutput(0).amount).toBe(BigInt(546));
+    expect(big.changeSats).toBe(49_354);
+
+    // A sub-546 cat (e.g. a 330-sat taproot mint) is fine too; funding tops
+    // up the postage. 330 cat + 50_000 funding - 546 postage - 1_100 fee = 48_684.
+    const small = buildCat21TransferPsbt(makeBaseArgs({
+      catUtxo: { ...makeBaseArgs().catUtxo, value: 330 },
+    }));
+    expect(small.changeSats).toBe(48_684);
   });
 
   it('rejects a negative fee', () => {
