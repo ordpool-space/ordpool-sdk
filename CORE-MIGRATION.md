@@ -1,0 +1,58 @@
+# Framework-agnostic orchestration core
+
+The build / validate / select / fee / sign / broadcast logic is the single
+source of truth for all three CAT-21 paths (cat21.space, cat21-wallet manual,
+cat21-wallet autonomous). It lives here as a **framework-agnostic core**: pure
+functions plus `async`, no Angular, no RxJS. Consumers wire four ports and add
+their own thin veneer.
+
+## The core (`src/cat21-core/`, ships via `ordpool-sdk/core`)
+
+Owns the risky, shared sequencing: content-checked coin selection, two-pass fee
+simulation, PSBT build, and the `select → fee → build → sign → broadcast`
+pipeline. Everything that differs per consumer is an injected **port**.
+
+| Port | Shape | cat21.space wires to | cat21-wallet wires to |
+|---|---|---|---|
+| `UtxosPort` | `spendableUtxos(addr) => Promise<CoreFundingUtxo[]>` | `Cat21Service.getUtxos` | `utxos.service` (spendable bucket) |
+| `ContentScanPort` | `classify(outpoint) => Promise<'clean' \| 'has-assets'>` | full scanner (cats + inscriptions + runes + rare sats) | cat21-ord (cats only, its current posture) |
+| `SignPort` | `sign(psbt, inputIndexes) => Promise<{ hex; weight }>` | `findSignerOrThrow(walletType)` | `signWithConfirmation` / `signSilently` |
+| `BroadcastPort` | `broadcast(hex) => Promise<{ txid; channel }>` | `Cat21Service.postTransaction` | mempool / Slipstream dispatcher |
+
+`ContentScanPort` makes scan *depth* a per-consumer choice, not a core rule: the
+core avoids whatever the port flags as `has-assets`. The wallet reports cats
+only today; when it later cares about inscriptions too, it deepens its port and
+the core is unchanged.
+
+The core exposes, per operation: `simulate(params)` (pure preview), and
+`execute(params, ports)` (the full async flow). Selection is
+`selectFunding(utxos, targetSats, scanPort)` — the async, port-driven form of the
+old Angular `FundingRecommendationService`, applying the pure `recommendFunding`.
+
+## Why async, not RxJS
+
+The core is a one-shot pipeline; `async`/Promise fits it and matches the
+wallet's already-Promise-based deps (`Cat21RpcDeps`). RxJS is for streams — a UI
+concern — so it lives only in the cat21.space adapter (live re-simulate +
+cancel-on-input-change via `switchMap`). Keeping RxJS out of the core shrinks it
+and removes the subscription-order footguns.
+
+## The two adapters
+
+- **cat21.space (Angular):** a reactive veneer. `simulation$` /
+  `fundingRecommendation$` re-run `core.simulate` on input change; signals for
+  templates. Wires the four ports to `Cat21Service` + per-wallet signers.
+- **cat21-wallet (React):** `Cat21RpcService` keeps its wallet-only concerns —
+  intent invariants, the mode-resolver (autonomous-signing security boundary),
+  agent-policy gate, popup/silent signers, NMH bridge, Bazaar `postBid`,
+  `recordSpend` — and delegates the sequencing to `core.execute`. Its
+  content-unaware `pickFundingUtxo` becomes `UtxosPort.spendableUtxos` + the
+  core's content-checked selection.
+
+## Payoff
+
+One build (no checked-in Angular bundle, no ng-packagr-in-node_modules bug). The
+core + ports is trivially testable: **fake ports = unit tests, real ports
+against the regtest stack = the high-level integration test** the pyramid was
+missing. And Path 2 + Path 3 finally run the same safe-auto selection as
+cat21.space.

@@ -91,6 +91,11 @@ export * from './cat21-fee/min-relay-fee';
 export * from './cat21-fee/ord-coin-select';
 export * from './cat21-fee/funding-safety';
 
+// --- Framework-agnostic orchestration core (ports + async flows; no Angular,
+//     no RxJS — the single source of truth all three CAT-21 paths compose) ---
+export * from './cat21-core/ports';
+export * from './cat21-core/select-funding';
+
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';
 export * from './cat21-transfer/cat21-transfer.types';

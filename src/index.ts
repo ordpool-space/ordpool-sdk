@@ -57,6 +57,10 @@ export * from './cat21-fee/ord-coin-select';
 export * from './cat21-fee/funding-safety';
 export * from './cat21-fee/funding-recommendation.service';
 
+// --- Framework-agnostic orchestration core (ports + async flows) ---
+export * from './cat21-core/ports';
+export * from './cat21-core/select-funding';
+
 // --- cat21 offer (ord-style buyer-initiated PSBT builder + seller-side validator) ---
 export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
