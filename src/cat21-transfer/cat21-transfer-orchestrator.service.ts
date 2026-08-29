@@ -30,7 +30,6 @@ import { bitcoinNetwork } from '../network-token';
 import { findSignerOrThrow } from '../wallet/signers';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletInfo } from '../wallet/wallet.service.types';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { getMinimumUtxoSize } from '../cat21-script/address-format';
 import { buildCat21TransferPsbt, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS } from './cat21-transfer.helper';
 import {
@@ -416,12 +415,11 @@ export class Cat21TransferOrchestrator {
     if (!wallet || !cat || !feeRate || fundingUtxos.length === 0) {
       return { simulation: null, insufficient: false };
     }
-    // The funding UTXO must cover `postage (546) + fee` beyond what the
-    // cat input already provides: the cat's first 546 sats flow to output
-    // 0 (the recipient); any surplus above 546 flows to the sender's
-    // change. Use a generous over-estimate in the pick stage; the two-pass
+    // GOLDEN RULE: the cat UTXO is preserved (output 0 = cat.value, funded by
+    // the cat input itself), so the funding must cover ONLY the miner fee.
+    // Use a generous fee over-estimate in the pick stage; the two-pass
     // simulation below tightens it.
-    const target = CAT21_POSTAGE_SATS + Math.ceil(feeRate * 200); // ~200 vB ceiling for transfer
+    const target = Math.ceil(feeRate * 200); // ~200 vB ceiling for transfer
     // User's explicit pick wins when it's still in the funding list
     // AND covers the target. Otherwise fall back to auto-pick (largest
     // covering UTXO). This lets the picker UI reject asset-carrying
@@ -444,16 +442,12 @@ export class Cat21TransferOrchestrator {
         simulate: (feeSats) => this.simulateTransfer(wallet, cat, pick, feeSats),
         feeRatePerVbyte: feeRate,
       });
-      // Real cat value, not a hardcoded 546: a cat on a larger UTXO sends
-      // its surplus above the 546 postage to the sender's change, and the
-      // displayed figure must match the builder's actual change output.
-      const totalIn = cat.value + pick.value;
-      // Mirror the builder's change-output dust rule: sub-dust change is
-      // absorbed into the miner fee (no change output emitted), so report
-      // 0 back to the user rather than a "you'll get N sats" figure that
-      // never lands on chain. Same per-address dust floor + 546 fallback
-      // the builder uses for senderChangeAddress = wallet.paymentAddress.
-      const changeRaw = totalIn - CAT21_POSTAGE_SATS - finalFeeSats;
+      // GOLDEN RULE: the cat UTXO is preserved (output 0 = cat.value), so the
+      // funding pays ONLY the fee — change = funding - fee (the cat's sats all
+      // went to output 0 untouched). Mirror the builder's dust rule: sub-dust
+      // change is absorbed into the miner fee (no change output emitted), so
+      // report 0 rather than a "you'll get N sats" figure that never lands.
+      const changeRaw = pick.value - finalFeeSats;
       let changeDustLimit: number;
       try {
         changeDustLimit = getMinimumUtxoSize(wallet.paymentAddress);

@@ -1,7 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
 import { getMinimumUtxoSize } from '../cat21-script/address-format';
@@ -41,9 +40,10 @@ export interface BuildCat21TransferArgs {
   network: Network;
   catUtxo: Cat21TransferCatInput;
   /**
-   * Funding UTXOs that cover postage + fee above what the cat UTXO
-   * already provides. May be empty when the cat UTXO is large enough
-   * to self-fund.
+   * Funding UTXOs that pay the miner fee. GOLDEN RULE: the cat UTXO is
+   * preserved intact (output 0 = catUtxo.value) and NEVER pays the fee, so
+   * funding must cover at least `feeSats`. Empty funding is only valid when
+   * `feeSats` is 0 (which won't relay) — in practice always non-empty.
    */
   fundingInputs: ReadonlyArray<Cat21TransferFundingInput>;
   destinations: Cat21TransferDestinations;
@@ -56,10 +56,17 @@ export interface BuildCat21TransferResult {
   hex: string;
   /** Raw PSBT bytes. */
   psbt: Uint8Array;
-  /** Total funding input value (sum of fundingInputs.value). 0 when self-funded. */
+  /** Total funding input value (sum of fundingInputs.value). */
   fundingInputTotalSats: number;
   /** Change output value (0 when sub-dust; absorbed into fee). */
   changeSats: number;
+  /**
+   * Actual miner fee in sats — `feeSats + absorbedSubDustChange`. When the
+   * funding change is sub-dust it is absorbed into the fee (miner tip);
+   * callers reporting the realised fee should use this, not the input
+   * `feeSats`. Mirrors the mint's `finalFeeSats`.
+   */
+  finalFeeSats: number;
 }
 
 /**
@@ -72,23 +79,26 @@ export interface BuildCat21TransferResult {
  * no consensus meaning.
  *
  * Structure:
- *   Input 0  — cat-bearing UTXO. Cat's sat is the first sat of this
- *              UTXO; ends up at the first sat of output 0 (FIFO).
- *   Input 1+ — funding UTXOs (empty when the cat UTXO has surplus).
- *   Output 0 — recipient address, postage sats. Cat lands here.
- *   Output 1 — change (absorbed into fee when sub-dust).
+ *   Input 0  — cat-bearing UTXO. Passes through UNCHANGED to output 0
+ *              (FIFO: its first sat, the cat, lands at output 0's first sat).
+ *   Input 1+ — funding UTXOs that pay the miner fee.
+ *   Output 0 — recipient address, `catUtxo.value` sats: the WHOLE cat UTXO,
+ *              preserved intact (golden rule — never resized). Cat lands here.
+ *   Output 1 — funding change (absorbed into fee when sub-dust).
  *
  * Hard invariants (asserted): lockTime=21, per-wallet sequence,
  * every input SIGHASH_ALL. Coin selection is the caller's job.
  */
 export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21TransferResult {
-  // 546 is the postage we CREATE at output 0 (our handy cross-address dust
-  // floor), NOT a constraint on the incoming cat UTXO. A cat can sit on a
-  // UTXO of any size — it is minted by any transaction, not only ours, and
-  // its value is the minter's choice. The builder uses the real
-  // `catUtxo.value` (see the change math below) and sends any surplus above
-  // postage to the sender's change. See SDK CLAUDE.md "cat UTXO size" rule.
-  const postageSats = CAT21_POSTAGE_SATS;
+  // GOLDEN RULE (transfer): we do NOT change the size of the cat UTXO. The
+  // whole cat-bearing UTXO travels intact to the recipient — output 0 =
+  // catUtxo.value — so every sat on it stays together under ordinal theory.
+  // 546 is NOT used here; that is the MINT's fresh-cat postage only (the one
+  // time we create a cat UTXO from scratch). The miner fee is paid by
+  // SEPARATE funding inputs, never by shrinking the cat; the funding change
+  // follows mint semantics (above dust -> sender, sub-dust -> absorbed into
+  // the fee as a miner tip). See SDK CLAUDE.md "cat UTXO size" golden rule.
+  const catOutputSats = args.catUtxo.value;
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);
@@ -116,17 +126,19 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
     addCat21Input(tx, funding, sequence);
   }
 
-  // Output 0: recipient. Cat ordinal travels here via FIFO; `lockTime=21`
-  // mints a fresh cat onto the same sat in the same tx.
-  tx.addOutputAddress(args.destinations.recipientAddress, BigInt(postageSats), scureNetwork);
+  // Output 0: recipient gets the WHOLE cat UTXO at its real size (golden
+  // rule: never resize). The cat ordinal travels here via FIFO; lockTime=21
+  // mints a bonus cat onto the same first sat in the same tx.
+  tx.addOutputAddress(args.destinations.recipientAddress, BigInt(catOutputSats), scureNetwork);
 
-  // Change math. Total in = cat UTXO value + funding inputs.
-  // Required out = postage + fee. Anything left over is change.
-  const totalInSats = args.catUtxo.value + fundingInputTotalSats;
-  const changeRaw = totalInSats - postageSats - args.feeSats;
+  // Change comes from the FUNDING only: funding - fee. The cat's sats all
+  // went to output 0 untouched, so the fee is paid entirely by the funding
+  // inputs, which must therefore cover at least the fee.
+  const changeRaw = fundingInputTotalSats - args.feeSats;
   if (changeRaw < 0) {
     throw new Error(
-      `Transfer funding insufficient: ${totalInSats} sats < ${postageSats + args.feeSats} sats required`
+      `Transfer funding insufficient: funding ${fundingInputTotalSats} sats < fee ${args.feeSats} sats. ` +
+      `The cat UTXO (${catOutputSats} sats) is preserved intact and never pays the fee.`
     );
   }
   // Per-address-type dust floor for the change output. The
@@ -143,10 +155,15 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
     changeDustLimit = CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
   }
   let changeSats = 0;
+  let absorbedIntoFee = 0;
   if (changeRaw >= changeDustLimit) {
     changeSats = changeRaw;
     tx.addOutputAddress(args.destinations.senderChangeAddress, BigInt(changeSats), scureNetwork);
+  } else {
+    // Sub-dust change -> miner tip (same as the mint).
+    absorbedIntoFee = changeRaw;
   }
+  const finalFeeSats = args.feeSats + absorbedIntoFee;
 
   // Hard post-build asserts. SIGHASH_ALL commits to lockTime + sequence
   // across the whole tx, so once any input signs, the 21 marker AND
@@ -173,6 +190,7 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
     psbt: tx.toPSBT(),
     fundingInputTotalSats,
     changeSats,
+    finalFeeSats,
   };
 }
 

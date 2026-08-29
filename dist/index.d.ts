@@ -2926,9 +2926,10 @@ interface BuildCat21TransferArgs {
     network: Network;
     catUtxo: Cat21TransferCatInput;
     /**
-     * Funding UTXOs that cover postage + fee above what the cat UTXO
-     * already provides. May be empty when the cat UTXO is large enough
-     * to self-fund.
+     * Funding UTXOs that pay the miner fee. GOLDEN RULE: the cat UTXO is
+     * preserved intact (output 0 = catUtxo.value) and NEVER pays the fee, so
+     * funding must cover at least `feeSats`. Empty funding is only valid when
+     * `feeSats` is 0 (which won't relay) — in practice always non-empty.
      */
     fundingInputs: ReadonlyArray<Cat21TransferFundingInput>;
     destinations: Cat21TransferDestinations;
@@ -2940,10 +2941,17 @@ interface BuildCat21TransferResult {
     hex: string;
     /** Raw PSBT bytes. */
     psbt: Uint8Array;
-    /** Total funding input value (sum of fundingInputs.value). 0 when self-funded. */
+    /** Total funding input value (sum of fundingInputs.value). */
     fundingInputTotalSats: number;
     /** Change output value (0 when sub-dust; absorbed into fee). */
     changeSats: number;
+    /**
+     * Actual miner fee in sats — `feeSats + absorbedSubDustChange`. When the
+     * funding change is sub-dust it is absorbed into the fee (miner tip);
+     * callers reporting the realised fee should use this, not the input
+     * `feeSats`. Mirrors the mint's `finalFeeSats`.
+     */
+    finalFeeSats: number;
 }
 /**
  * Builds the unsigned CAT-21 transfer PSBT.
@@ -2955,11 +2963,12 @@ interface BuildCat21TransferResult {
  * no consensus meaning.
  *
  * Structure:
- *   Input 0  — cat-bearing UTXO. Cat's sat is the first sat of this
- *              UTXO; ends up at the first sat of output 0 (FIFO).
- *   Input 1+ — funding UTXOs (empty when the cat UTXO has surplus).
- *   Output 0 — recipient address, postage sats. Cat lands here.
- *   Output 1 — change (absorbed into fee when sub-dust).
+ *   Input 0  — cat-bearing UTXO. Passes through UNCHANGED to output 0
+ *              (FIFO: its first sat, the cat, lands at output 0's first sat).
+ *   Input 1+ — funding UTXOs that pay the miner fee.
+ *   Output 0 — recipient address, `catUtxo.value` sats: the WHOLE cat UTXO,
+ *              preserved intact (golden rule — never resized). Cat lands here.
+ *   Output 1 — funding change (absorbed into fee when sub-dust).
  *
  * Hard invariants (asserted): lockTime=21, per-wallet sequence,
  * every input SIGHASH_ALL. Coin selection is the caller's job.

@@ -35,6 +35,7 @@ import { base64 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { buildCat21BuyOfferPsbt } from '../../src/cat21-offer/cat21-offer.helper';
+import { buildCat21TransferPsbt } from '../../src/cat21-transfer/cat21-transfer.helper';
 import { CAT21_WALLET_INPUT_SEQUENCE } from '../../src/cat21-protocol/cat21-sequence';
 import { Network, toScureNetwork } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
@@ -64,7 +65,7 @@ const PRICE_SATS = 50_000;
 // (`inscribe_with_options(&core, &ord, Some(9000), 0)`).
 const CAT_SIZES = [546, 3_000, 9_000, 30_000];
 
-describe('ord-parity: SDK offer matches `ord wallet offer create` at non-546 cat sizes', () => {
+describe('cat UTXO size preservation at non-546 sizes (offer ord-parity + transfer golden rule)', () => {
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
   // Wallet A: the cat owner / seller. Plain P2WPKH (bcrt1q).
@@ -236,4 +237,55 @@ describe('ord-parity: SDK offer matches `ord wallet offer create` at non-546 cat
     },
     120_000,
   );
+
+  it('TRANSFER golden rule: a 9000-sat cat stays 9000 at the recipient (never resized to 546)', async () => {
+    // GOLDEN RULE: transfer preserves the cat UTXO's exact size. Output 0 =
+    // catUtxo.value; the fee is paid by a SEPARATE funding input, never by
+    // shrinking the cat. Proven end-to-end: cat21-ord reports the moved cat
+    // on a 9000-sat UTXO, not a 546 one.
+    const cat = await mintCatOfSize(9_000);
+
+    // Separate funding for the fee (the cat is never touched for it).
+    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', aAddress, '0.01');
+    let tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdSync(tip);
+    const funding = await waitForUtxoAt(aAddress, 1_000_000);
+
+    const recipientPriv = secp256k1.utils.randomPrivateKey();
+    const recipientAddr = btc.p2wpkh(
+      secp256k1.getPublicKey(recipientPriv, true),
+      regtestNetwork,
+    ).address!;
+
+    const built = buildCat21TransferPsbt({
+      walletType: KnownOrdinalWalletType.cat21wallet,
+      network: Network.Regtest,
+      catUtxo: { txid: cat.txid, vout: 0, value: cat.value, scriptPubKey: aScript },
+      fundingInputs: [
+        { txid: funding.txid, vout: funding.vout, value: funding.value, scriptPubKey: aScript },
+      ],
+      destinations: { recipientAddress: recipientAddr, senderChangeAddress: aAddress },
+      feeSats: FEE_SATS,
+    });
+
+    // Output 0 carries the WHOLE cat UTXO (9000), not 546.
+    const tx = btc.Transaction.fromPSBT(built.psbt);
+    expect(tx.getOutput(0).amount).toBe(BigInt(9_000));
+
+    tx.signIdx(aPriv, 0, [btc.SigHash.ALL]); // cat
+    tx.signIdx(aPriv, 1, [btc.SigHash.ALL]); // funding
+    tx.finalize();
+    const txid = await postTx(tx.hex);
+    tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForTxConfirmed(txid);
+    await waitForOrdSync(tip);
+
+    // cat21-ord is the authority: the cat moved to the recipient AND kept its
+    // 9000-sat UTXO. A 546 here would mean the builder resized the cat.
+    const moved = await waitForCatAtAddress(cat.inscriptionId, recipientAddr);
+    expect(moved.address).toBe(recipientAddr);
+    expect(moved.value).toBe(9_000);
+  }, 120_000);
 });

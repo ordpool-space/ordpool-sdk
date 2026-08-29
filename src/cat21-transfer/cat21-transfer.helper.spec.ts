@@ -180,23 +180,32 @@ describe('buildCat21TransferPsbt', () => {
     expect(tx.getInput(0).tapInternalKey).toBeDefined();
   });
 
-  it('accepts a cat UTXO of any size (546 is our OUTPUT convention, not an input constraint)', () => {
-    // A cat can be minted on any UTXO size by any transaction, not only ours.
-    // The transfer uses the real catUtxo.value; the surplus above the 546
-    // output goes to the sender's change. Output 0 stays 546 (our convention).
-    // 1_000 cat + 50_000 funding - 546 postage - 1_100 fee = 49_354 change.
+  it('preserves the cat UTXO size at output 0 (GOLDEN RULE) — funding alone pays the fee', () => {
+    // GOLDEN RULE: the cat UTXO is NEVER resized. Output 0 = catUtxo.value
+    // (the whole UTXO travels intact); the fee is paid by the funding only,
+    // so change = funding - fee = 50_000 - 1_100 = 48_900, INDEPENDENT of the
+    // cat's size (the cat's sats all pass through to output 0 untouched).
     const big = buildCat21TransferPsbt(makeBaseArgs({
       catUtxo: { ...makeBaseArgs().catUtxo, value: 1_000 },
     }));
-    expect(btc.Transaction.fromPSBT(big.psbt).getOutput(0).amount).toBe(BigInt(546));
-    expect(big.changeSats).toBe(49_354);
+    expect(btc.Transaction.fromPSBT(big.psbt).getOutput(0).amount).toBe(BigInt(1_000)); // preserved, not 546
+    expect(big.changeSats).toBe(48_900);
+    expect(big.finalFeeSats).toBe(1_100); // no sub-dust absorption here
 
-    // A sub-546 cat (e.g. a 330-sat taproot mint) is fine too; funding tops
-    // up the postage. 330 cat + 50_000 funding - 546 postage - 1_100 fee = 48_684.
+    // A sub-546 cat (e.g. a 330-sat taproot mint) is preserved at 330 — we do
+    // NOT round it up to 546 any more than we shrink a larger cat down to it.
     const small = buildCat21TransferPsbt(makeBaseArgs({
       catUtxo: { ...makeBaseArgs().catUtxo, value: 330 },
     }));
-    expect(small.changeSats).toBe(48_684);
+    expect(btc.Transaction.fromPSBT(small.psbt).getOutput(0).amount).toBe(BigInt(330));
+    expect(small.changeSats).toBe(48_900);
+
+    // A large cat (9_000, ord's offer-test fixture size) is preserved whole.
+    const large = buildCat21TransferPsbt(makeBaseArgs({
+      catUtxo: { ...makeBaseArgs().catUtxo, value: 9_000 },
+    }));
+    expect(btc.Transaction.fromPSBT(large.psbt).getOutput(0).amount).toBe(BigInt(9_000));
+    expect(large.changeSats).toBe(48_900);
   });
 
   it('rejects a negative fee', () => {
