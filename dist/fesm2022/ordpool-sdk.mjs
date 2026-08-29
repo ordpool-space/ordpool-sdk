@@ -6277,15 +6277,27 @@ function validateCat21BuyOfferPsbt(args) {
             return fail('sighash-not-all', `input ${i} sighashType=${input.sighashType}`);
         }
     }
-    // 2b. Actual signature-byte sighash flag. A malicious buyer could
-    //     leave the PSBT sighashType field unset (or ALL) while signing
-    //     with SIGHASH_SINGLE|ANYONECANPAY — the validator's promise of
-    //     "all inputs committed under SIGHASH_ALL" is weaker than the
-    //     field-only check claims. Read the trailing byte of partialSig
-    //     (ECDSA) and assert it's 0x01. Schnorr signatures (Taproot key-
-    //     path) omit the flag when sighash is DEFAULT (= ALL); a 65-byte
-    //     Schnorr sig carries the flag in its last byte. Both shapes are
-    //     wire-equivalent to SIGHASH_ALL when the flag is absent or 0x01.
+    // 2b. Actual signature-byte sighash flag. A malicious buyer could leave
+    //     the PSBT sighashType field unset (or ALL) while signing with
+    //     SIGHASH_SINGLE|ANYONECANPAY, so the field-only check (2a) is weaker
+    //     than the "all inputs committed under SIGHASH_ALL" promise. Read the
+    //     trailing byte of partialSig (ECDSA) and assert it's 0x01. Schnorr
+    //     signatures (Taproot key-path) omit the flag when sighash is DEFAULT
+    //     (= ALL); a 65-byte Schnorr sig carries the flag in its last byte.
+    //     Both shapes are wire-equivalent to SIGHASH_ALL when the flag is
+    //     absent or 0x01.
+    //
+    //     Scope: this inspects partialSig / tapKeySig only. A buyer input that
+    //     is already FINALISED (bytes in finalScriptWitness) is not re-decoded
+    //     here, so its sighash flag is not re-verified. That is safe by
+    //     construction: the SELLER signs input 0 (the cat) with SIGHASH_ALL,
+    //     which commits every input and every output. Once the seller signs,
+    //     the cat can move only via this exact transaction, paying the seller
+    //     the agreed amount to the agreed address; a buyer's own-input sighash
+    //     cannot redirect the cat or shrink the payout without invalidating
+    //     the seller's signature and making the tx un-broadcastable. The
+    //     seller's safety rests on input 0, not on re-checking a finalised
+    //     buyer input.
     for (let i = 1; i < tx.inputsLength; i++) {
         const input = tx.getInput(i);
         if (input.partialSig && input.partialSig.length > 0) {
