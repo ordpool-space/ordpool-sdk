@@ -6728,14 +6728,16 @@ async function simulateTransfer(params, ports) {
  */
 async function executeTransfer(params, ports) {
     const plan = await planTransfer(params, ports);
-    if (plan.status !== 'ready' || !plan.pick || plan.buildFeeSats == null) {
+    if (plan.status !== 'ready' || !plan.pick || plan.buildFeeSats == null || plan.built == null) {
         throw new Error(plan.status === 'expert-required'
             ? 'Select a funding UTXO (the available coins carry assets)'
             : 'Insufficient funds for transfer at the current fee rate');
     }
     const built = buildTransfer(params, plan.pick, plan.buildFeeSats, false);
     const signed = await ports.sign.sign(built.psbt, 'all');
-    return ports.broadcast.broadcast(signed.hex);
+    const outcome = await ports.broadcast.broadcast(signed.hex);
+    // Realised miner fee (incl. absorbed sub-dust change) for spend recording.
+    return { ...outcome, feeSats: built.finalFeeSats };
 }
 
 /** ~200 vB fee ceiling for the mint fee component (1-in / 2-out). */
@@ -6837,7 +6839,10 @@ async function executeMint(params, ports) {
     }
     const built = buildMint(params, plan.pick, plan.buildFeeSats, false);
     const signed = await ports.sign.sign(built.psbt, 'all');
-    return ports.broadcast.broadcast(signed.hex);
+    const outcome = await ports.broadcast.broadcast(signed.hex);
+    // Realised miner fee (incl. absorbed sub-dust change) so consumers can record
+    // the spend / display the fee without re-simulating.
+    return { ...outcome, feeSats: built.finalFeeSats };
 }
 
 /**

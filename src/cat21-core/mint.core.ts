@@ -179,7 +179,7 @@ export async function simulateMint(
 export async function executeMint(
   params: MintCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort; sign: SignPort; broadcast: BroadcastPort },
-): Promise<BroadcastOutcome> {
+): Promise<BroadcastOutcome & { feeSats: number }> {
   const plan = await planMint(params, ports);
   if (plan.status !== 'ready' || !plan.pick || plan.buildFeeSats == null) {
     throw new Error(
@@ -190,5 +190,8 @@ export async function executeMint(
   }
   const built = buildMint(params, plan.pick, plan.buildFeeSats, false);
   const signed = await ports.sign.sign(built.psbt, 'all');
-  return ports.broadcast.broadcast(signed.hex);
+  const outcome = await ports.broadcast.broadcast(signed.hex);
+  // Realised miner fee (incl. absorbed sub-dust change) so consumers can record
+  // the spend / display the fee without re-simulating.
+  return { ...outcome, feeSats: built.finalFeeSats };
 }

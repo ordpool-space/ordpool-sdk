@@ -2672,7 +2672,9 @@ declare function executeTransfer(params: TransferCoreParams, ports: {
     scan: ContentScanPort;
     sign: SignPort;
     broadcast: BroadcastPort;
-}): Promise<BroadcastOutcome>;
+}): Promise<BroadcastOutcome & {
+    feeSats: number;
+}>;
 
 /**
  * Everything the mint core needs, framework-agnostic. A mint CREATES a fresh
@@ -2728,7 +2730,9 @@ declare function executeMint(params: MintCoreParams, ports: {
     scan: ContentScanPort;
     sign: SignPort;
     broadcast: BroadcastPort;
-}): Promise<BroadcastOutcome>;
+}): Promise<BroadcastOutcome & {
+    feeSats: number;
+}>;
 
 /**
  * Everything the create-offer core needs, framework-agnostic. The BUYER builds

@@ -72,7 +72,8 @@ describe('mint.core — executeMint', () => {
       sign: sign.port,
       broadcast: broadcast.port,
     });
-    expect(out).toEqual({ txid: 'mint-txid', channel: 'mempool' });
+    expect(out).toMatchObject({ txid: 'mint-txid', channel: 'mempool' });
+    expect(out.feeSats).toBeGreaterThan(0);
     expect(sign.calls).toEqual(['all']);
     expect(broadcast.calls).toEqual(['mintsigned']);
   });

@@ -91,7 +91,8 @@ describe('transfer.core — executeTransfer', () => {
       sign: sign.port,
       broadcast: broadcast.port,
     });
-    expect(out).toEqual({ txid: 'broadcast-txid', channel: 'mempool' });
+    expect(out).toMatchObject({ txid: 'broadcast-txid', channel: 'mempool' });
+    expect(out.feeSats).toBeGreaterThan(0);
     expect(sign.calls).toEqual([{ indexes: 'all' }]);
     expect(broadcast.calls).toEqual(['deadbeefsigned']);
   });
