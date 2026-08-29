@@ -1,8 +1,8 @@
-import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Observable, catchError, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
 
 import { cat21Config } from './cat21-sdk-config';
+import { fetchJson } from './http-fetch.helper';
 import { classifyUtxoContent } from './utxo-content.classify';
 import {
   Cat21OrdOutputResponse,
@@ -44,7 +44,6 @@ const AUTO_SCAN_CONCURRENCY = 5;
  */
 @Injectable({ providedIn: 'root' })
 export class UtxoContentScanner {
-  private http = inject(HttpClient);
   private config = inject(cat21Config);
 
   /** outpoint → latest state. */
@@ -159,17 +158,11 @@ export class UtxoContentScanner {
   }
 
   private fetchOrd(outpoint: string): Observable<OrdOutputResponse> {
-    const url = `${trimSlash(this.config.ordApiUrl)}/output/${outpoint}`;
-    return this.http.get<OrdOutputResponse>(url, {
-      headers: { Accept: 'application/json' },
-    });
+    return fetchJson<OrdOutputResponse>(`${trimSlash(this.config.ordApiUrl)}/output/${outpoint}`);
   }
 
   private fetchCat21Ord(outpoint: string): Observable<Cat21OrdOutputResponse> {
-    const url = `${trimSlash(this.config.cat21OrdApiUrl)}/output/${outpoint}`;
-    return this.http.get<Cat21OrdOutputResponse>(url, {
-      headers: { Accept: 'application/json' },
-    });
+    return fetchJson<Cat21OrdOutputResponse>(`${trimSlash(this.config.cat21OrdApiUrl)}/output/${outpoint}`);
   }
 
   private setState(outpoint: string, state: UtxoScanState): void {

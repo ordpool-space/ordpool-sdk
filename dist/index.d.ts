@@ -2246,7 +2246,6 @@ declare const AUTO_SCAN_MAX_VALUE_SAT = 50000;
  * convenience separately.
  */
 declare class UtxoContentScanner {
-    private http;
     private config;
     /** outpoint → latest state. */
     private readonly states;

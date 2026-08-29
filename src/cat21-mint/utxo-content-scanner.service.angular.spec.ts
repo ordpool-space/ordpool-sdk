@@ -1,10 +1,14 @@
-import { describe, expect, it, jest } from '@jest/globals';
-import { HttpClient } from '@angular/common/http';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { Injector, runInInjectionContext } from '@angular/core';
-import { firstValueFrom, Observable, of } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 
 import { cat21Config } from './cat21-sdk-config';
 import { UtxoContentScanner } from './utxo-content-scanner.service';
+
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 const ordApiUrl = 'https://ord.test';
 const cat21OrdApiUrl = 'https://cat21ord.test';
@@ -22,25 +26,30 @@ const CAT_ID = '98316dcb21daaa221865208fe0323616ee6dd84e6020b78bc6908e914ac03892
 const GENESIS_SAT = 596964966600565;
 
 type HttpGetResult = Record<string, unknown>;
-type MockHttp = {
-  get: jest.MockedFunction<(url: string, opts?: unknown) => Observable<HttpGetResult>>;
-};
 
 function buildScanner(ordBody: HttpGetResult, cat21OrdBody: HttpGetResult) {
-  const http: MockHttp = { get: jest.fn<MockHttp['get']>() };
-  http.get.mockImplementation((url: string) =>
-    of(url.startsWith(cat21OrdApiUrl) ? cat21OrdBody : ordBody)
-  );
+  // Mock native fetch (the scanner's HTTP primitive) — return each host's
+  // `GET /output/<outpoint>` body based on the URL, mirroring what the two ord
+  // instances really answer.
+  const fetchMock = jest.fn((input: string | URL | Request) => {
+    const url = String(input);
+    const body = url.startsWith(cat21OrdApiUrl) ? cat21OrdBody : ordBody;
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve(body),
+    } as unknown as Response);
+  });
+  globalThis.fetch = fetchMock as unknown as typeof fetch;
 
   const injector = Injector.create({
     providers: [
-      { provide: HttpClient, useValue: http },
       { provide: cat21Config, useValue: { ordApiUrl, cat21OrdApiUrl } },
     ],
   });
 
   const scanner = runInInjectionContext(injector, () => new UtxoContentScanner());
-  return { scanner, http };
+  return { scanner, fetchMock };
 }
 
 describe('UtxoContentScanner catSat', () => {

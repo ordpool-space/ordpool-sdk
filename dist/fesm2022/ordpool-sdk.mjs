@@ -5437,6 +5437,42 @@ function twoPassFeeSimulation(args) {
 }
 
 /**
+ * Native-fetch HTTP primitives for the SDK's Angular services (`Cat21Service`,
+ * `Cat21ApiService`, `UtxoContentScanner`). The SDK uses `fetch`, never
+ * Angular's `HttpClient` — so these services carry no `@angular/common/http`
+ * dependency and load + run anywhere the rest of the SDK does (browser, plain
+ * Node, a regtest jest harness), matching the workspace "use fetch, not axios"
+ * rule.
+ *
+ * Each rejects on a non-2xx status, carrying the response BODY as the error
+ * message (so an electrs/mempool broadcast rejection keeps its reason, e.g.
+ * "txn-mempool-conflict") — the callers' existing `catchError` chains read
+ * `err.message` and surface it unchanged.
+ */
+async function fetchOk(url, init) {
+    const res = await fetch(url, init);
+    if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(body || `${init?.method ?? 'GET'} ${url} failed: HTTP ${res.status}`);
+    }
+    return res;
+}
+/** `GET <url>` → parsed JSON. Sends `Accept: application/json` (the ord hosts
+ * gate HTML behind it). */
+function fetchJson(url) {
+    return from(fetchOk(url, { headers: { Accept: 'application/json' } }).then((r) => r.json()));
+}
+/** `GET <url>` → raw text (e.g. an esplora `/tx/:id/hex` response). */
+function fetchText(url) {
+    return from(fetchOk(url).then((r) => r.text()));
+}
+/** `POST <url>` with a raw string body → text response (e.g. esplora `/tx`
+ * returning the broadcast txid). */
+function postText(url, body) {
+    return from(fetchOk(url, { method: 'POST', body }).then((r) => r.text()));
+}
+
+/**
  * UTXOs at or below this value are auto-scanned by callers that respect
  * the default policy (the mint-flow components do). Above the threshold
  * a UTXO is overwhelmingly likely to be a plain payment, so we leave it
@@ -5466,7 +5502,6 @@ const AUTO_SCAN_CONCURRENCY = 5;
  * convenience separately.
  */
 class UtxoContentScanner {
-    http = inject(HttpClient);
     config = inject(cat21Config);
     /** outpoint → latest state. */
     states = new Map();
@@ -5565,16 +5600,10 @@ class UtxoContentScanner {
         this.statesSubject.next(new Map());
     }
     fetchOrd(outpoint) {
-        const url = `${trimSlash(this.config.ordApiUrl)}/output/${outpoint}`;
-        return this.http.get(url, {
-            headers: { Accept: 'application/json' },
-        });
+        return fetchJson(`${trimSlash(this.config.ordApiUrl)}/output/${outpoint}`);
     }
     fetchCat21Ord(outpoint) {
-        const url = `${trimSlash(this.config.cat21OrdApiUrl)}/output/${outpoint}`;
-        return this.http.get(url, {
-            headers: { Accept: 'application/json' },
-        });
+        return fetchJson(`${trimSlash(this.config.cat21OrdApiUrl)}/output/${outpoint}`);
     }
     setState(outpoint, state) {
         this.states.set(outpoint, state);
