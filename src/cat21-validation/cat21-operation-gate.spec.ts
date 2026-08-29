@@ -470,12 +470,17 @@ describe('validateCat21Operation — create_offer', () => {
     expect(result).toMatchObject({ ok: false, reason: 'price-not-positive' });
   });
 
-  it('rejects priceSats below the protocol postage floor (CAT21_POSTAGE_SATS = 546)', () => {
+  it('accepts a low positive price (no 546 floor): a cat sells for any price >= 1', () => {
+    // The seller's payout is priceSats + sellerInputValue, and the cat
+    // UTXO is already >= dust, so a low price never yields a sub-dust
+    // payout. ord imposes no amount floor either. Only price > 0 is
+    // required (asserted by the zero-price test above).
     const result = validateCat21Operation({
       config: mainnetConfig,
-      operation: { kind: 'create_offer', intent: createOfferIntent({ priceSats: 545 }) },
+      operation: { kind: 'create_offer', intent: createOfferIntent({ priceSats: 1 }) },
     });
-    expect(result).toMatchObject({ ok: false, reason: 'price-below-postage-floor' });
+    if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
+    expect(result.resources.kind).toBe('create_offer');
   });
 
   it('rejects priceSats above maxPriceSats', () => {

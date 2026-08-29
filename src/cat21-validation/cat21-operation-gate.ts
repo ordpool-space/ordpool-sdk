@@ -16,7 +16,6 @@ import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { addressesEquivalent, allowlistContainsAddress } from '../cat21-script/address-format';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network, toScureNetwork } from '../network';
 
 import type {
@@ -385,12 +384,12 @@ function validatePrice(
   if (priceSats <= 0) {
     return { ok: false, result: reject('price-not-positive', safeStringify(priceSats)) };
   }
-  if (priceSats < CAT21_POSTAGE_SATS) {
-    return {
-      ok: false,
-      result: reject('price-below-postage-floor', `${priceSats} < ${CAT21_POSTAGE_SATS}`),
-    };
-  }
+  // No minimum-price floor. A cat sells for any positive price: the
+  // seller's payout is `priceSats + sellerInputValue`, and the cat's own
+  // UTXO value is already >= dust, so the payout clears dust for any
+  // price >= 1. Stock ord imposes no amount floor either. The gate can't
+  // see sellerInputValue anyway (the intent carries only the price), so a
+  // price-only floor would be a blind, arbitrary proxy — do not re-add.
   if (config.maxPriceSats != null && priceSats > config.maxPriceSats) {
     return {
       ok: false,

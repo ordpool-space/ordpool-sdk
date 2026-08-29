@@ -247,7 +247,6 @@ export type Cat21GateRejectReason =
   | 'price-not-finite-number'
   | 'price-not-positive'
   | 'price-not-integer'
-  | 'price-below-postage-floor'
   | 'price-above-cap'
 
   // Accept-offer specifics

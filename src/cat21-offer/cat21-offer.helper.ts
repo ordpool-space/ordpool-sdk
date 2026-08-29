@@ -86,12 +86,15 @@ export interface BuildCat21BuyOfferResult {
  * can be spliced into a sniping tx.
  */
 export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21BuyOfferResult {
-  const postageSats = CAT21_POSTAGE_SATS;
   if (args.priceSats <= 0) throw new Error('priceSats must be positive');
-  // 546 is the postage we CREATE at output 0 (our handy dust floor), NOT a
-  // constraint on the seller's cat UTXO. A cat can sit on a UTXO of any size
-  // (minted by any tx, the minter's choice); the builder uses the real
-  // sellerInput.value and makes the seller whole on it (output 1 below).
+  // Byte-parity with ord `wallet offer create`: output 0 (the cat/inscription
+  // going to the buyer) is the seller's WHOLE UTXO at its real size, NOT a
+  // forced 546. The buyer is purchasing that exact UTXO, so every sat and any
+  // content on it (a co-located inscription, a rare sat past offset 546) must
+  // travel intact to the buyer. Forcing 546 here would route the seller's sats
+  // above offset 546 — and anything sitting on them — into output 1, merging
+  // them with the seller's payment. 546 is only for outputs we mint fresh.
+  const catOutputSats = args.sellerInput.value;
   if (args.buyerInputs.length === 0) throw new Error('buyerInputs must be non-empty');
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
 
@@ -141,10 +144,12 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
     addCat21Input(tx, input, sequenceNumber);
   }
 
-  // Output 0: cat lands at buyer.
+  // Output 0: the whole cat/inscription UTXO lands at the buyer, at its real
+  // size (ord parity). FIFO sends input 0's sats — the cat's first sat and
+  // everything else on that UTXO — to this output.
   tx.addOutputAddress(
     args.destinations.buyerReceiveAddress,
-    BigInt(postageSats),
+    BigInt(catOutputSats),
     scureNetwork
   );
 
@@ -157,14 +162,14 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
     scureNetwork
   );
 
-  // Output 2: buyer change when above dust. With output 1 = priceSats +
-  // sellerInput.value, the seller's input passes straight back to the seller,
-  // so the buyer funds exactly the cat output (postage) + priceSats + fee,
-  // independent of the cat UTXO's size.
-  const obligation = args.priceSats + postageSats + args.feeSats;
+  // Output 2: buyer change when above dust. Output 0 = sellerInput.value and
+  // output 1 = priceSats + sellerInput.value; the seller's input (V) passes
+  // straight back to the seller, so the buyer funds exactly the cat output (V)
+  // + priceSats + fee = priceSats + V + fee (ord parity: amount + V + fee).
+  const obligation = args.priceSats + catOutputSats + args.feeSats;
   const changeSats = buyerInputTotalSats - obligation;
   if (changeSats < 0) {
-    throw new Error('Buyer inputs do not cover priceSats + postage + fee');
+    throw new Error('Buyer inputs do not cover priceSats + cat UTXO value + fee');
   }
   // Per-address-type dust floor for the buyer's change output. 546
   // is the conservative cross-type floor (taproot 330, segwit 294,

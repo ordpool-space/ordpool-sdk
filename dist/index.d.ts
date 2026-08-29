@@ -2608,7 +2608,7 @@ declare class Cat21CreateOfferOrchestrator {
     readonly targetCat: _angular_core.WritableSignal<BuyOfferTargetCat>;
     /** Where the seller wants payment (their own address; usually the seller's payment address). */
     readonly sellerPaymentAddress: _angular_core.WritableSignal<PaymentAddress>;
-    /** Sats the buyer offers (this is the "ask" the seller's eventual payout output carries — `priceSats + CAT21_POSTAGE_SATS`). */
+    /** Sats the buyer offers (net to seller). The seller's payout output carries `priceSats + sellerInput.value` (ord parity); the seller nets exactly priceSats. */
     readonly priceSats: _angular_core.WritableSignal<number>;
     /** Where the cat lands after the seller signs + broadcasts. Default = connected wallet's ordinals address. */
     readonly buyerReceiveAddress: _angular_core.WritableSignal<string>;

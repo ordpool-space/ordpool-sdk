@@ -127,26 +127,38 @@ describe('buildCat21BuyOfferPsbt', () => {
     expect(() => buildCat21BuyOfferPsbt(makeBaseArgs({ priceSats: -1 }))).toThrow(/priceSats/);
   });
 
-  it('accepts a seller cat UTXO of any size and makes the seller whole on it', () => {
-    // 546 is our OUTPUT convention, not an input constraint. On an 800-sat cat
-    // UTXO: output 1 = priceSats + 800 (seller nets priceSats); the buyer still
-    // pays postage + price + fee, independent of the cat's size.
+  it('preserves the seller cat UTXO size at output 0 (ord parity) and makes the seller whole', () => {
+    // ord parity: output 0 = the seller's REAL UTXO size, NOT 546. On an
+    // 800-sat cat: output 0 = 800 (whole UTXO to buyer), output 1 =
+    // priceSats + 800 (seller nets priceSats); the buyer funds
+    // priceSats + 800 + fee.
     const big = buildCat21BuyOfferPsbt(makeBaseArgs({
       sellerInput: { ...makeBaseArgs().sellerInput, value: 800 },
     }));
     const bigTx = btc.Transaction.fromPSBT(big.psbt);
-    expect(bigTx.getOutput(0).amount).toBe(BigInt(CAT21_OFFER_POSTAGE_SATS)); // cat output = 546
-    expect(bigTx.getOutput(1).amount).toBe(BigInt(21_000 + 800));             // seller made whole on 800
-    // obligation = price 21_000 + postage 546 + fee 1_000 = 22_546; change = 50_000 - 22_546.
-    expect(big.changeSats).toBe(27_454);
+    expect(bigTx.getOutput(0).amount).toBe(BigInt(800));         // cat output = real size, not 546
+    expect(bigTx.getOutput(1).amount).toBe(BigInt(21_000 + 800)); // seller made whole on 800
+    // obligation = price 21_000 + cat 800 + fee 1_000 = 22_800; change = 50_000 - 22_800.
+    expect(big.changeSats).toBe(27_200);
 
-    // Sub-546 cat (330-sat taproot mint): buyer funds the postage top-up; the
-    // seller still nets priceSats and the buyer's cost is unchanged.
+    // Sub-546 cat (330-sat taproot mint): output 0 stays 330 — we preserve the
+    // real size, we do NOT round UP to 546 any more than we force DOWN to it.
     const small = buildCat21BuyOfferPsbt(makeBaseArgs({
       sellerInput: { ...makeBaseArgs().sellerInput, value: 330 },
     }));
-    expect(btc.Transaction.fromPSBT(small.psbt).getOutput(1).amount).toBe(BigInt(21_000 + 330));
-    expect(small.changeSats).toBe(27_454);
+    const smallTx = btc.Transaction.fromPSBT(small.psbt);
+    expect(smallTx.getOutput(0).amount).toBe(BigInt(330));
+    expect(smallTx.getOutput(1).amount).toBe(BigInt(21_000 + 330));
+    expect(small.changeSats).toBe(27_670); // 50_000 - (21_000 + 330 + 1_000)
+
+    // 9000-sat cat (ord's own offer-test fixture size): output 0 = 9000.
+    const large = buildCat21BuyOfferPsbt(makeBaseArgs({
+      sellerInput: { ...makeBaseArgs().sellerInput, value: 9_000 },
+    }));
+    const largeTx = btc.Transaction.fromPSBT(large.psbt);
+    expect(largeTx.getOutput(0).amount).toBe(BigInt(9_000));
+    expect(largeTx.getOutput(1).amount).toBe(BigInt(21_000 + 9_000));
+    expect(large.changeSats).toBe(19_000); // 50_000 - (21_000 + 9_000 + 1_000)
   });
 
   it('rejects empty buyerInputs', () => {
@@ -708,17 +720,18 @@ describe('validateCat21BuyOfferPsbt', () => {
 
   describe('sellerInput.value — any size (546 is our OUTPUT convention, not an input rule)', () => {
 
-    it('builder accepts a sub-546 seller UTXO and still pays the seller net priceSats', () => {
-      // A cat can sit on a sub-546 UTXO (e.g. a 400-sat taproot mint). The
-      // builder uses the real value: output 1 = priceSats + value (net priceSats);
-      // output 0 stays 546 (our cat-output convention, funded by the buyer).
+    it('builder preserves a sub-546 seller UTXO at output 0 and pays the seller net priceSats', () => {
+      // A cat can sit on a sub-546 UTXO (e.g. a 400-sat taproot mint). ord
+      // parity: output 0 = the real UTXO value (400, whole UTXO to the buyer),
+      // output 1 = priceSats + value (seller nets priceSats). We do NOT round
+      // output 0 up to 546.
       const result = buildCat21BuyOfferPsbt(
         makeBaseArgs({
           sellerInput: { ...makeBaseArgs().sellerInput, value: 400 },
         })
       );
       const tx = btc.Transaction.fromPSBT(result.psbt);
-      expect(tx.getOutput(0).amount).toBe(BigInt(CAT21_OFFER_POSTAGE_SATS));
+      expect(tx.getOutput(0).amount).toBe(BigInt(400));
       expect(tx.getOutput(1).amount).toBe(BigInt(21_000 + 400));
     });
   });

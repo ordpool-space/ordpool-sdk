@@ -260,6 +260,34 @@ describe('Cat21CreateOfferOrchestrator', () => {
       expect(outcome.simulation!.feeSats).toBeGreaterThan(0);
     });
 
+    it('sizes the buyer funding to the cat UTXO value on a NON-546 cat (ord parity)', async () => {
+      // Regression: the orchestrator must fund priceSats + the cat's REAL
+      // UTXO value (output 0 goes to the buyer whole, ord parity) + fee, NOT
+      // priceSats + 546 + fee. On a 9000-sat cat the buyer funds 8454 sats
+      // more than on a 546-sat cat; a 546-hardcode would under-fund and the
+      // builder would throw at sign time.
+      const utxos: TxnOutput[] = [{
+        txid: 'b'.repeat(64),
+        vout: 0,
+        value: 100_000,
+        status: { confirmed: true, block_height: 800_000, block_hash: '', block_time: 0 },
+      }];
+      const { orchestrator, walletSubject } = buildOrchestrator({ utxos });
+      walletSubject.next(wallet());
+      orchestrator.setTargetCat(target({ value: 9_000 }));
+      orchestrator.setSellerPaymentAddress(SELLER_PAYMENT);
+      orchestrator.setPriceSats(21_000);
+      orchestrator.setFeeRate(5);
+
+      const outcome = await firstValueFrom(orchestrator.simulation$);
+      expect(outcome.insufficient).toBe(false);
+      expect(outcome.simulation).not.toBeNull();
+      const sim = outcome.simulation!;
+      // change + price + cat value (9000) + fee == funding: the buyer funds
+      // the cat output at its REAL size, proving no 546 hardcode remains.
+      expect(sim.changeSats + 21_000 + 9_000 + sim.feeSats).toBe(100_000);
+    });
+
     it('form incomplete (no target) yields { simulation: null, insufficient: false }', async () => {
       const utxos: TxnOutput[] = [{
         txid: 'b'.repeat(64),

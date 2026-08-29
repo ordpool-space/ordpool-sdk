@@ -6044,13 +6044,16 @@ const BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE = BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB / 
  * can be spliced into a sniping tx.
  */
 function buildCat21BuyOfferPsbt(args) {
-    const postageSats = CAT21_POSTAGE_SATS;
     if (args.priceSats <= 0)
         throw new Error('priceSats must be positive');
-    // 546 is the postage we CREATE at output 0 (our handy dust floor), NOT a
-    // constraint on the seller's cat UTXO. A cat can sit on a UTXO of any size
-    // (minted by any tx, the minter's choice); the builder uses the real
-    // sellerInput.value and makes the seller whole on it (output 1 below).
+    // Byte-parity with ord `wallet offer create`: output 0 (the cat/inscription
+    // going to the buyer) is the seller's WHOLE UTXO at its real size, NOT a
+    // forced 546. The buyer is purchasing that exact UTXO, so every sat and any
+    // content on it (a co-located inscription, a rare sat past offset 546) must
+    // travel intact to the buyer. Forcing 546 here would route the seller's sats
+    // above offset 546 — and anything sitting on them — into output 1, merging
+    // them with the seller's payment. 546 is only for outputs we mint fresh.
+    const catOutputSats = args.sellerInput.value;
     if (args.buyerInputs.length === 0)
         throw new Error('buyerInputs must be non-empty');
     if (args.feeSats < 0)
@@ -6098,20 +6101,22 @@ function buildCat21BuyOfferPsbt(args) {
         buyerInputTotalSats += input.value;
         addCat21Input(tx, input, sequenceNumber);
     }
-    // Output 0: cat lands at buyer.
-    tx.addOutputAddress(args.destinations.buyerReceiveAddress, BigInt(postageSats), scureNetwork);
+    // Output 0: the whole cat/inscription UTXO lands at the buyer, at its real
+    // size (ord parity). FIFO sends input 0's sats — the cat's first sat and
+    // everything else on that UTXO — to this output.
+    tx.addOutputAddress(args.destinations.buyerReceiveAddress, BigInt(catOutputSats), scureNetwork);
     // Output 1: seller payment. Value is `priceSats + sellerInput.value` so the
     // seller is made whole on WHATEVER they contribute via input 0 (any size,
     // not just 546); net to seller is exactly priceSats.
     tx.addOutputAddress(args.destinations.sellerPaymentAddress, BigInt(args.priceSats + args.sellerInput.value), scureNetwork);
-    // Output 2: buyer change when above dust. With output 1 = priceSats +
-    // sellerInput.value, the seller's input passes straight back to the seller,
-    // so the buyer funds exactly the cat output (postage) + priceSats + fee,
-    // independent of the cat UTXO's size.
-    const obligation = args.priceSats + postageSats + args.feeSats;
+    // Output 2: buyer change when above dust. Output 0 = sellerInput.value and
+    // output 1 = priceSats + sellerInput.value; the seller's input (V) passes
+    // straight back to the seller, so the buyer funds exactly the cat output (V)
+    // + priceSats + fee = priceSats + V + fee (ord parity: amount + V + fee).
+    const obligation = args.priceSats + catOutputSats + args.feeSats;
     const changeSats = buyerInputTotalSats - obligation;
     if (changeSats < 0) {
-        throw new Error('Buyer inputs do not cover priceSats + postage + fee');
+        throw new Error('Buyer inputs do not cover priceSats + cat UTXO value + fee');
     }
     // Per-address-type dust floor for the buyer's change output. 546
     // is the conservative cross-type floor (taproot 330, segwit 294,
@@ -6480,7 +6485,7 @@ class Cat21CreateOfferOrchestrator {
     targetCat = signal(null, ...(ngDevMode ? [{ debugName: "targetCat" }] : []));
     /** Where the seller wants payment (their own address; usually the seller's payment address). */
     sellerPaymentAddress = signal(null, ...(ngDevMode ? [{ debugName: "sellerPaymentAddress" }] : []));
-    /** Sats the buyer offers (this is the "ask" the seller's eventual payout output carries — `priceSats + CAT21_POSTAGE_SATS`). */
+    /** Sats the buyer offers (net to seller). The seller's payout output carries `priceSats + sellerInput.value` (ord parity); the seller nets exactly priceSats. */
     priceSats = signal(null, ...(ngDevMode ? [{ debugName: "priceSats" }] : []));
     /** Where the cat lands after the seller signs + broadcasts. Default = connected wallet's ordinals address. */
     buyerReceiveAddress = signal(null, ...(ngDevMode ? [{ debugName: "buyerReceiveAddress" }] : []));
@@ -6747,14 +6752,19 @@ class Cat21CreateOfferOrchestrator {
         const target = this.targetCat();
         const sellerAddress = this.sellerPaymentAddress();
         const buyerReceive = this.buyerReceiveAddress();
-        if (!wallet || !priceSats || !feeRate || fundingUtxos.length === 0) {
+        // The target cat is required up front: its REAL UTXO value sizes output 0
+        // (ord parity: the whole cat UTXO goes to the buyer) and therefore drives
+        // the buyer's funding requirement.
+        if (!wallet || !priceSats || !feeRate || fundingUtxos.length === 0
+            || !target || !sellerAddress || !buyerReceive) {
             return { simulation: null, insufficient: false };
         }
-        // Buyer must cover: priceSats (to seller) + postage (their own
-        // return, 546) + fee. The cat UTXO contributes 546 sats but flows
-        // through to the seller in output 1 (priceSats + postage), so it
-        // doesn't reduce the buyer's funding requirement.
-        const targetSpend = priceSats + CAT21_POSTAGE_SATS + Math.ceil(feeRate * 220); // ~220 vB ceiling for offer
+        // Buyer must cover: priceSats (net to seller) + the cat UTXO's REAL value
+        // (output 0, the whole UTXO sent to the buyer, ord parity) + fee. The
+        // seller's input (V) flows back to the seller in output 1 (priceSats + V),
+        // but the buyer funds output 0 at that same size V, so V does NOT cancel:
+        // the requirement is priceSats + V + fee.
+        const targetSpend = priceSats + target.value + Math.ceil(feeRate * 220); // ~220 vB ceiling for offer
         // Buyer's explicit pick wins when still in the list AND covers.
         // Fallback to auto-pick for the pre-picker path.
         const selectedStillPresent = selected
@@ -6770,27 +6780,22 @@ class Cat21CreateOfferOrchestrator {
             return { simulation: null, insufficient: true };
         }
         try {
-            if (!target || !sellerAddress || !buyerReceive) {
-                // Form not complete — return sim only when all inputs are present.
-                return { simulation: null, insufficient: false };
-            }
             const { vsize, finalFeeSats } = twoPassFeeSimulation({
                 simulate: (feeSats) => this.simulateOffer(wallet, target, sellerAddress, priceSats, buyerReceive, pick, feeSats),
                 feeRatePerVbyte: feeRate,
             });
-            const totalIn = pick.value + CAT21_POSTAGE_SATS;
-            const requiredOut = (priceSats + CAT21_POSTAGE_SATS) + CAT21_POSTAGE_SATS + finalFeeSats; // seller-pay + cat-postage-to-buyer + fee
-            // The pre-pick used a 220 vB fee ceiling; twoPassFeeSimulation
-            // may return a higher `finalFeeSats` for wider inputs (multi-
-            // input P2SH-P2WPKH, legacy). If the real total-in doesn't
-            // cover the real requirement, surface insufficient EXPLICITLY
-            // rather than silently clamping change to 0 and letting the
-            // build step throw at sign time. The UI's "insufficient"
+            // Buyer funds priceSats + cat value (output 0, size V) + fee. The
+            // pre-pick used a 220 vB fee ceiling; twoPassFeeSimulation may return a
+            // higher `finalFeeSats` for wider inputs (multi-input P2SH-P2WPKH,
+            // legacy). If the pick no longer covers the real requirement, surface
+            // insufficient EXPLICITLY rather than silently clamping change to 0 and
+            // letting the build step throw at sign time. The UI's "insufficient"
             // branch renders a clear message; the raw-error path did not.
-            if (totalIn < requiredOut) {
+            const requiredBuyerFunding = priceSats + target.value + finalFeeSats;
+            if (pick.value < requiredBuyerFunding) {
                 return { simulation: null, insufficient: true };
             }
-            const changeSats = totalIn - requiredOut;
+            const changeSats = pick.value - requiredBuyerFunding;
             return {
                 simulation: {
                     vsize,

@@ -217,7 +217,7 @@ valid cat — a bug, not a rule.**
 | Transfer INPUT 0 (cat UTXO coming in) | **any size** — read the real value |
 | Transfer output 0 (cat UTXO we create) | 546 sats (our convention); surplus → sender change |
 | Offer INPUT 0 (seller's cat UTXO) | **any size** — read the real value |
-| Offer output 0 (cat we send to buyer) | 546 sats (our convention) |
+| Offer output 0 (cat we send to buyer) | **= sellerInput.value** — preserve the whole UTXO (ord `wallet offer create` parity); NOT 546 |
 | Offer output 1 (seller's payment) | `priceSats + sellerInput.value` — seller made whole on WHATEVER they contribute; nets exactly `priceSats` |
 
 **Why 546 for the outputs WE create**: 546 is the conservative
@@ -258,7 +258,7 @@ the first 546 sats — including the cat's first sat — to output 0.
 **Where the OUTPUT convention lives** (546 is created here, never required of inputs):
 - `cat21-mint/cat21-mint.helper.ts`: mint output 0 = 546.
 - `cat21-transfer/cat21-transfer.helper.ts`: transfer output 0 = 546; input any size.
-- `cat21-offer/cat21-offer.helper.ts`: offer output 0 = 546; input any size; output 1 = `priceSats + sellerInput.value`; validator nets `output1 - sellerInputValue` and gates output 0 on the per-address dust floor (NOT 546) so stock-ord offers with real-postage output 0 validate.
+- `cat21-offer/cat21-offer.helper.ts`: offer output 0 = `sellerInput.value` (preserve the whole cat UTXO, ord `wallet offer create` parity — NOT 546); input any size; output 1 = `priceSats + sellerInput.value`; validator nets `output1 - sellerInputValue` and gates output 0 on the per-address dust floor (NOT 546) so stock-ord offers with real-postage output 0 validate. Proven at 546/3000/9000/30000 in `e2e/regtest/offer-ord-parity-sizes.spec.ts` against live `ord wallet offer create`.
 - All builders share `CAT21_POSTAGE_SATS = 546` for the OUTPUTS they create.
 
 The 546-outputs are byte-parity with ord's `wallet offer create` / `wallet

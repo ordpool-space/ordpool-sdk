@@ -24,7 +24,6 @@ import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { CatOutpoint } from '../cat21-share/cat-outpoint';
 import { Network, toScureNetwork } from '../network';
 import { bitcoinNetwork } from '../network-token';
@@ -121,7 +120,7 @@ export class Cat21CreateOfferOrchestrator {
   /** Where the seller wants payment (their own address; usually the seller's payment address). */
   readonly sellerPaymentAddress = signal<PaymentAddress | null>(null);
 
-  /** Sats the buyer offers (this is the "ask" the seller's eventual payout output carries — `priceSats + CAT21_POSTAGE_SATS`). */
+  /** Sats the buyer offers (net to seller). The seller's payout output carries `priceSats + sellerInput.value` (ord parity); the seller nets exactly priceSats. */
   readonly priceSats = signal<number | null>(null);
 
   /** Where the cat lands after the seller signs + broadcasts. Default = connected wallet's ordinals address. */
@@ -440,14 +439,21 @@ export class Cat21CreateOfferOrchestrator {
     const target = this.targetCat();
     const sellerAddress = this.sellerPaymentAddress();
     const buyerReceive = this.buyerReceiveAddress();
-    if (!wallet || !priceSats || !feeRate || fundingUtxos.length === 0) {
+    // The target cat is required up front: its REAL UTXO value sizes output 0
+    // (ord parity: the whole cat UTXO goes to the buyer) and therefore drives
+    // the buyer's funding requirement.
+    if (
+      !wallet || !priceSats || !feeRate || fundingUtxos.length === 0
+      || !target || !sellerAddress || !buyerReceive
+    ) {
       return { simulation: null, insufficient: false };
     }
-    // Buyer must cover: priceSats (to seller) + postage (their own
-    // return, 546) + fee. The cat UTXO contributes 546 sats but flows
-    // through to the seller in output 1 (priceSats + postage), so it
-    // doesn't reduce the buyer's funding requirement.
-    const targetSpend = priceSats + CAT21_POSTAGE_SATS + Math.ceil(feeRate * 220); // ~220 vB ceiling for offer
+    // Buyer must cover: priceSats (net to seller) + the cat UTXO's REAL value
+    // (output 0, the whole UTXO sent to the buyer, ord parity) + fee. The
+    // seller's input (V) flows back to the seller in output 1 (priceSats + V),
+    // but the buyer funds output 0 at that same size V, so V does NOT cancel:
+    // the requirement is priceSats + V + fee.
+    const targetSpend = priceSats + target.value + Math.ceil(feeRate * 220); // ~220 vB ceiling for offer
     // Buyer's explicit pick wins when still in the list AND covers.
     // Fallback to auto-pick for the pre-picker path.
     const selectedStillPresent = selected
@@ -464,28 +470,23 @@ export class Cat21CreateOfferOrchestrator {
     }
 
     try {
-      if (!target || !sellerAddress || !buyerReceive) {
-        // Form not complete — return sim only when all inputs are present.
-        return { simulation: null, insufficient: false };
-      }
       const { vsize, finalFeeSats } = twoPassFeeSimulation({
         simulate: (feeSats) =>
           this.simulateOffer(wallet, target, sellerAddress, priceSats, buyerReceive, pick, feeSats),
         feeRatePerVbyte: feeRate,
       });
-      const totalIn = pick.value + CAT21_POSTAGE_SATS;
-      const requiredOut = (priceSats + CAT21_POSTAGE_SATS) + CAT21_POSTAGE_SATS + finalFeeSats; // seller-pay + cat-postage-to-buyer + fee
-      // The pre-pick used a 220 vB fee ceiling; twoPassFeeSimulation
-      // may return a higher `finalFeeSats` for wider inputs (multi-
-      // input P2SH-P2WPKH, legacy). If the real total-in doesn't
-      // cover the real requirement, surface insufficient EXPLICITLY
-      // rather than silently clamping change to 0 and letting the
-      // build step throw at sign time. The UI's "insufficient"
+      // Buyer funds priceSats + cat value (output 0, size V) + fee. The
+      // pre-pick used a 220 vB fee ceiling; twoPassFeeSimulation may return a
+      // higher `finalFeeSats` for wider inputs (multi-input P2SH-P2WPKH,
+      // legacy). If the pick no longer covers the real requirement, surface
+      // insufficient EXPLICITLY rather than silently clamping change to 0 and
+      // letting the build step throw at sign time. The UI's "insufficient"
       // branch renders a clear message; the raw-error path did not.
-      if (totalIn < requiredOut) {
+      const requiredBuyerFunding = priceSats + target.value + finalFeeSats;
+      if (pick.value < requiredBuyerFunding) {
         return { simulation: null, insufficient: true };
       }
-      const changeSats = totalIn - requiredOut;
+      const changeSats = pick.value - requiredBuyerFunding;
       return {
         simulation: {
           vsize,
