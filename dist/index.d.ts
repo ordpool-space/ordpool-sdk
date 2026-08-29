@@ -2803,6 +2803,7 @@ declare class Cat21CreateOfferOrchestrator {
     private wallet;
     private cat21;
     private network;
+    private fundingRec;
     /** Which cat the buyer wants to bid on. */
     readonly targetCat: _angular_core.WritableSignal<BuyOfferTargetCat>;
     /** Where the seller wants payment (their own address; usually the seller's payment address). */
@@ -2813,12 +2814,14 @@ declare class Cat21CreateOfferOrchestrator {
     readonly buyerReceiveAddress: _angular_core.WritableSignal<string>;
     readonly feeRate: _angular_core.WritableSignal<number>;
     /**
-     * User's explicit funding-UTXO pick from the buyer-side picker.
-     * When null the orchestrator auto-picks the best-fit covering UTXO
-     * (smallest that covers — ord's `select_cardinal_utxo` policy).
-     * Set from the UI so the buyer can reject an asset-carrying UTXO
-     * (inscription / rune / cat / rare sat) the auto-picker would
-     * happily spend.
+     * User's explicit funding-UTXO pick from the buyer-side picker (expert
+     * mode). When null the orchestrator uses the SAFE auto-recommendation
+     * (`buyerFundingRecommendation$`): a content-clean best-fit covering UTXO
+     * when one exists (`status: 'auto'`, invisible default), otherwise no
+     * auto-pick (`status: 'expert-required'` — the UI surfaces the picker so
+     * the buyer consciously spends an asset-carrying coin). Setting this here is
+     * the expert-mode override: honoured even for an asset coin the buyer chose
+     * deliberately.
      */
     readonly selectedFundingUtxo: _angular_core.WritableSignal<TxnOutput>;
     private lastWalletAddress;
@@ -2858,8 +2861,29 @@ declare class Cat21CreateOfferOrchestrator {
     readonly buyerFundingUtxos$: Observable<TxnOutput[]>;
     readonly recommendedFees$: Observable<RecommendedFees>;
     /**
-     * Two-pass fee simulation against the largest viable buyer UTXO.
-     * Re-emits when target / price / funding / feeRate change.
+     * The buyer's funding target the coin-selection safety check must cover:
+     * `price + cat.value + fee` (ord parity — the buyer funds the seller payout,
+     * the whole cat UTXO sent back to the buyer at output 0, and the miner fee).
+     * A generous ~220 vB fee ceiling; the two-pass simulation tightens the real
+     * fee later. Null until price + target cat + fee rate are all set.
+     */
+    private readonly fundingTarget$;
+    /**
+     * SAFE-by-default coin-selection recommendation for the buyer's funding
+     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
+     * `auto` (a content-clean coin covers → auto-selected, no picker),
+     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
+     * picker with the recommended coin pre-highlighted), `scanning`, or
+     * `insufficient`. The UI branches on `.status`; the invisible default is
+     * `auto`.
+     */
+    readonly buyerFundingRecommendation$: Observable<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>;
+    /**
+     * Two-pass fee simulation against the SAFE recommended buyer UTXO.
+     * Re-emits when target / price / funding recommendation / feeRate change. The
+     * funding coin comes from the buyer's expert-mode pick when set, else the
+     * safe auto-recommendation (only when `status: 'auto'`) — never a
+     * content-unaware value-only pick.
      */
     readonly simulation$: Observable<CreateOfferSimulationOutcome>;
     setTargetCat(cat: BuyOfferTargetCat | null): void;
@@ -2901,8 +2925,8 @@ declare class Cat21CreateOfferOrchestrator {
      * ordinals address.
      */
     reset(): void;
-    private lastFundingUtxosSnapshot;
-    private readonly fundingUtxosSnapshotSub;
+    private lastRecommendationSnapshot;
+    private readonly recommendationSnapshotSub;
     private resetFormFields;
     private computeSimulation;
     private simulateOffer;

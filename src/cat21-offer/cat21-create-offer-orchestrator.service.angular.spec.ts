@@ -2,8 +2,10 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { Injector, runInInjectionContext } from '@angular/core';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { BehaviorSubject, Subject, firstValueFrom, of, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, combineLatest, firstValueFrom, map, of, throwError } from 'rxjs';
 
+import { FundingRecommendationService } from '../cat21-fee/funding-recommendation.service';
+import { recommendFunding } from '../cat21-fee/funding-safety';
 import { Network } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { storage } from '../storage-like';
@@ -58,6 +60,9 @@ const target = (over: Partial<BuyOfferTargetCat> = {}): BuyOfferTargetCat => ({
 const buildOrchestrator = (opts: {
   utxos?: TxnOutput[];
   utxosError?: Error;
+  // Outpoints (`txid:vout`) to mark as asset-bearing so the recommendation
+  // returns `expert-required` instead of `auto`. Everything else is clean.
+  assetOutpoints?: Set<string>;
 } = {}) => {
   const walletSubject = new BehaviorSubject<WalletInfo | null>(null);
   const cat21 = {
@@ -68,6 +73,28 @@ const buildOrchestrator = (opts: {
     ),
     recommendedFees$: new Subject<RecommendedFees>(),
   };
+  // Scanner-free stand-in for FundingRecommendationService: marks the given
+  // outpoints as asset-bearing (everything else clean), so `auto` vs
+  // `expert-required` branching runs through the real orchestrator. Content
+  // detection itself is proven in funding-recommendation.service.angular.spec.ts.
+  const assetOutpoints = opts.assetOutpoints ?? new Set<string>();
+  const fundingRec = {
+    recommend: (
+      utxos$: Observable<ReadonlyArray<{ txid: string; vout: number; value: number }>>,
+      target$: Observable<number | null>,
+    ) =>
+      combineLatest([utxos$, target$]).pipe(
+        map(([utxos, target]) =>
+          recommendFunding(
+            utxos.map((u) => ({
+              ...u,
+              bucket: assetOutpoints.has(`${u.txid}:${u.vout}`) ? ('assets' as const) : ('clean' as const),
+            })),
+            target ?? 0,
+          ),
+        ),
+      ),
+  } as unknown as FundingRecommendationService;
   const injector = Injector.create({
     providers: [
       { provide: WalletService, useValue: { connectedWallet$: walletSubject } },
@@ -75,6 +102,7 @@ const buildOrchestrator = (opts: {
       { provide: bitcoinNetwork, useValue: Network.Mainnet },
       { provide: cat21Config, useValue: { mempoolApiUrl: 'https://mempool.test', cat21ApiUrl: 'https://api.cat21.test' } },
       { provide: storage, useValue: { getValue: () => null, setValue: () => {}, removeItem: () => {} } },
+      { provide: FundingRecommendationService, useValue: fundingRec },
     ],
   });
   const orchestrator = runInInjectionContext(injector, () => new Cat21CreateOfferOrchestrator());
@@ -305,6 +333,84 @@ describe('Cat21CreateOfferOrchestrator', () => {
       const outcome = await firstValueFrom(orchestrator.simulation$);
       expect(outcome.insufficient).toBe(false);
       expect(outcome.simulation).toBeNull();
+    });
+  });
+
+  describe('safe-auto coin selection (the vision)', () => {
+    const coin = (txid: string, value: number): TxnOutput => ({
+      txid: txid.repeat(64).slice(0, 64),
+      vout: 0,
+      value,
+      status: { confirmed: true, block_height: 800_000, block_hash: '', block_time: 0 },
+    });
+    const armOffer = (orchestrator: Cat21CreateOfferOrchestrator, walletSubject: BehaviorSubject<WalletInfo | null>) => {
+      walletSubject.next(wallet());
+      orchestrator.setTargetCat(target());
+      orchestrator.setSellerPaymentAddress(SELLER_PAYMENT);
+      orchestrator.setPriceSats(21_000);
+      orchestrator.setFeeRate(5);
+    };
+
+    it('AUTO (invisible default): a clean covering coin drives the simulation, no picker', async () => {
+      const clean = coin('c', 100_000);
+      const { orchestrator, walletSubject } = buildOrchestrator({ utxos: [clean] });
+      armOffer(orchestrator, walletSubject);
+
+      const rec = await firstValueFrom(orchestrator.buyerFundingRecommendation$);
+      expect(rec.status).toBe('auto');
+      expect(rec.recommended?.txid).toBe(clean.txid);
+
+      const outcome = await firstValueFrom(orchestrator.simulation$);
+      expect(outcome.insufficient).toBe(false);
+      expect(outcome.simulation?.buyerFundingUtxo.txid).toBe(clean.txid);
+    });
+
+    it('EXPERT-REQUIRED: only an asset coin covers -> NO auto-pick (simulation null, NOT insufficient)', async () => {
+      const assetCoin = coin('d', 100_000);
+      const { orchestrator, walletSubject } = buildOrchestrator({
+        utxos: [assetCoin],
+        assetOutpoints: new Set([`${assetCoin.txid}:${assetCoin.vout}`]),
+      });
+      armOffer(orchestrator, walletSubject);
+
+      const rec = await firstValueFrom(orchestrator.buyerFundingRecommendation$);
+      expect(rec.status).toBe('expert-required');
+      expect(rec.recommended?.bucket).toBe('assets');
+
+      const outcome = await firstValueFrom(orchestrator.simulation$);
+      expect(outcome.simulation).toBeNull();
+      expect(outcome.insufficient).toBe(false); // funds exist; they're just valuable
+    });
+
+    it('EXPERT OVERRIDE: an explicit pick of the asset coin is honoured', async () => {
+      const assetCoin = coin('d', 100_000);
+      const { orchestrator, walletSubject } = buildOrchestrator({
+        utxos: [assetCoin],
+        assetOutpoints: new Set([`${assetCoin.txid}:${assetCoin.vout}`]),
+      });
+      armOffer(orchestrator, walletSubject);
+      orchestrator.setSelectedFundingUtxo(assetCoin);
+
+      const outcome = await firstValueFrom(orchestrator.simulation$);
+      expect(outcome.insufficient).toBe(false);
+      expect(outcome.simulation?.buyerFundingUtxo.txid).toBe(assetCoin.txid);
+    });
+
+    it('never auto-spends the tighter ASSET coin when a clean coin also covers', async () => {
+      const assetTight = coin('d', 22_000); // tightest fit over (21000 + 546 + fee), but assets
+      const cleanLoose = coin('c', 100_000);
+      const { orchestrator, walletSubject } = buildOrchestrator({
+        utxos: [assetTight, cleanLoose],
+        assetOutpoints: new Set([`${assetTight.txid}:${assetTight.vout}`]),
+      });
+      armOffer(orchestrator, walletSubject);
+
+      const rec = await firstValueFrom(orchestrator.buyerFundingRecommendation$);
+      expect(rec.status).toBe('auto');
+      expect(rec.recommended?.txid).toBe(cleanLoose.txid);
+
+      const outcome = await firstValueFrom(orchestrator.simulation$);
+      expect(outcome.simulation?.buyerFundingUtxo.txid).toBe(cleanLoose.txid);
     });
   });
 

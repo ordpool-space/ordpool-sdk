@@ -16,12 +16,13 @@ import {
   throwError,
 } from 'rxjs';
 
-import {
-  pickSmallestFundingUtxoThatCovers,
-  type FundingUtxo,
-} from '../cat21-fee/coin-selection.helper';
 import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
+import { FundingRecommendationService } from '../cat21-fee/funding-recommendation.service';
+import {
+  AnnotatedFundingUtxo,
+  FundingRecommendation,
+} from '../cat21-fee/funding-safety';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
 import { CatOutpoint } from '../cat21-share/cat-outpoint';
@@ -111,6 +112,7 @@ export class Cat21CreateOfferOrchestrator {
   private wallet = inject(WalletService);
   private cat21 = inject(Cat21Service);
   private network = inject(bitcoinNetwork);
+  private fundingRec = inject(FundingRecommendationService);
 
   // --- Writable inputs ----------------------------------------------------
 
@@ -129,12 +131,14 @@ export class Cat21CreateOfferOrchestrator {
   readonly feeRate = signal<number | null>(null);
 
   /**
-   * User's explicit funding-UTXO pick from the buyer-side picker.
-   * When null the orchestrator auto-picks the best-fit covering UTXO
-   * (smallest that covers — ord's `select_cardinal_utxo` policy).
-   * Set from the UI so the buyer can reject an asset-carrying UTXO
-   * (inscription / rune / cat / rare sat) the auto-picker would
-   * happily spend.
+   * User's explicit funding-UTXO pick from the buyer-side picker (expert
+   * mode). When null the orchestrator uses the SAFE auto-recommendation
+   * (`buyerFundingRecommendation$`): a content-clean best-fit covering UTXO
+   * when one exists (`status: 'auto'`, invisible default), otherwise no
+   * auto-pick (`status: 'expert-required'` — the UI surfaces the picker so
+   * the buyer consciously spends an asset-carrying coin). Setting this here is
+   * the expert-mode override: honoured even for an asset coin the buyer chose
+   * deliberately.
    */
   readonly selectedFundingUtxo = signal<TxnOutput | null>(null);
 
@@ -234,11 +238,48 @@ export class Cat21CreateOfferOrchestrator {
   readonly recommendedFees$: Observable<RecommendedFees> = this.cat21.recommendedFees$;
 
   /**
-   * Two-pass fee simulation against the largest viable buyer UTXO.
-   * Re-emits when target / price / funding / feeRate change.
+   * The buyer's funding target the coin-selection safety check must cover:
+   * `price + cat.value + fee` (ord parity — the buyer funds the seller payout,
+   * the whole cat UTXO sent back to the buyer at output 0, and the miner fee).
+   * A generous ~220 vB fee ceiling; the two-pass simulation tightens the real
+   * fee later. Null until price + target cat + fee rate are all set.
+   */
+  private readonly fundingTarget$: Observable<number | null> = combineLatest([
+    this.priceSatsSubject,
+    this.targetCatSubject,
+    this.feeRateSubject,
+  ]).pipe(
+    map(([price, target, rate]) =>
+      price && price > 0 && target && rate && rate > 0
+        ? price + target.value + Math.ceil(rate * 220)
+        : null,
+    ),
+  );
+
+  /**
+   * SAFE-by-default coin-selection recommendation for the buyer's funding
+   * (shared brain, identical across mint / transfer / offer / inscribe). Emits
+   * `auto` (a content-clean coin covers → auto-selected, no picker),
+   * `expert-required` (only asset-bearing coins cover → the UI surfaces the
+   * picker with the recommended coin pre-highlighted), `scanning`, or
+   * `insufficient`. The UI branches on `.status`; the invisible default is
+   * `auto`.
+   */
+  readonly buyerFundingRecommendation$: Observable<
+    FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>
+  > = this.fundingRec
+    .recommend<TxnOutput>(this.buyerFundingUtxos$, this.fundingTarget$)
+    .pipe(shareReplay({ bufferSize: 1, refCount: true }));
+
+  /**
+   * Two-pass fee simulation against the SAFE recommended buyer UTXO.
+   * Re-emits when target / price / funding recommendation / feeRate change. The
+   * funding coin comes from the buyer's expert-mode pick when set, else the
+   * safe auto-recommendation (only when `status: 'auto'`) — never a
+   * content-unaware value-only pick.
    */
   readonly simulation$: Observable<CreateOfferSimulationOutcome> = combineLatest([
-    this.buyerFundingUtxos$,
+    this.buyerFundingRecommendation$,
     this.wallet.connectedWallet$.pipe(startWith(null as WalletInfo | null)),
     this.priceSatsSubject,
     this.feeRateSubject,
@@ -250,8 +291,8 @@ export class Cat21CreateOfferOrchestrator {
     // computeSimulation reads target/seller/buyerReceive from their signals
     // (written in lockstep with the subjects above); the extra sources are
     // present to RE-FIRE the stream when any of them change.
-    map(([fundingUtxos, wallet, priceSats, feeRate, selected]) =>
-      this.computeSimulation(fundingUtxos, wallet, priceSats, feeRate, selected),
+    map(([recommendation, wallet, priceSats, feeRate, selected]) =>
+      this.computeSimulation(recommendation, wallet, priceSats, feeRate, selected),
     ),
     shareReplay({ bufferSize: 1, refCount: true }),
   );
@@ -328,7 +369,7 @@ export class Cat21CreateOfferOrchestrator {
     if (!feeRate) return throwError(() => new Error('No fee rate set'));
 
     const sim = this.computeSimulation(
-      this.lastFundingUtxosSnapshot,
+      this.lastRecommendationSnapshot,
       wallet,
       priceSats,
       feeRate,
@@ -411,10 +452,14 @@ export class Cat21CreateOfferOrchestrator {
 
   // --- Internals ----------------------------------------------------------
 
-  private lastFundingUtxosSnapshot: TxnOutput[] = [];
+  private lastRecommendationSnapshot: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
+    status: 'insufficient',
+    recommended: null,
+    candidates: [],
+  };
 
-  private readonly fundingUtxosSnapshotSub = this.buyerFundingUtxos$.subscribe((u) => {
-    this.lastFundingUtxosSnapshot = u;
+  private readonly recommendationSnapshotSub = this.buyerFundingRecommendation$.subscribe((r) => {
+    this.lastRecommendationSnapshot = r;
   });
 
   private resetFormFields(): void {
@@ -431,7 +476,7 @@ export class Cat21CreateOfferOrchestrator {
   }
 
   private computeSimulation(
-    fundingUtxos: TxnOutput[],
+    recommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>,
     wallet: WalletInfo | null,
     priceSats: number | null,
     feeRate: number | null,
@@ -444,7 +489,7 @@ export class Cat21CreateOfferOrchestrator {
     // (ord parity: the whole cat UTXO goes to the buyer) and therefore drives
     // the buyer's funding requirement.
     if (
-      !wallet || !priceSats || !feeRate || fundingUtxos.length === 0
+      !wallet || !priceSats || !feeRate
       || !target || !sellerAddress || !buyerReceive
     ) {
       return { simulation: null, insufficient: false };
@@ -455,19 +500,24 @@ export class Cat21CreateOfferOrchestrator {
     // but the buyer funds output 0 at that same size V, so V does NOT cancel:
     // the requirement is priceSats + V + fee.
     const targetSpend = priceSats + target.value + Math.ceil(feeRate * 220); // ~220 vB ceiling for offer
-    // Buyer's explicit pick wins when still in the list AND covers.
-    // Fallback to auto-pick for the pre-picker path.
+    // Expert-mode override: the buyer's explicit pick wins when it still covers
+    // the target, even if it carries assets (they chose it deliberately).
+    // Otherwise use the SAFE auto-recommendation — but ONLY when a content-clean
+    // coin covers (`status: 'auto'`). When only asset coins cover
+    // (`expert-required`) or a scan is still resolving (`scanning`), there is no
+    // safe auto-pick: the simulation stays null and the UI surfaces the picker
+    // (via `buyerFundingRecommendation$`). Never auto-spend a valuable coin.
     const selectedStillPresent = selected
-      ? fundingUtxos.find((u) => u.txid === selected.txid && u.vout === selected.vout)
+      ? recommendation.candidates.find((u) => u.txid === selected.txid && u.vout === selected.vout)
       : undefined;
-    const pick = selectedStillPresent && selectedStillPresent.value >= targetSpend
-      ? selectedStillPresent
-      : pickSmallestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
-          utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
-          targetSpendSats: targetSpend,
-        });
+    const pick: TxnOutput | null =
+      selectedStillPresent && selectedStillPresent.value >= targetSpend
+        ? selectedStillPresent
+        : recommendation.status === 'auto'
+          ? recommendation.recommended
+          : null;
     if (!pick) {
-      return { simulation: null, insufficient: true };
+      return { simulation: null, insufficient: recommendation.status === 'insufficient' };
     }
 
     try {
