@@ -51,6 +51,7 @@
     "src/cat21-fee/dummy-keypair.ts",
     "src/cat21-fee/compute-psbt-vsize.helper.ts",
     "src/cat21-fee/min-relay-fee.ts",
+    "src/cat21-fee/ord-coin-select.ts",
     "src/cat21-transfer/cat21-transfer.helper.ts",
     "src/cat21-transfer/cat21-transfer.types.ts",
     "src/cat21-transfer/cat21-transfer-input-adapter.ts",
