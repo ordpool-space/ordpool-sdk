@@ -481,6 +481,31 @@ export function ordCreateOffer(
   return JSON.parse(stdout) as OrdOfferCreateOutput;
 }
 
+export interface OrdSendOutput {
+  txid: string;
+  psbt: string; // base64
+  fee: number;
+}
+
+/**
+ * Reference `ord wallet send` (the stock transfer). `--dry-run` returns the
+ * constructed PSBT without broadcasting, for byte-comparison against the SDK's
+ * transfer. `postageSats` maps to ord's `--postage` (default 10000 when
+ * omitted). The wallet must OWN the inscription being sent.
+ */
+export function ordWalletSend(
+  recipientAddress: string,
+  inscriptionId: string,
+  feeRateSatPerVb: number,
+  postageSats?: number,
+  wallet = 'ord',
+): OrdSendOutput {
+  const args = ['send', '--dry-run', '--fee-rate', String(feeRateSatPerVb)];
+  if (postageSats !== undefined) args.push('--postage', `${postageSats}sat`);
+  args.push(recipientAddress, inscriptionId);
+  return JSON.parse(ordWalletCli(wallet, ...args)) as OrdSendOutput;
+}
+
 export interface OrdAddressResponse {
   address: string;
 }
