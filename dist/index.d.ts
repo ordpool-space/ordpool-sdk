@@ -1941,6 +1941,116 @@ declare class Cat21ApiService {
 }
 
 /**
+ * Coin selection for CAT-21 flows. cat21.space lets the user pick
+ * (Cat21MintOrchestrator simulates against every UTXO); cat21-wallet's
+ * autonomous flows pick via the SDK.
+ *
+ * Two strategies:
+ *   - `pickLargestFundingUtxoThatCovers` — **default**, matches the
+ *     historic policy (see `findAutoPickCandidate`).
+ *   - `pickSmallestFundingUtxoThatCovers` — opt-in, for strategies
+ *     that want to preserve the largest balance (high-volume bot
+ *     spending many small mints).
+ *
+ * Both pure. Caller MUST exclude cat-bearing UTXOs from the input
+ * list — that filter is not this helper's job.
+ */
+interface FundingUtxo {
+    txid: string;
+    vout: number;
+    /** Value in sats. */
+    value: number;
+}
+interface PickFundingUtxoArgs<T extends FundingUtxo> {
+    utxos: ReadonlyArray<T>;
+    /** Minimum value the picked UTXO must cover. */
+    targetSpendSats: number;
+}
+declare function pickLargestFundingUtxoThatCovers<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T | null;
+/**
+ * **DEFAULT strategy (ord-aligned best-fit).** Returns the UTXO with the
+ * SMALLEST value that covers `targetSpendSats`; `null` when none is large
+ * enough. This is ord's own `select_cardinal_utxo` policy (prefer the
+ * smallest covering UTXO), so the transfer / offer flows that use it stay
+ * byte-aligned with `ord wallet send` — verified in
+ * `e2e/regtest/transfer-ord-parity.spec.ts`. It also minimises change
+ * (tighter than largest-first). See `selectOrdParityFunding` in
+ * `ord-coin-select.ts` for the full multi-input ord port.
+ */
+declare function pickSmallestFundingUtxoThatCovers<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T | null;
+/**
+ * Returns ALL UTXOs that can cover `targetSpendSats`, sorted
+ * largest-first (matches the default pick strategy). Useful when the
+ * caller wants to enumerate options (e.g. cat21.space's per-UTXO
+ * fee-simulation grid where the user picks from the list).
+ */
+declare function listFundingUtxosThatCover<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T[];
+
+/**
+ * Safe-by-default funding selection — the shared brain behind the coin-selection
+ * UX vision for EVERY cat action (mint, transfer, offer, inscribe):
+ *
+ *   1. Comfortable AUTOMATIC selection by default — the user shouldn't see a
+ *      coin picker to inscribe or transfer.
+ *   2. But never auto-spend a valuable UTXO (one carrying an inscription, rune,
+ *      cat, or rare sat). If only valuable UTXOs can pay, drop to EXPERT MODE
+ *      and ask.
+ *   3. Expert mode carries a RECOMMENDATION (the best-fit coin) but lets the
+ *      user pick a different one.
+ *
+ * This is pure: it takes candidates already annotated with their content
+ * `bucket` (from `UtxoContentScanner` / `classifyOutpoint`) and returns what to
+ * do. The Angular orchestrators run the scan, then call this. The "by value"
+ * pick is ord's best-fit `selectCardinalUtxo`, so an auto-selected clean coin
+ * stays byte-aligned with ord.
+ */
+
+/** A funding UTXO annotated with its content classification. */
+interface AnnotatedFundingUtxo extends FundingUtxo {
+    /**
+     * Content bucket from the scanner: `clean` = safe to spend, `assets` =
+     * carries an inscription / rune / cat / rare sat (spending burns it),
+     * `unscanned` / `scanning` = not known yet, `failed` = scan errored
+     * (content unknown, treat as unsafe to auto-spend).
+     */
+    bucket: UtxoScanBucket;
+}
+/**
+ * What the caller should do about funding:
+ *   - `auto`             — a CLEAN UTXO covers the spend; `recommended` is
+ *                          auto-selected. No coin picker needed (the default).
+ *   - `expert-required`  — no clean UTXO covers, but an asset-bearing (or
+ *                          scan-failed) one does. `recommended` is the best-fit
+ *                          such coin, but the UI MUST confirm / offer the picker
+ *                          before spending it (it would burn content).
+ *   - `scanning`         — a covering candidate hasn't finished scanning; wait
+ *                          for the scan, then re-evaluate. `recommended` null.
+ *   - `insufficient`     — nothing covers the spend. `recommended` null.
+ */
+type FundingRecommendationStatus = 'auto' | 'expert-required' | 'scanning' | 'insufficient';
+interface FundingRecommendation<T extends AnnotatedFundingUtxo = AnnotatedFundingUtxo> {
+    status: FundingRecommendationStatus;
+    /** The coin to use (best-fit). Null for `scanning` / `insufficient`. */
+    recommended: T | null;
+    /** The full annotated candidate list, for the expert-mode picker. */
+    candidates: ReadonlyArray<T>;
+}
+/**
+ * Decide funding for a spend of `targetSpendSats`, safely and automatically.
+ *
+ * Auto-selects the best-fit CLEAN covering UTXO (ord's `select_cardinal_utxo`
+ * restricted to clean candidates). Falls back to `expert-required` only when
+ * every covering candidate carries assets (or its scan failed), so a valuable
+ * UTXO is never auto-spent. Returns `scanning` while a covering candidate's
+ * content is still unknown, and `insufficient` when nothing covers.
+ *
+ * Same result shape for every action, so mint / transfer / offer / inscribe —
+ * and every consumer (cat21.space, cat21-wallet, bots) — get identical
+ * safe-auto + expert-with-recommendation behaviour.
+ */
+declare function recommendFunding<T extends AnnotatedFundingUtxo>(candidates: ReadonlyArray<T>, targetSpendSats: number): FundingRecommendation<T>;
+
+/**
  * One row in the orchestrator's `simulations$` stream. Either:
  * - `insufficient: true` — the UTXO can't cover the recipient amount
  *   (546 sats) + the fee at the current rate. `simulation` is null.
@@ -1980,9 +2090,18 @@ type MintState = 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'e
 declare class Cat21MintOrchestrator {
     private wallet;
     private cat21;
+    private fundingRec;
     /** sat/vB the user picked (from the fee picker or manually). null until set. */
     readonly feeRate: _angular_core.WritableSignal<number>;
-    /** Which UTXO from the list the user picked (auto-set to the largest viable one by default). */
+    /**
+     * Which UTXO the user explicitly picked (expert mode). When null, `mint()`
+     * falls back to the SAFE auto-recommendation (`fundingRecommendation$`): a
+     * content-clean covering UTXO when one exists (`status: 'auto'`, the invisible
+     * comfortable default), otherwise no auto-mint (`status: 'expert-required'` —
+     * the UI must surface the picker so the user consciously mints on an
+     * asset-carrying coin). Setting this is the expert-mode override, honoured
+     * even for an asset coin the user chose deliberately.
+     */
     readonly selectedUtxo: _angular_core.WritableSignal<TxnOutput>;
     private lastWalletAddress;
     private readonly feeRateSubject;
@@ -2015,8 +2134,27 @@ declare class Cat21MintOrchestrator {
     readonly simulations$: Observable<UtxoSimulation[]>;
     /** Pass-through of the SDK's polled fee tiers. */
     readonly recommendedFees$: Observable<RecommendedFees>;
+    /**
+     * The funding target the coin-selection safety check must cover: the fresh
+     * cat's postage (546) + the miner fee (a generous ~200 vB ceiling; the
+     * two-pass simulation tightens the real fee). A mint UTXO must clear this to
+     * be viable. Null until a fee rate is set.
+     */
+    private readonly fundingTarget$;
+    /**
+     * SAFE-by-default coin-selection recommendation for the mint's funding
+     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
+     * `auto` (a content-clean coin covers → auto-selected, no picker),
+     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
+     * picker), `scanning`, or `insufficient`. Degrades to `insufficient` if the
+     * UTXO fetch errors, so a load failure never yields an unsafe auto-mint. The
+     * UI branches on `.status`; the invisible default is `auto`.
+     */
+    readonly fundingRecommendation$: Observable<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>;
+    private lastRecommendationSnapshot;
     constructor();
     private readonly walletChangeSub;
+    private readonly recommendationSnapshotSub;
     setFeeRate(rate: number): void;
     setSelectedUtxo(utxo: TxnOutput | null): void;
     /**
@@ -2215,52 +2353,6 @@ declare function twoPassFeeSimulation<TResult extends {
 }>(args: TwoPassFeeSimulationArgs<TResult>): TwoPassFeeSimulationResult<TResult>;
 
 /**
- * Coin selection for CAT-21 flows. cat21.space lets the user pick
- * (Cat21MintOrchestrator simulates against every UTXO); cat21-wallet's
- * autonomous flows pick via the SDK.
- *
- * Two strategies:
- *   - `pickLargestFundingUtxoThatCovers` — **default**, matches the
- *     historic policy (see `findAutoPickCandidate`).
- *   - `pickSmallestFundingUtxoThatCovers` — opt-in, for strategies
- *     that want to preserve the largest balance (high-volume bot
- *     spending many small mints).
- *
- * Both pure. Caller MUST exclude cat-bearing UTXOs from the input
- * list — that filter is not this helper's job.
- */
-interface FundingUtxo {
-    txid: string;
-    vout: number;
-    /** Value in sats. */
-    value: number;
-}
-interface PickFundingUtxoArgs<T extends FundingUtxo> {
-    utxos: ReadonlyArray<T>;
-    /** Minimum value the picked UTXO must cover. */
-    targetSpendSats: number;
-}
-declare function pickLargestFundingUtxoThatCovers<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T | null;
-/**
- * **DEFAULT strategy (ord-aligned best-fit).** Returns the UTXO with the
- * SMALLEST value that covers `targetSpendSats`; `null` when none is large
- * enough. This is ord's own `select_cardinal_utxo` policy (prefer the
- * smallest covering UTXO), so the transfer / offer flows that use it stay
- * byte-aligned with `ord wallet send` — verified in
- * `e2e/regtest/transfer-ord-parity.spec.ts`. It also minimises change
- * (tighter than largest-first). See `selectOrdParityFunding` in
- * `ord-coin-select.ts` for the full multi-input ord port.
- */
-declare function pickSmallestFundingUtxoThatCovers<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T | null;
-/**
- * Returns ALL UTXOs that can cover `targetSpendSats`, sorted
- * largest-first (matches the default pick strategy). Useful when the
- * caller wants to enumerate options (e.g. cat21.space's per-UTXO
- * fee-simulation grid where the user picks from the list).
- */
-declare function listFundingUtxosThatCover<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T[];
-
-/**
  * Bitcoin Core's default minimum relay fee rate, in sat/vByte.
  *
  * A transaction paying below this rate is rejected by a default-configured
@@ -2389,70 +2481,6 @@ declare function selectOrdParityFunding(args: {
 }): OrdParityFundingResult | {
     error: 'NotEnoughCardinalUtxos';
 };
-
-/**
- * Safe-by-default funding selection — the shared brain behind the coin-selection
- * UX vision for EVERY cat action (mint, transfer, offer, inscribe):
- *
- *   1. Comfortable AUTOMATIC selection by default — the user shouldn't see a
- *      coin picker to inscribe or transfer.
- *   2. But never auto-spend a valuable UTXO (one carrying an inscription, rune,
- *      cat, or rare sat). If only valuable UTXOs can pay, drop to EXPERT MODE
- *      and ask.
- *   3. Expert mode carries a RECOMMENDATION (the best-fit coin) but lets the
- *      user pick a different one.
- *
- * This is pure: it takes candidates already annotated with their content
- * `bucket` (from `UtxoContentScanner` / `classifyOutpoint`) and returns what to
- * do. The Angular orchestrators run the scan, then call this. The "by value"
- * pick is ord's best-fit `selectCardinalUtxo`, so an auto-selected clean coin
- * stays byte-aligned with ord.
- */
-
-/** A funding UTXO annotated with its content classification. */
-interface AnnotatedFundingUtxo extends FundingUtxo {
-    /**
-     * Content bucket from the scanner: `clean` = safe to spend, `assets` =
-     * carries an inscription / rune / cat / rare sat (spending burns it),
-     * `unscanned` / `scanning` = not known yet, `failed` = scan errored
-     * (content unknown, treat as unsafe to auto-spend).
-     */
-    bucket: UtxoScanBucket;
-}
-/**
- * What the caller should do about funding:
- *   - `auto`             — a CLEAN UTXO covers the spend; `recommended` is
- *                          auto-selected. No coin picker needed (the default).
- *   - `expert-required`  — no clean UTXO covers, but an asset-bearing (or
- *                          scan-failed) one does. `recommended` is the best-fit
- *                          such coin, but the UI MUST confirm / offer the picker
- *                          before spending it (it would burn content).
- *   - `scanning`         — a covering candidate hasn't finished scanning; wait
- *                          for the scan, then re-evaluate. `recommended` null.
- *   - `insufficient`     — nothing covers the spend. `recommended` null.
- */
-type FundingRecommendationStatus = 'auto' | 'expert-required' | 'scanning' | 'insufficient';
-interface FundingRecommendation<T extends AnnotatedFundingUtxo = AnnotatedFundingUtxo> {
-    status: FundingRecommendationStatus;
-    /** The coin to use (best-fit). Null for `scanning` / `insufficient`. */
-    recommended: T | null;
-    /** The full annotated candidate list, for the expert-mode picker. */
-    candidates: ReadonlyArray<T>;
-}
-/**
- * Decide funding for a spend of `targetSpendSats`, safely and automatically.
- *
- * Auto-selects the best-fit CLEAN covering UTXO (ord's `select_cardinal_utxo`
- * restricted to clean candidates). Falls back to `expert-required` only when
- * every covering candidate carries assets (or its scan failed), so a valuable
- * UTXO is never auto-spent. Returns `scanning` while a covering candidate's
- * content is still unknown, and `insufficient` when nothing covers.
- *
- * Same result shape for every action, so mint / transfer / offer / inscribe —
- * and every consumer (cat21.space, cat21-wallet, bots) — get identical
- * safe-auto + expert-with-recommendation behaviour.
- */
-declare function recommendFunding<T extends AnnotatedFundingUtxo>(candidates: ReadonlyArray<T>, targetSpendSats: number): FundingRecommendation<T>;
 
 /**
  * The shared coin-selection brain for EVERY cat action's orchestrator.

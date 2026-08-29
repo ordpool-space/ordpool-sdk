@@ -18,6 +18,12 @@ import {
 } from 'rxjs';
 
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
+import { FundingRecommendationService } from '../cat21-fee/funding-recommendation.service';
+import {
+  AnnotatedFundingUtxo,
+  FundingRecommendation,
+} from '../cat21-fee/funding-safety';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { WalletService } from '../wallet/wallet.service';
 import { WalletInfo } from '../wallet/wallet.service.types';
 import { Cat21Service } from './cat21.service';
@@ -70,13 +76,22 @@ export type MintState = 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'succes
 export class Cat21MintOrchestrator {
   private wallet = inject(WalletService);
   private cat21 = inject(Cat21Service);
+  private fundingRec = inject(FundingRecommendationService);
 
   // --- Writable inputs ----------------------------------------------------
 
   /** sat/vB the user picked (from the fee picker or manually). null until set. */
   readonly feeRate = signal<number | null>(null);
 
-  /** Which UTXO from the list the user picked (auto-set to the largest viable one by default). */
+  /**
+   * Which UTXO the user explicitly picked (expert mode). When null, `mint()`
+   * falls back to the SAFE auto-recommendation (`fundingRecommendation$`): a
+   * content-clean covering UTXO when one exists (`status: 'auto'`, the invisible
+   * comfortable default), otherwise no auto-mint (`status: 'expert-required'` —
+   * the UI must surface the picker so the user consciously mints on an
+   * asset-carrying coin). Setting this is the expert-mode override, honoured
+   * even for an asset coin the user chose deliberately.
+   */
   readonly selectedUtxo = signal<TxnOutput | null>(null);
 
   // --- Internals (declared up here because instance-field initialisers
@@ -171,6 +186,44 @@ export class Cat21MintOrchestrator {
   /** Pass-through of the SDK's polled fee tiers. */
   readonly recommendedFees$: Observable<RecommendedFees> = this.cat21.recommendedFees$;
 
+  /**
+   * The funding target the coin-selection safety check must cover: the fresh
+   * cat's postage (546) + the miner fee (a generous ~200 vB ceiling; the
+   * two-pass simulation tightens the real fee). A mint UTXO must clear this to
+   * be viable. Null until a fee rate is set.
+   */
+  private readonly fundingTarget$: Observable<number | null> = this.feeRateSubject.pipe(
+    map((rate) => (rate && rate > 0 ? CAT21_POSTAGE_SATS + Math.ceil(rate * 200) : null)),
+  );
+
+  /**
+   * SAFE-by-default coin-selection recommendation for the mint's funding
+   * (shared brain, identical across mint / transfer / offer / inscribe). Emits
+   * `auto` (a content-clean coin covers → auto-selected, no picker),
+   * `expert-required` (only asset-bearing coins cover → the UI surfaces the
+   * picker), `scanning`, or `insufficient`. Degrades to `insufficient` if the
+   * UTXO fetch errors, so a load failure never yields an unsafe auto-mint. The
+   * UI branches on `.status`; the invisible default is `auto`.
+   */
+  readonly fundingRecommendation$: Observable<
+    FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>
+  > = this.fundingRec.recommend<TxnOutput>(this.utxos$, this.fundingTarget$).pipe(
+    catchError(() =>
+      of<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>({
+        status: 'insufficient',
+        recommended: null,
+        candidates: [],
+      }),
+    ),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  );
+
+  private lastRecommendationSnapshot: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
+    status: 'insufficient',
+    recommended: null,
+    candidates: [],
+  };
+
   // --- Setup --------------------------------------------------------------
 
   constructor() {
@@ -198,8 +251,17 @@ export class Cat21MintOrchestrator {
       this.errorMessage.set(null);
       this.successTxId.set(null);
     });
+    // Maintain a synchronous snapshot of the safe funding recommendation for
+    // mint()'s auto-fallback. Subscribed AFTER walletChangeSub on purpose: on a
+    // wallet switch the reset (which clears errorMessage) must run before the
+    // utxos$ error path (which sets it), which the connectedWallet$ subscription
+    // order guarantees only when this attaches second.
+    this.recommendationSnapshotSub = this.fundingRecommendation$.subscribe((r) => {
+      this.lastRecommendationSnapshot = r;
+    });
   }
   private readonly walletChangeSub: Subscription;
+  private readonly recommendationSnapshotSub: Subscription;
 
   // --- Commands -----------------------------------------------------------
 
@@ -227,11 +289,24 @@ export class Cat21MintOrchestrator {
   ): Observable<{ txId: string }> {
     const wallet = this.connectedWallet();
     const feeRate = this.feeRate();
-    const selected = this.selectedUtxo();
+    // Expert-mode pick wins; otherwise fall back to the SAFE auto-recommendation
+    // — but ONLY a content-clean covering coin (`status: 'auto'`). When only
+    // asset coins cover (`expert-required`) there is no safe auto-mint: error so
+    // the UI surfaces the picker instead of silently minting on a valuable coin.
+    const recommendation = this.lastRecommendationSnapshot;
+    const selected =
+      this.selectedUtxo() ??
+      (recommendation.status === 'auto' ? recommendation.recommended : null);
 
     if (!wallet) return throwError(() => new Error('No wallet connected'));
     if (!feeRate) return throwError(() => new Error('No fee rate set'));
-    if (!selected) return throwError(() => new Error('No UTXO selected'));
+    if (!selected) {
+      const msg =
+        recommendation.status === 'expert-required'
+          ? 'Select a funding UTXO (the available coins carry assets)'
+          : 'No UTXO selected';
+      return throwError(() => new Error(msg));
+    }
 
     let transactionFee: bigint;
     try {
