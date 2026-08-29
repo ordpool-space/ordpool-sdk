@@ -1,7 +1,9 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { Injector, runInInjectionContext } from '@angular/core';
-import { BehaviorSubject, Subject, firstValueFrom, of, throwError } from 'rxjs';
+import { BehaviorSubject, Observable, Subject, combineLatest, firstValueFrom, map, of, throwError } from 'rxjs';
 
+import { FundingRecommendationService } from '../cat21-fee/funding-recommendation.service';
+import { recommendFunding } from '../cat21-fee/funding-safety';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { cat21Config } from '../cat21-mint/cat21-sdk-config';
@@ -47,7 +49,11 @@ type MockCat21Service = {
   recommendedFees$: typeof Cat21Service.prototype.recommendedFees$;
 };
 
-const buildOrchestrator = (): {
+const buildOrchestrator = (opts: {
+  // Outpoints (`txid:vout`) to mark as asset-bearing so the recommendation
+  // returns `expert-required` instead of `auto`. Everything else is clean.
+  assetOutpoints?: Set<string>;
+} = {}): {
   orchestrator: InscribeMintOrchestrator;
   walletSubject: BehaviorSubject<WalletInfo | null>;
   cat21: MockCat21Service;
@@ -59,6 +65,32 @@ const buildOrchestrator = (): {
     recommendedFees$: new Subject<never>() as unknown as Cat21Service['recommendedFees$'],
   };
 
+  // Scanner-free stand-in for FundingRecommendationService: marks the given
+  // outpoints as asset-bearing (everything else clean), so `auto` vs
+  // `expert-required` branching runs through the real orchestrator. Content
+  // detection itself is proven in funding-recommendation.service.angular.spec.ts.
+  const assetOutpoints = opts.assetOutpoints ?? new Set<string>();
+  const fundingRec = {
+    recommend: (
+      utxos$: Observable<ReadonlyArray<{ txid: string; vout: number; value: number }>>,
+      target$: Observable<number | null>,
+    ) =>
+      combineLatest([utxos$, target$]).pipe(
+        map(([utxos, target]) => {
+          // Match the real service's guard: a null/≤0 target (content/fee not
+          // set yet) or empty list yields `insufficient`, never a 0-target pick.
+          if (!target || target <= 0 || utxos.length === 0) return recommendFunding([], target ?? 0);
+          return recommendFunding(
+            utxos.map((u) => ({
+              ...u,
+              bucket: assetOutpoints.has(`${u.txid}:${u.vout}`) ? ('assets' as const) : ('clean' as const),
+            })),
+            target,
+          );
+        }),
+      ),
+  } as unknown as FundingRecommendationService;
+
   const injector = Injector.create({
     providers: [
       { provide: WalletService, useValue: { connectedWallet$: walletSubject } satisfies MockWalletService },
@@ -66,6 +98,7 @@ const buildOrchestrator = (): {
       { provide: bitcoinNetwork, useValue: Network.Mainnet },
       { provide: cat21Config, useValue: { mempoolApiUrl: 'https://mempool.test', cat21ApiUrl: 'https://api.cat21.test' } },
       { provide: storage, useValue: { getValue: () => null, setValue: () => {}, removeItem: () => {} } },
+      { provide: FundingRecommendationService, useValue: fundingRec },
     ],
   });
 
@@ -292,6 +325,58 @@ describe('InscribeMintOrchestrator — watch-only promptForSignedPsbt threading'
 
   it('a watch-only inscribe WITHOUT the callback errors on the missing bridge', async () => {
     const orchestrator = setup();
+    await expect(firstValueFrom(orchestrator.mint())).rejects.toThrow(/promptForSignedPsbt/);
+  });
+});
+
+
+describe('InscribeMintOrchestrator — safe-auto coin selection (the vision)', () => {
+
+  it('AUTO (invisible default): a clean covering coin is auto-recommended, no picker', async () => {
+    const clean = utxo({ txid: 'c'.repeat(64), value: 200_000 });
+    const { orchestrator, walletSubject, cat21 } = buildOrchestrator();
+    cat21.getUtxos.mockReturnValue(of([clean]));
+    walletSubject.next(wallet());
+    orchestrator.setFeeRate(5);
+    orchestrator.setContent(content());
+
+    const rec = await firstValueFrom(orchestrator.fundingRecommendation$);
+    expect(rec.status).toBe('auto');
+    expect(rec.recommended?.txid).toBe(clean.txid);
+  });
+
+  it('EXPERT-REQUIRED: only an asset coin covers -> mint() refuses and asks for a pick', async () => {
+    const assetCoin = utxo({ txid: 'd'.repeat(64), value: 200_000 });
+    const { orchestrator, walletSubject, cat21 } = buildOrchestrator({
+      assetOutpoints: new Set([`${assetCoin.txid}:${assetCoin.vout}`]),
+    });
+    cat21.getUtxos.mockReturnValue(of([assetCoin]));
+    walletSubject.next(wallet());
+    orchestrator.setFeeRate(5);
+    orchestrator.setContent(content());
+
+    const rec = await firstValueFrom(orchestrator.fundingRecommendation$);
+    expect(rec.status).toBe('expert-required');
+
+    // No silent auto-inscribe on a valuable coin — the UI must surface the picker.
+    await expect(firstValueFrom(orchestrator.mint())).rejects.toThrow(/Select a funding UTXO/);
+  });
+
+  it('EXPERT OVERRIDE: an explicit pick gets mint() past the selection guard', async () => {
+    const assetCoin = utxo({ txid: 'd'.repeat(64), value: 200_000 });
+    const { orchestrator, walletSubject, cat21 } = buildOrchestrator({
+      assetOutpoints: new Set([`${assetCoin.txid}:${assetCoin.vout}`]),
+    });
+    cat21.getUtxos.mockReturnValue(of([assetCoin]));
+    // Watch-only wallet: past the selection guard, mint() reaches the signer,
+    // which without the prompt bridge rejects fast with a promptForSignedPsbt
+    // error. That the rejection is the SIGNING error (not 'Select a funding
+    // UTXO') proves the explicit pick cleared the picker guard.
+    walletSubject.next(wallet({ type: KnownOrdinalWalletType.xpub }));
+    orchestrator.setFeeRate(5);
+    orchestrator.setContent(content());
+    orchestrator.setSelectedUtxo(assetCoin);
+
     await expect(firstValueFrom(orchestrator.mint())).rejects.toThrow(/promptForSignedPsbt/);
   });
 });

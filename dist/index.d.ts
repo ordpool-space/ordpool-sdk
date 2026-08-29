@@ -5824,9 +5824,19 @@ declare class InscribeMintOrchestrator {
     private wallet;
     private cat21;
     private network;
+    private fundingRec;
     /** sat/vB the user picked (from the fee picker or manually). null until set. */
     readonly feeRate: _angular_core.WritableSignal<number>;
-    /** Which UTXO from the list the user picked (consumers wire auto-select). */
+    /**
+     * Which UTXO the user explicitly picked (expert mode). When null, `mint()`
+     * falls back to the SAFE auto-recommendation (`fundingRecommendation$`): a
+     * content-clean covering UTXO when one exists (`status: 'auto'`, the invisible
+     * comfortable default — so the inscribe flow never opens on a coin-selection
+     * puzzle), otherwise no auto-inscribe (`status: 'expert-required'` — the UI
+     * must surface the picker so the user consciously spends an asset-carrying
+     * coin). Setting this is the expert-mode override, honoured even for an asset
+     * coin the user chose deliberately.
+     */
     readonly selectedUtxo: _angular_core.WritableSignal<TxnOutput>;
     /** The inscription payload. Simulations only fire when this is set. */
     readonly content: _angular_core.WritableSignal<InscribeContent>;
@@ -5864,8 +5874,29 @@ declare class InscribeMintOrchestrator {
     readonly simulations$: Observable<InscribeUtxoSimulation[]>;
     /** Pass-through of the SDK's polled fee tiers. */
     readonly recommendedFees$: Observable<RecommendedFees>;
+    /**
+     * The funding target the coin-selection safety check must cover: the
+     * inscription's `fundingRequirementSats` (commit output + commit fee), derived
+     * from the content + fee rate via `simulateInscribeFees` against a
+     * wallet-default-shaped dummy funding input (the requirement depends on the
+     * content + fee + input script type, not the input's value). Null until wallet
+     * + fee rate + content are all set, or if the simulation throws.
+     */
+    private readonly fundingTarget$;
+    /**
+     * SAFE-by-default coin-selection recommendation for the inscribe's funding
+     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
+     * `auto` (a content-clean coin covers → auto-selected, no picker),
+     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
+     * picker), `scanning`, or `insufficient`. Degrades to `insufficient` if the
+     * UTXO fetch errors, so a load failure never yields an unsafe auto-inscribe.
+     * The UI branches on `.status`; the invisible default is `auto`.
+     */
+    readonly fundingRecommendation$: Observable<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>;
+    private lastRecommendationSnapshot;
     constructor();
     private readonly walletChangeSub;
+    private readonly recommendationSnapshotSub;
     setFeeRate(rate: number): void;
     setSelectedUtxo(utxo: TxnOutput | null): void;
     setContent(content: InscribeContent | null): void;
