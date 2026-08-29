@@ -1941,16 +1941,23 @@ declare class Cat21ApiService {
 }
 
 /**
- * Coin selection for CAT-21 flows. cat21.space lets the user pick
- * (Cat21MintOrchestrator simulates against every UTXO); cat21-wallet's
- * autonomous flows pick via the SDK.
+ * Value-based coin-selection helpers for CAT-21 flows. Both are OPT-IN
+ * strategies for a caller that wants a simple "pick one covering UTXO by
+ * value" WITHOUT the content-safety layer — e.g. a high-volume autonomous
+ * bot that has already vetted its own UTXO set.
+ *
+ * The action orchestrators (mint / transfer / offer / inscribe) do NOT call
+ * these directly. They select through `FundingRecommendationService` +
+ * `recommendFunding`, which force-scans the covering coins for content and
+ * auto-picks the best-fit CONTENT-CLEAN coin via ord's `selectCardinalUtxo`
+ * (falling back to expert-mode when only asset-bearing coins cover). Reach for
+ * the helpers below only when you deliberately want value-only selection.
  *
  * Two strategies:
- *   - `pickLargestFundingUtxoThatCovers` — **default**, matches the
- *     historic policy (see `findAutoPickCandidate`).
- *   - `pickSmallestFundingUtxoThatCovers` — opt-in, for strategies
- *     that want to preserve the largest balance (high-volume bot
- *     spending many small mints).
+ *   - `pickSmallestFundingUtxoThatCovers` — best-fit (smallest covering);
+ *     minimises change, matches ord's `select_cardinal_utxo` value policy.
+ *   - `pickLargestFundingUtxoThatCovers` — preserve-largest-balance
+ *     (largest covering).
  *
  * Both pure. Caller MUST exclude cat-bearing UTXOs from the input
  * list — that filter is not this helper's job.
@@ -1968,13 +1975,14 @@ interface PickFundingUtxoArgs<T extends FundingUtxo> {
 }
 declare function pickLargestFundingUtxoThatCovers<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T | null;
 /**
- * **DEFAULT strategy (ord-aligned best-fit).** Returns the UTXO with the
- * SMALLEST value that covers `targetSpendSats`; `null` when none is large
- * enough. This is ord's own `select_cardinal_utxo` policy (prefer the
- * smallest covering UTXO), so the transfer / offer flows that use it stay
- * byte-aligned with `ord wallet send` — verified in
- * `e2e/regtest/transfer-ord-parity.spec.ts`. It also minimises change
- * (tighter than largest-first). See `selectOrdParityFunding` in
+ * **OPT-IN best-fit strategy.** Returns the UTXO with the SMALLEST value that
+ * covers `targetSpendSats`; `null` when none is large enough. This is ord's
+ * own `select_cardinal_utxo` policy (prefer the smallest covering UTXO), so a
+ * caller using it directly stays byte-aligned with `ord wallet send` (verified
+ * in `e2e/regtest/transfer-ord-parity.spec.ts`); it also minimises change
+ * (tighter than largest-first). The action orchestrators reach this policy
+ * indirectly through `recommendFunding`, which applies `selectCardinalUtxo` to
+ * the content-CLEAN candidates only. See `selectOrdParityFunding` in
  * `ord-coin-select.ts` for the full multi-input ord port.
  */
 declare function pickSmallestFundingUtxoThatCovers<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T | null;
