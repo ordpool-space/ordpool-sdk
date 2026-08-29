@@ -273,7 +273,7 @@ byte-parity — but our preserve-default is in fact very close to what ord's
 `wallet send` already does (see below). See HQ "cat-touching txs do exactly
 what ord does".
 
-### Transfer size policy vs ord `wallet send` — PRESERVE by default, NEVER grow
+### Transfer size policy vs ord `wallet send` — PRESERVE by default; SHRINK + GROW as explicit opt-ins
 
 **Precise ord behaviour** (verified in `cat21-ord/src/wallet/transaction_builder.rs`, `Target::Postage`; module doc lines 17-18; `strip_excess_postage` lines 383-413; `build_transaction` pipeline `add_value` → `strip_value` → `deduct_fee`):
 - ord's `wallet send` **PRESERVES the inscription UTXO's value up to `MAX_POSTAGE = 20_000` sats** — it only strips when `value − fee > 20_000`.
@@ -286,8 +286,12 @@ So our preserve-default + require-funding transfer is **essentially ord's `walle
 | Policy | Output 0 | Fee from | Decision |
 |---|---|---|---|
 | **PRESERVE** (default) | = `catUtxo.value` | separate funding | **Default.** Matches ord ≤20k; stricter (never resize) above. |
-| **GROW** (pad up to a bigger postage) | > `catUtxo.value` | funding pads the output | **NO.** ord does NOT grow on *send*; the "chunky 10k so it moves again" is an inscribe/CREATE choice (= our MINT's 546). Growing on transfer mingles unrelated funding sats into the cat's UTXO for a convenience the funding-input model already covers. If we ever want chunkier cats, change the MINT postage, not transfer. |
-| **SHRINK** (trim, self-fund the fee from the cat's own surplus) | < `catUtxo.value` | the cat's own surplus (one-in-one-out) or co-funded | **Optional future param only.** If built, it must replicate ord's `Target::Postage` TransactionBuilder **byte-for-byte** (preserve ≤20k, trim >20k → 10k, cardinal selection), except `nLockTime=21` for the bonus cat — giving self-funding for chunky cats + on-chain indistinguishability from a stock-ord send. Not built yet. |
+| **GROW** (pad output up to a target > `catUtxo.value`) | > `catUtxo.value` | funding pads the output + pays the fee | **Optional (VALIDATED, not built yet).** Two real use cases: (1) **rescue a sub-dust cat** — a cat mined out-of-band (direct-to-miner / MARA, bypassing relay's dust rule) sits below the dust limit; growing it to ≥ dust is the ONLY relay-standard way to move it again. (2) **cold-wallet self-provisioning** — grow the cat's UTXO to a chunky size so the cold wallet can move it once later WITHOUT co-funding (the surplus above dust covers a future move's fee). The "mingling unrelated sats" is the POINT here, not a problem — the cat's sat stays at output-0 offset-0 (FIFO), the padding is just filler. |
+| **SHRINK** (trim, self-fund the fee from the cat's own surplus) | < `catUtxo.value` | the cat's own surplus (one-in-one-out) or co-funded | **Optional (not built yet).** If built, it must replicate ord's `Target::Postage` TransactionBuilder **byte-for-byte** (preserve ≤20k, trim >20k → 10k, cardinal selection), except `nLockTime=21` for the bonus cat — giving self-funding for chunky cats + on-chain indistinguishability from a stock-ord send. |
+
+**Sub-dust-rescue feasibility is PROVEN on regtest** (2026-08-29): a `nLockTime=21` tx with a 100-sat output-0 is rejected by normal relay (`testmempoolaccept allowed:false`) but mines out-of-band via `generateblock`; the resulting 100-sat cat UTXO is spendable, and a grow tx (100-sat cat + funding → 546-sat output-0) passes NORMAL relay (`allowed:true`) and confirms. cat21-ord then reports the cat (number 22) at `value:546`, `satpoint = <growtx>:0:0` — the cat's sat rode FIFO to the grown UTXO intact. Bitcoin has no dust rule on INPUTS (only on relayed outputs); consensus lets any UTXO be spent, so growing sub-dust to ≥ dust is always valid.
+
+**Design:** default stays PRESERVE. GROW + SHRINK are explicit opt-ins (e.g. a `targetPostageSats` on the transfer builder; omitted ⇒ preserve). GROW's funding must cover `(target − catUtxo.value) + fee`; SHRINK must be exact ord parity.
 
 **Every size test MUST stress non-546 sizes.** A 546-only parity/size test is a
 happy-path test that proves nothing about size-handling.
