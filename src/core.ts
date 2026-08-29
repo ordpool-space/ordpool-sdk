@@ -99,6 +99,7 @@ export * from './cat21-core/transfer.core';
 export * from './cat21-core/mint.core';
 export * from './cat21-core/create-offer.core';
 export * from './cat21-core/inscribe.core';
+export * from './cat21-core/accept-offer.core';
 
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';
