@@ -296,6 +296,46 @@ So our preserve-default + require-funding transfer is **essentially ord's `walle
 **Every size test MUST stress non-546 sizes.** A 546-only parity/size test is a
 happy-path test that proves nothing about size-handling.
 
+### Coin selection: adopt ord's best-fit, not our own algorithm
+
+To eliminate divergence bugs, the SDK adopts ord's own coin selection + fee
+model rather than inventing its own. `cat21-fee/ord-coin-select.ts` is a
+byte-faithful port of ord's `transaction_builder.rs`:
+
+- `selectCardinalUtxo` — ord's `select_cardinal_utxo` (best-fit: the smallest
+  UTXO that covers, else closest-under + loop). Verified against all six of
+  ord's own `select_cardinal_utxo_prefer_under` vectors.
+- `estimateTaprootVbytes` / `estimateFeeSats` — ord's all-taproot fee model.
+- `selectOrdParityFunding` — ord's `build_transaction` pipeline (`add_value`
+  deficit loop → `strip_value` → `deduct_fee`). Verified against ord's
+  `build_transaction_with_custom_postage` vector.
+
+**Adopted in production:** the transfer + create-offer orchestrators auto-pick
+the SMALLEST covering UTXO (ord's policy), not the largest.
+`pickLargestFundingUtxoThatCovers` is demoted to an opt-in
+preserve-largest-balance strategy. **Fee estimation stays `computePsbtVsize`**
+(accurate per input type) — ord's taproot-only fee model is for the byte-parity
+PROOF, not a safe blanket production change for non-taproot wallets.
+
+**PROVEN byte-parity vs live ord** (except the two intentional diffs,
+`nLockTime=21` and the change address):
+
+- Transfer: `e2e/regtest/transfer-ord-parity.spec.ts` — the SDK transfer is
+  byte-identical to a live `ord wallet send --dry-run --postage <target>` for
+  the same cat + cardinal (same inputs, sequences, output-0, and the EXACT same
+  change value).
+- Inscribe: `e2e/regtest/inscribe-ord-parity-roundtrip.spec.ts` — the SDK
+  reveal envelope is byte-identical to `ord wallet inscribe` (plain +
+  metaprotocol), and stock ord blesses the SDK inscription.
+
+**Not applicable:** mint has no ord equivalent (its `findAutoPickCandidate`
+selects a content-clean UTXO for safety, not by value); offer create uses
+Bitcoin Core's `fundrawtransaction`, not ord's `TransactionBuilder`, so it keeps
+its structural parity test. **Remaining refinement:** wire the full multi-input
+`selectOrdParityFunding` (add_value loop) into the orchestrators for the rare
+case where no single UTXO covers the fee; single-pick best-fit covers the
+common case and matches ord there.
+
 ## HARD RULE: CAT-21 mints — RBF policy (per-wallet)
 
 **CAT-21 mint inputs carry a wallet-specific sequence number.**
