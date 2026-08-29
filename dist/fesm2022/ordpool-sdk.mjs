@@ -4,7 +4,7 @@ import { Script } from '@scure/btc-signer';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import * as i0 from '@angular/core';
 import { InjectionToken, inject, Injectable, signal, computed } from '@angular/core';
-import { from, map, Observable, switchMap, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest } from 'rxjs';
+import { from, map, Observable, switchMap, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest, firstValueFrom } from 'rxjs';
 import Wallet, { AddressPurpose, addListener, getAddress, signTransaction, MessageSigningProtocols, request } from 'sats-connect';
 import { sha256 } from '@noble/hashes/sha2';
 import { concatBytes } from '@noble/hashes/utils';
@@ -7390,6 +7390,1517 @@ async function createOffer(params, ports) {
 }
 
 /**
+ * Layer-1 builder for the inscribe **commit** transaction.
+ *
+ * Construction outline:
+ *
+ *   1. The reveal spends a P2TR output with a **single envelope leaf**.
+ *      The **ephemeral key** is the taproot internal key — so the
+ *      commit output has two equivalent spend paths:
+ *        a. Script-path via the envelope leaf (used by the standard
+ *           reveal — emits the inscription).
+ *        b. Key-path via the ephemeral key (used by any redirect /
+ *           RBF / recover / bundle reveal the consumer constructs
+ *           after `createInscribeTransactions` returns).
+ *      Same shape as Casey Rodarmor's `ord` reference client
+ *      (`src/wallet/batch/plan.rs` lines 367-382). The ephemeral key
+ *      doubles as a bearer instrument: whoever holds it can build
+ *      any reveal-tx shape until the commit output is spent.
+ *
+ *   2. The commit transaction has:
+ *        - 1 funding input (caller-supplied UTXO; user's wallet
+ *          signs). Sequence is wallet-specific via
+ *          `resolveCat21MintInputSequence(walletType)`: 0xfffffffd for
+ *          cat21wallet (RBF allowed; our wallet preserves
+ *          lockTime=21 through replacement), 0xfffffffe for every
+ *          third-party wallet (RBF disabled; locks accelerate UIs
+ *          out, the 2024 Xverse incident defence).
+ *        - Output 0: the commit P2TR address holding
+ *          `postage + revealFeeReserve + tipValueSats` (the last
+ *          term only when `tipValueSats > 0` on the reveal). The
+ *          reveal spends this.
+ *        - Output 1 (optional): change back to the user, if the
+ *          funding input has surplus above commit fee + output 0.
+ *
+ *   3. `nLockTime=21`: the commit qualifies as a CAT-21 mint under
+ *      cat21-ord's `--index-cat21` rule. The first sat of vout[0]
+ *      becomes Cat A (`<commitTxid>i0`). The reveal then spends
+ *      vout[0] FIFO-style, moving Cat A to the inscription's UTXO,
+ *      and the reveal itself (also `nLockTime=21`) mints Cat B
+ *      (`<revealTxid>i0`) at the same satpoint. Net: two cats per
+ *      inscribe, stacked on the inscription's 546-sat UTXO. The
+ *      maintainer's design: "we gift the cats for free. because
+ *      why not."
+ *
+ * Returns the unsigned commit PSBT bytes + the metadata the
+ * reveal builder needs to construct the spending witness.
+ */
+/**
+ * Canonical postage for inscriptions. Same 546-sat dust floor as
+ * cat21 — keeps inscription UTXOs fungible across address types
+ * AND matches the floor every inscriber in the OSS catalog uses.
+ * See HQ rule "cat UTXO is always 546 sats, FIFO".
+ */
+const INSCRIBE_POSTAGE_SATS = CAT21_POSTAGE_SATS;
+function buildInscribeCommitPsbt(args) {
+    if (args.commitFeeSats < 0)
+        throw new Error('commitFeeSats must be non-negative');
+    if (args.revealFeeReserveSats < 0)
+        throw new Error('revealFeeReserveSats must be non-negative');
+    if (args.tipValueSats !== undefined && args.tipValueSats < 0) {
+        throw new Error('tipValueSats must be non-negative');
+    }
+    if (args.ephemeralPubkeyXonly.length !== 32) {
+        throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
+    }
+    const scureNetwork = toScureNetwork(args.network);
+    const postageSats = INSCRIBE_POSTAGE_SATS;
+    const tipValueSats = args.tipValueSats ?? 0;
+    const commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
+    // Single envelope leaf; ephemeral key as the taproot internal key.
+    // Matches ord's `TaprootBuilder::new().add_leaf(0, reveal_script)
+    // .finalize(&secp256k1, public_key)` (plan.rs:378-382).
+    //
+    // allowUnknownOutputs=true because the envelope tapscript isn't a
+    // pattern scure recognises (`<pubkey> CHECKSIG OP_FALSE OP_IF
+    // "ord" ... OP_ENDIF` is ord-specific).
+    const tree = [{ script: args.envelopeScript }];
+    const commitP2tr = btc.p2tr(args.ephemeralPubkeyXonly, tree, scureNetwork, true);
+    const commitAddress = commitP2tr.address;
+    if (commitAddress === undefined) {
+        throw new Error('Internal error: p2tr returned no address for commit output');
+    }
+    if (commitP2tr.tapLeafScript === undefined) {
+        throw new Error('Internal error: p2tr returned no tapLeafScript for the constructed tree');
+    }
+    // Build the PSBT with `lockTime=21`. Every ordpool inscription is
+    // ALSO a CAT-21 mint — we gift the cat for free to anyone using
+    // the inscribe pipeline. cat21-ord reads `nLockTime` structurally
+    // and assigns a cat to the first sat of the first output (the
+    // commit's P2TR envelope output). The reveal then spends that
+    // output FIFO-style, moving the cat to the inscription recipient
+    // — so the cat and the inscription end up on the same sat at the
+    // same address, with no extra cost to the user.
+    //
+    // Block 21 was mined in 2009, so the lockTime constraint is
+    // trivially satisfied no matter when the tx lands. The field is
+    // repurposed protocol-marker data; cat21-ord reads it structurally.
+    const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: CAT21_LOCK_TIME });
+    // Default to a non-cat21wallet sentinel so the sequence resolves to
+    // the safer non-RBF value (0xfffffffe). Standalone callers get the
+    // correct behaviour without having to learn the per-wallet rule.
+    //
+    // NOTE: this is a DIFFERENT reason for RBF-off than the mint case.
+    // On mint, a third-party accelerate would drop `lockTime=21` and
+    // kill the mint (no cat is produced). On inscribe commit, an RBF
+    // replacement changes the commit's inputs → its txid changes → the
+    // pre-built reveal (which
+    // references the SIMULATION commit txid) becomes invalid and the
+    // postage locks in an output nobody can spend (the ephemeral reveal
+    // key is not returned to the caller). Both cases warrant RBF-off
+    // for third-party wallets; the "mint" in the resolver's name refers
+    // to the CAT-flow rule, but the same value happens to protect us here.
+    const sequence = resolveCat21MintInputSequence(args.walletType ?? KnownOrdinalWalletType.xverse);
+    // Funding input shape mirrors the cat21 mint adapter: witnessUtxo
+    // for SegWit, nonWitnessUtxo for P2PKH legacy, plus per-address-
+    // type optional fields.
+    const inputBase = {
+        txid: args.fundingInput.txid,
+        index: args.fundingInput.vout,
+        sequence,
+        witnessUtxo: {
+            script: args.fundingInput.scriptPubKey,
+            amount: BigInt(args.fundingInput.value),
+        },
+    };
+    if (args.fundingInput.tapInternalKey) {
+        // Taproot key-path: SIGHASH_DEFAULT (omit), per the SDK-wide
+        // BIP-341 wire-equivalent rule.
+        inputBase.tapInternalKey = args.fundingInput.tapInternalKey;
+    }
+    else {
+        inputBase.sighashType = btc.SigHash.ALL;
+    }
+    if (args.fundingInput.redeemScript) {
+        inputBase.redeemScript = args.fundingInput.redeemScript;
+    }
+    if (args.fundingInput.nonWitnessUtxo) {
+        inputBase.nonWitnessUtxo = args.fundingInput.nonWitnessUtxo;
+    }
+    tx.addInput(inputBase);
+    // Output 0: commit P2TR. The reveal will spend this.
+    tx.addOutput({
+        script: commitP2tr.script,
+        amount: BigInt(commitOutputValueSats),
+    });
+    // Output 1: change to the user, when above dust.
+    const changeDustLimit = args.changeDustLimitSats ?? postageSats;
+    const calculatedChange = args.fundingInput.value - commitOutputValueSats - args.commitFeeSats;
+    if (calculatedChange < 0) {
+        throw new Error(`Funding insufficient: input=${args.fundingInput.value}, ` +
+            `commitOutput=${commitOutputValueSats}, commitFee=${args.commitFeeSats}`);
+    }
+    let changeSats = 0;
+    if (calculatedChange >= changeDustLimit) {
+        changeSats = calculatedChange;
+        tx.addOutputAddress(args.senderChangeAddress, BigInt(changeSats), scureNetwork);
+    }
+    // else: change is absorbed into the miner fee (same model as cat21 mint).
+    // Hard invariants (asserted before return).
+    if (tx.outputsLength === 0) {
+        throw new Error('Internal error: commit must have at least one output');
+    }
+    if (tx.getOutput(0).amount !== BigInt(commitOutputValueSats)) {
+        throw new Error('Internal error: commit output 0 amount drifted');
+    }
+    assertCat21LockTime(tx.lockTime);
+    if (tx.getInput(0).sequence !== sequence) {
+        throw new Error(`Internal error: input 0 sequence=${tx.getInput(0).sequence}, expected ${sequence}`);
+    }
+    return {
+        commitPsbt: tx.toPSBT(0),
+        commitAddress,
+        commitOutputScript: commitP2tr.script,
+        commitOutputValueSats,
+        taproot: {
+            internalKey: args.ephemeralPubkeyXonly,
+            tapLeafScript: commitP2tr.tapLeafScript,
+        },
+        changeSats,
+    };
+}
+
+/**
+ * Inscription envelope encoder — the inverse of `ordpool-parser`'s
+ * `InscriptionParserService`. Produces the tapscript bytes that
+ * commit to inscription content under the ord protocol.
+ *
+ * Vendoring decision: this is ~150 lines of pure encoding, no
+ * external deps. micro-ordinals v0.4.0 requires
+ * @scure/btc-signer@^2.2.0 but the SDK is pinned to 1.2.x (the
+ * consumer constraint from ordpool/frontend's lockfile). Rather
+ * than fork micro-ordinals to a v1-compatible branch, we write
+ * our own thin encoder against scure 1.2.x. The encoder's
+ * correctness is pinned by a reversibility spec
+ * (`inscription-envelope.spec.ts`) that round-trips every tag
+ * through ordpool-parser's decoder and asserts byte equality.
+ *
+ * Tag dictionary is intentionally grep-compatible with
+ * ordpool-parser/src/inscription/inscription-parser.service.helper.ts:10
+ * (`knownFields`). Same numeric values, same names. If the
+ * decoder ever adds a new tag, mirror it here and add a
+ * round-trip case to the spec.
+ */
+/** ASCII bytes for the protocol marker "ord" inside the envelope. */
+const ORD_MARKER = new Uint8Array([0x6f, 0x72, 0x64]);
+/**
+ * Ord-protocol field tags. Mirrors ordpool-parser's `knownFields`
+ * value-for-value. See https://docs.ordinals.com/inscriptions.html
+ * for the canonical reference.
+ */
+const ORD_TAGS = {
+    /** MIME type of the body. */
+    content_type: 0x01,
+    /** Override placement on a sat other than the first. */
+    pointer: 0x02,
+    /** Parent inscription id for provenance chains. */
+    parent: 0x03,
+    /** CBOR-encoded metadata. */
+    metadata: 0x05,
+    /** Metaprotocol identifier string. */
+    metaprotocol: 0x07,
+    /** Body encoding hint (e.g. `gzip`, or `br` for brotli). */
+    content_encoding: 0x09,
+    /** Delegate inscription id (point to another inscription's body). */
+    delegate: 0x0b,
+    /** Rune-name commitment for rune etching pre-commit. */
+    rune: 0x0d,
+    /** Reserved Tag::Note; de facto inscriber-tool watermark. */
+    note: 0x0f,
+    /** CBOR-encoded gallery items + attributes. */
+    properties: 0x11,
+    /** Encoding for properties (`br` for brotli). */
+    property_encoding: 0x13,
+};
+/**
+ * Maximum bytes per tapscript push. Bitcoin consensus + standardness
+ * caps each push at 520 bytes; the encoder slices the body across
+ * pushes accordingly. ordpool-parser's `getNextInscriptionMark` walks
+ * the same chunk boundaries on the decode side.
+ */
+const MAX_PUSH_BYTES = 520;
+/**
+ * Encodes a tag as a script item. The push form is the ONLY difference
+ * between an ord-standard inscription and a `vindicated`-charmed one; it's
+ * purely how the tag number lands in the script:
+ *
+ *   - `minimal === false` (default): a 1-byte DATA push,
+ *     `OP_PUSHBYTES_1 <tag>` (e.g. `01 01`). Byte-for-byte what ord emits
+ *     (`Tag::append` → `push_slice(self.bytes())`), so the inscription is
+ *     blessed / charm-free. scure does NOT minimal-encode a single byte
+ *     back to a pushnum — `Script.encode([Uint8Array([1])])` is `01 01`,
+ *     not `51` — so `Uint8Array([tag])` yields ord's exact bytes.
+ *   - `minimal === true`: the pushnum opcode `OP_1..OP_16` (e.g. `51`) for
+ *     tags 1–16 — 1 byte smaller, but ord flags any pushnum inside an
+ *     envelope as `Curse::Pushnum` → the inscription carries the
+ *     `vindicated` charm (post-jubilee). Everything else about the
+ *     inscription is identical. Tags > 16 have no pushnum opcode and always
+ *     data-push regardless of `minimal`.
+ */
+function tagAsScriptItem(tag, minimal) {
+    if (tag <= 0)
+        throw new Error(`Tag must be positive; got ${tag}`);
+    if (tag > 255)
+        throw new Error(`Tag must fit in one byte; got ${tag}`);
+    if (minimal && tag <= 16) {
+        return `OP_${tag}`;
+    }
+    return new Uint8Array([tag]);
+}
+/**
+ * Builds the inscription tapscript: the bytes that hash into a
+ * tapscript leaf on the commit address, and that the reveal tx
+ * provides as witness when spending via the envelope leaf.
+ *
+ * Structure (per ord protocol):
+ *
+ * ```
+ * <revealPubkeyXonly>                    (32-byte push)
+ * OP_CHECKSIG
+ * OP_FALSE                               (0x00)
+ * OP_IF                                  (0x63)
+ *   "ord"                                (3-byte push)
+ *   [for each field:]
+ *     <tag>                              (1-byte data push, ord-identical)
+ *     <value>                            (variable push)
+ *   OP_0                                 (separator before body)
+ *   [for each body chunk (≤ 520 bytes):]
+ *     <chunk>
+ * OP_ENDIF                               (0x68)
+ * ```
+ *
+ * The `OP_FALSE OP_IF ... OP_ENDIF` block is provably-dead code:
+ * script execution never enters the IF branch because the top of
+ * stack is OP_FALSE. The bytes are still committed to in the
+ * tapleaf hash, which is what carries the inscription on-chain.
+ * The actual spending check is the `<pubkey> OP_CHECKSIG` PREFIX,
+ * which ord's protocol places before the dead envelope.
+ *
+ * Returns the encoded tapscript bytes ready for taproot leaf
+ * inclusion via `btc.p2tr(..., { script, leafVersion: 0xc0 })`.
+ */
+/**
+ * Guard a single envelope push against the 520-byte standardness cap.
+ * The remediation depends on the tag: only metadata (0x05) and
+ * properties (0x11) are read back by concatenating repeated same-tag
+ * chunks, so only those can be split with `chunkFieldValue`. Every
+ * other tag (content_type, metaprotocol, note, parent, delegate, rune,
+ * …) is read from its FIRST field only, so splitting silently truncates
+ * it; those values simply must fit in one push.
+ */
+function assertPushWithinCap(tag, length) {
+    if (length <= MAX_PUSH_BYTES)
+        return;
+    const chunkable = tag === ORD_TAGS.metadata || tag === ORD_TAGS.properties;
+    const advice = chunkable
+        ? 'Split into repeated same-tag fields with chunkFieldValue.'
+        : 'This tag is read from its first field only and cannot be chunked; the value must fit in one push.';
+    throw new Error(`envelope field value for tag ${tag} is ${length} bytes; max ${MAX_PUSH_BYTES} per push. ${advice}`);
+}
+function buildInscriptionEnvelope(args) {
+    if (args.revealPubkeyXonly.length !== 32) {
+        throw new Error(`revealPubkeyXonly must be 32 bytes; got ${args.revealPubkeyXonly.length}`);
+    }
+    const items = [];
+    const minimalTagPush = args.minimalTagPush ?? false;
+    // Spending condition: <pubkey> OP_CHECKSIG. The reveal's signature
+    // checks against this; everything after is inert data.
+    items.push(args.revealPubkeyXonly);
+    items.push('CHECKSIG');
+    // Envelope opening: OP_FALSE OP_IF "ord".
+    items.push('OP_0');
+    items.push('IF');
+    items.push(ORD_MARKER);
+    // content_type comes first by convention (matches every inscriber
+    // we've seen on-chain). ord doesn't require any tag order, but
+    // keeping content_type first makes hex-grepping the envelope
+    // boundary easier.
+    if (args.contentType !== undefined) {
+        const contentTypeBytes = new TextEncoder().encode(args.contentType);
+        // Same 520-byte standardness cap as every other push (below). A
+        // content_type over the cap is absurd for a real MIME type, but the
+        // guard keeps every single push in this envelope uniformly checked
+        // rather than leaving one silent hole.
+        assertPushWithinCap(ORD_TAGS.content_type, contentTypeBytes.length);
+        items.push(tagAsScriptItem(ORD_TAGS.content_type, minimalTagPush));
+        items.push(contentTypeBytes);
+    }
+    // Other fields in the order the caller supplied.
+    for (const field of args.fields ?? []) {
+        // Each field value is ONE push. Bitcoin standardness caps a push at
+        // 520 bytes, and ord's decoder reads each field as a single
+        // pushdata, so a value above the cap can't be a valid single field.
+        // Fail loud here rather than emit a non-standard, non-relayable push.
+        assertPushWithinCap(field.tag, field.value.length);
+        items.push(tagAsScriptItem(field.tag, minimalTagPush));
+        items.push(field.value);
+    }
+    // OP_0 separator: marks the boundary between fields and body.
+    // ord's parser uses this as the body start sentinel.
+    items.push('OP_0');
+    // Body chunks: 520 bytes max per push.
+    for (let i = 0; i < args.body.length; i += MAX_PUSH_BYTES) {
+        items.push(args.body.subarray(i, i + MAX_PUSH_BYTES));
+    }
+    // Envelope close.
+    items.push('ENDIF');
+    return Script.encode(items);
+}
+/**
+ * Encode an inscription id (`<txid>i<index>`) into the byte form ord
+ * expects wherever an inscription id appears in an envelope value:
+ * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
+ *
+ *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
+ *
+ * Zero-index gets no trailing bytes; index 256 encodes as `[0x00, 0x01]`;
+ * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
+ *
+ * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
+ * which is what ordpool renders parents / delegates from. If the
+ * round-trip doesn't match, the parser drops the id silently (ord's
+ * `filter_map` semantics), so the caller MUST hand us a canonical id
+ * form.
+ */
+function encodeInscriptionId(inscriptionId) {
+    const m = inscriptionId.match(/^([0-9a-f]{64})i(\d+)$/);
+    if (!m) {
+        throw new Error(`Invalid inscription id "${inscriptionId}"; expected 64 lowercase hex + "i" + non-negative integer.`);
+    }
+    const txidHex = m[1];
+    const indexStr = m[2];
+    if (indexStr.length > 1 && indexStr.startsWith('0')) {
+        throw new Error(`Invalid inscription index "${indexStr}"; canonical form has no leading zeros.`);
+    }
+    const index = Number(indexStr);
+    if (!Number.isSafeInteger(index) || index < 0 || index > 0xffffffff) {
+        throw new Error(`Inscription index out of u32 range: ${indexStr}`);
+    }
+    const txidBytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+        txidBytes[i] = parseInt(txidHex.substr(i * 2, 2), 16);
+    }
+    txidBytes.reverse();
+    if (index === 0) {
+        return txidBytes;
+    }
+    const indexBytes = new Uint8Array(4);
+    new DataView(indexBytes.buffer).setUint32(0, index, true);
+    let end = 4;
+    while (end > 0 && indexBytes[end - 1] === 0)
+        end--;
+    const out = new Uint8Array(32 + end);
+    out.set(txidBytes);
+    out.set(indexBytes.subarray(0, end), 32);
+    return out;
+}
+/**
+ * Backwards-compatible alias. `parent` (tag 0x03) and `delegate`
+ * (tag 0x0b) share the same inscription-id byte form, so both go
+ * through `encodeInscriptionId`. Kept exported because consumers +
+ * specs already import this name.
+ */
+const encodeParentInscriptionId = encodeInscriptionId;
+/**
+ * Encode a pointer sat-offset (tag 0x02) as minimal little-endian
+ * bytes: the u64 offset with trailing zero bytes trimmed. Offset 0
+ * encodes as an empty push (ord reads a missing/empty value as 0);
+ * 255 → `[0xff]`; 256 → `[0x00, 0x01]`.
+ *
+ * Inverse of `ordpool-parser`'s `extractPointer`, which little-endian-
+ * decodes the value. The pointer names the sat position (in the
+ * concatenated outputs) the inscription is assigned to; only the
+ * builder knows whether that offset is reachable given the reveal's
+ * output topology, so range-vs-topology validation lives at the
+ * synthesis layer, not here.
+ */
+function encodePointerValue(offset) {
+    if (!Number.isInteger(offset) || offset < 0) {
+        throw new Error(`pointer must be a non-negative integer; got ${offset}`);
+    }
+    if (!Number.isSafeInteger(offset)) {
+        throw new Error(`pointer ${offset} exceeds the safe-integer range`);
+    }
+    return minimalLeBytes(BigInt(offset));
+}
+/**
+ * Encode a rune-name commitment (tag 0x0d) as minimal little-endian
+ * bytes: the rune's u128 value with trailing zero bytes trimmed.
+ * Value 0 encodes as an empty push. Rejects negatives and anything
+ * above u128 max.
+ *
+ * ord's rune etching reads this back as the u128 commitment (see
+ * `ordpool-parser` `knownFields.rune`); the etching tx must later
+ * spend this inscription's UTXO. A pre-computed byte value can still
+ * be passed through the generic `envelopeFields` escape hatch.
+ */
+function encodeRuneCommitment(value) {
+    if (typeof value !== 'bigint') {
+        throw new Error('rune commitment must be a bigint');
+    }
+    if (value < 0n) {
+        throw new Error(`rune commitment must be non-negative; got ${value}`);
+    }
+    const U128_MAX = (1n << 128n) - 1n;
+    if (value > U128_MAX) {
+        throw new Error(`rune commitment ${value} exceeds u128 range`);
+    }
+    return minimalLeBytes(value);
+}
+/** Little-endian bytes of a non-negative bigint, trailing zeros trimmed. */
+function minimalLeBytes(value) {
+    if (value === 0n) {
+        return new Uint8Array(0);
+    }
+    const bytes = [];
+    let v = value;
+    while (v > 0n) {
+        bytes.push(Number(v & 0xffn));
+        v >>= 8n;
+    }
+    return Uint8Array.from(bytes);
+}
+/**
+ * Split a field value into one-or-more `{ tag, value }` entries so no
+ * single push exceeds the 520-byte standardness cap. ord's decoder
+ * concatenates all same-tag chunks before decoding (metadata tag 0x05,
+ * properties tag 0x11), so a large CBOR blob is carried as several
+ * repeated-tag fields.
+ *
+ * A zero-length value yields a single empty-value field (callers that
+ * reject empty payloads gate that upstream).
+ */
+function chunkFieldValue(tag, value) {
+    if (value.length === 0) {
+        return [{ tag, value }];
+    }
+    const fields = [];
+    for (let i = 0; i < value.length; i += MAX_PUSH_BYTES) {
+        fields.push({ tag, value: value.subarray(i, i + MAX_PUSH_BYTES) });
+    }
+    return fields;
+}
+
+function prepareInscribeFundingInput(args) {
+    return prepareCat21Input(args);
+}
+
+/**
+ * Signs the reveal via the envelope tapscript leaf, returns the
+ * finalized reveal hex. The caller-supplied ephemeral private key
+ * is used for the Schnorr signature; the orchestrator returns this
+ * same key on its result so the consumer can rebuild a different
+ * reveal later under different parameters.
+ */
+function buildInscribeRevealTx(args) {
+    const scureNetwork = toScureNetwork(args.network);
+    const postageSats = INSCRIBE_POSTAGE_SATS;
+    const tipValueSats = args.tip?.value ?? 0;
+    if (tipValueSats < 0)
+        throw new Error('tip.value must be non-negative');
+    if (!Number.isInteger(tipValueSats))
+        throw new Error('tip.value must be an integer');
+    // The reveal's miner fee equals the leftover: commit output sats
+    // minus the postage going to the recipient minus any tip output
+    // going to the tip address.
+    const revealFeeReserveSats = args.commitOutputValueSats - postageSats - tipValueSats;
+    if (revealFeeReserveSats < 0) {
+        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`);
+    }
+    if (args.ephemeralPrivKey.length !== 32) {
+        throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
+    }
+    // `lockTime: 21` on the reveal too — both the commit AND the reveal
+    // qualify as CAT-21 mints under cat21-ord's `--index-cat21` rule
+    // (`nLockTime === 21`). That mints TWO cats per inscription:
+    //
+    //   1. Cat from the commit (id `<commitTxid>i0`) at the first sat
+    //      of commit's vout[0]. The reveal spends commit's vout[0]
+    //      FIFO-style, so this cat moves to the inscription recipient's
+    //      UTXO (vout[0] of the reveal at 546 sats).
+    //   2. Cat from the reveal (id `<revealTxid>i0`) at the first sat
+    //      of reveal's vout[0] — the same UTXO and the same sat as
+    //      cat #1. Post-jubilee chains (regtest above block 110;
+    //      mainnet above 824544) tag this cat with the `Vindicated`
+    //      charm because it's technically a reinscription on the same
+    //      sat. The charm is metadata; the cat is fully real, has a
+    //      positive cat number, and indexes normally.
+    //
+    // Net: one inscription, two cats stacked on the same 546-sat UTXO
+    // at the inscription recipient. The maintainer's call: "there are
+    // never enough cats".
+    const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
+    // Input 0: commit P2TR output, spent via the envelope leaf.
+    // Envelope leaf is index 0 of the args.taproot.tapLeafScript array.
+    tx.addInput({
+        txid: args.commitTxid,
+        index: args.commitVout,
+        witnessUtxo: {
+            script: args.commitOutputScript,
+            amount: BigInt(args.commitOutputValueSats),
+        },
+        tapInternalKey: args.taproot.internalKey,
+        tapLeafScript: args.taproot.tapLeafScript,
+    });
+    // Output 0: recipient address, postage sats. The inscription
+    // lands on the first sat of this output (ord-theory FIFO).
+    tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+    // Output 1 (optional): tip output. ord's first-sat-of-first-output
+    // rule pins the inscription to vout[0]; the tip lives at vout[1].
+    // Pattern matches `0xFlicker/ordinals` packages/inscriptions/src/
+    // reveal.ts (the only OSS inscriber with a tip primitive — see
+    // /Work/ordpool/OSS-INSCRIBERS.md). We diverge in that we ship a
+    // single fixed-sats tip, not a weighted multi-recipient split.
+    if (args.tip !== undefined && tipValueSats > 0) {
+        tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+    }
+    // Manual taproot tapscript-path finalization.
+    //
+    // scure 1.2.x's automatic finalize rejects our envelope tapscript
+    // pattern (`<pubkey> CHECKSIG OP_FALSE OP_IF "ord" ... OP_ENDIF`)
+    // because it's not one of the known `pk` / `ms` patterns — it
+    // throws "Finalize: Unknown tapLeafScript". scure 2.x added
+    // `customScripts` to register handlers; we don't have that.
+    //
+    // Manual path mirrors what scure's finalize would do for a `pk`
+    // leaf: compute the BIP-341 tapscript sighash, sign with the
+    // ephemeral Schnorr key, assemble `[sig, script, controlBlock]`
+    // as the witness, write it via updateInput. The output is
+    // byte-identical to what a scure-2.x customScripts handler
+    // would produce.
+    //
+    // scure stores each `tapLeafScript[i]` value as the BIP-371
+    // concatenation `<bareScript><leafVersionByte>` (see scure
+    // `index.js:1280-1283`: `concat(l.script, [l.version || TAP_LEAF_VERSION])`).
+    // The trailing version byte MUST be stripped before the script
+    // is used in the BIP-341 sighash AND before it goes into the
+    // witness — both validators reconstruct the leaf hash from the
+    // bare-script bytes only. scure's own sign path strips it the
+    // same way (`index.js:2352`: `_script.subarray(0, -1)`).
+    const [cbStruct, leafScriptWithVersion] = args.taproot.tapLeafScript[0];
+    const bareLeafScript = leafScriptWithVersion.subarray(0, -1);
+    const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
+    const sighash = tx.preimageWitnessV1(0, [args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(args.commitOutputValueSats)], undefined, bareLeafScript, leafVersion);
+    const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
+    const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
+    tx.updateInput(0, {
+        finalScriptWitness: [signature, bareLeafScript, controlBlock],
+    }, true);
+    assertCat21LockTime(tx.lockTime);
+    return {
+        revealHex: tx.hex,
+        revealTxid: tx.id,
+        revealVsize: tx.vsize,
+    };
+}
+/**
+ * Derives the x-only Schnorr pubkey from a private key. The pubkey
+ * is what gets embedded in the envelope tapscript via
+ * `<revealPubkeyXonly> OP_CHECKSIG`, so the caller can pre-compute
+ * the envelope independently of the actual reveal call. The same
+ * pubkey is fed to both the commit helper (via envelopeScript) and
+ * the reveal helper (implicitly via the regenerated private key).
+ *
+ * Returns the 32-byte x-only Schnorr pubkey.
+ */
+function deriveRevealPubkeyXonly(privKey) {
+    return schnorr.getPublicKey(privKey);
+}
+
+/**
+ * Returns the commit + reveal fee math at the given fee rate.
+ * Pure function — does not broadcast, does not retain any key
+ * material between calls.
+ */
+function simulateInscribeFees(args) {
+    if (args.feeRatePerVbyte <= 0) {
+        throw new Error('feeRatePerVbyte must be positive');
+    }
+    if (args.ephemeralPubkeyXonly.length !== 32) {
+        throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
+    }
+    // The simulator uses a deterministic dummy ephemeral private key
+    // for the reveal-signing step (the resulting Schnorr signature is
+    // always 64 bytes regardless of the key bytes, so vsize doesn't
+    // care). The pubkey embedded in the envelope + used as taproot
+    // internal key is whatever the caller passed (real orchestrator
+    // passes the freshly-generated ephemeral key; specs may pass a
+    // fixed dummy).
+    const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);
+    const envelope = buildInscriptionEnvelope({
+        revealPubkeyXonly: args.ephemeralPubkeyXonly,
+        contentType: args.contentType,
+        body: args.body,
+        fields: args.envelopeFields,
+        minimalTagPush: args.minimalTagPush,
+    });
+    // ---- Step 1: reveal vsize is deterministic; compute once. ----
+    // We need the commit output's script/address first to construct
+    // a reveal that points at it. Build a placeholder commit with
+    // zero fees just to get the taptree metadata.
+    const placeholderCommit = buildInscribeCommitPsbt({
+        fundingInput: args.fundingInput,
+        senderChangeAddress: args.senderChangeAddress,
+        envelopeScript: envelope,
+        ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
+        commitFeeSats: 0,
+        revealFeeReserveSats: 0,
+        tipValueSats: args.tip?.value,
+        walletType: args.walletType,
+        changeDustLimitSats: args.changeDustLimitSats,
+        network: args.network,
+    });
+    const tipValueSats = args.tip?.value ?? 0;
+    const reveal = buildInscribeRevealTx({
+        commitTxid: '0'.repeat(64),
+        commitVout: 0,
+        // postage + tip; the placeholder commit has revealFeeReserveSats=0
+        // so the commit output is sized exactly to cover the reveal's two
+        // outputs (recipient at postage, tip at tip.value). Setting it
+        // higher would leave change inside the reveal which the helper
+        // doesn't model — instead we measure vsize at zero reveal fee and
+        // compute the fee separately.
+        commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
+        commitOutputScript: placeholderCommit.commitOutputScript,
+        taproot: {
+            internalKey: placeholderCommit.taproot.internalKey,
+            tapLeafScript: placeholderCommit.taproot.tapLeafScript,
+        },
+        ephemeralPrivKey: dummyEphemeralPriv,
+        recipientAddress: args.recipientAddress,
+        tip: args.tip,
+        network: args.network,
+    });
+    const revealVsize = reveal.revealVsize;
+    const revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
+    // ---- Step 2: commit two-pass with revealFeeReserve = revealFeeSats. ----
+    // Reuse the existing twoPassFeeSimulation pattern.
+    const { finalFeeSats: commitFeeSats, vsize: commitVsize, finalSimulation } = twoPassFeeSimulation({
+        feeRatePerVbyte: args.feeRatePerVbyte,
+        simulate: (feeSats) => {
+            const commit = buildInscribeCommitPsbt({
+                fundingInput: args.fundingInput,
+                senderChangeAddress: args.senderChangeAddress,
+                envelopeScript: envelope,
+                ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
+                commitFeeSats: feeSats,
+                revealFeeReserveSats: revealFeeSats,
+                tipValueSats: args.tip?.value,
+                walletType: args.walletType,
+                changeDustLimitSats: args.changeDustLimitSats,
+                network: args.network,
+            });
+            // Decode the PSBT, dummy-sign the funding input, finalize,
+            // read vsize. Same pattern cat21's simulateTransaction uses
+            // (cat21.service.ts:176). Allows both DEFAULT and ALL
+            // sighash because the funding input is taproot when the
+            // caller passes a Taproot wallet via the Layer-2 adapter's
+            // simulation mode.
+            const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
+            const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
+            tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+            tx.finalize();
+            return { vsize: tx.vsize, commit };
+        },
+    });
+    const commitOutputValueSats = finalSimulation.commit.commitOutputValueSats;
+    return {
+        commitFeeSats,
+        revealFeeSats,
+        totalFeeSats: commitFeeSats + revealFeeSats,
+        commitVsize,
+        revealVsize,
+        combinedVsize: commitVsize + revealVsize,
+        commitOutputValueSats,
+        fundingRequirementSats: commitOutputValueSats + commitFeeSats,
+    };
+}
+
+/**
+ * Build the child reveal PSBT: parent input (unsigned) + commit input
+ * (ephemeral-finalized), parent-return output + child output.
+ */
+function buildChildInscribeRevealTx(args) {
+    const scureNetwork = toScureNetwork(args.network);
+    const postageSats = INSCRIBE_POSTAGE_SATS;
+    const tipValueSats = args.tip?.value ?? 0;
+    if (tipValueSats < 0 || !Number.isInteger(tipValueSats)) {
+        throw new Error('tip.value must be a non-negative integer');
+    }
+    if (args.ephemeralPrivKey.length !== 32) {
+        throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
+    }
+    if (!Number.isInteger(args.parent.utxo.value) || args.parent.utxo.value < postageSats) {
+        throw new Error(`parent.utxo.value must be an integer >= ${postageSats} (its sats are preserved on return); ` +
+            `got ${args.parent.utxo.value}`);
+    }
+    if (args.parent.utxo.tapInternalKey.length !== 32) {
+        throw new Error('parent.utxo.tapInternalKey must be a 32-byte x-only key (P2TR parent)');
+    }
+    const parentValue = args.parent.utxo.value;
+    // The reveal miner fee is the leftover after the child + tip are funded
+    // from the commit output. The parent's sats pass straight through
+    // (input 0 -> output 0), so they never enter the fee arithmetic.
+    const revealFeeSats = args.commitOutputValueSats - postageSats - tipValueSats;
+    if (revealFeeSats < 0) {
+        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`);
+    }
+    const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
+    // Input 0: parent UTXO (P2TR key-path). Left UNSIGNED — the wallet
+    // signs it. witnessUtxo + tapInternalKey are what a wallet needs to
+    // produce the key-path signature. SIGHASH_DEFAULT (omit sighashType)
+    // per the SDK-wide BIP-341 wire-equivalent rule.
+    tx.addInput({
+        txid: args.parent.utxo.txid,
+        index: args.parent.utxo.vout,
+        witnessUtxo: {
+            script: args.parent.utxo.scriptPubKey,
+            amount: BigInt(parentValue),
+        },
+        tapInternalKey: args.parent.utxo.tapInternalKey,
+    });
+    // Input 1: commit P2TR output, spent script-path via the envelope leaf.
+    tx.addInput({
+        txid: args.commitTxid,
+        index: args.commitVout,
+        witnessUtxo: {
+            script: args.commitOutputScript,
+            amount: BigInt(args.commitOutputValueSats),
+        },
+        tapInternalKey: args.taproot.internalKey,
+        tapLeafScript: args.taproot.tapLeafScript,
+    });
+    // Output 0: parent RETURN — the parent inscription goes back to its
+    // owner with exactly its incoming value (FIFO: input 0 → output 0).
+    tx.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
+    // Output 1: child recipient (546). FIFO puts the child here (the commit
+    // input's first sat is global `parentValue`, which lands in output 1).
+    tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+    // Output 2 (optional): tip, after the child.
+    if (args.tip !== undefined && tipValueSats > 0) {
+        tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+    }
+    // Ephemeral script-path finalization of the COMMIT input (index 1).
+    // SIGHASH_DEFAULT commits to ALL inputs + outputs, so the sighash needs
+    // every prevout script + amount (parent AND commit). Manual finalize
+    // mirrors the single-input reveal helper; see its comment for the
+    // trailing-version-byte handling on the leaf script.
+    const [cbStruct, leafScriptWithVersion] = args.taproot.tapLeafScript[0];
+    const bareLeafScript = leafScriptWithVersion.subarray(0, -1);
+    const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
+    const commitInputIndex = 1;
+    const sighash = tx.preimageWitnessV1(commitInputIndex, [args.parent.utxo.scriptPubKey, args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(parentValue), BigInt(args.commitOutputValueSats)], undefined, bareLeafScript, leafVersion);
+    const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
+    const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
+    // Attach the ephemeral script-path signature as a PARTIAL sig
+    // (tapScriptSig), NOT a finalScriptWitness. A PSBT that hands a wallet
+    // an already-FINALIZED sibling input is rejected by the address-filter
+    // signers (Unisat/Wizz/OKX) — their signPsbt won't produce a signing
+    // prompt for such a PSBT. Left partial, every input is unfinalized when
+    // the wallet sees it; the wallet signs input 0, and the shared
+    // extract-wire-tx step finalizes BOTH inputs (input 0 from the wallet's
+    // key-path sig, input 1 from this tapScriptSig via the tapLeafScript
+    // set above). Index-based signers (Leather / cat21-wallet) reach the
+    // same finalized witness. The measurement clone below still finalizes
+    // input 1 directly so revealTxid / revealVsize are exact.
+    const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
+    tx.updateInput(commitInputIndex, {
+        tapScriptSig: [[{ pubKey: args.taproot.internalKey, leafHash }, signature]],
+    }, true);
+    assertCat21LockTime(tx.lockTime);
+    // Measure vsize + txid on a fully-signed CLONE: set a dummy 64-byte
+    // key-path witness on the parent input (SIGHASH_DEFAULT P2TR witness is
+    // exactly a 64-byte Schnorr sig, so the size is exact regardless of the
+    // real signature). The txid is witness-independent, so the clone's id
+    // equals what the wallet-signed reveal will produce.
+    const clone = btc.Transaction.fromPSBT(tx.toPSBT(0), { allowUnknownInputs: true });
+    clone.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] }, true);
+    clone.updateInput(commitInputIndex, {
+        finalScriptWitness: [signature, bareLeafScript, controlBlock],
+    }, true);
+    // Wallet-facing PSBT: same consensus tx (inputs/outputs/locktime), but
+    // input 1 is a BARE Taproot input — witnessUtxo only, no tapLeafScript /
+    // tapScriptSig. The wallet signs input 0 here without ever parsing the
+    // ord envelope tap-leaf (which hangs / is rejected by some signPsbt
+    // implementations). Rebuilt fresh because scure's updateInput merges
+    // and cannot clear an already-set field.
+    const walletFacing = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
+    walletFacing.addInput({
+        txid: args.parent.utxo.txid,
+        index: args.parent.utxo.vout,
+        witnessUtxo: { script: args.parent.utxo.scriptPubKey, amount: BigInt(parentValue) },
+        tapInternalKey: args.parent.utxo.tapInternalKey,
+    });
+    walletFacing.addInput({
+        txid: args.commitTxid,
+        index: args.commitVout,
+        witnessUtxo: { script: args.commitOutputScript, amount: BigInt(args.commitOutputValueSats) },
+    });
+    walletFacing.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
+    walletFacing.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+    if (args.tip !== undefined && tipValueSats > 0) {
+        walletFacing.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+    }
+    return {
+        revealPsbt: tx.toPSBT(0),
+        revealPsbtForWallet: walletFacing.toPSBT(0),
+        revealTxid: clone.id,
+        revealVsize: clone.vsize,
+    };
+}
+
+/**
+ * Compute the commit transaction's txid BEFORE the wallet signs it.
+ *
+ * The reveal spends the commit's output, so its input must reference the
+ * exact txid the real wallet-signed commit will have. For witness funding
+ * inputs (P2WPKH / P2TR) the scriptSig is empty, so the txid is witness-
+ * independent and finalizing the dummy-keyed simulation commit yields the
+ * real txid byte-for-byte.
+ *
+ * For P2SH-P2WPKH (Nested SegWit) the redeemScript push lives in the
+ * scriptSig, which IS part of the non-witness txid — so the dummy pubkey
+ * used during simulation would produce a DIFFERENT txid than the real
+ * commit, the reveal would reference a non-existent output, and the
+ * postage would lock. The real scriptSig is fully determined by the real
+ * payment pubkey (`push(p2wpkh(pubkey))`, no signature required), so
+ * override input 0's scriptSig with it before reading the txid.
+ *
+ * P2PKH is excluded upstream by `isInscribeSupportedPaymentAddress`: its
+ * scriptSig carries the actual signature, which is not knowable until the
+ * wallet signs, so its commit txid genuinely cannot be predicted.
+ */
+function deriveUnsignedCommitTxid(simCommitPsbt, paymentAddress, paymentPublicKey, network) {
+    const scureNetwork = toScureNetwork(network);
+    const simTx = btc.Transaction.fromPSBT(simCommitPsbt);
+    const { dummyPrivateKey } = getDummyKeypair(scureNetwork);
+    simTx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+    simTx.finalize();
+    if (getAddressFormat(paymentAddress) === 'P2SH???') {
+        const redeemScript = btc.p2wpkh(paymentPublicKey, scureNetwork).script;
+        simTx.updateInput(0, { finalScriptSig: btc.Script.encode([redeemScript]) }, true);
+    }
+    return simTx.id;
+}
+/**
+ * Build the inscribe commit + reveal pair for the given content.
+ * Pure function modulo `randomPrivateKey`.
+ *
+ * The returned `ephemeral.privKey` is the bearer instrument for
+ * the commit output — see the module-level lifecycle note for the
+ * storage semantic.
+ */
+function createInscribeTransactions(args) {
+    if (args.feeRatePerVbyte <= 0) {
+        throw new Error('feeRatePerVbyte must be positive');
+    }
+    // Refuse P2PKH funding inputs. The reveal is pre-built against the
+    // commit txid from deriveUnsignedCommitTxid, which reconstructs the
+    // pre-signing scriptSig from the payment pubkey: empty for witness
+    // inputs (P2WPKH / P2TR) and a deterministic redeemScript push for
+    // P2SH-P2WPKH. Legacy P2PKH cannot be predicted — its scriptSig carries
+    // the actual signature, unknowable until the wallet signs — so a P2PKH
+    // inscribe would land the commit but bind the reveal to a non-existent
+    // txid, locking the postage. Consumers should gate the UI with
+    // `isInscribeSupportedPaymentAddress` so this throw is unreachable.
+    if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
+        throw new Error(`Legacy P2PKH payment addresses are not supported for inscribing ` +
+            `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
+            `Switch the wallet to Native SegWit or Taproot and retry.`);
+    }
+    if (args.tip !== undefined) {
+        if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
+            throw new Error('tip.value must be a non-negative integer');
+        }
+        if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
+            throw new Error('tip.address must be a non-empty string');
+        }
+    }
+    const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
+    const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
+    // Synthesise envelope fields from the convenience args and prepend
+    // to the caller-supplied envelopeFields. On duplicate tags (e.g.
+    // caller also supplies a parent entry) BOTH entries are emitted in
+    // order; ord's decoder handles multiple instances per tag according
+    // to that tag's semantics: `parent` / `delegate` accumulate,
+    // `content_type` / `content_encoding` first-wins (so caller-supplied
+    // values behind an auto-field are ignored by downstream indexers).
+    // Caller-side dedup is the consumer's responsibility.
+    const autoFields = synthesizeEnvelopeFields(args);
+    const mergedFields = autoFields.length === 0
+        ? (args.envelopeFields ?? [])
+        : [...autoFields, ...(args.envelopeFields ?? [])];
+    const envelope = buildInscriptionEnvelope({
+        revealPubkeyXonly: ephemeralPubkeyXonly,
+        contentType: args.contentType,
+        body: args.body,
+        fields: mergedFields,
+        minimalTagPush: args.minimalTagPush,
+    });
+    // Layer-2: convert raw UTXO into the funding-input shape the
+    // commit helper expects. Real-mode (not simulation) so the
+    // funding gets signed by the real wallet later.
+    const realFundingInput = prepareInscribeFundingInput({
+        utxo: args.paymentOutput,
+        paymentPublicKey: args.paymentPublicKey,
+        paymentAddress: args.paymentAddress,
+        isSimulation: false,
+        network: args.network,
+    });
+    // Layer-3: simulate fees. Layer 3 uses its own simulation-mode
+    // funding input via the dummy keypair pattern.
+    const simulationFundingInput = prepareInscribeFundingInput({
+        utxo: args.paymentOutput,
+        paymentPublicKey: args.paymentPublicKey,
+        paymentAddress: args.paymentAddress,
+        isSimulation: true,
+        network: args.network,
+    });
+    // The change-output dust floor must match the real commit build below,
+    // or the fee simulation quotes a different commit topology (absorb-vs-
+    // emit change) than the tx the wallet actually signs. Thread the real
+    // per-address minimum into BOTH.
+    const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
+    let fees;
+    try {
+        fees = simulateInscribeFees({
+            feeRatePerVbyte: args.feeRatePerVbyte,
+            body: args.body,
+            contentType: args.contentType,
+            envelopeFields: mergedFields,
+            minimalTagPush: args.minimalTagPush,
+            fundingInput: simulationFundingInput,
+            senderChangeAddress: args.paymentAddress,
+            recipientAddress: args.recipientAddress,
+            ephemeralPubkeyXonly,
+            changeDustLimitSats,
+            tip: args.tip,
+            walletType: args.walletType,
+            network: args.network,
+        });
+    }
+    catch (err) {
+        // The commit helper throws `Funding insufficient: ...` when the
+        // funding UTXO is below the postage + fees floor. Re-cast to
+        // the orchestrator's typed message so consumers can branch on it
+        // (same translation pattern cat21's createTransaction uses).
+        if (err instanceof Error && /Funding insufficient/.test(err.message)) {
+            throw new Error('Insufficient funds for inscribe');
+        }
+        throw err;
+    }
+    if (args.paymentOutput.value < fees.fundingRequirementSats) {
+        throw new Error(`Insufficient funds for inscribe: funding UTXO has ${args.paymentOutput.value} ` +
+            `sats, need ${fees.fundingRequirementSats} ` +
+            `(commit fee ${fees.commitFeeSats} + commit output value ` +
+            `${fees.commitOutputValueSats})`);
+    }
+    // Layer-1 build at resolved fees (same changeDustLimitSats as the sim).
+    const commit = buildInscribeCommitPsbt({
+        fundingInput: realFundingInput,
+        senderChangeAddress: args.paymentAddress,
+        envelopeScript: envelope,
+        ephemeralPubkeyXonly,
+        commitFeeSats: fees.commitFeeSats,
+        revealFeeReserveSats: fees.revealFeeSats,
+        tipValueSats: args.tip?.value,
+        walletType: args.walletType,
+        changeDustLimitSats,
+        network: args.network,
+    });
+    // The reveal's input outpoint references the commit's txid, which must
+    // be known BEFORE the wallet signs. Build a simulation-mode commit at
+    // the same fees against the dummy-keyed funding input, then derive the
+    // txid via deriveUnsignedCommitTxid (which reconstructs the real
+    // P2SH-P2WPKH scriptSig so the reveal binds to the correct output).
+    const simCommit = buildInscribeCommitPsbt({
+        fundingInput: simulationFundingInput,
+        senderChangeAddress: args.paymentAddress,
+        envelopeScript: envelope,
+        ephemeralPubkeyXonly,
+        commitFeeSats: fees.commitFeeSats,
+        revealFeeReserveSats: fees.revealFeeSats,
+        tipValueSats: args.tip?.value,
+        walletType: args.walletType,
+        changeDustLimitSats,
+        network: args.network,
+    });
+    const commitTxidUnsigned = deriveUnsignedCommitTxid(simCommit.commitPsbt, args.paymentAddress, args.paymentPublicKey, args.network);
+    const reveal = buildInscribeRevealTx({
+        commitTxid: commitTxidUnsigned,
+        commitVout: 0,
+        commitOutputValueSats: commit.commitOutputValueSats,
+        commitOutputScript: commit.commitOutputScript,
+        taproot: {
+            internalKey: commit.taproot.internalKey,
+            tapLeafScript: commit.taproot.tapLeafScript,
+        },
+        ephemeralPrivKey,
+        recipientAddress: args.recipientAddress,
+        tip: args.tip,
+        network: args.network,
+    });
+    return {
+        commitPsbt: commit.commitPsbt,
+        commitTxid: commitTxidUnsigned,
+        revealHex: reveal.revealHex,
+        revealTxid: reveal.revealTxid,
+        commitAddress: commit.commitAddress,
+        fees,
+        ephemeral: {
+            privKey: ephemeralPrivKey,
+            pubkeyXonly: ephemeralPubkeyXonly,
+        },
+        commit: {
+            outputScript: commit.commitOutputScript,
+            outputValueSats: commit.commitOutputValueSats,
+            envelopeScript: envelope,
+        },
+    };
+}
+/**
+ * Build the commit + CHILD reveal pair for an ord parent/child
+ * inscription. Same commit as a normal inscribe (envelope carries the
+ * `parent` tag); the reveal additionally SPENDS the parent UTXO and
+ * RETURNS it to the owner, which is what makes ord recognise the parent
+ * link (see {@link buildChildInscribeRevealTx}). The reveal is returned
+ * as a PSBT because its parent input needs the wallet's signature.
+ */
+function createChildInscribeTransactions(args) {
+    if (args.feeRatePerVbyte <= 0) {
+        throw new Error('feeRatePerVbyte must be positive');
+    }
+    if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
+        throw new Error(`Legacy P2PKH payment addresses are not supported for inscribing ` +
+            `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
+            `Switch the wallet to Native SegWit or Taproot and retry.`);
+    }
+    if (args.tip !== undefined) {
+        if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
+            throw new Error('tip.value must be a non-negative integer');
+        }
+        if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
+            throw new Error('tip.address must be a non-empty string');
+        }
+    }
+    if (typeof args.parentInscriptionId !== 'string' || args.parentInscriptionId.length === 0) {
+        throw new Error('parentInscriptionId must be a non-empty string');
+    }
+    if (args.pointer !== undefined) {
+        // The child lands on its own output (vout[1]) via FIFO sat-tracking
+        // with NO pointer: input 1's first sat is at global offset = parent
+        // value = the start of output 1 (see inscription-child-reveal.helper.ts).
+        // synthesizeEnvelopeFields validates a pointer against the plain
+        // single-output topology (inscription at vout[0]), which does NOT hold
+        // for the child reveal (vout[0] = parent return). A pointer accepted
+        // there would relocate the child onto the parent's returned UTXO, so
+        // it is refused rather than silently misplaced.
+        throw new Error('pointer is not supported for child inscriptions; the child lands on ' +
+            'its own output (vout[1]) via FIFO sat-tracking.');
+    }
+    const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
+    const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
+    // Envelope with the parent tag (0x03) synthesised from parentInscriptionId.
+    const autoFields = synthesizeEnvelopeFields({ ...args, parent: args.parentInscriptionId });
+    const mergedFields = autoFields.length === 0
+        ? (args.envelopeFields ?? [])
+        : [...autoFields, ...(args.envelopeFields ?? [])];
+    const envelope = buildInscriptionEnvelope({
+        revealPubkeyXonly: ephemeralPubkeyXonly,
+        contentType: args.contentType,
+        body: args.body,
+        fields: mergedFields,
+        minimalTagPush: args.minimalTagPush,
+    });
+    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
+    const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);
+    const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
+    const tipValueSats = args.tip?.value ?? 0;
+    const simFundingInput = prepareInscribeFundingInput({
+        utxo: args.paymentOutput,
+        paymentPublicKey: args.paymentPublicKey,
+        paymentAddress: args.paymentAddress,
+        isSimulation: true,
+        network: args.network,
+    });
+    // Child reveal vsize is deterministic (parent input + commit input, two
+    // outputs); measure it once via a sim child reveal to get the reveal fee.
+    // The commit builder throws `Funding insufficient` when the funding UTXO
+    // can't cover the commit output + fee; re-cast to the child-typed message
+    // (same translation the parent createInscribeTransactions does).
+    let revealVsize;
+    let revealFeeSats;
+    let commitFeeSats;
+    let commitVsize;
+    let commitOutputValueSats;
+    try {
+        const placeholderCommit = buildInscribeCommitPsbt({
+            fundingInput: simFundingInput,
+            senderChangeAddress: args.paymentAddress,
+            envelopeScript: envelope,
+            ephemeralPubkeyXonly,
+            commitFeeSats: 0,
+            revealFeeReserveSats: 0,
+            tipValueSats: args.tip?.value,
+            walletType: args.walletType,
+            changeDustLimitSats,
+            network: args.network,
+        });
+        const simChildReveal = buildChildInscribeRevealTx({
+            commitTxid: '0'.repeat(64),
+            commitVout: 0,
+            commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
+            commitOutputScript: placeholderCommit.commitOutputScript,
+            taproot: placeholderCommit.taproot,
+            ephemeralPrivKey: dummyEphemeralPriv,
+            parent: args.parentUtxo,
+            recipientAddress: args.recipientAddress,
+            tip: args.tip,
+            network: args.network,
+        });
+        revealVsize = simChildReveal.revealVsize;
+        revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
+        // Commit two-pass with revealFeeReserve = the CHILD reveal fee.
+        const twoPass = twoPassFeeSimulation({
+            feeRatePerVbyte: args.feeRatePerVbyte,
+            simulate: (feeSats) => {
+                const commit = buildInscribeCommitPsbt({
+                    fundingInput: simFundingInput,
+                    senderChangeAddress: args.paymentAddress,
+                    envelopeScript: envelope,
+                    ephemeralPubkeyXonly,
+                    commitFeeSats: feeSats,
+                    revealFeeReserveSats: revealFeeSats,
+                    tipValueSats: args.tip?.value,
+                    walletType: args.walletType,
+                    changeDustLimitSats,
+                    network: args.network,
+                });
+                const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
+                tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+                tx.finalize();
+                return { vsize: tx.vsize, commit };
+            },
+        });
+        commitFeeSats = twoPass.finalFeeSats;
+        commitVsize = twoPass.vsize;
+        commitOutputValueSats = twoPass.finalSimulation.commit.commitOutputValueSats;
+    }
+    catch (err) {
+        if (err instanceof Error && /Funding insufficient/.test(err.message)) {
+            throw new Error(`Insufficient funds for child inscribe: funding UTXO has ${args.paymentOutput.value} ` +
+                `sats, not enough for the commit output + fees`);
+        }
+        throw err;
+    }
+    const fundingRequirementSats = commitOutputValueSats + commitFeeSats;
+    if (args.paymentOutput.value < fundingRequirementSats) {
+        throw new Error(`Insufficient funds for child inscribe: funding UTXO has ${args.paymentOutput.value} ` +
+            `sats, need ${fundingRequirementSats} (commit fee ${commitFeeSats} + commit output ` +
+            `${commitOutputValueSats})`);
+    }
+    // Real commit + a sim commit to read the witness-independent commit txid.
+    const realFundingInput = prepareInscribeFundingInput({
+        utxo: args.paymentOutput,
+        paymentPublicKey: args.paymentPublicKey,
+        paymentAddress: args.paymentAddress,
+        isSimulation: false,
+        network: args.network,
+    });
+    const commitArgsBase = {
+        senderChangeAddress: args.paymentAddress,
+        envelopeScript: envelope,
+        ephemeralPubkeyXonly,
+        commitFeeSats,
+        revealFeeReserveSats: revealFeeSats,
+        tipValueSats: args.tip?.value,
+        walletType: args.walletType,
+        changeDustLimitSats,
+        network: args.network,
+    };
+    const commit = buildInscribeCommitPsbt({ fundingInput: realFundingInput, ...commitArgsBase });
+    const simCommit = buildInscribeCommitPsbt({ fundingInput: simFundingInput, ...commitArgsBase });
+    const commitTxid = deriveUnsignedCommitTxid(simCommit.commitPsbt, args.paymentAddress, args.paymentPublicKey, args.network);
+    const reveal = buildChildInscribeRevealTx({
+        commitTxid,
+        commitVout: 0,
+        commitOutputValueSats: commit.commitOutputValueSats,
+        commitOutputScript: commit.commitOutputScript,
+        taproot: commit.taproot,
+        ephemeralPrivKey,
+        parent: args.parentUtxo,
+        recipientAddress: args.recipientAddress,
+        tip: args.tip,
+        network: args.network,
+    });
+    return {
+        commitPsbt: commit.commitPsbt,
+        commitTxid,
+        revealPsbt: reveal.revealPsbt,
+        revealPsbtForWallet: reveal.revealPsbtForWallet,
+        revealTxid: reveal.revealTxid,
+        commitAddress: commit.commitAddress,
+        fees: {
+            commitFeeSats,
+            revealFeeSats,
+            totalFeeSats: commitFeeSats + revealFeeSats,
+            commitVsize,
+            revealVsize,
+            combinedVsize: commitVsize + revealVsize,
+            commitOutputValueSats,
+            fundingRequirementSats,
+        },
+        ephemeral: { privKey: ephemeralPrivKey, pubkeyXonly: ephemeralPubkeyXonly },
+        parent: args.parentUtxo,
+    };
+}
+/**
+ * Turn the convenience args (pointer, metadata, metaprotocol, parent,
+ * delegate, rune, note, contentEncoding, properties, propertyEncoding)
+ * into ord envelope fields in the exact byte form ord expects. Each
+ * value is validated here; large CBOR payloads (metadata / properties)
+ * are chunked across repeated same-tag fields so no single push
+ * exceeds the 520-byte cap. Field ORDER doesn't affect the resolved
+ * inscription (ord indexes by tag), but a stable order keeps the
+ * encoded envelope diff-friendly.
+ */
+function synthesizeEnvelopeFields(args) {
+    const fields = [];
+    if (args.pointer !== undefined) {
+        // Topology gate: this builder places the inscription's 546-sat
+        // recipient output at vout[0]. A pointer must point inside that
+        // output to land on the inscription's own UTXO. Reject an
+        // unreachable offset rather than emit a pointer that silently
+        // moves the inscription off its cat-bearing UTXO.
+        if (args.pointer >= INSCRIBE_POSTAGE_SATS) {
+            throw new Error(`pointer ${args.pointer} is unreachable: this builder's reveal has a single ` +
+                `${INSCRIBE_POSTAGE_SATS}-sat inscription output at vout[0], so pointer must be < ${INSCRIBE_POSTAGE_SATS}.`);
+        }
+        fields.push({ tag: ORD_TAGS.pointer, value: encodePointerValue(args.pointer) });
+    }
+    if (args.contentEncoding !== undefined) {
+        fields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode(args.contentEncoding) });
+    }
+    if (args.metaprotocol !== undefined) {
+        fields.push({ tag: ORD_TAGS.metaprotocol, value: new TextEncoder().encode(args.metaprotocol) });
+    }
+    if (args.parent !== undefined) {
+        fields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });
+    }
+    if (args.delegate !== undefined) {
+        fields.push({ tag: ORD_TAGS.delegate, value: encodeInscriptionId(args.delegate) });
+    }
+    if (args.metadata !== undefined) {
+        if (!ArrayBuffer.isView(args.metadata)) {
+            throw new Error('metadata must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
+        }
+        if (args.metadata.length === 0) {
+            throw new Error('metadata must be non-empty CBOR bytes');
+        }
+        fields.push(...chunkFieldValue(ORD_TAGS.metadata, args.metadata));
+    }
+    if (args.rune !== undefined) {
+        fields.push({ tag: ORD_TAGS.rune, value: encodeRuneCommitment(args.rune) });
+    }
+    if (args.properties !== undefined) {
+        if (!ArrayBuffer.isView(args.properties)) {
+            throw new Error('properties must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
+        }
+        if (args.properties.length === 0) {
+            throw new Error('properties must be non-empty CBOR bytes');
+        }
+        fields.push(...chunkFieldValue(ORD_TAGS.properties, args.properties));
+    }
+    if (args.propertyEncoding === 'br') {
+        if (args.properties === undefined) {
+            throw new Error('propertyEncoding is only valid alongside properties');
+        }
+        fields.push({ tag: ORD_TAGS.property_encoding, value: new TextEncoder().encode('br') });
+    }
+    if (args.note !== undefined) {
+        fields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
+    }
+    return fields;
+}
+
+function inscribeAndBroadcast(args) {
+    return defer(() => {
+        let built;
+        try {
+            built = createInscribeTransactions({
+                paymentOutput: args.paymentOutput,
+                paymentPublicKey: args.paymentPublicKey,
+                paymentAddress: args.paymentAddress,
+                recipientAddress: args.recipientAddress,
+                body: args.body,
+                contentType: args.contentType,
+                envelopeFields: args.envelopeFields,
+                feeRatePerVbyte: args.feeRatePerVbyte,
+                walletType: args.walletType,
+                tip: args.tip,
+                note: args.note,
+                parent: args.parent,
+                contentEncoding: args.contentEncoding,
+                pointer: args.pointer,
+                metadata: args.metadata,
+                metaprotocol: args.metaprotocol,
+                delegate: args.delegate,
+                rune: args.rune,
+                properties: args.properties,
+                propertyEncoding: args.propertyEncoding,
+                minimalTagPush: args.minimalTagPush,
+                network: args.network,
+            });
+        }
+        catch (err) {
+            return throwError(() => err);
+        }
+        const signer = findSignerOrThrow(args.walletType);
+        // The signer's broadcast callback is invoked with the signed
+        // commit wire-tx hex. We intercept to (a) fire the consumer's
+        // onCommitSigned hook, (b) actually broadcast via the consumer's
+        // broadcast callback.
+        const captureAndBroadcast = (signedCommitHex) => {
+            if (args.onCommitSigned) {
+                try {
+                    args.onCommitSigned(signedCommitHex);
+                }
+                catch { /* swallow */ }
+            }
+            return args.broadcast(signedCommitHex);
+        };
+        return signer.signSingleFundingInput({
+            psbtBytes: built.commitPsbt,
+            paymentAddress: args.paymentAddress,
+            // Pubkey enables the SDK's wallet-side-address shim so
+            // Unisat/Wizz/OKX see their MAINNET address in `toSignInputs`
+            // even when the app carries a bcrt address on regtest. Native-
+            // regtest wallets (Xverse/Cat21/Alby) get the app address
+            // unchanged. See src/wallet/network-address-shim.ts.
+            paymentPublicKey: hex.encode(args.paymentPublicKey),
+            network: args.network,
+            broadcast: captureAndBroadcast,
+            promptForSignedPsbt: args.promptForSignedPsbt,
+        }).pipe(switchMap(({ txId: commitTxId }) => args.broadcast(built.revealHex).pipe(map((revealTxId) => ({
+            commitTxId,
+            revealTxId,
+            commitAddress: built.commitAddress,
+            ephemeral: built.ephemeral,
+            fees: built.fees,
+        })))));
+    });
+}
+
+/**
+ * The inscription's funding requirement (commit output + commit fee), derived
+ * from the content + fee rate via `simulateInscribeFees` against a
+ * wallet-default-shaped dummy funding input — known before any coin is chosen.
+ * Returns null when the content can't be simulated (unbuildable).
+ */
+function inscribeFundingTarget(params) {
+    if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0)
+        return null;
+    try {
+        const fundingInput = prepareInscribeFundingInput({
+            utxo: { txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } },
+            paymentPublicKey: params.paymentPublicKey,
+            paymentAddress: params.paymentAddress,
+            isSimulation: true,
+            network: params.network,
+        });
+        const sim = simulateInscribeFees({
+            feeRatePerVbyte: params.feeRatePerVbyte,
+            body: params.body,
+            contentType: params.contentType,
+            envelopeFields: params.envelopeFields,
+            minimalTagPush: params.minimalTagPush,
+            fundingInput,
+            senderChangeAddress: params.paymentAddress,
+            recipientAddress: params.recipientAddress,
+            ephemeralPubkeyXonly: new Uint8Array(32).fill(0x02),
+            tip: params.tip,
+            walletType: params.walletType,
+            network: params.network,
+        });
+        return sim.fundingRequirementSats;
+    }
+    catch {
+        return null;
+    }
+}
+async function planInscribe(params, ports) {
+    const empty = recommendFunding([], 0);
+    const target = inscribeFundingTarget(params);
+    if (target == null) {
+        return { status: 'insufficient', recommendation: empty, pick: null, fundingRequirementSats: null };
+    }
+    const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
+    const recommendation = await selectFunding(utxos, target, ports.scan);
+    const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
+    if (!pick) {
+        return {
+            status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
+            recommendation,
+            pick: null,
+            fundingRequirementSats: target,
+        };
+    }
+    return { status: 'ready', recommendation, pick, fundingRequirementSats: target };
+}
+/**
+ * Preview an inscribe: the funding requirement + content-checked selection, no
+ * signing. `ready` = a safe funding coin covers the requirement.
+ */
+async function simulateInscribe(params, ports) {
+    const plan = await planInscribe(params, ports);
+    return {
+        status: plan.status,
+        recommendation: plan.recommendation,
+        fundingUtxo: plan.pick,
+        fundingRequirementSats: plan.fundingRequirementSats,
+    };
+}
+/**
+ * Execute an inscribe end-to-end: safe-auto funding selection, then the
+ * existing commit+reveal engine (build commit → sign → broadcast commit → build
+ * reveal → sign → broadcast reveal). Throws when only asset coins cover
+ * (`expert-required`) or nothing covers. `promptForSignedPsbt` is the
+ * watch-only signing bridge (Promise form; adapted internally).
+ */
+async function executeInscribe(params, ports) {
+    const plan = await planInscribe(params, ports);
+    if (plan.status !== 'ready' || !plan.pick) {
+        throw new Error(plan.status === 'expert-required'
+            ? 'Select a funding UTXO (the available coins carry assets)'
+            : 'Insufficient funds for inscribe at the current fee rate');
+    }
+    const { selectedFundingUtxo: _ignored, ...inscribeArgs } = params;
+    const prompt = ports.promptForSignedPsbt;
+    return firstValueFrom(inscribeAndBroadcast({
+        ...inscribeArgs,
+        paymentOutput: {
+            txid: plan.pick.txid,
+            vout: plan.pick.vout,
+            value: plan.pick.value,
+            status: { confirmed: true },
+            transactionHex: plan.pick.transactionHex,
+        },
+        broadcast: (txHex) => from(ports.broadcast.broadcast(txHex).then((r) => r.txid)),
+        promptForSignedPsbt: prompt ? (unsigned) => from(prompt(unsigned)) : undefined,
+    }));
+}
+
+/**
  * Alias for {@link CAT21_POSTAGE_SATS} kept for legacy import paths. The
  * canonical constant lives in `cat21-postage.ts`; every cat-touching tx
  * uses the same value across mint, transfer, and offer flows.
@@ -9371,327 +10882,6 @@ function checkSessionValidity(validUntilIso, nowMs) {
 }
 
 /**
- * Inscription envelope encoder — the inverse of `ordpool-parser`'s
- * `InscriptionParserService`. Produces the tapscript bytes that
- * commit to inscription content under the ord protocol.
- *
- * Vendoring decision: this is ~150 lines of pure encoding, no
- * external deps. micro-ordinals v0.4.0 requires
- * @scure/btc-signer@^2.2.0 but the SDK is pinned to 1.2.x (the
- * consumer constraint from ordpool/frontend's lockfile). Rather
- * than fork micro-ordinals to a v1-compatible branch, we write
- * our own thin encoder against scure 1.2.x. The encoder's
- * correctness is pinned by a reversibility spec
- * (`inscription-envelope.spec.ts`) that round-trips every tag
- * through ordpool-parser's decoder and asserts byte equality.
- *
- * Tag dictionary is intentionally grep-compatible with
- * ordpool-parser/src/inscription/inscription-parser.service.helper.ts:10
- * (`knownFields`). Same numeric values, same names. If the
- * decoder ever adds a new tag, mirror it here and add a
- * round-trip case to the spec.
- */
-/** ASCII bytes for the protocol marker "ord" inside the envelope. */
-const ORD_MARKER = new Uint8Array([0x6f, 0x72, 0x64]);
-/**
- * Ord-protocol field tags. Mirrors ordpool-parser's `knownFields`
- * value-for-value. See https://docs.ordinals.com/inscriptions.html
- * for the canonical reference.
- */
-const ORD_TAGS = {
-    /** MIME type of the body. */
-    content_type: 0x01,
-    /** Override placement on a sat other than the first. */
-    pointer: 0x02,
-    /** Parent inscription id for provenance chains. */
-    parent: 0x03,
-    /** CBOR-encoded metadata. */
-    metadata: 0x05,
-    /** Metaprotocol identifier string. */
-    metaprotocol: 0x07,
-    /** Body encoding hint (e.g. `gzip`, or `br` for brotli). */
-    content_encoding: 0x09,
-    /** Delegate inscription id (point to another inscription's body). */
-    delegate: 0x0b,
-    /** Rune-name commitment for rune etching pre-commit. */
-    rune: 0x0d,
-    /** Reserved Tag::Note; de facto inscriber-tool watermark. */
-    note: 0x0f,
-    /** CBOR-encoded gallery items + attributes. */
-    properties: 0x11,
-    /** Encoding for properties (`br` for brotli). */
-    property_encoding: 0x13,
-};
-/**
- * Maximum bytes per tapscript push. Bitcoin consensus + standardness
- * caps each push at 520 bytes; the encoder slices the body across
- * pushes accordingly. ordpool-parser's `getNextInscriptionMark` walks
- * the same chunk boundaries on the decode side.
- */
-const MAX_PUSH_BYTES = 520;
-/**
- * Encodes a tag as a script item. The push form is the ONLY difference
- * between an ord-standard inscription and a `vindicated`-charmed one; it's
- * purely how the tag number lands in the script:
- *
- *   - `minimal === false` (default): a 1-byte DATA push,
- *     `OP_PUSHBYTES_1 <tag>` (e.g. `01 01`). Byte-for-byte what ord emits
- *     (`Tag::append` → `push_slice(self.bytes())`), so the inscription is
- *     blessed / charm-free. scure does NOT minimal-encode a single byte
- *     back to a pushnum — `Script.encode([Uint8Array([1])])` is `01 01`,
- *     not `51` — so `Uint8Array([tag])` yields ord's exact bytes.
- *   - `minimal === true`: the pushnum opcode `OP_1..OP_16` (e.g. `51`) for
- *     tags 1–16 — 1 byte smaller, but ord flags any pushnum inside an
- *     envelope as `Curse::Pushnum` → the inscription carries the
- *     `vindicated` charm (post-jubilee). Everything else about the
- *     inscription is identical. Tags > 16 have no pushnum opcode and always
- *     data-push regardless of `minimal`.
- */
-function tagAsScriptItem(tag, minimal) {
-    if (tag <= 0)
-        throw new Error(`Tag must be positive; got ${tag}`);
-    if (tag > 255)
-        throw new Error(`Tag must fit in one byte; got ${tag}`);
-    if (minimal && tag <= 16) {
-        return `OP_${tag}`;
-    }
-    return new Uint8Array([tag]);
-}
-/**
- * Builds the inscription tapscript: the bytes that hash into a
- * tapscript leaf on the commit address, and that the reveal tx
- * provides as witness when spending via the envelope leaf.
- *
- * Structure (per ord protocol):
- *
- * ```
- * <revealPubkeyXonly>                    (32-byte push)
- * OP_CHECKSIG
- * OP_FALSE                               (0x00)
- * OP_IF                                  (0x63)
- *   "ord"                                (3-byte push)
- *   [for each field:]
- *     <tag>                              (1-byte data push, ord-identical)
- *     <value>                            (variable push)
- *   OP_0                                 (separator before body)
- *   [for each body chunk (≤ 520 bytes):]
- *     <chunk>
- * OP_ENDIF                               (0x68)
- * ```
- *
- * The `OP_FALSE OP_IF ... OP_ENDIF` block is provably-dead code:
- * script execution never enters the IF branch because the top of
- * stack is OP_FALSE. The bytes are still committed to in the
- * tapleaf hash, which is what carries the inscription on-chain.
- * The actual spending check is the `<pubkey> OP_CHECKSIG` PREFIX,
- * which ord's protocol places before the dead envelope.
- *
- * Returns the encoded tapscript bytes ready for taproot leaf
- * inclusion via `btc.p2tr(..., { script, leafVersion: 0xc0 })`.
- */
-/**
- * Guard a single envelope push against the 520-byte standardness cap.
- * The remediation depends on the tag: only metadata (0x05) and
- * properties (0x11) are read back by concatenating repeated same-tag
- * chunks, so only those can be split with `chunkFieldValue`. Every
- * other tag (content_type, metaprotocol, note, parent, delegate, rune,
- * …) is read from its FIRST field only, so splitting silently truncates
- * it; those values simply must fit in one push.
- */
-function assertPushWithinCap(tag, length) {
-    if (length <= MAX_PUSH_BYTES)
-        return;
-    const chunkable = tag === ORD_TAGS.metadata || tag === ORD_TAGS.properties;
-    const advice = chunkable
-        ? 'Split into repeated same-tag fields with chunkFieldValue.'
-        : 'This tag is read from its first field only and cannot be chunked; the value must fit in one push.';
-    throw new Error(`envelope field value for tag ${tag} is ${length} bytes; max ${MAX_PUSH_BYTES} per push. ${advice}`);
-}
-function buildInscriptionEnvelope(args) {
-    if (args.revealPubkeyXonly.length !== 32) {
-        throw new Error(`revealPubkeyXonly must be 32 bytes; got ${args.revealPubkeyXonly.length}`);
-    }
-    const items = [];
-    const minimalTagPush = args.minimalTagPush ?? false;
-    // Spending condition: <pubkey> OP_CHECKSIG. The reveal's signature
-    // checks against this; everything after is inert data.
-    items.push(args.revealPubkeyXonly);
-    items.push('CHECKSIG');
-    // Envelope opening: OP_FALSE OP_IF "ord".
-    items.push('OP_0');
-    items.push('IF');
-    items.push(ORD_MARKER);
-    // content_type comes first by convention (matches every inscriber
-    // we've seen on-chain). ord doesn't require any tag order, but
-    // keeping content_type first makes hex-grepping the envelope
-    // boundary easier.
-    if (args.contentType !== undefined) {
-        const contentTypeBytes = new TextEncoder().encode(args.contentType);
-        // Same 520-byte standardness cap as every other push (below). A
-        // content_type over the cap is absurd for a real MIME type, but the
-        // guard keeps every single push in this envelope uniformly checked
-        // rather than leaving one silent hole.
-        assertPushWithinCap(ORD_TAGS.content_type, contentTypeBytes.length);
-        items.push(tagAsScriptItem(ORD_TAGS.content_type, minimalTagPush));
-        items.push(contentTypeBytes);
-    }
-    // Other fields in the order the caller supplied.
-    for (const field of args.fields ?? []) {
-        // Each field value is ONE push. Bitcoin standardness caps a push at
-        // 520 bytes, and ord's decoder reads each field as a single
-        // pushdata, so a value above the cap can't be a valid single field.
-        // Fail loud here rather than emit a non-standard, non-relayable push.
-        assertPushWithinCap(field.tag, field.value.length);
-        items.push(tagAsScriptItem(field.tag, minimalTagPush));
-        items.push(field.value);
-    }
-    // OP_0 separator: marks the boundary between fields and body.
-    // ord's parser uses this as the body start sentinel.
-    items.push('OP_0');
-    // Body chunks: 520 bytes max per push.
-    for (let i = 0; i < args.body.length; i += MAX_PUSH_BYTES) {
-        items.push(args.body.subarray(i, i + MAX_PUSH_BYTES));
-    }
-    // Envelope close.
-    items.push('ENDIF');
-    return Script.encode(items);
-}
-/**
- * Encode an inscription id (`<txid>i<index>`) into the byte form ord
- * expects wherever an inscription id appears in an envelope value:
- * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
- *
- *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
- *
- * Zero-index gets no trailing bytes; index 256 encodes as `[0x00, 0x01]`;
- * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
- *
- * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
- * which is what ordpool renders parents / delegates from. If the
- * round-trip doesn't match, the parser drops the id silently (ord's
- * `filter_map` semantics), so the caller MUST hand us a canonical id
- * form.
- */
-function encodeInscriptionId(inscriptionId) {
-    const m = inscriptionId.match(/^([0-9a-f]{64})i(\d+)$/);
-    if (!m) {
-        throw new Error(`Invalid inscription id "${inscriptionId}"; expected 64 lowercase hex + "i" + non-negative integer.`);
-    }
-    const txidHex = m[1];
-    const indexStr = m[2];
-    if (indexStr.length > 1 && indexStr.startsWith('0')) {
-        throw new Error(`Invalid inscription index "${indexStr}"; canonical form has no leading zeros.`);
-    }
-    const index = Number(indexStr);
-    if (!Number.isSafeInteger(index) || index < 0 || index > 0xffffffff) {
-        throw new Error(`Inscription index out of u32 range: ${indexStr}`);
-    }
-    const txidBytes = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) {
-        txidBytes[i] = parseInt(txidHex.substr(i * 2, 2), 16);
-    }
-    txidBytes.reverse();
-    if (index === 0) {
-        return txidBytes;
-    }
-    const indexBytes = new Uint8Array(4);
-    new DataView(indexBytes.buffer).setUint32(0, index, true);
-    let end = 4;
-    while (end > 0 && indexBytes[end - 1] === 0)
-        end--;
-    const out = new Uint8Array(32 + end);
-    out.set(txidBytes);
-    out.set(indexBytes.subarray(0, end), 32);
-    return out;
-}
-/**
- * Backwards-compatible alias. `parent` (tag 0x03) and `delegate`
- * (tag 0x0b) share the same inscription-id byte form, so both go
- * through `encodeInscriptionId`. Kept exported because consumers +
- * specs already import this name.
- */
-const encodeParentInscriptionId = encodeInscriptionId;
-/**
- * Encode a pointer sat-offset (tag 0x02) as minimal little-endian
- * bytes: the u64 offset with trailing zero bytes trimmed. Offset 0
- * encodes as an empty push (ord reads a missing/empty value as 0);
- * 255 → `[0xff]`; 256 → `[0x00, 0x01]`.
- *
- * Inverse of `ordpool-parser`'s `extractPointer`, which little-endian-
- * decodes the value. The pointer names the sat position (in the
- * concatenated outputs) the inscription is assigned to; only the
- * builder knows whether that offset is reachable given the reveal's
- * output topology, so range-vs-topology validation lives at the
- * synthesis layer, not here.
- */
-function encodePointerValue(offset) {
-    if (!Number.isInteger(offset) || offset < 0) {
-        throw new Error(`pointer must be a non-negative integer; got ${offset}`);
-    }
-    if (!Number.isSafeInteger(offset)) {
-        throw new Error(`pointer ${offset} exceeds the safe-integer range`);
-    }
-    return minimalLeBytes(BigInt(offset));
-}
-/**
- * Encode a rune-name commitment (tag 0x0d) as minimal little-endian
- * bytes: the rune's u128 value with trailing zero bytes trimmed.
- * Value 0 encodes as an empty push. Rejects negatives and anything
- * above u128 max.
- *
- * ord's rune etching reads this back as the u128 commitment (see
- * `ordpool-parser` `knownFields.rune`); the etching tx must later
- * spend this inscription's UTXO. A pre-computed byte value can still
- * be passed through the generic `envelopeFields` escape hatch.
- */
-function encodeRuneCommitment(value) {
-    if (typeof value !== 'bigint') {
-        throw new Error('rune commitment must be a bigint');
-    }
-    if (value < 0n) {
-        throw new Error(`rune commitment must be non-negative; got ${value}`);
-    }
-    const U128_MAX = (1n << 128n) - 1n;
-    if (value > U128_MAX) {
-        throw new Error(`rune commitment ${value} exceeds u128 range`);
-    }
-    return minimalLeBytes(value);
-}
-/** Little-endian bytes of a non-negative bigint, trailing zeros trimmed. */
-function minimalLeBytes(value) {
-    if (value === 0n) {
-        return new Uint8Array(0);
-    }
-    const bytes = [];
-    let v = value;
-    while (v > 0n) {
-        bytes.push(Number(v & 0xffn));
-        v >>= 8n;
-    }
-    return Uint8Array.from(bytes);
-}
-/**
- * Split a field value into one-or-more `{ tag, value }` entries so no
- * single push exceeds the 520-byte standardness cap. ord's decoder
- * concatenates all same-tag chunks before decoding (metadata tag 0x05,
- * properties tag 0x11), so a large CBOR blob is carried as several
- * repeated-tag fields.
- *
- * A zero-length value yields a single empty-value field (callers that
- * reject empty payloads gate that upstream).
- */
-function chunkFieldValue(tag, value) {
-    if (value.length === 0) {
-        return [{ tag, value }];
-    }
-    const fields = [];
-    for (let i = 0; i < value.length; i += MAX_PUSH_BYTES) {
-        fields.push({ tag, value: value.subarray(i, i + MAX_PUSH_BYTES) });
-    }
-    return fields;
-}
-
-/**
  * Deterministic CBOR encoder for inscription metadata + properties.
  *
  * ## Why this lives in the SDK, not in ordpool-parser
@@ -9968,1029 +11158,6 @@ function compareBytes(a, b) {
 }
 
 /**
- * Layer-1 builder for the inscribe **commit** transaction.
- *
- * Construction outline:
- *
- *   1. The reveal spends a P2TR output with a **single envelope leaf**.
- *      The **ephemeral key** is the taproot internal key — so the
- *      commit output has two equivalent spend paths:
- *        a. Script-path via the envelope leaf (used by the standard
- *           reveal — emits the inscription).
- *        b. Key-path via the ephemeral key (used by any redirect /
- *           RBF / recover / bundle reveal the consumer constructs
- *           after `createInscribeTransactions` returns).
- *      Same shape as Casey Rodarmor's `ord` reference client
- *      (`src/wallet/batch/plan.rs` lines 367-382). The ephemeral key
- *      doubles as a bearer instrument: whoever holds it can build
- *      any reveal-tx shape until the commit output is spent.
- *
- *   2. The commit transaction has:
- *        - 1 funding input (caller-supplied UTXO; user's wallet
- *          signs). Sequence is wallet-specific via
- *          `resolveCat21MintInputSequence(walletType)`: 0xfffffffd for
- *          cat21wallet (RBF allowed; our wallet preserves
- *          lockTime=21 through replacement), 0xfffffffe for every
- *          third-party wallet (RBF disabled; locks accelerate UIs
- *          out, the 2024 Xverse incident defence).
- *        - Output 0: the commit P2TR address holding
- *          `postage + revealFeeReserve + tipValueSats` (the last
- *          term only when `tipValueSats > 0` on the reveal). The
- *          reveal spends this.
- *        - Output 1 (optional): change back to the user, if the
- *          funding input has surplus above commit fee + output 0.
- *
- *   3. `nLockTime=21`: the commit qualifies as a CAT-21 mint under
- *      cat21-ord's `--index-cat21` rule. The first sat of vout[0]
- *      becomes Cat A (`<commitTxid>i0`). The reveal then spends
- *      vout[0] FIFO-style, moving Cat A to the inscription's UTXO,
- *      and the reveal itself (also `nLockTime=21`) mints Cat B
- *      (`<revealTxid>i0`) at the same satpoint. Net: two cats per
- *      inscribe, stacked on the inscription's 546-sat UTXO. The
- *      maintainer's design: "we gift the cats for free. because
- *      why not."
- *
- * Returns the unsigned commit PSBT bytes + the metadata the
- * reveal builder needs to construct the spending witness.
- */
-/**
- * Canonical postage for inscriptions. Same 546-sat dust floor as
- * cat21 — keeps inscription UTXOs fungible across address types
- * AND matches the floor every inscriber in the OSS catalog uses.
- * See HQ rule "cat UTXO is always 546 sats, FIFO".
- */
-const INSCRIBE_POSTAGE_SATS = CAT21_POSTAGE_SATS;
-function buildInscribeCommitPsbt(args) {
-    if (args.commitFeeSats < 0)
-        throw new Error('commitFeeSats must be non-negative');
-    if (args.revealFeeReserveSats < 0)
-        throw new Error('revealFeeReserveSats must be non-negative');
-    if (args.tipValueSats !== undefined && args.tipValueSats < 0) {
-        throw new Error('tipValueSats must be non-negative');
-    }
-    if (args.ephemeralPubkeyXonly.length !== 32) {
-        throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
-    }
-    const scureNetwork = toScureNetwork(args.network);
-    const postageSats = INSCRIBE_POSTAGE_SATS;
-    const tipValueSats = args.tipValueSats ?? 0;
-    const commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
-    // Single envelope leaf; ephemeral key as the taproot internal key.
-    // Matches ord's `TaprootBuilder::new().add_leaf(0, reveal_script)
-    // .finalize(&secp256k1, public_key)` (plan.rs:378-382).
-    //
-    // allowUnknownOutputs=true because the envelope tapscript isn't a
-    // pattern scure recognises (`<pubkey> CHECKSIG OP_FALSE OP_IF
-    // "ord" ... OP_ENDIF` is ord-specific).
-    const tree = [{ script: args.envelopeScript }];
-    const commitP2tr = btc.p2tr(args.ephemeralPubkeyXonly, tree, scureNetwork, true);
-    const commitAddress = commitP2tr.address;
-    if (commitAddress === undefined) {
-        throw new Error('Internal error: p2tr returned no address for commit output');
-    }
-    if (commitP2tr.tapLeafScript === undefined) {
-        throw new Error('Internal error: p2tr returned no tapLeafScript for the constructed tree');
-    }
-    // Build the PSBT with `lockTime=21`. Every ordpool inscription is
-    // ALSO a CAT-21 mint — we gift the cat for free to anyone using
-    // the inscribe pipeline. cat21-ord reads `nLockTime` structurally
-    // and assigns a cat to the first sat of the first output (the
-    // commit's P2TR envelope output). The reveal then spends that
-    // output FIFO-style, moving the cat to the inscription recipient
-    // — so the cat and the inscription end up on the same sat at the
-    // same address, with no extra cost to the user.
-    //
-    // Block 21 was mined in 2009, so the lockTime constraint is
-    // trivially satisfied no matter when the tx lands. The field is
-    // repurposed protocol-marker data; cat21-ord reads it structurally.
-    const tx = new btc.Transaction({ allowUnknownOutputs: false, lockTime: CAT21_LOCK_TIME });
-    // Default to a non-cat21wallet sentinel so the sequence resolves to
-    // the safer non-RBF value (0xfffffffe). Standalone callers get the
-    // correct behaviour without having to learn the per-wallet rule.
-    //
-    // NOTE: this is a DIFFERENT reason for RBF-off than the mint case.
-    // On mint, a third-party accelerate would drop `lockTime=21` and
-    // kill the mint (no cat is produced). On inscribe commit, an RBF
-    // replacement changes the commit's inputs → its txid changes → the
-    // pre-built reveal (which
-    // references the SIMULATION commit txid) becomes invalid and the
-    // postage locks in an output nobody can spend (the ephemeral reveal
-    // key is not returned to the caller). Both cases warrant RBF-off
-    // for third-party wallets; the "mint" in the resolver's name refers
-    // to the CAT-flow rule, but the same value happens to protect us here.
-    const sequence = resolveCat21MintInputSequence(args.walletType ?? KnownOrdinalWalletType.xverse);
-    // Funding input shape mirrors the cat21 mint adapter: witnessUtxo
-    // for SegWit, nonWitnessUtxo for P2PKH legacy, plus per-address-
-    // type optional fields.
-    const inputBase = {
-        txid: args.fundingInput.txid,
-        index: args.fundingInput.vout,
-        sequence,
-        witnessUtxo: {
-            script: args.fundingInput.scriptPubKey,
-            amount: BigInt(args.fundingInput.value),
-        },
-    };
-    if (args.fundingInput.tapInternalKey) {
-        // Taproot key-path: SIGHASH_DEFAULT (omit), per the SDK-wide
-        // BIP-341 wire-equivalent rule.
-        inputBase.tapInternalKey = args.fundingInput.tapInternalKey;
-    }
-    else {
-        inputBase.sighashType = btc.SigHash.ALL;
-    }
-    if (args.fundingInput.redeemScript) {
-        inputBase.redeemScript = args.fundingInput.redeemScript;
-    }
-    if (args.fundingInput.nonWitnessUtxo) {
-        inputBase.nonWitnessUtxo = args.fundingInput.nonWitnessUtxo;
-    }
-    tx.addInput(inputBase);
-    // Output 0: commit P2TR. The reveal will spend this.
-    tx.addOutput({
-        script: commitP2tr.script,
-        amount: BigInt(commitOutputValueSats),
-    });
-    // Output 1: change to the user, when above dust.
-    const changeDustLimit = args.changeDustLimitSats ?? postageSats;
-    const calculatedChange = args.fundingInput.value - commitOutputValueSats - args.commitFeeSats;
-    if (calculatedChange < 0) {
-        throw new Error(`Funding insufficient: input=${args.fundingInput.value}, ` +
-            `commitOutput=${commitOutputValueSats}, commitFee=${args.commitFeeSats}`);
-    }
-    let changeSats = 0;
-    if (calculatedChange >= changeDustLimit) {
-        changeSats = calculatedChange;
-        tx.addOutputAddress(args.senderChangeAddress, BigInt(changeSats), scureNetwork);
-    }
-    // else: change is absorbed into the miner fee (same model as cat21 mint).
-    // Hard invariants (asserted before return).
-    if (tx.outputsLength === 0) {
-        throw new Error('Internal error: commit must have at least one output');
-    }
-    if (tx.getOutput(0).amount !== BigInt(commitOutputValueSats)) {
-        throw new Error('Internal error: commit output 0 amount drifted');
-    }
-    assertCat21LockTime(tx.lockTime);
-    if (tx.getInput(0).sequence !== sequence) {
-        throw new Error(`Internal error: input 0 sequence=${tx.getInput(0).sequence}, expected ${sequence}`);
-    }
-    return {
-        commitPsbt: tx.toPSBT(0),
-        commitAddress,
-        commitOutputScript: commitP2tr.script,
-        commitOutputValueSats,
-        taproot: {
-            internalKey: args.ephemeralPubkeyXonly,
-            tapLeafScript: commitP2tr.tapLeafScript,
-        },
-        changeSats,
-    };
-}
-
-/**
- * Signs the reveal via the envelope tapscript leaf, returns the
- * finalized reveal hex. The caller-supplied ephemeral private key
- * is used for the Schnorr signature; the orchestrator returns this
- * same key on its result so the consumer can rebuild a different
- * reveal later under different parameters.
- */
-function buildInscribeRevealTx(args) {
-    const scureNetwork = toScureNetwork(args.network);
-    const postageSats = INSCRIBE_POSTAGE_SATS;
-    const tipValueSats = args.tip?.value ?? 0;
-    if (tipValueSats < 0)
-        throw new Error('tip.value must be non-negative');
-    if (!Number.isInteger(tipValueSats))
-        throw new Error('tip.value must be an integer');
-    // The reveal's miner fee equals the leftover: commit output sats
-    // minus the postage going to the recipient minus any tip output
-    // going to the tip address.
-    const revealFeeReserveSats = args.commitOutputValueSats - postageSats - tipValueSats;
-    if (revealFeeReserveSats < 0) {
-        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`);
-    }
-    if (args.ephemeralPrivKey.length !== 32) {
-        throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
-    }
-    // `lockTime: 21` on the reveal too — both the commit AND the reveal
-    // qualify as CAT-21 mints under cat21-ord's `--index-cat21` rule
-    // (`nLockTime === 21`). That mints TWO cats per inscription:
-    //
-    //   1. Cat from the commit (id `<commitTxid>i0`) at the first sat
-    //      of commit's vout[0]. The reveal spends commit's vout[0]
-    //      FIFO-style, so this cat moves to the inscription recipient's
-    //      UTXO (vout[0] of the reveal at 546 sats).
-    //   2. Cat from the reveal (id `<revealTxid>i0`) at the first sat
-    //      of reveal's vout[0] — the same UTXO and the same sat as
-    //      cat #1. Post-jubilee chains (regtest above block 110;
-    //      mainnet above 824544) tag this cat with the `Vindicated`
-    //      charm because it's technically a reinscription on the same
-    //      sat. The charm is metadata; the cat is fully real, has a
-    //      positive cat number, and indexes normally.
-    //
-    // Net: one inscription, two cats stacked on the same 546-sat UTXO
-    // at the inscription recipient. The maintainer's call: "there are
-    // never enough cats".
-    const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
-    // Input 0: commit P2TR output, spent via the envelope leaf.
-    // Envelope leaf is index 0 of the args.taproot.tapLeafScript array.
-    tx.addInput({
-        txid: args.commitTxid,
-        index: args.commitVout,
-        witnessUtxo: {
-            script: args.commitOutputScript,
-            amount: BigInt(args.commitOutputValueSats),
-        },
-        tapInternalKey: args.taproot.internalKey,
-        tapLeafScript: args.taproot.tapLeafScript,
-    });
-    // Output 0: recipient address, postage sats. The inscription
-    // lands on the first sat of this output (ord-theory FIFO).
-    tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
-    // Output 1 (optional): tip output. ord's first-sat-of-first-output
-    // rule pins the inscription to vout[0]; the tip lives at vout[1].
-    // Pattern matches `0xFlicker/ordinals` packages/inscriptions/src/
-    // reveal.ts (the only OSS inscriber with a tip primitive — see
-    // /Work/ordpool/OSS-INSCRIBERS.md). We diverge in that we ship a
-    // single fixed-sats tip, not a weighted multi-recipient split.
-    if (args.tip !== undefined && tipValueSats > 0) {
-        tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
-    }
-    // Manual taproot tapscript-path finalization.
-    //
-    // scure 1.2.x's automatic finalize rejects our envelope tapscript
-    // pattern (`<pubkey> CHECKSIG OP_FALSE OP_IF "ord" ... OP_ENDIF`)
-    // because it's not one of the known `pk` / `ms` patterns — it
-    // throws "Finalize: Unknown tapLeafScript". scure 2.x added
-    // `customScripts` to register handlers; we don't have that.
-    //
-    // Manual path mirrors what scure's finalize would do for a `pk`
-    // leaf: compute the BIP-341 tapscript sighash, sign with the
-    // ephemeral Schnorr key, assemble `[sig, script, controlBlock]`
-    // as the witness, write it via updateInput. The output is
-    // byte-identical to what a scure-2.x customScripts handler
-    // would produce.
-    //
-    // scure stores each `tapLeafScript[i]` value as the BIP-371
-    // concatenation `<bareScript><leafVersionByte>` (see scure
-    // `index.js:1280-1283`: `concat(l.script, [l.version || TAP_LEAF_VERSION])`).
-    // The trailing version byte MUST be stripped before the script
-    // is used in the BIP-341 sighash AND before it goes into the
-    // witness — both validators reconstruct the leaf hash from the
-    // bare-script bytes only. scure's own sign path strips it the
-    // same way (`index.js:2352`: `_script.subarray(0, -1)`).
-    const [cbStruct, leafScriptWithVersion] = args.taproot.tapLeafScript[0];
-    const bareLeafScript = leafScriptWithVersion.subarray(0, -1);
-    const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
-    const sighash = tx.preimageWitnessV1(0, [args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(args.commitOutputValueSats)], undefined, bareLeafScript, leafVersion);
-    const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
-    const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
-    tx.updateInput(0, {
-        finalScriptWitness: [signature, bareLeafScript, controlBlock],
-    }, true);
-    assertCat21LockTime(tx.lockTime);
-    return {
-        revealHex: tx.hex,
-        revealTxid: tx.id,
-        revealVsize: tx.vsize,
-    };
-}
-/**
- * Derives the x-only Schnorr pubkey from a private key. The pubkey
- * is what gets embedded in the envelope tapscript via
- * `<revealPubkeyXonly> OP_CHECKSIG`, so the caller can pre-compute
- * the envelope independently of the actual reveal call. The same
- * pubkey is fed to both the commit helper (via envelopeScript) and
- * the reveal helper (implicitly via the regenerated private key).
- *
- * Returns the 32-byte x-only Schnorr pubkey.
- */
-function deriveRevealPubkeyXonly(privKey) {
-    return schnorr.getPublicKey(privKey);
-}
-
-/**
- * Build the child reveal PSBT: parent input (unsigned) + commit input
- * (ephemeral-finalized), parent-return output + child output.
- */
-function buildChildInscribeRevealTx(args) {
-    const scureNetwork = toScureNetwork(args.network);
-    const postageSats = INSCRIBE_POSTAGE_SATS;
-    const tipValueSats = args.tip?.value ?? 0;
-    if (tipValueSats < 0 || !Number.isInteger(tipValueSats)) {
-        throw new Error('tip.value must be a non-negative integer');
-    }
-    if (args.ephemeralPrivKey.length !== 32) {
-        throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
-    }
-    if (!Number.isInteger(args.parent.utxo.value) || args.parent.utxo.value < postageSats) {
-        throw new Error(`parent.utxo.value must be an integer >= ${postageSats} (its sats are preserved on return); ` +
-            `got ${args.parent.utxo.value}`);
-    }
-    if (args.parent.utxo.tapInternalKey.length !== 32) {
-        throw new Error('parent.utxo.tapInternalKey must be a 32-byte x-only key (P2TR parent)');
-    }
-    const parentValue = args.parent.utxo.value;
-    // The reveal miner fee is the leftover after the child + tip are funded
-    // from the commit output. The parent's sats pass straight through
-    // (input 0 -> output 0), so they never enter the fee arithmetic.
-    const revealFeeSats = args.commitOutputValueSats - postageSats - tipValueSats;
-    if (revealFeeSats < 0) {
-        throw new Error(`commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`);
-    }
-    const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
-    // Input 0: parent UTXO (P2TR key-path). Left UNSIGNED — the wallet
-    // signs it. witnessUtxo + tapInternalKey are what a wallet needs to
-    // produce the key-path signature. SIGHASH_DEFAULT (omit sighashType)
-    // per the SDK-wide BIP-341 wire-equivalent rule.
-    tx.addInput({
-        txid: args.parent.utxo.txid,
-        index: args.parent.utxo.vout,
-        witnessUtxo: {
-            script: args.parent.utxo.scriptPubKey,
-            amount: BigInt(parentValue),
-        },
-        tapInternalKey: args.parent.utxo.tapInternalKey,
-    });
-    // Input 1: commit P2TR output, spent script-path via the envelope leaf.
-    tx.addInput({
-        txid: args.commitTxid,
-        index: args.commitVout,
-        witnessUtxo: {
-            script: args.commitOutputScript,
-            amount: BigInt(args.commitOutputValueSats),
-        },
-        tapInternalKey: args.taproot.internalKey,
-        tapLeafScript: args.taproot.tapLeafScript,
-    });
-    // Output 0: parent RETURN — the parent inscription goes back to its
-    // owner with exactly its incoming value (FIFO: input 0 → output 0).
-    tx.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
-    // Output 1: child recipient (546). FIFO puts the child here (the commit
-    // input's first sat is global `parentValue`, which lands in output 1).
-    tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
-    // Output 2 (optional): tip, after the child.
-    if (args.tip !== undefined && tipValueSats > 0) {
-        tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
-    }
-    // Ephemeral script-path finalization of the COMMIT input (index 1).
-    // SIGHASH_DEFAULT commits to ALL inputs + outputs, so the sighash needs
-    // every prevout script + amount (parent AND commit). Manual finalize
-    // mirrors the single-input reveal helper; see its comment for the
-    // trailing-version-byte handling on the leaf script.
-    const [cbStruct, leafScriptWithVersion] = args.taproot.tapLeafScript[0];
-    const bareLeafScript = leafScriptWithVersion.subarray(0, -1);
-    const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
-    const commitInputIndex = 1;
-    const sighash = tx.preimageWitnessV1(commitInputIndex, [args.parent.utxo.scriptPubKey, args.commitOutputScript], btc.SignatureHash.DEFAULT, [BigInt(parentValue), BigInt(args.commitOutputValueSats)], undefined, bareLeafScript, leafVersion);
-    const signature = schnorr.sign(sighash, args.ephemeralPrivKey);
-    const controlBlock = btc.TaprootControlBlock.encode(cbStruct);
-    // Attach the ephemeral script-path signature as a PARTIAL sig
-    // (tapScriptSig), NOT a finalScriptWitness. A PSBT that hands a wallet
-    // an already-FINALIZED sibling input is rejected by the address-filter
-    // signers (Unisat/Wizz/OKX) — their signPsbt won't produce a signing
-    // prompt for such a PSBT. Left partial, every input is unfinalized when
-    // the wallet sees it; the wallet signs input 0, and the shared
-    // extract-wire-tx step finalizes BOTH inputs (input 0 from the wallet's
-    // key-path sig, input 1 from this tapScriptSig via the tapLeafScript
-    // set above). Index-based signers (Leather / cat21-wallet) reach the
-    // same finalized witness. The measurement clone below still finalizes
-    // input 1 directly so revealTxid / revealVsize are exact.
-    const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
-    tx.updateInput(commitInputIndex, {
-        tapScriptSig: [[{ pubKey: args.taproot.internalKey, leafHash }, signature]],
-    }, true);
-    assertCat21LockTime(tx.lockTime);
-    // Measure vsize + txid on a fully-signed CLONE: set a dummy 64-byte
-    // key-path witness on the parent input (SIGHASH_DEFAULT P2TR witness is
-    // exactly a 64-byte Schnorr sig, so the size is exact regardless of the
-    // real signature). The txid is witness-independent, so the clone's id
-    // equals what the wallet-signed reveal will produce.
-    const clone = btc.Transaction.fromPSBT(tx.toPSBT(0), { allowUnknownInputs: true });
-    clone.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] }, true);
-    clone.updateInput(commitInputIndex, {
-        finalScriptWitness: [signature, bareLeafScript, controlBlock],
-    }, true);
-    // Wallet-facing PSBT: same consensus tx (inputs/outputs/locktime), but
-    // input 1 is a BARE Taproot input — witnessUtxo only, no tapLeafScript /
-    // tapScriptSig. The wallet signs input 0 here without ever parsing the
-    // ord envelope tap-leaf (which hangs / is rejected by some signPsbt
-    // implementations). Rebuilt fresh because scure's updateInput merges
-    // and cannot clear an already-set field.
-    const walletFacing = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
-    walletFacing.addInput({
-        txid: args.parent.utxo.txid,
-        index: args.parent.utxo.vout,
-        witnessUtxo: { script: args.parent.utxo.scriptPubKey, amount: BigInt(parentValue) },
-        tapInternalKey: args.parent.utxo.tapInternalKey,
-    });
-    walletFacing.addInput({
-        txid: args.commitTxid,
-        index: args.commitVout,
-        witnessUtxo: { script: args.commitOutputScript, amount: BigInt(args.commitOutputValueSats) },
-    });
-    walletFacing.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
-    walletFacing.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
-    if (args.tip !== undefined && tipValueSats > 0) {
-        walletFacing.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
-    }
-    return {
-        revealPsbt: tx.toPSBT(0),
-        revealPsbtForWallet: walletFacing.toPSBT(0),
-        revealTxid: clone.id,
-        revealVsize: clone.vsize,
-    };
-}
-
-function prepareInscribeFundingInput(args) {
-    return prepareCat21Input(args);
-}
-
-/**
- * Returns the commit + reveal fee math at the given fee rate.
- * Pure function — does not broadcast, does not retain any key
- * material between calls.
- */
-function simulateInscribeFees(args) {
-    if (args.feeRatePerVbyte <= 0) {
-        throw new Error('feeRatePerVbyte must be positive');
-    }
-    if (args.ephemeralPubkeyXonly.length !== 32) {
-        throw new Error(`ephemeralPubkeyXonly must be 32 bytes; got ${args.ephemeralPubkeyXonly.length}`);
-    }
-    // The simulator uses a deterministic dummy ephemeral private key
-    // for the reveal-signing step (the resulting Schnorr signature is
-    // always 64 bytes regardless of the key bytes, so vsize doesn't
-    // care). The pubkey embedded in the envelope + used as taproot
-    // internal key is whatever the caller passed (real orchestrator
-    // passes the freshly-generated ephemeral key; specs may pass a
-    // fixed dummy).
-    const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);
-    const envelope = buildInscriptionEnvelope({
-        revealPubkeyXonly: args.ephemeralPubkeyXonly,
-        contentType: args.contentType,
-        body: args.body,
-        fields: args.envelopeFields,
-        minimalTagPush: args.minimalTagPush,
-    });
-    // ---- Step 1: reveal vsize is deterministic; compute once. ----
-    // We need the commit output's script/address first to construct
-    // a reveal that points at it. Build a placeholder commit with
-    // zero fees just to get the taptree metadata.
-    const placeholderCommit = buildInscribeCommitPsbt({
-        fundingInput: args.fundingInput,
-        senderChangeAddress: args.senderChangeAddress,
-        envelopeScript: envelope,
-        ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
-        commitFeeSats: 0,
-        revealFeeReserveSats: 0,
-        tipValueSats: args.tip?.value,
-        walletType: args.walletType,
-        changeDustLimitSats: args.changeDustLimitSats,
-        network: args.network,
-    });
-    const tipValueSats = args.tip?.value ?? 0;
-    const reveal = buildInscribeRevealTx({
-        commitTxid: '0'.repeat(64),
-        commitVout: 0,
-        // postage + tip; the placeholder commit has revealFeeReserveSats=0
-        // so the commit output is sized exactly to cover the reveal's two
-        // outputs (recipient at postage, tip at tip.value). Setting it
-        // higher would leave change inside the reveal which the helper
-        // doesn't model — instead we measure vsize at zero reveal fee and
-        // compute the fee separately.
-        commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
-        commitOutputScript: placeholderCommit.commitOutputScript,
-        taproot: {
-            internalKey: placeholderCommit.taproot.internalKey,
-            tapLeafScript: placeholderCommit.taproot.tapLeafScript,
-        },
-        ephemeralPrivKey: dummyEphemeralPriv,
-        recipientAddress: args.recipientAddress,
-        tip: args.tip,
-        network: args.network,
-    });
-    const revealVsize = reveal.revealVsize;
-    const revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
-    // ---- Step 2: commit two-pass with revealFeeReserve = revealFeeSats. ----
-    // Reuse the existing twoPassFeeSimulation pattern.
-    const { finalFeeSats: commitFeeSats, vsize: commitVsize, finalSimulation } = twoPassFeeSimulation({
-        feeRatePerVbyte: args.feeRatePerVbyte,
-        simulate: (feeSats) => {
-            const commit = buildInscribeCommitPsbt({
-                fundingInput: args.fundingInput,
-                senderChangeAddress: args.senderChangeAddress,
-                envelopeScript: envelope,
-                ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
-                commitFeeSats: feeSats,
-                revealFeeReserveSats: revealFeeSats,
-                tipValueSats: args.tip?.value,
-                walletType: args.walletType,
-                changeDustLimitSats: args.changeDustLimitSats,
-                network: args.network,
-            });
-            // Decode the PSBT, dummy-sign the funding input, finalize,
-            // read vsize. Same pattern cat21's simulateTransaction uses
-            // (cat21.service.ts:176). Allows both DEFAULT and ALL
-            // sighash because the funding input is taproot when the
-            // caller passes a Taproot wallet via the Layer-2 adapter's
-            // simulation mode.
-            const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
-            const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
-            tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-            tx.finalize();
-            return { vsize: tx.vsize, commit };
-        },
-    });
-    const commitOutputValueSats = finalSimulation.commit.commitOutputValueSats;
-    return {
-        commitFeeSats,
-        revealFeeSats,
-        totalFeeSats: commitFeeSats + revealFeeSats,
-        commitVsize,
-        revealVsize,
-        combinedVsize: commitVsize + revealVsize,
-        commitOutputValueSats,
-        fundingRequirementSats: commitOutputValueSats + commitFeeSats,
-    };
-}
-
-/**
- * Compute the commit transaction's txid BEFORE the wallet signs it.
- *
- * The reveal spends the commit's output, so its input must reference the
- * exact txid the real wallet-signed commit will have. For witness funding
- * inputs (P2WPKH / P2TR) the scriptSig is empty, so the txid is witness-
- * independent and finalizing the dummy-keyed simulation commit yields the
- * real txid byte-for-byte.
- *
- * For P2SH-P2WPKH (Nested SegWit) the redeemScript push lives in the
- * scriptSig, which IS part of the non-witness txid — so the dummy pubkey
- * used during simulation would produce a DIFFERENT txid than the real
- * commit, the reveal would reference a non-existent output, and the
- * postage would lock. The real scriptSig is fully determined by the real
- * payment pubkey (`push(p2wpkh(pubkey))`, no signature required), so
- * override input 0's scriptSig with it before reading the txid.
- *
- * P2PKH is excluded upstream by `isInscribeSupportedPaymentAddress`: its
- * scriptSig carries the actual signature, which is not knowable until the
- * wallet signs, so its commit txid genuinely cannot be predicted.
- */
-function deriveUnsignedCommitTxid(simCommitPsbt, paymentAddress, paymentPublicKey, network) {
-    const scureNetwork = toScureNetwork(network);
-    const simTx = btc.Transaction.fromPSBT(simCommitPsbt);
-    const { dummyPrivateKey } = getDummyKeypair(scureNetwork);
-    simTx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-    simTx.finalize();
-    if (getAddressFormat(paymentAddress) === 'P2SH???') {
-        const redeemScript = btc.p2wpkh(paymentPublicKey, scureNetwork).script;
-        simTx.updateInput(0, { finalScriptSig: btc.Script.encode([redeemScript]) }, true);
-    }
-    return simTx.id;
-}
-/**
- * Build the inscribe commit + reveal pair for the given content.
- * Pure function modulo `randomPrivateKey`.
- *
- * The returned `ephemeral.privKey` is the bearer instrument for
- * the commit output — see the module-level lifecycle note for the
- * storage semantic.
- */
-function createInscribeTransactions(args) {
-    if (args.feeRatePerVbyte <= 0) {
-        throw new Error('feeRatePerVbyte must be positive');
-    }
-    // Refuse P2PKH funding inputs. The reveal is pre-built against the
-    // commit txid from deriveUnsignedCommitTxid, which reconstructs the
-    // pre-signing scriptSig from the payment pubkey: empty for witness
-    // inputs (P2WPKH / P2TR) and a deterministic redeemScript push for
-    // P2SH-P2WPKH. Legacy P2PKH cannot be predicted — its scriptSig carries
-    // the actual signature, unknowable until the wallet signs — so a P2PKH
-    // inscribe would land the commit but bind the reveal to a non-existent
-    // txid, locking the postage. Consumers should gate the UI with
-    // `isInscribeSupportedPaymentAddress` so this throw is unreachable.
-    if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
-        throw new Error(`Legacy P2PKH payment addresses are not supported for inscribing ` +
-            `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
-            `Switch the wallet to Native SegWit or Taproot and retry.`);
-    }
-    if (args.tip !== undefined) {
-        if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
-            throw new Error('tip.value must be a non-negative integer');
-        }
-        if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
-            throw new Error('tip.address must be a non-empty string');
-        }
-    }
-    const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
-    const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
-    // Synthesise envelope fields from the convenience args and prepend
-    // to the caller-supplied envelopeFields. On duplicate tags (e.g.
-    // caller also supplies a parent entry) BOTH entries are emitted in
-    // order; ord's decoder handles multiple instances per tag according
-    // to that tag's semantics: `parent` / `delegate` accumulate,
-    // `content_type` / `content_encoding` first-wins (so caller-supplied
-    // values behind an auto-field are ignored by downstream indexers).
-    // Caller-side dedup is the consumer's responsibility.
-    const autoFields = synthesizeEnvelopeFields(args);
-    const mergedFields = autoFields.length === 0
-        ? (args.envelopeFields ?? [])
-        : [...autoFields, ...(args.envelopeFields ?? [])];
-    const envelope = buildInscriptionEnvelope({
-        revealPubkeyXonly: ephemeralPubkeyXonly,
-        contentType: args.contentType,
-        body: args.body,
-        fields: mergedFields,
-        minimalTagPush: args.minimalTagPush,
-    });
-    // Layer-2: convert raw UTXO into the funding-input shape the
-    // commit helper expects. Real-mode (not simulation) so the
-    // funding gets signed by the real wallet later.
-    const realFundingInput = prepareInscribeFundingInput({
-        utxo: args.paymentOutput,
-        paymentPublicKey: args.paymentPublicKey,
-        paymentAddress: args.paymentAddress,
-        isSimulation: false,
-        network: args.network,
-    });
-    // Layer-3: simulate fees. Layer 3 uses its own simulation-mode
-    // funding input via the dummy keypair pattern.
-    const simulationFundingInput = prepareInscribeFundingInput({
-        utxo: args.paymentOutput,
-        paymentPublicKey: args.paymentPublicKey,
-        paymentAddress: args.paymentAddress,
-        isSimulation: true,
-        network: args.network,
-    });
-    // The change-output dust floor must match the real commit build below,
-    // or the fee simulation quotes a different commit topology (absorb-vs-
-    // emit change) than the tx the wallet actually signs. Thread the real
-    // per-address minimum into BOTH.
-    const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
-    let fees;
-    try {
-        fees = simulateInscribeFees({
-            feeRatePerVbyte: args.feeRatePerVbyte,
-            body: args.body,
-            contentType: args.contentType,
-            envelopeFields: mergedFields,
-            minimalTagPush: args.minimalTagPush,
-            fundingInput: simulationFundingInput,
-            senderChangeAddress: args.paymentAddress,
-            recipientAddress: args.recipientAddress,
-            ephemeralPubkeyXonly,
-            changeDustLimitSats,
-            tip: args.tip,
-            walletType: args.walletType,
-            network: args.network,
-        });
-    }
-    catch (err) {
-        // The commit helper throws `Funding insufficient: ...` when the
-        // funding UTXO is below the postage + fees floor. Re-cast to
-        // the orchestrator's typed message so consumers can branch on it
-        // (same translation pattern cat21's createTransaction uses).
-        if (err instanceof Error && /Funding insufficient/.test(err.message)) {
-            throw new Error('Insufficient funds for inscribe');
-        }
-        throw err;
-    }
-    if (args.paymentOutput.value < fees.fundingRequirementSats) {
-        throw new Error(`Insufficient funds for inscribe: funding UTXO has ${args.paymentOutput.value} ` +
-            `sats, need ${fees.fundingRequirementSats} ` +
-            `(commit fee ${fees.commitFeeSats} + commit output value ` +
-            `${fees.commitOutputValueSats})`);
-    }
-    // Layer-1 build at resolved fees (same changeDustLimitSats as the sim).
-    const commit = buildInscribeCommitPsbt({
-        fundingInput: realFundingInput,
-        senderChangeAddress: args.paymentAddress,
-        envelopeScript: envelope,
-        ephemeralPubkeyXonly,
-        commitFeeSats: fees.commitFeeSats,
-        revealFeeReserveSats: fees.revealFeeSats,
-        tipValueSats: args.tip?.value,
-        walletType: args.walletType,
-        changeDustLimitSats,
-        network: args.network,
-    });
-    // The reveal's input outpoint references the commit's txid, which must
-    // be known BEFORE the wallet signs. Build a simulation-mode commit at
-    // the same fees against the dummy-keyed funding input, then derive the
-    // txid via deriveUnsignedCommitTxid (which reconstructs the real
-    // P2SH-P2WPKH scriptSig so the reveal binds to the correct output).
-    const simCommit = buildInscribeCommitPsbt({
-        fundingInput: simulationFundingInput,
-        senderChangeAddress: args.paymentAddress,
-        envelopeScript: envelope,
-        ephemeralPubkeyXonly,
-        commitFeeSats: fees.commitFeeSats,
-        revealFeeReserveSats: fees.revealFeeSats,
-        tipValueSats: args.tip?.value,
-        walletType: args.walletType,
-        changeDustLimitSats,
-        network: args.network,
-    });
-    const commitTxidUnsigned = deriveUnsignedCommitTxid(simCommit.commitPsbt, args.paymentAddress, args.paymentPublicKey, args.network);
-    const reveal = buildInscribeRevealTx({
-        commitTxid: commitTxidUnsigned,
-        commitVout: 0,
-        commitOutputValueSats: commit.commitOutputValueSats,
-        commitOutputScript: commit.commitOutputScript,
-        taproot: {
-            internalKey: commit.taproot.internalKey,
-            tapLeafScript: commit.taproot.tapLeafScript,
-        },
-        ephemeralPrivKey,
-        recipientAddress: args.recipientAddress,
-        tip: args.tip,
-        network: args.network,
-    });
-    return {
-        commitPsbt: commit.commitPsbt,
-        commitTxid: commitTxidUnsigned,
-        revealHex: reveal.revealHex,
-        revealTxid: reveal.revealTxid,
-        commitAddress: commit.commitAddress,
-        fees,
-        ephemeral: {
-            privKey: ephemeralPrivKey,
-            pubkeyXonly: ephemeralPubkeyXonly,
-        },
-        commit: {
-            outputScript: commit.commitOutputScript,
-            outputValueSats: commit.commitOutputValueSats,
-            envelopeScript: envelope,
-        },
-    };
-}
-/**
- * Build the commit + CHILD reveal pair for an ord parent/child
- * inscription. Same commit as a normal inscribe (envelope carries the
- * `parent` tag); the reveal additionally SPENDS the parent UTXO and
- * RETURNS it to the owner, which is what makes ord recognise the parent
- * link (see {@link buildChildInscribeRevealTx}). The reveal is returned
- * as a PSBT because its parent input needs the wallet's signature.
- */
-function createChildInscribeTransactions(args) {
-    if (args.feeRatePerVbyte <= 0) {
-        throw new Error('feeRatePerVbyte must be positive');
-    }
-    if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
-        throw new Error(`Legacy P2PKH payment addresses are not supported for inscribing ` +
-            `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
-            `Switch the wallet to Native SegWit or Taproot and retry.`);
-    }
-    if (args.tip !== undefined) {
-        if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
-            throw new Error('tip.value must be a non-negative integer');
-        }
-        if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
-            throw new Error('tip.address must be a non-empty string');
-        }
-    }
-    if (typeof args.parentInscriptionId !== 'string' || args.parentInscriptionId.length === 0) {
-        throw new Error('parentInscriptionId must be a non-empty string');
-    }
-    if (args.pointer !== undefined) {
-        // The child lands on its own output (vout[1]) via FIFO sat-tracking
-        // with NO pointer: input 1's first sat is at global offset = parent
-        // value = the start of output 1 (see inscription-child-reveal.helper.ts).
-        // synthesizeEnvelopeFields validates a pointer against the plain
-        // single-output topology (inscription at vout[0]), which does NOT hold
-        // for the child reveal (vout[0] = parent return). A pointer accepted
-        // there would relocate the child onto the parent's returned UTXO, so
-        // it is refused rather than silently misplaced.
-        throw new Error('pointer is not supported for child inscriptions; the child lands on ' +
-            'its own output (vout[1]) via FIFO sat-tracking.');
-    }
-    const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
-    const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
-    // Envelope with the parent tag (0x03) synthesised from parentInscriptionId.
-    const autoFields = synthesizeEnvelopeFields({ ...args, parent: args.parentInscriptionId });
-    const mergedFields = autoFields.length === 0
-        ? (args.envelopeFields ?? [])
-        : [...autoFields, ...(args.envelopeFields ?? [])];
-    const envelope = buildInscriptionEnvelope({
-        revealPubkeyXonly: ephemeralPubkeyXonly,
-        contentType: args.contentType,
-        body: args.body,
-        fields: mergedFields,
-        minimalTagPush: args.minimalTagPush,
-    });
-    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
-    const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);
-    const changeDustLimitSats = getMinimumUtxoSize(args.paymentAddress);
-    const tipValueSats = args.tip?.value ?? 0;
-    const simFundingInput = prepareInscribeFundingInput({
-        utxo: args.paymentOutput,
-        paymentPublicKey: args.paymentPublicKey,
-        paymentAddress: args.paymentAddress,
-        isSimulation: true,
-        network: args.network,
-    });
-    // Child reveal vsize is deterministic (parent input + commit input, two
-    // outputs); measure it once via a sim child reveal to get the reveal fee.
-    // The commit builder throws `Funding insufficient` when the funding UTXO
-    // can't cover the commit output + fee; re-cast to the child-typed message
-    // (same translation the parent createInscribeTransactions does).
-    let revealVsize;
-    let revealFeeSats;
-    let commitFeeSats;
-    let commitVsize;
-    let commitOutputValueSats;
-    try {
-        const placeholderCommit = buildInscribeCommitPsbt({
-            fundingInput: simFundingInput,
-            senderChangeAddress: args.paymentAddress,
-            envelopeScript: envelope,
-            ephemeralPubkeyXonly,
-            commitFeeSats: 0,
-            revealFeeReserveSats: 0,
-            tipValueSats: args.tip?.value,
-            walletType: args.walletType,
-            changeDustLimitSats,
-            network: args.network,
-        });
-        const simChildReveal = buildChildInscribeRevealTx({
-            commitTxid: '0'.repeat(64),
-            commitVout: 0,
-            commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
-            commitOutputScript: placeholderCommit.commitOutputScript,
-            taproot: placeholderCommit.taproot,
-            ephemeralPrivKey: dummyEphemeralPriv,
-            parent: args.parentUtxo,
-            recipientAddress: args.recipientAddress,
-            tip: args.tip,
-            network: args.network,
-        });
-        revealVsize = simChildReveal.revealVsize;
-        revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
-        // Commit two-pass with revealFeeReserve = the CHILD reveal fee.
-        const twoPass = twoPassFeeSimulation({
-            feeRatePerVbyte: args.feeRatePerVbyte,
-            simulate: (feeSats) => {
-                const commit = buildInscribeCommitPsbt({
-                    fundingInput: simFundingInput,
-                    senderChangeAddress: args.paymentAddress,
-                    envelopeScript: envelope,
-                    ephemeralPubkeyXonly,
-                    commitFeeSats: feeSats,
-                    revealFeeReserveSats: revealFeeSats,
-                    tipValueSats: args.tip?.value,
-                    walletType: args.walletType,
-                    changeDustLimitSats,
-                    network: args.network,
-                });
-                const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
-                tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-                tx.finalize();
-                return { vsize: tx.vsize, commit };
-            },
-        });
-        commitFeeSats = twoPass.finalFeeSats;
-        commitVsize = twoPass.vsize;
-        commitOutputValueSats = twoPass.finalSimulation.commit.commitOutputValueSats;
-    }
-    catch (err) {
-        if (err instanceof Error && /Funding insufficient/.test(err.message)) {
-            throw new Error(`Insufficient funds for child inscribe: funding UTXO has ${args.paymentOutput.value} ` +
-                `sats, not enough for the commit output + fees`);
-        }
-        throw err;
-    }
-    const fundingRequirementSats = commitOutputValueSats + commitFeeSats;
-    if (args.paymentOutput.value < fundingRequirementSats) {
-        throw new Error(`Insufficient funds for child inscribe: funding UTXO has ${args.paymentOutput.value} ` +
-            `sats, need ${fundingRequirementSats} (commit fee ${commitFeeSats} + commit output ` +
-            `${commitOutputValueSats})`);
-    }
-    // Real commit + a sim commit to read the witness-independent commit txid.
-    const realFundingInput = prepareInscribeFundingInput({
-        utxo: args.paymentOutput,
-        paymentPublicKey: args.paymentPublicKey,
-        paymentAddress: args.paymentAddress,
-        isSimulation: false,
-        network: args.network,
-    });
-    const commitArgsBase = {
-        senderChangeAddress: args.paymentAddress,
-        envelopeScript: envelope,
-        ephemeralPubkeyXonly,
-        commitFeeSats,
-        revealFeeReserveSats: revealFeeSats,
-        tipValueSats: args.tip?.value,
-        walletType: args.walletType,
-        changeDustLimitSats,
-        network: args.network,
-    };
-    const commit = buildInscribeCommitPsbt({ fundingInput: realFundingInput, ...commitArgsBase });
-    const simCommit = buildInscribeCommitPsbt({ fundingInput: simFundingInput, ...commitArgsBase });
-    const commitTxid = deriveUnsignedCommitTxid(simCommit.commitPsbt, args.paymentAddress, args.paymentPublicKey, args.network);
-    const reveal = buildChildInscribeRevealTx({
-        commitTxid,
-        commitVout: 0,
-        commitOutputValueSats: commit.commitOutputValueSats,
-        commitOutputScript: commit.commitOutputScript,
-        taproot: commit.taproot,
-        ephemeralPrivKey,
-        parent: args.parentUtxo,
-        recipientAddress: args.recipientAddress,
-        tip: args.tip,
-        network: args.network,
-    });
-    return {
-        commitPsbt: commit.commitPsbt,
-        commitTxid,
-        revealPsbt: reveal.revealPsbt,
-        revealPsbtForWallet: reveal.revealPsbtForWallet,
-        revealTxid: reveal.revealTxid,
-        commitAddress: commit.commitAddress,
-        fees: {
-            commitFeeSats,
-            revealFeeSats,
-            totalFeeSats: commitFeeSats + revealFeeSats,
-            commitVsize,
-            revealVsize,
-            combinedVsize: commitVsize + revealVsize,
-            commitOutputValueSats,
-            fundingRequirementSats,
-        },
-        ephemeral: { privKey: ephemeralPrivKey, pubkeyXonly: ephemeralPubkeyXonly },
-        parent: args.parentUtxo,
-    };
-}
-/**
- * Turn the convenience args (pointer, metadata, metaprotocol, parent,
- * delegate, rune, note, contentEncoding, properties, propertyEncoding)
- * into ord envelope fields in the exact byte form ord expects. Each
- * value is validated here; large CBOR payloads (metadata / properties)
- * are chunked across repeated same-tag fields so no single push
- * exceeds the 520-byte cap. Field ORDER doesn't affect the resolved
- * inscription (ord indexes by tag), but a stable order keeps the
- * encoded envelope diff-friendly.
- */
-function synthesizeEnvelopeFields(args) {
-    const fields = [];
-    if (args.pointer !== undefined) {
-        // Topology gate: this builder places the inscription's 546-sat
-        // recipient output at vout[0]. A pointer must point inside that
-        // output to land on the inscription's own UTXO. Reject an
-        // unreachable offset rather than emit a pointer that silently
-        // moves the inscription off its cat-bearing UTXO.
-        if (args.pointer >= INSCRIBE_POSTAGE_SATS) {
-            throw new Error(`pointer ${args.pointer} is unreachable: this builder's reveal has a single ` +
-                `${INSCRIBE_POSTAGE_SATS}-sat inscription output at vout[0], so pointer must be < ${INSCRIBE_POSTAGE_SATS}.`);
-        }
-        fields.push({ tag: ORD_TAGS.pointer, value: encodePointerValue(args.pointer) });
-    }
-    if (args.contentEncoding !== undefined) {
-        fields.push({ tag: ORD_TAGS.content_encoding, value: new TextEncoder().encode(args.contentEncoding) });
-    }
-    if (args.metaprotocol !== undefined) {
-        fields.push({ tag: ORD_TAGS.metaprotocol, value: new TextEncoder().encode(args.metaprotocol) });
-    }
-    if (args.parent !== undefined) {
-        fields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });
-    }
-    if (args.delegate !== undefined) {
-        fields.push({ tag: ORD_TAGS.delegate, value: encodeInscriptionId(args.delegate) });
-    }
-    if (args.metadata !== undefined) {
-        if (!ArrayBuffer.isView(args.metadata)) {
-            throw new Error('metadata must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
-        }
-        if (args.metadata.length === 0) {
-            throw new Error('metadata must be non-empty CBOR bytes');
-        }
-        fields.push(...chunkFieldValue(ORD_TAGS.metadata, args.metadata));
-    }
-    if (args.rune !== undefined) {
-        fields.push({ tag: ORD_TAGS.rune, value: encodeRuneCommitment(args.rune) });
-    }
-    if (args.properties !== undefined) {
-        if (!ArrayBuffer.isView(args.properties)) {
-            throw new Error('properties must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
-        }
-        if (args.properties.length === 0) {
-            throw new Error('properties must be non-empty CBOR bytes');
-        }
-        fields.push(...chunkFieldValue(ORD_TAGS.properties, args.properties));
-    }
-    if (args.propertyEncoding === 'br') {
-        if (args.properties === undefined) {
-            throw new Error('propertyEncoding is only valid alongside properties');
-        }
-        fields.push({ tag: ORD_TAGS.property_encoding, value: new TextEncoder().encode('br') });
-    }
-    if (args.note !== undefined) {
-        fields.push({ tag: ORD_TAGS.note, value: new TextEncoder().encode(args.note) });
-    }
-    return fields;
-}
-
-/**
  * Inscribe broadcast helper.
  *
  * Phase-1 strategy (per the locked-in design decisions in
@@ -11133,74 +11300,6 @@ async function postPackage(endpoint, body, fetchImpl, timeoutMs, outerSignal) {
         clearTimeout(timeoutId);
         outerSignal?.removeEventListener('abort', onOuterAbort);
     }
-}
-
-function inscribeAndBroadcast(args) {
-    return defer(() => {
-        let built;
-        try {
-            built = createInscribeTransactions({
-                paymentOutput: args.paymentOutput,
-                paymentPublicKey: args.paymentPublicKey,
-                paymentAddress: args.paymentAddress,
-                recipientAddress: args.recipientAddress,
-                body: args.body,
-                contentType: args.contentType,
-                envelopeFields: args.envelopeFields,
-                feeRatePerVbyte: args.feeRatePerVbyte,
-                walletType: args.walletType,
-                tip: args.tip,
-                note: args.note,
-                parent: args.parent,
-                contentEncoding: args.contentEncoding,
-                pointer: args.pointer,
-                metadata: args.metadata,
-                metaprotocol: args.metaprotocol,
-                delegate: args.delegate,
-                rune: args.rune,
-                properties: args.properties,
-                propertyEncoding: args.propertyEncoding,
-                minimalTagPush: args.minimalTagPush,
-                network: args.network,
-            });
-        }
-        catch (err) {
-            return throwError(() => err);
-        }
-        const signer = findSignerOrThrow(args.walletType);
-        // The signer's broadcast callback is invoked with the signed
-        // commit wire-tx hex. We intercept to (a) fire the consumer's
-        // onCommitSigned hook, (b) actually broadcast via the consumer's
-        // broadcast callback.
-        const captureAndBroadcast = (signedCommitHex) => {
-            if (args.onCommitSigned) {
-                try {
-                    args.onCommitSigned(signedCommitHex);
-                }
-                catch { /* swallow */ }
-            }
-            return args.broadcast(signedCommitHex);
-        };
-        return signer.signSingleFundingInput({
-            psbtBytes: built.commitPsbt,
-            paymentAddress: args.paymentAddress,
-            // Pubkey enables the SDK's wallet-side-address shim so
-            // Unisat/Wizz/OKX see their MAINNET address in `toSignInputs`
-            // even when the app carries a bcrt address on regtest. Native-
-            // regtest wallets (Xverse/Cat21/Alby) get the app address
-            // unchanged. See src/wallet/network-address-shim.ts.
-            paymentPublicKey: hex.encode(args.paymentPublicKey),
-            network: args.network,
-            broadcast: captureAndBroadcast,
-            promptForSignedPsbt: args.promptForSignedPsbt,
-        }).pipe(switchMap(({ txId: commitTxId }) => args.broadcast(built.revealHex).pipe(map((revealTxId) => ({
-            commitTxId,
-            revealTxId,
-            commitAddress: built.commitAddress,
-            ephemeral: built.ephemeral,
-            fees: built.fees,
-        })))));
-    });
 }
 
 function inscribeChildAndBroadcast(args) {
@@ -12896,5 +12995,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeMint, executeTransfer, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribeFees, simulateMint, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map

@@ -2794,6 +2794,1246 @@ declare function createOffer(params: CreateOfferCoreParams, ports: {
 }): Promise<CreateOfferArtifact>;
 
 /**
+ * Ord-protocol field tags. Mirrors ordpool-parser's `knownFields`
+ * value-for-value. See https://docs.ordinals.com/inscriptions.html
+ * for the canonical reference.
+ */
+declare const ORD_TAGS: {
+    /** MIME type of the body. */
+    readonly content_type: 1;
+    /** Override placement on a sat other than the first. */
+    readonly pointer: 2;
+    /** Parent inscription id for provenance chains. */
+    readonly parent: 3;
+    /** CBOR-encoded metadata. */
+    readonly metadata: 5;
+    /** Metaprotocol identifier string. */
+    readonly metaprotocol: 7;
+    /** Body encoding hint (e.g. `gzip`, or `br` for brotli). */
+    readonly content_encoding: 9;
+    /** Delegate inscription id (point to another inscription's body). */
+    readonly delegate: 11;
+    /** Rune-name commitment for rune etching pre-commit. */
+    readonly rune: 13;
+    /** Reserved Tag::Note; de facto inscriber-tool watermark. */
+    readonly note: 15;
+    /** CBOR-encoded gallery items + attributes. */
+    readonly properties: 17;
+    /** Encoding for properties (`br` for brotli). */
+    readonly property_encoding: 19;
+};
+type OrdTag = typeof ORD_TAGS[keyof typeof ORD_TAGS];
+/**
+ * A single tag/value pair embedded in the envelope before the body.
+ * The encoder serialises each as `<tag-push> <value-push>`.
+ */
+interface OrdEnvelopeField {
+    tag: OrdTag;
+    value: Uint8Array;
+}
+interface BuildInscriptionEnvelopeArgs {
+    /**
+     * x-only Schnorr pubkey (32 bytes) that signs the reveal. Embedded
+     * AFTER the envelope as `<pubkey> OP_CHECKSIG` — the actual
+     * spending condition. The envelope itself sits inside a dead
+     * `OP_FALSE OP_IF ... OP_ENDIF` branch and is never executed.
+     */
+    revealPubkeyXonly: Uint8Array;
+    /**
+     * MIME type encoded as UTF-8 bytes. Encoded as tag 1
+     * (`content_type`).
+     */
+    contentType?: string;
+    /**
+     * Body bytes (raw inscription content). Sliced into 520-byte
+     * pushes after the OP_0 separator. Pass an empty Uint8Array for
+     * inscriptions whose body lives elsewhere (delegate, metadata-only).
+     */
+    body: Uint8Array;
+    /**
+     * Additional tags (parent, metadata, metaprotocol, etc.). Order
+     * is preserved in the encoded envelope but order doesn't affect
+     * the on-chain inscription's resolved fields — ord's decoder
+     * indexes by tag, not position.
+     */
+    fields?: ReadonlyArray<OrdEnvelopeField>;
+    /**
+     * How each tag number is pushed into the tapscript. `false`
+     * (default) uses a 1-byte DATA push (`OP_PUSHBYTES_1 <tag>`) —
+     * byte-for-byte what ord's own wallet emits, so the inscription is
+     * charm-free. `true` uses the pushnum opcode `OP_1..OP_16` for tags
+     * 1–16 — 1 byte smaller per tag, but ord flags any pushnum inside an
+     * envelope as `Curse::Pushnum` and stamps the `vindicated` charm
+     * (post-jubilee). Everything else about the inscription is identical:
+     * same content, same tracking, same parent/child provenance, and on
+     * mainnet the same non-negative number. Purely a push-encoding choice.
+     */
+    minimalTagPush?: boolean;
+}
+declare function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Uint8Array;
+/**
+ * Encode an inscription id (`<txid>i<index>`) into the byte form ord
+ * expects wherever an inscription id appears in an envelope value:
+ * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
+ *
+ *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
+ *
+ * Zero-index gets no trailing bytes; index 256 encodes as `[0x00, 0x01]`;
+ * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
+ *
+ * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
+ * which is what ordpool renders parents / delegates from. If the
+ * round-trip doesn't match, the parser drops the id silently (ord's
+ * `filter_map` semantics), so the caller MUST hand us a canonical id
+ * form.
+ */
+declare function encodeInscriptionId(inscriptionId: string): Uint8Array;
+/**
+ * Backwards-compatible alias. `parent` (tag 0x03) and `delegate`
+ * (tag 0x0b) share the same inscription-id byte form, so both go
+ * through `encodeInscriptionId`. Kept exported because consumers +
+ * specs already import this name.
+ */
+declare const encodeParentInscriptionId: typeof encodeInscriptionId;
+/**
+ * Encode a pointer sat-offset (tag 0x02) as minimal little-endian
+ * bytes: the u64 offset with trailing zero bytes trimmed. Offset 0
+ * encodes as an empty push (ord reads a missing/empty value as 0);
+ * 255 → `[0xff]`; 256 → `[0x00, 0x01]`.
+ *
+ * Inverse of `ordpool-parser`'s `extractPointer`, which little-endian-
+ * decodes the value. The pointer names the sat position (in the
+ * concatenated outputs) the inscription is assigned to; only the
+ * builder knows whether that offset is reachable given the reveal's
+ * output topology, so range-vs-topology validation lives at the
+ * synthesis layer, not here.
+ */
+declare function encodePointerValue(offset: number): Uint8Array;
+/**
+ * Encode a rune-name commitment (tag 0x0d) as minimal little-endian
+ * bytes: the rune's u128 value with trailing zero bytes trimmed.
+ * Value 0 encodes as an empty push. Rejects negatives and anything
+ * above u128 max.
+ *
+ * ord's rune etching reads this back as the u128 commitment (see
+ * `ordpool-parser` `knownFields.rune`); the etching tx must later
+ * spend this inscription's UTXO. A pre-computed byte value can still
+ * be passed through the generic `envelopeFields` escape hatch.
+ */
+declare function encodeRuneCommitment(value: bigint): Uint8Array;
+/**
+ * Split a field value into one-or-more `{ tag, value }` entries so no
+ * single push exceeds the 520-byte standardness cap. ord's decoder
+ * concatenates all same-tag chunks before decoding (metadata tag 0x05,
+ * properties tag 0x11), so a large CBOR blob is carried as several
+ * repeated-tag fields.
+ *
+ * A zero-length value yields a single empty-value field (callers that
+ * reject empty payloads gate that upstream).
+ */
+declare function chunkFieldValue(tag: OrdTag, value: Uint8Array): OrdEnvelopeField[];
+
+/**
+ * Layer-1 builder for the inscribe **commit** transaction.
+ *
+ * Construction outline:
+ *
+ *   1. The reveal spends a P2TR output with a **single envelope leaf**.
+ *      The **ephemeral key** is the taproot internal key — so the
+ *      commit output has two equivalent spend paths:
+ *        a. Script-path via the envelope leaf (used by the standard
+ *           reveal — emits the inscription).
+ *        b. Key-path via the ephemeral key (used by any redirect /
+ *           RBF / recover / bundle reveal the consumer constructs
+ *           after `createInscribeTransactions` returns).
+ *      Same shape as Casey Rodarmor's `ord` reference client
+ *      (`src/wallet/batch/plan.rs` lines 367-382). The ephemeral key
+ *      doubles as a bearer instrument: whoever holds it can build
+ *      any reveal-tx shape until the commit output is spent.
+ *
+ *   2. The commit transaction has:
+ *        - 1 funding input (caller-supplied UTXO; user's wallet
+ *          signs). Sequence is wallet-specific via
+ *          `resolveCat21MintInputSequence(walletType)`: 0xfffffffd for
+ *          cat21wallet (RBF allowed; our wallet preserves
+ *          lockTime=21 through replacement), 0xfffffffe for every
+ *          third-party wallet (RBF disabled; locks accelerate UIs
+ *          out, the 2024 Xverse incident defence).
+ *        - Output 0: the commit P2TR address holding
+ *          `postage + revealFeeReserve + tipValueSats` (the last
+ *          term only when `tipValueSats > 0` on the reveal). The
+ *          reveal spends this.
+ *        - Output 1 (optional): change back to the user, if the
+ *          funding input has surplus above commit fee + output 0.
+ *
+ *   3. `nLockTime=21`: the commit qualifies as a CAT-21 mint under
+ *      cat21-ord's `--index-cat21` rule. The first sat of vout[0]
+ *      becomes Cat A (`<commitTxid>i0`). The reveal then spends
+ *      vout[0] FIFO-style, moving Cat A to the inscription's UTXO,
+ *      and the reveal itself (also `nLockTime=21`) mints Cat B
+ *      (`<revealTxid>i0`) at the same satpoint. Net: two cats per
+ *      inscribe, stacked on the inscription's 546-sat UTXO. The
+ *      maintainer's design: "we gift the cats for free. because
+ *      why not."
+ *
+ * Returns the unsigned commit PSBT bytes + the metadata the
+ * reveal builder needs to construct the spending witness.
+ */
+/**
+ * Canonical postage for inscriptions. Same 546-sat dust floor as
+ * cat21 — keeps inscription UTXOs fungible across address types
+ * AND matches the floor every inscriber in the OSS catalog uses.
+ * See HQ rule "cat UTXO is always 546 sats, FIFO".
+ */
+declare const INSCRIBE_POSTAGE_SATS = 546;
+interface InscribeCommitArgs {
+    /** Funding UTXO the user's wallet will sign. */
+    fundingInput: {
+        txid: string;
+        vout: number;
+        value: number;
+        scriptPubKey: Uint8Array;
+        /** Set on P2TR funding inputs. Same shape as the cat21 mint adapter. */
+        tapInternalKey?: Uint8Array;
+        /** Set on P2SH-wrapped funding (Xverse Nested SegWit etc.). */
+        redeemScript?: Uint8Array;
+        /** Set on legacy P2PKH funding. */
+        nonWitnessUtxo?: Uint8Array;
+    };
+    /** Address the user's change returns to (taproot output of the funding wallet). */
+    senderChangeAddress: string;
+    /** Tapscript bytes for the envelope leaf (output of `buildInscriptionEnvelope`). */
+    envelopeScript: Uint8Array;
+    /**
+     * 32-byte x-only ephemeral public key. Doubles as:
+     *   - The first push inside the envelope script (`<pubkey>
+     *     CHECKSIG OP_FALSE OP_IF "ord" …`).
+     *   - The taproot internal key of the commit output.
+     * Holding the matching private key authorises any reveal-tx
+     * shape the consumer wants to build (default reveal, redirect,
+     * RBF, recover-to-self, bundle).
+     */
+    ephemeralPubkeyXonly: Uint8Array;
+    /** Commit-tx fee in sats (built by the fee helper at Layer 3). */
+    commitFeeSats: number;
+    /** Reveal-tx fee in sats (reserved in commit output 0 for the reveal to pay). */
+    revealFeeReserveSats: number;
+    /**
+     * Optional tip-output amount in sats reserved on the commit output
+     * (in addition to postage + revealFeeReserve). The tip output itself
+     * lives on the reveal tx at vout[1]; this is just the bookkeeping
+     * the commit needs to fund it.
+     *
+     * When set, `commitOutputValueSats = postage + revealFeeReserve +
+     * tipValueSats`; when omitted the commit output sizes exactly as
+     * before. Must be a non-negative integer.
+     */
+    tipValueSats?: number;
+    /**
+     * Which wallet will sign the commit PSBT. Drives the funding
+     * input's sequence number via `resolveCat21MintInputSequence`:
+     *   - `cat21wallet`: 0xfffffffd (RBF-allowed; our wallet preserves
+     *     `lockTime=21` through any replacement).
+     *   - any other wallet (default): 0xfffffffe (non-RBF; locks
+     *     third-party accelerate UIs out of touching the marker,
+     *     defending against the 2024 Xverse incident where an
+     *     accelerator dropped `lockTime=21` and burned a CAT-21 mint).
+     *
+     * Defaults to a non-cat21wallet sentinel so any standalone caller
+     * (regtest specs, third-party SDK consumers) gets the safer
+     * non-RBF sequence without having to know about the rule.
+     */
+    walletType?: KnownOrdinalWalletType;
+    /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
+    changeDustLimitSats?: number;
+    network: Network;
+}
+interface InscribeCommitResult {
+    /** Unsigned PSBT bytes ready for the user's wallet to sign. */
+    commitPsbt: Uint8Array;
+    /** Bech32m P2TR address the reveal will spend from. */
+    commitAddress: string;
+    /** scriptPubKey bytes of the commit output (same script the reveal references). */
+    commitOutputScript: Uint8Array;
+    /**
+     * Sat value the commit places at output 0. Equals
+     * `postage + revealFeeReserveSats + (tipValueSats ?? 0)`. Funds
+     * the reveal's recipient output + optional tip output + reveal
+     * miner fee in a single P2TR commit.
+     */
+    commitOutputValueSats: number;
+    /** Taptree metadata the reveal builder needs to construct its spending witness. */
+    taproot: {
+        /** Taproot internal key actually written to the output (the ephemeral pubkey). */
+        internalKey: Uint8Array;
+        /**
+         * scure's tapLeafScript array — single entry, for the envelope leaf.
+         * The reveal builder passes this straight to the script-path reveal;
+         * a key-path reveal doesn't need it.
+         */
+        tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
+    };
+    /** Change amount on output 1; 0 when sub-dust (absorbed into the fee). */
+    changeSats: number;
+}
+declare function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommitResult;
+
+/**
+ * Layer-3 fee simulation for the inscribe commit + reveal pair.
+ *
+ * The two transactions pay independent fees at the same `feeRate`:
+ *
+ *   commit_fee = ceil(commitVsize × feeRate)
+ *   reveal_fee = ceil(revealVsize × feeRate)
+ *
+ * The reveal's vsize is **deterministic given the envelope and
+ * the tip presence** (input = commit output; outputs = recipient
+ * at postage + optional tip at `tip.value`; witness = envelope
+ * script + Schnorr sig + control block) so we compute it once via
+ * a one-shot simulation. The commit's vsize depends on
+ * whether the change output crosses the dust limit at the
+ * resolved fee, so we run the cat21-style two-pass loop on the
+ * commit alone, passing `revealFeeReserveSats = reveal_fee`.
+ *
+ * Net cost: 1 reveal simulation + 2 commit simulations = 3 builds.
+ *
+ * Universal fee strategy that matches every inscriber in the
+ * verified OSS catalog (ord client, micro-ordinals examples,
+ * ordit-sdk, 0xFlicker, LaserEyes — see
+ * OSS-INSCRIBERS.md). No zero-fee tricks, no CPFP magic; the
+ * atomicity story is `submitpackage` at broadcast time, which
+ * handles its own package-feerate math.
+ */
+interface SimulateInscribeFeesArgs {
+    /** sat/vB target fee rate. Same rate applies to both commit + reveal. */
+    feeRatePerVbyte: number;
+    /** Inscription body bytes. Shape-determines reveal vsize. */
+    body: Uint8Array;
+    /** MIME type encoded into the envelope. */
+    contentType?: string;
+    /** Optional extra envelope fields (parent, metaprotocol, metadata...). */
+    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
+    /**
+     * Tag push-encoding choice. Threads to `buildInscriptionEnvelope`
+     * so the simulated reveal vsize matches the encoding the real
+     * commit will use (pushnum saves 1 byte per tag). Default false.
+     */
+    minimalTagPush?: boolean;
+    /**
+     * Funding-input shape — the same `InscribeFundingInput` the commit
+     * helper consumes. The Layer-2 adapter produces this.
+     */
+    fundingInput: InscribeCommitArgs['fundingInput'];
+    /** Where the user's change returns to. */
+    senderChangeAddress: string;
+    /** Where the inscription lands. */
+    recipientAddress: string;
+    /**
+     * 32-byte x-only ephemeral pubkey used as the taproot internal key
+     * AND embedded in the envelope's `<pubkey> CHECKSIG` prefix. Real
+     * orchestrator passes the freshly-generated key; specs may pass a
+     * deterministic dummy because vsizes don't depend on key bytes.
+     */
+    ephemeralPubkeyXonly: Uint8Array;
+    /**
+     * Optional reveal-tx tip output. Threads through to the reveal
+     * vsize estimate (extra output bytes) AND the commit's
+     * `tipValueSats` so the commit funds postage + revealFee + tip.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
+    /**
+     * Wallet whose signature topology drives the commit's funding-
+     * input sequence. Threaded through to `buildInscribeCommitPsbt`.
+     * Optional; defaults to the safer non-RBF sequence when omitted.
+     */
+    walletType?: KnownOrdinalWalletType;
+    /** Per-address-type dust limit for the commit change. */
+    changeDustLimitSats?: number;
+    network: Network;
+}
+interface SimulateInscribeFeesResult {
+    /** Final commit-tx fee in sats. */
+    commitFeeSats: number;
+    /** Final reveal-tx fee in sats. */
+    revealFeeSats: number;
+    /** commitFeeSats + revealFeeSats. The "total fee burden" for UI display. */
+    totalFeeSats: number;
+    /** Commit vsize at final fee. */
+    commitVsize: number;
+    /** Reveal vsize (deterministic given the envelope). */
+    revealVsize: number;
+    /** commitVsize + revealVsize. Useful for package-feerate math. */
+    combinedVsize: number;
+    /**
+     * Amount the commit output 0 holds = postage + revealFeeSats +
+     * (tip.value ?? 0) — sized to fund the reveal's recipient
+     * + optional tip + miner fee in one P2TR output.
+     */
+    commitOutputValueSats: number;
+    /** Total sats the funding UTXO must cover: commitOutputValueSats + commitFeeSats. */
+    fundingRequirementSats: number;
+}
+/**
+ * Returns the commit + reveal fee math at the given fee rate.
+ * Pure function — does not broadcast, does not retain any key
+ * material between calls.
+ */
+declare function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateInscribeFeesResult;
+
+/**
+ * Layer-1 builder for a **child** inscription's reveal transaction —
+ * ord provenance (parent/child), the trustless way to prove a child was
+ * created by the owner of the parent.
+ *
+ * # What makes a valid parent link (ord spec, verified against
+ * `inscription_updater.rs` + `plan.rs`)
+ *
+ * ord recognises `P` as the parent of child `C` iff BOTH hold:
+ *   1. `C`'s envelope carries the `parent` tag (0x03) = P's inscription
+ *      id (this builder's caller emits that via the envelope, same as a
+ *      normal inscribe).
+ *   2. **P's UTXO is spent as an input of C's reveal transaction.** The
+ *      indexer builds `potential_parents` from the inscriptions present
+ *      in the tx and drops any declared parent not in that set
+ *      (`inscription_updater.rs:253-269`). Emitting the tag WITHOUT
+ *      spending P produces a valid child with NO recognised parent.
+ *
+ * # Topology (matches ord's own wallet, `plan.rs:392-425`)
+ *
+ * ```
+ * Inputs:   [ parent UTXO (0),           commit output (1) ]
+ * Outputs:  [ parent RETURN (0, = P val), child recipient (1, 546) , tip? ]
+ * ```
+ *
+ * FIFO sat-tracking makes this correct with NO pointer:
+ *   - Input 0 (parent, P sats) → global `[0..P)` → Output 0 → the parent
+ *     inscription RETURNS to its owner. Nothing is lost.
+ *   - Input 1 (commit) first sat → global `P` → Output 1 → the child
+ *     inscription lands on its recipient (the default offset is "first
+ *     sat of the inscription's own input", `inscription_updater.rs:207-211`).
+ *
+ * Because the child's envelope is on a non-first input (input 1), ord
+ * marks it `Curse::NotInFirstInput` → **post-jubilee that is a normal,
+ * positively-numbered inscription with the `Vindicated` charm** (mainnet
+ * + our regtest are post-jubilee). This is exactly how ord's own
+ * `wallet inscribe --parent` produces children; the charm is cosmetic and
+ * provenance is unaffected.
+ *
+ * # Two signers
+ *
+ * The reveal is co-signed:
+ *   - **Commit input (1)** — the ephemeral key, script-path via the
+ *     envelope leaf, finalized here (SIGHASH_DEFAULT over the whole tx).
+ *   - **Parent input (0)** — the parent OWNER's wallet (P2TR key-path).
+ *     Left UNSIGNED in the returned PSBT; the orchestrator hands it to
+ *     the wallet, which signs input 0, then we finalize + broadcast.
+ * Both sign SIGHASH_ALL/DEFAULT over the same fixed inputs+outputs, so
+ * order is irrelevant and neither invalidates the other.
+ */
+/** A parent inscription being spent + returned by the child reveal. */
+interface ChildRevealParent {
+    /** The parent inscription's current UTXO (P2TR — an ordinals address). */
+    utxo: {
+        txid: string;
+        vout: number;
+        /** Sat value at the parent UTXO; the parent RETURNS with exactly this value. */
+        value: number;
+        /** scriptPubKey of the parent UTXO (P2TR). */
+        scriptPubKey: Uint8Array;
+        /** x-only internal key of the parent's P2TR address (for wallet key-path signing). */
+        tapInternalKey: Uint8Array;
+    };
+    /**
+     * Where the parent inscription returns to — the owner's ordinals
+     * address. For the in-wallet case this is the SAME wallet that owns
+     * the parent (the inscription goes back where it came from).
+     */
+    returnAddress: string;
+}
+interface ChildInscribeRevealArgs {
+    /** Commit txid (the child's commit; same commit builder as a normal inscribe). */
+    commitTxid: string;
+    /** Commit output index — always 0. */
+    commitVout: number;
+    /** Sat value at the commit output (funds child postage + reveal fee + tip). */
+    commitOutputValueSats: number;
+    /** scriptPubKey of the commit output. */
+    commitOutputScript: Uint8Array;
+    /** Taptree spend metadata from the commit builder. */
+    taproot: {
+        internalKey: Uint8Array;
+        tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
+    };
+    /** 32-byte ephemeral private key (same key embedded in the envelope). */
+    ephemeralPrivKey: Uint8Array;
+    /** The parent inscription spent + returned by this reveal. */
+    parent: ChildRevealParent;
+    /** Address the CHILD inscription lands on (P2TR recommended). */
+    recipientAddress: string;
+    /** Optional tip output, appended after the child output. */
+    tip?: {
+        address: string;
+        value: number;
+    };
+    network: Network;
+}
+interface ChildInscribeRevealResult {
+    /**
+     * The FULL reveal PSBT, used to FINALIZE + broadcast (not to hand to
+     * the wallet). Input 0 (parent) is unsigned; input 1 (commit) carries
+     * the ephemeral script-path signature as a partial tapScriptSig + the
+     * envelope tapLeafScript. After the wallet signs input 0 on
+     * `revealPsbtForWallet`, its signature is merged here and BOTH inputs
+     * finalize (input 1 from the tapScriptSig).
+     */
+    revealPsbt: Uint8Array;
+    /**
+     * The reveal PSBT the WALLET signs. Byte-identical to `revealPsbt` in
+     * its consensus fields (inputs, outputs, locktime) so input 0's sighash
+     * matches, but input 1 is a BARE Taproot input (witnessUtxo only) — no
+     * envelope tapLeafScript, no tapScriptSig. Some wallets' signPsbt hang
+     * or reject when a PSBT contains a non-standard tap-leaf script on an
+     * input they aren't even asked to sign; stripping it lets every wallet
+     * sign input 0 cleanly. Input 0's signature is valid on `revealPsbt`
+     * because the sighash commits to input 1's prevout (from witnessUtxo),
+     * not its PSBT metadata.
+     */
+    revealPsbtForWallet: Uint8Array;
+    /** Reveal txid (witness-independent; stable before the wallet signs). */
+    revealTxid: string;
+    /** Reveal vsize (fully-signed) for fee math. */
+    revealVsize: number;
+}
+/**
+ * Build the child reveal PSBT: parent input (unsigned) + commit input
+ * (ephemeral-finalized), parent-return output + child output.
+ */
+declare function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): ChildInscribeRevealResult;
+
+/**
+ * Isomorphic inscription-body compression (browser + Node).
+ *
+ * Inscription bytes go on-chain at real sat/vB; compressing HTML / JSON /
+ * SVG / text before inscribing is a direct fee win. ord recognises a
+ * compressed body via the `content_encoding` envelope tag (0x09) and
+ * serves it back with a matching HTTP `Content-Encoding` header, so the
+ * viewing browser transparently decompresses it (see cat21-ord
+ * `src/subcommand/server/r.rs`). Browsers always send `Accept-Encoding:
+ * gzip, deflate, br`, so both `gzip` and `br` bodies render everywhere
+ * ordinals do; brotli typically lands ~15-20% smaller than gzip on
+ * text/SVG/JSON.
+ *
+ * # Codecs: native first, wasm brotli only where forced
+ *
+ * - **gzip** — native `CompressionStream('gzip')` everywhere (Node 18+,
+ *   all modern browsers). The universal baseline.
+ * - **brotli, native** — `CompressionStream('brotli')` where the runtime
+ *   has it: Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+ (brotli was
+ *   added to the WHATWG Compression Standard in 2026). Zero dependency,
+ *   no fetch.
+ * - **brotli, wasm fallback** — Chrome/Edge (Blink) deliberately don't
+ *   ship the brotli compression dictionary, so there is no native encoder
+ *   there. For those runtimes {@link assessCompression} uses the reference
+ *   Rust brotli compiled to wasm (see {@link ./brotli-wasm-encoder}), but
+ *   ONLY when the caller passes `brotliWasmUrl`. The `.wasm` is a hosted
+ *   PACKAGE ASSET the consumer serves from its own origin and is fetched
+ *   on demand — it never bloats the JS bundle. Omit the URL and Chrome
+ *   simply falls back to gzip.
+ *
+ * Immutable-data safety: every encoder here is the platform's zlib or the
+ * reference Rust brotli — never hand-rolled — so an encoder bug can't
+ * corrupt an inscription. Decoding lives in `ordpool-parser`
+ * (`brotliDecode` / native `DecompressionStream`).
+ *
+ * # Async on purpose
+ *
+ * The Compression Streams API is a stream API, so the primitives return
+ * Promises. Callers `await` them; the inscribe builder stays sync because
+ * compression happens at the call site BEFORE `createInscribeTransactions`
+ * (see {@link assessCompression}).
+ *
+ * # Reuse beyond inscribe (cubes)
+ *
+ * {@link assessCompression} is deliberately generic (arbitrary bytes + a
+ * content-type). cubes-frontend's cube HTML is highly compressible text,
+ * so cubes can adopt it for its cube inscriptions with no inscribe-specific
+ * coupling. This file ships in `dist-core`, so both browser consumers
+ * import it from `ordpool-sdk/core`.
+ */
+/**
+ * Body encodings the inscribe builder can tag on-chain (`content_encoding`,
+ * tag 0x09). `'gzip'` is what {@link assessCompression} produces here;
+ * `'br'` remains valid for a consumer that brings its own brotli bytes
+ * (the builder emits whichever tag; only the decoder needs to exist, and
+ * it lives in `ordpool-parser`). Exported as a runtime tuple so the
+ * inscribe operation-gate can validate untrusted input against it.
+ */
+declare const INSCRIPTION_CONTENT_ENCODINGS: readonly ["br", "gzip"];
+type InscriptionContentEncoding = typeof INSCRIPTION_CONTENT_ENCODINGS[number];
+/**
+ * Compress `body` with gzip via the native Compression Streams API. Works
+ * in the browser AND Node. Returns a fresh `Uint8Array` (gzip stream:
+ * magic `1f 8b`).
+ */
+declare function compressGzip(body: Uint8Array): Promise<Uint8Array>;
+/**
+ * Whether the runtime has a native `CompressionStream('brotli')` encoder:
+ * true on Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+; false on
+ * Chrome/Edge (Blink), which deliberately don't ship the brotli compression
+ * dictionary. Construction throws synchronously for an unsupported format,
+ * so this is a cheap sync feature test.
+ */
+declare function nativeBrotliAvailable(): boolean;
+/**
+ * Decompress a gzip `body` via the native Compression Streams API. The
+ * inverse of {@link compressGzip}; used to verify a `content_encoding:
+ * 'gzip'` body recovers its original bytes.
+ *
+ * Mirrors `ordpool-parser`'s `gzipDecode` decompression-bomb guard: the
+ * running output is capped at {@link MAX_DECOMPRESSED_SIZE} and the stream
+ * is cancelled the instant it would be exceeded. Unlike the parser's
+ * render-path variant (which returns an error string as bytes so rendering
+ * never throws), this verify-path variant THROWS on a bomb or on invalid
+ * data, because a caller checking a round-trip wants the failure surfaced.
+ */
+declare function decompressGzip(body: Uint8Array): Promise<Uint8Array>;
+/**
+ * The facts a consumer needs to decide whether to inscribe a body
+ * compressed. {@link assessCompression} NEVER decides silently: it hands
+ * back the numbers + the winning bytes and the caller/UI picks yes/no.
+ */
+interface CompressionAssessment {
+    /**
+     * `true` when compressing meaningfully shrinks the body (smaller by at
+     * least the minimum margin). The caller inscribes `compressed` +
+     * `contentEncoding: bestEncoding` only when this is `true`.
+     */
+    worthIt: boolean;
+    /**
+     * The winning codec's `content_encoding` tag value when `worthIt`, else
+     * `'none'` (inscribe `compressed` — the original bytes — uncompressed,
+     * no `content_encoding` tag). `'br'` is produced where a brotli encoder
+     * is available: native `CompressionStream('brotli')`, or the wasm encoder
+     * when the caller passes `brotliWasmUrl`.
+     */
+    bestEncoding: 'none' | InscriptionContentEncoding;
+    /** Byte length of the original body. */
+    originalSize: number;
+    /** Byte length of `compressed` (equals `originalSize` when `bestEncoding === 'none'`). */
+    compressedSize: number;
+    /** `originalSize - compressedSize` (0 when not worth it / short-circuited). */
+    savedBytes: number;
+    /** `savedBytes / originalSize * 100`, rounded to 2 decimals (0 when `originalSize` is 0). */
+    savedPercent: number;
+    /**
+     * When `worthIt`, the compressed bytes to inscribe (so the caller never
+     * compresses twice). When not worth it, the ORIGINAL bytes (the body to
+     * inscribe uncompressed).
+     */
+    compressed: Uint8Array;
+}
+interface AssessCompressionOptions {
+    /**
+     * Minimum saving (percent of the original) required to report
+     * `worthIt: true`. Default 5%. Rationale: the `content_encoding`
+     * envelope tag itself costs a few bytes on-chain and gzip adds a small
+     * framing overhead, so a sub-few-percent "saving" can be a net loss once
+     * the tag is counted; 5% clears that comfortably for any non-trivial
+     * body. A consumer with different economics can override it.
+     */
+    minSavedPercent?: number;
+    /**
+     * URL of a hosted `brotli_wasm_bg.wasm` (shipped in this package under
+     * `wasm/`; the consumer app copies it to its own origin and passes that
+     * URL). ONLY used on runtimes WITHOUT native `CompressionStream('brotli')`
+     * — i.e. Chrome/Edge — to fetch + instantiate the wasm brotli encoder on
+     * demand (once, cached). Omit it and Chrome/Edge simply fall back to gzip;
+     * Safari/Firefox/Node use native brotli and never touch this.
+     */
+    brotliWasmUrl?: string;
+}
+/**
+ * Assess whether inscribing `bytes` compressed is worth it, trying every
+ * available codec (gzip, plus brotli where an encoder exists) and returning
+ * the smallest winner. Pure
+ * assessment: emits NO envelope tag, makes NO inscribe-specific
+ * assumptions, and returns everything the caller needs to decide. Generic
+ * enough for cubes-frontend to call on arbitrary cube HTML.
+ *
+ * Behaviour:
+ *   - Known already-compressed `contentType` (image/*, video, zip, woff2,
+ *     …) → short-circuits to `worthIt: false`, `bestEncoding: 'none'`
+ *     WITHOUT running any compressor (`compressed` = the original bytes).
+ *   - Otherwise compresses once per codec, keeps the smallest output, and
+ *     sets `worthIt = savedBytes > 0 && savedPercent >= minSavedPercent`.
+ *     The `savedBytes > 0` term also guards the "compressed output larger
+ *     than the original → not worth it" case. On a size tie the earlier
+ *     codec wins (gzip; see {@link buildCodecs}). The winning bytes are
+ *     returned so the caller reuses them (never compresses twice).
+ */
+declare function assessCompression(bytes: Uint8Array, contentType?: string, options?: AssessCompressionOptions): Promise<CompressionAssessment>;
+
+/**
+ * Layer-4 orchestration entry: ties the envelope encoder + per-
+ * wallet input adapter + commit/reveal builders + fee simulator
+ * into a single createTransaction-style entry point.
+ *
+ * Mirrors `createTransaction` from `cat21.service.helper.ts`. The
+ * caller hands in the funding UTXO + wallet payment context + the
+ * inscription content + feeRate; we hand back an unsigned commit
+ * PSBT + a default signed reveal hex + the **ephemeral key material**
+ * needed to build any other reveal shape (redirect, RBF, recover-
+ * to-self, bundle).
+ *
+ * # Free cats (the "ordpool inscribers get cats" design)
+ *
+ * Both the commit AND the reveal carry `nLockTime=21`, so cat21-ord
+ * mints TWO cats per inscription:
+ *   - Cat A: `<commitTxid>i0` — minted by the commit; ends up at
+ *     the inscription's UTXO via FIFO transitivity through the
+ *     reveal's input.
+ *   - Cat B: `<revealTxid>i0` — minted by the reveal at the same
+ *     satpoint. Post-jubilee chains tag Cat B with the `Vindicated`
+ *     charm; it's otherwise a normal cat with a positive number.
+ * Both cats stack on the inscription's 546-sat UTXO at the
+ * recipient's address. No opt-out. See the commit helper's module
+ * doc for the cat21-ord index mechanics.
+ *
+ * # Lifecycle
+ *
+ *  1. Generate fresh ephemeral keypair (32 random bytes).
+ *  2. Derive Schnorr x-only pubkey — this doubles as the envelope's
+ *     `<pubkey> CHECKSIG` prefix AND the taproot internal key of the
+ *     commit output.
+ *  3. Build envelope with caller's content + auto-prepended fields
+ *     (note → tag 0x0f UTF-8; contentEncoding → tag 0x09, the encoding
+ *     string e.g. "gzip" / "br")
+ *     + any caller-supplied `envelopeFields`.
+ *  4. Simulate fees (Layer 3): commitFee, revealFee,
+ *     commitOutputValueSats (= postage + revealFee + tip.value),
+ *     fundingRequirementSats.
+ *  5. Build the commit PSBT at the resolved commitFee with
+ *     `nLockTime=21` and the per-wallet sequence.
+ *  6. Build a default reveal tx at the resolved revealFee using the
+ *     ephemeral private key (recipient = `args.recipientAddress`,
+ *     optional tip at vout[1], also `nLockTime=21`).
+ *  7. Return the ephemeral key material so the caller can re-build
+ *     the reveal under different parameters later if it wants to.
+ *
+ * # Bearer-key semantic
+ *
+ * `ephemeral.privKey` is a **bearer instrument**: anyone who holds
+ * it can spend the commit output (redirect the inscription, RBF the
+ * reveal, recover the postage to themselves, ...) until the commit
+ * output is spent on chain. Treat it with the same care as any
+ * other money-bearing key:
+ *
+ *   - Phase 1 storage: `localStorage` keyed by `commitTxid` is fine
+ *     for typical low-value inscriptions. The key lives only
+ *     between commit broadcast and reveal broadcast (seconds to
+ *     hours typically).
+ *   - For higher-value flows, encrypt at rest with the wallet
+ *     password — same posture as any other hot key.
+ *   - Lose the key with no reveal broadcast and the postage is
+ *     permanently locked. Save it before discarding the result.
+ *
+ * This is byte-equivalent to the `ord` reference client's design
+ * (`src/wallet/batch/plan.rs` lines 367-382 + 676-709) — ord
+ * persists the ephemeral key into Bitcoin Core's wallet under a
+ * `commit tx recovery key` label; we hand it to the consumer to
+ * persist however it wants.
+ */
+interface CreateInscribeTransactionsArgs {
+    /** Funding UTXO. */
+    paymentOutput: TxnOutput;
+    /** Wallet's payment public key (33-byte compressed). */
+    paymentPublicKey: Uint8Array;
+    /** Wallet's payment address (where change returns). */
+    paymentAddress: string;
+    /** Where the inscription lands (P2TR recommended for ord theory). */
+    recipientAddress: string;
+    /** Inscription body bytes. */
+    body: Uint8Array;
+    /** MIME type. */
+    contentType?: string;
+    /** Optional extra ord tags (parent, metaprotocol, metadata...). */
+    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
+    /** sat/vB target. Applied identically to commit + reveal. */
+    feeRatePerVbyte: number;
+    /**
+     * Which wallet will sign the commit. Drives the funding-input
+     * sequence number on the commit (cat21wallet → RBF allowed; every
+     * other wallet → RBF disabled). Optional; the safer non-RBF
+     * sequence applies when omitted, which is what every third-party
+     * wallet should ship anyway.
+     *
+     * Ordpool inscriptions ALWAYS build the commit with
+     * `nLockTime=21` regardless of wallet — see the module-level
+     * docstring for the "free cat for inscribers" design.
+     */
+    walletType?: KnownOrdinalWalletType;
+    /**
+     * Optional tip output appended at vout[1] of the reveal tx. The
+     * inscription stays at vout[0] per ord's first-sat-of-first-output
+     * rule. The commit's funding requirement grows by `tip.value` so
+     * the reveal has the sats to fund the extra output.
+     *
+     * The SDK ships no default tip address — consumers (ordpool.space,
+     * cat21.space, future inscribers) wire their own default. Pattern
+     * mirrors `0xFlicker/ordinals`' `feeDestinations`, simplified to
+     * one recipient and a fixed sats amount.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
+    /**
+     * Optional Tag::Note (0x0f) string. Emitted as a UTF-8 envelope
+     * field; ordpool-parser surfaces it on the inscription record.
+     * The de-facto inscriber-tool watermark slot.
+     *
+     * When set, the SDK auto-builds the `{ tag: 0x0f, value: utf8(note) }`
+     * field and prepends it to `envelopeFields`.
+     */
+    note?: string;
+    /**
+     * Optional parent inscription id (`<txid>i<index>`) for provenance
+     * chains. Emitted as a Tag::Parent (0x03) envelope field.
+     *
+     * IMPORTANT: setting this ONLY emits the envelope tag. Ord treats
+     * an inscription as a genuine child only when the reveal tx ALSO
+     * spends the parent's UTXO as an input — which requires the
+     * parent owner co-signing the reveal, a topology change this
+     * builder does not model. Consumers using `parent` today get the
+     * annotation (ordpool-parser surfaces the parent id), not the
+     * provenance link. Full parent/child support needs its own
+     * orchestrator.
+     */
+    parent?: string;
+    /**
+     * Optional body-encoding hint. When set, the SDK emits the
+     * `content_encoding` envelope tag (0x09) with this exact string,
+     * signalling to indexers + ord that the body is compressed with that
+     * codec. The body must ALREADY be compressed by the caller; this flag
+     * only emits the tag.
+     *
+     * Compression is a deliberate, explicit consumer step (never hidden in
+     * this builder): call `assessCompression(bytes, contentType)` from
+     * `inscribe-compression.helper.ts`, show the savings, and if you choose
+     * to compress pass its `compressed` body here with
+     * `contentEncoding: assessment.bestEncoding`. `assessCompression` /
+     * `compressGzip` are async + isomorphic (native Compression Streams),
+     * so the compression happens at the call site before this sync builder
+     * runs. `'br'` is also accepted for a caller that brings its own brotli
+     * bytes (the decoder lives in `ordpool-parser`).
+     */
+    contentEncoding?: InscriptionContentEncoding;
+    /**
+     * Optional pointer (tag 0x02): the sat offset, within the reveal's
+     * concatenated outputs, the inscription is assigned to. Emitted as
+     * minimal little-endian bytes.
+     *
+     * TOPOLOGY CAVEAT: this builder's reveal has the inscription's own
+     * 546-sat recipient output at vout[0] (plus an optional tip at
+     * vout[1]). A pointer only lands on the inscription's UTXO when it
+     * points inside that first output, i.e. `pointer < 546`. A larger
+     * offset would move the inscription onto the tip output or past the
+     * end of the outputs (unreachable, and not what any single-inscription
+     * caller wants), so values `>= 546` are rejected rather than silently
+     * emitted. Default (unset) behaves like pointer 0.
+     */
+    pointer?: number;
+    /**
+     * Optional CBOR metadata (tag 0x05). Pass the ALREADY-CBOR-ENCODED
+     * bytes: use the exported `encodeCborDeterministic(value)` helper to
+     * turn a structured value into canonical CBOR first. Values over 520
+     * bytes are split across repeated tag-5 fields automatically (ord
+     * concatenates them before decoding). Must be non-empty.
+     */
+    metadata?: Uint8Array;
+    /**
+     * Optional metaprotocol identifier (tag 0x07). Emitted as UTF-8
+     * bytes (e.g. `'brc-20'`).
+     */
+    metaprotocol?: string;
+    /**
+     * Optional delegate inscription id (`<txid>i<index>`, tag 0x0b).
+     * A delegate inscription typically carries an EMPTY body and points
+     * at another inscription's content; ord serves the delegate's
+     * content in its place. Unlike `parent`, this is functional with no
+     * extra tx topology: the delegate link resolves purely from the
+     * envelope tag. A body alongside a delegate is allowed (ord ignores
+     * it when the delegate resolves) but the canonical shape is an
+     * empty body.
+     */
+    delegate?: string;
+    /**
+     * Optional rune-name commitment (tag 0x0d) as the rune's u128 value.
+     * Emitted as minimal little-endian bytes. The etching transaction
+     * must later spend this inscription's UTXO. A pre-computed byte
+     * value can go through `envelopeFields` instead.
+     */
+    rune?: bigint;
+    /**
+     * Optional CBOR properties (tag 0x11): gallery items + attributes.
+     * Same contract as `metadata`: pass ALREADY-CBOR-ENCODED bytes
+     * (`encodeCborDeterministic`), chunked automatically over 520 bytes.
+     *
+     * ord's properties struct is INTEGER-keyed. Build the CBOR with a
+     * `Map` whose keys are real numbers (`new Map([[0, gallery], [1,
+     * attrs]])`), NOT a plain object `{0: …, 1: …}` (whose keys are the
+     * strings `"0"`/`"1"`); ord drops a text-keyed properties map. See
+     * `encodeCborDeterministic`'s doc for the full caveat.
+     */
+    properties?: Uint8Array;
+    /**
+     * Optional properties-encoding hint (tag 0x13). When `'br'`, signals
+     * that the `properties` bytes are brotli-compressed. Only emitted
+     * alongside `properties`.
+     */
+    propertyEncoding?: 'br';
+    /**
+     * How each ord tag number is pushed into the reveal tapscript.
+     * `false` (default) uses a 2-byte data push (`OP_PUSHBYTES_1 <tag>`),
+     * byte-for-byte what ord's own wallet emits — the inscription is
+     * charm-free. `true` uses the 1-byte pushnum opcode (`OP_1..OP_16`)
+     * for tags 1–16, saving 1 byte per tag, at the cost of ord stamping
+     * the `vindicated` charm (post-jubilee). Nothing else changes: same
+     * content, tracking, provenance, and non-negative number on mainnet.
+     * The commit + reveal fee simulation uses the same encoding, so the
+     * quoted vsize/fees already reflect the choice.
+     */
+    minimalTagPush?: boolean;
+    /** Network. */
+    network: Network;
+}
+interface CreateInscribeTransactionsResult {
+    /** Unsigned commit PSBT — hand to the user's wallet for signing. */
+    commitPsbt: Uint8Array;
+    /**
+     * Computed txid of the commit, matching what the wallet-signed commit
+     * will produce. Witness inputs (P2WPKH / P2TR) are witness-independent;
+     * P2SH-P2WPKH is reconstructed from the real redeemScript. See
+     * deriveUnsignedCommitTxid.
+     */
+    commitTxid: string;
+    /** Signed, finalized reveal-tx hex. Self-contained; broadcast as-is. */
+    revealHex: string;
+    /** Computed txid of the reveal (lets consumers display/track before broadcast). */
+    revealTxid: string;
+    /** Commit-tx P2TR address (bech32m). */
+    commitAddress: string;
+    /** Final fees (sats), vsizes, and the funding requirement. */
+    fees: SimulateInscribeFeesResult;
+    /**
+     * Ephemeral bearer key for the commit output. Authorises any
+     * reveal-tx shape (default reveal, redirect, RBF, recover-to-
+     * self, bundle) until the commit output is spent. SAVE BEFORE
+     * DISCARDING THIS RESULT — losing the key with no reveal
+     * broadcast locks the postage forever.
+     */
+    ephemeral: {
+        /** 32-byte Schnorr private key. */
+        privKey: Uint8Array;
+        /** 32-byte x-only public key. Same key embedded in the envelope. */
+        pubkeyXonly: Uint8Array;
+    };
+    /** Material the caller needs to rebuild the reveal tx under different parameters. */
+    commit: {
+        /** Commit output scriptPubKey. */
+        outputScript: Uint8Array;
+        /** Postage + revealFeeReserve at the commit output. */
+        outputValueSats: number;
+        /** Envelope tapscript bytes (the leaf the reveal spends through). */
+        envelopeScript: Uint8Array;
+    };
+}
+/**
+ * Build the inscribe commit + reveal pair for the given content.
+ * Pure function modulo `randomPrivateKey`.
+ *
+ * The returned `ephemeral.privKey` is the bearer instrument for
+ * the commit output — see the module-level lifecycle note for the
+ * storage semantic.
+ */
+declare function createInscribeTransactions(args: CreateInscribeTransactionsArgs): CreateInscribeTransactionsResult;
+/**
+ * Args for {@link createChildInscribeTransactions}. Same content +
+ * funding shape as a normal inscribe, plus the parent to spend. The
+ * base `parent` string tag is replaced by an explicit pair: the
+ * `parentInscriptionId` (the `parent` tag value) and the `parentUtxo`
+ * (the UTXO the reveal spends + where it returns).
+ */
+interface CreateChildInscribeTransactionsArgs extends Omit<CreateInscribeTransactionsArgs, 'parent'> {
+    /**
+     * The parent inscription id (`<txid>i<index>`) — emitted as the
+     * `parent` tag (0x03). This is the inscription's IDENTITY, which may
+     * differ from `parentUtxo`'s outpoint if the parent has been
+     * transferred since it was inscribed.
+     */
+    parentInscriptionId: string;
+    /**
+     * The parent inscription's CURRENT UTXO (spent by the reveal to prove
+     * control) + the address it returns to. For the in-wallet case both
+     * belong to the connected wallet.
+     */
+    parentUtxo: ChildRevealParent;
+}
+interface CreateChildInscribeTransactionsResult {
+    /** Unsigned commit PSBT — the wallet signs its funding input. */
+    commitPsbt: Uint8Array;
+    /** Commit txid, stable before signing (see deriveUnsignedCommitTxid). */
+    commitTxid: string;
+    /**
+     * The FULL child reveal PSBT (for finalize + broadcast). Input 0 (parent)
+     * is unsigned; input 1 (commit) carries the ephemeral tapScriptSig +
+     * envelope tapLeafScript. The wallet signs input 0 on
+     * `revealPsbtForWallet`; its signature merges here and both inputs
+     * finalize.
+     */
+    revealPsbt: Uint8Array;
+    /**
+     * The reveal PSBT the WALLET signs — same consensus tx as `revealPsbt`,
+     * but input 1 is a BARE Taproot input (no envelope tap-leaf) so every
+     * wallet's signPsbt handles it. See `ChildInscribeRevealResult`.
+     */
+    revealPsbtForWallet: Uint8Array;
+    /** Reveal txid (witness-independent). */
+    revealTxid: string;
+    /** Commit-tx P2TR address. */
+    commitAddress: string;
+    /** Fee + vsize + funding math. */
+    fees: {
+        commitFeeSats: number;
+        revealFeeSats: number;
+        totalFeeSats: number;
+        commitVsize: number;
+        revealVsize: number;
+        combinedVsize: number;
+        commitOutputValueSats: number;
+        fundingRequirementSats: number;
+    };
+    /** Ephemeral bearer key for the commit output (see createInscribeTransactions). */
+    ephemeral: {
+        privKey: Uint8Array;
+        pubkeyXonly: Uint8Array;
+    };
+    /** The parent that must be signed on the reveal, echoed for the orchestrator. */
+    parent: ChildRevealParent;
+}
+/**
+ * Build the commit + CHILD reveal pair for an ord parent/child
+ * inscription. Same commit as a normal inscribe (envelope carries the
+ * `parent` tag); the reveal additionally SPENDS the parent UTXO and
+ * RETURNS it to the owner, which is what makes ord recognise the parent
+ * link (see {@link buildChildInscribeRevealTx}). The reveal is returned
+ * as a PSBT because its parent input needs the wallet's signature.
+ */
+declare function createChildInscribeTransactions(args: CreateChildInscribeTransactionsArgs): CreateChildInscribeTransactionsResult;
+/**
+ * Turn the convenience args (pointer, metadata, metaprotocol, parent,
+ * delegate, rune, note, contentEncoding, properties, propertyEncoding)
+ * into ord envelope fields in the exact byte form ord expects. Each
+ * value is validated here; large CBOR payloads (metadata / properties)
+ * are chunked across repeated same-tag fields so no single push
+ * exceeds the 520-byte cap. Field ORDER doesn't affect the resolved
+ * inscription (ord indexes by tag), but a stable order keeps the
+ * encoded envelope diff-friendly.
+ */
+declare function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnvelopeField[];
+
+/**
+ * Public orchestrator for the inscribe operation. Build commit +
+ * reveal, ask the user's wallet to sign the commit's funding input
+ * via the operation-named `signSingleFundingInput`, broadcast both
+ * txs in sequence, return the ephemeral key + txids.
+ *
+ * # Why one entry point, no signingMap
+ *
+ * The inscribe commit has a single input at `paymentAddress`,
+ * SIGHASH_ALL — same topology as a cat21 mint. The signer's
+ * `signSingleFundingInput` enforces that shape; the consumer cannot
+ * pass a signingMap that asks for anything else.
+ *
+ * # Bearer key
+ *
+ * The ephemeral private key is returned on `result.ephemeral.privKey`.
+ * Anyone holding it controls the commit output (redirect, RBF,
+ * recover-to-self, bundle) until the commit output is spent. Persist
+ * with whatever security posture matches the inscription value;
+ * localStorage keyed by `commitTxId` is fine for typical low-value
+ * inscriptions, encrypt-at-rest with the wallet password for
+ * higher-value flows. See `inscription.service.helper.ts` module
+ * doc for the full bearer-key semantic.
+ *
+ * # Broadcast model
+ *
+ * Default: sequential. Sign commit → broadcast commit → broadcast
+ * reveal. Each broadcast goes through the same `broadcast` callback
+ * the consumer supplies (typically `electrs POST /tx`).
+ *
+ * For atomic submitpackage broadcast, see `broadcastInscribePackage`
+ * in `inscribe-broadcast.helper.ts` — the consumer can capture the
+ * signed commit hex from this orchestrator's `onCommitSigned`
+ * callback and POST both hexes to `/txs/package` instead. The
+ * orchestrator itself stays simple.
+ */
+interface InscribeAndBroadcastArgs {
+    walletType: KnownOrdinalWalletType;
+    paymentOutput: TxnOutput;
+    paymentPublicKey: Uint8Array;
+    paymentAddress: string;
+    recipientAddress: string;
+    body: Uint8Array;
+    contentType?: string;
+    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
+    feeRatePerVbyte: number;
+    /**
+     * Optional tip output appended at vout[1] of the reveal. SDK
+     * ships no default address — consumers wire their own. See
+     * `createInscribeTransactions` for the full semantic.
+     */
+    tip?: {
+        address: string;
+        value: number;
+    };
+    /** Optional Tag::Note (0x0f) watermark string. */
+    note?: string;
+    /**
+     * Optional parent inscription id (`<txid>i<index>`); emits Tag::Parent
+     * (0x03). Annotation only — full parent/child provenance also
+     * requires spending the parent's UTXO in the reveal (not modelled
+     * here). See `createInscribeTransactions` for the caveat.
+     */
+    parent?: string;
+    /**
+     * Optional body-encoding hint ('gzip', or 'br' for a caller-supplied
+     * brotli body). Body must already be compressed; this flag only emits
+     * the envelope tag.
+     */
+    contentEncoding?: InscriptionContentEncoding;
+    /**
+     * Optional pointer (tag 0x02) sat offset. Must be < 546 given this
+     * builder's single-output reveal topology. See
+     * `createInscribeTransactions` for the full caveat.
+     */
+    pointer?: number;
+    /**
+     * Optional CBOR metadata (tag 0x05). Pass pre-encoded bytes
+     * (`encodeCborDeterministic`); chunked automatically over 520 bytes.
+     */
+    metadata?: Uint8Array;
+    /** Optional metaprotocol identifier (tag 0x07), emitted as UTF-8. */
+    metaprotocol?: string;
+    /**
+     * Optional delegate inscription id (`<txid>i<index>`, tag 0x0b).
+     * Functional (no extra tx topology): ord serves the delegate's
+     * content. Canonical shape is an empty `body`.
+     */
+    delegate?: string;
+    /**
+     * Optional rune-name commitment (tag 0x0d) as the rune's u128 value,
+     * emitted as minimal little-endian bytes.
+     */
+    rune?: bigint;
+    /**
+     * Optional CBOR properties (tag 0x11): gallery + attributes. Pass
+     * pre-encoded bytes (`encodeCborDeterministic`); chunked over 520.
+     */
+    properties?: Uint8Array;
+    /** Optional properties-encoding hint (tag 0x13); only with `properties`. */
+    propertyEncoding?: 'br';
+    /**
+     * How ord tag numbers are pushed into the reveal tapscript. `false`
+     * (default) = 2-byte data push, matching ord's own wallet (charm-free).
+     * `true` = 1-byte pushnum for tags 1–16, saving a byte per tag at the
+     * cost of ord's `vindicated` charm. Everything else identical. See
+     * `createInscribeTransactions`.
+     */
+    minimalTagPush?: boolean;
+    network: Network;
+    /**
+     * Broadcasts a wire-format tx hex; returns the resulting txid.
+     * Called twice: once with the wallet-signed commit, then with the
+     * ephemeral-key-signed reveal. Same callback for both — the
+     * consumer typically wires this to electrs POST /tx.
+     */
+    broadcast(txHex: string): Observable<string>;
+    /**
+     * Optional hook fired when the wallet-signed commit hex is in hand,
+     * BEFORE broadcast. Useful for consumers that want to swap in a
+     * package broadcast or persist the signed bytes for retry.
+     */
+    onCommitSigned?(signedCommitHex: string): void;
+    /**
+     * Watch-only signers (psbt-export) bridge to user-mediated signing.
+     * Browser-wallet signers ignore it.
+     */
+    promptForSignedPsbt?(unsigned: {
+        base64: string;
+        hex: string;
+    }): Observable<string>;
+}
+interface InscribeAndBroadcastResult {
+    commitTxId: string;
+    revealTxId: string;
+    commitAddress: string;
+    /** Ephemeral bearer key — persist or forfeit reveal-side flexibility. */
+    ephemeral: CreateInscribeTransactionsResult['ephemeral'];
+    /** Final commit + reveal fees + vsizes (for UI display). */
+    fees: CreateInscribeTransactionsResult['fees'];
+}
+declare function inscribeAndBroadcast(args: InscribeAndBroadcastArgs): Observable<InscribeAndBroadcastResult>;
+
+/**
+ * Everything the inscribe core needs, framework-agnostic. Reuses the existing
+ * commit+reveal engine (`inscribeAndBroadcast`) but selects the funding coin
+ * through the SAME content-checked safe-auto path as the other flows — so an
+ * inscribe never auto-spends a coin that carries an inscription / rune / cat /
+ * rare sat. It is the full `inscribeAndBroadcast` arg set minus the coin (the
+ * core selects it) and the transport (injected as ports).
+ */
+interface InscribeCoreParams extends Omit<InscribeAndBroadcastArgs, 'paymentOutput' | 'broadcast' | 'promptForSignedPsbt'> {
+    /** Expert-mode explicit funding pick; omitted ⇒ the safe auto coin. */
+    selectedFundingUtxo?: CoreFundingUtxo | null;
+}
+type InscribeStatus = 'ready' | 'expert-required' | 'insufficient';
+interface InscribeSimulation {
+    status: InscribeStatus;
+    recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
+    fundingUtxo: CoreFundingUtxo | null;
+    /** commit output + commit fee the funding coin must cover. Null if the content is unbuildable. */
+    fundingRequirementSats: number | null;
+}
+/**
+ * Preview an inscribe: the funding requirement + content-checked selection, no
+ * signing. `ready` = a safe funding coin covers the requirement.
+ */
+declare function simulateInscribe(params: InscribeCoreParams, ports: {
+    utxos: UtxosPort;
+    scan: ContentScanPort;
+}): Promise<InscribeSimulation>;
+/**
+ * Execute an inscribe end-to-end: safe-auto funding selection, then the
+ * existing commit+reveal engine (build commit → sign → broadcast commit → build
+ * reveal → sign → broadcast reveal). Throws when only asset coins cover
+ * (`expert-required`) or nothing covers. `promptForSignedPsbt` is the
+ * watch-only signing bridge (Promise form; adapted internally).
+ */
+declare function executeInscribe(params: InscribeCoreParams, ports: {
+    utxos: UtxosPort;
+    scan: ContentScanPort;
+    broadcast: BroadcastPort;
+    promptForSignedPsbt?: (unsigned: {
+        base64: string;
+        hex: string;
+    }) => Promise<string>;
+}): Promise<InscribeAndBroadcastResult>;
+
+/**
  * Alias for {@link CAT21_POSTAGE_SATS} kept for legacy import paths. The
  * canonical constant lives in `cat21-postage.ts`; every cat-touching tx
  * uses the same value across mint, transfer, and offer flows.
@@ -4433,146 +5673,6 @@ declare function verifyBip322Signature(args: {
 }): VerifyBip322SignatureResult;
 
 /**
- * Ord-protocol field tags. Mirrors ordpool-parser's `knownFields`
- * value-for-value. See https://docs.ordinals.com/inscriptions.html
- * for the canonical reference.
- */
-declare const ORD_TAGS: {
-    /** MIME type of the body. */
-    readonly content_type: 1;
-    /** Override placement on a sat other than the first. */
-    readonly pointer: 2;
-    /** Parent inscription id for provenance chains. */
-    readonly parent: 3;
-    /** CBOR-encoded metadata. */
-    readonly metadata: 5;
-    /** Metaprotocol identifier string. */
-    readonly metaprotocol: 7;
-    /** Body encoding hint (e.g. `gzip`, or `br` for brotli). */
-    readonly content_encoding: 9;
-    /** Delegate inscription id (point to another inscription's body). */
-    readonly delegate: 11;
-    /** Rune-name commitment for rune etching pre-commit. */
-    readonly rune: 13;
-    /** Reserved Tag::Note; de facto inscriber-tool watermark. */
-    readonly note: 15;
-    /** CBOR-encoded gallery items + attributes. */
-    readonly properties: 17;
-    /** Encoding for properties (`br` for brotli). */
-    readonly property_encoding: 19;
-};
-type OrdTag = typeof ORD_TAGS[keyof typeof ORD_TAGS];
-/**
- * A single tag/value pair embedded in the envelope before the body.
- * The encoder serialises each as `<tag-push> <value-push>`.
- */
-interface OrdEnvelopeField {
-    tag: OrdTag;
-    value: Uint8Array;
-}
-interface BuildInscriptionEnvelopeArgs {
-    /**
-     * x-only Schnorr pubkey (32 bytes) that signs the reveal. Embedded
-     * AFTER the envelope as `<pubkey> OP_CHECKSIG` — the actual
-     * spending condition. The envelope itself sits inside a dead
-     * `OP_FALSE OP_IF ... OP_ENDIF` branch and is never executed.
-     */
-    revealPubkeyXonly: Uint8Array;
-    /**
-     * MIME type encoded as UTF-8 bytes. Encoded as tag 1
-     * (`content_type`).
-     */
-    contentType?: string;
-    /**
-     * Body bytes (raw inscription content). Sliced into 520-byte
-     * pushes after the OP_0 separator. Pass an empty Uint8Array for
-     * inscriptions whose body lives elsewhere (delegate, metadata-only).
-     */
-    body: Uint8Array;
-    /**
-     * Additional tags (parent, metadata, metaprotocol, etc.). Order
-     * is preserved in the encoded envelope but order doesn't affect
-     * the on-chain inscription's resolved fields — ord's decoder
-     * indexes by tag, not position.
-     */
-    fields?: ReadonlyArray<OrdEnvelopeField>;
-    /**
-     * How each tag number is pushed into the tapscript. `false`
-     * (default) uses a 1-byte DATA push (`OP_PUSHBYTES_1 <tag>`) —
-     * byte-for-byte what ord's own wallet emits, so the inscription is
-     * charm-free. `true` uses the pushnum opcode `OP_1..OP_16` for tags
-     * 1–16 — 1 byte smaller per tag, but ord flags any pushnum inside an
-     * envelope as `Curse::Pushnum` and stamps the `vindicated` charm
-     * (post-jubilee). Everything else about the inscription is identical:
-     * same content, same tracking, same parent/child provenance, and on
-     * mainnet the same non-negative number. Purely a push-encoding choice.
-     */
-    minimalTagPush?: boolean;
-}
-declare function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Uint8Array;
-/**
- * Encode an inscription id (`<txid>i<index>`) into the byte form ord
- * expects wherever an inscription id appears in an envelope value:
- * tag 0x03 (`parent`), tag 0x0b (`delegate`), and gallery items:
- *
- *   [ 32 bytes: reversed txid ][ 0..4 bytes: little-endian index, trailing zeros trimmed ]
- *
- * Zero-index gets no trailing bytes; index 256 encodes as `[0x00, 0x01]`;
- * index 0xFFFFFFFF (u32 max) encodes as `[0xFF, 0xFF, 0xFF, 0xFF]`.
- *
- * Byte-for-byte inverse of `ordpool-parser`'s `extractInscriptionId`,
- * which is what ordpool renders parents / delegates from. If the
- * round-trip doesn't match, the parser drops the id silently (ord's
- * `filter_map` semantics), so the caller MUST hand us a canonical id
- * form.
- */
-declare function encodeInscriptionId(inscriptionId: string): Uint8Array;
-/**
- * Backwards-compatible alias. `parent` (tag 0x03) and `delegate`
- * (tag 0x0b) share the same inscription-id byte form, so both go
- * through `encodeInscriptionId`. Kept exported because consumers +
- * specs already import this name.
- */
-declare const encodeParentInscriptionId: typeof encodeInscriptionId;
-/**
- * Encode a pointer sat-offset (tag 0x02) as minimal little-endian
- * bytes: the u64 offset with trailing zero bytes trimmed. Offset 0
- * encodes as an empty push (ord reads a missing/empty value as 0);
- * 255 → `[0xff]`; 256 → `[0x00, 0x01]`.
- *
- * Inverse of `ordpool-parser`'s `extractPointer`, which little-endian-
- * decodes the value. The pointer names the sat position (in the
- * concatenated outputs) the inscription is assigned to; only the
- * builder knows whether that offset is reachable given the reveal's
- * output topology, so range-vs-topology validation lives at the
- * synthesis layer, not here.
- */
-declare function encodePointerValue(offset: number): Uint8Array;
-/**
- * Encode a rune-name commitment (tag 0x0d) as minimal little-endian
- * bytes: the rune's u128 value with trailing zero bytes trimmed.
- * Value 0 encodes as an empty push. Rejects negatives and anything
- * above u128 max.
- *
- * ord's rune etching reads this back as the u128 commitment (see
- * `ordpool-parser` `knownFields.rune`); the etching tx must later
- * spend this inscription's UTXO. A pre-computed byte value can still
- * be passed through the generic `envelopeFields` escape hatch.
- */
-declare function encodeRuneCommitment(value: bigint): Uint8Array;
-/**
- * Split a field value into one-or-more `{ tag, value }` entries so no
- * single push exceeds the 520-byte standardness cap. ord's decoder
- * concatenates all same-tag chunks before decoding (metadata tag 0x05,
- * properties tag 0x11), so a large CBOR blob is carried as several
- * repeated-tag fields.
- *
- * A zero-length value yields a single empty-value field (callers that
- * reject empty payloads gate that upstream).
- */
-declare function chunkFieldValue(tag: OrdTag, value: Uint8Array): OrdEnvelopeField[];
-
-/**
  * Deterministic CBOR encoder for inscription metadata + properties.
  *
  * ## Why this lives in the SDK, not in ordpool-parser
@@ -4654,151 +5754,6 @@ declare function chunkFieldValue(tag: OrdTag, value: Uint8Array): OrdEnvelopeFie
  * Throws on unsupported inputs rather than emitting lossy bytes.
  */
 declare function encodeCborDeterministic(value: unknown): Uint8Array;
-
-/**
- * Layer-1 builder for the inscribe **commit** transaction.
- *
- * Construction outline:
- *
- *   1. The reveal spends a P2TR output with a **single envelope leaf**.
- *      The **ephemeral key** is the taproot internal key — so the
- *      commit output has two equivalent spend paths:
- *        a. Script-path via the envelope leaf (used by the standard
- *           reveal — emits the inscription).
- *        b. Key-path via the ephemeral key (used by any redirect /
- *           RBF / recover / bundle reveal the consumer constructs
- *           after `createInscribeTransactions` returns).
- *      Same shape as Casey Rodarmor's `ord` reference client
- *      (`src/wallet/batch/plan.rs` lines 367-382). The ephemeral key
- *      doubles as a bearer instrument: whoever holds it can build
- *      any reveal-tx shape until the commit output is spent.
- *
- *   2. The commit transaction has:
- *        - 1 funding input (caller-supplied UTXO; user's wallet
- *          signs). Sequence is wallet-specific via
- *          `resolveCat21MintInputSequence(walletType)`: 0xfffffffd for
- *          cat21wallet (RBF allowed; our wallet preserves
- *          lockTime=21 through replacement), 0xfffffffe for every
- *          third-party wallet (RBF disabled; locks accelerate UIs
- *          out, the 2024 Xverse incident defence).
- *        - Output 0: the commit P2TR address holding
- *          `postage + revealFeeReserve + tipValueSats` (the last
- *          term only when `tipValueSats > 0` on the reveal). The
- *          reveal spends this.
- *        - Output 1 (optional): change back to the user, if the
- *          funding input has surplus above commit fee + output 0.
- *
- *   3. `nLockTime=21`: the commit qualifies as a CAT-21 mint under
- *      cat21-ord's `--index-cat21` rule. The first sat of vout[0]
- *      becomes Cat A (`<commitTxid>i0`). The reveal then spends
- *      vout[0] FIFO-style, moving Cat A to the inscription's UTXO,
- *      and the reveal itself (also `nLockTime=21`) mints Cat B
- *      (`<revealTxid>i0`) at the same satpoint. Net: two cats per
- *      inscribe, stacked on the inscription's 546-sat UTXO. The
- *      maintainer's design: "we gift the cats for free. because
- *      why not."
- *
- * Returns the unsigned commit PSBT bytes + the metadata the
- * reveal builder needs to construct the spending witness.
- */
-/**
- * Canonical postage for inscriptions. Same 546-sat dust floor as
- * cat21 — keeps inscription UTXOs fungible across address types
- * AND matches the floor every inscriber in the OSS catalog uses.
- * See HQ rule "cat UTXO is always 546 sats, FIFO".
- */
-declare const INSCRIBE_POSTAGE_SATS = 546;
-interface InscribeCommitArgs {
-    /** Funding UTXO the user's wallet will sign. */
-    fundingInput: {
-        txid: string;
-        vout: number;
-        value: number;
-        scriptPubKey: Uint8Array;
-        /** Set on P2TR funding inputs. Same shape as the cat21 mint adapter. */
-        tapInternalKey?: Uint8Array;
-        /** Set on P2SH-wrapped funding (Xverse Nested SegWit etc.). */
-        redeemScript?: Uint8Array;
-        /** Set on legacy P2PKH funding. */
-        nonWitnessUtxo?: Uint8Array;
-    };
-    /** Address the user's change returns to (taproot output of the funding wallet). */
-    senderChangeAddress: string;
-    /** Tapscript bytes for the envelope leaf (output of `buildInscriptionEnvelope`). */
-    envelopeScript: Uint8Array;
-    /**
-     * 32-byte x-only ephemeral public key. Doubles as:
-     *   - The first push inside the envelope script (`<pubkey>
-     *     CHECKSIG OP_FALSE OP_IF "ord" …`).
-     *   - The taproot internal key of the commit output.
-     * Holding the matching private key authorises any reveal-tx
-     * shape the consumer wants to build (default reveal, redirect,
-     * RBF, recover-to-self, bundle).
-     */
-    ephemeralPubkeyXonly: Uint8Array;
-    /** Commit-tx fee in sats (built by the fee helper at Layer 3). */
-    commitFeeSats: number;
-    /** Reveal-tx fee in sats (reserved in commit output 0 for the reveal to pay). */
-    revealFeeReserveSats: number;
-    /**
-     * Optional tip-output amount in sats reserved on the commit output
-     * (in addition to postage + revealFeeReserve). The tip output itself
-     * lives on the reveal tx at vout[1]; this is just the bookkeeping
-     * the commit needs to fund it.
-     *
-     * When set, `commitOutputValueSats = postage + revealFeeReserve +
-     * tipValueSats`; when omitted the commit output sizes exactly as
-     * before. Must be a non-negative integer.
-     */
-    tipValueSats?: number;
-    /**
-     * Which wallet will sign the commit PSBT. Drives the funding
-     * input's sequence number via `resolveCat21MintInputSequence`:
-     *   - `cat21wallet`: 0xfffffffd (RBF-allowed; our wallet preserves
-     *     `lockTime=21` through any replacement).
-     *   - any other wallet (default): 0xfffffffe (non-RBF; locks
-     *     third-party accelerate UIs out of touching the marker,
-     *     defending against the 2024 Xverse incident where an
-     *     accelerator dropped `lockTime=21` and burned a CAT-21 mint).
-     *
-     * Defaults to a non-cat21wallet sentinel so any standalone caller
-     * (regtest specs, third-party SDK consumers) gets the safer
-     * non-RBF sequence without having to know about the rule.
-     */
-    walletType?: KnownOrdinalWalletType;
-    /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
-    changeDustLimitSats?: number;
-    network: Network;
-}
-interface InscribeCommitResult {
-    /** Unsigned PSBT bytes ready for the user's wallet to sign. */
-    commitPsbt: Uint8Array;
-    /** Bech32m P2TR address the reveal will spend from. */
-    commitAddress: string;
-    /** scriptPubKey bytes of the commit output (same script the reveal references). */
-    commitOutputScript: Uint8Array;
-    /**
-     * Sat value the commit places at output 0. Equals
-     * `postage + revealFeeReserveSats + (tipValueSats ?? 0)`. Funds
-     * the reveal's recipient output + optional tip output + reveal
-     * miner fee in a single P2TR commit.
-     */
-    commitOutputValueSats: number;
-    /** Taptree metadata the reveal builder needs to construct its spending witness. */
-    taproot: {
-        /** Taproot internal key actually written to the output (the ephemeral pubkey). */
-        internalKey: Uint8Array;
-        /**
-         * scure's tapLeafScript array — single entry, for the envelope leaf.
-         * The reveal builder passes this straight to the script-path reveal;
-         * a key-path reveal doesn't need it.
-         */
-        tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
-    };
-    /** Change amount on output 1; 0 when sub-dust (absorbed into the fee). */
-    changeSats: number;
-}
-declare function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommitResult;
 
 /**
  * Layer-1 builder for the **reveal** transaction.
@@ -4901,136 +5856,6 @@ declare function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeReveal
 declare function deriveRevealPubkeyXonly(privKey: Uint8Array): Uint8Array;
 
 /**
- * Layer-1 builder for a **child** inscription's reveal transaction —
- * ord provenance (parent/child), the trustless way to prove a child was
- * created by the owner of the parent.
- *
- * # What makes a valid parent link (ord spec, verified against
- * `inscription_updater.rs` + `plan.rs`)
- *
- * ord recognises `P` as the parent of child `C` iff BOTH hold:
- *   1. `C`'s envelope carries the `parent` tag (0x03) = P's inscription
- *      id (this builder's caller emits that via the envelope, same as a
- *      normal inscribe).
- *   2. **P's UTXO is spent as an input of C's reveal transaction.** The
- *      indexer builds `potential_parents` from the inscriptions present
- *      in the tx and drops any declared parent not in that set
- *      (`inscription_updater.rs:253-269`). Emitting the tag WITHOUT
- *      spending P produces a valid child with NO recognised parent.
- *
- * # Topology (matches ord's own wallet, `plan.rs:392-425`)
- *
- * ```
- * Inputs:   [ parent UTXO (0),           commit output (1) ]
- * Outputs:  [ parent RETURN (0, = P val), child recipient (1, 546) , tip? ]
- * ```
- *
- * FIFO sat-tracking makes this correct with NO pointer:
- *   - Input 0 (parent, P sats) → global `[0..P)` → Output 0 → the parent
- *     inscription RETURNS to its owner. Nothing is lost.
- *   - Input 1 (commit) first sat → global `P` → Output 1 → the child
- *     inscription lands on its recipient (the default offset is "first
- *     sat of the inscription's own input", `inscription_updater.rs:207-211`).
- *
- * Because the child's envelope is on a non-first input (input 1), ord
- * marks it `Curse::NotInFirstInput` → **post-jubilee that is a normal,
- * positively-numbered inscription with the `Vindicated` charm** (mainnet
- * + our regtest are post-jubilee). This is exactly how ord's own
- * `wallet inscribe --parent` produces children; the charm is cosmetic and
- * provenance is unaffected.
- *
- * # Two signers
- *
- * The reveal is co-signed:
- *   - **Commit input (1)** — the ephemeral key, script-path via the
- *     envelope leaf, finalized here (SIGHASH_DEFAULT over the whole tx).
- *   - **Parent input (0)** — the parent OWNER's wallet (P2TR key-path).
- *     Left UNSIGNED in the returned PSBT; the orchestrator hands it to
- *     the wallet, which signs input 0, then we finalize + broadcast.
- * Both sign SIGHASH_ALL/DEFAULT over the same fixed inputs+outputs, so
- * order is irrelevant and neither invalidates the other.
- */
-/** A parent inscription being spent + returned by the child reveal. */
-interface ChildRevealParent {
-    /** The parent inscription's current UTXO (P2TR — an ordinals address). */
-    utxo: {
-        txid: string;
-        vout: number;
-        /** Sat value at the parent UTXO; the parent RETURNS with exactly this value. */
-        value: number;
-        /** scriptPubKey of the parent UTXO (P2TR). */
-        scriptPubKey: Uint8Array;
-        /** x-only internal key of the parent's P2TR address (for wallet key-path signing). */
-        tapInternalKey: Uint8Array;
-    };
-    /**
-     * Where the parent inscription returns to — the owner's ordinals
-     * address. For the in-wallet case this is the SAME wallet that owns
-     * the parent (the inscription goes back where it came from).
-     */
-    returnAddress: string;
-}
-interface ChildInscribeRevealArgs {
-    /** Commit txid (the child's commit; same commit builder as a normal inscribe). */
-    commitTxid: string;
-    /** Commit output index — always 0. */
-    commitVout: number;
-    /** Sat value at the commit output (funds child postage + reveal fee + tip). */
-    commitOutputValueSats: number;
-    /** scriptPubKey of the commit output. */
-    commitOutputScript: Uint8Array;
-    /** Taptree spend metadata from the commit builder. */
-    taproot: {
-        internalKey: Uint8Array;
-        tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
-    };
-    /** 32-byte ephemeral private key (same key embedded in the envelope). */
-    ephemeralPrivKey: Uint8Array;
-    /** The parent inscription spent + returned by this reveal. */
-    parent: ChildRevealParent;
-    /** Address the CHILD inscription lands on (P2TR recommended). */
-    recipientAddress: string;
-    /** Optional tip output, appended after the child output. */
-    tip?: {
-        address: string;
-        value: number;
-    };
-    network: Network;
-}
-interface ChildInscribeRevealResult {
-    /**
-     * The FULL reveal PSBT, used to FINALIZE + broadcast (not to hand to
-     * the wallet). Input 0 (parent) is unsigned; input 1 (commit) carries
-     * the ephemeral script-path signature as a partial tapScriptSig + the
-     * envelope tapLeafScript. After the wallet signs input 0 on
-     * `revealPsbtForWallet`, its signature is merged here and BOTH inputs
-     * finalize (input 1 from the tapScriptSig).
-     */
-    revealPsbt: Uint8Array;
-    /**
-     * The reveal PSBT the WALLET signs. Byte-identical to `revealPsbt` in
-     * its consensus fields (inputs, outputs, locktime) so input 0's sighash
-     * matches, but input 1 is a BARE Taproot input (witnessUtxo only) — no
-     * envelope tapLeafScript, no tapScriptSig. Some wallets' signPsbt hang
-     * or reject when a PSBT contains a non-standard tap-leaf script on an
-     * input they aren't even asked to sign; stripping it lets every wallet
-     * sign input 0 cleanly. Input 0's signature is valid on `revealPsbt`
-     * because the sighash commits to input 1's prevout (from witnessUtxo),
-     * not its PSBT metadata.
-     */
-    revealPsbtForWallet: Uint8Array;
-    /** Reveal txid (witness-independent; stable before the wallet signs). */
-    revealTxid: string;
-    /** Reveal vsize (fully-signed) for fee math. */
-    revealVsize: number;
-}
-/**
- * Build the child reveal PSBT: parent input (unsigned) + commit input
- * (ephemeral-finalized), parent-return output + child output.
- */
-declare function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): ChildInscribeRevealResult;
-
-/**
  * Layer-2 input adapter for the CAT-21 inscribe pipeline. Thin wrapper
  * over the shared `prepareCat21Input` (same body the mint / transfer /
  * offer adapters delegate to). Turns a raw funding UTXO + the wallet's
@@ -5040,643 +5865,6 @@ declare function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Chil
 type InscribeFundingInput = Cat21PreparedInput;
 type PrepareInscribeFundingInputArgs = PrepareCat21InputArgs;
 declare function prepareInscribeFundingInput(args: PrepareInscribeFundingInputArgs): InscribeFundingInput;
-
-/**
- * Layer-3 fee simulation for the inscribe commit + reveal pair.
- *
- * The two transactions pay independent fees at the same `feeRate`:
- *
- *   commit_fee = ceil(commitVsize × feeRate)
- *   reveal_fee = ceil(revealVsize × feeRate)
- *
- * The reveal's vsize is **deterministic given the envelope and
- * the tip presence** (input = commit output; outputs = recipient
- * at postage + optional tip at `tip.value`; witness = envelope
- * script + Schnorr sig + control block) so we compute it once via
- * a one-shot simulation. The commit's vsize depends on
- * whether the change output crosses the dust limit at the
- * resolved fee, so we run the cat21-style two-pass loop on the
- * commit alone, passing `revealFeeReserveSats = reveal_fee`.
- *
- * Net cost: 1 reveal simulation + 2 commit simulations = 3 builds.
- *
- * Universal fee strategy that matches every inscriber in the
- * verified OSS catalog (ord client, micro-ordinals examples,
- * ordit-sdk, 0xFlicker, LaserEyes — see
- * OSS-INSCRIBERS.md). No zero-fee tricks, no CPFP magic; the
- * atomicity story is `submitpackage` at broadcast time, which
- * handles its own package-feerate math.
- */
-interface SimulateInscribeFeesArgs {
-    /** sat/vB target fee rate. Same rate applies to both commit + reveal. */
-    feeRatePerVbyte: number;
-    /** Inscription body bytes. Shape-determines reveal vsize. */
-    body: Uint8Array;
-    /** MIME type encoded into the envelope. */
-    contentType?: string;
-    /** Optional extra envelope fields (parent, metaprotocol, metadata...). */
-    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
-    /**
-     * Tag push-encoding choice. Threads to `buildInscriptionEnvelope`
-     * so the simulated reveal vsize matches the encoding the real
-     * commit will use (pushnum saves 1 byte per tag). Default false.
-     */
-    minimalTagPush?: boolean;
-    /**
-     * Funding-input shape — the same `InscribeFundingInput` the commit
-     * helper consumes. The Layer-2 adapter produces this.
-     */
-    fundingInput: InscribeCommitArgs['fundingInput'];
-    /** Where the user's change returns to. */
-    senderChangeAddress: string;
-    /** Where the inscription lands. */
-    recipientAddress: string;
-    /**
-     * 32-byte x-only ephemeral pubkey used as the taproot internal key
-     * AND embedded in the envelope's `<pubkey> CHECKSIG` prefix. Real
-     * orchestrator passes the freshly-generated key; specs may pass a
-     * deterministic dummy because vsizes don't depend on key bytes.
-     */
-    ephemeralPubkeyXonly: Uint8Array;
-    /**
-     * Optional reveal-tx tip output. Threads through to the reveal
-     * vsize estimate (extra output bytes) AND the commit's
-     * `tipValueSats` so the commit funds postage + revealFee + tip.
-     */
-    tip?: {
-        address: string;
-        value: number;
-    };
-    /**
-     * Wallet whose signature topology drives the commit's funding-
-     * input sequence. Threaded through to `buildInscribeCommitPsbt`.
-     * Optional; defaults to the safer non-RBF sequence when omitted.
-     */
-    walletType?: KnownOrdinalWalletType;
-    /** Per-address-type dust limit for the commit change. */
-    changeDustLimitSats?: number;
-    network: Network;
-}
-interface SimulateInscribeFeesResult {
-    /** Final commit-tx fee in sats. */
-    commitFeeSats: number;
-    /** Final reveal-tx fee in sats. */
-    revealFeeSats: number;
-    /** commitFeeSats + revealFeeSats. The "total fee burden" for UI display. */
-    totalFeeSats: number;
-    /** Commit vsize at final fee. */
-    commitVsize: number;
-    /** Reveal vsize (deterministic given the envelope). */
-    revealVsize: number;
-    /** commitVsize + revealVsize. Useful for package-feerate math. */
-    combinedVsize: number;
-    /**
-     * Amount the commit output 0 holds = postage + revealFeeSats +
-     * (tip.value ?? 0) — sized to fund the reveal's recipient
-     * + optional tip + miner fee in one P2TR output.
-     */
-    commitOutputValueSats: number;
-    /** Total sats the funding UTXO must cover: commitOutputValueSats + commitFeeSats. */
-    fundingRequirementSats: number;
-}
-/**
- * Returns the commit + reveal fee math at the given fee rate.
- * Pure function — does not broadcast, does not retain any key
- * material between calls.
- */
-declare function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateInscribeFeesResult;
-
-/**
- * Isomorphic inscription-body compression (browser + Node).
- *
- * Inscription bytes go on-chain at real sat/vB; compressing HTML / JSON /
- * SVG / text before inscribing is a direct fee win. ord recognises a
- * compressed body via the `content_encoding` envelope tag (0x09) and
- * serves it back with a matching HTTP `Content-Encoding` header, so the
- * viewing browser transparently decompresses it (see cat21-ord
- * `src/subcommand/server/r.rs`). Browsers always send `Accept-Encoding:
- * gzip, deflate, br`, so both `gzip` and `br` bodies render everywhere
- * ordinals do; brotli typically lands ~15-20% smaller than gzip on
- * text/SVG/JSON.
- *
- * # Codecs: native first, wasm brotli only where forced
- *
- * - **gzip** — native `CompressionStream('gzip')` everywhere (Node 18+,
- *   all modern browsers). The universal baseline.
- * - **brotli, native** — `CompressionStream('brotli')` where the runtime
- *   has it: Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+ (brotli was
- *   added to the WHATWG Compression Standard in 2026). Zero dependency,
- *   no fetch.
- * - **brotli, wasm fallback** — Chrome/Edge (Blink) deliberately don't
- *   ship the brotli compression dictionary, so there is no native encoder
- *   there. For those runtimes {@link assessCompression} uses the reference
- *   Rust brotli compiled to wasm (see {@link ./brotli-wasm-encoder}), but
- *   ONLY when the caller passes `brotliWasmUrl`. The `.wasm` is a hosted
- *   PACKAGE ASSET the consumer serves from its own origin and is fetched
- *   on demand — it never bloats the JS bundle. Omit the URL and Chrome
- *   simply falls back to gzip.
- *
- * Immutable-data safety: every encoder here is the platform's zlib or the
- * reference Rust brotli — never hand-rolled — so an encoder bug can't
- * corrupt an inscription. Decoding lives in `ordpool-parser`
- * (`brotliDecode` / native `DecompressionStream`).
- *
- * # Async on purpose
- *
- * The Compression Streams API is a stream API, so the primitives return
- * Promises. Callers `await` them; the inscribe builder stays sync because
- * compression happens at the call site BEFORE `createInscribeTransactions`
- * (see {@link assessCompression}).
- *
- * # Reuse beyond inscribe (cubes)
- *
- * {@link assessCompression} is deliberately generic (arbitrary bytes + a
- * content-type). cubes-frontend's cube HTML is highly compressible text,
- * so cubes can adopt it for its cube inscriptions with no inscribe-specific
- * coupling. This file ships in `dist-core`, so both browser consumers
- * import it from `ordpool-sdk/core`.
- */
-/**
- * Body encodings the inscribe builder can tag on-chain (`content_encoding`,
- * tag 0x09). `'gzip'` is what {@link assessCompression} produces here;
- * `'br'` remains valid for a consumer that brings its own brotli bytes
- * (the builder emits whichever tag; only the decoder needs to exist, and
- * it lives in `ordpool-parser`). Exported as a runtime tuple so the
- * inscribe operation-gate can validate untrusted input against it.
- */
-declare const INSCRIPTION_CONTENT_ENCODINGS: readonly ["br", "gzip"];
-type InscriptionContentEncoding = typeof INSCRIPTION_CONTENT_ENCODINGS[number];
-/**
- * Compress `body` with gzip via the native Compression Streams API. Works
- * in the browser AND Node. Returns a fresh `Uint8Array` (gzip stream:
- * magic `1f 8b`).
- */
-declare function compressGzip(body: Uint8Array): Promise<Uint8Array>;
-/**
- * Whether the runtime has a native `CompressionStream('brotli')` encoder:
- * true on Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+; false on
- * Chrome/Edge (Blink), which deliberately don't ship the brotli compression
- * dictionary. Construction throws synchronously for an unsupported format,
- * so this is a cheap sync feature test.
- */
-declare function nativeBrotliAvailable(): boolean;
-/**
- * Decompress a gzip `body` via the native Compression Streams API. The
- * inverse of {@link compressGzip}; used to verify a `content_encoding:
- * 'gzip'` body recovers its original bytes.
- *
- * Mirrors `ordpool-parser`'s `gzipDecode` decompression-bomb guard: the
- * running output is capped at {@link MAX_DECOMPRESSED_SIZE} and the stream
- * is cancelled the instant it would be exceeded. Unlike the parser's
- * render-path variant (which returns an error string as bytes so rendering
- * never throws), this verify-path variant THROWS on a bomb or on invalid
- * data, because a caller checking a round-trip wants the failure surfaced.
- */
-declare function decompressGzip(body: Uint8Array): Promise<Uint8Array>;
-/**
- * The facts a consumer needs to decide whether to inscribe a body
- * compressed. {@link assessCompression} NEVER decides silently: it hands
- * back the numbers + the winning bytes and the caller/UI picks yes/no.
- */
-interface CompressionAssessment {
-    /**
-     * `true` when compressing meaningfully shrinks the body (smaller by at
-     * least the minimum margin). The caller inscribes `compressed` +
-     * `contentEncoding: bestEncoding` only when this is `true`.
-     */
-    worthIt: boolean;
-    /**
-     * The winning codec's `content_encoding` tag value when `worthIt`, else
-     * `'none'` (inscribe `compressed` — the original bytes — uncompressed,
-     * no `content_encoding` tag). `'br'` is produced where a brotli encoder
-     * is available: native `CompressionStream('brotli')`, or the wasm encoder
-     * when the caller passes `brotliWasmUrl`.
-     */
-    bestEncoding: 'none' | InscriptionContentEncoding;
-    /** Byte length of the original body. */
-    originalSize: number;
-    /** Byte length of `compressed` (equals `originalSize` when `bestEncoding === 'none'`). */
-    compressedSize: number;
-    /** `originalSize - compressedSize` (0 when not worth it / short-circuited). */
-    savedBytes: number;
-    /** `savedBytes / originalSize * 100`, rounded to 2 decimals (0 when `originalSize` is 0). */
-    savedPercent: number;
-    /**
-     * When `worthIt`, the compressed bytes to inscribe (so the caller never
-     * compresses twice). When not worth it, the ORIGINAL bytes (the body to
-     * inscribe uncompressed).
-     */
-    compressed: Uint8Array;
-}
-interface AssessCompressionOptions {
-    /**
-     * Minimum saving (percent of the original) required to report
-     * `worthIt: true`. Default 5%. Rationale: the `content_encoding`
-     * envelope tag itself costs a few bytes on-chain and gzip adds a small
-     * framing overhead, so a sub-few-percent "saving" can be a net loss once
-     * the tag is counted; 5% clears that comfortably for any non-trivial
-     * body. A consumer with different economics can override it.
-     */
-    minSavedPercent?: number;
-    /**
-     * URL of a hosted `brotli_wasm_bg.wasm` (shipped in this package under
-     * `wasm/`; the consumer app copies it to its own origin and passes that
-     * URL). ONLY used on runtimes WITHOUT native `CompressionStream('brotli')`
-     * — i.e. Chrome/Edge — to fetch + instantiate the wasm brotli encoder on
-     * demand (once, cached). Omit it and Chrome/Edge simply fall back to gzip;
-     * Safari/Firefox/Node use native brotli and never touch this.
-     */
-    brotliWasmUrl?: string;
-}
-/**
- * Assess whether inscribing `bytes` compressed is worth it, trying every
- * available codec (gzip, plus brotli where an encoder exists) and returning
- * the smallest winner. Pure
- * assessment: emits NO envelope tag, makes NO inscribe-specific
- * assumptions, and returns everything the caller needs to decide. Generic
- * enough for cubes-frontend to call on arbitrary cube HTML.
- *
- * Behaviour:
- *   - Known already-compressed `contentType` (image/*, video, zip, woff2,
- *     …) → short-circuits to `worthIt: false`, `bestEncoding: 'none'`
- *     WITHOUT running any compressor (`compressed` = the original bytes).
- *   - Otherwise compresses once per codec, keeps the smallest output, and
- *     sets `worthIt = savedBytes > 0 && savedPercent >= minSavedPercent`.
- *     The `savedBytes > 0` term also guards the "compressed output larger
- *     than the original → not worth it" case. On a size tie the earlier
- *     codec wins (gzip; see {@link buildCodecs}). The winning bytes are
- *     returned so the caller reuses them (never compresses twice).
- */
-declare function assessCompression(bytes: Uint8Array, contentType?: string, options?: AssessCompressionOptions): Promise<CompressionAssessment>;
-
-/**
- * Layer-4 orchestration entry: ties the envelope encoder + per-
- * wallet input adapter + commit/reveal builders + fee simulator
- * into a single createTransaction-style entry point.
- *
- * Mirrors `createTransaction` from `cat21.service.helper.ts`. The
- * caller hands in the funding UTXO + wallet payment context + the
- * inscription content + feeRate; we hand back an unsigned commit
- * PSBT + a default signed reveal hex + the **ephemeral key material**
- * needed to build any other reveal shape (redirect, RBF, recover-
- * to-self, bundle).
- *
- * # Free cats (the "ordpool inscribers get cats" design)
- *
- * Both the commit AND the reveal carry `nLockTime=21`, so cat21-ord
- * mints TWO cats per inscription:
- *   - Cat A: `<commitTxid>i0` — minted by the commit; ends up at
- *     the inscription's UTXO via FIFO transitivity through the
- *     reveal's input.
- *   - Cat B: `<revealTxid>i0` — minted by the reveal at the same
- *     satpoint. Post-jubilee chains tag Cat B with the `Vindicated`
- *     charm; it's otherwise a normal cat with a positive number.
- * Both cats stack on the inscription's 546-sat UTXO at the
- * recipient's address. No opt-out. See the commit helper's module
- * doc for the cat21-ord index mechanics.
- *
- * # Lifecycle
- *
- *  1. Generate fresh ephemeral keypair (32 random bytes).
- *  2. Derive Schnorr x-only pubkey — this doubles as the envelope's
- *     `<pubkey> CHECKSIG` prefix AND the taproot internal key of the
- *     commit output.
- *  3. Build envelope with caller's content + auto-prepended fields
- *     (note → tag 0x0f UTF-8; contentEncoding → tag 0x09, the encoding
- *     string e.g. "gzip" / "br")
- *     + any caller-supplied `envelopeFields`.
- *  4. Simulate fees (Layer 3): commitFee, revealFee,
- *     commitOutputValueSats (= postage + revealFee + tip.value),
- *     fundingRequirementSats.
- *  5. Build the commit PSBT at the resolved commitFee with
- *     `nLockTime=21` and the per-wallet sequence.
- *  6. Build a default reveal tx at the resolved revealFee using the
- *     ephemeral private key (recipient = `args.recipientAddress`,
- *     optional tip at vout[1], also `nLockTime=21`).
- *  7. Return the ephemeral key material so the caller can re-build
- *     the reveal under different parameters later if it wants to.
- *
- * # Bearer-key semantic
- *
- * `ephemeral.privKey` is a **bearer instrument**: anyone who holds
- * it can spend the commit output (redirect the inscription, RBF the
- * reveal, recover the postage to themselves, ...) until the commit
- * output is spent on chain. Treat it with the same care as any
- * other money-bearing key:
- *
- *   - Phase 1 storage: `localStorage` keyed by `commitTxid` is fine
- *     for typical low-value inscriptions. The key lives only
- *     between commit broadcast and reveal broadcast (seconds to
- *     hours typically).
- *   - For higher-value flows, encrypt at rest with the wallet
- *     password — same posture as any other hot key.
- *   - Lose the key with no reveal broadcast and the postage is
- *     permanently locked. Save it before discarding the result.
- *
- * This is byte-equivalent to the `ord` reference client's design
- * (`src/wallet/batch/plan.rs` lines 367-382 + 676-709) — ord
- * persists the ephemeral key into Bitcoin Core's wallet under a
- * `commit tx recovery key` label; we hand it to the consumer to
- * persist however it wants.
- */
-interface CreateInscribeTransactionsArgs {
-    /** Funding UTXO. */
-    paymentOutput: TxnOutput;
-    /** Wallet's payment public key (33-byte compressed). */
-    paymentPublicKey: Uint8Array;
-    /** Wallet's payment address (where change returns). */
-    paymentAddress: string;
-    /** Where the inscription lands (P2TR recommended for ord theory). */
-    recipientAddress: string;
-    /** Inscription body bytes. */
-    body: Uint8Array;
-    /** MIME type. */
-    contentType?: string;
-    /** Optional extra ord tags (parent, metaprotocol, metadata...). */
-    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
-    /** sat/vB target. Applied identically to commit + reveal. */
-    feeRatePerVbyte: number;
-    /**
-     * Which wallet will sign the commit. Drives the funding-input
-     * sequence number on the commit (cat21wallet → RBF allowed; every
-     * other wallet → RBF disabled). Optional; the safer non-RBF
-     * sequence applies when omitted, which is what every third-party
-     * wallet should ship anyway.
-     *
-     * Ordpool inscriptions ALWAYS build the commit with
-     * `nLockTime=21` regardless of wallet — see the module-level
-     * docstring for the "free cat for inscribers" design.
-     */
-    walletType?: KnownOrdinalWalletType;
-    /**
-     * Optional tip output appended at vout[1] of the reveal tx. The
-     * inscription stays at vout[0] per ord's first-sat-of-first-output
-     * rule. The commit's funding requirement grows by `tip.value` so
-     * the reveal has the sats to fund the extra output.
-     *
-     * The SDK ships no default tip address — consumers (ordpool.space,
-     * cat21.space, future inscribers) wire their own default. Pattern
-     * mirrors `0xFlicker/ordinals`' `feeDestinations`, simplified to
-     * one recipient and a fixed sats amount.
-     */
-    tip?: {
-        address: string;
-        value: number;
-    };
-    /**
-     * Optional Tag::Note (0x0f) string. Emitted as a UTF-8 envelope
-     * field; ordpool-parser surfaces it on the inscription record.
-     * The de-facto inscriber-tool watermark slot.
-     *
-     * When set, the SDK auto-builds the `{ tag: 0x0f, value: utf8(note) }`
-     * field and prepends it to `envelopeFields`.
-     */
-    note?: string;
-    /**
-     * Optional parent inscription id (`<txid>i<index>`) for provenance
-     * chains. Emitted as a Tag::Parent (0x03) envelope field.
-     *
-     * IMPORTANT: setting this ONLY emits the envelope tag. Ord treats
-     * an inscription as a genuine child only when the reveal tx ALSO
-     * spends the parent's UTXO as an input — which requires the
-     * parent owner co-signing the reveal, a topology change this
-     * builder does not model. Consumers using `parent` today get the
-     * annotation (ordpool-parser surfaces the parent id), not the
-     * provenance link. Full parent/child support needs its own
-     * orchestrator.
-     */
-    parent?: string;
-    /**
-     * Optional body-encoding hint. When set, the SDK emits the
-     * `content_encoding` envelope tag (0x09) with this exact string,
-     * signalling to indexers + ord that the body is compressed with that
-     * codec. The body must ALREADY be compressed by the caller; this flag
-     * only emits the tag.
-     *
-     * Compression is a deliberate, explicit consumer step (never hidden in
-     * this builder): call `assessCompression(bytes, contentType)` from
-     * `inscribe-compression.helper.ts`, show the savings, and if you choose
-     * to compress pass its `compressed` body here with
-     * `contentEncoding: assessment.bestEncoding`. `assessCompression` /
-     * `compressGzip` are async + isomorphic (native Compression Streams),
-     * so the compression happens at the call site before this sync builder
-     * runs. `'br'` is also accepted for a caller that brings its own brotli
-     * bytes (the decoder lives in `ordpool-parser`).
-     */
-    contentEncoding?: InscriptionContentEncoding;
-    /**
-     * Optional pointer (tag 0x02): the sat offset, within the reveal's
-     * concatenated outputs, the inscription is assigned to. Emitted as
-     * minimal little-endian bytes.
-     *
-     * TOPOLOGY CAVEAT: this builder's reveal has the inscription's own
-     * 546-sat recipient output at vout[0] (plus an optional tip at
-     * vout[1]). A pointer only lands on the inscription's UTXO when it
-     * points inside that first output, i.e. `pointer < 546`. A larger
-     * offset would move the inscription onto the tip output or past the
-     * end of the outputs (unreachable, and not what any single-inscription
-     * caller wants), so values `>= 546` are rejected rather than silently
-     * emitted. Default (unset) behaves like pointer 0.
-     */
-    pointer?: number;
-    /**
-     * Optional CBOR metadata (tag 0x05). Pass the ALREADY-CBOR-ENCODED
-     * bytes: use the exported `encodeCborDeterministic(value)` helper to
-     * turn a structured value into canonical CBOR first. Values over 520
-     * bytes are split across repeated tag-5 fields automatically (ord
-     * concatenates them before decoding). Must be non-empty.
-     */
-    metadata?: Uint8Array;
-    /**
-     * Optional metaprotocol identifier (tag 0x07). Emitted as UTF-8
-     * bytes (e.g. `'brc-20'`).
-     */
-    metaprotocol?: string;
-    /**
-     * Optional delegate inscription id (`<txid>i<index>`, tag 0x0b).
-     * A delegate inscription typically carries an EMPTY body and points
-     * at another inscription's content; ord serves the delegate's
-     * content in its place. Unlike `parent`, this is functional with no
-     * extra tx topology: the delegate link resolves purely from the
-     * envelope tag. A body alongside a delegate is allowed (ord ignores
-     * it when the delegate resolves) but the canonical shape is an
-     * empty body.
-     */
-    delegate?: string;
-    /**
-     * Optional rune-name commitment (tag 0x0d) as the rune's u128 value.
-     * Emitted as minimal little-endian bytes. The etching transaction
-     * must later spend this inscription's UTXO. A pre-computed byte
-     * value can go through `envelopeFields` instead.
-     */
-    rune?: bigint;
-    /**
-     * Optional CBOR properties (tag 0x11): gallery items + attributes.
-     * Same contract as `metadata`: pass ALREADY-CBOR-ENCODED bytes
-     * (`encodeCborDeterministic`), chunked automatically over 520 bytes.
-     *
-     * ord's properties struct is INTEGER-keyed. Build the CBOR with a
-     * `Map` whose keys are real numbers (`new Map([[0, gallery], [1,
-     * attrs]])`), NOT a plain object `{0: …, 1: …}` (whose keys are the
-     * strings `"0"`/`"1"`); ord drops a text-keyed properties map. See
-     * `encodeCborDeterministic`'s doc for the full caveat.
-     */
-    properties?: Uint8Array;
-    /**
-     * Optional properties-encoding hint (tag 0x13). When `'br'`, signals
-     * that the `properties` bytes are brotli-compressed. Only emitted
-     * alongside `properties`.
-     */
-    propertyEncoding?: 'br';
-    /**
-     * How each ord tag number is pushed into the reveal tapscript.
-     * `false` (default) uses a 2-byte data push (`OP_PUSHBYTES_1 <tag>`),
-     * byte-for-byte what ord's own wallet emits — the inscription is
-     * charm-free. `true` uses the 1-byte pushnum opcode (`OP_1..OP_16`)
-     * for tags 1–16, saving 1 byte per tag, at the cost of ord stamping
-     * the `vindicated` charm (post-jubilee). Nothing else changes: same
-     * content, tracking, provenance, and non-negative number on mainnet.
-     * The commit + reveal fee simulation uses the same encoding, so the
-     * quoted vsize/fees already reflect the choice.
-     */
-    minimalTagPush?: boolean;
-    /** Network. */
-    network: Network;
-}
-interface CreateInscribeTransactionsResult {
-    /** Unsigned commit PSBT — hand to the user's wallet for signing. */
-    commitPsbt: Uint8Array;
-    /**
-     * Computed txid of the commit, matching what the wallet-signed commit
-     * will produce. Witness inputs (P2WPKH / P2TR) are witness-independent;
-     * P2SH-P2WPKH is reconstructed from the real redeemScript. See
-     * deriveUnsignedCommitTxid.
-     */
-    commitTxid: string;
-    /** Signed, finalized reveal-tx hex. Self-contained; broadcast as-is. */
-    revealHex: string;
-    /** Computed txid of the reveal (lets consumers display/track before broadcast). */
-    revealTxid: string;
-    /** Commit-tx P2TR address (bech32m). */
-    commitAddress: string;
-    /** Final fees (sats), vsizes, and the funding requirement. */
-    fees: SimulateInscribeFeesResult;
-    /**
-     * Ephemeral bearer key for the commit output. Authorises any
-     * reveal-tx shape (default reveal, redirect, RBF, recover-to-
-     * self, bundle) until the commit output is spent. SAVE BEFORE
-     * DISCARDING THIS RESULT — losing the key with no reveal
-     * broadcast locks the postage forever.
-     */
-    ephemeral: {
-        /** 32-byte Schnorr private key. */
-        privKey: Uint8Array;
-        /** 32-byte x-only public key. Same key embedded in the envelope. */
-        pubkeyXonly: Uint8Array;
-    };
-    /** Material the caller needs to rebuild the reveal tx under different parameters. */
-    commit: {
-        /** Commit output scriptPubKey. */
-        outputScript: Uint8Array;
-        /** Postage + revealFeeReserve at the commit output. */
-        outputValueSats: number;
-        /** Envelope tapscript bytes (the leaf the reveal spends through). */
-        envelopeScript: Uint8Array;
-    };
-}
-/**
- * Build the inscribe commit + reveal pair for the given content.
- * Pure function modulo `randomPrivateKey`.
- *
- * The returned `ephemeral.privKey` is the bearer instrument for
- * the commit output — see the module-level lifecycle note for the
- * storage semantic.
- */
-declare function createInscribeTransactions(args: CreateInscribeTransactionsArgs): CreateInscribeTransactionsResult;
-/**
- * Args for {@link createChildInscribeTransactions}. Same content +
- * funding shape as a normal inscribe, plus the parent to spend. The
- * base `parent` string tag is replaced by an explicit pair: the
- * `parentInscriptionId` (the `parent` tag value) and the `parentUtxo`
- * (the UTXO the reveal spends + where it returns).
- */
-interface CreateChildInscribeTransactionsArgs extends Omit<CreateInscribeTransactionsArgs, 'parent'> {
-    /**
-     * The parent inscription id (`<txid>i<index>`) — emitted as the
-     * `parent` tag (0x03). This is the inscription's IDENTITY, which may
-     * differ from `parentUtxo`'s outpoint if the parent has been
-     * transferred since it was inscribed.
-     */
-    parentInscriptionId: string;
-    /**
-     * The parent inscription's CURRENT UTXO (spent by the reveal to prove
-     * control) + the address it returns to. For the in-wallet case both
-     * belong to the connected wallet.
-     */
-    parentUtxo: ChildRevealParent;
-}
-interface CreateChildInscribeTransactionsResult {
-    /** Unsigned commit PSBT — the wallet signs its funding input. */
-    commitPsbt: Uint8Array;
-    /** Commit txid, stable before signing (see deriveUnsignedCommitTxid). */
-    commitTxid: string;
-    /**
-     * The FULL child reveal PSBT (for finalize + broadcast). Input 0 (parent)
-     * is unsigned; input 1 (commit) carries the ephemeral tapScriptSig +
-     * envelope tapLeafScript. The wallet signs input 0 on
-     * `revealPsbtForWallet`; its signature merges here and both inputs
-     * finalize.
-     */
-    revealPsbt: Uint8Array;
-    /**
-     * The reveal PSBT the WALLET signs — same consensus tx as `revealPsbt`,
-     * but input 1 is a BARE Taproot input (no envelope tap-leaf) so every
-     * wallet's signPsbt handles it. See `ChildInscribeRevealResult`.
-     */
-    revealPsbtForWallet: Uint8Array;
-    /** Reveal txid (witness-independent). */
-    revealTxid: string;
-    /** Commit-tx P2TR address. */
-    commitAddress: string;
-    /** Fee + vsize + funding math. */
-    fees: {
-        commitFeeSats: number;
-        revealFeeSats: number;
-        totalFeeSats: number;
-        commitVsize: number;
-        revealVsize: number;
-        combinedVsize: number;
-        commitOutputValueSats: number;
-        fundingRequirementSats: number;
-    };
-    /** Ephemeral bearer key for the commit output (see createInscribeTransactions). */
-    ephemeral: {
-        privKey: Uint8Array;
-        pubkeyXonly: Uint8Array;
-    };
-    /** The parent that must be signed on the reveal, echoed for the orchestrator. */
-    parent: ChildRevealParent;
-}
-/**
- * Build the commit + CHILD reveal pair for an ord parent/child
- * inscription. Same commit as a normal inscribe (envelope carries the
- * `parent` tag); the reveal additionally SPENDS the parent UTXO and
- * RETURNS it to the owner, which is what makes ord recognise the parent
- * link (see {@link buildChildInscribeRevealTx}). The reveal is returned
- * as a PSBT because its parent input needs the wallet's signature.
- */
-declare function createChildInscribeTransactions(args: CreateChildInscribeTransactionsArgs): CreateChildInscribeTransactionsResult;
-/**
- * Turn the convenience args (pointer, metadata, metaprotocol, parent,
- * delegate, rune, note, contentEncoding, properties, propertyEncoding)
- * into ord envelope fields in the exact byte form ord expects. Each
- * value is validated here; large CBOR payloads (metadata / properties)
- * are chunked across repeated same-tag fields so no single push
- * exceeds the 520-byte cap. Field ORDER doesn't affect the resolved
- * inscription (ord indexes by tag), but a stable order keeps the
- * encoded envelope diff-friendly.
- */
-declare function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnvelopeField[];
 
 /**
  * Inscribe broadcast helper.
@@ -5796,149 +5984,6 @@ interface InscribePackageBroadcastResult {
  * sub-second.
  */
 declare function broadcastInscribePackage(input: InscribePackageBroadcastInput, options?: InscribePackageBroadcastOptions): Promise<InscribePackageBroadcastResult>;
-
-/**
- * Public orchestrator for the inscribe operation. Build commit +
- * reveal, ask the user's wallet to sign the commit's funding input
- * via the operation-named `signSingleFundingInput`, broadcast both
- * txs in sequence, return the ephemeral key + txids.
- *
- * # Why one entry point, no signingMap
- *
- * The inscribe commit has a single input at `paymentAddress`,
- * SIGHASH_ALL — same topology as a cat21 mint. The signer's
- * `signSingleFundingInput` enforces that shape; the consumer cannot
- * pass a signingMap that asks for anything else.
- *
- * # Bearer key
- *
- * The ephemeral private key is returned on `result.ephemeral.privKey`.
- * Anyone holding it controls the commit output (redirect, RBF,
- * recover-to-self, bundle) until the commit output is spent. Persist
- * with whatever security posture matches the inscription value;
- * localStorage keyed by `commitTxId` is fine for typical low-value
- * inscriptions, encrypt-at-rest with the wallet password for
- * higher-value flows. See `inscription.service.helper.ts` module
- * doc for the full bearer-key semantic.
- *
- * # Broadcast model
- *
- * Default: sequential. Sign commit → broadcast commit → broadcast
- * reveal. Each broadcast goes through the same `broadcast` callback
- * the consumer supplies (typically `electrs POST /tx`).
- *
- * For atomic submitpackage broadcast, see `broadcastInscribePackage`
- * in `inscribe-broadcast.helper.ts` — the consumer can capture the
- * signed commit hex from this orchestrator's `onCommitSigned`
- * callback and POST both hexes to `/txs/package` instead. The
- * orchestrator itself stays simple.
- */
-interface InscribeAndBroadcastArgs {
-    walletType: KnownOrdinalWalletType;
-    paymentOutput: TxnOutput;
-    paymentPublicKey: Uint8Array;
-    paymentAddress: string;
-    recipientAddress: string;
-    body: Uint8Array;
-    contentType?: string;
-    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
-    feeRatePerVbyte: number;
-    /**
-     * Optional tip output appended at vout[1] of the reveal. SDK
-     * ships no default address — consumers wire their own. See
-     * `createInscribeTransactions` for the full semantic.
-     */
-    tip?: {
-        address: string;
-        value: number;
-    };
-    /** Optional Tag::Note (0x0f) watermark string. */
-    note?: string;
-    /**
-     * Optional parent inscription id (`<txid>i<index>`); emits Tag::Parent
-     * (0x03). Annotation only — full parent/child provenance also
-     * requires spending the parent's UTXO in the reveal (not modelled
-     * here). See `createInscribeTransactions` for the caveat.
-     */
-    parent?: string;
-    /**
-     * Optional body-encoding hint ('gzip', or 'br' for a caller-supplied
-     * brotli body). Body must already be compressed; this flag only emits
-     * the envelope tag.
-     */
-    contentEncoding?: InscriptionContentEncoding;
-    /**
-     * Optional pointer (tag 0x02) sat offset. Must be < 546 given this
-     * builder's single-output reveal topology. See
-     * `createInscribeTransactions` for the full caveat.
-     */
-    pointer?: number;
-    /**
-     * Optional CBOR metadata (tag 0x05). Pass pre-encoded bytes
-     * (`encodeCborDeterministic`); chunked automatically over 520 bytes.
-     */
-    metadata?: Uint8Array;
-    /** Optional metaprotocol identifier (tag 0x07), emitted as UTF-8. */
-    metaprotocol?: string;
-    /**
-     * Optional delegate inscription id (`<txid>i<index>`, tag 0x0b).
-     * Functional (no extra tx topology): ord serves the delegate's
-     * content. Canonical shape is an empty `body`.
-     */
-    delegate?: string;
-    /**
-     * Optional rune-name commitment (tag 0x0d) as the rune's u128 value,
-     * emitted as minimal little-endian bytes.
-     */
-    rune?: bigint;
-    /**
-     * Optional CBOR properties (tag 0x11): gallery + attributes. Pass
-     * pre-encoded bytes (`encodeCborDeterministic`); chunked over 520.
-     */
-    properties?: Uint8Array;
-    /** Optional properties-encoding hint (tag 0x13); only with `properties`. */
-    propertyEncoding?: 'br';
-    /**
-     * How ord tag numbers are pushed into the reveal tapscript. `false`
-     * (default) = 2-byte data push, matching ord's own wallet (charm-free).
-     * `true` = 1-byte pushnum for tags 1–16, saving a byte per tag at the
-     * cost of ord's `vindicated` charm. Everything else identical. See
-     * `createInscribeTransactions`.
-     */
-    minimalTagPush?: boolean;
-    network: Network;
-    /**
-     * Broadcasts a wire-format tx hex; returns the resulting txid.
-     * Called twice: once with the wallet-signed commit, then with the
-     * ephemeral-key-signed reveal. Same callback for both — the
-     * consumer typically wires this to electrs POST /tx.
-     */
-    broadcast(txHex: string): Observable<string>;
-    /**
-     * Optional hook fired when the wallet-signed commit hex is in hand,
-     * BEFORE broadcast. Useful for consumers that want to swap in a
-     * package broadcast or persist the signed bytes for retry.
-     */
-    onCommitSigned?(signedCommitHex: string): void;
-    /**
-     * Watch-only signers (psbt-export) bridge to user-mediated signing.
-     * Browser-wallet signers ignore it.
-     */
-    promptForSignedPsbt?(unsigned: {
-        base64: string;
-        hex: string;
-    }): Observable<string>;
-}
-interface InscribeAndBroadcastResult {
-    commitTxId: string;
-    revealTxId: string;
-    commitAddress: string;
-    /** Ephemeral bearer key — persist or forfeit reveal-side flexibility. */
-    ephemeral: CreateInscribeTransactionsResult['ephemeral'];
-    /** Final commit + reveal fees + vsizes (for UI display). */
-    fees: CreateInscribeTransactionsResult['fees'];
-}
-declare function inscribeAndBroadcast(args: InscribeAndBroadcastArgs): Observable<InscribeAndBroadcastResult>;
 
 /**
  * Public orchestrator for the ord parent/child (provenance) inscribe.
@@ -6529,5 +6574,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeMint, executeTransfer, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribeFees, simulateMint, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
-export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AddressProbe, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AnnotatedFundingUtxo, AskQueryArgs, AssessCompressionOptions, BroadcastOutcome, BroadcastPort, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, CardinalUtxoCandidate, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CatsAtAddressOptions, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, ClassifyOutpointOptions, CompressionAssessment, ContentScanPort, CoreFundingUtxo, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferArtifact, CreateOfferCoreParams, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferSimulationResult, CreateOfferState, CreateOfferStatus, CreateTransactionResult, DeriveWatchOnlyArgs, DummyKeypairResult, ErrorResponse, FundingRecommendation, FundingRecommendationStatus, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintCoreParams, MintSimulationResult, MintState, MintStatus, OfferCreateSignPort, OrdEnvelopeField, OrdOutputResponse, OrdParityFundingResult, OrdTag, OrdinalsAddress, OutpointClassification, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, ScanWatchOnlyArgs, ScannedAddress, SignMessageArgs, SignMessageResult, SignPort, SignedTxBytes, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferCoreParams, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferSimulationResult, TransferState, TransferStatus, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoClassification, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, UtxosPort, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletCapabilityStatus, WalletConnector, WalletInfo, WalletMatrixEntry, WatchOnlyAddress, WatchOnlyDeriveErrorCode, WatchOnlyProbeConfig, WatchOnlyScanResult, WatchOnlyScriptType, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export type { AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AddressProbe, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AnnotatedFundingUtxo, AskQueryArgs, AssessCompressionOptions, BroadcastOutcome, BroadcastPort, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, CardinalUtxoCandidate, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CatsAtAddressOptions, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, ClassifyOutpointOptions, CompressionAssessment, ContentScanPort, CoreFundingUtxo, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferArtifact, CreateOfferCoreParams, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferSimulationResult, CreateOfferState, CreateOfferStatus, CreateTransactionResult, DeriveWatchOnlyArgs, DummyKeypairResult, ErrorResponse, FundingRecommendation, FundingRecommendationStatus, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeCoreParams, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeSimulation, InscribeStatus, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintCoreParams, MintSimulationResult, MintState, MintStatus, OfferCreateSignPort, OrdEnvelopeField, OrdOutputResponse, OrdParityFundingResult, OrdTag, OrdinalsAddress, OutpointClassification, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, ScanWatchOnlyArgs, ScannedAddress, SignMessageArgs, SignMessageResult, SignPort, SignedTxBytes, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferCoreParams, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferSimulationResult, TransferState, TransferStatus, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoClassification, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, UtxosPort, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletCapabilityStatus, WalletConnector, WalletInfo, WalletMatrixEntry, WatchOnlyAddress, WatchOnlyDeriveErrorCode, WatchOnlyProbeConfig, WatchOnlyScanResult, WatchOnlyScriptType, WindowLike, XverseAddressResponse };
