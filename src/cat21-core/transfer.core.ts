@@ -23,7 +23,7 @@ import {
   SignPort,
   UtxosPort,
 } from './ports';
-import { selectFunding } from './select-funding';
+import { resolveFundingPick, selectFunding } from './select-funding';
 
 /** ~200 vB fee ceiling: the funding budget a transfer coin must cover. */
 const TRANSFER_FEE_VBYTE_CEILING = 200;
@@ -123,20 +123,6 @@ function buildTransfer(
   });
 }
 
-/** Pick the funding coin: explicit expert override, else the safe auto coin. */
-function resolvePick(
-  params: TransferCoreParams,
-  recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>,
-  target: number,
-): CoreFundingUtxo | null {
-  const selected = params.selectedFundingUtxo;
-  const stillPresent = selected
-    ? recommendation.candidates.find((c) => c.txid === selected.txid && c.vout === selected.vout)
-    : undefined;
-  if (stillPresent && stillPresent.value >= target) return stillPresent;
-  return recommendation.status === 'auto' ? recommendation.recommended : null;
-}
-
 async function planTransfer(
   params: TransferCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort },
@@ -149,7 +135,7 @@ async function planTransfer(
   // Cat preserved (funded by input 0); funding covers ONLY the miner fee.
   const target = Math.ceil(params.feeRatePerVbyte * TRANSFER_FEE_VBYTE_CEILING);
   const recommendation = await selectFunding(utxos, target, ports.scan);
-  const pick = resolvePick(params, recommendation, target);
+  const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
       status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',

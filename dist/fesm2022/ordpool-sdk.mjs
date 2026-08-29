@@ -6449,6 +6449,21 @@ async function selectFunding(utxos, targetSats, scan) {
     }));
     return recommendFunding(annotated, targetSats);
 }
+/**
+ * Resolve the funding coin a flow will spend: the user's EXPLICIT expert-mode
+ * pick when it still covers the target (honoured even if it carries assets —
+ * they chose it), otherwise the SAFE auto coin (only when a content-clean coin
+ * covers, i.e. `status: 'auto'`). Returns null when there is no safe auto-pick
+ * and no explicit override — the flow then surfaces the picker / an error.
+ */
+function resolveFundingPick(recommendation, target, explicitSelection) {
+    const stillPresent = explicitSelection
+        ? recommendation.candidates.find((c) => c.txid === explicitSelection.txid && c.vout === explicitSelection.vout)
+        : undefined;
+    if (stillPresent && stillPresent.value >= target)
+        return stillPresent;
+    return recommendation.status === 'auto' ? recommendation.recommended : null;
+}
 
 /**
  * Dust threshold for the change output. 546 sats is the conservative
@@ -6643,16 +6658,6 @@ function buildTransfer(params, funding, feeSats, isSimulation) {
         targetPostageSats: params.targetPostageSats,
     });
 }
-/** Pick the funding coin: explicit expert override, else the safe auto coin. */
-function resolvePick(params, recommendation, target) {
-    const selected = params.selectedFundingUtxo;
-    const stillPresent = selected
-        ? recommendation.candidates.find((c) => c.txid === selected.txid && c.vout === selected.vout)
-        : undefined;
-    if (stillPresent && stillPresent.value >= target)
-        return stillPresent;
-    return recommendation.status === 'auto' ? recommendation.recommended : null;
-}
 async function planTransfer(params, ports) {
     const empty = recommendFunding([], 0);
     if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
@@ -6662,7 +6667,7 @@ async function planTransfer(params, ports) {
     // Cat preserved (funded by input 0); funding covers ONLY the miner fee.
     const target = Math.ceil(params.feeRatePerVbyte * TRANSFER_FEE_VBYTE_CEILING);
     const recommendation = await selectFunding(utxos, target, ports.scan);
-    const pick = resolvePick(params, recommendation, target);
+    const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
         return {
             status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
@@ -6729,6 +6734,108 @@ async function executeTransfer(params, ports) {
             : 'Insufficient funds for transfer at the current fee rate');
     }
     const built = buildTransfer(params, plan.pick, plan.buildFeeSats, false);
+    const signed = await ports.sign.sign(built.psbt, 'all');
+    return ports.broadcast.broadcast(signed.hex);
+}
+
+/** ~200 vB fee ceiling for the mint fee component (1-in / 2-out). */
+const MINT_FEE_VBYTE_CEILING = 200;
+function buildMint(params, funding, feeSats, isSimulation) {
+    const fundingInput = prepareMintInputForWallet({
+        txid: funding.txid,
+        vout: funding.vout,
+        value: funding.value,
+        status: { confirmed: true },
+        transactionHex: funding.transactionHex,
+    }, params.paymentPublicKey, params.paymentAddress, isSimulation, params.network);
+    return buildCat21MintPsbt({
+        walletType: params.walletType,
+        network: params.network,
+        fundingInput,
+        destinations: {
+            recipientAddress: params.recipientAddress,
+            senderChangeAddress: params.paymentAddress,
+            tip: params.tip ? { address: params.tip.address, valueSats: params.tip.valueSats } : undefined,
+        },
+        feeSats,
+    });
+}
+async function planMint(params, ports) {
+    const empty = recommendFunding([], 0);
+    if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
+        return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+    }
+    const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
+    const tipValue = params.tip?.valueSats ?? 0;
+    const feeCeiling = Math.ceil(params.feeRatePerVbyte * MINT_FEE_VBYTE_CEILING);
+    // Funding covers the fresh cat's postage + tip + the miner fee.
+    const target = CAT21_POSTAGE_SATS + tipValue + feeCeiling;
+    const recommendation = await selectFunding(utxos, target, ports.scan);
+    const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
+    if (!pick) {
+        return {
+            status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
+            recommendation,
+            pick: null,
+            built: null,
+            vsize: null,
+            buildFeeSats: null,
+        };
+    }
+    try {
+        const two = twoPassFeeSimulation({
+            simulate: (feeSats) => {
+                const built = buildMint(params, pick, feeSats, true);
+                return { built, vsize: computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) }) };
+            },
+            feeRatePerVbyte: params.feeRatePerVbyte,
+            // Seed pass-1 with the fee component of the selection budget, not a flat
+            // 1000, so a small-but-viable clean coin isn't rejected at low fee rates.
+            placeholderFeeSats: feeCeiling,
+        });
+        return {
+            status: 'ready',
+            recommendation,
+            pick,
+            built: two.finalSimulation.built,
+            vsize: two.vsize,
+            buildFeeSats: two.finalFeeSats,
+        };
+    }
+    catch {
+        return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
+    }
+}
+/**
+ * Preview a mint: content-checked funding selection + two-pass fee, no signing.
+ * `ready` = a safe funding coin covers postage + tip + fee; `expert-required` =
+ * only asset coins cover; `insufficient` = nothing covers.
+ */
+async function simulateMint(params, ports) {
+    const plan = await planMint(params, ports);
+    return {
+        status: plan.status,
+        recommendation: plan.recommendation,
+        fundingUtxo: plan.pick,
+        vsize: plan.vsize,
+        feeSats: plan.built ? plan.built.finalFeeSats : null,
+        changeSats: plan.built ? plan.built.changeSats : null,
+    };
+}
+/**
+ * Execute a mint end-to-end: select → fee → build → sign → broadcast. Creates a
+ * fresh 546-sat cat at `recipientAddress`, funded by the safe-auto-selected coin
+ * (or the explicit expert pick). Throws with a clear message when only asset
+ * coins cover or nothing covers.
+ */
+async function executeMint(params, ports) {
+    const plan = await planMint(params, ports);
+    if (plan.status !== 'ready' || !plan.pick || plan.buildFeeSats == null) {
+        throw new Error(plan.status === 'expert-required'
+            ? 'Select a funding UTXO (the available coins carry assets)'
+            : 'Insufficient funds for mint at the current fee rate');
+    }
+    const built = buildMint(params, plan.pick, plan.buildFeeSats, false);
     const signed = await ports.sign.sign(built.psbt, 'all');
     return ports.broadcast.broadcast(signed.hex);
 }
@@ -12666,5 +12773,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeTransfer, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateInscribeFees, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeMint, executeTransfer, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateInscribeFees, simulateMint, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map

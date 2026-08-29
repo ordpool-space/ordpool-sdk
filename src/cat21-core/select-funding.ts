@@ -56,3 +56,24 @@ export async function selectFunding<T extends FundingUtxo>(
   );
   return recommendFunding(annotated, targetSats);
 }
+
+/**
+ * Resolve the funding coin a flow will spend: the user's EXPLICIT expert-mode
+ * pick when it still covers the target (honoured even if it carries assets —
+ * they chose it), otherwise the SAFE auto coin (only when a content-clean coin
+ * covers, i.e. `status: 'auto'`). Returns null when there is no safe auto-pick
+ * and no explicit override — the flow then surfaces the picker / an error.
+ */
+export function resolveFundingPick<T extends AnnotatedFundingUtxo>(
+  recommendation: FundingRecommendation<T>,
+  target: number,
+  explicitSelection?: { txid: string; vout: number } | null,
+): T | null {
+  const stillPresent = explicitSelection
+    ? recommendation.candidates.find(
+        (c) => c.txid === explicitSelection.txid && c.vout === explicitSelection.vout,
+      )
+    : undefined;
+  if (stillPresent && stillPresent.value >= target) return stillPresent;
+  return recommendation.status === 'auto' ? recommendation.recommended : null;
+}
