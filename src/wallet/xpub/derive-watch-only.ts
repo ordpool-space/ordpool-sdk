@@ -37,6 +37,32 @@ const base58checkSha256 = base58check(sha256);
 /** The four address encodings a watch-only export can use. */
 export type WatchOnlyScriptType = 'p2tr' | 'p2wpkh' | 'p2sh-p2wpkh' | 'p2pkh';
 
+/** Stable failure codes for watch-only key derivation. */
+export type WatchOnlyDeriveErrorCode =
+  | 'invalid-key'
+  | 'unrecognised-prefix'
+  | 'network-mismatch'
+  | 'script-type-conflict'
+  | 'script-type-ambiguous'
+  | 'invalid-args'
+  | 'derivation-failed';
+
+/**
+ * Error thrown by watch-only key derivation, carrying a STABLE `code` so
+ * consumers branch on `err.code === 'script-type-ambiguous'` (e.g. to prompt
+ * for an account type) rather than matching the human-readable `message`,
+ * which is free to change. `code` is a plain string field, cross-realm safe;
+ * prefer it over `instanceof`.
+ */
+export class WatchOnlyDeriveError extends Error {
+  readonly code: WatchOnlyDeriveErrorCode;
+  constructor(code: WatchOnlyDeriveErrorCode, message: string) {
+    super(message);
+    this.name = 'WatchOnlyDeriveError';
+    this.code = code;
+  }
+}
+
 interface VersionInfo {
   /** undefined = the prefix is script-type-ambiguous (plain xpub/tpub). */
   scriptType?: WatchOnlyScriptType;
@@ -121,21 +147,22 @@ function parseAccountKey(
   try {
     payload = base58checkSha256.decode(extendedPublicKey);
   } catch {
-    throw new Error('Watch-only: not a valid base58check extended key');
+    throw new WatchOnlyDeriveError('invalid-key', 'Watch-only: not a valid base58check extended key');
   }
   if (payload.length !== 78) {
-    throw new Error(`Watch-only: extended key has wrong length (${payload.length}, expected 78)`);
+    throw new WatchOnlyDeriveError('invalid-key', `Watch-only: extended key has wrong length (${payload.length}, expected 78)`);
   }
 
   const version = (payload[0] << 24) | (payload[1] << 16) | (payload[2] << 8) | payload[3];
   const info = VERSION_BYTES[version >>> 0];
   if (!info) {
-    throw new Error(`Watch-only: unrecognised extended-key prefix (version 0x${version.toString(16)})`);
+    throw new WatchOnlyDeriveError('unrecognised-prefix', `Watch-only: unrecognised extended-key prefix (version 0x${version.toString(16)})`);
   }
 
   const wantMainnet = isMainnetKeyPrefix(network);
   if (info.mainnet !== wantMainnet) {
-    throw new Error(
+    throw new WatchOnlyDeriveError(
+      'network-mismatch',
       `Watch-only: key is a ${info.mainnet ? 'mainnet' : 'testnet'} extended key but network is ${network}`,
     );
   }
@@ -143,14 +170,16 @@ function parseAccountKey(
   let scriptType: WatchOnlyScriptType;
   if (info.scriptType) {
     if (scriptTypeOverride && scriptTypeOverride !== info.scriptType) {
-      throw new Error(
+      throw new WatchOnlyDeriveError(
+        'script-type-conflict',
         `Watch-only: key prefix implies ${info.scriptType} but scriptType=${scriptTypeOverride} was given`,
       );
     }
     scriptType = info.scriptType;
   } else {
     if (!scriptTypeOverride) {
-      throw new Error(
+      throw new WatchOnlyDeriveError(
+        'script-type-ambiguous',
         'Watch-only: this key prefix (xpub/tpub) is script-type-ambiguous; pass scriptType (p2tr for a taproot account, p2pkh for legacy)',
       );
     }
@@ -200,8 +229,8 @@ export function deriveWatchOnlyAddresses(args: DeriveWatchOnlyArgs): WatchOnlyAd
   const chain: 0 | 1 = args.chain ?? 0;
   const startIndex = args.startIndex ?? 0;
   const count = args.count ?? 20;
-  if (count < 0) throw new Error('Watch-only: count must be non-negative');
-  if (startIndex < 0) throw new Error('Watch-only: startIndex must be non-negative');
+  if (count < 0) throw new WatchOnlyDeriveError('invalid-args', 'Watch-only: count must be non-negative');
+  if (startIndex < 0) throw new WatchOnlyDeriveError('invalid-args', 'Watch-only: startIndex must be non-negative');
 
   const { hd, scriptType } = parseAccountKey(args.extendedPublicKey, args.network, args.scriptType);
   const scureNetwork = toScureNetwork(args.network);
@@ -211,7 +240,7 @@ export function deriveWatchOnlyAddresses(args: DeriveWatchOnlyArgs): WatchOnlyAd
   for (let i = 0; i < count; i++) {
     const index = startIndex + i;
     const child = chainNode.deriveChild(index);
-    if (!child.publicKey) throw new Error(`Watch-only: no public key at ${chain}/${index}`);
+    if (!child.publicKey) throw new WatchOnlyDeriveError('derivation-failed', `Watch-only: no public key at ${chain}/${index}`);
     out.push({
       address: encodeAddress(child.publicKey, scriptType, scureNetwork),
       publicKeyHex: hex.encode(child.publicKey),

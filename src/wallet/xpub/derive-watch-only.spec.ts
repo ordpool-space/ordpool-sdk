@@ -5,6 +5,7 @@ import { sha256 } from '@noble/hashes/sha2';
 import { Network } from '../../network';
 import {
   deriveWatchOnlyAddresses,
+  WatchOnlyDeriveError,
   watchOnlyScriptType,
 } from './derive-watch-only';
 
@@ -122,20 +123,25 @@ describe('deriveWatchOnlyAddresses — input validation', () => {
   const BIP86_ACCOUNT_XPUB =
     'xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ';
 
-  it('rejects a plain xpub with no scriptType (ambiguous)', () => {
-    expect(() => deriveWatchOnlyAddresses({
-      extendedPublicKey: BIP86_ACCOUNT_XPUB,
-      network: Network.Mainnet,
-    })).toThrow(/ambiguous/);
+  it('rejects a plain xpub with no scriptType (ambiguous) with a stable code consumers can branch on', () => {
+    let caught: unknown;
+    try {
+      deriveWatchOnlyAddresses({ extendedPublicKey: BIP86_ACCOUNT_XPUB, network: Network.Mainnet });
+    } catch (e) { caught = e; }
+    // Consumers key on `code`, NOT the human-readable message (which is free to change).
+    expect(caught).toBeInstanceOf(WatchOnlyDeriveError);
+    expect((caught as WatchOnlyDeriveError).code).toBe('script-type-ambiguous');
+    expect((caught as Error).message).toMatch(/ambiguous/);
   });
 
-  it('rejects a scriptType that conflicts with a SLIP-132 prefix', () => {
+  it('rejects a scriptType that conflicts with a SLIP-132 prefix (code script-type-conflict)', () => {
     const zpub = reversion(BIP86_ACCOUNT_XPUB, ZPUB_VERSION);
-    expect(() => deriveWatchOnlyAddresses({
-      extendedPublicKey: zpub,
-      network: Network.Mainnet,
-      scriptType: 'p2tr',
-    })).toThrow(/implies p2wpkh/);
+    let caught: unknown;
+    try {
+      deriveWatchOnlyAddresses({ extendedPublicKey: zpub, network: Network.Mainnet, scriptType: 'p2tr' });
+    } catch (e) { caught = e; }
+    expect((caught as WatchOnlyDeriveError).code).toBe('script-type-conflict');
+    expect((caught as Error).message).toMatch(/implies p2wpkh/);
   });
 
   it('rejects a mainnet key on a testnet network', () => {

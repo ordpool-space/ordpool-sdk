@@ -3426,6 +3426,21 @@ function writeVarInt(n) {
  */
 const base58checkSha256 = base58check(sha256);
 /**
+ * Error thrown by watch-only key derivation, carrying a STABLE `code` so
+ * consumers branch on `err.code === 'script-type-ambiguous'` (e.g. to prompt
+ * for an account type) rather than matching the human-readable `message`,
+ * which is free to change. `code` is a plain string field, cross-realm safe;
+ * prefer it over `instanceof`.
+ */
+class WatchOnlyDeriveError extends Error {
+    code;
+    constructor(code, message) {
+        super(message);
+        this.name = 'WatchOnlyDeriveError';
+        this.code = code;
+    }
+}
+/**
  * SLIP-132 extended-public-key version bytes → implied script type +
  * network. Sources: BIP-32 (xpub/tpub, 0x0488b21e / 0x043587cf) and
  * SLIP-132 (ypub/zpub/upub/vpub). Taproot (BIP-86) has NO SLIP-132
@@ -3466,30 +3481,30 @@ function parseAccountKey(extendedPublicKey, network, scriptTypeOverride) {
         payload = base58checkSha256.decode(extendedPublicKey);
     }
     catch {
-        throw new Error('Watch-only: not a valid base58check extended key');
+        throw new WatchOnlyDeriveError('invalid-key', 'Watch-only: not a valid base58check extended key');
     }
     if (payload.length !== 78) {
-        throw new Error(`Watch-only: extended key has wrong length (${payload.length}, expected 78)`);
+        throw new WatchOnlyDeriveError('invalid-key', `Watch-only: extended key has wrong length (${payload.length}, expected 78)`);
     }
     const version = (payload[0] << 24) | (payload[1] << 16) | (payload[2] << 8) | payload[3];
     const info = VERSION_BYTES[version >>> 0];
     if (!info) {
-        throw new Error(`Watch-only: unrecognised extended-key prefix (version 0x${version.toString(16)})`);
+        throw new WatchOnlyDeriveError('unrecognised-prefix', `Watch-only: unrecognised extended-key prefix (version 0x${version.toString(16)})`);
     }
     const wantMainnet = isMainnetKeyPrefix(network);
     if (info.mainnet !== wantMainnet) {
-        throw new Error(`Watch-only: key is a ${info.mainnet ? 'mainnet' : 'testnet'} extended key but network is ${network}`);
+        throw new WatchOnlyDeriveError('network-mismatch', `Watch-only: key is a ${info.mainnet ? 'mainnet' : 'testnet'} extended key but network is ${network}`);
     }
     let scriptType;
     if (info.scriptType) {
         if (scriptTypeOverride && scriptTypeOverride !== info.scriptType) {
-            throw new Error(`Watch-only: key prefix implies ${info.scriptType} but scriptType=${scriptTypeOverride} was given`);
+            throw new WatchOnlyDeriveError('script-type-conflict', `Watch-only: key prefix implies ${info.scriptType} but scriptType=${scriptTypeOverride} was given`);
         }
         scriptType = info.scriptType;
     }
     else {
         if (!scriptTypeOverride) {
-            throw new Error('Watch-only: this key prefix (xpub/tpub) is script-type-ambiguous; pass scriptType (p2tr for a taproot account, p2pkh for legacy)');
+            throw new WatchOnlyDeriveError('script-type-ambiguous', 'Watch-only: this key prefix (xpub/tpub) is script-type-ambiguous; pass scriptType (p2tr for a taproot account, p2pkh for legacy)');
         }
         scriptType = scriptTypeOverride;
     }
@@ -3530,9 +3545,9 @@ function deriveWatchOnlyAddresses(args) {
     const startIndex = args.startIndex ?? 0;
     const count = args.count ?? 20;
     if (count < 0)
-        throw new Error('Watch-only: count must be non-negative');
+        throw new WatchOnlyDeriveError('invalid-args', 'Watch-only: count must be non-negative');
     if (startIndex < 0)
-        throw new Error('Watch-only: startIndex must be non-negative');
+        throw new WatchOnlyDeriveError('invalid-args', 'Watch-only: startIndex must be non-negative');
     const { hd, scriptType } = parseAccountKey(args.extendedPublicKey, args.network, args.scriptType);
     const scureNetwork = toScureNetwork(args.network);
     const chainNode = hd.deriveChild(chain);
@@ -3541,7 +3556,7 @@ function deriveWatchOnlyAddresses(args) {
         const index = startIndex + i;
         const child = chainNode.deriveChild(index);
         if (!child.publicKey)
-            throw new Error(`Watch-only: no public key at ${chain}/${index}`);
+            throw new WatchOnlyDeriveError('derivation-failed', `Watch-only: no public key at ${chain}/${index}`);
         out.push({
             address: encodeAddress(child.publicKey, scriptType, scureNetwork),
             publicKeyHex: hex.encode(child.publicKey),
@@ -11805,5 +11820,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map
