@@ -188,9 +188,8 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
     // per-wallet RBF policy gates the wallet's accelerate UI; scure
     // serialises `sequence` into the wire tx regardless of input
     // type, so a Taproot input with a mis-set sequence would silently
-    // ship. Pre-2026-07-26 this block sat behind a `continue` inside
-    // the Taproot branch (finding #12 — the continue was scoped to
-    // the sighash concern but accidentally skipped this assert too).
+    // ship; this assert runs for every input, not just the non-Taproot
+    // branch that carries the sighash check.
     if (input.sequence !== sequence) {
       throw new Error(
         `Internal error: input ${i} sequence=${input.sequence}, expected ${sequence}`

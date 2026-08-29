@@ -294,11 +294,12 @@ to signal RBF because its acceleration code path is contractually
 required to preserve `nLockTime=21` (cat21-wallet HARD RULE #1).
 
 The rule is enforced at exactly ONE place:
-`src/cat21-mint/cat21.service.helper.ts → createInput()`. Don't
-duplicate the branch elsewhere. If a future signer wants to override
-the sequence, it must update this function, not work around it. A
-focused spec at the bottom of `cat21.service.helper.spec.ts` pins
-the per-wallet sequence value — touch one without the other and CI
+`src/cat21-protocol/cat21-sequence.ts → resolveCat21MintInputSequence()`
+(called from `buildCat21MintPsbt`). Don't duplicate the branch
+elsewhere. If a future signer wants to override the sequence, it must
+update this function, not work around it. A focused spec
+(`cat21-sequence.spec.ts`) pins the per-wallet sequence value; touch
+one without the other and CI
 catches it.
 
 **See also**: `cat21-wallet/CLAUDE.md` HARD RULE #1 (the wallet

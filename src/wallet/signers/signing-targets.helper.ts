@@ -23,7 +23,7 @@ export function resolveSigningTargets(
   input: WithSigningMap
 ): ReadonlyArray<{ address: string; indexes: number[]; sigHash: number; publicKey?: string }> {
   if (!input.signingMap || input.signingMap.length === 0) {
-    throw new Error('signingMap is empty — pass at least one (address, indexes) row');
+    throw new Error('signingMap is empty: pass at least one (address, indexes) row');
   }
   return input.signingMap.map((row) => ({
     address: row.address,

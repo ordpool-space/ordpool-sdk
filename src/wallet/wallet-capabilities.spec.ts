@@ -154,10 +154,9 @@ describe('walletsSupporting', () => {
       ]);
   });
 
-  it('transfer proven: cat21wallet, xverse, leather, unisat, wizz, alby, okx, xpub (real regtest roundtrips)', () => {
+  it('transfer proven: cat21wallet, xverse, leather, unisat, wizz, okx, xpub (alby transfer unsupported: no per-input signing)', () => {
     expect(ids(walletsSupporting(WalletCapability.Cat21Transfer, { minSupport: CapabilitySupport.Proven })))
       .toEqual([
-        KnownOrdinalWalletType.alby,
         KnownOrdinalWalletType.cat21wallet,
         KnownOrdinalWalletType.leather,
         KnownOrdinalWalletType.okx,

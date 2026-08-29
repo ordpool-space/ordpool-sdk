@@ -416,11 +416,11 @@ export class Cat21TransferOrchestrator {
     if (!wallet || !cat || !feeRate || fundingUtxos.length === 0) {
       return { simulation: null, insufficient: false };
     }
-    // The transfer needs `postage (546) + fee` covered by the funding
-    // UTXO (the cat UTXO itself contributes 546 sats but those flow
-    // back out at output 0 to the recipient — they don't fund the fee).
-    // Use a generous over-estimate for fee+postage in the pick stage;
-    // the two-pass simulation below tightens it.
+    // The funding UTXO must cover `postage (546) + fee` beyond what the
+    // cat input already provides: the cat's first 546 sats flow to output
+    // 0 (the recipient); any surplus above 546 flows to the sender's
+    // change. Use a generous over-estimate in the pick stage; the two-pass
+    // simulation below tightens it.
     const target = CAT21_POSTAGE_SATS + Math.ceil(feeRate * 200); // ~200 vB ceiling for transfer
     // User's explicit pick wins when it's still in the funding list
     // AND covers the target. Otherwise fall back to auto-pick (largest
@@ -444,7 +444,10 @@ export class Cat21TransferOrchestrator {
         simulate: (feeSats) => this.simulateTransfer(wallet, cat, pick, feeSats),
         feeRatePerVbyte: feeRate,
       });
-      const totalIn = CAT21_POSTAGE_SATS + pick.value;
+      // Real cat value, not a hardcoded 546: a cat on a larger UTXO sends
+      // its surplus above the 546 postage to the sender's change, and the
+      // displayed figure must match the builder's actual change output.
+      const totalIn = cat.value + pick.value;
       // Mirror the builder's change-output dust rule: sub-dust change is
       // absorbed into the miner fee (no change output emitted), so report
       // 0 back to the user rather than a "you'll get N sats" figure that

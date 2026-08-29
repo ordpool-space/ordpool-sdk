@@ -105,9 +105,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // loses the bonus mint, not the cat itself. Third-party sellers
   // stuck at old fees CAN bump. The @scure default sequence is
   // 0xffffffff (final); we override explicitly so a future scure
-  // change can't drift the behaviour. Was wrong pre-2026-07-25
-  // (finding #8) — the call resolved to 0xfffffffe for non-cat21wallet
-  // sellers and disabled RBF on the whole tx.
+  // change can't drift the behaviour.
   const sequenceNumber = CAT21_WALLET_INPUT_SEQUENCE;
   // lockTime = 21 makes the offer-acceptance tx a CAT-21 mint in addition
   // to a transfer: cat21-ord reads tx.lock_time structurally and mints a
@@ -153,8 +151,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
 
   // Output 1: seller payment. Value is `priceSats + sellerInput.value` so the
   // seller is made whole on WHATEVER they contribute via input 0 (any size,
-  // not just 546) — net to seller is exactly priceSats. Hardcoding
-  // `+ postageSats` here shortchanged a seller whose cat sat on a >546 UTXO.
+  // not just 546); net to seller is exactly priceSats.
   tx.addOutputAddress(
     args.destinations.sellerPaymentAddress,
     BigInt(args.priceSats + args.sellerInput.value),
@@ -176,7 +173,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // getMinimumUtxoSize can't classify the address; the per-address
   // value is preferred so P2TR (330) and P2WPKH (294) change amounts
   // in [dust, 546) are actually emitted instead of silently absorbed
-  // into the miner fee. Was hardcoded 546 pre-2026-07-26 (finding #13).
+  // into the miner fee.
   let changeDustLimit: number;
   try {
     changeDustLimit = getMinimumUtxoSize(args.destinations.buyerChangeAddress);

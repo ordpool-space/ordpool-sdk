@@ -1319,6 +1319,64 @@ const albyConnector = {
     },
 };
 
+async function getBasicBinanceInfo() {
+    const binanceBtc = window.binancew3w.bitcoin;
+    const accounts = await binanceBtc.requestAccounts();
+    const [address] = accounts;
+    const publicKey = await binanceBtc.getPublicKey();
+    return { address, publicKey };
+}
+/**
+ * Binance Web3 Wallet — `window.binancew3w.bitcoin.*`.
+ *
+ * Shape per the official developer docs at developers.binance.com
+ * /docs/binance-w3w/bitcoin-provider: requestAccounts /
+ * getPublicKey / getNetwork / switchNetwork / getBalance /
+ * signMessage / signPsbt. Single-address contract (the docs say
+ * Binance "proxies window.unisat with some API differences"),
+ * meaning ordinals + payment lanes both use the same address.
+ *
+ * **Runtime status (v1.17.2 disassembly, 2026-06-12):** the
+ * shipped Chrome Web Store binary injects only
+ * `window.binancew3w.{wallet, ethereum, solana, tron, sui,
+ * tonconnect}` — no `.bitcoin` sub-provider. So detect returns
+ * false on current binaries; this connector ships as
+ * potential-support, ready to light up the moment Binance
+ * exposes the documented surface.
+ *
+ * Adapter shape modelled after LaserEyes'
+ * `packages/core/src/client/providers/binance.ts` which is in
+ * production use across multiple Ordinals-related projects.
+ *
+ * Event surface per the developer docs: accountsChanged +
+ * networkChanged on `window.binancew3w.bitcoin`. Same shape as
+ * Unisat. Whether the eventual binary actually wires them is
+ * unverified (the surface itself isn't injected yet); the no-op
+ * guard handles the not-yet-implemented case cleanly.
+ */
+const binanceConnector = {
+    providerId: KnownOrdinalWalletType.binance,
+    wallet: KnownOrdinalWallets[KnownOrdinalWalletType.binance],
+    signingSupported: true,
+    detect(win) {
+        return isBinanceInstalled(win);
+    },
+    connect(_network) {
+        return from(getBasicBinanceInfo()).pipe(map(({ address, publicKey }) => binanceBasicInfoToWalletInfo(address, publicKey)));
+    },
+    onAccountChange(handler) {
+        const binanceBtc = window.binancew3w?.bitcoin;
+        if (!binanceBtc?.on || !binanceBtc.removeListener)
+            return () => undefined;
+        binanceBtc.on('accountsChanged', handler);
+        binanceBtc.on('networkChanged', handler);
+        return () => {
+            binanceBtc.removeListener('accountsChanged', handler);
+            binanceBtc.removeListener('networkChanged', handler);
+        };
+    },
+};
+
 /**
  * CAT-21 wallet — `window.Cat21Provider.request('getAddresses')`.
  *
@@ -1805,64 +1863,6 @@ const xverseConnector = {
     },
 };
 
-async function getBasicBinanceInfo() {
-    const binanceBtc = window.binancew3w.bitcoin;
-    const accounts = await binanceBtc.requestAccounts();
-    const [address] = accounts;
-    const publicKey = await binanceBtc.getPublicKey();
-    return { address, publicKey };
-}
-/**
- * Binance Web3 Wallet — `window.binancew3w.bitcoin.*`.
- *
- * Shape per the official developer docs at developers.binance.com
- * /docs/binance-w3w/bitcoin-provider: requestAccounts /
- * getPublicKey / getNetwork / switchNetwork / getBalance /
- * signMessage / signPsbt. Single-address contract (the docs say
- * Binance "proxies window.unisat with some API differences"),
- * meaning ordinals + payment lanes both use the same address.
- *
- * **Runtime status (v1.17.2 disassembly, 2026-06-12):** the
- * shipped Chrome Web Store binary injects only
- * `window.binancew3w.{wallet, ethereum, solana, tron, sui,
- * tonconnect}` — no `.bitcoin` sub-provider. So detect returns
- * false on current binaries; this connector ships as
- * potential-support, ready to light up the moment Binance
- * exposes the documented surface.
- *
- * Adapter shape modelled after LaserEyes'
- * `packages/core/src/client/providers/binance.ts` which is in
- * production use across multiple Ordinals-related projects.
- *
- * Event surface per the developer docs: accountsChanged +
- * networkChanged on `window.binancew3w.bitcoin`. Same shape as
- * Unisat. Whether the eventual binary actually wires them is
- * unverified (the surface itself isn't injected yet); the no-op
- * guard handles the not-yet-implemented case cleanly.
- */
-const binanceConnector = {
-    providerId: KnownOrdinalWalletType.binance,
-    wallet: KnownOrdinalWallets[KnownOrdinalWalletType.binance],
-    signingSupported: true,
-    detect(win) {
-        return isBinanceInstalled(win);
-    },
-    connect(_network) {
-        return from(getBasicBinanceInfo()).pipe(map(({ address, publicKey }) => binanceBasicInfoToWalletInfo(address, publicKey)));
-    },
-    onAccountChange(handler) {
-        const binanceBtc = window.binancew3w?.bitcoin;
-        if (!binanceBtc?.on || !binanceBtc.removeListener)
-            return () => undefined;
-        binanceBtc.on('accountsChanged', handler);
-        binanceBtc.on('networkChanged', handler);
-        return () => {
-            binanceBtc.removeListener('accountsChanged', handler);
-            binanceBtc.removeListener('networkChanged', handler);
-        };
-    },
-};
-
 /**
  * Read-side wallet roster. New connectors get added here. The
  * `WalletService` walks this list for detection and dispatch.
@@ -1873,15 +1873,16 @@ const binanceConnector = {
  * external recommendation. Everything else by installed-base
  * heuristic.
  *
- * Binance is NOT in this list. The connector + signer files stay on
- * disk because Binance's developer docs document `window.binancew3w
- * .bitcoin` with a Unisat-shaped API, but the v1.17.2 binary never
- * actually exposes that surface — detect-by-`binancew3w.bitcoin`
- * returns false for every real install, AND no user-side smoke test
- * is possible because the API doesn't ship. The picker entry would
- * be a broken promise. If Binance ever ships the documented surface,
- * re-add `binanceConnector` to this list, the existing connector +
- * signer auto-activates.
+ * Binance is in the roster so it stays consistent with the capability
+ * matrix (which lists Binance): a matrix-driven picker's connect
+ * resolves to this connector instead of throwing "unknown wallet". Its
+ * `detect` gates real availability. Binance's developer docs document
+ * `window.binancew3w.bitcoin` with a Unisat-shaped API, but the shipped
+ * binary (v1.17.2) injects only `window.binancew3w.{wallet, ethereum,
+ * solana, tron, sui, tonconnect}` and no `.bitcoin`, so `detect` returns
+ * false on every current install and Binance shows as not-installed. The
+ * connector + signer auto-activate the moment Binance exposes the
+ * documented surface.
  */
 const walletConnectors = [
     cat21walletConnector,
@@ -1892,6 +1893,7 @@ const walletConnectors = [
     okxConnector,
     phantomConnector,
     albyConnector,
+    binanceConnector,
 ];
 /**
  * Sort the roster into installed / not-installed buckets based on
@@ -2296,7 +2298,7 @@ const albySigner = {
  */
 function resolveSigningTargets(input) {
     if (!input.signingMap || input.signingMap.length === 0) {
-        throw new Error('signingMap is empty — pass at least one (address, indexes) row');
+        throw new Error('signingMap is empty: pass at least one (address, indexes) row');
     }
     return input.signingMap.map((row) => ({
         address: row.address,
@@ -4268,7 +4270,10 @@ const WALLET_MATRIX = [
         signingMode: 'injected',
         capabilities: {
             [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-            [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
+            [WalletCapability.Cat21Transfer]: {
+                support: CapabilitySupport.Unsupported,
+                caveat: "Alby cannot transfer: its API exposes no per-input signing, so it cannot sign a transfer's cat input plus the funding inputs. Single-input flows (mint, plain inscription) work.",
+            },
             [WalletCapability.Cat21OfferCreate]: {
                 support: CapabilitySupport.Unsupported,
                 caveat: 'Alby cannot create offers: it signs every input in a transaction with your one key, so it cannot co-sign an offer alongside the buyer.',
@@ -4975,9 +4980,8 @@ function buildCat21MintPsbt(args) {
         // per-wallet RBF policy gates the wallet's accelerate UI; scure
         // serialises `sequence` into the wire tx regardless of input
         // type, so a Taproot input with a mis-set sequence would silently
-        // ship. Pre-2026-07-26 this block sat behind a `continue` inside
-        // the Taproot branch (finding #12 — the continue was scoped to
-        // the sighash concern but accidentally skipped this assert too).
+        // ship; this assert runs for every input, not just the non-Taproot
+        // branch that carries the sighash check.
         if (input.sequence !== sequence) {
             throw new Error(`Internal error: input ${i} sequence=${input.sequence}, expected ${sequence}`);
         }
@@ -6028,9 +6032,7 @@ function buildCat21BuyOfferPsbt(args) {
     // loses the bonus mint, not the cat itself. Third-party sellers
     // stuck at old fees CAN bump. The @scure default sequence is
     // 0xffffffff (final); we override explicitly so a future scure
-    // change can't drift the behaviour. Was wrong pre-2026-07-25
-    // (finding #8) — the call resolved to 0xfffffffe for non-cat21wallet
-    // sellers and disabled RBF on the whole tx.
+    // change can't drift the behaviour.
     const sequenceNumber = CAT21_WALLET_INPUT_SEQUENCE;
     // lockTime = 21 makes the offer-acceptance tx a CAT-21 mint in addition
     // to a transfer: cat21-ord reads tx.lock_time structurally and mints a
@@ -6068,8 +6070,7 @@ function buildCat21BuyOfferPsbt(args) {
     tx.addOutputAddress(args.destinations.buyerReceiveAddress, BigInt(postageSats), scureNetwork);
     // Output 1: seller payment. Value is `priceSats + sellerInput.value` so the
     // seller is made whole on WHATEVER they contribute via input 0 (any size,
-    // not just 546) — net to seller is exactly priceSats. Hardcoding
-    // `+ postageSats` here shortchanged a seller whose cat sat on a >546 UTXO.
+    // not just 546); net to seller is exactly priceSats.
     tx.addOutputAddress(args.destinations.sellerPaymentAddress, BigInt(args.priceSats + args.sellerInput.value), scureNetwork);
     // Output 2: buyer change when above dust. With output 1 = priceSats +
     // sellerInput.value, the seller's input passes straight back to the seller,
@@ -6086,7 +6087,7 @@ function buildCat21BuyOfferPsbt(args) {
     // getMinimumUtxoSize can't classify the address; the per-address
     // value is preferred so P2TR (330) and P2WPKH (294) change amounts
     // in [dust, 546) are actually emitted instead of silently absorbed
-    // into the miner fee. Was hardcoded 546 pre-2026-07-26 (finding #13).
+    // into the miner fee.
     let changeDustLimit;
     try {
         changeDustLimit = getMinimumUtxoSize(args.destinations.buyerChangeAddress);
@@ -7165,8 +7166,8 @@ function buildCat21TransferPsbt(args) {
     // (`resolveCat21MintInputSequence`) does NOT apply here: the cat is
     // already on chain, so a third-party wallet's accelerate UI dropping
     // `lockTime=21` on an RBF replacement only loses the bonus mint, not
-    // the cat itself. Third-party wallets stuck at old fees CAN bump. Was
-    // wrong pre-2026-07-25; see cat21-sequence.ts docstring.
+    // the cat itself. Third-party wallets stuck at old fees CAN bump. See
+    // cat21-sequence.ts docstring for the full rationale.
     const sequence = CAT21_WALLET_INPUT_SEQUENCE;
     const tx = new btc.Transaction({
         lockTime: CAT21_LOCK_TIME,
@@ -7198,7 +7199,6 @@ function buildCat21TransferPsbt(args) {
     // the address; the per-address value is preferred so P2TR (330)
     // and P2WPKH (294) change amounts in [dust, 546) actually get
     // emitted instead of being silently absorbed into the miner fee.
-    // Was hardcoded 546 pre-2026-07-26 (finding #13).
     let changeDustLimit;
     try {
         changeDustLimit = getMinimumUtxoSize(args.destinations.senderChangeAddress);
@@ -7519,11 +7519,11 @@ class Cat21TransferOrchestrator {
         if (!wallet || !cat || !feeRate || fundingUtxos.length === 0) {
             return { simulation: null, insufficient: false };
         }
-        // The transfer needs `postage (546) + fee` covered by the funding
-        // UTXO (the cat UTXO itself contributes 546 sats but those flow
-        // back out at output 0 to the recipient — they don't fund the fee).
-        // Use a generous over-estimate for fee+postage in the pick stage;
-        // the two-pass simulation below tightens it.
+        // The funding UTXO must cover `postage (546) + fee` beyond what the
+        // cat input already provides: the cat's first 546 sats flow to output
+        // 0 (the recipient); any surplus above 546 flows to the sender's
+        // change. Use a generous over-estimate in the pick stage; the two-pass
+        // simulation below tightens it.
         const target = CAT21_POSTAGE_SATS + Math.ceil(feeRate * 200); // ~200 vB ceiling for transfer
         // User's explicit pick wins when it's still in the funding list
         // AND covers the target. Otherwise fall back to auto-pick (largest
@@ -7546,7 +7546,10 @@ class Cat21TransferOrchestrator {
                 simulate: (feeSats) => this.simulateTransfer(wallet, cat, pick, feeSats),
                 feeRatePerVbyte: feeRate,
             });
-            const totalIn = CAT21_POSTAGE_SATS + pick.value;
+            // Real cat value, not a hardcoded 546: a cat on a larger UTXO sends
+            // its surplus above the 546 postage to the sender's change, and the
+            // displayed figure must match the builder's actual change output.
+            const totalIn = cat.value + pick.value;
             // Mirror the builder's change-output dust rule: sub-dust change is
             // absorbed into the miner fee (no change output emitted), so report
             // 0 back to the user rather than a "you'll get N sats" figure that
@@ -9572,7 +9575,7 @@ function createInscribeTransactions(args) {
     // `isInscribeSupportedPaymentAddress` so this throw is unreachable.
     if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
         throw new Error(`Legacy P2PKH payment addresses are not supported for inscribing ` +
-            `(would lock the postage — see isInscribeSupportedPaymentAddress). ` +
+            `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
             `Switch the wallet to Native SegWit or Taproot and retry.`);
     }
     if (args.tip !== undefined) {
@@ -9739,7 +9742,7 @@ function createChildInscribeTransactions(args) {
     }
     if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
         throw new Error(`Legacy P2PKH payment addresses are not supported for inscribing ` +
-            `(would lock the postage — see isInscribeSupportedPaymentAddress). ` +
+            `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
             `Switch the wallet to Native SegWit or Taproot and retry.`);
     }
     if (args.tip !== undefined) {

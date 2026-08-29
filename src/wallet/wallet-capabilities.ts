@@ -209,7 +209,10 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     signingMode: 'injected',
     capabilities: {
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
-      [WalletCapability.Cat21Transfer]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Cat21Transfer]: {
+        support: CapabilitySupport.Unsupported,
+        caveat: "Alby cannot transfer: its API exposes no per-input signing, so it cannot sign a transfer's cat input plus the funding inputs. Single-input flows (mint, plain inscription) work.",
+      },
       [WalletCapability.Cat21OfferCreate]: {
         support: CapabilitySupport.Unsupported,
         caveat: 'Alby cannot create offers: it signs every input in a transaction with your one key, so it cannot co-sign an offer alongside the buyer.',

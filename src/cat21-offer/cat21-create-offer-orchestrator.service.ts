@@ -47,7 +47,12 @@ import { Cat21OfferBuyerInput, Cat21OfferSellerInput } from './cat21-offer.types
  */
 export interface BuyOfferTargetCat extends CatOutpoint {
   catNumber: number;
-  /** Always 546 sats for a CAT-21 cat UTXO; carried on the type for safety. */
+  /**
+   * The cat UTXO's real on-chain value (any size). Fed straight to the
+   * offer builder's `sellerInput.value`, so it MUST be the actual prevout
+   * value, never a hardcoded 546: a wrong amount makes the seller's
+   * signature invalid and the offer un-broadcastable.
+   */
   value: number;
   /** scriptPubKey of the seller's cat UTXO, raw bytes. */
   scriptPubKey: Uint8Array;

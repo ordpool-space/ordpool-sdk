@@ -379,7 +379,7 @@ export function createInscribeTransactions(
   if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
     throw new Error(
       `Legacy P2PKH payment addresses are not supported for inscribing ` +
-      `(would lock the postage — see isInscribeSupportedPaymentAddress). ` +
+      `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
       `Switch the wallet to Native SegWit or Taproot and retry.`,
     );
   }
@@ -631,7 +631,7 @@ export function createChildInscribeTransactions(
   if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
     throw new Error(
       `Legacy P2PKH payment addresses are not supported for inscribing ` +
-      `(would lock the postage — see isInscribeSupportedPaymentAddress). ` +
+      `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
       `Switch the wallet to Native SegWit or Taproot and retry.`,
     );
   }

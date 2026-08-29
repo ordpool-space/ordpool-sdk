@@ -96,8 +96,8 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   // (`resolveCat21MintInputSequence`) does NOT apply here: the cat is
   // already on chain, so a third-party wallet's accelerate UI dropping
   // `lockTime=21` on an RBF replacement only loses the bonus mint, not
-  // the cat itself. Third-party wallets stuck at old fees CAN bump. Was
-  // wrong pre-2026-07-25; see cat21-sequence.ts docstring.
+  // the cat itself. Third-party wallets stuck at old fees CAN bump. See
+  // cat21-sequence.ts docstring for the full rationale.
   const sequence = CAT21_WALLET_INPUT_SEQUENCE;
 
   const tx = new btc.Transaction({
@@ -136,7 +136,6 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   // the address; the per-address value is preferred so P2TR (330)
   // and P2WPKH (294) change amounts in [dust, 546) actually get
   // emitted instead of being silently absorbed into the miner fee.
-  // Was hardcoded 546 pre-2026-07-26 (finding #13).
   let changeDustLimit: number;
   try {
     changeDustLimit = getMinimumUtxoSize(args.destinations.senderChangeAddress);

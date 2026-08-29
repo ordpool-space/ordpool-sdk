@@ -7,11 +7,11 @@ import { detectInstalledWallets, walletConnectors } from './index';
 describe('walletConnectors registry', () => {
 
   it('lists CAT-21 wallet first (our own wallet), then Xverse + the rest in detection order', () => {
-    expect(walletConnectors.map(c => c.providerId)).toEqual(['cat21wallet', 'xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'alby']);
+    expect(walletConnectors.map(c => c.providerId)).toEqual(['cat21wallet', 'xverse', 'leather', 'unisat', 'wizz', 'okx', 'phantom', 'alby', 'binance']);
   });
 
-  it('omits Binance from the registry — the documented .bitcoin sub-provider isn\'t shipped in any released binary, so a picker entry would be a broken promise', () => {
-    expect(walletConnectors.map(c => c.providerId)).not.toContain('binance');
+  it('includes Binance in the registry, detect-gated: no released binary ships the .bitcoin sub-provider yet, so detect returns false today and it auto-activates when Binance exposes the surface', () => {
+    expect(walletConnectors.map(c => c.providerId)).toContain('binance');
   });
 
   it('marks every wallet as signing-supported at the SDK level (runtime detect-by-signature gates surface visibility — see CLAUDE.md "Ship every signer we have code for")', () => {
@@ -22,7 +22,7 @@ describe('walletConnectors registry', () => {
 
 describe('detectInstalledWallets', () => {
 
-  it('returns all eight as not-installed when window is undefined', () => {
+  it('returns all nine as not-installed when window is undefined', () => {
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(undefined);
     expect(installedWallets).toEqual([]);
     expect(notInstalledWallets).toEqual([
@@ -34,10 +34,11 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.alby,
+      KnownOrdinalWallets.binance,
     ]);
   });
 
-  it('returns all eight as installed when every extension is present', () => {
+  it('returns all nine as installed when every extension is present', () => {
     const win = { Cat21Provider: { isCat21: true }, XverseProviders: {}, LeatherProvider: {}, unisat: {}, wizz: {}, okxwallet: { bitcoin: {} }, phantom: { bitcoin: {} }, alby: {}, binancew3w: { bitcoin: {} } };
     const { installedWallets, notInstalledWallets } = detectInstalledWallets(win);
     expect(installedWallets).toEqual([
@@ -49,6 +50,7 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.alby,
+      KnownOrdinalWallets.binance,
     ]);
     expect(notInstalledWallets).toEqual([]);
   });
@@ -64,6 +66,7 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.okx,
       KnownOrdinalWallets.phantom,
       KnownOrdinalWallets.alby,
+      KnownOrdinalWallets.binance,
     ]);
   });
 
@@ -78,6 +81,7 @@ describe('detectInstalledWallets', () => {
       KnownOrdinalWallets.okx.label,
       KnownOrdinalWallets.phantom.label,
       KnownOrdinalWallets.alby.label,
+      KnownOrdinalWallets.binance.label,
     ]);
   });
 
@@ -107,9 +111,12 @@ describe('detectInstalledWallets', () => {
     expect(forBtc).toEqual([KnownOrdinalWallets.okx]);
   });
 
-  it('does not surface Binance even when window.binancew3w.bitcoin is present (removed from the picker — the .bitcoin sub-provider doesn\'t ship in any released binary, see walletConnectors comment)', () => {
-    const { installedWallets } = detectInstalledWallets({ binancew3w: { bitcoin: {} } });
-    expect(installedWallets).toEqual([]);
+  it('surfaces Binance when window.binancew3w.bitcoin is present, and NOT when the .bitcoin sub-provider is absent (detect-gated auto-activation)', () => {
+    const { installedWallets: withBtc } = detectInstalledWallets({ binancew3w: { bitcoin: {} } });
+    expect(withBtc).toEqual([KnownOrdinalWallets.binance]);
+    // The shipped binary injects binancew3w without a .bitcoin sub-provider.
+    const { installedWallets: noBtc } = detectInstalledWallets({ binancew3w: { wallet: {} } });
+    expect(noBtc).toEqual([]);
   });
 
   it('accepts the legacy HiroWalletProvider global for Leather detection', () => {
