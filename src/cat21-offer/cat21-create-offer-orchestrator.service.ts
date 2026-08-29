@@ -17,7 +17,7 @@ import {
 } from 'rxjs';
 
 import {
-  pickLargestFundingUtxoThatCovers,
+  pickSmallestFundingUtxoThatCovers,
   type FundingUtxo,
 } from '../cat21-fee/coin-selection.helper';
 import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
@@ -130,7 +130,8 @@ export class Cat21CreateOfferOrchestrator {
 
   /**
    * User's explicit funding-UTXO pick from the buyer-side picker.
-   * When null the orchestrator auto-picks the largest covering UTXO.
+   * When null the orchestrator auto-picks the best-fit covering UTXO
+   * (smallest that covers — ord's `select_cardinal_utxo` policy).
    * Set from the UI so the buyer can reject an asset-carrying UTXO
    * (inscription / rune / cat / rare sat) the auto-picker would
    * happily spend.
@@ -461,7 +462,7 @@ export class Cat21CreateOfferOrchestrator {
       : undefined;
     const pick = selectedStillPresent && selectedStillPresent.value >= targetSpend
       ? selectedStillPresent
-      : pickLargestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
+      : pickSmallestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
           utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
           targetSpendSats: targetSpend,
         });

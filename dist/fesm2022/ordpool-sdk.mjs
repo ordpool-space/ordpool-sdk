@@ -5948,16 +5948,12 @@ function trimSlash(url) {
  * list — that filter is not this helper's job.
  */
 /**
- * **DEFAULT strategy.** Returns the LARGEST-value UTXO that covers
- * `targetSpendSats`; `null` if none does. Picked as default because
- * largest-first:
- *
- *   - has highest mint-success probability at high fee rates (no
- *     "Insufficient funds" surprise at the dust boundary);
- *   - defragments the wallet instead of fragmenting it;
- *   - avoids sub-dust change absorption (smallest-covers can leave
- *     change just under dust, where the builders fold it into the
- *     miner fee — the user over-pays).
+ * **OPT-IN strategy (preserve-largest-balance).** Returns the LARGEST-value
+ * UTXO that covers `targetSpendSats`; `null` if none does. No longer the
+ * default: the flows use best-fit (`pickSmallestFundingUtxoThatCovers`) to
+ * stay byte-aligned with ord. Reach for largest-first only with a documented
+ * reason — e.g. a high-volume autonomous bot that would rather keep spending
+ * one big balance than defragment the wallet against every small operation.
  */
 /**
  * Shared filter+sort: every UTXO whose value covers `targetSpendSats`,
@@ -5981,17 +5977,14 @@ function pickLargestFundingUtxoThatCovers(args) {
     return sortedCovering(args.utxos, args.targetSpendSats, 'desc')[0] ?? null;
 }
 /**
- * OPT-IN strategy. Returns the UTXO with the SMALLEST value that
- * covers `targetSpendSats`. `null` when no UTXO is large enough.
- *
- * Use ONLY when the consumer explicitly wants to preserve their
- * largest balance for later — e.g. a high-volume autonomous bot
- * spending many small mints in sequence where defragmenting the
- * wallet against each mint would slowly consume the big balance.
- *
- * For most flows (cat21.space user flow, one-shot mints, transfers,
- * offer creation) `pickLargestFundingUtxoThatCovers` is the right
- * call. Default to that unless you have a documented reason.
+ * **DEFAULT strategy (ord-aligned best-fit).** Returns the UTXO with the
+ * SMALLEST value that covers `targetSpendSats`; `null` when none is large
+ * enough. This is ord's own `select_cardinal_utxo` policy (prefer the
+ * smallest covering UTXO), so the transfer / offer flows that use it stay
+ * byte-aligned with `ord wallet send` — verified in
+ * `e2e/regtest/transfer-ord-parity.spec.ts`. It also minimises change
+ * (tighter than largest-first). See `selectOrdParityFunding` in
+ * `ord-coin-select.ts` for the full multi-input ord port.
  */
 function pickSmallestFundingUtxoThatCovers(args) {
     if (args.utxos.length === 0)
@@ -6677,7 +6670,8 @@ class Cat21CreateOfferOrchestrator {
     feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
     /**
      * User's explicit funding-UTXO pick from the buyer-side picker.
-     * When null the orchestrator auto-picks the largest covering UTXO.
+     * When null the orchestrator auto-picks the best-fit covering UTXO
+     * (smallest that covers — ord's `select_cardinal_utxo` policy).
      * Set from the UI so the buyer can reject an asset-carrying UTXO
      * (inscription / rune / cat / rare sat) the auto-picker would
      * happily spend.
@@ -6957,7 +6951,7 @@ class Cat21CreateOfferOrchestrator {
             : undefined;
         const pick = selectedStillPresent && selectedStillPresent.value >= targetSpend
             ? selectedStillPresent
-            : pickLargestFundingUtxoThatCovers({
+            : pickSmallestFundingUtxoThatCovers({
                 utxos: fundingUtxos,
                 targetSpendSats: targetSpend,
             });
@@ -7563,10 +7557,11 @@ class Cat21TransferOrchestrator {
     feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
     /**
      * User's explicit funding-UTXO pick from the picker. When null the
-     * orchestrator auto-picks the largest covering UTXO (backwards-
-     * compatible with the pre-picker behaviour). Set this from the UI's
-     * scanner-annotated row selection so the user can reject an
-     * asset-carrying UTXO the auto-picker would happily spend.
+     * orchestrator auto-picks the best-fit covering UTXO (the smallest that
+     * covers — ord's `select_cardinal_utxo` policy, which minimises change and
+     * keeps us byte-aligned with `ord wallet send`). Set this from the UI's
+     * scanner-annotated row selection so the user can reject an asset-carrying
+     * UTXO the auto-picker would happily spend.
      */
     selectedFundingUtxo = signal(null, ...(ngDevMode ? [{ debugName: "selectedFundingUtxo" }] : []));
     // --- Internals (declared up here because instance-field initialisers
@@ -7822,7 +7817,7 @@ class Cat21TransferOrchestrator {
             : undefined;
         const pick = selectedStillPresent && selectedStillPresent.value >= target
             ? selectedStillPresent
-            : pickLargestFundingUtxoThatCovers({
+            : pickSmallestFundingUtxoThatCovers({
                 utxos: fundingUtxos,
                 targetSpendSats: target,
             });

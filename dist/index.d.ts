@@ -2242,17 +2242,14 @@ interface PickFundingUtxoArgs<T extends FundingUtxo> {
 }
 declare function pickLargestFundingUtxoThatCovers<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T | null;
 /**
- * OPT-IN strategy. Returns the UTXO with the SMALLEST value that
- * covers `targetSpendSats`. `null` when no UTXO is large enough.
- *
- * Use ONLY when the consumer explicitly wants to preserve their
- * largest balance for later — e.g. a high-volume autonomous bot
- * spending many small mints in sequence where defragmenting the
- * wallet against each mint would slowly consume the big balance.
- *
- * For most flows (cat21.space user flow, one-shot mints, transfers,
- * offer creation) `pickLargestFundingUtxoThatCovers` is the right
- * call. Default to that unless you have a documented reason.
+ * **DEFAULT strategy (ord-aligned best-fit).** Returns the UTXO with the
+ * SMALLEST value that covers `targetSpendSats`; `null` when none is large
+ * enough. This is ord's own `select_cardinal_utxo` policy (prefer the
+ * smallest covering UTXO), so the transfer / offer flows that use it stay
+ * byte-aligned with `ord wallet send` — verified in
+ * `e2e/regtest/transfer-ord-parity.spec.ts`. It also minimises change
+ * (tighter than largest-first). See `selectOrdParityFunding` in
+ * `ord-coin-select.ts` for the full multi-input ord port.
  */
 declare function pickSmallestFundingUtxoThatCovers<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T | null;
 /**
@@ -2728,7 +2725,8 @@ declare class Cat21CreateOfferOrchestrator {
     readonly feeRate: _angular_core.WritableSignal<number>;
     /**
      * User's explicit funding-UTXO pick from the buyer-side picker.
-     * When null the orchestrator auto-picks the largest covering UTXO.
+     * When null the orchestrator auto-picks the best-fit covering UTXO
+     * (smallest that covers — ord's `select_cardinal_utxo` policy).
      * Set from the UI so the buyer can reject an asset-carrying UTXO
      * (inscription / rune / cat / rare sat) the auto-picker would
      * happily spend.
@@ -3190,10 +3188,11 @@ declare class Cat21TransferOrchestrator {
     readonly feeRate: _angular_core.WritableSignal<number>;
     /**
      * User's explicit funding-UTXO pick from the picker. When null the
-     * orchestrator auto-picks the largest covering UTXO (backwards-
-     * compatible with the pre-picker behaviour). Set this from the UI's
-     * scanner-annotated row selection so the user can reject an
-     * asset-carrying UTXO the auto-picker would happily spend.
+     * orchestrator auto-picks the best-fit covering UTXO (the smallest that
+     * covers — ord's `select_cardinal_utxo` policy, which minimises change and
+     * keeps us byte-aligned with `ord wallet send`). Set this from the UI's
+     * scanner-annotated row selection so the user can reject an asset-carrying
+     * UTXO the auto-picker would happily spend.
      */
     readonly selectedFundingUtxo: _angular_core.WritableSignal<TxnOutput>;
     private lastWalletAddress;

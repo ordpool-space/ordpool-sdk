@@ -17,7 +17,7 @@ import {
 } from 'rxjs';
 
 import {
-  pickLargestFundingUtxoThatCovers,
+  pickSmallestFundingUtxoThatCovers,
   type FundingUtxo,
 } from '../cat21-fee/coin-selection.helper';
 import { CatOutpoint } from '../cat21-share/cat-outpoint';
@@ -121,10 +121,11 @@ export class Cat21TransferOrchestrator {
 
   /**
    * User's explicit funding-UTXO pick from the picker. When null the
-   * orchestrator auto-picks the largest covering UTXO (backwards-
-   * compatible with the pre-picker behaviour). Set this from the UI's
-   * scanner-annotated row selection so the user can reject an
-   * asset-carrying UTXO the auto-picker would happily spend.
+   * orchestrator auto-picks the best-fit covering UTXO (the smallest that
+   * covers — ord's `select_cardinal_utxo` policy, which minimises change and
+   * keeps us byte-aligned with `ord wallet send`). Set this from the UI's
+   * scanner-annotated row selection so the user can reject an asset-carrying
+   * UTXO the auto-picker would happily spend.
    */
   readonly selectedFundingUtxo = signal<TxnOutput | null>(null);
 
@@ -429,7 +430,7 @@ export class Cat21TransferOrchestrator {
       : undefined;
     const pick = selectedStillPresent && selectedStillPresent.value >= target
       ? selectedStillPresent
-      : pickLargestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
+      : pickSmallestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
           utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
           targetSpendSats: target,
         });
