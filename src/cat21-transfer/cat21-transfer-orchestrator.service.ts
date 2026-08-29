@@ -16,13 +16,14 @@ import {
   throwError,
 } from 'rxjs';
 
-import {
-  pickSmallestFundingUtxoThatCovers,
-  type FundingUtxo,
-} from '../cat21-fee/coin-selection.helper';
 import { CatOutpoint } from '../cat21-share/cat-outpoint';
 import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
+import { FundingRecommendationService } from '../cat21-fee/funding-recommendation.service';
+import {
+  AnnotatedFundingUtxo,
+  FundingRecommendation,
+} from '../cat21-fee/funding-safety';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
 import { Network, toScureNetwork } from '../network';
@@ -107,6 +108,7 @@ export class Cat21TransferOrchestrator {
   private wallet = inject(WalletService);
   private cat21 = inject(Cat21Service);
   private network = inject(bitcoinNetwork);
+  private fundingRec = inject(FundingRecommendationService);
 
   // --- Writable inputs ----------------------------------------------------
 
@@ -120,12 +122,14 @@ export class Cat21TransferOrchestrator {
   readonly feeRate = signal<number | null>(null);
 
   /**
-   * User's explicit funding-UTXO pick from the picker. When null the
-   * orchestrator auto-picks the best-fit covering UTXO (the smallest that
-   * covers — ord's `select_cardinal_utxo` policy, which minimises change and
-   * keeps us byte-aligned with `ord wallet send`). Set this from the UI's
-   * scanner-annotated row selection so the user can reject an asset-carrying
-   * UTXO the auto-picker would happily spend.
+   * User's explicit funding-UTXO pick from the picker (expert mode). When
+   * null the orchestrator uses the SAFE auto-recommendation
+   * (`fundingRecommendation$`): a content-clean best-fit covering UTXO when
+   * one exists (`status: 'auto'`, invisible default), otherwise no auto-pick
+   * (`status: 'expert-required'` — the UI must surface the picker so the user
+   * consciously spends an asset-carrying coin). Setting this here is the
+   * expert-mode override: the user's pick is honoured even if it carries
+   * assets, because they chose it deliberately.
    */
   readonly selectedFundingUtxo = signal<TxnOutput | null>(null);
 
@@ -228,13 +232,42 @@ export class Cat21TransferOrchestrator {
   readonly recommendedFees$: Observable<RecommendedFees> = this.cat21.recommendedFees$;
 
   /**
+   * The funding target that the coin-selection safety check must cover. A
+   * transfer preserves the cat UTXO (output 0 = `cat.value`), so the funding
+   * pays ONLY the miner fee; the target is a generous ~200 vB fee ceiling (the
+   * two-pass simulation tightens the real fee later). Null while no fee rate is
+   * set, which makes the recommendation `insufficient` until the user picks a
+   * rate.
+   */
+  private readonly fundingTarget$: Observable<number | null> = this.feeRateSubject.pipe(
+    map((rate) => (rate && rate > 0 ? Math.ceil(rate * 200) : null)),
+  );
+
+  /**
+   * SAFE-by-default coin-selection recommendation for the transfer's funding
+   * (shared brain, identical across mint / transfer / offer / inscribe). Emits
+   * `auto` (a content-clean coin covers → auto-selected, no picker needed),
+   * `expert-required` (only asset-bearing coins cover → the UI must surface the
+   * picker with the recommended coin pre-highlighted), `scanning`, or
+   * `insufficient`. The UI branches on `.status` to decide whether to show the
+   * picker; the invisible default is `auto`.
+   */
+  readonly fundingRecommendation$: Observable<
+    FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>
+  > = this.fundingRec
+    .recommend<TxnOutput>(this.fundingUtxos$, this.fundingTarget$)
+    .pipe(shareReplay({ bufferSize: 1, refCount: true }));
+
+  /**
    * Best-funding-UTXO + two-pass-fee simulation for the current
-   * (cat, fundingUtxos, recipient, feeRate) tuple. Re-emits when any
-   * of those change. `insufficient: true` when no funding UTXO covers
-   * `postage + fee`.
+   * (cat, funding recommendation, recipient, feeRate) tuple. Re-emits when any
+   * of those change. `insufficient: true` when no funding UTXO covers the fee.
+   * The funding coin comes from the user's expert-mode pick when set, else the
+   * SAFE auto-recommendation (only when `status: 'auto'`) — never a
+   * content-unaware value-only pick.
    */
   readonly simulation$: Observable<TransferSimulationOutcome> = combineLatest([
-    this.fundingUtxos$,
+    this.fundingRecommendation$,
     this.wallet.connectedWallet$.pipe(startWith(null as WalletInfo | null)),
     this.catUtxoSubject,
     this.feeRateSubject,
@@ -244,8 +277,8 @@ export class Cat21TransferOrchestrator {
     // computeSimulation reads the recipient from its signal (set synchronously
     // in setRecipientAddress before the subject emits, so it's current here);
     // the recipient source is present to RE-FIRE the stream on recipient change.
-    map(([fundingUtxos, wallet, cat, feeRate, selected]) =>
-      this.computeSimulation(fundingUtxos, wallet, cat, feeRate, selected),
+    map(([recommendation, wallet, cat, feeRate, selected]) =>
+      this.computeSimulation(recommendation, wallet, cat, feeRate, selected),
     ),
     shareReplay({ bufferSize: 1, refCount: true }),
   );
@@ -306,12 +339,11 @@ export class Cat21TransferOrchestrator {
     let simulationOutcome: TransferSimulationOutcome;
     try {
       simulationOutcome = this.computeSimulation(
-        // Latest fundingUtxos value (one-shot read via take(1) on a
-        // shared replay is the right shape, but we want a sync value
-        // here. The simulation stream already pre-computes — reuse it
-        // by re-running the calc against a sync snapshot of the
-        // funding UTXOs).
-        this.lastFundingUtxosSnapshot,
+        // Sync snapshot of the safe funding recommendation (the async scan has
+        // resolved by the time Transfer is clickable — the UI gates the button
+        // on a present simulation). Re-running the calc here guarantees the
+        // broadcast uses the exact coin the preview showed.
+        this.lastRecommendationSnapshot,
         wallet,
         cat,
         feeRate,
@@ -384,15 +416,19 @@ export class Cat21TransferOrchestrator {
   // --- Internals ----------------------------------------------------------
 
   /**
-   * Latest snapshot of the funding UTXO list maintained by the
-   * `fundingUtxos$` subscription. Lets `transfer()` synchronously
-   * re-compute the simulation against the most recent UTXO set
-   * without juggling RxJS take(1).
+   * Latest snapshot of the safe funding recommendation maintained by the
+   * `fundingRecommendation$` subscription. Lets `transfer()` synchronously
+   * re-compute the simulation against the most recent recommendation (the
+   * clean auto-pick + full candidate list) without juggling RxJS take(1).
    */
-  private lastFundingUtxosSnapshot: TxnOutput[] = [];
+  private lastRecommendationSnapshot: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
+    status: 'insufficient',
+    recommended: null,
+    candidates: [],
+  };
 
-  private readonly fundingUtxosSnapshotSub = this.fundingUtxos$.subscribe((u) => {
-    this.lastFundingUtxosSnapshot = u;
+  private readonly recommendationSnapshotSub = this.fundingRecommendation$.subscribe((r) => {
+    this.lastRecommendationSnapshot = r;
   });
 
   private resetFormFields(): void {
@@ -407,13 +443,13 @@ export class Cat21TransferOrchestrator {
   }
 
   private computeSimulation(
-    fundingUtxos: TxnOutput[],
+    recommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>,
     wallet: WalletInfo | null,
     cat: Cat21Holding | null,
     feeRate: number | null,
     selected: TxnOutput | null = null,
   ): TransferSimulationOutcome {
-    if (!wallet || !cat || !feeRate || fundingUtxos.length === 0) {
+    if (!wallet || !cat || !feeRate) {
       return { simulation: null, insufficient: false };
     }
     // GOLDEN RULE: the cat UTXO is preserved (output 0 = cat.value, funded by
@@ -421,21 +457,25 @@ export class Cat21TransferOrchestrator {
     // Use a generous fee over-estimate in the pick stage; the two-pass
     // simulation below tightens it.
     const target = Math.ceil(feeRate * 200); // ~200 vB ceiling for transfer
-    // User's explicit pick wins when it's still in the funding list
-    // AND covers the target. Otherwise fall back to auto-pick (largest
-    // covering UTXO). This lets the picker UI reject asset-carrying
-    // rows the auto-picker would happily spend.
+    // Expert-mode override: the user's explicit pick wins when it still covers
+    // the target, even if it carries assets (they chose it deliberately).
+    // Otherwise use the SAFE auto-recommendation — but ONLY when a content-clean
+    // coin covers (`status: 'auto'`). When only asset coins cover
+    // (`expert-required`) or a scan is still resolving (`scanning`), there is no
+    // safe auto-pick: the simulation stays null and the UI surfaces the picker
+    // (via `fundingRecommendation$`). This is the "never auto-spend a valuable
+    // coin" guarantee, enforced at the orchestrator, shared by every flow.
     const selectedStillPresent = selected
-      ? fundingUtxos.find((u) => u.txid === selected.txid && u.vout === selected.vout)
+      ? recommendation.candidates.find((u) => u.txid === selected.txid && u.vout === selected.vout)
       : undefined;
-    const pick = selectedStillPresent && selectedStillPresent.value >= target
-      ? selectedStillPresent
-      : pickSmallestFundingUtxoThatCovers<TxnOutput & FundingUtxo>({
-          utxos: fundingUtxos as ReadonlyArray<TxnOutput & FundingUtxo>,
-          targetSpendSats: target,
-        });
+    const pick: TxnOutput | null =
+      selectedStillPresent && selectedStillPresent.value >= target
+        ? selectedStillPresent
+        : recommendation.status === 'auto'
+          ? recommendation.recommended
+          : null;
     if (!pick) {
-      return { simulation: null, insufficient: true };
+      return { simulation: null, insufficient: recommendation.status === 'insufficient' };
     }
 
     try {

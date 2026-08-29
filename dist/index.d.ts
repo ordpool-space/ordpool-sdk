@@ -3269,6 +3269,7 @@ declare class Cat21TransferOrchestrator {
     private wallet;
     private cat21;
     private network;
+    private fundingRec;
     /** Which cat the user picked from their gallery. */
     readonly catUtxo: _angular_core.WritableSignal<Cat21Holding>;
     /** Where the cat should go after the transfer. */
@@ -3276,12 +3277,14 @@ declare class Cat21TransferOrchestrator {
     /** sat/vB from the fee picker or manual input. */
     readonly feeRate: _angular_core.WritableSignal<number>;
     /**
-     * User's explicit funding-UTXO pick from the picker. When null the
-     * orchestrator auto-picks the best-fit covering UTXO (the smallest that
-     * covers — ord's `select_cardinal_utxo` policy, which minimises change and
-     * keeps us byte-aligned with `ord wallet send`). Set this from the UI's
-     * scanner-annotated row selection so the user can reject an asset-carrying
-     * UTXO the auto-picker would happily spend.
+     * User's explicit funding-UTXO pick from the picker (expert mode). When
+     * null the orchestrator uses the SAFE auto-recommendation
+     * (`fundingRecommendation$`): a content-clean best-fit covering UTXO when
+     * one exists (`status: 'auto'`, invisible default), otherwise no auto-pick
+     * (`status: 'expert-required'` — the UI must surface the picker so the user
+     * consciously spends an asset-carrying coin). Setting this here is the
+     * expert-mode override: the user's pick is honoured even if it carries
+     * assets, because they chose it deliberately.
      */
     readonly selectedFundingUtxo: _angular_core.WritableSignal<TxnOutput>;
     private lastWalletAddress;
@@ -3321,10 +3324,31 @@ declare class Cat21TransferOrchestrator {
      */
     readonly recommendedFees$: Observable<RecommendedFees>;
     /**
+     * The funding target that the coin-selection safety check must cover. A
+     * transfer preserves the cat UTXO (output 0 = `cat.value`), so the funding
+     * pays ONLY the miner fee; the target is a generous ~200 vB fee ceiling (the
+     * two-pass simulation tightens the real fee later). Null while no fee rate is
+     * set, which makes the recommendation `insufficient` until the user picks a
+     * rate.
+     */
+    private readonly fundingTarget$;
+    /**
+     * SAFE-by-default coin-selection recommendation for the transfer's funding
+     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
+     * `auto` (a content-clean coin covers → auto-selected, no picker needed),
+     * `expert-required` (only asset-bearing coins cover → the UI must surface the
+     * picker with the recommended coin pre-highlighted), `scanning`, or
+     * `insufficient`. The UI branches on `.status` to decide whether to show the
+     * picker; the invisible default is `auto`.
+     */
+    readonly fundingRecommendation$: Observable<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>;
+    /**
      * Best-funding-UTXO + two-pass-fee simulation for the current
-     * (cat, fundingUtxos, recipient, feeRate) tuple. Re-emits when any
-     * of those change. `insufficient: true` when no funding UTXO covers
-     * `postage + fee`.
+     * (cat, funding recommendation, recipient, feeRate) tuple. Re-emits when any
+     * of those change. `insufficient: true` when no funding UTXO covers the fee.
+     * The funding coin comes from the user's expert-mode pick when set, else the
+     * SAFE auto-recommendation (only when `status: 'auto'`) — never a
+     * content-unaware value-only pick.
      */
     readonly simulation$: Observable<TransferSimulationOutcome>;
     setCatUtxo(cat: Cat21Holding | null): void;
@@ -3356,13 +3380,13 @@ declare class Cat21TransferOrchestrator {
      */
     reset(): void;
     /**
-     * Latest snapshot of the funding UTXO list maintained by the
-     * `fundingUtxos$` subscription. Lets `transfer()` synchronously
-     * re-compute the simulation against the most recent UTXO set
-     * without juggling RxJS take(1).
+     * Latest snapshot of the safe funding recommendation maintained by the
+     * `fundingRecommendation$` subscription. Lets `transfer()` synchronously
+     * re-compute the simulation against the most recent recommendation (the
+     * clean auto-pick + full candidate list) without juggling RxJS take(1).
      */
-    private lastFundingUtxosSnapshot;
-    private readonly fundingUtxosSnapshotSub;
+    private lastRecommendationSnapshot;
+    private readonly recommendationSnapshotSub;
     private resetFormFields;
     private computeSimulation;
     /**
