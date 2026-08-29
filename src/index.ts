@@ -55,6 +55,7 @@ export * from './cat21-fee/dummy-keypair';
 export * from './cat21-fee/min-relay-fee';
 export * from './cat21-fee/ord-coin-select';
 export * from './cat21-fee/funding-safety';
+export * from './cat21-fee/funding-recommendation.service';
 
 // --- cat21 offer (ord-style buyer-initiated PSBT builder + seller-side validator) ---
 export * from './cat21-offer/cat21-offer.helper';
