@@ -147,3 +147,97 @@ export function estimateFeeSats(
 ): number {
   return Math.ceil(estimateTaprootVbytes(numInputs, outputScriptLengths) * feeRatePerVb);
 }
+
+/** Result of ord-parity coin selection for a single-outgoing (cat) send. */
+export interface OrdParityFundingResult {
+  /** Cardinal funding UTXOs to add, in ord's selection order. */
+  fundingInputs: CardinalUtxoCandidate[];
+  /** Final output-0 (the cat/inscription) value in sats. */
+  outputSats: number;
+  /** Change output value in sats; 0 when no change output is emitted. */
+  changeSats: number;
+  /** Miner fee in sats (ord's `estimate_fee` on the final input/output set). */
+  feeSats: number;
+}
+
+/**
+ * ord-parity coin selection + fee for a single outgoing (cat/inscription)
+ * output at an exact target postage. A faithful port of ord's
+ * `build_transaction` coin-selection pipeline for `Target::ExactPostage`:
+ * `add_value` (deficit loop, best-fit cardinals) → `strip_value` (trim the
+ * outgoing back to the target, spilling the excess to change) → `deduct_fee`
+ * (subtract the fee from the last output).
+ *
+ * Given the same available `cardinalUtxos`, this yields the same input set,
+ * output values, and fee ord would — so a builder fed these produces a tx
+ * byte-identical to `ord wallet send --postage <target>` except `nLockTime=21`
+ * and the change address (the caller's own). Returns `NotEnoughCardinalUtxos`
+ * when the wallet can't cover target + fee.
+ *
+ * `outgoingScriptLen` / `changeScriptLen` are scriptPubKey byte lengths
+ * (P2TR 34, P2WPKH 22, P2PKH 25, P2SH 23); `changeDustSats` is the change
+ * address's dust floor.
+ */
+export function selectOrdParityFunding(args: {
+  outgoingValueSats: number;
+  targetPostageSats: number;
+  feeRatePerVb: number;
+  cardinalUtxos: ReadonlyArray<CardinalUtxoCandidate>;
+  outgoingScriptLen: number;
+  changeScriptLen: number;
+  changeDustSats: number;
+}): OrdParityFundingResult | { error: 'NotEnoughCardinalUtxos' } {
+  const { targetPostageSats, feeRatePerVb, outgoingScriptLen, changeScriptLen, changeDustSats } = args;
+  const feeFor = (inputs: number, outLens: number[]): number =>
+    estimateFeeSats(inputs, outLens, feeRatePerVb);
+  // ord's `fee_rate.fee(ADDITIONAL_INPUT_VBYTES)` — the incremental fee ord
+  // budgets per extra input while covering a deficit.
+  const additionalInputFee = Math.ceil(ORD_ADDITIONAL_INPUT_VBYTES * feeRatePerVb);
+  const additionalOutputFee = Math.ceil(ORD_ADDITIONAL_OUTPUT_VBYTES * feeRatePerVb);
+
+  let pool = [...args.cardinalUtxos];
+  const selected: CardinalUtxoCandidate[] = [];
+  let outgoing = args.outgoingValueSats;
+  const numInputs = (): number => 1 + selected.length;
+
+  // add_value: cover (target + fee) from the outgoing value, pulling best-fit
+  // cardinals as needed. During the loop the output set is just [outgoing].
+  let deficit = targetPostageSats + feeFor(numInputs(), [outgoingScriptLen]) - outgoing;
+  while (deficit > 0) {
+    const needed = deficit + additionalInputFee;
+    const pick = selectCardinalUtxo(pool, needed, false);
+    if (!pick) return { error: 'NotEnoughCardinalUtxos' };
+    const benefit = pick.value - additionalInputFee;
+    if (benefit <= 0) return { error: 'NotEnoughCardinalUtxos' };
+    pool = pool.filter((u) => !(u.txid === pick.txid && u.vout === pick.vout));
+    selected.push(pick);
+    outgoing += pick.value;
+    deficit = benefit > deficit ? 0 : deficit - benefit;
+  }
+
+  // strip_value (ExactPostage: max = target = targetPostageSats): if the
+  // outgoing exceeds the target with room for a non-dust change output that
+  // pays its own marginal fee, trim it back and spill the excess to change.
+  const inputs = numInputs();
+  const excess = outgoing - feeFor(inputs, [outgoingScriptLen]);
+  let outputSats = outgoing;
+  let changeSats = 0;
+  if (excess > targetPostageSats && outgoing - targetPostageSats > changeDustSats + additionalOutputFee) {
+    outputSats = targetPostageSats;
+    changeSats = outgoing - targetPostageSats;
+  }
+
+  // deduct_fee: fee on the FINAL input/output set, subtracted from the last
+  // output (change when present, else the outgoing).
+  const outLens = changeSats > 0 ? [outgoingScriptLen, changeScriptLen] : [outgoingScriptLen];
+  const feeSats = feeFor(inputs, outLens);
+  if (changeSats > 0) {
+    changeSats -= feeSats;
+    if (changeSats < 0) return { error: 'NotEnoughCardinalUtxos' };
+  } else {
+    outputSats -= feeSats;
+    if (outputSats < 0) return { error: 'NotEnoughCardinalUtxos' };
+  }
+
+  return { fundingInputs: selected, outputSats, changeSats, feeSats };
+}

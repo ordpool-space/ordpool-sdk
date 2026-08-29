@@ -6137,6 +6137,78 @@ function estimateTaprootVbytes(numInputs, outputScriptLengths) {
 function estimateFeeSats(numInputs, outputScriptLengths, feeRatePerVb) {
     return Math.ceil(estimateTaprootVbytes(numInputs, outputScriptLengths) * feeRatePerVb);
 }
+/**
+ * ord-parity coin selection + fee for a single outgoing (cat/inscription)
+ * output at an exact target postage. A faithful port of ord's
+ * `build_transaction` coin-selection pipeline for `Target::ExactPostage`:
+ * `add_value` (deficit loop, best-fit cardinals) → `strip_value` (trim the
+ * outgoing back to the target, spilling the excess to change) → `deduct_fee`
+ * (subtract the fee from the last output).
+ *
+ * Given the same available `cardinalUtxos`, this yields the same input set,
+ * output values, and fee ord would — so a builder fed these produces a tx
+ * byte-identical to `ord wallet send --postage <target>` except `nLockTime=21`
+ * and the change address (the caller's own). Returns `NotEnoughCardinalUtxos`
+ * when the wallet can't cover target + fee.
+ *
+ * `outgoingScriptLen` / `changeScriptLen` are scriptPubKey byte lengths
+ * (P2TR 34, P2WPKH 22, P2PKH 25, P2SH 23); `changeDustSats` is the change
+ * address's dust floor.
+ */
+function selectOrdParityFunding(args) {
+    const { targetPostageSats, feeRatePerVb, outgoingScriptLen, changeScriptLen, changeDustSats } = args;
+    const feeFor = (inputs, outLens) => estimateFeeSats(inputs, outLens, feeRatePerVb);
+    // ord's `fee_rate.fee(ADDITIONAL_INPUT_VBYTES)` — the incremental fee ord
+    // budgets per extra input while covering a deficit.
+    const additionalInputFee = Math.ceil(ORD_ADDITIONAL_INPUT_VBYTES * feeRatePerVb);
+    const additionalOutputFee = Math.ceil(ORD_ADDITIONAL_OUTPUT_VBYTES * feeRatePerVb);
+    let pool = [...args.cardinalUtxos];
+    const selected = [];
+    let outgoing = args.outgoingValueSats;
+    const numInputs = () => 1 + selected.length;
+    // add_value: cover (target + fee) from the outgoing value, pulling best-fit
+    // cardinals as needed. During the loop the output set is just [outgoing].
+    let deficit = targetPostageSats + feeFor(numInputs(), [outgoingScriptLen]) - outgoing;
+    while (deficit > 0) {
+        const needed = deficit + additionalInputFee;
+        const pick = selectCardinalUtxo(pool, needed, false);
+        if (!pick)
+            return { error: 'NotEnoughCardinalUtxos' };
+        const benefit = pick.value - additionalInputFee;
+        if (benefit <= 0)
+            return { error: 'NotEnoughCardinalUtxos' };
+        pool = pool.filter((u) => !(u.txid === pick.txid && u.vout === pick.vout));
+        selected.push(pick);
+        outgoing += pick.value;
+        deficit = benefit > deficit ? 0 : deficit - benefit;
+    }
+    // strip_value (ExactPostage: max = target = targetPostageSats): if the
+    // outgoing exceeds the target with room for a non-dust change output that
+    // pays its own marginal fee, trim it back and spill the excess to change.
+    const inputs = numInputs();
+    const excess = outgoing - feeFor(inputs, [outgoingScriptLen]);
+    let outputSats = outgoing;
+    let changeSats = 0;
+    if (excess > targetPostageSats && outgoing - targetPostageSats > changeDustSats + additionalOutputFee) {
+        outputSats = targetPostageSats;
+        changeSats = outgoing - targetPostageSats;
+    }
+    // deduct_fee: fee on the FINAL input/output set, subtracted from the last
+    // output (change when present, else the outgoing).
+    const outLens = changeSats > 0 ? [outgoingScriptLen, changeScriptLen] : [outgoingScriptLen];
+    const feeSats = feeFor(inputs, outLens);
+    if (changeSats > 0) {
+        changeSats -= feeSats;
+        if (changeSats < 0)
+            return { error: 'NotEnoughCardinalUtxos' };
+    }
+    else {
+        outputSats -= feeSats;
+        if (outputSats < 0)
+            return { error: 'NotEnoughCardinalUtxos' };
+    }
+    return { fundingInputs: selected, outputSats, changeSats, feeSats };
+}
 
 /**
  * Builds the buyer-initiated CAT-21 offer PSBT (ord-style,
@@ -12017,5 +12089,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectOrdParityFunding, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map

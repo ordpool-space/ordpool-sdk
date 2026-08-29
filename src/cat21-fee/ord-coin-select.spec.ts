@@ -5,6 +5,7 @@ import {
   estimateFeeSats,
   estimateTaprootVbytes,
   selectCardinalUtxo,
+  selectOrdParityFunding,
 } from './ord-coin-select';
 
 /**
@@ -74,5 +75,58 @@ describe('estimateTaprootVbytes / estimateFeeSats — ord taproot fee model', ()
     expect(estimateFeeSats(1, [34, 34], 10)).toBe(1_540); // 154 * 10
     expect(estimateFeeSats(1, [34], 1)).toBe(111);
     expect(estimateFeeSats(1, [34], 1.5)).toBe(Math.ceil(111 * 1.5)); // rounds up
+  });
+});
+
+describe('selectOrdParityFunding — ord build_transaction (ExactPostage) parity', () => {
+  const P2TR = 34;
+
+  it('self-funded (1M cat, target 66k, rate 17.3) matches ord build_transaction_with_custom_postage', () => {
+    // ord's own vector: 1 input of 1_000_000, ExactPostage(66_000), fee_rate 17.3
+    // -> outputs [66_000, 1_000_000 - 66_000 - fee]. fee = ceil(154 vB * 17.3).
+    const r = selectOrdParityFunding({
+      outgoingValueSats: 1_000_000,
+      targetPostageSats: 66_000,
+      feeRatePerVb: 17.3,
+      cardinalUtxos: [],
+      outgoingScriptLen: P2TR,
+      changeScriptLen: P2TR,
+      changeDustSats: 330,
+    });
+    if ('error' in r) throw new Error(r.error);
+    expect(r.fundingInputs).toEqual([]); // the cat self-funds; no cardinal added
+    expect(r.outputSats).toBe(66_000);
+    expect(r.feeSats).toBe(2_665); // ceil(154 * 17.3)
+    expect(r.changeSats).toBe(1_000_000 - 66_000 - 2_665);
+  });
+
+  it('preserve-transfer (546 cat + one 50k cardinal, rate 1) picks the cardinal + ord fee', () => {
+    const r = selectOrdParityFunding({
+      outgoingValueSats: 546,
+      targetPostageSats: 546,
+      feeRatePerVb: 1,
+      cardinalUtxos: [{ txid: 'aa'.repeat(32), vout: 0, value: 50_000 }],
+      outgoingScriptLen: P2TR,
+      changeScriptLen: P2TR,
+      changeDustSats: 330,
+    });
+    if ('error' in r) throw new Error(r.error);
+    expect(r.fundingInputs.map((u) => u.value)).toEqual([50_000]);
+    expect(r.outputSats).toBe(546);
+    expect(r.feeSats).toBe(212); // 2-in / 2-out taproot at 1 sat/vB
+    expect(r.changeSats).toBe(50_000 - 212);
+  });
+
+  it('errors NotEnoughCardinalUtxos when funding cannot cover target + fee', () => {
+    const r = selectOrdParityFunding({
+      outgoingValueSats: 546,
+      targetPostageSats: 10_000,
+      feeRatePerVb: 1,
+      cardinalUtxos: [{ txid: 'aa'.repeat(32), vout: 0, value: 100 }],
+      outgoingScriptLen: P2TR,
+      changeScriptLen: P2TR,
+      changeDustSats: 330,
+    });
+    expect('error' in r).toBe(true);
   });
 });
