@@ -268,10 +268,26 @@ first sat.
 **Relation to ord:** offer + inscribe are cross-compat surfaces, byte-parity
 with ord except `nLockTime=21`; ord's `wallet offer create` also preserves the
 UTXO size (`output[0] = inscription.value`), so preserve = ord parity there.
-Transfer has no counterparty, so it is NOT bound to ord's `wallet send` (which
-resizes to a configurable postage, default 10000) — our stricter
-preserve-the-exact-UTXO rule is intended. See HQ "cat-touching txs do exactly
+Transfer has no counterparty (nobody accepts a send), so it is not *bound* to
+byte-parity — but our preserve-default is in fact very close to what ord's
+`wallet send` already does (see below). See HQ "cat-touching txs do exactly
 what ord does".
+
+### Transfer size policy vs ord `wallet send` — PRESERVE by default, NEVER grow
+
+**Precise ord behaviour** (verified in `cat21-ord/src/wallet/transaction_builder.rs`, `Target::Postage`; module doc lines 17-18; `strip_excess_postage` lines 383-413; `build_transaction` pipeline `add_value` → `strip_value` → `deduct_fee`):
+- ord's `wallet send` **PRESERVES the inscription UTXO's value up to `MAX_POSTAGE = 20_000` sats** — it only strips when `value − fee > 20_000`.
+- **Above ~20_000 it trims the output to `TARGET_POSTAGE = 10_000`** and sends the surplus to a change output.
+- The fee is paid by **added cardinal (non-inscription) UTXOs** (`add_value`); ord **errors `NotEnoughCardinalUtxos` ("please add additional funds")** when the wallet has none. Only a > 20k inscription self-funds the fee from its own trimmed surplus.
+- The famous **`10_000` is ord's *inscribe*-time postage** (fresh inscriptions get `TARGET_POSTAGE`) — a CREATE-time padding choice, NOT a move behaviour.
+
+So our preserve-default + require-funding transfer is **essentially ord's `wallet send` for a normal-sized cat** (≤20k: ord preserves too and requires cardinal funding — the same "you need extra money to move it"). The only divergence: a cat on a >20k UTXO — ord trims to 10k, we preserve. Ours is the stricter, cleaner rule (never touch the cat).
+
+| Policy | Output 0 | Fee from | Decision |
+|---|---|---|---|
+| **PRESERVE** (default) | = `catUtxo.value` | separate funding | **Default.** Matches ord ≤20k; stricter (never resize) above. |
+| **GROW** (pad up to a bigger postage) | > `catUtxo.value` | funding pads the output | **NO.** ord does NOT grow on *send*; the "chunky 10k so it moves again" is an inscribe/CREATE choice (= our MINT's 546). Growing on transfer mingles unrelated funding sats into the cat's UTXO for a convenience the funding-input model already covers. If we ever want chunkier cats, change the MINT postage, not transfer. |
+| **SHRINK** (trim, self-fund the fee from the cat's own surplus) | < `catUtxo.value` | the cat's own surplus (one-in-one-out) or co-funded | **Optional future param only.** If built, it must replicate ord's `Target::Postage` TransactionBuilder **byte-for-byte** (preserve ≤20k, trim >20k → 10k, cardinal selection), except `nLockTime=21` for the bonus cat — giving self-funding for chunky cats + on-chain indistinguishability from a stock-ord send. Not built yet. |
 
 **Every size test MUST stress non-546 sizes.** A 546-only parity/size test is a
 happy-path test that proves nothing about size-handling.
