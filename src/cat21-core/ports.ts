@@ -66,3 +66,13 @@ export interface BroadcastOutcome {
 export interface BroadcastPort {
   broadcast(signedTxHex: string): Promise<BroadcastOutcome>;
 }
+
+/**
+ * Signs a buy-offer's BUYER inputs (1..N) with SIGHASH_ALL WITHOUT finalizing —
+ * input 0 (the seller's cat) stays unsigned for the seller to sign at accept
+ * time. Returns the partial PSBT bytes: the bid artifact, never broadcast.
+ * Distinct from `SignPort.sign`, which finalizes into a broadcast-ready tx.
+ */
+export interface OfferCreateSignPort {
+  signBuyerInputs(psbt: Uint8Array, buyerInputIndexes: number[]): Promise<Uint8Array>;
+}

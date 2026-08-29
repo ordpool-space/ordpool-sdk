@@ -97,6 +97,7 @@ export * from './cat21-core/ports';
 export * from './cat21-core/select-funding';
 export * from './cat21-core/transfer.core';
 export * from './cat21-core/mint.core';
+export * from './cat21-core/create-offer.core';
 
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';
