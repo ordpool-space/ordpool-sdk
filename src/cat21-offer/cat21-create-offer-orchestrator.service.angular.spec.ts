@@ -84,15 +84,16 @@ const buildOrchestrator = (opts: {
       target$: Observable<number | null>,
     ) =>
       combineLatest([utxos$, target$]).pipe(
-        map(([utxos, target]) =>
-          recommendFunding(
+        map(([utxos, target]) => {
+          if (!target || target <= 0 || utxos.length === 0) return recommendFunding([], target ?? 0);
+          return recommendFunding(
             utxos.map((u) => ({
               ...u,
               bucket: assetOutpoints.has(`${u.txid}:${u.vout}`) ? ('assets' as const) : ('clean' as const),
             })),
-            target ?? 0,
-          ),
-        ),
+            target,
+          );
+        }),
       ),
   } as unknown as FundingRecommendationService;
   const injector = Injector.create({

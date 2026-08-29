@@ -6098,6 +6098,10 @@ class Cat21MintOrchestrator {
             const { finalFeeSats } = twoPassFeeSimulation({
                 simulate: (feeSats) => this.cat21.simulateTransaction(wallet.type, wallet.ordinalsAddress, selected, wallet.paymentAddress, paymentPublicKey, BigInt(feeSats)),
                 feeRatePerVbyte: feeRate,
+                // Seed pass-1 with the SAME fee budget the coin was selected against
+                // (`ceil(feeRate*200)`), not the flat 1000-sat default, so a
+                // small-but-viable clean coin isn't falsely rejected at low fee rates.
+                placeholderFeeSats: Math.ceil(feeRate * 200),
             });
             transactionFee = BigInt(finalFeeSats);
         }
@@ -6150,6 +6154,10 @@ class Cat21MintOrchestrator {
                 const { finalSimulation, finalFeeSats } = twoPassFeeSimulation({
                     simulate: (feeSats) => this.cat21.simulateTransaction(wallet.type, wallet.ordinalsAddress, utxo, wallet.paymentAddress, paymentPublicKey, BigInt(feeSats)),
                     feeRatePerVbyte: feeRate,
+                    // Seed pass-1 with a rate-scaled fee budget, not the flat 1000-sat
+                    // default, so the per-UTXO grid doesn't mis-flag a small-but-viable
+                    // coin as insufficient at low fee rates.
+                    placeholderFeeSats: Math.ceil(feeRate * 200),
                 });
                 // Normalize the DISPLAYED fee to the charged fee. finalSimulation is
                 // built with the provisional (pass-1-vsize) fee, which equals
@@ -6951,9 +6959,11 @@ class Cat21CreateOfferOrchestrator {
      * `insufficient`. The UI branches on `.status`; the invisible default is
      * `auto`.
      */
-    buyerFundingRecommendation$ = this.fundingRec
-        .recommend(this.buyerFundingUtxos$, this.fundingTarget$)
-        .pipe(shareReplay({ bufferSize: 1, refCount: true }));
+    buyerFundingRecommendation$ = this.fundingRec.recommend(this.buyerFundingUtxos$, this.fundingTarget$).pipe(catchError(() => of({
+        status: 'insufficient',
+        recommended: null,
+        candidates: [],
+    })), shareReplay({ bufferSize: 1, refCount: true }));
     /**
      * Two-pass fee simulation against the SAFE recommended buyer UTXO.
      * Re-emits when target / price / funding recommendation / feeRate change. The
@@ -7046,7 +7056,18 @@ class Cat21CreateOfferOrchestrator {
             return throwError(() => new Error('No fee rate set'));
         const sim = this.computeSimulation(this.lastRecommendationSnapshot, wallet, priceSats, feeRate, this.selectedFundingUtxo());
         if (sim.insufficient || !sim.simulation) {
-            const msg = 'Insufficient funds for buy-offer at the current price + fee rate';
+            // Distinguish a genuine shortfall from "there's money, but only on a
+            // valuable coin" (expert-required) or "scans still resolving".
+            let msg;
+            if (sim.insufficient) {
+                msg = 'Insufficient funds for buy-offer at the current price + fee rate';
+            }
+            else if (this.lastRecommendationSnapshot.status === 'expert-required') {
+                msg = 'Select a funding UTXO (the available coins carry assets)';
+            }
+            else {
+                msg = 'Still checking your coins for assets, one moment';
+            }
             this.errorMessage.set(msg);
             this.state.set('error');
             return throwError(() => new Error(msg));
@@ -7172,6 +7193,11 @@ class Cat21CreateOfferOrchestrator {
             const { vsize, finalFeeSats } = twoPassFeeSimulation({
                 simulate: (feeSats) => this.simulateOffer(wallet, target, sellerAddress, priceSats, buyerReceive, pick, feeSats),
                 feeRatePerVbyte: feeRate,
+                // Seed pass-1 with the SAME fee budget the coin was selected against
+                // (the ~220 vB ceiling), not the flat 1000-sat default, so the picked
+                // coin (which covers price + cat value + this fee) always builds in
+                // pass-1 instead of being falsely rejected at low fee rates.
+                placeholderFeeSats: Math.ceil(feeRate * 220),
             });
             // Buyer funds priceSats + cat value (output 0, size V) + fee. The
             // pre-pick used a 220 vB fee ceiling; twoPassFeeSimulation may return a
@@ -7876,9 +7902,11 @@ class Cat21TransferOrchestrator {
      * `insufficient`. The UI branches on `.status` to decide whether to show the
      * picker; the invisible default is `auto`.
      */
-    fundingRecommendation$ = this.fundingRec
-        .recommend(this.fundingUtxos$, this.fundingTarget$)
-        .pipe(shareReplay({ bufferSize: 1, refCount: true }));
+    fundingRecommendation$ = this.fundingRec.recommend(this.fundingUtxos$, this.fundingTarget$).pipe(catchError(() => of({
+        status: 'insufficient',
+        recommended: null,
+        candidates: [],
+    })), shareReplay({ bufferSize: 1, refCount: true }));
     /**
      * Best-funding-UTXO + two-pass-fee simulation for the current
      * (cat, funding recommendation, recipient, feeRate) tuple. Re-emits when any
@@ -7965,7 +7993,19 @@ class Cat21TransferOrchestrator {
             return throwError(() => err);
         }
         if (simulationOutcome.insufficient || !simulationOutcome.simulation) {
-            const msg = 'Insufficient funds for transfer at the current fee rate';
+            // Distinguish a genuine shortfall from "there's money, but only on a
+            // valuable coin" (expert-required) or "scans still resolving" — a flat
+            // "insufficient funds" would misreport the last two.
+            let msg;
+            if (simulationOutcome.insufficient) {
+                msg = 'Insufficient funds for transfer at the current fee rate';
+            }
+            else if (this.lastRecommendationSnapshot.status === 'expert-required') {
+                msg = 'Select a funding UTXO (the available coins carry assets)';
+            }
+            else {
+                msg = 'Still checking your coins for assets, one moment';
+            }
             this.errorMessage.set(msg);
             this.state.set('error');
             return throwError(() => new Error(msg));
@@ -8070,6 +8110,11 @@ class Cat21TransferOrchestrator {
             const { vsize, finalFeeSats } = twoPassFeeSimulation({
                 simulate: (feeSats) => this.simulateTransfer(wallet, cat, pick, feeSats),
                 feeRatePerVbyte: feeRate,
+                // Seed pass-1 with the SAME fee budget the coin was selected against
+                // (`target`), not the flat 1000-sat default. The picked coin covers
+                // `target` by construction, so pass-1 always builds; a flat 1000 would
+                // falsely reject a small-but-viable clean coin at low fee rates.
+                placeholderFeeSats: target,
             });
             // GOLDEN RULE: the cat UTXO is preserved (output 0 = cat.value), so the
             // funding pays ONLY the fee — change = funding - fee (the cat's sats all

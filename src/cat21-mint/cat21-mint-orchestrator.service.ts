@@ -326,6 +326,10 @@ export class Cat21MintOrchestrator {
           BigInt(feeSats),
         ),
         feeRatePerVbyte: feeRate,
+        // Seed pass-1 with the SAME fee budget the coin was selected against
+        // (`ceil(feeRate*200)`), not the flat 1000-sat default, so a
+        // small-but-viable clean coin isn't falsely rejected at low fee rates.
+        placeholderFeeSats: Math.ceil(feeRate * 200),
       });
       transactionFee = BigInt(finalFeeSats);
     } catch (err: unknown) {
@@ -404,6 +408,10 @@ export class Cat21MintOrchestrator {
             BigInt(feeSats),
           ),
           feeRatePerVbyte: feeRate,
+          // Seed pass-1 with a rate-scaled fee budget, not the flat 1000-sat
+          // default, so the per-UTXO grid doesn't mis-flag a small-but-viable
+          // coin as insufficient at low fee rates.
+          placeholderFeeSats: Math.ceil(feeRate * 200),
         });
         // Normalize the DISPLAYED fee to the charged fee. finalSimulation is
         // built with the provisional (pass-1-vsize) fee, which equals

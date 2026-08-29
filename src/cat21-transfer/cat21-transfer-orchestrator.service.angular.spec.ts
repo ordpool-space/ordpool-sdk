@@ -73,12 +73,15 @@ const buildOrchestrator = (): {
       target$: Observable<number | null>,
     ) =>
       combineLatest([utxos$, target$]).pipe(
-        map(([utxos, target]) =>
-          recommendFunding(
+        map(([utxos, target]) => {
+          // Match the real service's guard: null/≤0 target or empty list yields
+          // `insufficient`, never a 0-target pick.
+          if (!target || target <= 0 || utxos.length === 0) return recommendFunding([], target ?? 0);
+          return recommendFunding(
             utxos.map((u) => ({ ...u, bucket: 'clean' as const })),
-            target ?? 0,
-          ),
-        ),
+            target,
+          );
+        }),
       ),
   } as unknown as FundingRecommendationService;
 
@@ -315,15 +318,16 @@ describe('Cat21TransferOrchestrator', () => {
           target$: Observable<number | null>,
         ) =>
           combineLatest([utxos$, target$]).pipe(
-            map(([utxos, target]) =>
-              recommendFunding(
+            map(([utxos, target]) => {
+              if (!target || target <= 0 || utxos.length === 0) return recommendFunding([], target ?? 0);
+              return recommendFunding(
                 utxos.map((u) => ({
                   ...u,
                   bucket: assetOutpoints.has(op(u)) ? ('assets' as const) : ('clean' as const),
                 })),
-                target ?? 0,
-              ),
-            ),
+                target,
+              );
+            }),
           ),
       } as unknown as FundingRecommendationService;
       const injector = Injector.create({
@@ -411,6 +415,26 @@ describe('Cat21TransferOrchestrator', () => {
 
       const outcome = await firstValueFrom(orchestrator.simulation$);
       expect(outcome.simulation?.fundingUtxo.txid).toBe(cleanLoose.txid);
+    });
+
+    it('low fee rate + small clean coin: auto-picks and simulates (no false insufficient)', async () => {
+      // Regression: the two-pass fee sim's placeholder was a flat 1000 sats, so a
+      // small-but-viable clean coin (600 sats at rate 2, target ceil(2*200)=400)
+      // was falsely rejected in pass-1 and the auto-default reported insufficient.
+      // The placeholder now matches the selection target, so pass-1 builds.
+      const smallClean = utxo({ txid: 'e'.repeat(64), vout: 0, value: 600 });
+      const { orchestrator, walletSubject, cat21 } = buildWithAssets(new Set());
+      const w = wallet({ paymentAddress: payAddr });
+      cat21.getUtxos.mockReturnValue(of([smallClean]));
+      walletSubject.next(w);
+      orchestrator.setCatUtxo(cat());
+      orchestrator.setRecipientAddress(w.ordinalsAddress);
+      orchestrator.setFeeRate(2);
+
+      const outcome = await firstValueFrom(orchestrator.simulation$);
+      expect(outcome.insufficient).toBe(false);
+      expect(outcome.simulation).not.toBeNull();
+      expect(outcome.simulation?.fundingUtxo.txid).toBe(smallClean.txid);
     });
   });
 });

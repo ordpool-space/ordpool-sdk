@@ -267,9 +267,16 @@ export class Cat21CreateOfferOrchestrator {
    */
   readonly buyerFundingRecommendation$: Observable<
     FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>
-  > = this.fundingRec
-    .recommend<TxnOutput>(this.buyerFundingUtxos$, this.fundingTarget$)
-    .pipe(shareReplay({ bufferSize: 1, refCount: true }));
+  > = this.fundingRec.recommend<TxnOutput>(this.buyerFundingUtxos$, this.fundingTarget$).pipe(
+    catchError(() =>
+      of<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>({
+        status: 'insufficient',
+        recommended: null,
+        candidates: [],
+      }),
+    ),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  );
 
   /**
    * Two-pass fee simulation against the SAFE recommended buyer UTXO.
@@ -376,7 +383,16 @@ export class Cat21CreateOfferOrchestrator {
       this.selectedFundingUtxo(),
     );
     if (sim.insufficient || !sim.simulation) {
-      const msg = 'Insufficient funds for buy-offer at the current price + fee rate';
+      // Distinguish a genuine shortfall from "there's money, but only on a
+      // valuable coin" (expert-required) or "scans still resolving".
+      let msg: string;
+      if (sim.insufficient) {
+        msg = 'Insufficient funds for buy-offer at the current price + fee rate';
+      } else if (this.lastRecommendationSnapshot.status === 'expert-required') {
+        msg = 'Select a funding UTXO (the available coins carry assets)';
+      } else {
+        msg = 'Still checking your coins for assets, one moment';
+      }
       this.errorMessage.set(msg);
       this.state.set('error');
       return throwError(() => new Error(msg));
@@ -525,6 +541,11 @@ export class Cat21CreateOfferOrchestrator {
         simulate: (feeSats) =>
           this.simulateOffer(wallet, target, sellerAddress, priceSats, buyerReceive, pick, feeSats),
         feeRatePerVbyte: feeRate,
+        // Seed pass-1 with the SAME fee budget the coin was selected against
+        // (the ~220 vB ceiling), not the flat 1000-sat default, so the picked
+        // coin (which covers price + cat value + this fee) always builds in
+        // pass-1 instead of being falsely rejected at low fee rates.
+        placeholderFeeSats: Math.ceil(feeRate * 220),
       });
       // Buyer funds priceSats + cat value (output 0, size V) + fee. The
       // pre-pick used a 220 vB fee ceiling; twoPassFeeSimulation may return a

@@ -254,9 +254,16 @@ export class Cat21TransferOrchestrator {
    */
   readonly fundingRecommendation$: Observable<
     FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>
-  > = this.fundingRec
-    .recommend<TxnOutput>(this.fundingUtxos$, this.fundingTarget$)
-    .pipe(shareReplay({ bufferSize: 1, refCount: true }));
+  > = this.fundingRec.recommend<TxnOutput>(this.fundingUtxos$, this.fundingTarget$).pipe(
+    catchError(() =>
+      of<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>({
+        status: 'insufficient',
+        recommended: null,
+        candidates: [],
+      }),
+    ),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  );
 
   /**
    * Best-funding-UTXO + two-pass-fee simulation for the current
@@ -357,7 +364,17 @@ export class Cat21TransferOrchestrator {
     }
 
     if (simulationOutcome.insufficient || !simulationOutcome.simulation) {
-      const msg = 'Insufficient funds for transfer at the current fee rate';
+      // Distinguish a genuine shortfall from "there's money, but only on a
+      // valuable coin" (expert-required) or "scans still resolving" — a flat
+      // "insufficient funds" would misreport the last two.
+      let msg: string;
+      if (simulationOutcome.insufficient) {
+        msg = 'Insufficient funds for transfer at the current fee rate';
+      } else if (this.lastRecommendationSnapshot.status === 'expert-required') {
+        msg = 'Select a funding UTXO (the available coins carry assets)';
+      } else {
+        msg = 'Still checking your coins for assets, one moment';
+      }
       this.errorMessage.set(msg);
       this.state.set('error');
       return throwError(() => new Error(msg));
@@ -482,6 +499,11 @@ export class Cat21TransferOrchestrator {
       const { vsize, finalFeeSats } = twoPassFeeSimulation({
         simulate: (feeSats) => this.simulateTransfer(wallet, cat, pick, feeSats),
         feeRatePerVbyte: feeRate,
+        // Seed pass-1 with the SAME fee budget the coin was selected against
+        // (`target`), not the flat 1000-sat default. The picked coin covers
+        // `target` by construction, so pass-1 always builds; a flat 1000 would
+        // falsely reject a small-but-viable clean coin at low fee rates.
+        placeholderFeeSats: target,
       });
       // GOLDEN RULE: the cat UTXO is preserved (output 0 = cat.value), so the
       // funding pays ONLY the fee — change = funding - fee (the cat's sats all
