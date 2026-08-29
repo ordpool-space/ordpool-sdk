@@ -6329,17 +6329,27 @@ function validateCat21BuyOfferPsbt(args) {
             return fail('buyer-input-unsigned', `input ${i} carries no signature`);
         }
     }
-    // 4. Cat output postage MUST equal CAT21_POSTAGE_SATS (546). See HARD
-    //    RULE "cat UTXO is always 546 sats" in SDK CLAUDE.md.
+    // 4. Cat output (output 0) must decode to a spendable address AND clear
+    //    that address's dust floor. Its value is DELIBERATELY NOT pinned to
+    //    546. A cat rides whatever UTXO it was minted on — any size, by any
+    //    tx, not only ours — and a stock-ord `wallet offer create` sets
+    //    output 0 to the inscription's REAL postage (ord's own test at
+    //    cat21-ord/tests/wallet/offer/create.rs inscribes 9000 sats and
+    //    asserts output[0].value == 9000). Pinning 546 here would reject
+    //    every valid ord-built offer whose cat/inscription doesn't happen to
+    //    sit on exactly 546 sats — i.e. the "buy an inscription-that-is-
+    //    also-a-cat from stock ord" flow. The value can't hurt the SELLER
+    //    either: step 6 nets the payout as `output1 - sellerInputValue`,
+    //    independent of output 0. The only seller-relevant failure is a
+    //    below-dust output 0 that makes the settlement tx un-relayable (the
+    //    seller would sign a tx that can never confirm), so that we gate —
+    //    via the real per-address dust floor, the same helper the builder
+    //    uses for the buyer's change output.
+    //
+    //    Script must also decode to a real address: without it a malicious
+    //    buyer could route output 0 to an OP_RETURN, burning the cat after
+    //    the seller signs (buyer gets nothing either, but the cat is gone).
     const catOutput = tx.getOutput(0);
-    const postageSats = Number(catOutput.amount ?? 0n);
-    if (postageSats !== CAT21_POSTAGE_SATS) {
-        return fail('wrong-postage', `${postageSats} !== ${CAT21_POSTAGE_SATS}`);
-    }
-    // 4b. Cat output script must decode to a spendable address on the
-    //     configured network. Without this check a malicious buyer could
-    //     route Output 0 to an OP_RETURN, burning the cat after the seller
-    //     signs. Buyer gets nothing either, but the cat is destroyed.
     const scureNetwork = toScureNetwork(args.network ?? Network.Mainnet);
     if (!catOutput.script) {
         return fail('cat-output-not-spendable', 'cat output has no scriptPubKey');
@@ -6350,6 +6360,17 @@ function validateCat21BuyOfferPsbt(args) {
     }
     catch {
         return fail('cat-output-not-spendable', 'cat output scriptPubKey not a real address');
+    }
+    const postageSats = Number(catOutput.amount ?? 0n);
+    let catOutputDustFloor;
+    try {
+        catOutputDustFloor = getMinimumUtxoSize(catOutputAddress);
+    }
+    catch {
+        catOutputDustFloor = CAT21_POSTAGE_SATS;
+    }
+    if (postageSats < catOutputDustFloor) {
+        return fail('wrong-postage', `cat output ${postageSats} < dust floor ${catOutputDustFloor}`);
     }
     // 4c. Marketplace-side: cat output address must match the buyer's
     //     declared receive address. Only runs when the caller supplies

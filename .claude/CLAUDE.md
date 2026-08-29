@@ -231,7 +231,14 @@ sender's change). The offer builder pays the seller `priceSats +
 sellerInput.value` and the buyer funds `postage + priceSats + fee`
 (size-independent). The accept-side validator computes net-to-seller as
 `output1 - sellerInputValue` and enforces only the price floor — never that
-the input equals 546.
+the seller input equals 546. It also does NOT pin output 0 (the cat going to
+the buyer) to 546: it accepts any value clearing that output address's dust
+floor. A stock-ord `wallet offer create` sets output 0 to the inscription's
+REAL postage (ord's own test at `cat21-ord/tests/wallet/offer/create.rs`
+inscribes 9000 sats and asserts `output[0].value == 9000`). Pinning 546 there
+would reject every valid ord-built offer for an inscription-that-is-also-a-cat
+(nLockTime=21 inscription → cat on the same sat) — breaking the "buy an
+inscription from stock ord" flow.
 
 **546 is never a DETECTION rule either.** Do NOT detect a cat by its UTXO
 size: a 546-sat UTXO is not necessarily a cat (inscriptions and rare sats are
@@ -251,7 +258,7 @@ the first 546 sats — including the cat's first sat — to output 0.
 **Where the OUTPUT convention lives** (546 is created here, never required of inputs):
 - `cat21-mint/cat21-mint.helper.ts`: mint output 0 = 546.
 - `cat21-transfer/cat21-transfer.helper.ts`: transfer output 0 = 546; input any size.
-- `cat21-offer/cat21-offer.helper.ts`: offer output 0 = 546; input any size; output 1 = `priceSats + sellerInput.value`; validator nets `output1 - sellerInputValue`.
+- `cat21-offer/cat21-offer.helper.ts`: offer output 0 = 546; input any size; output 1 = `priceSats + sellerInput.value`; validator nets `output1 - sellerInputValue` and gates output 0 on the per-address dust floor (NOT 546) so stock-ord offers with real-postage output 0 validate.
 - All builders share `CAT21_POSTAGE_SATS = 546` for the OUTPUTS they create.
 
 The 546-outputs are byte-parity with ord's `wallet offer create` / `wallet

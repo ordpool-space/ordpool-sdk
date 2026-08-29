@@ -281,10 +281,12 @@ describe('validateCat21BuyOfferPsbt', () => {
     if (!result.ok) expect(result.reason).toBe('buyer-input-unsigned');
   });
 
-  it('rejects when Output 0 postage is not exactly 546 (HARD RULE)', () => {
-    // Build a PSBT by hand with cat output at 500 sats. Inputs first,
-    // then outputs, THEN sign — scure refuses input mutations after any
-    // signature is attached.
+  it('rejects a cat output (output 0) below its address dust floor', () => {
+    // NOT a 546 pin: output 0 may be any value >= the address's dust
+    // floor. A P2WPKH output below 294 sats can't relay, so the seller
+    // would sign a settlement tx that can never confirm. Build by hand:
+    // inputs first, then outputs, THEN sign — scure refuses input
+    // mutations after a signature is attached.
     const args = makeBaseArgs();
     const tx = new btc.Transaction({ allowUnknownInputs: true, lockTime: 21 });
     tx.addInput({
@@ -301,7 +303,7 @@ describe('validateCat21BuyOfferPsbt', () => {
       witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(50_000) },
       sighashType: btc.SigHash.ALL,
     });
-    tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(500), btc.TEST_NETWORK); // wrong postage
+    tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(200), btc.TEST_NETWORK); // below P2WPKH dust (294)
     tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(21_546), btc.TEST_NETWORK);
     tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
     const result = validateCat21BuyOfferPsbt({
@@ -313,6 +315,50 @@ describe('validateCat21BuyOfferPsbt', () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.reason).toBe('wrong-postage');
+  });
+
+  it('accepts a stock-ord offer whose cat output (output 0) is NOT 546 (ord cross-compat)', () => {
+    // Mirrors ord `wallet offer create` (cat21-ord/tests/wallet/offer/
+    // create.rs): output 0 = the inscription's REAL postage (ord's test
+    // uses 9000), output 1 = amount + postage, lockTime = 0. An
+    // inscription with nLockTime=21 carries a cat on the same sat, so a
+    // stock-ord buyer's offer for it must validate here. Build by hand —
+    // the SDK builder always emits 546 at output 0, so only a hand-built
+    // tx reproduces ord's shape.
+    const catUtxoValue = 9_000; // ord: inscription.value (any size)
+    const price = 21_000;
+    const args = makeBaseArgs();
+    const tx = new btc.Transaction({ allowUnknownInputs: true, lockTime: 0 }); // ord: LockTime::ZERO
+    tx.addInput({
+      txid: args.sellerInput.txid,
+      index: args.sellerInput.vout,
+      sequence: 0xfffffffd, // ord: ENABLE_RBF_NO_LOCKTIME
+      witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(catUtxoValue) },
+      sighashType: btc.SigHash.ALL,
+    });
+    tx.addInput({
+      txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+      index: 1,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(50_000) },
+      sighashType: btc.SigHash.ALL,
+    });
+    // output 0 = real postage (9000), NOT 546; output 1 = amount + postage
+    tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(catUtxoValue), btc.TEST_NETWORK);
+    tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(price + catUtxoValue), btc.TEST_NETWORK);
+    tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+    const result = validateCat21BuyOfferPsbt({
+      psbt: tx.toPSBT(),
+      expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+      floorPriceSats: price,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+      network: Network.Testnet3,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.pricePaidSats).toBe(price); // (price + value) - value
+      expect(result.postageSats).toBe(catUtxoValue); // real postage surfaced, not 546
+    }
   });
 
   it('rejects a non-PSBT blob (magic-byte mismatch) as malformed-offer-psbt', () => {
