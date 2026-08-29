@@ -208,6 +208,72 @@ describe('buildCat21TransferPsbt', () => {
     expect(large.changeSats).toBe(48_900);
   });
 
+  describe('targetPostageSats — explicit GROW / SHRINK opt-in (default = preserve)', () => {
+    it('GROW: pads output 0 up to the target; funding covers (target - value) + fee', () => {
+      // cat 546 + funding 50_000 − output 9_000 − fee 1_100 = 40_446 change.
+      const result = buildCat21TransferPsbt(makeBaseArgs({ targetPostageSats: 9_000 }));
+      expect(btc.Transaction.fromPSBT(result.psbt).getOutput(0).amount).toBe(BigInt(9_000));
+      expect(result.catOutputSats).toBe(9_000);
+      expect(result.changeSats).toBe(40_446);
+    });
+
+    it('GROW rescues a sub-dust cat (100 sats mined out-of-band) to a relay-standard 546 output', () => {
+      // 100 cat + 50_000 funding − 546 output − 1_100 fee = 48_454 change.
+      const result = buildCat21TransferPsbt(makeBaseArgs({
+        catUtxo: { ...makeBaseArgs().catUtxo, value: 100 },
+        targetPostageSats: 546,
+      }));
+      expect(btc.Transaction.fromPSBT(result.psbt).getOutput(0).amount).toBe(BigInt(546));
+      expect(result.catOutputSats).toBe(546);
+      expect(result.changeSats).toBe(48_454);
+    });
+
+    it('SHRINK: the cat surplus self-funds the fee — one-in / two-out, NO separate funding', () => {
+      // 20_000 cat, shrink to 10_000, EMPTY funding: the freed 10_000 surplus
+      // covers the fee. 20_000 + 0 − 10_000 − 1_100 = 8_900 change.
+      const result = buildCat21TransferPsbt(makeBaseArgs({
+        catUtxo: { ...makeBaseArgs().catUtxo, value: 20_000 },
+        fundingInputs: [],
+        targetPostageSats: 10_000,
+      }));
+      const tx = btc.Transaction.fromPSBT(result.psbt);
+      expect(tx.inputsLength).toBe(1); // just the cat — no funding input
+      expect(tx.getOutput(0).amount).toBe(BigInt(10_000));
+      expect(result.catOutputSats).toBe(10_000);
+      expect(result.fundingInputTotalSats).toBe(0);
+      expect(result.changeSats).toBe(8_900);
+    });
+
+    it('omitting targetPostageSats PRESERVES (unchanged default): output 0 = catUtxo.value', () => {
+      const result = buildCat21TransferPsbt(makeBaseArgs({
+        catUtxo: { ...makeBaseArgs().catUtxo, value: 7_777 },
+      }));
+      expect(btc.Transaction.fromPSBT(result.psbt).getOutput(0).amount).toBe(BigInt(7_777));
+      expect(result.catOutputSats).toBe(7_777);
+      expect(result.changeSats).toBe(48_900); // funding − fee, independent of cat size
+    });
+
+    it('PRESERVE is exempt from the dust guard: a sub-dust cat can be preserved (no throw)', () => {
+      // No target: preserve a 100-sat cat. output 0 = 100 (sub-dust); the caller
+      // knows it needs out-of-band broadcast (or a GROW) to relay — no throw.
+      const result = buildCat21TransferPsbt(makeBaseArgs({
+        catUtxo: { ...makeBaseArgs().catUtxo, value: 100 },
+      }));
+      expect(btc.Transaction.fromPSBT(result.psbt).getOutput(0).amount).toBe(BigInt(100));
+    });
+
+    it('rejects an explicit resize below the recipient dust floor (P2WPKH = 294)', () => {
+      expect(() => buildCat21TransferPsbt(makeBaseArgs({ targetPostageSats: 200 })))
+        .toThrow(/below the recipient dust floor/);
+    });
+
+    it('rejects a resize whose inputs cannot cover output + fee', () => {
+      // Grow to 100_000: cat 546 + funding 50_000 < output 100_000 + fee 1_100.
+      expect(() => buildCat21TransferPsbt(makeBaseArgs({ targetPostageSats: 100_000 })))
+        .toThrow(/funding insufficient/);
+    });
+  });
+
   it('rejects a negative fee', () => {
     expect(() => buildCat21TransferPsbt(makeBaseArgs({ feeSats: -1 }))).toThrow(/non-negative/);
   });

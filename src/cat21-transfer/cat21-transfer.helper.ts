@@ -40,15 +40,33 @@ export interface BuildCat21TransferArgs {
   network: Network;
   catUtxo: Cat21TransferCatInput;
   /**
-   * Funding UTXOs that pay the miner fee. GOLDEN RULE: the cat UTXO is
-   * preserved intact (output 0 = catUtxo.value) and NEVER pays the fee, so
-   * funding must cover at least `feeSats`. Empty funding is only valid when
-   * `feeSats` is 0 (which won't relay) — in practice always non-empty.
+   * Funding UTXOs. By default (PRESERVE — `targetPostageSats` omitted) the cat
+   * UTXO is never touched for the fee, so funding must cover at least
+   * `feeSats`. With `targetPostageSats` set: GROW (target > catUtxo.value)
+   * funding covers `(target − catUtxo.value) + feeSats`; SHRINK
+   * (target < catUtxo.value) lets the cat's own freed surplus cover the fee,
+   * so funding may be empty when `catUtxo.value − target ≥ feeSats`.
    */
   fundingInputs: ReadonlyArray<Cat21TransferFundingInput>;
   destinations: Cat21TransferDestinations;
   /** Miner fee in sats. Caller computes from intended feeRate × vsize estimate. */
   feeSats: number;
+  /**
+   * OPTIONAL output-0 size (the recipient's cat UTXO). Omitted ⇒ PRESERVE:
+   * output 0 = `catUtxo.value`, the golden-rule default (never resize; fee
+   * from separate funding). When set it is an EXPLICIT opt-in to resize:
+   *   - `> catUtxo.value` ⇒ **GROW**: pad the output up (funding provides the
+   *     extra sats + fee). Rescues a sub-dust cat mined out-of-band below the
+   *     dust limit to a relay-standard size, and provisions a cold-wallet cat
+   *     with padding so it can be moved once later without co-funding.
+   *   - `< catUtxo.value` ⇒ **SHRINK**: trim the output; the freed surplus
+   *     (`catUtxo.value − target`) self-funds the fee (one-in/one-out when it
+   *     covers the fee, else co-funded by `fundingInputs`). Structurally
+   *     matches ord `wallet send --postage <target>` (except `nLockTime=21`).
+   * A set value must clear the recipient address's dust floor (a resized
+   * output below dust would not relay); the builder throws otherwise.
+   */
+  targetPostageSats?: number;
 }
 
 export interface BuildCat21TransferResult {
@@ -58,6 +76,11 @@ export interface BuildCat21TransferResult {
   psbt: Uint8Array;
   /** Total funding input value (sum of fundingInputs.value). */
   fundingInputTotalSats: number;
+  /**
+   * Output-0 size actually emitted (the recipient's cat UTXO): `catUtxo.value`
+   * when preserving (default), or `targetPostageSats` when grown/shrunk.
+   */
+  catOutputSats: number;
   /** Change output value (0 when sub-dust; absorbed into fee). */
   changeSats: number;
   /**
@@ -79,27 +102,44 @@ export interface BuildCat21TransferResult {
  * no consensus meaning.
  *
  * Structure:
- *   Input 0  — cat-bearing UTXO. Passes through UNCHANGED to output 0
- *              (FIFO: its first sat, the cat, lands at output 0's first sat).
- *   Input 1+ — funding UTXOs that pay the miner fee.
- *   Output 0 — recipient address, `catUtxo.value` sats: the WHOLE cat UTXO,
- *              preserved intact (golden rule — never resized). Cat lands here.
- *   Output 1 — funding change (absorbed into fee when sub-dust).
+ *   Input 0  — cat-bearing UTXO. FIFO: its first sat, the cat, lands at
+ *              output 0's first sat.
+ *   Input 1+ — funding UTXOs.
+ *   Output 0 — recipient address, `catOutputSats` sats (= `catUtxo.value` by
+ *              default = PRESERVE; = `targetPostageSats` when grown/shrunk).
+ *   Output 1 — change (absorbed into fee when sub-dust).
  *
  * Hard invariants (asserted): lockTime=21, per-wallet sequence,
  * every input SIGHASH_ALL. Coin selection is the caller's job.
  */
 export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21TransferResult {
-  // GOLDEN RULE (transfer): we do NOT change the size of the cat UTXO. The
-  // whole cat-bearing UTXO travels intact to the recipient — output 0 =
-  // catUtxo.value — so every sat on it stays together under ordinal theory.
-  // 546 is NOT used here; that is the MINT's fresh-cat postage only (the one
-  // time we create a cat UTXO from scratch). The miner fee is paid by
-  // SEPARATE funding inputs, never by shrinking the cat; the funding change
-  // follows mint semantics (above dust -> sender, sub-dust -> absorbed into
-  // the fee as a miner tip). See SDK CLAUDE.md "cat UTXO size" golden rule.
-  const catOutputSats = args.catUtxo.value;
+  // GOLDEN RULE default: PRESERVE the cat UTXO — output 0 = catUtxo.value, so
+  // every sat stays together (ordinal theory) and the fee comes from SEPARATE
+  // funding. `targetPostageSats` is the explicit opt-in to resize: GROW
+  // (target > value) has funding pad the output + pay the fee; SHRINK
+  // (target < value) lets the cat's freed surplus self-fund the fee. 546 is
+  // never used here (that is the MINT's fresh-cat postage). See SDK CLAUDE.md
+  // "cat UTXO size" golden rule + the grow/shrink table.
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
+  const catOutputSats = args.targetPostageSats ?? args.catUtxo.value;
+  if (catOutputSats <= 0) throw new Error('targetPostageSats must be positive');
+  // A resized output (explicit targetPostageSats) must clear the recipient's
+  // dust floor or the tx won't relay. PRESERVE (omitted) is exempt: a caller
+  // preserving a sub-dust cat knows it needs out-of-band broadcast (or a GROW).
+  if (args.targetPostageSats !== undefined) {
+    let recipientDust: number;
+    try {
+      recipientDust = getMinimumUtxoSize(args.destinations.recipientAddress);
+    } catch {
+      recipientDust = CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+    }
+    if (catOutputSats < recipientDust) {
+      throw new Error(
+        `targetPostageSats ${catOutputSats} is below the recipient dust floor ${recipientDust}; ` +
+        `a resized output below dust would not relay`
+      );
+    }
+  }
 
   const scureNetwork = toScureNetwork(args.network);
   // RBF-on for every wallet on transfers. The mint-only RBF-off policy
@@ -126,19 +166,23 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
     addCat21Input(tx, funding, sequence);
   }
 
-  // Output 0: recipient gets the WHOLE cat UTXO at its real size (golden
-  // rule: never resize). The cat ordinal travels here via FIFO; lockTime=21
-  // mints a bonus cat onto the same first sat in the same tx.
+  // Output 0: the recipient's cat UTXO at `catOutputSats` (= catUtxo.value by
+  // default = PRESERVE; = targetPostageSats when grown/shrunk). The cat
+  // ordinal travels here via FIFO; lockTime=21 mints a bonus cat on the same
+  // first sat in the same tx.
   tx.addOutputAddress(args.destinations.recipientAddress, BigInt(catOutputSats), scureNetwork);
 
-  // Change comes from the FUNDING only: funding - fee. The cat's sats all
-  // went to output 0 untouched, so the fee is paid entirely by the funding
-  // inputs, which must therefore cover at least the fee.
-  const changeRaw = fundingInputTotalSats - args.feeSats;
+  // Conservation: cat value + funding = output 0 + change + fee, so
+  //   change = catUtxo.value + funding − catOutputSats − fee.
+  //   PRESERVE (catOutputSats = value): change = funding − fee.
+  //   GROW    (catOutputSats > value): change = funding − (catOutputSats − value) − fee.
+  //   SHRINK  (catOutputSats < value): change = (value − catOutputSats) + funding − fee
+  //                                    (the cat's freed surplus self-funds the fee).
+  const changeRaw = args.catUtxo.value + fundingInputTotalSats - catOutputSats - args.feeSats;
   if (changeRaw < 0) {
     throw new Error(
-      `Transfer funding insufficient: funding ${fundingInputTotalSats} sats < fee ${args.feeSats} sats. ` +
-      `The cat UTXO (${catOutputSats} sats) is preserved intact and never pays the fee.`
+      `Transfer funding insufficient: cat ${args.catUtxo.value} + funding ${fundingInputTotalSats} sats ` +
+      `< output ${catOutputSats} + fee ${args.feeSats} sats required`
     );
   }
   // Per-address-type dust floor for the change output. The
@@ -189,6 +233,7 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
     hex: tx.hex,
     psbt: tx.toPSBT(),
     fundingInputTotalSats,
+    catOutputSats,
     changeSats,
     finalFeeSats,
   };

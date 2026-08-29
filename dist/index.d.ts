@@ -2926,15 +2926,33 @@ interface BuildCat21TransferArgs {
     network: Network;
     catUtxo: Cat21TransferCatInput;
     /**
-     * Funding UTXOs that pay the miner fee. GOLDEN RULE: the cat UTXO is
-     * preserved intact (output 0 = catUtxo.value) and NEVER pays the fee, so
-     * funding must cover at least `feeSats`. Empty funding is only valid when
-     * `feeSats` is 0 (which won't relay) — in practice always non-empty.
+     * Funding UTXOs. By default (PRESERVE — `targetPostageSats` omitted) the cat
+     * UTXO is never touched for the fee, so funding must cover at least
+     * `feeSats`. With `targetPostageSats` set: GROW (target > catUtxo.value)
+     * funding covers `(target − catUtxo.value) + feeSats`; SHRINK
+     * (target < catUtxo.value) lets the cat's own freed surplus cover the fee,
+     * so funding may be empty when `catUtxo.value − target ≥ feeSats`.
      */
     fundingInputs: ReadonlyArray<Cat21TransferFundingInput>;
     destinations: Cat21TransferDestinations;
     /** Miner fee in sats. Caller computes from intended feeRate × vsize estimate. */
     feeSats: number;
+    /**
+     * OPTIONAL output-0 size (the recipient's cat UTXO). Omitted ⇒ PRESERVE:
+     * output 0 = `catUtxo.value`, the golden-rule default (never resize; fee
+     * from separate funding). When set it is an EXPLICIT opt-in to resize:
+     *   - `> catUtxo.value` ⇒ **GROW**: pad the output up (funding provides the
+     *     extra sats + fee). Rescues a sub-dust cat mined out-of-band below the
+     *     dust limit to a relay-standard size, and provisions a cold-wallet cat
+     *     with padding so it can be moved once later without co-funding.
+     *   - `< catUtxo.value` ⇒ **SHRINK**: trim the output; the freed surplus
+     *     (`catUtxo.value − target`) self-funds the fee (one-in/one-out when it
+     *     covers the fee, else co-funded by `fundingInputs`). Structurally
+     *     matches ord `wallet send --postage <target>` (except `nLockTime=21`).
+     * A set value must clear the recipient address's dust floor (a resized
+     * output below dust would not relay); the builder throws otherwise.
+     */
+    targetPostageSats?: number;
 }
 interface BuildCat21TransferResult {
     /** Raw hex of the unsigned tx. */
@@ -2943,6 +2961,11 @@ interface BuildCat21TransferResult {
     psbt: Uint8Array;
     /** Total funding input value (sum of fundingInputs.value). */
     fundingInputTotalSats: number;
+    /**
+     * Output-0 size actually emitted (the recipient's cat UTXO): `catUtxo.value`
+     * when preserving (default), or `targetPostageSats` when grown/shrunk.
+     */
+    catOutputSats: number;
     /** Change output value (0 when sub-dust; absorbed into fee). */
     changeSats: number;
     /**
@@ -2963,12 +2986,12 @@ interface BuildCat21TransferResult {
  * no consensus meaning.
  *
  * Structure:
- *   Input 0  — cat-bearing UTXO. Passes through UNCHANGED to output 0
- *              (FIFO: its first sat, the cat, lands at output 0's first sat).
- *   Input 1+ — funding UTXOs that pay the miner fee.
- *   Output 0 — recipient address, `catUtxo.value` sats: the WHOLE cat UTXO,
- *              preserved intact (golden rule — never resized). Cat lands here.
- *   Output 1 — funding change (absorbed into fee when sub-dust).
+ *   Input 0  — cat-bearing UTXO. FIFO: its first sat, the cat, lands at
+ *              output 0's first sat.
+ *   Input 1+ — funding UTXOs.
+ *   Output 0 — recipient address, `catOutputSats` sats (= `catUtxo.value` by
+ *              default = PRESERVE; = `targetPostageSats` when grown/shrunk).
+ *   Output 1 — change (absorbed into fee when sub-dust).
  *
  * Hard invariants (asserted): lockTime=21, per-wallet sequence,
  * every input SIGHASH_ALL. Coin selection is the caller's job.

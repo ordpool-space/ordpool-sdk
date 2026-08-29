@@ -54,6 +54,19 @@ export function mineBlocks(n: number): number {
   return Number(rpc('getblockcount'));
 }
 
+/**
+ * Mine a block that INCLUDES the given raw transactions, bypassing mempool
+ * relay policy (the `generateblock` RPC). This is how a transaction relay
+ * would reject — e.g. one carrying a sub-dust output — reaches the chain
+ * out-of-band, exactly as a direct-to-miner submission (Slipstream / MARA)
+ * would. Returns the new tip height.
+ */
+export function mineBlockWithRawTxs(rawTxHexes: string[]): number {
+  const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'legacy');
+  rpc('generateblock', address, JSON.stringify(rawTxHexes));
+  return Number(rpc('getblockcount'));
+}
+
 /** Wait until electrs has indexed up to (at least) the given height. */
 export async function waitForElectrsSync(targetHeight: number, timeoutMs = 15_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;

@@ -43,6 +43,7 @@ import {
   ElectrsUtxo,
   catInscriptionId,
   mineBlocks,
+  mineBlockWithRawTxs,
   ordCreateOffer,
   ordCreateWallet,
   postTx,
@@ -287,5 +288,87 @@ describe('cat UTXO size preservation at non-546 sizes (offer ord-parity + transf
     const moved = await waitForCatAtAddress(cat.inscriptionId, recipientAddr);
     expect(moved.address).toBe(recipientAddr);
     expect(moved.value).toBe(9_000);
+  }, 120_000);
+
+  it('GROW rescues a SUB-DUST cat mined out-of-band (relay-rejected) back to a relay-standard 546', async () => {
+    // 1) Build a nLockTime=21 tx whose output 0 is 100 sats — BELOW the dust
+    //    limit. A cat can be minted this way by an out-of-band submission
+    //    (direct-to-miner / MARA) that bypasses relay's dust rule.
+    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', aAddress, '0.5');
+    let tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdSync(tip);
+    const funding = await waitForUtxoAt(aAddress, 50_000_000);
+
+    const subDust = new btc.Transaction({ lockTime: 21 });
+    subDust.addInput({
+      txid: funding.txid,
+      index: funding.vout,
+      sequence: 0xfffffffe,
+      witnessUtxo: { script: aScript, amount: BigInt(funding.value) },
+    });
+    subDust.addOutputAddress(aAddress, BigInt(100), regtestNetwork); // 100 sats = SUB-DUST
+    subDust.addOutputAddress(aAddress, BigInt(funding.value - 100 - FEE_SATS), regtestNetwork);
+    subDust.signIdx(aPriv, 0, [btc.SigHash.ALL]);
+    subDust.finalize();
+    const subDustHex = subDust.hex;
+    const subDustTxid = subDust.id;
+
+    // 2) Normal RELAY rejects the sub-dust output; mine it OUT-OF-BAND.
+    const accept = JSON.parse(rpc('testmempoolaccept', JSON.stringify([subDustHex])));
+    expect(accept[0].allowed).toBe(false); // relay won't take a sub-dust output
+    tip = mineBlockWithRawTxs([subDustHex]);
+    await waitForElectrsSync(tip);
+    await waitForTxConfirmed(subDustTxid);
+    await waitForOrdSync(tip);
+
+    // cat21-ord indexes the sub-dust cat on its 100-sat UTXO.
+    const inscriptionId = catInscriptionId(subDustTxid);
+    const subDustCat = await waitForCatAtAddress(inscriptionId, aAddress);
+    expect(subDustCat.value).toBe(100);
+
+    // 3) GROW-rescue via the SDK builder: spend the 100-sat cat + funding, with
+    //    targetPostageSats = 546 so output 0 clears the dust floor.
+    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', aAddress, '0.01');
+    tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdSync(tip);
+    const rescueFunding = await waitForUtxoAt(aAddress, 1_000_000);
+
+    const recipientAddr = btc.p2wpkh(
+      secp256k1.getPublicKey(secp256k1.utils.randomPrivateKey(), true),
+      regtestNetwork,
+    ).address!;
+    const grown = buildCat21TransferPsbt({
+      walletType: KnownOrdinalWalletType.cat21wallet,
+      network: Network.Regtest,
+      catUtxo: { txid: subDustTxid, vout: 0, value: 100, scriptPubKey: aScript },
+      fundingInputs: [
+        { txid: rescueFunding.txid, vout: rescueFunding.vout, value: rescueFunding.value, scriptPubKey: aScript },
+      ],
+      destinations: { recipientAddress: recipientAddr, senderChangeAddress: aAddress },
+      feeSats: FEE_SATS,
+      targetPostageSats: 546, // GROW the sub-dust cat to relay-standard
+    });
+    expect(grown.catOutputSats).toBe(546);
+    const gtx = btc.Transaction.fromPSBT(grown.psbt);
+    expect(gtx.getOutput(0).amount).toBe(BigInt(546));
+    gtx.signIdx(aPriv, 0, [btc.SigHash.ALL]); // cat
+    gtx.signIdx(aPriv, 1, [btc.SigHash.ALL]); // funding
+    gtx.finalize();
+
+    // 4) Broadcast via NORMAL relay (no out-of-band) — proves it's now standard.
+    const grownTxid = await postTx(gtx.hex);
+    tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForTxConfirmed(grownTxid);
+    await waitForOrdSync(tip);
+
+    // 5) cat21-ord: the same cat rode FIFO to the grown 546-sat UTXO at the
+    //    recipient — rescued from sub-dust to relay-standard.
+    const rescued = await waitForCatAtAddress(inscriptionId, recipientAddr);
+    expect(rescued.address).toBe(recipientAddr);
+    expect(rescued.value).toBe(546);
+    expect(rescued.number).toBe(subDustCat.number);
   }, 120_000);
 });
