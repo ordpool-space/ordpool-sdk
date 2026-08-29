@@ -89,6 +89,7 @@ export * from './cat21-fee/dummy-keypair';
 export * from './cat21-fee/compute-psbt-vsize.helper';
 export * from './cat21-fee/min-relay-fee';
 export * from './cat21-fee/ord-coin-select';
+export * from './cat21-fee/funding-safety';
 
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';

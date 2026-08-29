@@ -6204,6 +6204,61 @@ function selectOrdParityFunding(args) {
 }
 
 /**
+ * Safe-by-default funding selection — the shared brain behind the coin-selection
+ * UX vision for EVERY cat action (mint, transfer, offer, inscribe):
+ *
+ *   1. Comfortable AUTOMATIC selection by default — the user shouldn't see a
+ *      coin picker to inscribe or transfer.
+ *   2. But never auto-spend a valuable UTXO (one carrying an inscription, rune,
+ *      cat, or rare sat). If only valuable UTXOs can pay, drop to EXPERT MODE
+ *      and ask.
+ *   3. Expert mode carries a RECOMMENDATION (the best-fit coin) but lets the
+ *      user pick a different one.
+ *
+ * This is pure: it takes candidates already annotated with their content
+ * `bucket` (from `UtxoContentScanner` / `classifyOutpoint`) and returns what to
+ * do. The Angular orchestrators run the scan, then call this. The "by value"
+ * pick is ord's best-fit `selectCardinalUtxo`, so an auto-selected clean coin
+ * stays byte-aligned with ord.
+ */
+/**
+ * Decide funding for a spend of `targetSpendSats`, safely and automatically.
+ *
+ * Auto-selects the best-fit CLEAN covering UTXO (ord's `select_cardinal_utxo`
+ * restricted to clean candidates). Falls back to `expert-required` only when
+ * every covering candidate carries assets (or its scan failed), so a valuable
+ * UTXO is never auto-spent. Returns `scanning` while a covering candidate's
+ * content is still unknown, and `insufficient` when nothing covers.
+ *
+ * Same result shape for every action, so mint / transfer / offer / inscribe —
+ * and every consumer (cat21.space, cat21-wallet, bots) — get identical
+ * safe-auto + expert-with-recommendation behaviour.
+ */
+function recommendFunding(candidates, targetSpendSats) {
+    const covering = candidates.filter((c) => c.value >= targetSpendSats);
+    if (covering.length === 0) {
+        return { status: 'insufficient', recommended: null, candidates };
+    }
+    const annotatedFor = (u) => covering.find((c) => c.txid === u.txid && c.vout === u.vout);
+    // 1. A clean UTXO covers → auto-select the best-fit clean one. The default.
+    const cleanCovering = covering.filter((c) => c.bucket === 'clean');
+    if (cleanCovering.length > 0) {
+        const best = selectCardinalUtxo(cleanCovering, targetSpendSats, false);
+        return { status: 'auto', recommended: annotatedFor(best), candidates };
+    }
+    // 2. No clean cover yet, but a covering candidate is still unscanned/scanning
+    //    → the answer isn't final; wait for the scan.
+    if (covering.some((c) => c.bucket === 'unscanned' || c.bucket === 'scanning')) {
+        return { status: 'scanning', recommended: null, candidates };
+    }
+    // 3. Every covering candidate is scanned and carries assets (or its scan
+    //    failed — content unknown). Never auto-spend those: recommend the best-fit
+    //    covering coin but require expert confirmation.
+    const best = selectCardinalUtxo(covering, targetSpendSats, false);
+    return { status: 'expert-required', recommended: annotatedFor(best), candidates };
+}
+
+/**
  * Builds the buyer-initiated CAT-21 offer PSBT (ord-style,
  * SIGHASH_ALL on every input).
  *
@@ -12084,5 +12139,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectOrdParityFunding, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, findAutoPickCandidate, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectOrdParityFunding, serializeCats, simulateInscribeFees, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map
