@@ -95,6 +95,7 @@ export * from './cat21-fee/funding-safety';
 //     no RxJS — the single source of truth all three CAT-21 paths compose) ---
 export * from './cat21-core/ports';
 export * from './cat21-core/select-funding';
+export * from './cat21-core/transfer.core';
 
 // --- CAT-21 transfer ---
 export * from './cat21-transfer/cat21-transfer.helper';

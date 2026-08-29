@@ -60,6 +60,7 @@ export * from './cat21-fee/funding-recommendation.service';
 // --- Framework-agnostic orchestration core (ports + async flows) ---
 export * from './cat21-core/ports';
 export * from './cat21-core/select-funding';
+export * from './cat21-core/transfer.core';
 
 // --- cat21 offer (ord-style buyer-initiated PSBT builder + seller-side validator) ---
 export * from './cat21-offer/cat21-offer.helper';

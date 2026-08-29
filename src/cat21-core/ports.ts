@@ -9,15 +9,19 @@ import { FundingUtxo } from '../cat21-fee/coin-selection.helper';
  */
 
 /**
- * A funding UTXO ready for a cat21 builder. Cat-bearing / asset coins are
+ * A funding UTXO the account can spend. The core derives the PSBT input shape
+ * from the wallet's payment address + pubkey (the input adapter), so the port
+ * only carries the outpoint + value here. Cat-bearing / asset coins are
  * excluded by the consumer's `UtxosPort` and the core's content-checked
  * selection — never by a size heuristic.
  */
 export interface CoreFundingUtxo extends FundingUtxo {
-  /** scriptPubKey bytes; the builder derives the input shape from it. */
-  scriptPubKey: Uint8Array;
-  /** Taproot internal key, when the UTXO sits on a P2TR output. */
-  tapInternalKey?: Uint8Array;
+  /**
+   * Previous-tx hex. Required only for a legacy (P2PKH) funding input on a real
+   * (non-simulation) build — scure needs `nonWitnessUtxo`. Omit for
+   * segwit/taproot funding.
+   */
+  transactionHex?: string;
 }
 
 /** Content-safety verdict for one outpoint. The core auto-spends only `clean`. */
