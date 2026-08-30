@@ -72,12 +72,14 @@ export * from './cat21-mint/cat21.service.types';
 export * from './cat21-mint/cat21-mint.helper';
 export * from './cat21-mint/cat21-mint-input-adapter';
 
-// --- UTXO content-safety scanner: pure types + auto-pick helpers.
+// --- UTXO content-safety scanner: pure types + detection primitives.
 //     The Angular @Injectable `UtxoContentScanner` service stays in
 //     the main entry only; the pure detection primitives (bucketOf,
-//     findAutoPickCandidate, rune-name extraction, thresholds, all
-//     type aliases) belong at core so non-Angular consumers — bots,
-//     cat21-wallet autonomous flows, CLIs — can reach them.
+//     rune-name extraction, thresholds, all type aliases) belong at
+//     core so non-Angular consumers — bots, cat21-wallet autonomous
+//     flows, CLIs — can reach them. Content-safe funding auto-pick is
+//     `selectFunding` (force-scans covering candidates), not a raw
+//     bucket helper.
 export * from './cat21-mint/utxo-content.types';
 export * from './cat21-mint/recommended-funding.helper';
 export * from './cat21-mint/sat-rarity.helper';

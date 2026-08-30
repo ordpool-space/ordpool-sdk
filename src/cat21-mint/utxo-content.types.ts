@@ -158,36 +158,6 @@ export function bucketOf(state: UtxoScanState): UtxoScanBucket {
 }
 
 /**
- * Auto-pick the largest "safe-enough" row from a bucket-annotated list.
- * Priority: scanned-clean (verified safe) → unscanned (probably-safe big
- * UTXO) → scan-failed (unknown, better than nothing). NEVER auto-pick
- * scanned-with-assets — that row requires an explicit "Use anyway"
- * click from the user.
- *
- * Callers pass any row shape that carries a `bucket` field; this
- * preserves the row type so consumers can use whatever shape they
- * stored (UtxoSimulation, ViableUtxoRow, etc.).
- *
- * WARNING: this is a low-level primitive that TRUSTS the `bucket` on
- * each row. The `unscanned` fallback only means "big and not yet
- * looked at" — it is safe ONLY when every COVERING candidate was
- * actually scanned first. A consumer whose scanner skips large UTXOs
- * by value leaves a large covering coin `unscanned`, and this helper
- * will then auto-pick it even though it may hold an asset. Do NOT call
- * this directly for a content-safe auto-pick; use the safe layer that
- * force-scans covering candidates first (`selectFunding` in
- * `ordpool-sdk/core`, or the Angular `FundingRecommendationService`),
- * which only ever feeds this helper rows whose covering coins are
- * already `clean`/`assets`.
- */
-export function findAutoPickCandidate<T extends { bucket: UtxoScanBucket }>(rows: T[]): T | null {
-  return rows.find((r) => r.bucket === 'clean')
-    ?? rows.find((r) => r.bucket === 'unscanned')
-    ?? rows.find((r) => r.bucket === 'failed')
-    ?? null;
-}
-
-/**
  * Names of every rune balance present on a scanned UTXO. `null` runes
  * (cat21-ord) or empty object short-circuits to an empty array. Used
  * by the asset-found UI to render one link per rune.
