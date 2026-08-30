@@ -1,10 +1,11 @@
-import { Network } from '../network';
+import * as btc from '@scure/btc-signer';
+import { Network, toScureNetwork } from '../network';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { getMinimumUtxoSize } from '../cat21-script/address-format';
 import { buildCat21MintPsbt } from './cat21-mint.helper';
 import { prepareMintInputForWallet } from './cat21-mint-input-adapter';
-import { CreateTransactionResult, TxnOutput } from './cat21.service.types';
+import { CreateTransactionResult, SimulateTransactionResult, TxnOutput } from './cat21.service.types';
 
 // Re-export from the new locations so existing consumers keep working
 // while the v2 ecosystem migrates to the canonical import paths.
@@ -16,10 +17,8 @@ export {
   isSegWit,
   toXOnly,
 } from '../cat21-script/address-format';
-export {
-  getDummyKeypair,
-  getDummyLegacyTransaction,
-} from '../cat21-fee/dummy-keypair';
+import { getDummyKeypair, getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
+export { getDummyKeypair, getDummyLegacyTransaction };
 
 /**
  * Layer-4 orchestration entry: adapts cat21.space-shaped args to
@@ -81,4 +80,38 @@ export function createTransaction(
     changeAmount: BigInt(built.changeSats),
     finalTransactionFee: BigInt(built.finalFeeSats),
   };
+}
+
+/**
+ * Dummy-signed simulation of a mint transaction, framework-agnostic. Builds
+ * the mint PSBT (via `createTransaction`, simulation mode), dummy-signs input 0
+ * with the SDK's well-known key, finalises, and returns the result plus the
+ * measured `vsize`. Never broadcast — the fee-estimation path uses it (the
+ * Angular `Cat21Service.simulateTransaction` delegates here). Taproot inputs
+ * omit `sighashType` (SIGHASH_DEFAULT is wire-equivalent to SIGHASH_ALL for
+ * key-path spends per BIP-341), so `[DEFAULT, ALL]` covers both PSBT shapes.
+ */
+export function simulateMintTransaction(
+  walletType: KnownOrdinalWalletType,
+  recipientAddress: string,
+  paymentOutput: TxnOutput,
+  paymentAddress: string,
+  paymentPublicKey: Uint8Array,
+  transactionFee: bigint,
+  network: Network,
+): SimulateTransactionResult {
+  const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(network));
+  const result = createTransaction(
+    walletType,
+    recipientAddress,
+    paymentOutput,
+    paymentPublicKey,
+    paymentAddress,
+    transactionFee,
+    true,
+    network,
+  );
+  result.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+  result.tx.finalize();
+  return { ...result, vsize: result.tx.vsize };
 }

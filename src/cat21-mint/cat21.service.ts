@@ -29,6 +29,7 @@ import {
   createTransaction,
   getDummyKeypair,
   isSegWit,
+  simulateMintTransaction,
 } from './cat21.service.helper';
 import {
   MempoolTx,
@@ -162,32 +163,17 @@ export class Cat21Service {
     paymentPublicKey: Uint8Array,
     transactionFee: bigint
   ): SimulateTransactionResult {
-
-    const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(this.network));
-
-    const result = createTransaction(
+    // Delegates to the framework-agnostic helper — one implementation shared
+    // with the wallet + any non-Angular consumer (`simulateMintTransaction`).
+    return simulateMintTransaction(
       walletType,
       recipientAddress,
       paymentOutput,
-      paymentPublicKey,
       paymentAddress,
+      paymentPublicKey,
       transactionFee,
-      true, // simulation
-      this.network
+      this.network,
     );
-
-    // Taproot inputs omit `sighashType` in the PSBT (SIGHASH_DEFAULT is
-    // wire-equivalent to SIGHASH_ALL for key-path spends per BIP-341).
-    // signIdx's allowed-sighash list must match the input's expectation,
-    // so we pass [DEFAULT, ALL] to cover both shapes.
-    result.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-    result.tx.finalize();
-    const vsize = result.tx.vsize; // 🎉
-
-    return {
-      ...result,
-      vsize
-    };
   }
 
   /**
