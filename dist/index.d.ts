@@ -2127,7 +2127,7 @@ interface FundingRecommendation<T extends AnnotatedFundingUtxo = AnnotatedFundin
  * and every consumer (cat21.space, cat21-wallet, bots) — get identical
  * safe-auto + expert-with-recommendation behaviour.
  */
-declare function recommendFunding<T extends AnnotatedFundingUtxo>(candidates: ReadonlyArray<T>, targetSpendSats: number): FundingRecommendation<T>;
+declare function recommendFunding<T extends AnnotatedFundingUtxo>(candidates: ReadonlyArray<T>, targetSpendSats: number, preferredSpendSats?: number): FundingRecommendation<T>;
 /**
  * Re-key a recommendation onto a richer source type by outpoint. The core
  * flows return `FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>`;
@@ -2538,8 +2538,16 @@ declare class FundingRecommendationService {
  * Non-covering coins stay `unscanned` (never auto-picked anyway, so no wasted
  * scan). No RxJS, no Angular — the wallet and bots consume it as plain async;
  * cat21.space wraps it in its reactive veneer.
+ *
+ * `preferredSats` (optional) is the WITH-CHANGE + dust headroom target, above
+ * the no-change feasibility `targetSats`. When given, the auto-pick is biased
+ * toward a clean coin that clears it, so the tx emits an above-dust change and
+ * the realised fee-rate lands on the requested rate instead of absorbing a
+ * sub-dust leftover into the fee (a dust-cliff over-pay). It only biases the
+ * pick; `targetSats` stays the coverage gate, so a wallet of only tight coins
+ * still selects one (bounded over-pay, never a false `insufficient`).
  */
-declare function selectFunding<T extends FundingUtxo>(utxos: ReadonlyArray<T>, targetSats: number, scan: ContentScanPort): Promise<FundingRecommendation<T & AnnotatedFundingUtxo>>;
+declare function selectFunding<T extends FundingUtxo>(utxos: ReadonlyArray<T>, targetSats: number, scan: ContentScanPort, preferredSats?: number): Promise<FundingRecommendation<T & AnnotatedFundingUtxo>>;
 /**
  * Resolve the funding coin a flow will spend: the user's EXPLICIT expert-mode
  * pick when it still covers the target (honoured even if it carries assets —

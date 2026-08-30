@@ -120,3 +120,46 @@ describe('mint.core — executeMint', () => {
     expect(sign.calls).toHaveLength(1);
   });
 });
+
+describe('mint.core — change-headroom coin selection (dust-cliff over-pay guard)', () => {
+  const RATE = 10;
+  const FIXED = 546; // CAT21_POSTAGE_SATS (no tip): the mint's fixed output value.
+
+  // Learn the with-change miner fee F = ceil(withChangeVsize * RATE) from a
+  // large (headroom) coin, then build a coin whose budget lands in the
+  // dust-cliff band [F, F + 546): its would-be change is sub-dust, so the
+  // builder absorbs it into the fee → over-pay. A second coin has headroom.
+  const learnF = async () => {
+    const big = coin('a', 1_000_000);
+    const s = await simulateMint(params({ feeRatePerVbyte: RATE }), { utxos: utxosPort([big]), scan: scanPort() });
+    return s.feeSats!;
+  };
+
+  it('auto-picks the change-headroom coin so the realised fee-rate lands on the typed rate', async () => {
+    const F = await learnF();
+    const tight = coin('b', FIXED + F + 200); // budget F+200, in the dust-cliff band
+    const headroom = coin('c', FIXED + F + 546 + 500); // budget clears the with-change fee + dust
+
+    const sim = await simulateMint(params({ feeRatePerVbyte: RATE }), {
+      utxos: utxosPort([tight, headroom]),
+      scan: scanPort(),
+    });
+    expect(sim.status).toBe('ready');
+    // Best-fit-by-value alone would take the SMALLER `tight` coin; the headroom
+    // bias must skip it for `headroom` so an above-dust change is emitted.
+    expect(sim.fundingUtxo?.txid).toBe(headroom.txid);
+    const realisedRate = sim.feeSats! / sim.vsize!;
+    expect(Math.abs(realisedRate - RATE)).toBeLessThan(1); // the over-pay is gone
+  });
+
+  it('FALLBACK: a tight-only wallet still MINTS (never a false insufficient), even though it over-pays', async () => {
+    const F = await learnF();
+    const tight = coin('b', FIXED + F + 200);
+    const sim = await simulateMint(params({ feeRatePerVbyte: RATE }), { utxos: utxosPort([tight]), scan: scanPort() });
+    expect(sim.status).toBe('ready'); // a doable mint is never rejected
+    expect(sim.feeSats!).toBeGreaterThan(0);
+    // This coin CANNOT avoid the over-pay (its sub-dust change is absorbed) —
+    // proving the dust-cliff band is real and why the headroom pick matters.
+    expect(sim.feeSats! / sim.vsize!).toBeGreaterThan(RATE);
+  });
+});

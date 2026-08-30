@@ -70,6 +70,7 @@ export interface FundingRecommendation<T extends AnnotatedFundingUtxo = Annotate
 export function recommendFunding<T extends AnnotatedFundingUtxo>(
   candidates: ReadonlyArray<T>,
   targetSpendSats: number,
+  preferredSpendSats?: number,
 ): FundingRecommendation<T> {
   const covering = candidates.filter((c) => c.value >= targetSpendSats);
   if (covering.length === 0) {
@@ -80,9 +81,28 @@ export function recommendFunding<T extends AnnotatedFundingUtxo>(
     covering.find((c) => c.txid === u.txid && c.vout === u.vout)!;
 
   // 1. A clean UTXO covers → auto-select the best-fit clean one. The default.
+  //    When a `preferredSpendSats` is given (the WITH-CHANGE + dust HEADROOM
+  //    target, above the no-change feasibility `targetSpendSats`), bias toward a
+  //    clean coin that clears it: such a coin leaves enough over the miner fee
+  //    to emit an above-dust change output, so the realised fee-rate lands on
+  //    the requested rate. A coin that only clears feasibility sits in the
+  //    dust-cliff band (leftover-over-fee is sub-dust), so the builder absorbs
+  //    that leftover into the fee — a 7-13% over-pay. Fall back to the best-fit
+  //    coin over feasibility when NONE has headroom, so a wallet of only tight
+  //    coins still spends (bounded, sub-dust over-pay), never a false
+  //    `insufficient`.
   const cleanCovering = covering.filter((c) => c.bucket === 'clean');
   if (cleanCovering.length > 0) {
-    const best = selectCardinalUtxo(cleanCovering, targetSpendSats, false)!;
+    const headroomTarget =
+      preferredSpendSats !== undefined && preferredSpendSats > targetSpendSats
+        ? preferredSpendSats
+        : undefined;
+    const headroomCoins =
+      headroomTarget !== undefined ? cleanCovering.filter((c) => c.value >= headroomTarget) : [];
+    const best =
+      headroomTarget !== undefined && headroomCoins.length > 0
+        ? selectCardinalUtxo(headroomCoins, headroomTarget, false)!
+        : selectCardinalUtxo(cleanCovering, targetSpendSats, false)!;
     return { status: 'auto', recommended: annotatedFor(best), candidates };
   }
 

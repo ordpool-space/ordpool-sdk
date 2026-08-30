@@ -10,6 +10,7 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   BuildCat21TransferResult,
   buildCat21TransferPsbt,
+  CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS,
 } from '../cat21-transfer/cat21-transfer.helper';
 import {
   prepareTransferCatInput,
@@ -152,7 +153,19 @@ async function planTransfer(
   }
   const noChangeVsize = measureVsize(buildTransfer(params, largest, feeBudget(largest.value), true));
   const target = Math.ceil(noChangeVsize * params.feeRatePerVbyte);
-  const recommendation = await selectFunding(utxos, target, ports.scan);
+  // Preferred (change-headroom) target: a coin >= this leaves an above-dust
+  // change at the requested rate, so the realised fee-rate lands on the typed
+  // rate instead of a sub-dust leftover being absorbed into the fee. Expressed
+  // as a delta over the feasibility `target` so it inherits target's exact
+  // (preserve / grow / shrink) semantics. selectFunding biases the auto-pick
+  // toward such a coin, falling back to a tight coin when none exists.
+  const withChangeVsize = measureVsize(buildTransfer(params, largest, 0, true));
+  const preferredTarget =
+    target +
+    Math.ceil(withChangeVsize * params.feeRatePerVbyte) -
+    Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
+    CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+  const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {

@@ -11,6 +11,7 @@ import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import {
   BuildCat21MintResult,
   buildCat21MintPsbt,
+  CAT21_MINT_CHANGE_DUST_LIMIT_SATS,
 } from '../cat21-mint/cat21-mint.helper';
 import { prepareMintInputForWallet } from '../cat21-mint/cat21-mint-input-adapter';
 import {
@@ -123,8 +124,21 @@ async function planMint(
   }
   const noChangeVsize = measureVsize(buildMint(params, largest, largest.value - fixedOutputs, true));
   const target = fixedOutputs + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
+  // Preferred (change-headroom) target: cat postage + tip + the WITH-CHANGE
+  // miner fee + a dust floor. A coin >= this leaves an above-dust change at the
+  // requested rate, so the realised fee-rate lands on the typed rate instead of
+  // a sub-dust leftover being absorbed into the fee (a 7-13% over-pay in the
+  // dust-cliff band). selectFunding biases the auto-pick toward such a coin and
+  // falls back to a feasibility-only (tight) coin when none exists — bounded
+  // over-pay, never a false insufficient. The dust floor is 546 (the mint
+  // builder's change dust limit).
+  const withChangeVsize = measureVsize(buildMint(params, largest, 0, true));
+  const preferredTarget =
+    fixedOutputs +
+    Math.ceil(withChangeVsize * params.feeRatePerVbyte) +
+    CAT21_MINT_CHANGE_DUST_LIMIT_SATS;
 
-  const recommendation = await selectFunding(utxos, target, ports.scan);
+  const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {

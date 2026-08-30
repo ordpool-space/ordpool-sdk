@@ -144,7 +144,19 @@ async function planOffer(
   }
   const noChangeVsize = offerVsize(buildOffer(params, largest, feeBudget(largest.value), true));
   const target = params.priceSats + params.targetCat.value + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
-  const recommendation = await selectFunding(utxos, target, ports.scan);
+  // Preferred (change-headroom) target: a coin >= this leaves an above-dust
+  // change at the requested rate, so the realised fee-rate lands on the typed
+  // rate instead of a sub-dust leftover being absorbed into the fee. Delta over
+  // the feasibility `target`. 546 is the conservative cross-address dust floor
+  // (the offer builder's own fallback, cat21-offer.helper.ts). selectFunding
+  // biases the auto-pick toward such a coin, falling back to a tight one.
+  const withChangeVsize = offerVsize(buildOffer(params, largest, 0, true));
+  const preferredTarget =
+    target +
+    Math.ceil(withChangeVsize * params.feeRatePerVbyte) -
+    Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
+    546;
+  const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {

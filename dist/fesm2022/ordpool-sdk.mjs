@@ -5696,16 +5696,32 @@ function selectOrdParityFunding(args) {
  * and every consumer (cat21.space, cat21-wallet, bots) — get identical
  * safe-auto + expert-with-recommendation behaviour.
  */
-function recommendFunding(candidates, targetSpendSats) {
+function recommendFunding(candidates, targetSpendSats, preferredSpendSats) {
     const covering = candidates.filter((c) => c.value >= targetSpendSats);
     if (covering.length === 0) {
         return { status: 'insufficient', recommended: null, candidates };
     }
     const annotatedFor = (u) => covering.find((c) => c.txid === u.txid && c.vout === u.vout);
     // 1. A clean UTXO covers → auto-select the best-fit clean one. The default.
+    //    When a `preferredSpendSats` is given (the WITH-CHANGE + dust HEADROOM
+    //    target, above the no-change feasibility `targetSpendSats`), bias toward a
+    //    clean coin that clears it: such a coin leaves enough over the miner fee
+    //    to emit an above-dust change output, so the realised fee-rate lands on
+    //    the requested rate. A coin that only clears feasibility sits in the
+    //    dust-cliff band (leftover-over-fee is sub-dust), so the builder absorbs
+    //    that leftover into the fee — a 7-13% over-pay. Fall back to the best-fit
+    //    coin over feasibility when NONE has headroom, so a wallet of only tight
+    //    coins still spends (bounded, sub-dust over-pay), never a false
+    //    `insufficient`.
     const cleanCovering = covering.filter((c) => c.bucket === 'clean');
     if (cleanCovering.length > 0) {
-        const best = selectCardinalUtxo(cleanCovering, targetSpendSats, false);
+        const headroomTarget = preferredSpendSats !== undefined && preferredSpendSats > targetSpendSats
+            ? preferredSpendSats
+            : undefined;
+        const headroomCoins = headroomTarget !== undefined ? cleanCovering.filter((c) => c.value >= headroomTarget) : [];
+        const best = headroomTarget !== undefined && headroomCoins.length > 0
+            ? selectCardinalUtxo(headroomCoins, headroomTarget, false)
+            : selectCardinalUtxo(cleanCovering, targetSpendSats, false);
         return { status: 'auto', recommended: annotatedFor(best), candidates };
     }
     // 2. No clean cover yet, but a covering candidate is still unscanned/scanning
@@ -5756,8 +5772,16 @@ const outpoint = (u) => `${u.txid}:${u.vout}`;
  * Non-covering coins stay `unscanned` (never auto-picked anyway, so no wasted
  * scan). No RxJS, no Angular — the wallet and bots consume it as plain async;
  * cat21.space wraps it in its reactive veneer.
+ *
+ * `preferredSats` (optional) is the WITH-CHANGE + dust headroom target, above
+ * the no-change feasibility `targetSats`. When given, the auto-pick is biased
+ * toward a clean coin that clears it, so the tx emits an above-dust change and
+ * the realised fee-rate lands on the requested rate instead of absorbing a
+ * sub-dust leftover into the fee (a dust-cliff over-pay). It only biases the
+ * pick; `targetSats` stays the coverage gate, so a wallet of only tight coins
+ * still selects one (bounded over-pay, never a false `insufficient`).
  */
-async function selectFunding(utxos, targetSats, scan) {
+async function selectFunding(utxos, targetSats, scan, preferredSats) {
     if (!targetSats || targetSats <= 0 || utxos.length === 0) {
         return recommendFunding([], targetSats > 0 ? targetSats : 0);
     }
@@ -5777,7 +5801,7 @@ async function selectFunding(utxos, targetSats, scan) {
         ...u,
         bucket: bucketByOutpoint.get(outpoint(u)) ?? 'unscanned',
     }));
-    return recommendFunding(annotated, targetSats);
+    return recommendFunding(annotated, targetSats, preferredSats);
 }
 /**
  * Resolve the funding coin a flow will spend: the user's EXPLICIT expert-mode
@@ -5834,7 +5858,19 @@ async function planMint(params, ports) {
     }
     const noChangeVsize = measureVsize(buildMint(params, largest, largest.value - fixedOutputs, true));
     const target = fixedOutputs + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
-    const recommendation = await selectFunding(utxos, target, ports.scan);
+    // Preferred (change-headroom) target: cat postage + tip + the WITH-CHANGE
+    // miner fee + a dust floor. A coin >= this leaves an above-dust change at the
+    // requested rate, so the realised fee-rate lands on the typed rate instead of
+    // a sub-dust leftover being absorbed into the fee (a 7-13% over-pay in the
+    // dust-cliff band). selectFunding biases the auto-pick toward such a coin and
+    // falls back to a feasibility-only (tight) coin when none exists — bounded
+    // over-pay, never a false insufficient. The dust floor is 546 (the mint
+    // builder's change dust limit).
+    const withChangeVsize = measureVsize(buildMint(params, largest, 0, true));
+    const preferredTarget = fixedOutputs +
+        Math.ceil(withChangeVsize * params.feeRatePerVbyte) +
+        CAT21_MINT_CHANGE_DUST_LIMIT_SATS;
+    const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
         return {
@@ -6745,7 +6781,18 @@ async function planTransfer(params, ports) {
     }
     const noChangeVsize = measureVsize(buildTransfer(params, largest, feeBudget(largest.value), true));
     const target = Math.ceil(noChangeVsize * params.feeRatePerVbyte);
-    const recommendation = await selectFunding(utxos, target, ports.scan);
+    // Preferred (change-headroom) target: a coin >= this leaves an above-dust
+    // change at the requested rate, so the realised fee-rate lands on the typed
+    // rate instead of a sub-dust leftover being absorbed into the fee. Expressed
+    // as a delta over the feasibility `target` so it inherits target's exact
+    // (preserve / grow / shrink) semantics. selectFunding biases the auto-pick
+    // toward such a coin, falling back to a tight coin when none exists.
+    const withChangeVsize = measureVsize(buildTransfer(params, largest, 0, true));
+    const preferredTarget = target +
+        Math.ceil(withChangeVsize * params.feeRatePerVbyte) -
+        Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
+        CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+    const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
         return {
@@ -7304,7 +7351,18 @@ async function planOffer(params, ports) {
     }
     const noChangeVsize = offerVsize(buildOffer(params, largest, feeBudget(largest.value), true));
     const target = params.priceSats + params.targetCat.value + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
-    const recommendation = await selectFunding(utxos, target, ports.scan);
+    // Preferred (change-headroom) target: a coin >= this leaves an above-dust
+    // change at the requested rate, so the realised fee-rate lands on the typed
+    // rate instead of a sub-dust leftover being absorbed into the fee. Delta over
+    // the feasibility `target`. 546 is the conservative cross-address dust floor
+    // (the offer builder's own fallback, cat21-offer.helper.ts). selectFunding
+    // biases the auto-pick toward such a coin, falling back to a tight one.
+    const withChangeVsize = offerVsize(buildOffer(params, largest, 0, true));
+    const preferredTarget = target +
+        Math.ceil(withChangeVsize * params.feeRatePerVbyte) -
+        Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
+        546;
+    const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
         return {
@@ -11036,7 +11094,15 @@ class InscribeMintOrchestrator {
         }
         else {
             try {
-                fundingRecommendation = await selectFunding(this.utxos, target, this.deps.scan);
+                // `target` already reflects the WITH-CHANGE commit fee (simulated
+                // against a large synthetic funding input). Adding the 546-sat dust
+                // floor gives the change-headroom preferred target: a real coin >= this
+                // keeps its commit change above dust, so the realised commit fee-rate
+                // lands on the typed rate instead of absorbing a sub-dust leftover into
+                // the fee. selectFunding falls back to a tight coin when none has
+                // headroom (bounded over-pay, never a false insufficient).
+                const preferredTarget = target + 546;
+                fundingRecommendation = await selectFunding(this.utxos, target, this.deps.scan, preferredTarget);
             }
             catch {
                 fundingRecommendation = EMPTY_RECOMMENDATION;

@@ -374,7 +374,20 @@ export class InscribeMintOrchestrator {
       fundingRecommendation = EMPTY_RECOMMENDATION;
     } else {
       try {
-        fundingRecommendation = await selectFunding<TxnOutput>(this.utxos, target, this.deps.scan);
+        // `target` already reflects the WITH-CHANGE commit fee (simulated
+        // against a large synthetic funding input). Adding the 546-sat dust
+        // floor gives the change-headroom preferred target: a real coin >= this
+        // keeps its commit change above dust, so the realised commit fee-rate
+        // lands on the typed rate instead of absorbing a sub-dust leftover into
+        // the fee. selectFunding falls back to a tight coin when none has
+        // headroom (bounded over-pay, never a false insufficient).
+        const preferredTarget = target + 546;
+        fundingRecommendation = await selectFunding<TxnOutput>(
+          this.utxos,
+          target,
+          this.deps.scan,
+          preferredTarget,
+        );
       } catch {
         fundingRecommendation = EMPTY_RECOMMENDATION;
       }

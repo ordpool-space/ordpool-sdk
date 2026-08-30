@@ -24,11 +24,20 @@ const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
  * Non-covering coins stay `unscanned` (never auto-picked anyway, so no wasted
  * scan). No RxJS, no Angular — the wallet and bots consume it as plain async;
  * cat21.space wraps it in its reactive veneer.
+ *
+ * `preferredSats` (optional) is the WITH-CHANGE + dust headroom target, above
+ * the no-change feasibility `targetSats`. When given, the auto-pick is biased
+ * toward a clean coin that clears it, so the tx emits an above-dust change and
+ * the realised fee-rate lands on the requested rate instead of absorbing a
+ * sub-dust leftover into the fee (a dust-cliff over-pay). It only biases the
+ * pick; `targetSats` stays the coverage gate, so a wallet of only tight coins
+ * still selects one (bounded over-pay, never a false `insufficient`).
  */
 export async function selectFunding<T extends FundingUtxo>(
   utxos: ReadonlyArray<T>,
   targetSats: number,
   scan: ContentScanPort,
+  preferredSats?: number,
 ): Promise<FundingRecommendation<T & AnnotatedFundingUtxo>> {
   if (!targetSats || targetSats <= 0 || utxos.length === 0) {
     return recommendFunding<T & AnnotatedFundingUtxo>([], targetSats > 0 ? targetSats : 0);
@@ -54,7 +63,7 @@ export async function selectFunding<T extends FundingUtxo>(
       bucket: bucketByOutpoint.get(outpoint(u)) ?? 'unscanned',
     }),
   );
-  return recommendFunding(annotated, targetSats);
+  return recommendFunding(annotated, targetSats, preferredSats);
 }
 
 /**
