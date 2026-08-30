@@ -2,6 +2,7 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { ContentScanPort } from '../cat21-core/ports';
+import { MINT_FEE_VBYTE_CEILING } from '../cat21-core/mint.core';
 import { selectFunding } from '../cat21-core/select-funding';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety';
@@ -24,7 +25,9 @@ import { SimulateTransactionResult, TxnOutput } from './cat21.service.types';
  * the connected wallet via `setWallet`.
  *
  * The Angular `Cat21MintOrchestrator` (`cat21-mint-orchestrator.service.ts`)
- * is a thin veneer over this; both share one implementation.
+ * is a parallel Angular-signal implementation that composes the same
+ * lower-level helpers (`createTransaction` / `simulateMintTransaction` /
+ * `selectFunding`); the two do not share this class.
  */
 
 /** State machine the UI branches on. */
@@ -75,12 +78,13 @@ const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUt
   candidates: [],
 };
 
-/** ~200 vB fee ceiling the funding target must clear (the two-pass sim tightens it). */
-const MINT_FEE_VBYTE_CEILING = 200;
-
 export class Cat21MintOrchestrator {
   private wallet: MintWalletContext | null = null;
   private utxos: TxnOutput[] = [];
+  // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
+  // recompute whose captured seq is stale drops its result instead of
+  // overwriting a newer snapshot (the plain-class replacement for switchMap).
+  private recomputeSeq = 0;
   private snap: MintSnapshot = {
     state: 'idle',
     feeRate: null,
@@ -117,6 +121,7 @@ export class Cat21MintOrchestrator {
   async setWallet(wallet: MintWalletContext | null): Promise<void> {
     const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
     this.wallet = wallet;
+    this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     if (changed) {
       this.patch({ feeRate: null, selectedUtxo: null, errorMessage: null, successTxId: null });
     }
@@ -234,6 +239,8 @@ export class Cat21MintOrchestrator {
     this.patch({
       feeRate: null,
       selectedUtxo: null,
+      simulations: [],
+      fundingRecommendation: EMPTY_RECOMMENDATION,
       errorMessage: null,
       successTxId: null,
       state: this.wallet ? 'ready' : 'idle',
@@ -243,6 +250,7 @@ export class Cat21MintOrchestrator {
   // --- internals ----------------------------------------------------------
 
   private async recompute(): Promise<void> {
+    const seq = ++this.recomputeSeq;
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
     if (!wallet || !feeRate || this.utxos.length === 0) {
@@ -284,6 +292,7 @@ export class Cat21MintOrchestrator {
     } catch {
       fundingRecommendation = EMPTY_RECOMMENDATION;
     }
+    if (seq !== this.recomputeSeq) return; // a newer input superseded this run
     this.patch({ simulations, fundingRecommendation });
   }
 

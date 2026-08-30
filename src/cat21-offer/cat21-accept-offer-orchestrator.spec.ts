@@ -147,4 +147,35 @@ describe('Cat21AcceptOfferOrchestrator (framework-agnostic)', () => {
     o.reset();
     expect(seen).toHaveLength(n);
   });
+
+  it('a wallet swap resets state + outcome fields, not just the form', () => {
+    const o = new Cat21AcceptOfferOrchestrator(deps());
+    o.setWallet(wallet);
+    fillIntent(o);
+    o.setPastedOffer(buildOfferBase64());
+    expect(o.getSnapshot().state).toBe('parsed');
+    // Swap to a different seller wallet (different ordinals address).
+    const otherOrdinals = btc.p2tr(new Uint8Array(32).fill(7), undefined, btc.NETWORK).address!;
+    o.setWallet({ ...wallet, ordinalsAddress: otherOrdinals });
+    const s = o.getSnapshot();
+    expect(s.state).toBe('idle');
+    expect(s.preview).toBeNull();
+    expect(s.successTxId).toBeNull();
+    expect(s.errorMessage).toBeNull();
+  });
+
+  it('disableFloorGate keeps floor 0 across reset; a bot consumer re-requires an explicit floor', () => {
+    const human = new Cat21AcceptOfferOrchestrator(deps());
+    human.setWallet(wallet);
+    human.disableFloorGate();
+    expect(human.getSnapshot().floorPriceSats).toBe(0);
+    human.reset();
+    expect(human.getSnapshot().floorPriceSats).toBe(0); // opt-out persists
+
+    const bot = new Cat21AcceptOfferOrchestrator(deps());
+    bot.setWallet(wallet);
+    bot.setFloorPriceSats(21_000);
+    bot.reset();
+    expect(bot.getSnapshot().floorPriceSats).toBeNull(); // the "explicit floor" gate re-arms
+  });
 });

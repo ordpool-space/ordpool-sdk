@@ -2721,30 +2721,24 @@ const phantomSigner = {
 };
 
 /**
- * Decode a user-provided signed PSBT into raw bytes. Sparrow exports
- * base64 by default, Electrum and `bitcoin-cli` lean towards hex.
- * We accept either by sniffing the first byte:
- *
- * - All standard PSBTs start with the magic bytes `0x70736274ff`
- *   ("psbt" + 0xff). Base64-encoded, that's the prefix `cHNidP8`.
- * - Hex-encoded, it's literally `70736274ff`.
- *
- * Anything else throws — better a clear error than a downstream
- * scure crash on garbled bytes.
+ * Decode a base64- or hex-encoded PSBT paste to raw bytes. All standard PSBTs
+ * start with the magic bytes `0x70736274ff` ("psbt" + 0xff): base64-encoded
+ * that is the prefix `cHNidP`, hex-encoded it is literally `70736274ff`. The
+ * accept-offer flow uses this to turn a seller's pasted `?offer=…` artifact
+ * into bytes; also shared by the watch-only psbt-export signer (via `subject`).
  */
-function decodeSignedPsbt(input) {
+function decodePastedPsbt(input, subject = 'Pasted offer') {
     const trimmed = input.trim();
-    if (!trimmed) {
-        throw new Error('Signed PSBT is empty');
-    }
-    if (trimmed.startsWith('cHNidP')) {
+    if (!trimmed)
+        throw new Error(`${subject} is empty`);
+    if (trimmed.startsWith('cHNidP'))
         return base64.decode(trimmed);
-    }
     if (/^70736274ff/i.test(trimmed) && trimmed.length % 2 === 0) {
         return hex.decode(trimmed.toLowerCase());
     }
-    throw new Error('Signed PSBT must be base64 or hex (start: "cHNidP" or "70736274ff")');
+    throw new Error(`${subject} must be base64 or hex PSBT (start: "cHNidP" or "70736274ff")`);
 }
+
 /**
  * Watch-only signer. Covers any wallet that doesn't inject into the
  * browser — Sparrow Desktop, Electrum, Bitcoin Core, Specter,
@@ -2770,7 +2764,7 @@ const legacy$3 = {
             base64: base64.encode(input.psbtBytes),
             hex: hex.encode(input.psbtBytes),
         }).pipe(switchMap(signedPsbt => {
-            const signedBytes = decodeSignedPsbt(signedPsbt);
+            const signedBytes = decodePastedPsbt(signedPsbt, 'Signed PSBT');
             const tx = btc.Transaction.fromPSBT(signedBytes);
             // External wallets may return either shape:
             //   - partial-sig PSBT (inputs have BIP-174 partial sigs but
@@ -2802,7 +2796,7 @@ const legacy$3 = {
             base64: base64.encode(input.psbtBytes),
             hex: hex.encode(input.psbtBytes),
         }).pipe(switchMap((signedPsbt) => {
-            const signedBytes = decodeSignedPsbt(signedPsbt);
+            const signedBytes = decodePastedPsbt(signedPsbt, 'Signed PSBT');
             const tx = btc.Transaction.fromPSBT(signedBytes);
             if (!tx.isFinal)
                 tx.finalize();
@@ -2822,7 +2816,7 @@ const legacy$3 = {
         return input.promptForSignedPsbt({
             base64: base64.encode(input.psbtBytes),
             hex: hex.encode(input.psbtBytes),
-        }).pipe(map((signedPsbt) => decodeSignedPsbt(signedPsbt)));
+        }).pipe(map((signedPsbt) => decodePastedPsbt(signedPsbt, 'Signed PSBT')));
     },
 };
 const psbtExportSigner = {
@@ -6747,7 +6741,14 @@ async function executeTransfer(params, ports) {
     return { ...outcome, feeSats: built.finalFeeSats };
 }
 
-/** ~200 vB fee ceiling for the mint fee component (1-in / 2-out). */
+/**
+ * Conservative vB ceiling for a CAT-21 mint (1 funding input + 1 P2TR cat
+ * output + 1 change output; the largest such tx measures well under this).
+ * Used only as a coverage over-estimate + two-pass seed — never a charged fee;
+ * the real fee is the two-pass `finalFeeSats`. Exported as the single source
+ * of truth so the framework-agnostic mint orchestrator's per-UTXO grid seeds
+ * its two-pass from the same value instead of re-declaring it.
+ */
 const MINT_FEE_VBYTE_CEILING = 200;
 function buildMint(params, funding, feeSats, isSimulation) {
     const fundingInput = prepareMintInputForWallet({
@@ -9452,25 +9453,6 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
             type: Injectable,
             args: [{ providedIn: 'root' }]
         }] });
-
-/**
- * Decode a base64- or hex-encoded PSBT paste to raw bytes. All standard PSBTs
- * start with the magic bytes `0x70736274ff` ("psbt" + 0xff): base64-encoded
- * that is the prefix `cHNidP`, hex-encoded it is literally `70736274ff`. The
- * accept-offer flow uses this to turn a seller's pasted `?offer=…` artifact
- * into bytes without depending on the watch-only signer module.
- */
-function decodePastedPsbt(input) {
-    const trimmed = input.trim();
-    if (!trimmed)
-        throw new Error('Pasted offer is empty');
-    if (trimmed.startsWith('cHNidP'))
-        return base64.decode(trimmed);
-    if (/^70736274ff/i.test(trimmed) && trimmed.length % 2 === 0) {
-        return hex.decode(trimmed.toLowerCase());
-    }
-    throw new Error('Offer must be base64 or hex PSBT (start: "cHNidP" or "70736274ff")');
-}
 
 /**
  * Seller-side CAT-21 buy-offer accept. Pastes a base64 PSBT, validates
@@ -13058,5 +13040,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, MINT_FEE_VBYTE_CEILING, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map

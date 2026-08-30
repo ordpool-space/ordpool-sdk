@@ -50,7 +50,8 @@ const deps = (over: Partial<TransferOrchestratorDeps> = {}): TransferOrchestrato
 
 function waitFor(o: Cat21TransferOrchestrator, pred: (s: TransferSnapshot) => boolean): Promise<TransferSnapshot> {
   return new Promise((resolve) => {
-    const unsub = o.subscribe((s) => {
+    let unsub: () => void = () => {};
+    unsub = o.subscribe((s) => {
       if (pred(s)) {
         unsub();
         resolve(s);
@@ -58,6 +59,8 @@ function waitFor(o: Cat21TransferOrchestrator, pred: (s: TransferSnapshot) => bo
     });
   });
 }
+
+const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe('Cat21TransferOrchestrator (framework-agnostic)', () => {
   it('starts idle', () => {
@@ -117,5 +120,48 @@ describe('Cat21TransferOrchestrator (framework-agnostic)', () => {
     unsub();
     o.reset();
     expect(seen).toHaveLength(n);
+  });
+
+  it('getUtxos rejection => state error with the load message, cleared sim', async () => {
+    const o = new Cat21TransferOrchestrator(
+      deps({ getUtxos: async () => { throw new Error('electrs 502'); } }),
+    );
+    await o.setWallet(wallet);
+    expect(o.getSnapshot().state).toBe('error');
+    expect(o.getSnapshot().errorMessage).toBe('Failed to load UTXOs: electrs 502');
+    expect(o.getSnapshot().simulation).toBeNull();
+  });
+
+  it('INSUFFICIENT: coin too small => no sim, transfer() refuses with the fee-rate message', async () => {
+    const o = new Cat21TransferOrchestrator(deps({ getUtxos: async () => [coin('c', 300)] }));
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    await flush();
+    expect(o.getSnapshot().simulation).toBeNull();
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+    await expect(o.transfer()).rejects.toThrow(/Insufficient funds for transfer/);
+  });
+
+  it('race: a stale recompute never overwrites a newer snapshot (seq guard)', async () => {
+    // Gate scan.classify so recomputes can be resolved out of order.
+    const gates: Array<(v: 'clean' | 'has-assets') => void> = [];
+    const scan = { classify: () => new Promise<'clean' | 'has-assets'>((res) => { gates.push(res); }) };
+    const o = new Cat21TransferOrchestrator(deps({ scan }));
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(5);   // recompute A -> gates[0]
+    o.setFeeRate(50);  // recompute B (newer) -> gates[1]
+    for (let i = 0; i < 50 && gates.length < 2; i++) await flush();
+    expect(gates.length).toBe(2);
+    gates[1]('has-assets'); // resolve the NEWER run first => expert-required, sim null
+    await flush();
+    gates[0]('clean');      // resolve the STALE run last => would set auto/non-null if unguarded
+    await flush();
+    // The newer run (B) must win regardless of resolution order.
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('expert-required');
+    expect(o.getSnapshot().simulation).toBeNull();
   });
 });

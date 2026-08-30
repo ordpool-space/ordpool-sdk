@@ -47,7 +47,8 @@ const deps = (over: Partial<MintOrchestratorDeps> = {}): MintOrchestratorDeps =>
 /** Resolve once a snapshot satisfying `pred` is emitted (the async recompute). */
 function waitFor(o: Cat21MintOrchestrator, pred: (s: MintSnapshot) => boolean): Promise<MintSnapshot> {
   return new Promise((resolve) => {
-    const unsub = o.subscribe((s) => {
+    let unsub: () => void = () => {};
+    unsub = o.subscribe((s) => {
       if (pred(s)) {
         unsub();
         resolve(s);
@@ -55,6 +56,8 @@ function waitFor(o: Cat21MintOrchestrator, pred: (s: MintSnapshot) => boolean): 
     });
   });
 }
+
+const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe('Cat21MintOrchestrator (framework-agnostic)', () => {
   it('starts idle with an empty recommendation', () => {
@@ -119,5 +122,37 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     await o.setWallet({ ...wallet, ordinalsAddress: btc.p2tr(hex.decode('0'.repeat(63) + '2'), undefined, btc.NETWORK).address! });
     expect(o.getSnapshot().feeRate).toBeNull();
     expect(o.getSnapshot().selectedUtxo).toBeNull();
+  });
+
+  it('getUtxos rejection => state error + cleared grid', async () => {
+    const o = new Cat21MintOrchestrator(
+      deps({ getUtxos: async () => { throw new Error('electrs 502'); } }),
+    );
+    await o.setWallet(wallet);
+    expect(o.getSnapshot().state).toBe('error');
+    expect(o.getSnapshot().errorMessage).toBe('Failed to load UTXOs: electrs 502');
+    expect(o.getSnapshot().simulations).toEqual([]);
+  });
+
+  it("mint() rejects with 'No UTXO selected' when funding is insufficient (not expert)", async () => {
+    const o = new Cat21MintOrchestrator(deps({ getUtxos: async () => [coin('c', 400)] }));
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    await flush();
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+    await expect(o.mint()).rejects.toThrow('No UTXO selected');
+  });
+
+  it('reset() clears the simulation grid + funding recommendation, not just feeRate', async () => {
+    const o = new Cat21MintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
+    o.reset();
+    const s = o.getSnapshot();
+    expect(s.feeRate).toBeNull();
+    expect(s.simulations).toEqual([]);
+    expect(s.fundingRecommendation.status).toBe('insufficient');
+    expect(s.state).toBe('ready');
   });
 });

@@ -214,10 +214,9 @@ export class Cat21AcceptOfferOrchestrator {
     }
   }
 
-  /** Wipe paste + parse result. Keeps the wallet connected. */
+  /** Wipe paste + parse result + any prior outcome. Keeps the wallet connected. */
   reset(): void {
     this.resetFormFields();
-    this.patch({ errorMessage: null, successTxId: null, channel: null, state: 'idle' });
   }
 
   // --- internals ----------------------------------------------------------
@@ -284,6 +283,12 @@ export class Cat21AcceptOfferOrchestrator {
       floorPriceSats: this.humanUiOptOut ? 0 : null,
       expectedCatUtxo: null,
       expectedSellerPaymentAddress: null,
+      // A wallet swap must not leave a prior accept's success/error/txid on the
+      // snapshot under the new wallet; return to a clean idle.
+      state: 'idle',
+      errorMessage: null,
+      successTxId: null,
+      channel: null,
     });
   }
 

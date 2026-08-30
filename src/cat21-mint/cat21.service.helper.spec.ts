@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from '@jest/globals';
 
-import { createTransaction, getAddressFormat, getDummyKeypair, getMinimumUtxoSize, getDummyLegacyTransaction, toXOnly, isSegWit } from './cat21.service.helper';
+import { createTransaction, getAddressFormat, getDummyKeypair, getMinimumUtxoSize, getDummyLegacyTransaction, toXOnly, isSegWit, simulateMintTransaction } from './cat21.service.helper';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { Network, toScureNetwork } from '../network';
 import { sha256 } from '@noble/hashes/sha256';
@@ -669,5 +669,23 @@ describe('CAT-21 RBF policy (per-wallet sequence)', () => {
     expect(cat21Input.sequence).not.toBe(leatherInput.sequence);
     expect(cat21Input.sequence).toBe(0xfffffffd);
     expect(leatherInput.sequence).toBe(0xfffffffe);
+  });
+});
+
+describe('simulateMintTransaction (fee-estimation entry point)', () => {
+  const PAYMENT_PUB = hex.decode('0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b');
+  const PAYMENT_ADDR = btc.p2wpkh(PAYMENT_PUB, btc.NETWORK).address!;
+  const ORDINALS_ADDR = btc.p2tr(hex.decode('5df12ac222a1cd78dd4681c7c7a56f3e273884a086b2b6100957d20c73be3c37'), undefined, btc.NETWORK).address!;
+  const coin: TxnOutput = { txid: hex.encode(sha256('sim-mint-txid')), vout: 0, value: 100_000, status: { confirmed: true } };
+
+  it('mints 546 to the recipient, keeps the passed fee, and measures a segwit-funded vsize', () => {
+    const result = simulateMintTransaction(
+      KnownOrdinalWalletType.cat21wallet, ORDINALS_ADDR, coin, PAYMENT_ADDR, PAYMENT_PUB, 1000n, Network.Mainnet,
+    );
+    expect(result.amountToRecipient).toBe(546n);
+    expect(result.finalTransactionFee).toBe(1000n);
+    expect(result.changeAmount).toBe(100_000n - 546n - 1000n);
+    // Measured vsize: p2wpkh funding input + p2tr cat output + p2wpkh change.
+    expect(result.vsize).toBe(153);
   });
 });

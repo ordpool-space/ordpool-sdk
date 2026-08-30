@@ -60,7 +60,8 @@ function waitFor(
   pred: (s: CreateOfferSnapshot) => boolean,
 ): Promise<CreateOfferSnapshot> {
   return new Promise((resolve) => {
-    const unsub = o.subscribe((s) => {
+    let unsub: () => void = () => {};
+    unsub = o.subscribe((s) => {
       if (pred(s)) {
         unsub();
         resolve(s);
@@ -68,6 +69,8 @@ function waitFor(
     });
   });
 }
+
+const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /** Set every input a valid bid needs (buyerReceiveAddress defaults from wallet). */
 function fillInputs(o: Cat21CreateOfferOrchestrator): void {
@@ -135,5 +138,31 @@ describe('Cat21CreateOfferOrchestrator (framework-agnostic)', () => {
     unsub();
     o.reset();
     expect(seen).toHaveLength(n);
+  });
+
+  it('setPriceSats floors a fractional price (avoids a BigInt RangeError in the builder)', () => {
+    const o = new Cat21CreateOfferOrchestrator(deps());
+    o.setPriceSats(21_000.7);
+    expect(o.getSnapshot().priceSats).toBe(21_000);
+    o.setPriceSats(0.5); // floors to 0 => ignored; the prior value stands
+    expect(o.getSnapshot().priceSats).toBe(21_000);
+  });
+
+  it('getUtxos rejection => state error with the load message', async () => {
+    const o = new Cat21CreateOfferOrchestrator(
+      deps({ getUtxos: async () => { throw new Error('electrs 502'); } }),
+    );
+    await o.setWallet(wallet);
+    expect(o.getSnapshot().state).toBe('error');
+    expect(o.getSnapshot().errorMessage).toBe('Failed to load UTXOs: electrs 502');
+  });
+
+  it('INSUFFICIENT: coin too small => no sim, createOffer refuses with the price+fee message', async () => {
+    const o = new Cat21CreateOfferOrchestrator(deps({ getUtxos: async () => [coin('c', 500)] }));
+    await o.setWallet(wallet);
+    fillInputs(o);
+    await flush();
+    expect(o.getSnapshot().simulation).toBeNull();
+    await expect(o.createOffer()).rejects.toThrow(/Insufficient funds for buy-offer/);
   });
 });

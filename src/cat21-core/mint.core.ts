@@ -23,8 +23,15 @@ import {
 } from './ports';
 import { resolveFundingPick, selectFunding } from './select-funding';
 
-/** ~200 vB fee ceiling for the mint fee component (1-in / 2-out). */
-const MINT_FEE_VBYTE_CEILING = 200;
+/**
+ * Conservative vB ceiling for a CAT-21 mint (1 funding input + 1 P2TR cat
+ * output + 1 change output; the largest such tx measures well under this).
+ * Used only as a coverage over-estimate + two-pass seed — never a charged fee;
+ * the real fee is the two-pass `finalFeeSats`. Exported as the single source
+ * of truth so the framework-agnostic mint orchestrator's per-UTXO grid seeds
+ * its two-pass from the same value instead of re-declaring it.
+ */
+export const MINT_FEE_VBYTE_CEILING = 200;
 
 /**
  * Everything the mint core needs, framework-agnostic. A mint CREATES a fresh

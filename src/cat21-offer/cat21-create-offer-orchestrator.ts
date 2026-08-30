@@ -73,6 +73,10 @@ const EMPTY_RECOMMENDATION: FundingRecommendation<CoreFundingUtxo & AnnotatedFun
 export class Cat21CreateOfferOrchestrator {
   private wallet: CreateOfferWalletContext | null = null;
   private utxos: TxnOutput[] = [];
+  // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
+  // recompute whose captured seq is stale drops its result instead of
+  // overwriting a newer snapshot (the plain-class replacement for switchMap).
+  private recomputeSeq = 0;
   private snap: CreateOfferSnapshot = {
     state: 'idle',
     targetCat: null,
@@ -103,6 +107,7 @@ export class Cat21CreateOfferOrchestrator {
   async setWallet(wallet: CreateOfferWalletContext | null): Promise<void> {
     const changed = (this.wallet?.paymentAddress ?? null) !== (wallet?.paymentAddress ?? null);
     this.wallet = wallet;
+    this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     if (changed) {
       this.patch({
         targetCat: null, priceSats: null, sellerPaymentAddress: null, buyerReceiveAddress: wallet?.ordinalsAddress ?? null,
@@ -127,7 +132,12 @@ export class Cat21CreateOfferOrchestrator {
   }
 
   setTargetCat(cat: BuyOfferTargetCat | null): void { this.patch({ targetCat: cat }); void this.recompute(); }
-  setPriceSats(price: number): void { if (Number.isFinite(price) && price > 0) { this.patch({ priceSats: price }); void this.recompute(); } }
+  setPriceSats(price: number): void {
+    // Floor to whole sats: a fractional price reaches BigInt(price + value) in
+    // the offer builder, which throws RangeError on a non-integer.
+    const p = Math.floor(price);
+    if (Number.isFinite(price) && p > 0) { this.patch({ priceSats: p }); void this.recompute(); }
+  }
   setSellerPaymentAddress(addr: string | null): void { this.patch({ sellerPaymentAddress: addr }); void this.recompute(); }
   setBuyerReceiveAddress(addr: string | null): void { this.patch({ buyerReceiveAddress: addr }); void this.recompute(); }
   setFeeRate(rate: number): void { if (Number.isFinite(rate) && rate > 0) { this.patch({ feeRate: rate }); void this.recompute(); } }
@@ -190,6 +200,7 @@ export class Cat21CreateOfferOrchestrator {
   // --- internals ----------------------------------------------------------
 
   private async recompute(): Promise<void> {
+    const seq = ++this.recomputeSeq;
     const params = this.params();
     if (!params) {
       this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
@@ -197,6 +208,7 @@ export class Cat21CreateOfferOrchestrator {
     }
     try {
       const sim = await simulateCreateOffer(params, { utxos: this.utxosPort(), scan: this.deps.scan });
+      if (seq !== this.recomputeSeq) return; // a newer input superseded this run
       this.patch({
         fundingRecommendation: sim.recommendation,
         simulation:
@@ -205,6 +217,7 @@ export class Cat21CreateOfferOrchestrator {
             : null,
       });
     } catch {
+      if (seq !== this.recomputeSeq) return;
       this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
     }
   }

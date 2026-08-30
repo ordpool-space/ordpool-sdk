@@ -11,34 +11,7 @@ import {
 } from '../wallet.service.types';
 import { operationNamedDefaults } from './operation-named-defaults';
 import { unsupportedSignMessage } from './unsupported-sign-message';
-
-
-/**
- * Decode a user-provided signed PSBT into raw bytes. Sparrow exports
- * base64 by default, Electrum and `bitcoin-cli` lean towards hex.
- * We accept either by sniffing the first byte:
- *
- * - All standard PSBTs start with the magic bytes `0x70736274ff`
- *   ("psbt" + 0xff). Base64-encoded, that's the prefix `cHNidP8`.
- * - Hex-encoded, it's literally `70736274ff`.
- *
- * Anything else throws — better a clear error than a downstream
- * scure crash on garbled bytes.
- */
-function decodeSignedPsbt(input: string): Uint8Array {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    throw new Error('Signed PSBT is empty');
-  }
-  if (trimmed.startsWith('cHNidP')) {
-    return base64.decode(trimmed);
-  }
-  if (/^70736274ff/i.test(trimmed) && trimmed.length % 2 === 0) {
-    return hex.decode(trimmed.toLowerCase());
-  }
-  throw new Error('Signed PSBT must be base64 or hex (start: "cHNidP" or "70736274ff")');
-}
-
+import { decodePastedPsbt } from '../../cat21-offer/decode-pasted-psbt';
 
 /**
  * Watch-only signer. Covers any wallet that doesn't inject into the
@@ -70,7 +43,7 @@ const legacy = {
       hex: hex.encode(input.psbtBytes),
     }).pipe(
       switchMap(signedPsbt => {
-        const signedBytes = decodeSignedPsbt(signedPsbt);
+        const signedBytes = decodePastedPsbt(signedPsbt, 'Signed PSBT');
         const tx = btc.Transaction.fromPSBT(signedBytes);
         // External wallets may return either shape:
         //   - partial-sig PSBT (inputs have BIP-174 partial sigs but
@@ -107,7 +80,7 @@ const legacy = {
       hex: hex.encode(input.psbtBytes),
     }).pipe(
       switchMap((signedPsbt) => {
-        const signedBytes = decodeSignedPsbt(signedPsbt);
+        const signedBytes = decodePastedPsbt(signedPsbt, 'Signed PSBT');
         const tx = btc.Transaction.fromPSBT(signedBytes);
         if (!tx.isFinal) tx.finalize();
         return input.broadcast(tx.hex).pipe(map((txId) => ({ txId })));
@@ -130,7 +103,7 @@ const legacy = {
     return input.promptForSignedPsbt({
       base64: base64.encode(input.psbtBytes),
       hex: hex.encode(input.psbtBytes),
-    }).pipe(map((signedPsbt) => decodeSignedPsbt(signedPsbt)));
+    }).pipe(map((signedPsbt) => decodePastedPsbt(signedPsbt, 'Signed PSBT')));
   },
 };
 

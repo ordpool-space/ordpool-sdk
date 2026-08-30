@@ -1,27 +1,28 @@
 import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
-import { buildTransfer } from '../cat21-core/transfer.core';
+import {
+  buildTransfer,
+  simulateTransfer,
+  TransferCoreParams,
+  TransferSimulationResult,
+} from '../cat21-core/transfer.core';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports';
-import { selectFunding } from '../cat21-core/select-funding';
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
-import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
-import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
 import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety';
-import { Network, toScureNetwork } from '../network';
+import { Network } from '../network';
 import { findSignerOrThrow } from '../wallet/signers';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS } from './cat21-transfer.helper';
 import { Cat21Holding } from './cat21-transfer.types';
 
 /**
  * FRAMEWORK-AGNOSTIC high-level transfer API. Plain class — no Angular. Owns
- * the transfer state machine + safe-auto funding pick (via `selectFunding`'s
- * force-scan), reuses `transfer.core`'s `buildTransfer` (no duplication), and
- * wires wallet-backed sign+broadcast INTERNALLY via `findSignerOrThrow`
- * (`signer.signTransfer`). State ships through a plain `subscribe(listener)`
- * callback; a consumer imports it ready-made and binds in one line.
+ * the transfer state machine; delegates the preview (content-checked funding
+ * pick + two-pass fee + dust-absorb) to `transfer.core`'s `simulateTransfer`
+ * and the build to `buildTransfer` (no duplication), and wires wallet-backed
+ * sign+broadcast INTERNALLY via `findSignerOrThrow` (`signer.signTransfer`).
+ * State ships through a plain `subscribe(listener)` callback; a consumer
+ * imports it ready-made and binds in one line.
  *
  * The cat UTXO is preserved (output 0 = the whole cat value); funding covers
  * ONLY the miner fee (golden rule).
@@ -50,7 +51,7 @@ export interface TransferOrchestratorDeps {
 export interface TransferSimulationView {
   feeSats: number;
   changeSats: number;
-  fundingUtxo: TxnOutput;
+  fundingUtxo: CoreFundingUtxo;
 }
 
 export interface TransferSnapshot {
@@ -58,25 +59,26 @@ export interface TransferSnapshot {
   catUtxo: Cat21Holding | null;
   recipientAddress: string | null;
   feeRate: number | null;
-  selectedFundingUtxo: TxnOutput | null;
-  fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
+  selectedFundingUtxo: CoreFundingUtxo | null;
+  fundingRecommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   simulation: TransferSimulationView | null;
   errorMessage: string | null;
   successTxId: string | null;
 }
 
-const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
+const EMPTY_RECOMMENDATION: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo> = {
   status: 'insufficient',
   recommended: null,
   candidates: [],
 };
 
-/** ~200 vB fee ceiling (cat preserved, so funding covers ONLY the fee). */
-const TRANSFER_FEE_VBYTE_CEILING = 200;
-
 export class Cat21TransferOrchestrator {
   private wallet: TransferWalletContext | null = null;
   private utxos: TxnOutput[] = [];
+  // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
+  // recompute whose captured seq is stale drops its result instead of
+  // overwriting a newer snapshot (the plain-class replacement for switchMap).
+  private recomputeSeq = 0;
   private snap: TransferSnapshot = {
     state: 'idle',
     catUtxo: null,
@@ -105,6 +107,7 @@ export class Cat21TransferOrchestrator {
   async setWallet(wallet: TransferWalletContext | null): Promise<void> {
     const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
     this.wallet = wallet;
+    this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     if (changed) {
       this.patch({
         catUtxo: null, recipientAddress: null, feeRate: null, selectedFundingUtxo: null,
@@ -144,7 +147,7 @@ export class Cat21TransferOrchestrator {
     void this.recompute();
   }
 
-  setSelectedFundingUtxo(utxo: TxnOutput | null): void {
+  setSelectedFundingUtxo(utxo: CoreFundingUtxo | null): void {
     this.patch({ selectedFundingUtxo: utxo });
     void this.recompute();
   }
@@ -179,7 +182,7 @@ export class Cat21TransferOrchestrator {
     try {
       const built = buildTransfer(
         this.paramsFor(wallet, cat, recipient, feeRate),
-        toCore(sim.fundingUtxo),
+        sim.fundingUtxo,
         sim.feeSats,
         false,
       );
@@ -216,70 +219,42 @@ export class Cat21TransferOrchestrator {
   // --- internals ----------------------------------------------------------
 
   private async recompute(): Promise<void> {
+    const seq = ++this.recomputeSeq;
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
-    if (!wallet || !feeRate || this.utxos.length === 0) {
+    const cat = this.snap.catUtxo;
+    const recipient = this.snap.recipientAddress;
+    if (!wallet || !feeRate || !cat || !recipient || this.utxos.length === 0) {
       this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
       return;
     }
-    // Cat preserved: funding covers ONLY the miner fee.
-    const feeTarget = Math.ceil(feeRate * TRANSFER_FEE_VBYTE_CEILING);
-    let recommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
+    let sim: TransferSimulationResult;
     try {
-      recommendation = await selectFunding<TxnOutput>(this.utxos, feeTarget, this.deps.scan);
+      sim = await simulateTransfer(
+        this.paramsFor(wallet, cat, recipient, feeRate),
+        { utxos: this.utxosPort(), scan: this.deps.scan },
+      );
     } catch {
-      recommendation = EMPTY_RECOMMENDATION;
+      if (seq !== this.recomputeSeq) return;
+      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
+      return;
     }
-
-    const pick = this.pickFunding(recommendation, feeTarget);
-    let simulation: TransferSimulationView | null = null;
-    const cat = this.snap.catUtxo;
-    const recipient = this.snap.recipientAddress;
-    if (cat && recipient && pick) {
-      try {
-        const params = this.paramsFor(wallet, cat, recipient, feeRate);
-        const fundingCore = toCore(pick);
-        const two = twoPassFeeSimulation({
-          simulate: (feeSats) => {
-            const built = buildTransfer(params, fundingCore, feeSats, true);
-            return { built, vsize: computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(this.deps.network) }) };
-          },
-          feeRatePerVbyte: feeRate,
-          placeholderFeeSats: feeTarget,
-        });
-        const changeRaw = pick.value - two.finalFeeSats;
-        let dustLimit: number;
-        try {
-          dustLimit = getMinimumUtxoSize(wallet.paymentAddress);
-        } catch {
-          dustLimit = CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
-        }
-        simulation = {
-          feeSats: two.finalFeeSats,
-          changeSats: changeRaw >= dustLimit ? changeRaw : 0,
-          fundingUtxo: pick,
-        };
-      } catch {
-        simulation = null;
-      }
-    }
-    this.patch({ fundingRecommendation: recommendation, simulation });
+    if (seq !== this.recomputeSeq) return; // a newer input superseded this run
+    this.patch({
+      fundingRecommendation: sim.recommendation,
+      simulation:
+        sim.status === 'ready' && sim.fundingUtxo && sim.feeSats != null
+          ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, fundingUtxo: sim.fundingUtxo }
+          : null,
+    });
   }
 
-  /** Expert override wins if it still covers; else the safe auto-clean coin. */
-  private pickFunding(
-    rec: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>,
-    feeTarget: number,
-  ): TxnOutput | null {
-    const selected = this.snap.selectedFundingUtxo;
-    const stillPresent = selected
-      ? rec.candidates.find((u) => u.txid === selected.txid && u.vout === selected.vout)
-      : undefined;
-    if (stillPresent && stillPresent.value >= feeTarget) return stillPresent;
-    return rec.status === 'auto' ? rec.recommended : null;
-  }
-
-  private paramsFor(wallet: TransferWalletContext, cat: Cat21Holding, recipient: string, feeRate: number) {
+  private paramsFor(
+    wallet: TransferWalletContext,
+    cat: Cat21Holding,
+    recipient: string,
+    feeRate: number,
+  ): TransferCoreParams {
     return {
       walletType: wallet.type,
       network: this.deps.network,
@@ -290,6 +265,14 @@ export class Cat21TransferOrchestrator {
       catUtxo: { txid: cat.txid, vout: cat.vout, value: cat.value },
       recipientAddress: recipient,
       feeRatePerVbyte: feeRate,
+      selectedFundingUtxo: this.snap.selectedFundingUtxo ?? undefined,
+    };
+  }
+
+  private utxosPort() {
+    const utxos = this.utxos;
+    return {
+      spendableUtxos: async (): Promise<CoreFundingUtxo[]> => utxos.map(toCore),
     };
   }
 

@@ -25,8 +25,10 @@ import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orc
  * and the connected wallet via `setWallet`.
  *
  * The Angular `InscribeMintOrchestrator`
- * (`inscribe-mint-orchestrator.service.ts`) is a thin veneer over the same
- * helpers; both share one implementation surface.
+ * (`inscribe-mint-orchestrator.service.ts`) is a parallel Angular-signal
+ * implementation composing the same lower-level helpers
+ * (`simulateInscribeFees` / `inscribeAndBroadcast`); it re-exports the shared
+ * content/simulation/state types from this file but does not share this class.
  *
  * # Two-tx model
  *
@@ -137,6 +139,10 @@ const DUMMY_PUBKEY_XONLY = new Uint8Array(32).fill(0x02);
 export class InscribeMintOrchestrator {
   private wallet: InscribeWalletContext | null = null;
   private utxos: TxnOutput[] = [];
+  // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
+  // recompute whose captured seq is stale drops its result instead of
+  // overwriting a newer snapshot (the plain-class replacement for switchMap).
+  private recomputeSeq = 0;
   private snap: InscribeSnapshot = {
     state: 'idle',
     feeRate: null,
@@ -169,6 +175,7 @@ export class InscribeMintOrchestrator {
   async setWallet(wallet: InscribeWalletContext | null): Promise<void> {
     const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
     this.wallet = wallet;
+    this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     if (changed) {
       this.patch({ feeRate: null, selectedUtxo: null, content: null, errorMessage: null, successResult: null });
     }
@@ -278,6 +285,8 @@ export class InscribeMintOrchestrator {
       feeRate: null,
       selectedUtxo: null,
       content: null,
+      simulations: [],
+      fundingRecommendation: EMPTY_RECOMMENDATION,
       errorMessage: null,
       successResult: null,
       state: this.wallet ? 'ready' : 'idle',
@@ -287,6 +296,7 @@ export class InscribeMintOrchestrator {
   // --- internals ----------------------------------------------------------
 
   private async recompute(): Promise<void> {
+    const seq = ++this.recomputeSeq;
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
     const content = this.snap.content;
@@ -369,6 +379,7 @@ export class InscribeMintOrchestrator {
         fundingRecommendation = EMPTY_RECOMMENDATION;
       }
     }
+    if (seq !== this.recomputeSeq) return; // a newer input superseded this run
     this.patch({ simulations, fundingRecommendation });
   }
 
