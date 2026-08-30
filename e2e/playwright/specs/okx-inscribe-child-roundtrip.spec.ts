@@ -164,13 +164,30 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
   // operation-promise await settles the true outcome.
   await approval.getByText('Confirm', { exact: true }).first().click()
     .catch(() => undefined);
-  // Wait for this request's heading to disappear so the next poll can't
-  // re-detect the request we just confirmed.
-  await approval.waitForFunction(
-    () => !/Signature request|Confirm Trade/i.test(document.body.innerText || ''),
-    undefined,
-    { timeout: 30_000 },
-  ).catch(() => undefined);
+  // Wait for this request's heading to disappear so a later call can't
+  // re-detect the request we just confirmed. Poll from the Node side
+  // (isClosed-guarded innerText), NOT page.waitForFunction: OKX CLOSES the
+  // sign popup the instant it finishes a sign (especially the final reveal),
+  // and a page-side waitForFunction installs a polling handle whose disposal
+  // races that close. Playwright then throws an uncatchable, empty-stack
+  // "Object with guid ... was not bound in the connection" through the
+  // connection's error channel, NOT as this promise's rejection, so the
+  // .catch below never sees it (the deterministic child-spec failure). A
+  // Node-side loop leaves no page-side handle to dispose, and exits early on
+  // the popup closing or the operation completing.
+  const headingDeadline = Date.now() + 30_000;
+  while (Date.now() < headingDeadline) {
+    if (isDone?.()) return;
+    if (approval.isClosed()) return; // popup gone => sign done, heading cleared
+    let text = '';
+    try {
+      text = await approval.locator('body').innerText({ timeout: 2_000 }).catch(() => '');
+    } catch {
+      return; // page closed mid-read => sign done
+    }
+    if (!/Signature request|Confirm Trade/i.test(text)) return;
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }
 
 async function fundPaymentAddress(paymentAddress: string): Promise<{ txid: string; vout: number; value: number }> {
