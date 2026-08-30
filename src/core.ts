@@ -119,6 +119,9 @@ export * from './cat21-transfer/cat21-transfer.helper';
 export * from './cat21-transfer/cat21-transfer.types';
 export * from './cat21-transfer/cat21-transfer-input-adapter';
 
+// --- CAT-21 transfer framework-agnostic orchestrator (subscribe-based). ---
+export * from './cat21-transfer/cat21-transfer-orchestrator';
+
 // --- CAT-21 offer (ord-style buy-offer builder + seller validator) ---
 export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
