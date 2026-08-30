@@ -5373,6 +5373,13 @@ function buildCatImageUrl(baseUrl, catNumber) {
     return `${baseUrl}/api/cat/${catNumber}/image.webp`;
 }
 
+/**
+ * Response shapes for the cat21 data API (`backend2.cat21.space` /
+ * cat21-indexer). Framework-agnostic — shared by the Angular
+ * `Cat21ApiService` and the fetch-based `cat21-api.fetch` twin so the
+ * wire contract has ONE definition.
+ */
+
 class Cat21ApiService {
     config = inject(cat21Config);
     baseUrl = this.config.cat21ApiUrl;
@@ -5440,10 +5447,17 @@ async function fetchOk(url, init) {
     }
     return res;
 }
-/** `GET <url>` → parsed JSON. Sends `Accept: application/json` (the ord hosts
- * gate HTML behind it). */
+/** `GET <url>` → parsed JSON, Promise form. Sends `Accept: application/json`
+ * (the ord hosts gate HTML behind it). The framework-agnostic form used by
+ * plain-async consumers (the `cat21-api.fetch` twin, bots, CLIs). */
+function fetchJsonAsync(url) {
+    return fetchOk(url, { headers: { Accept: 'application/json' } }).then((r) => r.json());
+}
+/** `GET <url>` → parsed JSON, Observable form. Thin RxJS wrapper over
+ * `fetchJsonAsync` for the Angular services' existing `.pipe(catchError)`
+ * chains. */
 function fetchJson(url) {
-    return from(fetchOk(url, { headers: { Accept: 'application/json' } }).then((r) => r.json()));
+    return from(fetchJsonAsync(url));
 }
 /** `GET <url>` → raw text (e.g. an esplora `/tx/:id/hex` response). */
 function fetchText(url) {

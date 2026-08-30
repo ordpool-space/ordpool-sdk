@@ -72,6 +72,13 @@ export * from './cat21-mint/cat21.service.types';
 export * from './cat21-mint/cat21-mint.helper';
 export * from './cat21-mint/cat21-mint-input-adapter';
 
+// --- CAT-21 data API: framework-agnostic fetch twin of the Angular
+//     Cat21ApiService (status + latest-cat-numbers), the shared wire
+//     types, and the pure URL builders. Consumers own caching/reactivity. ---
+export * from './cat21-mint/cat21-api.types';
+export * from './cat21-mint/cat21-api.urls';
+export * from './cat21-mint/cat21-api.fetch';
+
 // --- UTXO content-safety scanner: pure types + detection primitives.
 //     The Angular @Injectable `UtxoContentScanner` service stays in
 //     the main entry only; the pure detection primitives (bucketOf,

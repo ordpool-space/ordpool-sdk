@@ -8,55 +8,10 @@ import {
   buildLatestCatNumbersUrl,
   buildStatusUrl,
 } from './cat21-api.urls';
+import { CatNumbersResult, StatusResult } from './cat21-api.types';
 
-export interface StatusResult {
-  totalCats: number;
-  lastSyncedCatNumber: number;
-  proofOfCatWork: number;
-}
-
-export interface CatNumbersResult {
-  catNumbers: number[];
-  total: number;
-  currentPage: number;
-  itemsPerPage: number;
-}
-
-export interface Cat21 {
-  transactionId: string;
-  blockId: string;
-  number: number;
-  feeRate: number;
-  blockHeight: number;
-  blockTime: number;
-  fee: number;
-  size: number;
-  weight: number;
-  value: number;
-  sat: number;
-  firstOwner: string;
-}
-
-export interface Cat21PaginatedResult {
-  cats: Cat21[];
-  totalResults: number;
-  itemsPerPage: number;
-  currentPage: number;
-}
-
-export interface Cat21SingleResult {
-  cat: Cat21;
-  previousTransactionId: string | null;
-  nextTransactionId: string | null;
-}
-
-export interface ErrorResponse {
-  statusCode: number;
-  timestamp: string;
-  path: string;
-  message: string;
-  stack?: string;
-}
+// Wire contract shared with the framework-agnostic `cat21-api.fetch` twin.
+export * from './cat21-api.types';
 
 @Injectable({ providedIn: 'root' })
 export class Cat21ApiService {

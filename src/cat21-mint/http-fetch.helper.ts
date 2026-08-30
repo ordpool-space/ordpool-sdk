@@ -22,12 +22,18 @@ async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
   return res;
 }
 
-/** `GET <url>` → parsed JSON. Sends `Accept: application/json` (the ord hosts
- * gate HTML behind it). */
+/** `GET <url>` → parsed JSON, Promise form. Sends `Accept: application/json`
+ * (the ord hosts gate HTML behind it). The framework-agnostic form used by
+ * plain-async consumers (the `cat21-api.fetch` twin, bots, CLIs). */
+export function fetchJsonAsync<T>(url: string): Promise<T> {
+  return fetchOk(url, { headers: { Accept: 'application/json' } }).then((r) => r.json() as Promise<T>);
+}
+
+/** `GET <url>` → parsed JSON, Observable form. Thin RxJS wrapper over
+ * `fetchJsonAsync` for the Angular services' existing `.pipe(catchError)`
+ * chains. */
 export function fetchJson<T>(url: string): Observable<T> {
-  return from(
-    fetchOk(url, { headers: { Accept: 'application/json' } }).then((r) => r.json() as Promise<T>),
-  );
+  return from(fetchJsonAsync<T>(url));
 }
 
 /** `GET <url>` → raw text (e.g. an esplora `/tx/:id/hex` response). */
