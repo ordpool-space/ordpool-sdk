@@ -72,6 +72,10 @@ export * from './cat21-mint/cat21.service.types';
 export * from './cat21-mint/cat21-mint.helper';
 export * from './cat21-mint/cat21-mint-input-adapter';
 
+// --- CAT-21 mint framework-agnostic orchestrator (subscribe-based high-level
+//     API; the Angular Cat21MintOrchestrator is a thin veneer over this). ---
+export * from './cat21-mint/cat21-mint-orchestrator';
+
 // --- CAT-21 data API: framework-agnostic fetch twin of the Angular
 //     Cat21ApiService (status + latest-cat-numbers), the shared wire
 //     types, and the pure URL builders. Consumers own caching/reactivity. ---

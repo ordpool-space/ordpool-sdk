@@ -49,6 +49,7 @@
     "src/cat21-mint/cat21-api.types.ts",
     "src/cat21-mint/cat21-api.urls.ts",
     "src/cat21-mint/cat21-api.fetch.ts",
+    "src/cat21-mint/cat21-mint-orchestrator.ts",
     "src/cat21-mint/http-fetch.helper.ts",
     "src/cat21-fee/fee-simulation.helper.ts",
     "src/cat21-fee/coin-selection.helper.ts",
