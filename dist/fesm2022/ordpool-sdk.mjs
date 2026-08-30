@@ -5827,9 +5827,7 @@ async function planMint(params, ports) {
     // Guess-free coverage target: cat postage + tip + the NO-CHANGE miner fee,
     // measured from a real build (no vB estimate). The no-change form is the
     // cheapest a mint can be, so any coin >= this target can mint and any coin
-    // below it cannot — the exact feasibility threshold, replacing the old
-    // eyeballed `* 200` ceiling that wrongly excluded coins between the real
-    // threshold and the inflated one.
+    // below it cannot — the exact feasibility threshold.
     const largest = utxos.reduce((a, b) => (a && a.value >= b.value ? a : b), null);
     if (!largest || largest.value < fixedOutputs) {
         return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
@@ -6724,8 +6722,7 @@ async function planTransfer(params, ports) {
     const catOutputSats = params.targetPostageSats ?? params.catUtxo.value;
     const feeBudget = (coinValue) => coinValue + params.catUtxo.value - catOutputSats;
     // Guess-free coverage target: the no-change transfer fee, measured from a real
-    // build (vsize depends on input/output TYPES, not values), replacing the old
-    // eyeballed `* 200` ceiling.
+    // build (vsize depends on input/output TYPES, not values).
     const largest = utxos.reduce((a, b) => (a && a.value >= b.value ? a : b), null);
     if (!largest) {
         return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
@@ -7284,7 +7281,7 @@ async function planOffer(params, ports) {
         nonSignableInputs: [0],
     });
     // Guess-free coverage target: price + cat value + the NO-CHANGE offer fee,
-    // measured from a real build (no vB estimate), replacing the old `* 220`.
+    // measured from a real build (no vB estimate).
     const largest = utxos.reduce((a, b) => (a && a.value >= b.value ? a : b), null);
     if (!largest || feeBudget(largest.value) < 0) {
         return { status: 'insufficient', recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null };

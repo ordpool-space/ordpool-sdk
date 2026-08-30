@@ -145,8 +145,7 @@ async function planTransfer(
   const feeBudget = (coinValue: number) => coinValue + params.catUtxo.value - catOutputSats;
 
   // Guess-free coverage target: the no-change transfer fee, measured from a real
-  // build (vsize depends on input/output TYPES, not values), replacing the old
-  // eyeballed `* 200` ceiling.
+  // build (vsize depends on input/output TYPES, not values).
   const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
   if (!largest) {
     return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };

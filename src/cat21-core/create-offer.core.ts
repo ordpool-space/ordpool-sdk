@@ -137,7 +137,7 @@ async function planOffer(
     });
 
   // Guess-free coverage target: price + cat value + the NO-CHANGE offer fee,
-  // measured from a real build (no vB estimate), replacing the old `* 220`.
+  // measured from a real build (no vB estimate).
   const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
   if (!largest || feeBudget(largest.value) < 0) {
     return { status: 'insufficient', recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null };

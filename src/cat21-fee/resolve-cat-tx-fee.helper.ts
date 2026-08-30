@@ -4,9 +4,8 @@
  * The miner fee is `vsize x feeRate`, but the vsize depends on the fee: a
  * change output is present only while the leftover clears the dust floor, and a
  * cat tx has exactly two possible sizes — WITH a change output, or WITHOUT
- * (leftover absorbed into the fee). Rather than seed the sizing pass with an
- * eyeballed vB ceiling (the old `* 200` / `* 220`), this measures both forms
- * from real builds:
+ * (leftover absorbed into the fee). Instead of seeding the sizing pass with a
+ * vB estimate, this measures both forms from real builds:
  *
  *   1. Build at fee 0 -> the WITH-CHANGE form (leftover is maximal, so a change
  *      output is present); its vsize gives the with-change fee.
