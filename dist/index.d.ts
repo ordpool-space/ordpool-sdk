@@ -2615,6 +2615,171 @@ declare function resolveFundingPick<T extends AnnotatedFundingUtxo>(recommendati
 } | null): T | null;
 
 /**
+ * Bare cat UTXO outpoint — `{ txid, vout }` — the minimum a caller
+ * needs to reference a specific cat on chain. Enriched siblings live
+ * alongside their orchestrators and extend this shape:
+ *
+ *   - `Cat21Holding` (transfer): `CatOutpoint & { catNumber; value }`
+ *   - `BuyOfferTargetCat` (offer-create): `CatOutpoint & { catNumber; value; scriptPubKey }`
+ *   - `ParsedOffer.catUtxo` (offer-accept): re-uses `CatOutpoint`
+ *
+ * The URL-permalink layer (`permalink.helper.ts`) uses only the
+ * bare shape — cat number + value are consumer-side enrichments.
+ */
+interface CatOutpoint {
+    /** Lowercase 64-hex txid. */
+    txid: string;
+    /** Zero-based output index. */
+    vout: number;
+}
+
+/**
+ * Identifies a cat the connected wallet currently owns. A consumer populates
+ * this from its "show me my cats" lookup (ord by ordinals address → the UTXO
+ * each cat sits on). `value` is read from the real UTXO — a cat can sit on any
+ * size, so never assume 546.
+ */
+interface Cat21Holding extends CatOutpoint {
+    catNumber: number;
+    /**
+     * The cat UTXO's actual on-chain value. Usually 546 for cats we mint (our
+     * postage convention), but a cat minted by any other transaction can sit on
+     * a UTXO of any size, so read it, never assume 546.
+     */
+    value: number;
+}
+/**
+ * Alias for {@link CAT21_POSTAGE_SATS}, kept for legacy import paths. The
+ * canonical constant lives in `cat21-postage.ts`; every cat-touching tx
+ * uses the same value across mint, transfer, and offer flows.
+ */
+declare const CAT21_TRANSFER_POSTAGE_SATS = 546;
+/**
+ * The cat-bearing UTXO the seller spends to move the cat. The first sat
+ * of this UTXO carries the existing cat ordinal; per ordinal-theory
+ * FIFO, it travels to the first sat of output 0. Same prepared-input
+ * shape as every other cat-touching flow ({@link Cat21PreparedInput}).
+ */
+type Cat21TransferCatInput = Cat21PreparedInput;
+/**
+ * Wallet-provided funding UTXOs that pay the miner fee. Coin selection is
+ * the caller's responsibility — the builder does NOT select. The caller
+ * may also pass zero funding inputs if the cat UTXO itself has surplus
+ * value above postage + fee.
+ */
+type Cat21TransferFundingInput = Cat21PreparedInput;
+/** Output destinations of a CAT-21 transfer. */
+interface Cat21TransferDestinations {
+    /**
+     * Where the cat lands. The first sat of this output receives the
+     * existing cat AND — because `lockTime=21` is set — a fresh cat is
+     * minted onto the same ordinal in the same tx.
+     */
+    recipientAddress: string;
+    /** Where the sender's BTC change goes (when above dust). */
+    senderChangeAddress: string;
+}
+
+/**
+ * Dust threshold for the change output. 546 sats is the conservative
+ * cross-address-type floor (taproot 330, segwit 294, p2sh 540 — 546
+ * clears them all).
+ */
+declare const CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS = 546;
+/**
+ * Arguments for `buildCat21TransferPsbt`.
+ *
+ * Coin selection is the caller's responsibility. The builder structures
+ * the PSBT and pins the protocol invariants; it does NOT pick UTXOs,
+ * fetch them, or compute fees.
+ */
+interface BuildCat21TransferArgs {
+    /**
+     * The signing wallet type. Currently unused for sequence-picking:
+     * transfers ship `sequence = 0xfffffffd` (RBF on) for EVERY wallet
+     * (see `cat21-sequence.ts`). Unlike a mint, the cat is already on
+     * chain, so a third-party accelerate UI that RBF-replaces this tx
+     * only risks a missed bonus mint, not a cat loss — not worth
+     * degrading fee-bump UX to prevent. Kept for API symmetry with the
+     * mint and offer builders.
+     */
+    walletType: KnownOrdinalWalletType;
+    network: Network;
+    catUtxo: Cat21TransferCatInput;
+    /**
+     * Funding UTXOs. By default (PRESERVE — `targetPostageSats` omitted) the cat
+     * UTXO is never touched for the fee, so funding must cover at least
+     * `feeSats`. With `targetPostageSats` set: GROW (target > catUtxo.value)
+     * funding covers `(target − catUtxo.value) + feeSats`; SHRINK
+     * (target < catUtxo.value) lets the cat's own freed surplus cover the fee,
+     * so funding may be empty when `catUtxo.value − target ≥ feeSats`.
+     */
+    fundingInputs: ReadonlyArray<Cat21TransferFundingInput>;
+    destinations: Cat21TransferDestinations;
+    /** Miner fee in sats. Caller computes from intended feeRate × vsize estimate. */
+    feeSats: number;
+    /**
+     * OPTIONAL output-0 size (the recipient's cat UTXO). Omitted ⇒ PRESERVE:
+     * output 0 = `catUtxo.value`, the golden-rule default (never resize; fee
+     * from separate funding). When set it is an EXPLICIT opt-in to resize:
+     *   - `> catUtxo.value` ⇒ **GROW**: pad the output up (funding provides the
+     *     extra sats + fee). Rescues a sub-dust cat mined out-of-band below the
+     *     dust limit to a relay-standard size, and provisions a cold-wallet cat
+     *     with padding so it can be moved once later without co-funding.
+     *   - `< catUtxo.value` ⇒ **SHRINK**: trim the output; the freed surplus
+     *     (`catUtxo.value − target`) self-funds the fee (one-in/one-out when it
+     *     covers the fee, else co-funded by `fundingInputs`). Structurally
+     *     matches ord `wallet send --postage <target>` (except `nLockTime=21`).
+     * A set value must clear the recipient address's dust floor (a resized
+     * output below dust would not relay); the builder throws otherwise.
+     */
+    targetPostageSats?: number;
+}
+interface BuildCat21TransferResult {
+    /** Raw hex of the unsigned tx. */
+    hex: string;
+    /** Raw PSBT bytes. */
+    psbt: Uint8Array;
+    /** Total funding input value (sum of fundingInputs.value). */
+    fundingInputTotalSats: number;
+    /**
+     * Output-0 size actually emitted (the recipient's cat UTXO): `catUtxo.value`
+     * when preserving (default), or `targetPostageSats` when grown/shrunk.
+     */
+    catOutputSats: number;
+    /** Change output value (0 when sub-dust; absorbed into fee). */
+    changeSats: number;
+    /**
+     * Actual miner fee in sats — `feeSats + absorbedSubDustChange`. When the
+     * funding change is sub-dust it is absorbed into the fee (miner tip);
+     * callers reporting the realised fee should use this, not the input
+     * `feeSats`. Mirrors the mint's `finalFeeSats`.
+     */
+    finalFeeSats: number;
+}
+/**
+ * Builds the unsigned CAT-21 transfer PSBT.
+ *
+ * Every cat-touching tx we build is structurally a CAT-21 mint:
+ * `lockTime=21` re-mints a fresh cat onto the same ordinal that
+ * already carries the original — a single ordinal can carry multiple
+ * cats. The value `21` is a protocol marker (block 21 mined in 2009),
+ * no consensus meaning.
+ *
+ * Structure:
+ *   Input 0  — cat-bearing UTXO. FIFO: its first sat, the cat, lands at
+ *              output 0's first sat.
+ *   Input 1+ — funding UTXOs.
+ *   Output 0 — recipient address, `catOutputSats` sats (= `catUtxo.value` by
+ *              default = PRESERVE; = `targetPostageSats` when grown/shrunk).
+ *   Output 1 — change (absorbed into fee when sub-dust).
+ *
+ * Hard invariants (asserted): lockTime=21, per-wallet sequence,
+ * every input SIGHASH_ALL. Coin selection is the caller's job.
+ */
+declare function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21TransferResult;
+
+/**
  * Everything the transfer core needs, framework-agnostic. Pubkeys are raw bytes
  * (no wallet-object dependency). The cat rides input 0 (at `ordinalsAddress`);
  * funding rides inputs 1+ (at `paymentAddress`).
@@ -2654,6 +2819,13 @@ interface TransferSimulationResult {
     /** Output-0 size actually emitted (the recipient's cat UTXO). */
     catOutputSats: number | null;
 }
+/** Build the transfer PSBT for one funding pick + fee (sim or real). */
+/**
+ * Build the transfer PSBT for one funding pick + fee (simulation or real).
+ * Exported so the framework-agnostic transfer orchestrator reuses it instead
+ * of duplicating the prepare-inputs + `buildCat21TransferPsbt` composition.
+ */
+declare function buildTransfer(params: TransferCoreParams, funding: CoreFundingUtxo, feeSats: number, isSimulation: boolean): BuildCat21TransferResult;
 /**
  * Preview a transfer: content-checked funding selection + two-pass fee, no
  * signing or broadcast. `status: 'ready'` means a safe funding coin was found
@@ -4327,25 +4499,6 @@ type PrepareBuyOfferBuyerInputArgs = PrepareCat21InputArgs;
 declare function prepareBuyOfferBuyerInput(args: PrepareBuyOfferBuyerInputArgs): Cat21OfferBuyerInput;
 
 /**
- * Bare cat UTXO outpoint — `{ txid, vout }` — the minimum a caller
- * needs to reference a specific cat on chain. Enriched siblings live
- * alongside their orchestrators and extend this shape:
- *
- *   - `Cat21Holding` (transfer): `CatOutpoint & { catNumber; value }`
- *   - `BuyOfferTargetCat` (offer-create): `CatOutpoint & { catNumber; value; scriptPubKey }`
- *   - `ParsedOffer.catUtxo` (offer-accept): re-uses `CatOutpoint`
- *
- * The URL-permalink layer (`permalink.helper.ts`) uses only the
- * bare shape — cat number + value are consumer-side enrichments.
- */
-interface CatOutpoint {
-    /** Lowercase 64-hex txid. */
-    txid: string;
-    /** Zero-based output index. */
-    vout: number;
-}
-
-/**
  * What the buyer needs to know about the cat they want to bid on.
  * Caller (typically a frontend) fetches this from ord: cat number →
  * inscription → current UTXO at the seller's address.
@@ -4699,137 +4852,6 @@ declare class Cat21AcceptOfferOrchestrator {
 }
 
 /**
- * Alias for {@link CAT21_POSTAGE_SATS}, kept for legacy import paths. The
- * canonical constant lives in `cat21-postage.ts`; every cat-touching tx
- * uses the same value across mint, transfer, and offer flows.
- */
-declare const CAT21_TRANSFER_POSTAGE_SATS = 546;
-/**
- * The cat-bearing UTXO the seller spends to move the cat. The first sat
- * of this UTXO carries the existing cat ordinal; per ordinal-theory
- * FIFO, it travels to the first sat of output 0. Same prepared-input
- * shape as every other cat-touching flow ({@link Cat21PreparedInput}).
- */
-type Cat21TransferCatInput = Cat21PreparedInput;
-/**
- * Wallet-provided funding UTXOs that pay the miner fee. Coin selection is
- * the caller's responsibility — the builder does NOT select. The caller
- * may also pass zero funding inputs if the cat UTXO itself has surplus
- * value above postage + fee.
- */
-type Cat21TransferFundingInput = Cat21PreparedInput;
-/** Output destinations of a CAT-21 transfer. */
-interface Cat21TransferDestinations {
-    /**
-     * Where the cat lands. The first sat of this output receives the
-     * existing cat AND — because `lockTime=21` is set — a fresh cat is
-     * minted onto the same ordinal in the same tx.
-     */
-    recipientAddress: string;
-    /** Where the sender's BTC change goes (when above dust). */
-    senderChangeAddress: string;
-}
-
-/**
- * Dust threshold for the change output. 546 sats is the conservative
- * cross-address-type floor (taproot 330, segwit 294, p2sh 540 — 546
- * clears them all).
- */
-declare const CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS = 546;
-/**
- * Arguments for `buildCat21TransferPsbt`.
- *
- * Coin selection is the caller's responsibility. The builder structures
- * the PSBT and pins the protocol invariants; it does NOT pick UTXOs,
- * fetch them, or compute fees.
- */
-interface BuildCat21TransferArgs {
-    /**
-     * The signing wallet type. Currently unused for sequence-picking:
-     * transfers ship `sequence = 0xfffffffd` (RBF on) for EVERY wallet
-     * (see `cat21-sequence.ts`). Unlike a mint, the cat is already on
-     * chain, so a third-party accelerate UI that RBF-replaces this tx
-     * only risks a missed bonus mint, not a cat loss — not worth
-     * degrading fee-bump UX to prevent. Kept for API symmetry with the
-     * mint and offer builders.
-     */
-    walletType: KnownOrdinalWalletType;
-    network: Network;
-    catUtxo: Cat21TransferCatInput;
-    /**
-     * Funding UTXOs. By default (PRESERVE — `targetPostageSats` omitted) the cat
-     * UTXO is never touched for the fee, so funding must cover at least
-     * `feeSats`. With `targetPostageSats` set: GROW (target > catUtxo.value)
-     * funding covers `(target − catUtxo.value) + feeSats`; SHRINK
-     * (target < catUtxo.value) lets the cat's own freed surplus cover the fee,
-     * so funding may be empty when `catUtxo.value − target ≥ feeSats`.
-     */
-    fundingInputs: ReadonlyArray<Cat21TransferFundingInput>;
-    destinations: Cat21TransferDestinations;
-    /** Miner fee in sats. Caller computes from intended feeRate × vsize estimate. */
-    feeSats: number;
-    /**
-     * OPTIONAL output-0 size (the recipient's cat UTXO). Omitted ⇒ PRESERVE:
-     * output 0 = `catUtxo.value`, the golden-rule default (never resize; fee
-     * from separate funding). When set it is an EXPLICIT opt-in to resize:
-     *   - `> catUtxo.value` ⇒ **GROW**: pad the output up (funding provides the
-     *     extra sats + fee). Rescues a sub-dust cat mined out-of-band below the
-     *     dust limit to a relay-standard size, and provisions a cold-wallet cat
-     *     with padding so it can be moved once later without co-funding.
-     *   - `< catUtxo.value` ⇒ **SHRINK**: trim the output; the freed surplus
-     *     (`catUtxo.value − target`) self-funds the fee (one-in/one-out when it
-     *     covers the fee, else co-funded by `fundingInputs`). Structurally
-     *     matches ord `wallet send --postage <target>` (except `nLockTime=21`).
-     * A set value must clear the recipient address's dust floor (a resized
-     * output below dust would not relay); the builder throws otherwise.
-     */
-    targetPostageSats?: number;
-}
-interface BuildCat21TransferResult {
-    /** Raw hex of the unsigned tx. */
-    hex: string;
-    /** Raw PSBT bytes. */
-    psbt: Uint8Array;
-    /** Total funding input value (sum of fundingInputs.value). */
-    fundingInputTotalSats: number;
-    /**
-     * Output-0 size actually emitted (the recipient's cat UTXO): `catUtxo.value`
-     * when preserving (default), or `targetPostageSats` when grown/shrunk.
-     */
-    catOutputSats: number;
-    /** Change output value (0 when sub-dust; absorbed into fee). */
-    changeSats: number;
-    /**
-     * Actual miner fee in sats — `feeSats + absorbedSubDustChange`. When the
-     * funding change is sub-dust it is absorbed into the fee (miner tip);
-     * callers reporting the realised fee should use this, not the input
-     * `feeSats`. Mirrors the mint's `finalFeeSats`.
-     */
-    finalFeeSats: number;
-}
-/**
- * Builds the unsigned CAT-21 transfer PSBT.
- *
- * Every cat-touching tx we build is structurally a CAT-21 mint:
- * `lockTime=21` re-mints a fresh cat onto the same ordinal that
- * already carries the original — a single ordinal can carry multiple
- * cats. The value `21` is a protocol marker (block 21 mined in 2009),
- * no consensus meaning.
- *
- * Structure:
- *   Input 0  — cat-bearing UTXO. FIFO: its first sat, the cat, lands at
- *              output 0's first sat.
- *   Input 1+ — funding UTXOs.
- *   Output 0 — recipient address, `catOutputSats` sats (= `catUtxo.value` by
- *              default = PRESERVE; = `targetPostageSats` when grown/shrunk).
- *   Output 1 — change (absorbed into fee when sub-dust).
- *
- * Hard invariants (asserted): lockTime=21, per-wallet sequence,
- * every input SIGHASH_ALL. Coin selection is the caller's job.
- */
-declare function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21TransferResult;
-
-/**
  * Layer-2 input adapter for the CAT-21 transfer pipeline. Two semantic
  * entry points (the cat UTXO at input 0, the funding UTXOs at 1..N)
  * that both delegate to the shared `prepareCat21Input` — same prepared
@@ -4839,25 +4861,6 @@ type PrepareTransferInputArgs = PrepareCat21InputArgs;
 declare function prepareTransferCatInput(args: PrepareTransferInputArgs): Cat21TransferCatInput;
 declare function prepareTransferFundingInput(args: PrepareTransferInputArgs): Cat21TransferFundingInput;
 
-/**
- * Identifies a cat the connected wallet currently owns. Consumer (the
- * cat21.space frontend or any other) populates this from its existing
- * "show me my cats" lookup (ord by ordinals address → list of cat
- * inscriptions → the UTXO each cat sits on).
- *
- * `vout` and `value` locate the cat (FIFO at output 0); we carry them on
- * the type so the orchestrator is self-contained. `value` is read from the
- * real UTXO — a cat can sit on any size, so never assume 546 here.
- */
-interface Cat21Holding extends CatOutpoint {
-    catNumber: number;
-    /**
-     * The cat UTXO's actual on-chain value. Usually 546 for cats we mint (our
-     * postage convention), but a cat minted by any other transaction can sit on
-     * a UTXO of any size, so read it, never assume 546.
-     */
-    value: number;
-}
 /**
  * Result of the per-fee-rate simulation. Either:
  * - `insufficient: true` — funding UTXOs can't cover postage + fee
@@ -6627,5 +6630,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 export type { AcceptOfferCoreParams, AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AddressProbe, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AnnotatedFundingUtxo, AskQueryArgs, AssessCompressionOptions, BroadcastOutcome, BroadcastPort, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, CardinalUtxoCandidate, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CatsAtAddressOptions, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, ClassifyOutpointOptions, CompressionAssessment, ContentScanPort, CoreFundingUtxo, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferArtifact, CreateOfferCoreParams, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferSimulationResult, CreateOfferState, CreateOfferStatus, CreateTransactionResult, DeriveWatchOnlyArgs, DummyKeypairResult, ErrorResponse, FundingRecommendation, FundingRecommendationStatus, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeCoreParams, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeSimulation, InscribeStatus, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintCoreParams, MintSimulationResult, MintState, MintStatus, OfferCreateSignPort, OrdEnvelopeField, OrdOutputResponse, OrdParityFundingResult, OrdTag, OrdinalsAddress, OutpointClassification, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, ScanWatchOnlyArgs, ScannedAddress, SignMessageArgs, SignMessageResult, SignPort, SignedTxBytes, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferCoreParams, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferSimulationResult, TransferState, TransferStatus, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoClassification, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, UtxosPort, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletCapabilityStatus, WalletConnector, WalletInfo, WalletMatrixEntry, WatchOnlyAddress, WatchOnlyDeriveErrorCode, WatchOnlyProbeConfig, WatchOnlyScanResult, WatchOnlyScriptType, WindowLike, XverseAddressResponse };

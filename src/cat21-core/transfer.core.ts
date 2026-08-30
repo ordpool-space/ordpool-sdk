@@ -78,7 +78,12 @@ interface TransferPlan {
 }
 
 /** Build the transfer PSBT for one funding pick + fee (sim or real). */
-function buildTransfer(
+/**
+ * Build the transfer PSBT for one funding pick + fee (simulation or real).
+ * Exported so the framework-agnostic transfer orchestrator reuses it instead
+ * of duplicating the prepare-inputs + `buildCat21TransferPsbt` composition.
+ */
+export function buildTransfer(
   params: TransferCoreParams,
   funding: CoreFundingUtxo,
   feeSats: number,

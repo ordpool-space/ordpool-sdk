@@ -1,5 +1,22 @@
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Cat21PreparedInput } from '../cat21-script/prepare-cat21-input';
+import { CatOutpoint } from '../cat21-share/cat-outpoint';
+
+/**
+ * Identifies a cat the connected wallet currently owns. A consumer populates
+ * this from its "show me my cats" lookup (ord by ordinals address → the UTXO
+ * each cat sits on). `value` is read from the real UTXO — a cat can sit on any
+ * size, so never assume 546.
+ */
+export interface Cat21Holding extends CatOutpoint {
+  catNumber: number;
+  /**
+   * The cat UTXO's actual on-chain value. Usually 546 for cats we mint (our
+   * postage convention), but a cat minted by any other transaction can sit on
+   * a UTXO of any size, so read it, never assume 546.
+   */
+  value: number;
+}
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}, kept for legacy import paths. The

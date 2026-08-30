@@ -16,7 +16,7 @@ import {
   throwError,
 } from 'rxjs';
 
-import { CatOutpoint } from '../cat21-share/cat-outpoint';
+import { Cat21Holding } from './cat21-transfer.types';
 import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
 import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 import { FundingRecommendationService } from '../cat21-fee/funding-recommendation.service';
@@ -42,25 +42,9 @@ import {
   Cat21TransferFundingInput,
 } from './cat21-transfer.types';
 
-/**
- * Identifies a cat the connected wallet currently owns. Consumer (the
- * cat21.space frontend or any other) populates this from its existing
- * "show me my cats" lookup (ord by ordinals address → list of cat
- * inscriptions → the UTXO each cat sits on).
- *
- * `vout` and `value` locate the cat (FIFO at output 0); we carry them on
- * the type so the orchestrator is self-contained. `value` is read from the
- * real UTXO — a cat can sit on any size, so never assume 546 here.
- */
-export interface Cat21Holding extends CatOutpoint {
-  catNumber: number;
-  /**
-   * The cat UTXO's actual on-chain value. Usually 546 for cats we mint (our
-   * postage convention), but a cat minted by any other transaction can sit on
-   * a UTXO of any size, so read it, never assume 546.
-   */
-  value: number;
-}
+// Cat21Holding moved to cat21-transfer.types (framework-agnostic); re-exported
+// here so consumers importing it from the orchestrator keep working.
+export type { Cat21Holding };
 
 /**
  * Result of the per-fee-rate simulation. Either:
