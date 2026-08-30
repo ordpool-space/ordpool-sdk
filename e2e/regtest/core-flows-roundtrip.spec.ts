@@ -153,17 +153,23 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
   }, 90_000);
 
   // The shared gate for the change-headroom fix (a9ffd7e): on a REAL chain, a
-  // wallet holding BOTH a dust-cliff coin (covers the mint but is too tight to
-  // emit an above-dust change) AND a headroom coin must auto-pick the headroom
+  // wallet holding a dust-cliff coin (covers the mint but is too tight to emit
+  // an above-dust change) alongside headroom coins must auto-pick a headroom
   // coin, so the ON-CHAIN realised fee-rate lands on the typed rate instead of
   // the 7-13% over-pay (the leftover absorbed into the fee). Best-fit-by-value
-  // alone would take the SMALLER dust-cliff coin; the preferred-target bias
-  // must skip it. Self-calibrated: the with-change fee F is learned from a real
-  // simulate against the headroom coin, then the dust-cliff coin is sized into
-  // the band [F, F + 546) so its change is provably sub-dust.
-  it('mixed pool: dust-cliff coin + headroom coin => auto-picks headroom, on-chain realised rate == typed', async () => {
+  // alone would take the SMALLEST dust-cliff coin; the preferred-target bias
+  // must skip it.
+  //
+  // ABSOLUTE sats (NOT self-calibrated): this replays cat21-indexer's real
+  // regtest pool {13689, 99301, 100000} @ rate 100 as a genuine
+  // true-positive-control. A self-calibrated variant (sizing the dust-cliff
+  // coin off the internal fee F) is consistent-by-construction and would pass
+  // even if `withChangeVsize` were mis-measured as the no-change size; fixed
+  // sats + a fixed rate pin the real outcome: pre-fix best-fit picks 13689
+  // (vsize 122, rate ~107.73); the fix picks a headroom coin (rate == 100).
+  it('mixed pool {13689, 99301, 100000} @ rate 100: picks a headroom coin, on-chain realised rate == 100', async () => {
     const RATE = 100;
-    // Fresh account so the 2-coin pool is fully controlled.
+    // Fresh account so the 3-coin pool is fully controlled.
     const mpPriv = secp256k1.utils.randomPrivateKey();
     const mpPub = secp256k1.getPublicKey(mpPriv, true);
     const mpXonly = mpPub.subarray(1, 33);
@@ -189,30 +195,21 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     const simPorts = { utxos, scan };
     const execPorts = { utxos, scan, sign: mpSign, broadcast };
 
-    const HEADROOM_SATS = 100_000;
-
-    // 1) Fund the headroom coin; learn the with-change fee F from a real simulate.
-    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', mpPayment, '0.001');
-    await waitForElectrsSync(mineBlocks(1));
-    const F = (await simulateMint(params, simPorts)).feeSats;
-    if (F === null) throw new Error('calibration simulate returned no fee');
-    expect(F).toBeGreaterThan(0);
-
-    // 2) Fund a dust-cliff coin: budget in [F, F + 546) => its would-be change
-    //    is sub-dust => absorbed into the fee (over-pay) IF it were picked.
-    //    546 = CAT21_POSTAGE_SATS (the mint's fixed output).
-    const dustCliffSats = 546 + F + 200;
-    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', mpPayment, (dustCliffSats / 1e8).toFixed(8));
+    // Fund the exact 3-coin pool: one dust-cliff coin + two headroom coins.
+    for (const amt of ['0.00013689', '0.00099301', '0.00100000']) {
+      rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', mpPayment, amt);
+    }
     await waitForElectrsSync(mineBlocks(1));
 
-    // 3) Simulate the mixed pool: the auto-pick MUST take the headroom coin, not
-    //    the smaller (best-fit-by-value) dust-cliff coin.
+    // The auto-pick MUST take a headroom coin (99301/100000), not the smaller
+    // (best-fit-by-value) 13689 dust-cliff coin.
     const sim = await simulateMint(params, simPorts);
     expect(sim.status).toBe('ready');
-    expect(sim.fundingUtxo?.value).toBe(HEADROOM_SATS);
+    expect(sim.fundingUtxo?.value).not.toBe(13689);
+    expect([99301, 100000]).toContain(sim.fundingUtxo?.value);
     expect(Math.abs(sim.feeSats! / sim.vsize! - RATE)).toBeLessThan(1);
 
-    // 4) Execute + broadcast + measure the ON-CHAIN realised rate.
+    // Execute + broadcast + measure the ON-CHAIN realised rate.
     const out = await executeMint(params, execPorts);
     expect(out.txid).toMatch(/^[0-9a-f]{64}$/);
     const tip = mineBlocks(1);
@@ -221,8 +218,8 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     const onchainVsize = Math.ceil(tx.weight / 4);
     expect(Math.abs(tx.fee / onchainVsize - RATE)).toBeLessThan(1);
 
-    // 5) The dust-cliff coin was NOT spent — the headroom coin was preferred.
+    // The dust-cliff coin was NOT spent — a headroom coin was preferred.
     const remaining = await getUtxos(mpPayment);
-    expect(remaining.some((u) => u.value === dustCliffSats)).toBe(true);
+    expect(remaining.some((u) => u.value === 13689)).toBe(true);
   }, 120_000);
 });

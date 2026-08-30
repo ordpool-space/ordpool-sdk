@@ -125,6 +125,23 @@ describe('mint.core — change-headroom coin selection (dust-cliff over-pay guar
   const RATE = 10;
   const FIXED = 546; // CAT21_POSTAGE_SATS (no tip): the mint's fixed output value.
 
+  // ABSOLUTE-value true-positive-control (NOT self-calibrated): cat21-indexer's
+  // real regtest pool. A self-calibrated test (below) sizes its coins from the
+  // internal fee F, so it stays consistent-by-construction and would pass even
+  // if `withChangeVsize` were wrongly measured as the no-change size. This
+  // pins the fix against fixed sats + a fixed rate: pre-fix (best-fit, no
+  // preferred target) picks the 13689 dust-cliff coin (vsize 122, rate ~107.73);
+  // the fix must pick a headroom coin (99301/100000) with rate == 100.
+  it('REGRESSION {13689, 99301, 100000} @ rate 100: picks a headroom coin, not the 13689 dust-cliff', async () => {
+    const utxos = [coin('a', 13689), coin('b', 99301), coin('c', 100000)];
+    const sim = await simulateMint(params({ feeRatePerVbyte: 100 }), { utxos: utxosPort(utxos), scan: scanPort() });
+    expect(sim.status).toBe('ready');
+    expect(sim.fundingUtxo?.value).not.toBe(13689);
+    expect([99301, 100000]).toContain(sim.fundingUtxo?.value);
+    expect(sim.vsize).toBe(153); // with-change (NOT the 122 no-change of the dust-cliff pick)
+    expect(Math.abs(sim.feeSats! / sim.vsize! - 100)).toBeLessThan(1);
+  });
+
   // Learn the with-change miner fee F = ceil(withChangeVsize * RATE) from a
   // large (headroom) coin, then build a coin whose budget lands in the
   // dust-cliff band [F, F + 546): its would-be change is sub-dust, so the
