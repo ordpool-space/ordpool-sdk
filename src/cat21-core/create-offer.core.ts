@@ -73,8 +73,12 @@ interface OfferPlan {
   changeSats: number | null;
 }
 
-/** Build the buy-offer PSBT for one buyer funding pick + fee. */
-function buildOffer(
+/**
+ * Build the buy-offer PSBT for one buyer funding pick + fee. Exported so the
+ * framework-agnostic create-offer orchestrator reuses it instead of
+ * duplicating the prepare-inputs + `buildCat21BuyOfferPsbt` composition.
+ */
+export function buildOffer(
   params: CreateOfferCoreParams,
   funding: CoreFundingUtxo,
   feeSats: number,

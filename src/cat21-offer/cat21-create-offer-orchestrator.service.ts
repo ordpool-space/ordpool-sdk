@@ -25,7 +25,7 @@ import {
 } from '../cat21-fee/funding-safety';
 import { Cat21Service } from '../cat21-mint/cat21.service';
 import { RecommendedFees, TxnOutput } from '../cat21-mint/cat21.service.types';
-import { CatOutpoint } from '../cat21-share/cat-outpoint';
+import { BuyOfferTargetCat } from './cat21-offer.types';
 import { Network, toScureNetwork } from '../network';
 import { bitcoinNetwork } from '../network-token';
 import { PaymentAddress } from '../wallet/address-types';
@@ -36,27 +36,9 @@ import { buildCat21BuyOfferPsbt } from './cat21-offer.helper';
 import { prepareBuyOfferBuyerInput } from './cat21-offer-input-adapter';
 import { Cat21OfferBuyerInput, Cat21OfferSellerInput } from './cat21-offer.types';
 
-/**
- * What the buyer needs to know about the cat they want to bid on.
- * Caller (typically a frontend) fetches this from ord: cat number →
- * inscription → current UTXO at the seller's address.
- *
- * The PSBT pre-populates input 0's `witnessUtxo` from these bytes so
- * the seller can sign offline without a round-trip — that's the
- * "buyer-initiated, sniping-proof" property of ord-style offers.
- */
-export interface BuyOfferTargetCat extends CatOutpoint {
-  catNumber: number;
-  /**
-   * The cat UTXO's real on-chain value (any size). Fed straight to the
-   * offer builder's `sellerInput.value`, so it MUST be the actual prevout
-   * value, never a hardcoded 546: a wrong amount makes the seller's
-   * signature invalid and the offer un-broadcastable.
-   */
-  value: number;
-  /** scriptPubKey of the seller's cat UTXO, raw bytes. */
-  scriptPubKey: Uint8Array;
-}
+// BuyOfferTargetCat moved to cat21-offer.types (framework-agnostic); re-exported
+// here so consumers importing it from the orchestrator keep working.
+export type { BuyOfferTargetCat };
 
 export interface CreateOfferSimulation {
   vsize: number;

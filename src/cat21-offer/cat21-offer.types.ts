@@ -1,5 +1,26 @@
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Cat21PreparedInput } from '../cat21-script/prepare-cat21-input';
+import { CatOutpoint } from '../cat21-share/cat-outpoint';
+
+/**
+ * What the buyer needs to know about the cat they want to bid on. A consumer
+ * fetches this from ord: cat number → inscription → current UTXO at the
+ * seller's address. The PSBT pre-populates input 0's `witnessUtxo` from these
+ * bytes so the seller can sign offline (the buyer-initiated, sniping-proof
+ * property of ord-style offers).
+ */
+export interface BuyOfferTargetCat extends CatOutpoint {
+  catNumber: number;
+  /**
+   * The cat UTXO's real on-chain value (any size). Fed straight to the offer
+   * builder's `sellerInput.value`, so it MUST be the actual prevout value,
+   * never a hardcoded 546: a wrong amount makes the seller's signature invalid
+   * and the offer un-broadcastable.
+   */
+  value: number;
+  /** scriptPubKey of the seller's cat UTXO, raw bytes. */
+  scriptPubKey: Uint8Array;
+}
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS} kept for legacy import paths. The
