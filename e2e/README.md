@@ -57,12 +57,23 @@ The Angular `UtxoContentScanner` reads `cat21Config.ordApiUrl` +
 `cat21OrdApiUrl`. To make a mint/inscribe regtest pass after bumping to
 the safe-layer SDK:
 
-1. Run a local cat21-ord in the regtest stack (the profile above, or
-   your own service) and confirm it is synced to the regtest chain.
+1. Serve `/output/<outpoint>` on a reachable local port. Two options:
+   - **Happy path (simplest): a stub.** A tiny handler that answers
+     `GET /output/<outpoint>` with a clean ord body (`inscriptions: []`,
+     `runes: {}`, `sat_ranges: []`) is enough — the force-scan classifies
+     the fresh funding UTXO `clean` and the mint-ready UI shows. No synced
+     ord needed. (cat21-indexer's regtest reuses its existing
+     `fees-electrs-stub.mjs` on `:8999` for exactly this.)
+   - **Full behaviour: a real local cat21-ord** (the profile above),
+     synced to the regtest chain — needed only if the spec must actually
+     DETECT a cat/inscription/rune on a UTXO (see the caveat below).
 2. Point BOTH `ordApiUrl` AND `cat21OrdApiUrl` at it (e.g. `sed` both
    `ord.ordpool.space` and `ord.cat21.space` to the local host:port in
    the workflow — the `api.ordpool.space → localhost` sed alone is not
-   enough; the ord URLs are separate).
+   enough; the ord URLs are separate). A common trap: the workflow seds
+   the ord URLs to a port that nothing is listening on — connection
+   refused reads to the scanner exactly like a 404, so the UTXO flips to
+   `scan-failed`. Confirm the port actually serves `/output`.
 
 **Caveat — happy path vs asset-detection.** cat21-ord (`--index-cat21`)
 does not index real inscriptions/runes, so pointing `ordApiUrl` at it
