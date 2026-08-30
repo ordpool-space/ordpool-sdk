@@ -335,6 +335,27 @@ function getMinimumUtxoSize(address) {
     throw new Error('Unsupported address type');
 }
 /**
+ * The change-output dust floor an address's spend will actually use: the
+ * per-address-type minimum (`getMinimumUtxoSize`), falling back to 546 (the
+ * conservative cross-type floor) when the address prefix isn't recognised.
+ *
+ * This is the EXACT rule the transfer / offer / inscribe builders apply to
+ * decide whether to emit change or absorb it into the fee (see
+ * `cat21-transfer.helper.ts`, `cat21-offer.helper.ts`,
+ * `inscription.service.helper.ts`). Coin-selection's change-headroom preferred
+ * target must use the SAME floor as the builder, or it either wrongly excludes
+ * a coin whose change WOULD be emitted (falling back to a dust-cliff coin that
+ * over-pays) or falsely counts a coin whose change would be absorbed.
+ */
+function changeDustFloor(address) {
+    try {
+        return getMinimumUtxoSize(address);
+    }
+    catch {
+        return 546;
+    }
+}
+/**
  * Address format from prefix. `P2SH???` because P2SH covers multiple
  * wrap shapes (P2SH-P2WPKH, P2SH-P2WSH); resolving the inner shape
  * needs the redeem script. P2PK not supported.
@@ -6532,8 +6553,17 @@ const outpointKey = (u) => `${u.txid}:${u.vout}`;
  */
 class FundingRecommendationService {
     scanner = inject(UtxoContentScanner);
-    recommend(fundingUtxos$, targetSpendSats$) {
-        return combineLatest([fundingUtxos$, targetSpendSats$]).pipe(switchMap(([utxos, target]) => {
+    /**
+     * `preferredSpendSats$` (optional, defaults to no bias) is the WITH-CHANGE +
+     * dust headroom target, above the no-change feasibility `targetSpendSats$`.
+     * When supplied, the auto-pick is biased toward a clean coin that clears it,
+     * so the spend emits an above-dust change and the realised fee-rate lands on
+     * the requested rate instead of a sub-dust leftover being absorbed into the
+     * fee. `targetSpendSats$` stays the coverage gate (never a false
+     * `insufficient`). Mirrors `selectFunding`'s `preferredSats`.
+     */
+    recommend(fundingUtxos$, targetSpendSats$, preferredSpendSats$ = of(null)) {
+        return combineLatest([fundingUtxos$, targetSpendSats$, preferredSpendSats$]).pipe(switchMap(([utxos, target, preferred]) => {
             if (!target || target <= 0 || utxos.length === 0) {
                 return of(recommendFunding([], target ?? 0));
             }
@@ -6552,7 +6582,7 @@ class FundingRecommendationService {
                     ...u,
                     bucket: bucketOf(this.scanner.getState(outpointKey(u))),
                 }));
-                return recommendFunding(annotated, target);
+                return recommendFunding(annotated, target, preferred ?? undefined);
             }));
         }));
     }
@@ -6791,7 +6821,7 @@ async function planTransfer(params, ports) {
     const preferredTarget = target +
         Math.ceil(withChangeVsize * params.feeRatePerVbyte) -
         Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
-        CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+        changeDustFloor(params.paymentAddress);
     const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
@@ -7354,14 +7384,17 @@ async function planOffer(params, ports) {
     // Preferred (change-headroom) target: a coin >= this leaves an above-dust
     // change at the requested rate, so the realised fee-rate lands on the typed
     // rate instead of a sub-dust leftover being absorbed into the fee. Delta over
-    // the feasibility `target`. 546 is the conservative cross-address dust floor
-    // (the offer builder's own fallback, cat21-offer.helper.ts). selectFunding
-    // biases the auto-pick toward such a coin, falling back to a tight one.
+    // the feasibility `target`. The dust floor is the buyer change address's own
+    // (`changeDustFloor(params.paymentAddress)`) — the SAME floor the offer
+    // builder uses, so a P2WPKH/P2TR coin whose change lands in [floor, 546) is
+    // recognised as headroom rather than excluded (which would fall back to a
+    // dust-cliff coin that over-pays). selectFunding biases the auto-pick toward
+    // such a coin, falling back to a tight one only when none has headroom.
     const withChangeVsize = offerVsize(buildOffer(params, largest, 0, true));
     const preferredTarget = target +
         Math.ceil(withChangeVsize * params.feeRatePerVbyte) -
         Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
-        546;
+        changeDustFloor(params.paymentAddress);
     const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
@@ -8900,7 +8933,14 @@ async function planInscribe(params, ports) {
         return { status: 'insufficient', recommendation: empty, pick: null, fundingRequirementSats: null };
     }
     const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
-    const recommendation = await selectFunding(utxos, target, ports.scan);
+    // `target` already reflects the WITH-CHANGE commit fee (simulated against a
+    // large synthetic funding input). Adding the change address's dust floor gives
+    // the change-headroom preferred target: a coin >= this keeps its commit change
+    // above dust, so the realised commit fee-rate lands on the typed rate instead
+    // of a sub-dust leftover being absorbed into the fee. selectFunding falls back
+    // to a tight coin when none has headroom — never a false insufficient.
+    const preferredTarget = target + changeDustFloor(params.paymentAddress);
+    const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
         return {
@@ -11095,13 +11135,16 @@ class InscribeMintOrchestrator {
         else {
             try {
                 // `target` already reflects the WITH-CHANGE commit fee (simulated
-                // against a large synthetic funding input). Adding the 546-sat dust
-                // floor gives the change-headroom preferred target: a real coin >= this
-                // keeps its commit change above dust, so the realised commit fee-rate
-                // lands on the typed rate instead of absorbing a sub-dust leftover into
-                // the fee. selectFunding falls back to a tight coin when none has
-                // headroom (bounded over-pay, never a false insufficient).
-                const preferredTarget = target + 546;
+                // against a large synthetic funding input). Adding the change address's
+                // OWN dust floor (the same one the commit builder uses, via
+                // `getMinimumUtxoSize(paymentAddress)`) gives the change-headroom
+                // preferred target: a real coin >= this keeps its commit change above
+                // dust, so the realised commit fee-rate lands on the typed rate instead
+                // of absorbing a sub-dust leftover into the fee. A hardcoded 546 would be
+                // too conservative for a P2WPKH/P2TR payment address (294/330) and would
+                // fall back to a dust-cliff coin that over-pays. selectFunding still
+                // falls back to a tight coin when none has headroom.
+                const preferredTarget = target + changeDustFloor(wallet.paymentAddress);
                 fundingRecommendation = await selectFunding(this.utxos, target, this.deps.scan, preferredTarget);
             }
             catch {
@@ -12346,5 +12389,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decodePastedPsbt, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, liftRecommendationByOutpoint, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, changeDustFloor, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decodePastedPsbt, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, liftRecommendationByOutpoint, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map

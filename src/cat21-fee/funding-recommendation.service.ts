@@ -34,12 +34,22 @@ const outpointKey = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
 export class FundingRecommendationService {
   private scanner = inject(UtxoContentScanner);
 
+  /**
+   * `preferredSpendSats$` (optional, defaults to no bias) is the WITH-CHANGE +
+   * dust headroom target, above the no-change feasibility `targetSpendSats$`.
+   * When supplied, the auto-pick is biased toward a clean coin that clears it,
+   * so the spend emits an above-dust change and the realised fee-rate lands on
+   * the requested rate instead of a sub-dust leftover being absorbed into the
+   * fee. `targetSpendSats$` stays the coverage gate (never a false
+   * `insufficient`). Mirrors `selectFunding`'s `preferredSats`.
+   */
   recommend<T extends FundingUtxo>(
     fundingUtxos$: Observable<ReadonlyArray<T>>,
     targetSpendSats$: Observable<number | null>,
+    preferredSpendSats$: Observable<number | null> = of(null),
   ): Observable<FundingRecommendation<T & AnnotatedFundingUtxo>> {
-    return combineLatest([fundingUtxos$, targetSpendSats$]).pipe(
-      switchMap(([utxos, target]) => {
+    return combineLatest([fundingUtxos$, targetSpendSats$, preferredSpendSats$]).pipe(
+      switchMap(([utxos, target, preferred]) => {
         if (!target || target <= 0 || utxos.length === 0) {
           return of(recommendFunding<T & AnnotatedFundingUtxo>([], target ?? 0));
         }
@@ -62,7 +72,7 @@ export class FundingRecommendationService {
                 bucket: bucketOf(this.scanner.getState(outpointKey(u))),
               }),
             );
-            return recommendFunding(annotated, target);
+            return recommendFunding(annotated, target, preferred ?? undefined);
           }),
         );
       }),

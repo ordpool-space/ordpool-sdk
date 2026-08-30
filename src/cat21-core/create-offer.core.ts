@@ -9,6 +9,7 @@ import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { buildCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper';
 import { prepareBuyOfferBuyerInput } from '../cat21-offer/cat21-offer-input-adapter';
+import { changeDustFloor } from '../cat21-script/address-format';
 import {
   ContentScanPort,
   CoreFundingUtxo,
@@ -147,15 +148,18 @@ async function planOffer(
   // Preferred (change-headroom) target: a coin >= this leaves an above-dust
   // change at the requested rate, so the realised fee-rate lands on the typed
   // rate instead of a sub-dust leftover being absorbed into the fee. Delta over
-  // the feasibility `target`. 546 is the conservative cross-address dust floor
-  // (the offer builder's own fallback, cat21-offer.helper.ts). selectFunding
-  // biases the auto-pick toward such a coin, falling back to a tight one.
+  // the feasibility `target`. The dust floor is the buyer change address's own
+  // (`changeDustFloor(params.paymentAddress)`) — the SAME floor the offer
+  // builder uses, so a P2WPKH/P2TR coin whose change lands in [floor, 546) is
+  // recognised as headroom rather than excluded (which would fall back to a
+  // dust-cliff coin that over-pays). selectFunding biases the auto-pick toward
+  // such a coin, falling back to a tight one only when none has headroom.
   const withChangeVsize = offerVsize(buildOffer(params, largest, 0, true));
   const preferredTarget =
     target +
     Math.ceil(withChangeVsize * params.feeRatePerVbyte) -
     Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
-    546;
+    changeDustFloor(params.paymentAddress);
   const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {

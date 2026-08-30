@@ -1,10 +1,25 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  changeDustFloor,
   getAddressFormat,
   isInscribeSupportedPaymentAddress,
   isSegWit,
 } from './address-format';
+
+describe('changeDustFloor', () => {
+  it('returns the per-address-type minimum for recognised prefixes', () => {
+    expect(changeDustFloor('bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4')).toBe(294); // P2WPKH
+    expect(changeDustFloor('bc1p5cyxnuxmeuwuvkwfem96lqzszd9r3rqmxmzu4a')).toBe(330); // P2TR
+    expect(changeDustFloor('1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2')).toBe(546); // P2PKH
+    expect(changeDustFloor('3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy')).toBe(546); // P2SH
+    expect(changeDustFloor('bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080')).toBe(294); // regtest P2WPKH
+  });
+
+  it('falls back to 546 for an unrecognised address (matches the builders’ catch)', () => {
+    expect(changeDustFloor('not-an-address')).toBe(546);
+  });
+});
 
 describe('isInscribeSupportedPaymentAddress', () => {
 

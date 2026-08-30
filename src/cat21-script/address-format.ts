@@ -52,6 +52,27 @@ export function getMinimumUtxoSize(address: string): number {
 }
 
 /**
+ * The change-output dust floor an address's spend will actually use: the
+ * per-address-type minimum (`getMinimumUtxoSize`), falling back to 546 (the
+ * conservative cross-type floor) when the address prefix isn't recognised.
+ *
+ * This is the EXACT rule the transfer / offer / inscribe builders apply to
+ * decide whether to emit change or absorb it into the fee (see
+ * `cat21-transfer.helper.ts`, `cat21-offer.helper.ts`,
+ * `inscription.service.helper.ts`). Coin-selection's change-headroom preferred
+ * target must use the SAME floor as the builder, or it either wrongly excludes
+ * a coin whose change WOULD be emitted (falling back to a dust-cliff coin that
+ * over-pays) or falsely counts a coin whose change would be absorbed.
+ */
+export function changeDustFloor(address: string): number {
+  try {
+    return getMinimumUtxoSize(address);
+  } catch {
+    return 546;
+  }
+}
+
+/**
  * Address format from prefix. `P2SH???` because P2SH covers multiple
  * wrap shapes (P2SH-P2WPKH, P2SH-P2WSH); resolving the inner shape
  * needs the redeem script. P2PK not supported.

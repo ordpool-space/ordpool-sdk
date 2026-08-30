@@ -3,6 +3,7 @@ import { hex } from '@scure/base';
 
 import { ContentScanPort } from '../cat21-core/ports';
 import { selectFunding } from '../cat21-core/select-funding';
+import { changeDustFloor } from '../cat21-script/address-format';
 import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety';
 import { Network } from '../network';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
@@ -375,13 +376,16 @@ export class InscribeMintOrchestrator {
     } else {
       try {
         // `target` already reflects the WITH-CHANGE commit fee (simulated
-        // against a large synthetic funding input). Adding the 546-sat dust
-        // floor gives the change-headroom preferred target: a real coin >= this
-        // keeps its commit change above dust, so the realised commit fee-rate
-        // lands on the typed rate instead of absorbing a sub-dust leftover into
-        // the fee. selectFunding falls back to a tight coin when none has
-        // headroom (bounded over-pay, never a false insufficient).
-        const preferredTarget = target + 546;
+        // against a large synthetic funding input). Adding the change address's
+        // OWN dust floor (the same one the commit builder uses, via
+        // `getMinimumUtxoSize(paymentAddress)`) gives the change-headroom
+        // preferred target: a real coin >= this keeps its commit change above
+        // dust, so the realised commit fee-rate lands on the typed rate instead
+        // of absorbing a sub-dust leftover into the fee. A hardcoded 546 would be
+        // too conservative for a P2WPKH/P2TR payment address (294/330) and would
+        // fall back to a dust-cliff coin that over-pays. selectFunding still
+        // falls back to a tight coin when none has headroom.
+        const preferredTarget = target + changeDustFloor(wallet.paymentAddress);
         fundingRecommendation = await selectFunding<TxnOutput>(
           this.utxos,
           target,

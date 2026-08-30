@@ -44,6 +44,24 @@ describe('inscribe.core — simulateInscribe', () => {
     expect(sim.fundingRequirementSats).toBeGreaterThan(0);
   });
 
+  it('mixed pool: a dust-cliff coin + a headroom coin => auto-picks the headroom coin (change-headroom)', async () => {
+    // The funding requirement (with-change commit fee) is pool-independent
+    // (simulated against a synthetic input), so learn it from a large coin.
+    const target = (await simulateInscribe(params(), { utxos: utxosPort([coin('a', 500_000)]), scan: scanPort() }))
+      .fundingRequirementSats!;
+    // dust-cliff: covers the requirement but its 100-sat over-requirement is
+    // below the P2WPKH change dust floor (294) => sub-dust commit change =>
+    // absorbed into the fee (over-pay) IF picked.
+    const dustCliff = coin('b', target + 100);
+    // headroom: clears the requirement + the 294 floor comfortably.
+    const headroom = coin('c', target + 2000);
+    const sim = await simulateInscribe(params(), { utxos: utxosPort([dustCliff, headroom]), scan: scanPort() });
+    expect(sim.status).toBe('ready');
+    // Best-fit-by-value alone would take the SMALLER dust-cliff coin; the
+    // preferred-target bias must skip it for the headroom coin.
+    expect(sim.fundingUtxo?.value).toBe(target + 2000);
+  });
+
   it('EXPERT-REQUIRED: only an asset coin covers', async () => {
     const asset = coin('d', 200_000);
     const sim = await simulateInscribe(params(), { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: 'has-assets' }) });

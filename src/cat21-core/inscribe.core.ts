@@ -12,6 +12,7 @@ import {
 } from '../inscribe/inscribe-orchestrator';
 import { simulateInscribeFees } from '../inscribe/inscription-fee.helper';
 import { prepareInscribeFundingInput } from '../inscribe/inscription-input-adapter';
+import { changeDustFloor } from '../cat21-script/address-format';
 import { BroadcastPort, ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports';
 import { resolveFundingPick, selectFunding } from './select-funding';
 
@@ -92,7 +93,14 @@ async function planInscribe(
     return { status: 'insufficient', recommendation: empty, pick: null, fundingRequirementSats: null };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
-  const recommendation = await selectFunding(utxos, target, ports.scan);
+  // `target` already reflects the WITH-CHANGE commit fee (simulated against a
+  // large synthetic funding input). Adding the change address's dust floor gives
+  // the change-headroom preferred target: a coin >= this keeps its commit change
+  // above dust, so the realised commit fee-rate lands on the typed rate instead
+  // of a sub-dust leftover being absorbed into the fee. selectFunding falls back
+  // to a tight coin when none has headroom — never a false insufficient.
+  const preferredTarget = target + changeDustFloor(params.paymentAddress);
+  const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {

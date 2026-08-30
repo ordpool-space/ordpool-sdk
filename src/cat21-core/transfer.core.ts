@@ -10,8 +10,8 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   BuildCat21TransferResult,
   buildCat21TransferPsbt,
-  CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS,
 } from '../cat21-transfer/cat21-transfer.helper';
+import { changeDustFloor } from '../cat21-script/address-format';
 import {
   prepareTransferCatInput,
   prepareTransferFundingInput,
@@ -164,7 +164,7 @@ async function planTransfer(
     target +
     Math.ceil(withChangeVsize * params.feeRatePerVbyte) -
     Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
-    CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
+    changeDustFloor(params.paymentAddress);
   const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
