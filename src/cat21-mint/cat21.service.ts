@@ -178,8 +178,8 @@ export class Cat21Service {
 
   /**
    * Parse a PSBT, dummy-sign input 0 with the well-known dummy key,
-   * finalise, and return the scure Transaction. Used by the Layer-3
-   * `twoPassFeeSimulation` helper as its `signSimulation` callback.
+   * finalise, and return the scure Transaction. Used to measure a
+   * candidate tx's vsize during fee resolution (`resolveCatTxFee`).
    *
    * The dummy key is the SDK's well-known fixed key (`getDummyKeypair`);
    * the signature is structurally valid (correct DER length, correct

@@ -10,10 +10,10 @@ import { DummyKeypairResult, TxnOutput } from '../cat21-mint/cat21.service.types
  * (`0x0101…01`) — DO NOT use these helpers in any real signing or
  * broadcast path.
  *
- * Lives in `cat21-fee/` because the only legitimate use is the
- * two-pass fee simulation in `fee-simulation.helper.ts`. Putting
- * the dummy material next to the simulator makes the security
- * boundary obvious: "simulation-only, never broadcast."
+ * Lives in `cat21-fee/` because the only legitimate use is
+ * fee-simulation vsize measurement (the `resolveCatTxFee` simulate
+ * callbacks). Putting the dummy material next to the fee code makes
+ * the security boundary obvious: "simulation-only, never broadcast."
  */
 
 const getDummyKeypairResult: { [key: string]: DummyKeypairResult } = {};

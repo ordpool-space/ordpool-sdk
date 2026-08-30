@@ -22,12 +22,13 @@ import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-re
  * the tip presence** (input = commit output; outputs = recipient
  * at postage + optional tip at `tip.value`; witness = envelope
  * script + Schnorr sig + control block) so we compute it once via
- * a one-shot simulation. The commit's vsize depends on
- * whether the change output crosses the dust limit at the
- * resolved fee, so we run the cat21-style two-pass loop on the
- * commit alone, passing `revealFeeReserveSats = reveal_fee`.
+ * a one-shot simulation. The commit's vsize depends on whether the
+ * change output crosses the dust limit at the resolved fee, so we
+ * resolve the commit fee guess-free via `resolveCatTxFee` (it
+ * measures the with-change + no-change forms from real builds),
+ * passing `revealFeeReserveSats = reveal_fee`.
  *
- * Net cost: 1 reveal simulation + 2 commit simulations = 3 builds.
+ * Net cost: 1 reveal simulation + a few commit simulations.
  *
  * Universal fee strategy that matches every inscriber in the
  * verified OSS catalog (ord client, micro-ordinals examples,
@@ -233,7 +234,6 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
 /**
  * Re-exports for consumers that want the underlying primitive.
  */
-export { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
 
 /**
  * Re-export for consumers that need to forward the field-array.
