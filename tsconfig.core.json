@@ -104,6 +104,7 @@
     "src/wallet/signers/alby.signer.ts",
     "src/wallet/signers/binance.signer.ts",
     "src/wallet/signers/cat21wallet.signer.ts",
+    "src/wallet/signers/child-reveal-finalize.helper.ts",
     "src/wallet/signers/index.ts",
     "src/wallet/signers/leather.signer.ts",
     "src/wallet/signers/okx.signer.ts",
