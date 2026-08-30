@@ -3,7 +3,11 @@ import { base64, hex } from '@scure/base';
 
 import { buildOffer, CreateOfferCoreParams, simulateCreateOffer } from '../cat21-core/create-offer.core';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports';
-import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety';
+import {
+  AnnotatedFundingUtxo,
+  FundingRecommendation,
+  liftRecommendationByOutpoint,
+} from '../cat21-fee/funding-safety';
 import { Network } from '../network';
 import { findSignerOrThrow } from '../wallet/signers';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -57,14 +61,16 @@ export interface CreateOfferSnapshot {
   sellerPaymentAddress: string | null;
   buyerReceiveAddress: string | null;
   feeRate: number | null;
-  selectedFundingUtxo: CoreFundingUtxo | null;
-  fundingRecommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
+  selectedFundingUtxo: TxnOutput | null;
+  // Candidates are lifted to the consumer's TxnOutput domain (carrying `status`,
+  // `transactionHex`, …) so a picker UI renders them directly.
+  fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
   simulation: CreateOfferSimulationView | null;
   bid: OfferBidArtifact | null;
   errorMessage: string | null;
 }
 
-const EMPTY_RECOMMENDATION: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo> = {
+const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'insufficient',
   recommended: null,
   candidates: [],
@@ -141,7 +147,7 @@ export class Cat21CreateOfferOrchestrator {
   setSellerPaymentAddress(addr: string | null): void { this.patch({ sellerPaymentAddress: addr }); void this.recompute(); }
   setBuyerReceiveAddress(addr: string | null): void { this.patch({ buyerReceiveAddress: addr }); void this.recompute(); }
   setFeeRate(rate: number): void { if (Number.isFinite(rate) && rate > 0) { this.patch({ feeRate: rate }); void this.recompute(); } }
-  setSelectedFundingUtxo(utxo: CoreFundingUtxo | null): void { this.patch({ selectedFundingUtxo: utxo }); void this.recompute(); }
+  setSelectedFundingUtxo(utxo: TxnOutput | null): void { this.patch({ selectedFundingUtxo: utxo }); void this.recompute(); }
 
   /**
    * Build + buyer-sign the bid PSBT (the artifact). No broadcast — the seller
@@ -210,7 +216,7 @@ export class Cat21CreateOfferOrchestrator {
       const sim = await simulateCreateOffer(params, { utxos: this.utxosPort(), scan: this.deps.scan });
       if (seq !== this.recomputeSeq) return; // a newer input superseded this run
       this.patch({
-        fundingRecommendation: sim.recommendation,
+        fundingRecommendation: liftRecommendationByOutpoint(sim.recommendation, this.utxos),
         simulation:
           sim.status === 'ready' && sim.buyerFundingUtxo && sim.feeSats != null
             ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, buyerFundingUtxo: sim.buyerFundingUtxo }
@@ -237,7 +243,7 @@ export class Cat21CreateOfferOrchestrator {
       targetCat: { txid: targetCat.txid, vout: targetCat.vout, value: targetCat.value, scriptPubKey: targetCat.scriptPubKey },
       priceSats,
       feeRatePerVbyte: feeRate,
-      selectedFundingUtxo: selectedFundingUtxo ?? undefined,
+      selectedFundingUtxo: selectedFundingUtxo ? toCore(selectedFundingUtxo) : undefined,
     };
   }
 
@@ -253,8 +259,7 @@ export class Cat21CreateOfferOrchestrator {
   private utxosPort() {
     const utxos = this.utxos;
     return {
-      spendableUtxos: async (): Promise<CoreFundingUtxo[]> =>
-        utxos.map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex })),
+      spendableUtxos: async (): Promise<CoreFundingUtxo[]> => utxos.map(toCore),
     };
   }
 
@@ -262,6 +267,10 @@ export class Cat21CreateOfferOrchestrator {
     this.snap = { ...this.snap, ...next };
     for (const l of this.listeners) l(this.snap);
   }
+}
+
+function toCore(u: TxnOutput): CoreFundingUtxo {
+  return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
 }
 
 function errMsg(err: unknown): string {

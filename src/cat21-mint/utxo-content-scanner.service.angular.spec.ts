@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { Injector, runInInjectionContext } from '@angular/core';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, of } from 'rxjs';
 
 import { cat21Config } from './cat21-sdk-config';
 import { UtxoContentScanner } from './utxo-content-scanner.service';
+import { UtxoScanState } from './utxo-content.types';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -113,5 +114,33 @@ describe('UtxoContentScanner catSat', () => {
     expect(state.content.catIds).toEqual([CAT_ID]);
     // Before the fix this was null (catSat read only from the full ord).
     expect(state.content.catSat).toBe(GENESIS_SAT);
+  });
+});
+
+describe('UtxoContentScanner.classify (ContentScanPort adapter)', () => {
+  function makeScanner(): UtxoContentScanner {
+    const injector = Injector.create({
+      providers: [{ provide: cat21Config, useValue: { ordApiUrl, cat21OrdApiUrl } }],
+    });
+    return runInInjectionContext(injector, () => new UtxoContentScanner());
+  }
+  it('scanned-clean => clean', async () => {
+    const scanner = makeScanner();
+    jest.spyOn(scanner, 'scan').mockReturnValue(of<UtxoScanState>({ kind: 'scanned-clean' }));
+    expect(await scanner.classify('aa:0')).toBe('clean');
+  });
+
+  it('scanned-with-assets => has-assets', async () => {
+    const scanner = makeScanner();
+    jest.spyOn(scanner, 'scan').mockReturnValue(
+      of<UtxoScanState>({ kind: 'scanned-with-assets', content: {} as never }),
+    );
+    expect(await scanner.classify('aa:0')).toBe('has-assets');
+  });
+
+  it('scan-failed => has-assets (FAIL-CLOSED — an unverified coin is never auto-spent)', async () => {
+    const scanner = makeScanner();
+    jest.spyOn(scanner, 'scan').mockReturnValue(of<UtxoScanState>({ kind: 'scan-failed', message: 'ord down' }));
+    expect(await scanner.classify('aa:0')).toBe('has-assets');
   });
 });

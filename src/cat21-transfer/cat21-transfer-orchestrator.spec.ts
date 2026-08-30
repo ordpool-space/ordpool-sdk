@@ -85,6 +85,18 @@ describe('Cat21TransferOrchestrator (framework-agnostic)', () => {
     expect(s.simulation?.fundingUtxo.txid).toBe(coin('c', 100_000).txid);
   });
 
+  it('recommendation candidates are lifted to TxnOutput — carry status + the scan bucket (picker-ready)', async () => {
+    const o = new Cat21TransferOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.fundingRecommendation.candidates.length > 0);
+    const c = s.fundingRecommendation.candidates[0];
+    expect(c.status).toEqual({ confirmed: true }); // from the source TxnOutput (a picker reads this)
+    expect(c.bucket).toBeDefined();                // scan annotation preserved
+  });
+
   it('EXPERT-REQUIRED: only an asset coin => no simulation, transfer() refuses', async () => {
     const o = new Cat21TransferOrchestrator(
       deps({ getUtxos: async () => [coin('d', 100_000)], scan: { classify: async () => 'has-assets' } }),

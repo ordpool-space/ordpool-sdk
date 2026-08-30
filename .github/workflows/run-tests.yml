@@ -20,6 +20,18 @@ jobs:
     - run: npm install
     - run: npm run test
 
+    # Guard the /core entry. A clean include-only `tsc -p tsconfig.core.json`
+    # does NOT emit imported-but-unlisted files — a local tsc graph-follows and
+    # emits them, hiding the gap, so `dist-core/` looks complete on a dev box
+    # while CI's clean build produces a broken require graph. Rebuild core and
+    # require the emitted entry: a missing include (e.g. a helper added to an
+    # import but not to tsconfig.core.json's `include`) fails HERE, at the
+    # source, instead of in a /core consumer's (cat21-wallet) red CI.
+    - name: Smoke-load the /core require graph
+      run: |
+        npm run build:core
+        node -e "require('./dist-core/core.js')"
+
     # Enforce the "build before commit" HARD RULE from
     # .claude/CLAUDE.md: rebuild dist/ (Angular fesm2022) and fail
     # if it drifts from what was committed. dist-core/ is NOT

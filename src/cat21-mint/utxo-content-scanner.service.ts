@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, Observable, catchError, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, firstValueFrom, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
 
+import { ContentScanPort, UtxoClassification } from '../cat21-core/ports';
 import { cat21Config } from './cat21-sdk-config';
 import { fetchJson } from './http-fetch.helper';
 import { classifyUtxoContent } from './utxo-content.classify';
@@ -43,7 +44,7 @@ const AUTO_SCAN_CONCURRENCY = 5;
  * convenience separately.
  */
 @Injectable({ providedIn: 'root' })
-export class UtxoContentScanner {
+export class UtxoContentScanner implements ContentScanPort {
   private config = inject(cat21Config);
 
   /** outpoint → latest state. */
@@ -67,6 +68,23 @@ export class UtxoContentScanner {
    */
   getState(outpoint: string): UtxoScanState {
     return this.states.get(outpoint) ?? { kind: 'not-scanned' };
+  }
+
+  /**
+   * `ContentScanPort` adapter: resolve one outpoint to the orchestrators'
+   * `'clean' | 'has-assets'` verdict, reusing this scanner's dedup + cache
+   * (`scan()`), so the orchestrator's force-scan and the UI's per-row badges
+   * hit the ord/cat21-ord endpoints once, not twice.
+   *
+   * FAIL-CLOSED: a `scan-failed` (content unknown) maps to `'has-assets'`, never
+   * `'clean'` — an unverified coin must never be auto-spent. This is the whole
+   * point of the force-scan funding-safety layer; hand-rolling the map per
+   * consumer risks one wrong fail-open reopening the auto-spend footgun, which
+   * is why it lives here (single source of truth).
+   */
+  async classify(outpoint: string): Promise<UtxoClassification> {
+    const state = await firstValueFrom(this.scan(outpoint));
+    return state.kind === 'scanned-clean' ? 'clean' : 'has-assets';
   }
 
   /**

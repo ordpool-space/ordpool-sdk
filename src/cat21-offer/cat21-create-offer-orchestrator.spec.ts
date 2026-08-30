@@ -103,6 +103,16 @@ describe('Cat21CreateOfferOrchestrator (framework-agnostic)', () => {
     expect(s.simulation?.buyerFundingUtxo.txid).toBe(coin('c', 100_000).txid);
   });
 
+  it('recommendation candidates are lifted to TxnOutput — carry status + the scan bucket (picker-ready)', async () => {
+    const o = new Cat21CreateOfferOrchestrator(deps());
+    await o.setWallet(wallet);
+    fillInputs(o);
+    const s = await waitFor(o, (x) => x.fundingRecommendation.candidates.length > 0);
+    const c = s.fundingRecommendation.candidates[0];
+    expect(c.status).toEqual({ confirmed: true });
+    expect(c.bucket).toBeDefined();
+  });
+
   it('EXPERT-REQUIRED: only an asset coin => no simulation, createOffer() refuses', async () => {
     const o = new Cat21CreateOfferOrchestrator(
       deps({ getUtxos: async () => [coin('d', 100_000)], scan: { classify: async () => 'has-assets' } }),

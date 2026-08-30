@@ -6108,12 +6108,12 @@ class Cat21MintOrchestrator {
             paymentAddress: wallet.paymentAddress,
             recipientAddress: wallet.ordinalsAddress,
             feeRatePerVbyte: feeRate,
-            selectedFundingUtxo: this.snap.selectedUtxo ? toCore$1(this.snap.selectedUtxo) : undefined,
+            selectedFundingUtxo: this.snap.selectedUtxo ? toCore$2(this.snap.selectedUtxo) : undefined,
         };
     }
     utxosPort() {
         const utxos = this.utxos;
-        return { spendableUtxos: async () => utxos.map(toCore$1) };
+        return { spendableUtxos: async () => utxos.map(toCore$2) };
     }
     patch(next) {
         this.snap = { ...this.snap, ...next };
@@ -6121,7 +6121,7 @@ class Cat21MintOrchestrator {
             l(this.snap);
     }
 }
-function toCore$1(u) {
+function toCore$2(u) {
     return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
 }
 function errMsg$4(err) {
@@ -6265,6 +6265,22 @@ class UtxoContentScanner {
      */
     getState(outpoint) {
         return this.states.get(outpoint) ?? { kind: 'not-scanned' };
+    }
+    /**
+     * `ContentScanPort` adapter: resolve one outpoint to the orchestrators'
+     * `'clean' | 'has-assets'` verdict, reusing this scanner's dedup + cache
+     * (`scan()`), so the orchestrator's force-scan and the UI's per-row badges
+     * hit the ord/cat21-ord endpoints once, not twice.
+     *
+     * FAIL-CLOSED: a `scan-failed` (content unknown) maps to `'has-assets'`, never
+     * `'clean'` — an unverified coin must never be auto-spent. This is the whole
+     * point of the force-scan funding-safety layer; hand-rolling the map per
+     * consumer risks one wrong fail-open reopening the auto-spend footgun, which
+     * is why it lives here (single source of truth).
+     */
+    async classify(outpoint) {
+        const state = await firstValueFrom(this.scan(outpoint));
+        return state.kind === 'scanned-clean' ? 'clean' : 'has-assets';
     }
     /**
      * Scan one outpoint. If already scanned, returns the cached state
@@ -9074,7 +9090,7 @@ class Cat21CreateOfferOrchestrator {
             if (seq !== this.recomputeSeq)
                 return; // a newer input superseded this run
             this.patch({
-                fundingRecommendation: sim.recommendation,
+                fundingRecommendation: liftRecommendationByOutpoint(sim.recommendation, this.utxos),
                 simulation: sim.status === 'ready' && sim.buyerFundingUtxo && sim.feeSats != null
                     ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, buyerFundingUtxo: sim.buyerFundingUtxo }
                     : null,
@@ -9102,7 +9118,7 @@ class Cat21CreateOfferOrchestrator {
             targetCat: { txid: targetCat.txid, vout: targetCat.vout, value: targetCat.value, scriptPubKey: targetCat.scriptPubKey },
             priceSats,
             feeRatePerVbyte: feeRate,
-            selectedFundingUtxo: selectedFundingUtxo ?? undefined,
+            selectedFundingUtxo: selectedFundingUtxo ? toCore$1(selectedFundingUtxo) : undefined,
         };
     }
     missingInputError() {
@@ -9121,7 +9137,7 @@ class Cat21CreateOfferOrchestrator {
     utxosPort() {
         const utxos = this.utxos;
         return {
-            spendableUtxos: async () => utxos.map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex })),
+            spendableUtxos: async () => utxos.map(toCore$1),
         };
     }
     patch(next) {
@@ -9129,6 +9145,9 @@ class Cat21CreateOfferOrchestrator {
         for (const l of this.listeners)
             l(this.snap);
     }
+}
+function toCore$1(u) {
+    return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
 }
 function errMsg$3(err) {
     return err instanceof Error ? err.message : String(err);
@@ -9532,7 +9551,7 @@ class Cat21TransferOrchestrator {
         if (seq !== this.recomputeSeq)
             return; // a newer input superseded this run
         this.patch({
-            fundingRecommendation: sim.recommendation,
+            fundingRecommendation: liftRecommendationByOutpoint(sim.recommendation, this.utxos),
             simulation: sim.status === 'ready' && sim.fundingUtxo && sim.feeSats != null
                 ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, fundingUtxo: sim.fundingUtxo }
                 : null,
@@ -9549,7 +9568,7 @@ class Cat21TransferOrchestrator {
             catUtxo: { txid: cat.txid, vout: cat.vout, value: cat.value },
             recipientAddress: recipient,
             feeRatePerVbyte: feeRate,
-            selectedFundingUtxo: this.snap.selectedFundingUtxo ?? undefined,
+            selectedFundingUtxo: this.snap.selectedFundingUtxo ? toCore(this.snap.selectedFundingUtxo) : undefined,
         };
     }
     utxosPort() {

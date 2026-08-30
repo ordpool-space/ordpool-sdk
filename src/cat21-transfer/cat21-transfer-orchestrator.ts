@@ -8,7 +8,11 @@ import {
   TransferSimulationResult,
 } from '../cat21-core/transfer.core';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports';
-import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety';
+import {
+  AnnotatedFundingUtxo,
+  FundingRecommendation,
+  liftRecommendationByOutpoint,
+} from '../cat21-fee/funding-safety';
 import { Network } from '../network';
 import { findSignerOrThrow } from '../wallet/signers';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -59,14 +63,16 @@ export interface TransferSnapshot {
   catUtxo: Cat21Holding | null;
   recipientAddress: string | null;
   feeRate: number | null;
-  selectedFundingUtxo: CoreFundingUtxo | null;
-  fundingRecommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
+  selectedFundingUtxo: TxnOutput | null;
+  // Candidates are lifted back to the consumer's TxnOutput domain (carrying
+  // `status`, `transactionHex`, …) so a picker UI renders them directly.
+  fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
   simulation: TransferSimulationView | null;
   errorMessage: string | null;
   successTxId: string | null;
 }
 
-const EMPTY_RECOMMENDATION: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo> = {
+const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'insufficient',
   recommended: null,
   candidates: [],
@@ -147,7 +153,7 @@ export class Cat21TransferOrchestrator {
     void this.recompute();
   }
 
-  setSelectedFundingUtxo(utxo: CoreFundingUtxo | null): void {
+  setSelectedFundingUtxo(utxo: TxnOutput | null): void {
     this.patch({ selectedFundingUtxo: utxo });
     void this.recompute();
   }
@@ -241,7 +247,7 @@ export class Cat21TransferOrchestrator {
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
     this.patch({
-      fundingRecommendation: sim.recommendation,
+      fundingRecommendation: liftRecommendationByOutpoint(sim.recommendation, this.utxos),
       simulation:
         sim.status === 'ready' && sim.fundingUtxo && sim.feeSats != null
           ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, fundingUtxo: sim.fundingUtxo }
@@ -265,7 +271,7 @@ export class Cat21TransferOrchestrator {
       catUtxo: { txid: cat.txid, vout: cat.vout, value: cat.value },
       recipientAddress: recipient,
       feeRatePerVbyte: feeRate,
-      selectedFundingUtxo: this.snap.selectedFundingUtxo ?? undefined,
+      selectedFundingUtxo: this.snap.selectedFundingUtxo ? toCore(this.snap.selectedFundingUtxo) : undefined,
     };
   }
 

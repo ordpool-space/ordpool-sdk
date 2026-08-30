@@ -2300,7 +2300,7 @@ declare const AUTO_SCAN_MAX_VALUE_SAT = 50000;
  * via `scan(outpoint)`. The orchestrator exposes the auto-scan
  * convenience separately.
  */
-declare class UtxoContentScanner {
+declare class UtxoContentScanner implements ContentScanPort {
     private config;
     /** outpoint → latest state. */
     private readonly states;
@@ -2318,6 +2318,19 @@ declare class UtxoContentScanner {
      * Default: `not-scanned` for never-touched outpoints.
      */
     getState(outpoint: string): UtxoScanState;
+    /**
+     * `ContentScanPort` adapter: resolve one outpoint to the orchestrators'
+     * `'clean' | 'has-assets'` verdict, reusing this scanner's dedup + cache
+     * (`scan()`), so the orchestrator's force-scan and the UI's per-row badges
+     * hit the ord/cat21-ord endpoints once, not twice.
+     *
+     * FAIL-CLOSED: a `scan-failed` (content unknown) maps to `'has-assets'`, never
+     * `'clean'` — an unverified coin must never be auto-spent. This is the whole
+     * point of the force-scan funding-safety layer; hand-rolling the map per
+     * consumer risks one wrong fail-open reopening the auto-spend footgun, which
+     * is why it lives here (single source of truth).
+     */
+    classify(outpoint: string): Promise<UtxoClassification>;
     /**
      * Scan one outpoint. If already scanned, returns the cached state
      * synchronously via `of(...)`. If scan is in flight, returns the
@@ -4492,8 +4505,8 @@ interface CreateOfferSnapshot {
     sellerPaymentAddress: string | null;
     buyerReceiveAddress: string | null;
     feeRate: number | null;
-    selectedFundingUtxo: CoreFundingUtxo | null;
-    fundingRecommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
+    selectedFundingUtxo: TxnOutput | null;
+    fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
     simulation: CreateOfferSimulationView | null;
     bid: OfferBidArtifact | null;
     errorMessage: string | null;
@@ -4514,7 +4527,7 @@ declare class Cat21CreateOfferOrchestrator {
     setSellerPaymentAddress(addr: string | null): void;
     setBuyerReceiveAddress(addr: string | null): void;
     setFeeRate(rate: number): void;
-    setSelectedFundingUtxo(utxo: CoreFundingUtxo | null): void;
+    setSelectedFundingUtxo(utxo: TxnOutput | null): void;
     /**
      * Build + buyer-sign the bid PSBT (the artifact). No broadcast — the seller
      * accepts + broadcasts later. `bid` on success carries the shareable base64/hex.
@@ -4686,8 +4699,8 @@ interface TransferSnapshot {
     catUtxo: Cat21Holding | null;
     recipientAddress: string | null;
     feeRate: number | null;
-    selectedFundingUtxo: CoreFundingUtxo | null;
-    fundingRecommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
+    selectedFundingUtxo: TxnOutput | null;
+    fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
     simulation: TransferSimulationView | null;
     errorMessage: string | null;
     successTxId: string | null;
@@ -4706,7 +4719,7 @@ declare class Cat21TransferOrchestrator {
     setCatUtxo(cat: Cat21Holding | null): void;
     setRecipientAddress(recipient: string | null): void;
     setFeeRate(rate: number): void;
-    setSelectedFundingUtxo(utxo: CoreFundingUtxo | null): void;
+    setSelectedFundingUtxo(utxo: TxnOutput | null): void;
     /**
      * Execute the transfer: build the real PSBT with the previewed funding + fee
      * and sign+broadcast via the wallet's internal `signTransfer` (input 0 = cat
