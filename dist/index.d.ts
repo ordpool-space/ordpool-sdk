@@ -1,7 +1,7 @@
 import { Observable, Subject, BehaviorSubject } from 'rxjs';
 import { AddressPurpose } from 'sats-connect';
 import * as btc from '@scure/btc-signer';
-import * as _angular_core from '@angular/core';
+import * as i0 from '@angular/core';
 import { InjectionToken } from '@angular/core';
 import * as ordpool_sdk from 'ordpool-sdk';
 import { HttpClient } from '@angular/common/http';
@@ -1104,8 +1104,8 @@ declare class WalletService {
     private armAccountChangeSubscription;
     private tearDownAccountChangeSubscription;
     requestWalletConnect(): void;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<WalletService, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<WalletService>;
+    static ɵfac: i0.ɵɵFactoryDeclaration<WalletService, never>;
+    static ɵprov: i0.ɵɵInjectableDeclaration<WalletService>;
 }
 
 /**
@@ -1832,8 +1832,8 @@ declare class Cat21Service {
      */
     readonly recommendedFees$: Observable<RecommendedFees>;
     pendingMints$(addresses: string[]): Observable<PendingMint[]>;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<Cat21Service, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<Cat21Service>;
+    static ɵfac: i0.ɵɵFactoryDeclaration<Cat21Service, never>;
+    static ɵprov: i0.ɵɵInjectableDeclaration<Cat21Service>;
 }
 
 /**
@@ -1939,8 +1939,8 @@ declare class Cat21ApiService {
     getStatus(): Observable<StatusResult>;
     getLatestCatNumbers(itemsPerPage: number): Observable<CatNumbersResult>;
     getCatImageUrl(catNumber: number): string;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<Cat21ApiService, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<Cat21ApiService>;
+    static ɵfac: i0.ɵɵFactoryDeclaration<Cat21ApiService, never>;
+    static ɵprov: i0.ɵɵInjectableDeclaration<Cat21ApiService>;
 }
 
 /**
@@ -1996,6 +1996,74 @@ declare function pickSmallestFundingUtxoThatCovers<T extends FundingUtxo>(args: 
  * fee-simulation grid where the user picks from the list).
  */
 declare function listFundingUtxosThatCover<T extends FundingUtxo>(args: PickFundingUtxoArgs<T>): T[];
+
+/**
+ * The framework-agnostic orchestration core's injected ports. Everything that
+ * differs per consumer (where UTXOs come from, how deep the content scan goes,
+ * how a PSBT is signed, how a tx is broadcast) is one of these four Promise-
+ * based interfaces. The core owns the shared sequencing; the consumer owns the
+ * ports. No Angular, no RxJS — plain `async`.
+ */
+/**
+ * A funding UTXO the account can spend. The core derives the PSBT input shape
+ * from the wallet's payment address + pubkey (the input adapter), so the port
+ * only carries the outpoint + value here. Cat-bearing / asset coins are
+ * excluded by the consumer's `UtxosPort` and the core's content-checked
+ * selection — never by a size heuristic.
+ */
+interface CoreFundingUtxo extends FundingUtxo {
+    /**
+     * Previous-tx hex. Required only for a legacy (P2PKH) funding input on a real
+     * (non-simulation) build — scure needs `nonWitnessUtxo`. Omit for
+     * segwit/taproot funding.
+     */
+    transactionHex?: string;
+}
+/** Content-safety verdict for one outpoint. The core auto-spends only `clean`. */
+type UtxoClassification = 'clean' | 'has-assets';
+/** Where the account's spendable funding UTXOs come from. */
+interface UtxosPort {
+    spendableUtxos(address: string): Promise<CoreFundingUtxo[]>;
+}
+/**
+ * Classifies one outpoint's on-chain content. Scan DEPTH is the consumer's
+ * choice — cat-only (cat21-wallet today) or full (cat21.space: cats +
+ * inscriptions + runes + rare sats). The core avoids whatever the port flags as
+ * `has-assets`. Reject to signal a scan failure; the core treats a failed scan
+ * as not-auto (expert-mode), never as clean.
+ */
+interface ContentScanPort {
+    classify(outpoint: string): Promise<UtxoClassification>;
+}
+interface SignedTxBytes {
+    hex: string;
+    weight: number;
+}
+/**
+ * Signs a PSBT. `inputIndexes` constrains which inputs are signed: `'all'` for
+ * wallet-built mint/transfer txs (every input is ours), a list for offer flows
+ * (e.g. `[0]` for the seller's cat input on accept).
+ */
+interface SignPort {
+    sign(psbt: Uint8Array, inputIndexes: 'all' | number[]): Promise<SignedTxBytes>;
+}
+interface BroadcastOutcome {
+    txid: string;
+    channel: 'mempool' | 'slipstream';
+}
+/** Broadcasts a signed tx (mempool, or Slipstream for oversize). */
+interface BroadcastPort {
+    broadcast(signedTxHex: string): Promise<BroadcastOutcome>;
+}
+/**
+ * Signs a buy-offer's BUYER inputs (1..N) with SIGHASH_ALL WITHOUT finalizing —
+ * input 0 (the seller's cat) stays unsigned for the seller to sign at accept
+ * time. Returns the partial PSBT bytes: the bid artifact, never broadcast.
+ * Distinct from `SignPort.sign`, which finalizes into a broadcast-ready tx.
+ */
+interface OfferCreateSignPort {
+    signBuyerInputs(psbt: Uint8Array, buyerInputIndexes: number[]): Promise<Uint8Array>;
+}
 
 /**
  * Safe-by-default funding selection — the shared brain behind the coin-selection
@@ -2074,133 +2142,105 @@ declare function liftRecommendationByOutpoint<S extends AnnotatedFundingUtxo, T 
 }>(rec: FundingRecommendation<S>, source: readonly T[]): FundingRecommendation<T & AnnotatedFundingUtxo>;
 
 /**
- * One row in the orchestrator's `simulations$` stream. Either:
- * - `insufficient: true` — the UTXO can't cover the recipient amount
- *   (546 sats) + the fee at the current rate. `simulation` is null.
- * - `insufficient: false` — UTXO is viable; `simulation` carries the
- *   full breakdown (vsize, miner fee, change amount, etc.) the UI
- *   needs to render an "this is what'll happen" panel.
+ * FRAMEWORK-AGNOSTIC high-level mint API. Plain class — no Angular, no
+ * `@Injectable`, no signals. The SDK owns this orchestration; a consumer
+ * IMPORTS it ready-made and binds its `subscribe(listener)` callback to
+ * whatever reactivity it uses in ONE line (`orch.subscribe(s => sig.set(s))`).
+ * The orchestrator wires wallet-backed signing internally (the signer
+ * registry) and the fee/selection/build logic (the shared helpers + the
+ * force-scanning `selectFunding`); the consumer supplies only the I/O it
+ * owns (electrs/ord/broadcast) as the `MintOrchestratorDeps` callbacks and
+ * the connected wallet via `setWallet`.
+ *
+ * The Angular `Cat21MintOrchestrator` (`cat21-mint-orchestrator.service.ts`)
+ * is a parallel Angular-signal implementation that composes the same
+ * lower-level helpers (`createTransaction` / `simulateMintTransaction` /
+ * `selectFunding`); the two do not share this class.
  */
-interface UtxoSimulation {
+/** State machine the UI branches on. */
+type MintOrchestratorState = 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
+/** One row in the per-UTXO simulation grid (the expert picker). */
+interface UtxoSimulationRow {
     utxo: TxnOutput;
     simulation: SimulateTransactionResult | null;
     insufficient: boolean;
 }
-/**
- * State machine the consumer's template branches on. Single-source-of-
- * truth for "what should the UI show right now":
- *
- *  - `idle` — no wallet connected.
- *  - `loading-utxos` — wallet just connected, fetching UTXOs from electrs.
- *  - `ready` — UTXOs loaded; the form is interactive.
- *  - `minting` — user clicked "Mint", PSBT being signed / broadcast.
- *  - `success` — broadcast OK; `successTxId` holds the txid.
- *  - `error` — something failed; `errorMessage` holds the reason.
- */
-type MintState = 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
-/**
- * High-level mint flow. Wraps `Cat21Service` (UTXOs, simulation,
- * broadcast) + `WalletService` (the currently connected wallet) into
- * one cohesive surface so both consumers (ordpool/frontend and
- * cat21-indexer/frontend) drive the same state machine and reactive
- * pipelines with thin templates.
- *
- * Singleton (`providedIn: 'root'`) — state persists across route
- * navigations within a session. Auto-resets `feeRate` + `selectedUtxo`
- * + the success/error fields when the connected wallet changes (the
- * old UTXO is gone; the user picks fresh for the new wallet).
- */
+/** The connected wallet's addresses + type; the consumer supplies it. */
+interface MintWalletContext {
+    type: KnownOrdinalWalletType;
+    ordinalsAddress: string;
+    paymentAddress: string;
+    /** hex-encoded payment public key. */
+    paymentPublicKey: string;
+}
+/** I/O the orchestrator delegates to the consumer's infra — all plain async. */
+interface MintOrchestratorDeps {
+    /** Spendable UTXOs at the payment address (electrs). */
+    getUtxos(paymentAddress: string): Promise<TxnOutput[]>;
+    /** Content classification for the force-scan funding safety (ord + cat21-ord). */
+    scan: ContentScanPort;
+    /** Broadcast a signed tx hex; resolves to the txid. */
+    broadcast(signedTxHex: string): Promise<string>;
+    network: Network;
+}
+/** Everything a consumer template needs, emitted on every state change. */
+interface MintSnapshot {
+    state: MintOrchestratorState;
+    feeRate: number | null;
+    selectedUtxo: TxnOutput | null;
+    fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
+    simulations: UtxoSimulationRow[];
+    errorMessage: string | null;
+    successTxId: string | null;
+}
 declare class Cat21MintOrchestrator {
+    private readonly deps;
     private wallet;
-    private cat21;
-    private fundingRec;
-    /** sat/vB the user picked (from the fee picker or manually). null until set. */
-    readonly feeRate: _angular_core.WritableSignal<number>;
+    private utxos;
+    private recomputeSeq;
+    private snap;
+    private readonly listeners;
+    constructor(deps: MintOrchestratorDeps);
+    /** Synchronous snapshot read. */
+    getSnapshot(): MintSnapshot;
     /**
-     * Which UTXO the user explicitly picked (expert mode). When null, `mint()`
-     * falls back to the SAFE auto-recommendation (`fundingRecommendation$`): a
-     * content-clean covering UTXO when one exists (`status: 'auto'`, the invisible
-     * comfortable default), otherwise no auto-mint (`status: 'expert-required'` —
-     * the UI must surface the picker so the user consciously mints on an
-     * asset-carrying coin). Setting this is the expert-mode override, honoured
-     * even for an asset coin the user chose deliberately.
+     * Subscribe to snapshot changes. Fires immediately with the current
+     * snapshot, then on every change. Returns an unsubscribe fn. A consumer
+     * binds this to its reactivity in one line.
      */
-    readonly selectedUtxo: _angular_core.WritableSignal<TxnOutput>;
-    private lastWalletAddress;
-    private readonly feeRateSubject;
-    readonly state: _angular_core.WritableSignal<MintState>;
-    readonly errorMessage: _angular_core.WritableSignal<string>;
-    readonly successTxId: _angular_core.WritableSignal<string>;
-    /** Currently connected wallet bridged to a signal for template reads. */
-    readonly connectedWallet: _angular_core.Signal<WalletInfo>;
-    /** Convenience computed for `state() === 'ready'` gating. */
-    readonly isReady: _angular_core.Signal<boolean>;
+    subscribe(listener: (s: MintSnapshot) => void): () => void;
     /**
-     * UTXOs for the connected wallet's payment address. Re-fetches on
-     * wallet change. Errors are mapped to an empty list and an error
-     * state. Shared between subscribers via `shareReplay` so the side
-     * effects on `state` only fire once per emission.
-     *
-     * `startWith(null)` keeps the chain hot before any wallet connects;
-     * downstream `simulations$` then emits `[]` instead of stalling.
+     * Set (or clear) the connected wallet. On a genuine wallet change, resets
+     * form state, fetches the new wallet's UTXOs, and recomputes.
      */
-    readonly utxos$: Observable<TxnOutput[]>;
-    /**
-     * For each UTXO + current fee rate, run the two-pass simulation
-     * (pass 1 estimates vsize at fee=0; pass 2 uses the real fee
-     * derived from vsize × feeRate). UTXOs that throw on simulation
-     * (insufficient funds at this fee rate) come through with
-     * `insufficient: true` rather than poisoning the whole stream.
-     *
-     * Re-emits whenever utxos$ or feeRate changes.
-     */
-    readonly simulations$: Observable<UtxoSimulation[]>;
-    /** Pass-through of the SDK's polled fee tiers. */
-    readonly recommendedFees$: Observable<RecommendedFees>;
-    /**
-     * The funding target the coin-selection safety check must cover: the fresh
-     * cat's postage (546) + the miner fee (a generous ~200 vB ceiling; the
-     * two-pass simulation tightens the real fee). A mint UTXO must clear this to
-     * be viable. Null until a fee rate is set.
-     */
-    private readonly fundingTarget$;
-    /**
-     * SAFE-by-default coin-selection recommendation for the mint's funding
-     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
-     * `auto` (a content-clean coin covers → auto-selected, no picker),
-     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
-     * picker), `scanning`, or `insufficient`. Degrades to `insufficient` if the
-     * UTXO fetch errors, so a load failure never yields an unsafe auto-mint. The
-     * UI branches on `.status`; the invisible default is `auto`.
-     */
-    readonly fundingRecommendation$: Observable<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>;
-    private lastRecommendationSnapshot;
-    constructor();
-    private readonly walletChangeSub;
-    private readonly recommendationSnapshotSub;
+    setWallet(wallet: MintWalletContext | null): Promise<void>;
     setFeeRate(rate: number): void;
     setSelectedUtxo(utxo: TxnOutput | null): void;
     /**
-     * Trigger the mint. Requires a connected wallet, a feeRate set, and
-     * a selectedUtxo. Computes the precise fee from the simulation,
-     * dispatches `Cat21Service.createCat21Transaction`, transitions
-     * state to `minting` → `success` (with `successTxId`) or `error`
-     * (with `errorMessage`).
+     * Execute the mint: pick (explicit override, else the safe auto-clean
+     * recommendation — never an asset coin unless the user chose it), two-pass
+     * fee, build, and sign+broadcast via the wallet's internal signer. Browser
+     * wallets sign-and-broadcast in one call; watch-only wallets bridge through
+     * `promptForSignedPsbt`.
      */
     mint(promptForSignedPsbt?: (unsigned: {
         base64: string;
         hex: string;
-    }) => Observable<string>): Observable<{
+    }) => Promise<string>): Promise<{
         txId: string;
     }>;
-    /**
-     * Wipe form state back to a fresh mint (typically the "Mint another"
-     * button on the success screen). Keeps the wallet connected.
-     */
+    /** "Mint another" — wipe form state, keep the wallet. */
     reset(): void;
-    private computeSimulations;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<Cat21MintOrchestrator, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<Cat21MintOrchestrator>;
+    private recompute;
+    /**
+     * Guess-free realised fee for one funding coin, or null when it can't mint at
+     * the fee rate. Measures the with-change form and falls back to no-change /
+     * absorb, so a coin that genuinely fits is never rejected.
+     */
+    private resolveFee;
+    private mintParams;
+    private utxosPort;
+    private patch;
 }
 
 /**
@@ -2311,8 +2351,8 @@ declare class UtxoContentScanner {
     private fetchOrd;
     private fetchCat21Ord;
     private setState;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<UtxoContentScanner, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<UtxoContentScanner>;
+    static ɵfac: i0.ɵɵFactoryDeclaration<UtxoContentScanner, never>;
+    static ɵprov: i0.ɵɵInjectableDeclaration<UtxoContentScanner>;
 }
 
 /**
@@ -2525,76 +2565,8 @@ declare function selectOrdParityFunding(args: {
 declare class FundingRecommendationService {
     private scanner;
     recommend<T extends FundingUtxo>(fundingUtxos$: Observable<ReadonlyArray<T>>, targetSpendSats$: Observable<number | null>): Observable<FundingRecommendation<T & AnnotatedFundingUtxo>>;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<FundingRecommendationService, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<FundingRecommendationService>;
-}
-
-/**
- * The framework-agnostic orchestration core's injected ports. Everything that
- * differs per consumer (where UTXOs come from, how deep the content scan goes,
- * how a PSBT is signed, how a tx is broadcast) is one of these four Promise-
- * based interfaces. The core owns the shared sequencing; the consumer owns the
- * ports. No Angular, no RxJS — plain `async`.
- */
-/**
- * A funding UTXO the account can spend. The core derives the PSBT input shape
- * from the wallet's payment address + pubkey (the input adapter), so the port
- * only carries the outpoint + value here. Cat-bearing / asset coins are
- * excluded by the consumer's `UtxosPort` and the core's content-checked
- * selection — never by a size heuristic.
- */
-interface CoreFundingUtxo extends FundingUtxo {
-    /**
-     * Previous-tx hex. Required only for a legacy (P2PKH) funding input on a real
-     * (non-simulation) build — scure needs `nonWitnessUtxo`. Omit for
-     * segwit/taproot funding.
-     */
-    transactionHex?: string;
-}
-/** Content-safety verdict for one outpoint. The core auto-spends only `clean`. */
-type UtxoClassification = 'clean' | 'has-assets';
-/** Where the account's spendable funding UTXOs come from. */
-interface UtxosPort {
-    spendableUtxos(address: string): Promise<CoreFundingUtxo[]>;
-}
-/**
- * Classifies one outpoint's on-chain content. Scan DEPTH is the consumer's
- * choice — cat-only (cat21-wallet today) or full (cat21.space: cats +
- * inscriptions + runes + rare sats). The core avoids whatever the port flags as
- * `has-assets`. Reject to signal a scan failure; the core treats a failed scan
- * as not-auto (expert-mode), never as clean.
- */
-interface ContentScanPort {
-    classify(outpoint: string): Promise<UtxoClassification>;
-}
-interface SignedTxBytes {
-    hex: string;
-    weight: number;
-}
-/**
- * Signs a PSBT. `inputIndexes` constrains which inputs are signed: `'all'` for
- * wallet-built mint/transfer txs (every input is ours), a list for offer flows
- * (e.g. `[0]` for the seller's cat input on accept).
- */
-interface SignPort {
-    sign(psbt: Uint8Array, inputIndexes: 'all' | number[]): Promise<SignedTxBytes>;
-}
-interface BroadcastOutcome {
-    txid: string;
-    channel: 'mempool' | 'slipstream';
-}
-/** Broadcasts a signed tx (mempool, or Slipstream for oversize). */
-interface BroadcastPort {
-    broadcast(signedTxHex: string): Promise<BroadcastOutcome>;
-}
-/**
- * Signs a buy-offer's BUYER inputs (1..N) with SIGHASH_ALL WITHOUT finalizing —
- * input 0 (the seller's cat) stays unsigned for the seller to sign at accept
- * time. Returns the partial PSBT bytes: the bid artifact, never broadcast.
- * Distinct from `SignPort.sign`, which finalizes into a broadcast-ready tx.
- */
-interface OfferCreateSignPort {
-    signBuyerInputs(psbt: Uint8Array, buyerInputIndexes: number[]): Promise<Uint8Array>;
+    static ɵfac: i0.ɵɵFactoryDeclaration<FundingRecommendationService, never>;
+    static ɵprov: i0.ɵɵInjectableDeclaration<FundingRecommendationService>;
 }
 
 /**
@@ -4538,337 +4510,191 @@ declare function validateCat21BuyOfferPsbt(args: ValidateCat21BuyOfferArgs): Cat
 type PrepareBuyOfferBuyerInputArgs = PrepareCat21InputArgs;
 declare function prepareBuyOfferBuyerInput(args: PrepareBuyOfferBuyerInputArgs): Cat21OfferBuyerInput;
 
-interface CreateOfferSimulation {
-    vsize: number;
+/**
+ * FRAMEWORK-AGNOSTIC high-level create-offer (buyer bid) API. Plain class — no
+ * Angular. Owns the bid state machine + safe-auto funding pick (via
+ * `selectFunding`'s force-scan inside `simulateCreateOffer`), reuses
+ * `create-offer.core`'s `buildOffer` (no duplication), and buyer-signs via the
+ * internal `signer.signOfferCreatePsbt`. This flow produces a bid ARTIFACT
+ * (a buyer-signed PSBT the seller later accepts) — it does NOT broadcast.
+ * State ships through a plain `subscribe(listener)` callback.
+ */
+type CreateOfferOrchestratorState = 'idle' | 'loading-utxos' | 'ready' | 'creating' | 'success' | 'error';
+interface CreateOfferWalletContext {
+    type: KnownOrdinalWalletType;
+    /** Buyer's ordinals address — where the cat lands (default receive address). */
+    ordinalsAddress: string;
+    paymentAddress: string;
+    /** hex-encoded payment public key (funds the offer + signs the buyer inputs). */
+    paymentPublicKey: string;
+}
+interface CreateOfferOrchestratorDeps {
+    getUtxos(paymentAddress: string): Promise<TxnOutput[]>;
+    scan: ContentScanPort;
+    network: Network;
+}
+interface CreateOfferSimulationView {
     feeSats: number;
     changeSats: number;
-    buyerFundingUtxo: TxnOutput;
+    buyerFundingUtxo: CoreFundingUtxo;
 }
-interface CreateOfferSimulationOutcome {
-    simulation: CreateOfferSimulation | null;
-    insufficient: boolean;
+/** The buyer-signed bid — bare base64/hex to share anywhere (offers are public). */
+interface OfferBidArtifact {
+    base64: string;
+    hex: string;
 }
-/**
- * State machine:
- *  - `idle` — no wallet connected.
- *  - `loading-utxos` — wallet just connected, fetching buyer's UTXOs.
- *  - `ready` — UTXOs loaded; form is interactive.
- *  - `signing` — user clicked Create; wallet is being asked to sign.
- *  - `success` — buyer-side signing finished; `offerArtifact()` carries
- *                the half-signed PSBT. **No broadcast** — the buyer's
- *                PSBT is incomplete (seller's input 0 stays unsigned).
- *  - `error` — something failed; `errorMessage` carries the reason.
- */
-type CreateOfferState = 'idle' | 'loading-utxos' | 'ready' | 'signing' | 'success' | 'error';
-/**
- * Buyer-side CAT-21 buy-offer construction. Produces the half-signed
- * PSBT a buyer shares with the cat's current owner.
- *
- * Per the workspace HARD RULE "Offers can be shared in the wild" the
- * artifact is NOT secret — the orchestrator emits bare base64 (and hex)
- * and the consumer is free to wrap it in any transport (URL, QR, gist).
- *
- * Per `validateCat21Operation`'s contract, all protocol invariants
- * (postage = 546, lockTime = 21, SIGHASH_ALL on every input) are
- * enforced INSIDE `buildCat21BuyOfferPsbt` — the orchestrator only
- * threads inputs and calls the builder.
- *
- * Singleton, signal-first. Mirrors Cat21TransferOrchestrator's wallet-
- * change reset semantics (wipe form on actual wallet swap; preserve
- * across BehaviorSubject re-emissions; defaults `buyerReceiveAddress`
- * to the connected wallet's ordinals address).
- */
+interface CreateOfferSnapshot {
+    state: CreateOfferOrchestratorState;
+    targetCat: BuyOfferTargetCat | null;
+    priceSats: number | null;
+    sellerPaymentAddress: string | null;
+    buyerReceiveAddress: string | null;
+    feeRate: number | null;
+    selectedFundingUtxo: CoreFundingUtxo | null;
+    fundingRecommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
+    simulation: CreateOfferSimulationView | null;
+    bid: OfferBidArtifact | null;
+    errorMessage: string | null;
+}
 declare class Cat21CreateOfferOrchestrator {
+    private readonly deps;
     private wallet;
-    private cat21;
-    private network;
-    private fundingRec;
-    /** Which cat the buyer wants to bid on. */
-    readonly targetCat: _angular_core.WritableSignal<BuyOfferTargetCat>;
-    /** Where the seller wants payment (their own address; usually the seller's payment address). */
-    readonly sellerPaymentAddress: _angular_core.WritableSignal<PaymentAddress>;
-    /** Sats the buyer offers (net to seller). The seller's payout output carries `priceSats + sellerInput.value` (ord parity); the seller nets exactly priceSats. */
-    readonly priceSats: _angular_core.WritableSignal<number>;
-    /** Where the cat lands after the seller signs + broadcasts. Default = connected wallet's ordinals address. */
-    readonly buyerReceiveAddress: _angular_core.WritableSignal<string>;
-    readonly feeRate: _angular_core.WritableSignal<number>;
-    /**
-     * User's explicit funding-UTXO pick from the buyer-side picker (expert
-     * mode). When null the orchestrator uses the SAFE auto-recommendation
-     * (`buyerFundingRecommendation$`): a content-clean best-fit covering UTXO
-     * when one exists (`status: 'auto'`, invisible default), otherwise no
-     * auto-pick (`status: 'expert-required'` — the UI surfaces the picker so
-     * the buyer consciously spends an asset-carrying coin). Setting this here is
-     * the expert-mode override: honoured even for an asset coin the buyer chose
-     * deliberately.
-     */
-    readonly selectedFundingUtxo: _angular_core.WritableSignal<TxnOutput>;
-    private lastWalletAddress;
-    private readonly priceSatsSubject;
-    private readonly feeRateSubject;
-    private readonly selectedFundingUtxoSubject;
-    private readonly targetCatSubject;
-    private readonly sellerPaymentAddressSubject;
-    private readonly buyerReceiveAddressSubject;
-    /** Write-through: keep each signal and its RxJS-mirror subject in lockstep. */
-    private writeTargetCat;
-    private writeSellerPaymentAddress;
-    private writeBuyerReceiveAddress;
-    readonly state: _angular_core.WritableSignal<CreateOfferState>;
-    readonly errorMessage: _angular_core.WritableSignal<string>;
-    /**
-     * The half-signed buy-offer PSBT (base64 + hex). Populated by
-     * `createOffer()` on success. This IS the offer artifact the buyer
-     * shares with the seller.
-     */
-    readonly offerArtifact: _angular_core.WritableSignal<{
-        base64: string;
-        hex: string;
-    }>;
-    readonly connectedWallet: _angular_core.Signal<WalletInfo>;
-    readonly isReady: _angular_core.Signal<boolean>;
-    /**
-     * Auto-reset form fields when the wallet's ordinals address actually
-     * changes. Field-init-order discipline as Cat21TransferOrchestrator
-     * (BEFORE the derived streams below).
-     */
-    private readonly walletChangeSub;
-    /**
-     * Buyer's funding UTXOs (their payment address). The seller's cat
-     * UTXO is at the seller's address — not in this list.
-     */
-    readonly buyerFundingUtxos$: Observable<TxnOutput[]>;
-    readonly recommendedFees$: Observable<RecommendedFees>;
-    /**
-     * The buyer's funding target the coin-selection safety check must cover:
-     * `price + cat.value + fee` (ord parity — the buyer funds the seller payout,
-     * the whole cat UTXO sent back to the buyer at output 0, and the miner fee).
-     * A generous ~220 vB fee ceiling; the two-pass simulation tightens the real
-     * fee later. Null until price + target cat + fee rate are all set.
-     */
-    private readonly fundingTarget$;
-    /**
-     * SAFE-by-default coin-selection recommendation for the buyer's funding
-     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
-     * `auto` (a content-clean coin covers → auto-selected, no picker),
-     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
-     * picker with the recommended coin pre-highlighted), `scanning`, or
-     * `insufficient`. The UI branches on `.status`; the invisible default is
-     * `auto`.
-     */
-    readonly buyerFundingRecommendation$: Observable<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>;
-    /**
-     * Two-pass fee simulation against the SAFE recommended buyer UTXO.
-     * Re-emits when target / price / funding recommendation / feeRate change. The
-     * funding coin comes from the buyer's expert-mode pick when set, else the
-     * safe auto-recommendation (only when `status: 'auto'`) — never a
-     * content-unaware value-only pick.
-     */
-    readonly simulation$: Observable<CreateOfferSimulationOutcome>;
+    private utxos;
+    private recomputeSeq;
+    private snap;
+    private readonly listeners;
+    constructor(deps: CreateOfferOrchestratorDeps);
+    getSnapshot(): CreateOfferSnapshot;
+    subscribe(listener: (s: CreateOfferSnapshot) => void): () => void;
+    setWallet(wallet: CreateOfferWalletContext | null): Promise<void>;
     setTargetCat(cat: BuyOfferTargetCat | null): void;
-    /**
-     * Set the seller's PAYMENT address (where sale proceeds land). The
-     * branded `PaymentAddress` type makes the "is this really a payment
-     * address, not an ordinals one?" question un-skippable at every
-     * callsite — either the value came from `parseBuyOfferQueryParams`
-     * (which brands the URL `payTo=` param at ingress) or the caller
-     * used `toPaymentAddress()` on a raw string. See SDK HARD RULE
-     * "Never derive a payment address from an on-chain lookup".
-     */
-    setSellerPaymentAddress(address: PaymentAddress | null): void;
     setPriceSats(price: number): void;
-    setBuyerReceiveAddress(address: string | null): void;
+    setSellerPaymentAddress(addr: string | null): void;
+    setBuyerReceiveAddress(addr: string | null): void;
     setFeeRate(rate: number): void;
+    setSelectedFundingUtxo(utxo: CoreFundingUtxo | null): void;
     /**
-     * Push the buyer's funding-UTXO pick (or null to auto-pick). Called
-     * from the picker UI whenever the buyer clicks a row in the
-     * scanner-annotated funding list.
-     */
-    setSelectedFundingUtxo(utxo: TxnOutput | null): void;
-    /**
-     * Build the buy-offer PSBT, ask the connected wallet to sign all
-     * buyer inputs (1..N), and expose the result as `offerArtifact()`.
-     * **Does NOT broadcast** — the offer is incomplete until the seller
-     * signs input 0 in their own accept flow.
+     * Build + buyer-sign the bid PSBT (the artifact). No broadcast — the seller
+     * accepts + broadcasts later. `bid` on success carries the shareable base64/hex.
      */
     createOffer(promptForSignedPsbt?: (unsigned: {
         base64: string;
         hex: string;
-    }) => Observable<string>): Observable<{
-        base64: string;
-        hex: string;
-    }>;
-    /**
-     * Wipe form + result back to a fresh create-offer attempt. Keeps the
-     * wallet connected; restores `buyerReceiveAddress` to the wallet's
-     * ordinals address.
-     */
+    }) => Promise<string>): Promise<OfferBidArtifact>;
     reset(): void;
-    private lastRecommendationSnapshot;
-    private readonly recommendationSnapshotSub;
-    private resetFormFields;
-    private computeSimulation;
-    private simulateOffer;
-    private buildOfferPsbt;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<Cat21CreateOfferOrchestrator, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<Cat21CreateOfferOrchestrator>;
+    private recompute;
+    /** Build the core params, or null when a required input is missing. */
+    private params;
+    private missingInputError;
+    private utxosPort;
+    private patch;
 }
 
 /**
- * The seller's view of a pasted offer PSBT after validation. Carries
- * the parsed details a UI surfaces in a "is this what you want to
- * accept?" panel before the user signs.
+ * FRAMEWORK-AGNOSTIC seller-side accept-offer API. Plain class — no Angular.
+ * The seller pastes a buyer-built buy-offer PSBT; the orchestrator decodes it,
+ * validates against the seller's intent (right cat / price floor / payout
+ * address / sniping-proof shape) via the shared `validateCat21BuyOfferPsbt`,
+ * then on `acceptOffer()` signs the seller's cat input 0 and broadcasts by
+ * delegating to `accept-offer.core`'s `acceptOffer` (no duplication). There is
+ * NO coin selection here — the buyer already funded the offer. State ships
+ * through a plain `subscribe(listener)` callback.
  */
-interface ParsedOffer {
-    /** Raw bytes of the (still buyer-signed-only) PSBT. */
+type AcceptOfferOrchestratorState = 'idle' | 'parsed' | 'invalid' | 'accepting' | 'success' | 'error';
+interface AcceptOfferWalletContext {
+    type: KnownOrdinalWalletType;
+    /** Seller's ordinals identity — the cat at input 0 belongs to it. */
+    ordinalsAddress: string;
+    /** Seller's ordinals pubkey hex (input 0's taproot internal key). */
+    ordinalsPublicKey: string;
+}
+interface AcceptOfferOrchestratorDeps {
+    broadcast(signedTxHex: string): Promise<BroadcastOutcome>;
+    network: Network;
+}
+/** The seller's decoded + validated view of a pasted offer, shown pre-sign. */
+interface AcceptOfferPreview {
     psbtBytes: Uint8Array;
     /** Cat being sold — sat 0 of this UTXO is the cat sat. */
     catUtxo: CatOutpoint;
     /** Buyer's payout — sats arriving at the seller's address. */
     pricePaidSats: number;
-    /** 546 cat-postage that comes back to the seller's payout output. */
+    /** Cat-postage that returns to the seller's payout output. */
     postageSats: number;
 }
-/**
- * State machine for the seller-side accept-offer flow:
- *  - `idle` — nothing pasted yet.
- *  - `parsed` — paste decoded + validated successfully; seller can review.
- *  - `invalid` — paste decoded but failed validation (wrong cat, low price, missing sig).
- *  - `accepting` — wallet signing input 0; broadcast in flight.
- *  - `success` — broadcast OK; `successTxId` holds the txid.
- *  - `error` — something failed mid-accept; `errorMessage` holds the reason.
- */
-type AcceptOfferState = 'idle' | 'parsed' | 'invalid' | 'accepting' | 'success' | 'error';
-/**
- * Seller-side CAT-21 buy-offer accept. Pastes a base64 PSBT, validates
- * (right cat / right price / right address / sniping-proof shape),
- * lets the seller sign input 0, broadcasts.
- *
- * Validation uses `validateCat21BuyOfferPsbt` from the helper layer —
- * the seller's UI never reimplements protocol invariants.
- */
+interface AcceptOfferSnapshot {
+    state: AcceptOfferOrchestratorState;
+    pastedOffer: string | null;
+    floorPriceSats: number | null;
+    expectedCatUtxo: CatOutpoint | null;
+    expectedSellerPaymentAddress: PaymentAddress | null;
+    preview: AcceptOfferPreview | null;
+    validationResult: Cat21OfferValidation | null;
+    errorMessage: string | null;
+    successTxId: string | null;
+    channel: BroadcastOutcome['channel'] | null;
+}
 declare class Cat21AcceptOfferOrchestrator {
-    private wallet;
-    private cat21;
-    private network;
-    /** Offer artifact pasted by the seller (base64 or hex). */
-    readonly pastedOffer: _angular_core.WritableSignal<string>;
-    /**
-     * Minimum price the seller is willing to accept. The orchestrator
-     * REFUSES to validate until the consumer sets this explicitly — a
-     * forgotten value would let any 1-sat offer pass the floor check.
-     * No default. Human UI consumers that show the price in a summary
-     * panel before signing (where the human IS the floor check) should
-     * call `disableFloorGate()` at construction; headless / bot
-     * consumers must set it programmatically via `setFloorPriceSats(n)`.
-     */
-    readonly floorPriceSats: _angular_core.WritableSignal<number>;
-    /**
-     * The cat the seller is selling (txid + vout). When set, validation
-     * checks input 0 against this UTXO and rejects offers for the wrong
-     * cat. UI typically derives this from the seller's selected cat-to-sell.
-     */
-    readonly expectedCatUtxo: _angular_core.WritableSignal<CatOutpoint>;
-    /**
-     * The address the seller wants the payment to land at. When set,
-     * validation rejects offers whose Output 1 (seller payment) doesn't
-     * decode to this exact address. Strongly recommended; matches
-     * `validateCat21BuyOfferPsbt`'s `expectedSellerPaymentAddress` arg.
-     */
-    readonly expectedSellerPaymentAddress: _angular_core.WritableSignal<PaymentAddress>;
-    readonly state: _angular_core.WritableSignal<AcceptOfferState>;
-    readonly errorMessage: _angular_core.WritableSignal<string>;
-    readonly successTxId: _angular_core.WritableSignal<string>;
-    /** Parsed + validated offer (set only when validation succeeds). */
-    readonly parsedOffer: _angular_core.WritableSignal<ParsedOffer>;
-    /**
-     * Latest validation result (success or failure). Surfaces the typed
-     * rejection reason in the UI without re-parsing.
-     */
-    readonly validationResult: _angular_core.WritableSignal<Cat21OfferValidation>;
-    readonly connectedWallet: _angular_core.Signal<ordpool_sdk.WalletInfo>;
-    readonly canAccept: _angular_core.Signal<boolean>;
-    private lastWalletAddress;
-    /**
-     * Auto-reset paste + parse state when the wallet's ordinals address
-     * actually changes. Field-init order before any derived stream
-     * (none here, but kept for symmetry with the other orchestrators).
-     */
-    private readonly walletChangeSub;
-    /**
-     * Maximum acceptable paste size in bytes. PSBTs above this are rejected
-     * before decoding to prevent OOM / tab-crash attacks via a malicious
-     * `?offer=…` link. The on-chain shape of a real CAT-21 buy-offer is
-     * <1 KB; 256 KiB is generous headroom for future protocol extensions
-     * while still blocking DoS payloads.
-     */
+    private readonly deps;
     static readonly MAX_PASTED_OFFER_BYTES: number;
+    private wallet;
+    private lastWalletAddress;
+    private humanUiOptOut;
+    private snap;
+    private readonly listeners;
+    constructor(deps: AcceptOfferOrchestratorDeps);
+    getSnapshot(): AcceptOfferSnapshot;
+    subscribe(listener: (s: AcceptOfferSnapshot) => void): () => void;
+    /** Connect / swap the seller wallet. Auto-resets the form on address change. */
+    setWallet(wallet: AcceptOfferWalletContext | null): void;
     /**
-     * Decode + validate the pasted offer. Sets `parsedOffer` + `validationResult`
-     * + transitions `state` to `parsed` or `invalid`. Pure transition — no
-     * wallet calls. Safe to call repeatedly as the user edits the paste.
-     *
-     * **Hardening:**
-     * - Paste length capped at MAX_PASTED_OFFER_BYTES (audit finding C2).
-     * - Validator only runs when `expectedSellerPaymentAddress` AND
-     *   `floorPriceSats` are set (audit findings H1, H2). Without them
-     *   the orchestrator stays in `idle` so the UI prompts the seller to
-     *   complete the form before any wallet interaction.
+     * Decode + validate the pasted offer. Pure transition — no wallet calls.
+     * Safe to call repeatedly as the user edits. Stays `idle` until the expected
+     * cat, seller payout address, AND floor are all set (without them any offer
+     * could redirect payment / pass a 1-sat price).
      */
     setPastedOffer(paste: string | null): void;
     setFloorPriceSats(sats: number): void;
     /**
-     * Human-UI opt-out for the floor safety-net.
-     *
-     * Sets floor to 0 AND keeps it there across resets — the seller
-     * sees `pricePaidSats` in the validated summary before clicking
-     * sign; the human is the check. Under the hood, this flips
-     * `resetFormFields()` so `floorPriceSats` no longer wipes back to
-     * `null` on wallet-swap / reset.
-     *
-     * Call once at construction / ngOnInit. `setFloorPriceSats(n)`
-     * still works after — the seller can raise the floor to enable the
-     * auto-reject-lowballs behaviour without touching this flag.
-     *
-     * Bot / headless consumers should NOT call this — they must set a
-     * floor explicitly per-run so a forgotten value doesn't silently
-     * pass a 1-sat offer. See audit finding H2 for the rationale.
+     * Human-UI opt-out for the floor safety-net: floor stays 0 across resets (the
+     * seller reads `pricePaidSats` in the summary before signing — the human is
+     * the check). Bot / headless consumers must NOT call this; they set an
+     * explicit floor per-run so a forgotten value can't pass a 1-sat offer.
      */
     disableFloorGate(): void;
-    private humanUiOptOut;
-    /**
-     * MAX_PASTED_OFFER_BYTES exposed for the UI's pre-paste textarea
-     * `maxlength` attribute. Mirrors the static class field so consumers
-     * don't need to reach for the constructor.
-     */
-    readonly maxPastedOfferBytes: number;
     setExpectedCatUtxo(utxo: CatOutpoint | null): void;
     /**
-     * Set the address the seller expects the payment output to land at.
-     * Symmetric with `Cat21CreateOfferOrchestrator.setSellerPaymentAddress`
-     * — branded for the same reason (SDK HARD RULE "Never derive a
-     * payment address from an on-chain lookup"). Value must be
-     * constructed via `toPaymentAddress()` or come pre-branded from the
-     * URL parser / wallet fixture.
+     * Set the address the seller expects the payment output (output 1) at.
+     * Branded `PaymentAddress` (SDK HARD RULE "Never derive a payment address
+     * from an on-chain lookup"): pass a value from the connected wallet or the
+     * URL permalink, never from an ord / electrs ownership query.
      */
     setExpectedSellerPaymentAddress(address: PaymentAddress | null): void;
     /**
-     * Sign input 0 (the seller's cat UTXO) at the ordinals address and
-     * broadcast. Requires a validated paste (`state === 'parsed'`) and
-     * a connected wallet.
+     * Sign the seller's cat input 0 and broadcast. Delegates to
+     * `accept-offer.core`'s `acceptOffer` (validate → sign → broadcast), which
+     * re-validates and refuses to sign a mismatched offer. Requires a validated
+     * paste (`state === 'parsed'`) and a connected wallet.
      */
     acceptOffer(promptForSignedPsbt?: (unsigned: {
         base64: string;
         hex: string;
-    }) => Observable<string>): Observable<{
-        txId: string;
-    }>;
-    /** Wipe paste + parse result. Keeps the wallet connected. */
+    }) => Promise<string>): Promise<BroadcastOutcome>;
+    /** Wipe paste + parse result + any prior outcome. Keeps the wallet connected. */
     reset(): void;
+    private revalidate;
     private resetFormFields;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<Cat21AcceptOfferOrchestrator, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<Cat21AcceptOfferOrchestrator>;
+    private patch;
 }
+
+/**
+ * Decode a base64- or hex-encoded PSBT paste to raw bytes. All standard PSBTs
+ * start with the magic bytes `0x70736274ff` ("psbt" + 0xff): base64-encoded
+ * that is the prefix `cHNidP`, hex-encoded it is literally `70736274ff`. The
+ * accept-offer flow uses this to turn a seller's pasted `?offer=…` artifact
+ * into bytes; also shared by the watch-only psbt-export signer (via `subject`).
+ */
+declare function decodePastedPsbt(input: string, subject?: string): Uint8Array;
 
 /**
  * Layer-2 input adapter for the CAT-21 transfer pipeline. Two semantic
@@ -4881,181 +4707,80 @@ declare function prepareTransferCatInput(args: PrepareTransferInputArgs): Cat21T
 declare function prepareTransferFundingInput(args: PrepareTransferInputArgs): Cat21TransferFundingInput;
 
 /**
- * Result of the per-fee-rate simulation. Either:
- * - `insufficient: true` — funding UTXOs can't cover postage + fee
- *   at the chosen rate. `simulation` is null.
- * - `insufficient: false` — viable; the simulation breakdown drives
- *   the "this is what'll happen" panel.
+ * FRAMEWORK-AGNOSTIC high-level transfer API. Plain class — no Angular. Owns
+ * the transfer state machine; delegates the preview (content-checked funding
+ * pick + two-pass fee + dust-absorb) to `transfer.core`'s `simulateTransfer`
+ * and the build to `buildTransfer` (no duplication), and wires wallet-backed
+ * sign+broadcast INTERNALLY via `findSignerOrThrow` (`signer.signTransfer`).
+ * State ships through a plain `subscribe(listener)` callback; a consumer
+ * imports it ready-made and binds in one line.
+ *
+ * The cat UTXO is preserved (output 0 = the whole cat value); funding covers
+ * ONLY the miner fee (golden rule).
  */
-interface TransferSimulation {
-    vsize: number;
+type TransferOrchestratorState = 'idle' | 'loading-utxos' | 'ready' | 'transferring' | 'success' | 'error';
+interface TransferWalletContext {
+    type: KnownOrdinalWalletType;
+    ordinalsAddress: string;
+    /** hex-encoded ordinals public key (signs the cat input). */
+    ordinalsPublicKey: string;
+    paymentAddress: string;
+    /** hex-encoded payment public key (signs the funding inputs). */
+    paymentPublicKey: string;
+}
+interface TransferOrchestratorDeps {
+    getUtxos(paymentAddress: string): Promise<TxnOutput[]>;
+    scan: ContentScanPort;
+    broadcast(signedTxHex: string): Promise<string>;
+    network: Network;
+}
+interface TransferSimulationView {
     feeSats: number;
     changeSats: number;
-    fundingUtxo: TxnOutput;
+    fundingUtxo: CoreFundingUtxo;
 }
-interface TransferSimulationOutcome {
-    simulation: TransferSimulation | null;
-    insufficient: boolean;
+interface TransferSnapshot {
+    state: TransferOrchestratorState;
+    catUtxo: Cat21Holding | null;
+    recipientAddress: string | null;
+    feeRate: number | null;
+    selectedFundingUtxo: CoreFundingUtxo | null;
+    fundingRecommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
+    simulation: TransferSimulationView | null;
+    errorMessage: string | null;
+    successTxId: string | null;
 }
-/**
- * State machine the consumer's template branches on:
- *  - `idle` — no wallet connected.
- *  - `loading-utxos` — wallet just connected, fetching UTXOs from electrs.
- *  - `ready` — UTXOs loaded; form is interactive.
- *  - `transferring` — user clicked Transfer, PSBT being signed / broadcast.
- *  - `success` — broadcast OK; `successTxId` holds the txid.
- *  - `error` — something failed; `errorMessage` holds the reason.
- */
-type TransferState = 'idle' | 'loading-utxos' | 'ready' | 'transferring' | 'success' | 'error';
-/**
- * High-level CAT-21 transfer flow. Mirrors `Cat21MintOrchestrator` in
- * shape so consumers can drive both flows with identical state-machine
- * templates.
- *
- * Singleton (`providedIn: 'root'`); state persists across route
- * navigations within a session. Auto-resets writable inputs when the
- * connected wallet changes — the cat UTXOs aren't visible to a
- * different wallet, the funding UTXOs are gone, and the recipient the
- * user typed for the previous wallet shouldn't quietly carry forward.
- */
 declare class Cat21TransferOrchestrator {
+    private readonly deps;
     private wallet;
-    private cat21;
-    private network;
-    private fundingRec;
-    /** Which cat the user picked from their gallery. */
-    readonly catUtxo: _angular_core.WritableSignal<Cat21Holding>;
-    /** Where the cat should go after the transfer. */
-    readonly recipientAddress: _angular_core.WritableSignal<string>;
-    /** sat/vB from the fee picker or manual input. */
-    readonly feeRate: _angular_core.WritableSignal<number>;
-    /**
-     * User's explicit funding-UTXO pick from the picker (expert mode). When
-     * null the orchestrator uses the SAFE auto-recommendation
-     * (`fundingRecommendation$`): a content-clean best-fit covering UTXO when
-     * one exists (`status: 'auto'`, invisible default), otherwise no auto-pick
-     * (`status: 'expert-required'` — the UI must surface the picker so the user
-     * consciously spends an asset-carrying coin). Setting this here is the
-     * expert-mode override: the user's pick is honoured even if it carries
-     * assets, because they chose it deliberately.
-     */
-    readonly selectedFundingUtxo: _angular_core.WritableSignal<TxnOutput>;
-    private lastWalletAddress;
-    private readonly catUtxoSubject;
-    private readonly feeRateSubject;
-    private readonly selectedFundingUtxoSubject;
-    private readonly recipientAddressSubject;
-    readonly state: _angular_core.WritableSignal<TransferState>;
-    readonly errorMessage: _angular_core.WritableSignal<string>;
-    readonly successTxId: _angular_core.WritableSignal<string>;
-    /** Currently connected wallet bridged to a signal for template reads. */
-    readonly connectedWallet: _angular_core.Signal<WalletInfo>;
-    /** Convenience computed for `state() === 'ready'` gating. */
-    readonly isReady: _angular_core.Signal<boolean>;
-    /**
-     * Auto-reset form fields when the wallet changes. Field-init order
-     * matters: this subscription is declared BEFORE `fundingUtxos$` so
-     * that `walletSubject.next(...)` notifies this handler FIRST,
-     * clearing form state, and only then propagates through the loading
-     * chain. Reverse order causes the form-reset to wipe a freshly-set
-     * error message that the UTXO-fetch error path just wrote.
-     *
-     * Only the FORM is reset — not `errorMessage` or `successTxId`.
-     * Operation-result state is owned by `transfer()` and `reset()`,
-     * not by wallet-change events.
-     */
-    private readonly walletChangeSub;
-    /**
-     * Funding UTXOs for the connected wallet's payment address, with
-     * the cat-bearing UTXO filtered out (we MUST NOT spend the cat as
-     * funding — it has to ride input 0 of the transfer tx and end up
-     * at output 0). Re-fetches on wallet change.
-     */
-    readonly fundingUtxos$: Observable<TxnOutput[]>;
-    /**
-     * Pass-through of the SDK's polled fee tiers. Mirrors mint's API.
-     */
-    readonly recommendedFees$: Observable<RecommendedFees>;
-    /**
-     * The funding target that the coin-selection safety check must cover. A
-     * transfer preserves the cat UTXO (output 0 = `cat.value`), so the funding
-     * pays ONLY the miner fee; the target is a generous ~200 vB fee ceiling (the
-     * two-pass simulation tightens the real fee later). Null while no fee rate is
-     * set, which makes the recommendation `insufficient` until the user picks a
-     * rate.
-     */
-    private readonly fundingTarget$;
-    /**
-     * SAFE-by-default coin-selection recommendation for the transfer's funding
-     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
-     * `auto` (a content-clean coin covers → auto-selected, no picker needed),
-     * `expert-required` (only asset-bearing coins cover → the UI must surface the
-     * picker with the recommended coin pre-highlighted), `scanning`, or
-     * `insufficient`. The UI branches on `.status` to decide whether to show the
-     * picker; the invisible default is `auto`.
-     */
-    readonly fundingRecommendation$: Observable<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>;
-    /**
-     * Best-funding-UTXO + two-pass-fee simulation for the current
-     * (cat, funding recommendation, recipient, feeRate) tuple. Re-emits when any
-     * of those change. `insufficient: true` when no funding UTXO covers the fee.
-     * The funding coin comes from the user's expert-mode pick when set, else the
-     * SAFE auto-recommendation (only when `status: 'auto'`) — never a
-     * content-unaware value-only pick.
-     */
-    readonly simulation$: Observable<TransferSimulationOutcome>;
+    private utxos;
+    private recomputeSeq;
+    private snap;
+    private readonly listeners;
+    constructor(deps: TransferOrchestratorDeps);
+    getSnapshot(): TransferSnapshot;
+    subscribe(listener: (s: TransferSnapshot) => void): () => void;
+    setWallet(wallet: TransferWalletContext | null): Promise<void>;
     setCatUtxo(cat: Cat21Holding | null): void;
-    setRecipientAddress(address: string | null): void;
+    setRecipientAddress(recipient: string | null): void;
     setFeeRate(rate: number): void;
+    setSelectedFundingUtxo(utxo: CoreFundingUtxo | null): void;
     /**
-     * Push the user's funding-UTXO pick (or null to fall back to
-     * auto-pick). The picker UI calls this every time the seller clicks
-     * a row in the scanner-annotated funding list.
-     */
-    setSelectedFundingUtxo(utxo: TxnOutput | null): void;
-    /**
-     * Trigger the transfer. Requires a connected wallet, a selected cat,
-     * a recipient address, a fee rate, and a fundable funding UTXO.
-     * Builds the PSBT, signs at both addresses, broadcasts.
-     *
-     * State transitions: ready → transferring → success | error.
+     * Execute the transfer: build the real PSBT with the previewed funding + fee
+     * and sign+broadcast via the wallet's internal `signTransfer` (input 0 = cat
+     * at the ordinals address; funding inputs 1..N at the payment address).
      */
     transfer(promptForSignedPsbt?: (unsigned: {
         base64: string;
         hex: string;
-    }) => Observable<string>): Observable<{
+    }) => Promise<string>): Promise<{
         txId: string;
     }>;
-    /**
-     * Wipe writables AND operation-result state back to a fresh
-     * transfer (typically the "Transfer another" button on success).
-     * Keeps the wallet connected.
-     */
     reset(): void;
-    /**
-     * Latest snapshot of the safe funding recommendation maintained by the
-     * `fundingRecommendation$` subscription. Lets `transfer()` synchronously
-     * re-compute the simulation against the most recent recommendation (the
-     * clean auto-pick + full candidate list) without juggling RxJS take(1).
-     */
-    private lastRecommendationSnapshot;
-    private readonly recommendationSnapshotSub;
-    private resetFormFields;
-    private computeSimulation;
-    /**
-     * Build a dummy-signed transfer PSBT for fee/vsize measurement.
-     * Uses the wallet's real public keys + addresses + script types
-     * (so the witness shape and vsize match the real broadcast) but a
-     * dummy fee placeholder per `twoPassFeeSimulation`'s contract.
-     */
-    private simulateTransfer;
-    /**
-     * Build the REAL unsigned transfer PSBT, using the pass-2 fee from
-     * `simulation`. Caller hands the bytes to the wallet for signing.
-     */
-    private buildTransferPsbt;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<Cat21TransferOrchestrator, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<Cat21TransferOrchestrator>;
+    private recompute;
+    private paramsFor;
+    private utxosPort;
+    private patch;
 }
 
 /**
@@ -6216,140 +5941,69 @@ interface InscribeUtxoSimulation {
 }
 /** State machine the consumer's template branches on. Sibling of the cat21 mint. */
 type InscribeMintState = 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
-
-/**
- * High-level inscribe flow. Wraps `Cat21Service` (UTXOs, broadcast) +
- * `WalletService` (connected wallet) + the pure `simulateInscribeFees`
- * / `inscribeAndBroadcast` helpers into one cohesive surface, so
- * consumers drive the same state machine + reactive pipelines with
- * thin templates. Sibling of `Cat21MintOrchestrator`.
- *
- * Singleton (`providedIn: 'root'`) — state persists across route
- * navigations within a session. Auto-resets `feeRate`, `selectedUtxo`,
- * `content`, and the success/error fields when the connected wallet
- * changes (old UTXO is gone; the user picks fresh for the new wallet).
- *
- * # Two-tx model
- *
- * Every inscribe produces a commit + reveal pair. Simulations show
- * the sum of both fees + the funding requirement. `mint()` calls
- * `inscribeAndBroadcast` which signs commit via the wallet, broadcasts
- * both txs sequentially via `Cat21Service.postTransaction`, and returns
- * the pair of txids + the ephemeral bearer key.
- *
- * # Bearer key
- *
- * The ephemeral private key that controls the commit output is
- * returned in `successResult().ephemeral`. Between commit broadcast
- * and reveal broadcast (a few seconds) losing this key means the
- * commit output is unrecoverable. The orchestrator does not persist
- * it — that is a consumer concern.
- */
+/** The connected wallet's addresses + type; the consumer supplies it. */
+interface InscribeWalletContext {
+    type: KnownOrdinalWalletType;
+    ordinalsAddress: string;
+    paymentAddress: string;
+    /** hex-encoded payment public key. */
+    paymentPublicKey: string;
+}
+/** I/O the orchestrator delegates to the consumer's infra — all plain async. */
+interface InscribeOrchestratorDeps {
+    /** Spendable UTXOs at the payment address (electrs). */
+    getUtxos(paymentAddress: string): Promise<TxnOutput[]>;
+    /** Content classification for the force-scan funding safety (ord + cat21-ord). */
+    scan: ContentScanPort;
+    /** Broadcast a signed tx hex; resolves to the txid. Called for commit AND reveal. */
+    broadcast(signedTxHex: string): Promise<string>;
+    network: Network;
+}
+/** Everything a consumer template needs, emitted on every state change. */
+interface InscribeSnapshot {
+    state: InscribeMintState;
+    feeRate: number | null;
+    selectedUtxo: TxnOutput | null;
+    content: InscribeContent | null;
+    simulations: InscribeUtxoSimulation[];
+    fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
+    errorMessage: string | null;
+    successResult: InscribeAndBroadcastResult | null;
+}
 declare class InscribeMintOrchestrator {
+    private readonly deps;
     private wallet;
-    private cat21;
-    private network;
-    private fundingRec;
-    /** sat/vB the user picked (from the fee picker or manually). null until set. */
-    readonly feeRate: _angular_core.WritableSignal<number>;
+    private utxos;
+    private recomputeSeq;
+    private snap;
+    private readonly listeners;
+    constructor(deps: InscribeOrchestratorDeps);
+    getSnapshot(): InscribeSnapshot;
     /**
-     * Which UTXO the user explicitly picked (expert mode). When null, `mint()`
-     * falls back to the SAFE auto-recommendation (`fundingRecommendation$`): a
-     * content-clean covering UTXO when one exists (`status: 'auto'`, the invisible
-     * comfortable default — so the inscribe flow never opens on a coin-selection
-     * puzzle), otherwise no auto-inscribe (`status: 'expert-required'` — the UI
-     * must surface the picker so the user consciously spends an asset-carrying
-     * coin). Setting this is the expert-mode override, honoured even for an asset
-     * coin the user chose deliberately.
+     * Subscribe to snapshot changes. Fires immediately with the current snapshot,
+     * then on every change. Returns an unsubscribe fn — bind in one line.
      */
-    readonly selectedUtxo: _angular_core.WritableSignal<TxnOutput>;
-    /** The inscription payload. Simulations only fire when this is set. */
-    readonly content: _angular_core.WritableSignal<InscribeContent>;
-    private lastWalletAddress;
-    private readonly feeRateSubject;
-    private readonly contentSubject;
-    readonly state: _angular_core.WritableSignal<InscribeMintState>;
-    readonly errorMessage: _angular_core.WritableSignal<string>;
-    readonly successResult: _angular_core.WritableSignal<InscribeAndBroadcastResult>;
-    /** Currently connected wallet bridged to a signal for template reads. */
-    readonly connectedWallet: _angular_core.Signal<WalletInfo>;
-    /** Convenience computed for `state() === 'ready'` gating. */
-    readonly isReady: _angular_core.Signal<boolean>;
-    /**
-     * UTXOs for the connected wallet's payment address. Re-fetches on
-     * wallet change. Errors are mapped to an empty list and an error
-     * state. Shared between subscribers via `shareReplay` so the side
-     * effects on `state` only fire once per emission.
-     *
-     * `startWith(null)` keeps the chain hot before any wallet connects;
-     * downstream `simulations$` then emits `[]` instead of stalling.
-     */
-    readonly utxos$: Observable<TxnOutput[]>;
-    /**
-     * For each UTXO + current fee rate + set content, run
-     * `simulateInscribeFees` to produce the commit + reveal fee
-     * breakdown. UTXOs that can't cover `fundingRequirementSats` come
-     * through with `insufficient: true` rather than poisoning the whole
-     * stream.
-     *
-     * Re-emits whenever utxos$, wallet, feeRate, or content changes.
-     * Emits `[]` when content is null (consumer hasn't wired the
-     * inscription payload yet).
-     */
-    readonly simulations$: Observable<InscribeUtxoSimulation[]>;
-    /** Pass-through of the SDK's polled fee tiers. */
-    readonly recommendedFees$: Observable<RecommendedFees>;
-    /**
-     * The funding target the coin-selection safety check must cover: the
-     * inscription's `fundingRequirementSats` (commit output + commit fee), derived
-     * from the content + fee rate via `simulateInscribeFees` against a
-     * wallet-default-shaped dummy funding input (the requirement depends on the
-     * content + fee + input script type, not the input's value). Null until wallet
-     * + fee rate + content are all set, or if the simulation throws.
-     */
-    private readonly fundingTarget$;
-    /**
-     * SAFE-by-default coin-selection recommendation for the inscribe's funding
-     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
-     * `auto` (a content-clean coin covers → auto-selected, no picker),
-     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
-     * picker), `scanning`, or `insufficient`. Degrades to `insufficient` if the
-     * UTXO fetch errors, so a load failure never yields an unsafe auto-inscribe.
-     * The UI branches on `.status`; the invisible default is `auto`.
-     */
-    readonly fundingRecommendation$: Observable<FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>>;
-    private lastRecommendationSnapshot;
-    constructor();
-    private readonly walletChangeSub;
-    private readonly recommendationSnapshotSub;
+    subscribe(listener: (s: InscribeSnapshot) => void): () => void;
+    /** Set (or clear) the connected wallet. On a genuine change, resets + refetches. */
+    setWallet(wallet: InscribeWalletContext | null): Promise<void>;
     setFeeRate(rate: number): void;
     setSelectedUtxo(utxo: TxnOutput | null): void;
     setContent(content: InscribeContent | null): void;
     /**
-     * Trigger the inscribe. Requires a connected wallet, a feeRate set,
-     * a selectedUtxo, and content set. Composes:
-     *   1. `simulateInscribeFees` for the picked UTXO to derive the
-     *      exact commit / reveal fee at broadcast time.
-     *   2. `inscribeAndBroadcast` — signs the commit input via the
-     *      wallet, broadcasts commit, signs reveal internally,
-     *      broadcasts reveal — via `Cat21Service.postTransaction`.
-     *
-     * Transitions state to `minting` → `success` (with `successResult`)
-     * or `error` (with `errorMessage`).
+     * Execute the inscribe: pick (explicit override, else the safe auto-clean
+     * recommendation — never an asset coin unless the user chose it), then
+     * `inscribeAndBroadcast` (build commit + reveal, wallet-sign the commit's
+     * single funding input, broadcast both). Watch-only wallets bridge through
+     * `promptForSignedPsbt`.
      */
     mint(promptForSignedPsbt?: (unsigned: {
         base64: string;
         hex: string;
-    }) => Observable<string>): Observable<InscribeAndBroadcastResult>;
-    /**
-     * Wipe form state back to a fresh mint (typically the "Mint another"
-     * button on the success screen). Keeps the wallet connected.
-     */
+    }) => Promise<string>): Promise<InscribeAndBroadcastResult>;
+    /** "Inscribe another" — wipe form state, keep the wallet. */
     reset(): void;
-    private resetFormState;
-    private computeSimulations;
-    static ɵfac: _angular_core.ɵɵFactoryDeclaration<InscribeMintOrchestrator, never>;
-    static ɵprov: _angular_core.ɵɵInjectableDeclaration<InscribeMintOrchestrator>;
+    private recompute;
+    private patch;
 }
 
 /**
@@ -6668,5 +6322,5 @@ type AgentPolicyDenyReason = 'agent-disabled' | 'spend-above-action-cap' | 'spen
  */
 declare function evaluateAgentPolicy(policy: AgentPolicy, action: AgentActionContext): AgentPolicyDecision;
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, liftRecommendationByOutpoint, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
-export type { AcceptOfferCoreParams, AcceptOfferQueryArgs, AcceptOfferState, AddressNetworkGroup, AddressProbe, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AnnotatedFundingUtxo, AskQueryArgs, AssessCompressionOptions, BroadcastOutcome, BroadcastPort, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, CardinalUtxoCandidate, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CatsAtAddressOptions, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, ClassifyOutpointOptions, CompressionAssessment, ContentScanPort, CoreFundingUtxo, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferArtifact, CreateOfferCoreParams, CreateOfferSimulation, CreateOfferSimulationOutcome, CreateOfferSimulationResult, CreateOfferState, CreateOfferStatus, CreateTransactionResult, DeriveWatchOnlyArgs, DummyKeypairResult, ErrorResponse, FundingRecommendation, FundingRecommendationStatus, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeCoreParams, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeSimulation, InscribeStatus, InscribeUtxoSimulation, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintCoreParams, MintSimulationResult, MintState, MintStatus, OfferCreateSignPort, OrdEnvelopeField, OrdOutputResponse, OrdParityFundingResult, OrdTag, OrdinalsAddress, OutpointClassification, ParsedAskQuery, ParsedBuyOfferQuery, ParsedOffer, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, ScanWatchOnlyArgs, ScannedAddress, SignMessageArgs, SignMessageResult, SignPort, SignedTxBytes, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferCoreParams, TransferQueryArgs, TransferSimulation, TransferSimulationOutcome, TransferSimulationResult, TransferState, TransferStatus, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoClassification, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulation, UtxosPort, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletCapabilityStatus, WalletConnector, WalletInfo, WalletMatrixEntry, WatchOnlyAddress, WatchOnlyDeriveErrorCode, WatchOnlyProbeConfig, WatchOnlyScanResult, WatchOnlyScriptType, WindowLike, XverseAddressResponse };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decodePastedPsbt, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, liftRecommendationByOutpoint, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export type { AcceptOfferCoreParams, AcceptOfferOrchestratorDeps, AcceptOfferOrchestratorState, AcceptOfferPreview, AcceptOfferQueryArgs, AcceptOfferSnapshot, AcceptOfferWalletContext, AddressNetworkGroup, AddressProbe, AgentActionContext, AgentActionKind, AgentPolicy, AgentPolicyDecision, AgentPolicyDenyReason, AnnotatedFundingUtxo, AskQueryArgs, AssessCompressionOptions, BroadcastOutcome, BroadcastPort, BuildCat21BuyOfferArgs, BuildCat21BuyOfferResult, BuildCat21TransferArgs, BuildCat21TransferResult, BuildInputScriptArgs, BuildInputScriptResult, BuildInscriptionEnvelopeArgs, BuyOfferQueryArgs, BuyOfferTargetCat, CardinalUtxoCandidate, Cat21, Cat21BroadcastChannel, Cat21BroadcastDecision, Cat21BroadcastInput, Cat21BroadcastOptions, Cat21BroadcastResult, Cat21Holding, Cat21Listing, Cat21OfferBuyerInput, Cat21OfferDestinations, Cat21OfferRejectionReason, Cat21OfferSellerInput, Cat21OfferValidation, Cat21OfferValidationFailure, Cat21OfferValidationResult, Cat21OrdOutputResponse, Cat21PaginatedResult, Cat21PreparedInput, Cat21SdkConfig, Cat21SingleResult, Cat21TransferCatInput, Cat21TransferDestinations, Cat21TransferFundingInput, CatNumbersResult, CatOutpoint, CatsAtAddressOptions, ChildInscribeRevealArgs, ChildInscribeRevealResult, ChildRevealParent, ClassifyOutpointOptions, CompressionAssessment, ContentScanPort, CoreFundingUtxo, CreateChildInscribeTransactionsArgs, CreateChildInscribeTransactionsResult, CreateInscribeTransactionsArgs, CreateInscribeTransactionsResult, CreateOfferArtifact, CreateOfferCoreParams, CreateOfferOrchestratorDeps, CreateOfferOrchestratorState, CreateOfferSimulationResult, CreateOfferSimulationView, CreateOfferSnapshot, CreateOfferStatus, CreateOfferWalletContext, CreateTransactionResult, DeriveWatchOnlyArgs, DummyKeypairResult, ErrorResponse, FundingRecommendation, FundingRecommendationStatus, FundingUtxo, InscribeAndBroadcastArgs, InscribeAndBroadcastResult, InscribeChildAndBroadcastArgs, InscribeChildAndBroadcastResult, InscribeCommitArgs, InscribeCommitResult, InscribeContent, InscribeCoreParams, InscribeFundingInput, InscribeGateRejectReason, InscribeGateResources, InscribeIntent, InscribeMintState, InscribeOperation, InscribeOperationGateConfig, InscribeOperationGateResult, InscribeOrchestratorDeps, InscribePackageBroadcastInput, InscribePackageBroadcastOptions, InscribePackageBroadcastResult, InscribePackageEndpointResult, InscribeRevealArgs, InscribeRevealResult, InscribeSimulation, InscribeSnapshot, InscribeStatus, InscribeUtxoSimulation, InscribeWalletContext, InscriptionContentEncoding, KnownOrdinalWallet, LeatherAddress, LeatherAddressResponse, LeatherBtcAddress, LeatherPSBTBroadcastResponse, LeatherSignPsbtRequestParams, LeatherStxAddress, ListingMessageFields, MempoolTx, MintCoreParams, MintOrchestratorDeps, MintOrchestratorState, MintSimulationResult, MintSnapshot, MintStatus, MintWalletContext, OfferBidArtifact, OfferCreateSignPort, OrdEnvelopeField, OrdOutputResponse, OrdParityFundingResult, OrdTag, OrdinalsAddress, OutpointClassification, ParsedAskQuery, ParsedBuyOfferQuery, PaymentAddress, PendingMint, PickFundingUtxoArgs, PrepareBuyOfferBuyerInputArgs, PrepareCat21InputArgs, PrepareInscribeFundingInputArgs, PrepareTransferInputArgs, RecommendedFees, SatRarity, ScanWatchOnlyArgs, ScannedAddress, SignMessageArgs, SignMessageResult, SignPort, SignedTxBytes, SimulateInscribeFeesArgs, SimulateInscribeFeesResult, SimulateTransactionResult, SlipstreamSubmitResponse, StatusResult, StorageLike, SubmitToSlipstreamOptions, TransferCoreParams, TransferOrchestratorDeps, TransferOrchestratorState, TransferQueryArgs, TransferSimulationResult, TransferSimulationView, TransferSnapshot, TransferStatus, TransferWalletContext, TwoPassFeeSimulationArgs, TwoPassFeeSimulationResult, TxnOutput, TxnOutputStatus, UtxoClassification, UtxoContent, UtxoScanBucket, UtxoScanState, UtxoSimulationRow, UtxosPort, ValidateCat21BuyOfferArgs, VerifyBip322RejectionReason, VerifyBip322SignatureResult, VerifyListingRejectionReason, VerifyListingSignatureResult, WalletCapabilityStatus, WalletConnector, WalletInfo, WalletMatrixEntry, WatchOnlyAddress, WatchOnlyDeriveErrorCode, WatchOnlyProbeConfig, WatchOnlyScanResult, WatchOnlyScriptType, WindowLike, XverseAddressResponse };

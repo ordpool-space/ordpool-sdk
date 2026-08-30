@@ -41,7 +41,9 @@ export * from './cat21-mint/cat21.service';
 export * from './cat21-mint/cat21.service.helper';
 export * from './cat21-mint/cat21.service.types';
 export * from './cat21-mint/cat21-api.service';
-export * from './cat21-mint/cat21-mint-orchestrator.service';
+// Framework-agnostic orchestrators (plain classes, subscribe-based) are the
+// only Bitcoin-operation surface — the same ones as the /core entry.
+export * from './cat21-mint/cat21-mint-orchestrator';
 export * from './cat21-mint/cat21-mint-input-adapter';
 export * from './cat21-mint/utxo-content.types';
 export * from './cat21-mint/recommended-funding.helper';
@@ -70,14 +72,15 @@ export * from './cat21-core/accept-offer.core';
 export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
 export * from './cat21-offer/cat21-offer-input-adapter';
-export * from './cat21-offer/cat21-create-offer-orchestrator.service';
-export * from './cat21-offer/cat21-accept-offer-orchestrator.service';
+export * from './cat21-offer/cat21-create-offer-orchestrator';
+export * from './cat21-offer/cat21-accept-offer-orchestrator';
+export * from './cat21-offer/decode-pasted-psbt';
 
 // --- cat21 transfer (move a cat to another address; mints a fresh cat on the same ordinal) ---
 export * from './cat21-transfer/cat21-transfer.helper';
 export * from './cat21-transfer/cat21-transfer.types';
 export * from './cat21-transfer/cat21-transfer-input-adapter';
-export * from './cat21-transfer/cat21-transfer-orchestrator.service';
+export * from './cat21-transfer/cat21-transfer-orchestrator';
 
 // --- cat21 broadcast (mempool / Slipstream dispatcher + Slipstream client) ---
 export * from './cat21-broadcast/broadcast.helper';
@@ -112,7 +115,7 @@ export * from './inscribe/inscription.service.helper';
 export * from './inscribe/inscribe-broadcast.helper';
 export * from './inscribe/inscribe-orchestrator';
 export * from './inscribe/inscribe-child-orchestrator';
-export * from './inscribe/inscribe-mint-orchestrator.service';
+export * from './inscribe/inscribe-mint-orchestrator';
 export * from './inscribe/inscribe-compression.helper';
 
 // --- inscribe validation gate (pure helpers, same set that /core exposes) ---

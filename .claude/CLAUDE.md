@@ -63,11 +63,21 @@ Allowed:
 
 NOT allowed (stays in main entry only):
 - `WalletService`, `Cat21Service`, `Cat21ApiService`,
-  `Cat21MintOrchestrator`, `UtxoContentScanner` — Angular
-  `@Injectable` classes.
+  `UtxoContentScanner` — the supporting Angular `@Injectable`
+  services a consumer wires as the framework-agnostic
+  orchestrators' deps (getUtxos / scan / broadcast / wallet).
 - `InjectionToken` constants (`storage`, `bitcoinNetwork`,
   `cat21SdkConfig`).
 - Anything that imports `@angular/*`.
+
+The five orchestrators (`Cat21MintOrchestrator`,
+`Cat21TransferOrchestrator`, `Cat21CreateOfferOrchestrator`,
+`Cat21AcceptOfferOrchestrator`, `InscribeMintOrchestrator`) are the
+framework-agnostic subscribe-based plain classes, exported from BOTH
+`core.ts` and `index.ts` — the single Bitcoin-operation surface for
+every consumer. The legacy Angular `@Injectable` orchestrator
+services were deleted (2026-08-30) to force consumers off the
+duplicated, guessed-fee flow logic and onto these.
 
 When adding a new pure helper:
 
@@ -291,7 +301,7 @@ So our preserve-default + require-funding transfer is **essentially ord's `walle
 
 **Sub-dust-rescue feasibility is PROVEN on regtest** (2026-08-29): a `nLockTime=21` tx with a 100-sat output-0 is rejected by normal relay (`testmempoolaccept allowed:false`) but mines out-of-band via `generateblock`; the resulting 100-sat cat UTXO is spendable, and a grow tx (100-sat cat + funding → 546-sat output-0) passes NORMAL relay (`allowed:true`) and confirms. cat21-ord then reports the cat (number 22) at `value:546`, `satpoint = <growtx>:0:0` — the cat's sat rode FIFO to the grown UTXO intact. Bitcoin has no dust rule on INPUTS (only on relayed outputs); consensus lets any UTXO be spent, so growing sub-dust to ≥ dust is always valid.
 
-**Design (shipped):** default stays PRESERVE. `buildCat21TransferPsbt` takes an optional `targetPostageSats`; omitted ⇒ preserve (output 0 = `catUtxo.value`, golden-rule default, unchanged). Set ⇒ output 0 = target: GROW (>) or SHRINK (<). Unified conservation: `change = catUtxo.value + funding − catOutputSats − fee`. A set target must clear the recipient's dust floor (builder throws otherwise); PRESERVE is exempt (a sub-dust cat can be preserved for a later grow / out-of-band move). The result reports `catOutputSats`. **Follow-ups (not done):** (1) thread `targetPostageSats` through the Angular `Cat21TransferOrchestrator` + its coin-selection so cat21.space's UI can offer grow/shrink (the builder is already usable by the wallet + bots directly); (2) a live shrink-vs-`ord wallet send` byte-compare regtest to measure exact parity.
+**Design (shipped):** default stays PRESERVE. `buildCat21TransferPsbt` takes an optional `targetPostageSats`; omitted ⇒ preserve (output 0 = `catUtxo.value`, golden-rule default, unchanged). Set ⇒ output 0 = target: GROW (>) or SHRINK (<). Unified conservation: `change = catUtxo.value + funding − catOutputSats − fee`. A set target must clear the recipient's dust floor (builder throws otherwise); PRESERVE is exempt (a sub-dust cat can be preserved for a later grow / out-of-band move). The result reports `catOutputSats`. **Follow-ups (not done):** (1) thread `targetPostageSats` through the framework-agnostic `Cat21TransferOrchestrator` + its coin-selection so cat21.space's UI can offer grow/shrink (the builder is already usable by the wallet + bots directly); (2) a live shrink-vs-`ord wallet send` byte-compare regtest to measure exact parity.
 
 **Every size test MUST stress non-546 sizes.** A 546-only parity/size test is a
 happy-path test that proves nothing about size-handling.

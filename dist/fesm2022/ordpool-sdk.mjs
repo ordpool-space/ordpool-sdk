@@ -3,14 +3,13 @@ import * as btc from '@scure/btc-signer';
 import { Script } from '@scure/btc-signer';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import * as i0 from '@angular/core';
-import { InjectionToken, inject, Injectable, signal, computed } from '@angular/core';
-import { from, map, Observable, switchMap, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, combineLatest, firstValueFrom } from 'rxjs';
+import { InjectionToken, inject, Injectable } from '@angular/core';
+import { from, map, Observable, switchMap, defer, throwError, Subject, BehaviorSubject, timer, take, distinctUntilChanged, of, tap, mergeMap, concatMap, toArray, interval, startWith, shareReplay, catchError, forkJoin, firstValueFrom, combineLatest } from 'rxjs';
 import Wallet, { AddressPurpose, addListener, getAddress, signTransaction, MessageSigningProtocols, request } from 'sats-connect';
 import { sha256 } from '@noble/hashes/sha2';
 import { concatBytes } from '@noble/hashes/utils';
 import { HDKey } from '@scure/bip32';
 import { HttpClient } from '@angular/common/http';
-import { toSignal } from '@angular/core/rxjs-interop';
 
 /**
  * Canonical CAT-21 postage. Every cat-bearing UTXO across the protocol is
@@ -5401,219 +5400,84 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
         }] });
 
 /**
- * Run the two-pass loop and return the final fee + vsize +
- * the pass-2 simulation result. The pass-2 simulation is the one
- * the caller should USE for display or broadcast metadata — it's
- * the simulation that matches the final fee.
+ * Fake taproot key-path witness: a single 64-byte schnorr signature.
+ * `.vsize` measures the same whether the bytes are a real signature or
+ * zero-fill, so a module-scoped constant is fine (read-only downstream
+ * in scure's `updateInput`).
  */
-function twoPassFeeSimulation(args) {
-    if (args.feeRatePerVbyte <= 0) {
+const DUMMY_TAPROOT_KEYPATH_WITNESS = new Uint8Array(64);
+/**
+ * Fake P2WPKH witness: `<sig ~72><pubkey 33>`. Used as the fallback
+ * for any non-taproot non-signable input. A DER-encoded ECDSA sig with
+ * a sighash byte is up to ~72 bytes; erring on the larger side means we
+ * over- rather than under-estimate the fee for that input.
+ */
+const DUMMY_P2WPKH_WITNESS = [new Uint8Array(72), new Uint8Array(33)];
+/**
+ * Size the dummy witness for a non-signable input by its scriptPubKey.
+ * A cat can be held on a taproot (Xverse/Leather) OR a native-segwit
+ * (Unisat/Wizz) ordinals address; faking a taproot 64-byte witness on a
+ * real P2WPKH input under-counts ~11 vB and underpays the fee. Read the
+ * input's own scriptPubKey (from its witnessUtxo) and match the witness
+ * shape. Unknown/absent script falls back to the larger P2WPKH shape.
+ */
+function dummyWitnessForNonSignable(script) {
+    // P2TR scriptPubKey: OP_1 (0x51) PUSH32 (0x20) <32-byte key> = 34 bytes.
+    if (script && script.length === 34 && script[0] === 0x51 && script[1] === 0x20) {
+        return [DUMMY_TAPROOT_KEYPATH_WITNESS];
+    }
+    return DUMMY_P2WPKH_WITNESS;
+}
+/**
+ * Return `tx.vsize` for a freshly-built PSBT by dummy-signing every
+ * signable input and attaching a fake witness to any `nonSignableInputs`.
+ *
+ * scure's `.vsize` throws "Transaction is not finalized" on any input
+ * that isn't finalized; this helper handles both the "we're the signer
+ * of everything" case (mint, transfer) and the "we're the buyer, seller
+ * signs later" case (buy-offer create).
+ */
+function computePsbtVsize(args) {
+    const tx = btc.Transaction.fromPSBT(args.psbt);
+    const { dummyPrivateKey } = getDummyKeypair(args.network);
+    const nonSignable = args.nonSignableInputs ? new Set(args.nonSignableInputs) : null;
+    for (let i = 0; i < tx.inputsLength; i++) {
+        if (nonSignable?.has(i)) {
+            const script = tx.getInput(i).witnessUtxo?.script;
+            tx.updateInput(i, { finalScriptWitness: dummyWitnessForNonSignable(script) });
+        }
+        else {
+            tx.signIdx(dummyPrivateKey, i, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+            tx.finalizeIdx(i);
+        }
+    }
+    return tx.vsize;
+}
+
+function resolveCatTxFee(args) {
+    const { simulate, feeRatePerVbyte: rate, feeBudgetSats: budget } = args;
+    if (!(rate > 0))
         throw new Error('feeRatePerVbyte must be positive');
+    if (budget < 0)
+        return null;
+    // With-change form: fee 0 keeps the leftover maximal, so a change output is
+    // present and we measure the larger of the two possible sizes.
+    const withChange = simulate(0);
+    const withChangeFee = Math.ceil(withChange.vsize * rate);
+    if (withChangeFee <= budget) {
+        // Affordable. Settle at that fee; if the leftover now falls below dust the
+        // builder drops the change output and folds it into `finalFeeSats`.
+        const settled = simulate(withChangeFee);
+        if (Math.ceil(settled.vsize * rate) <= budget)
+            return settled;
     }
-    const placeholderFee = args.placeholderFeeSats ?? 1_000;
-    // Pass 1 — placeholder fee → vsize.
-    const pass1 = args.simulate(placeholderFee);
-    const provisionalFee = Math.ceil(pass1.vsize * args.feeRatePerVbyte);
-    // Pass 2 — provisional fee → FINAL vsize (different if change
-    // crossed dust). The returned fee is rate × pass2Vsize.
-    const pass2 = args.simulate(provisionalFee);
-    const finalFeeSats = Math.ceil(pass2.vsize * args.feeRatePerVbyte);
-    return {
-        finalFeeSats,
-        vsize: pass2.vsize,
-        finalSimulation: pass2,
-    };
-}
-
-/**
- * Native-fetch HTTP primitives for the SDK's Angular services (`Cat21Service`,
- * `Cat21ApiService`, `UtxoContentScanner`). The SDK uses `fetch`, never
- * Angular's `HttpClient` — so these services carry no `@angular/common/http`
- * dependency and load + run anywhere the rest of the SDK does (browser, plain
- * Node, a regtest jest harness), matching the workspace "use fetch, not axios"
- * rule.
- *
- * Each rejects on a non-2xx status, carrying the response BODY as the error
- * message (so an electrs/mempool broadcast rejection keeps its reason, e.g.
- * "txn-mempool-conflict") — the callers' existing `catchError` chains read
- * `err.message` and surface it unchanged.
- */
-async function fetchOk(url, init) {
-    const res = await fetch(url, init);
-    if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(body || `${init?.method ?? 'GET'} ${url} failed: HTTP ${res.status}`);
-    }
-    return res;
-}
-/** `GET <url>` → parsed JSON, Promise form. Sends `Accept: application/json`
- * (the ord hosts gate HTML behind it). The framework-agnostic form used by
- * plain-async consumers (the `cat21-api.fetch` twin, bots, CLIs). */
-function fetchJsonAsync(url) {
-    return fetchOk(url, { headers: { Accept: 'application/json' } }).then((r) => r.json());
-}
-/** `GET <url>` → parsed JSON, Observable form. Thin RxJS wrapper over
- * `fetchJsonAsync` for the Angular services' existing `.pipe(catchError)`
- * chains. */
-function fetchJson(url) {
-    return from(fetchJsonAsync(url));
-}
-/** `GET <url>` → raw text (e.g. an esplora `/tx/:id/hex` response). */
-function fetchText(url) {
-    return from(fetchOk(url).then((r) => r.text()));
-}
-/** `POST <url>` with a raw string body → text response (e.g. esplora `/tx`
- * returning the broadcast txid). */
-function postText(url, body) {
-    return from(fetchOk(url, { method: 'POST', body }).then((r) => r.text()));
-}
-
-/**
- * UTXOs at or below this value are auto-scanned by callers that respect
- * the default policy (the mint-flow components do). Above the threshold
- * a UTXO is overwhelmingly likely to be a plain payment, so we leave it
- * `not-scanned` and let the user click "Scan anyway" if they want
- * certainty. The 50k figure: most ordinal-bearing UTXOs are 546-10k
- * sat; rare-sat UTXOs are typically dust-postaged too. A 50k+ UTXO is
- * a deliberate-payment shape.
- */
-const AUTO_SCAN_MAX_VALUE_SAT = 50_000;
-/**
- * Concurrency ceiling for `autoScan` HTTP fan-out. Each scan fires two
- * ord requests in parallel; six is the de-facto browser per-host
- * connection limit so we batch 5 outpoints (= 10 requests) at a time
- * to leave one slot for unrelated traffic.
- */
-const AUTO_SCAN_CONCURRENCY = 5;
-/**
- * Per-outpoint asset scanner backed by our ord instance
- * (`ord.ordpool.space`, for inscriptions + runes) and cat21-ord
- * (`ord.cat21.space`, for CAT-21 cats). Results are cached for the
- * singleton's lifetime — a UTXO's content is immutable until the UTXO
- * is spent, and a spent UTXO doesn't appear in the payment-address
- * list anymore, so the cache never goes stale.
- *
- * The scanner does NOT decide which UTXOs to scan; the caller picks
- * via `scan(outpoint)`. The orchestrator exposes the auto-scan
- * convenience separately.
- */
-class UtxoContentScanner {
-    config = inject(cat21Config);
-    /** outpoint → latest state. */
-    states = new Map();
-    statesSubject = new BehaviorSubject(new Map());
-    /**
-     * Live snapshot of every outpoint's scan state. Subscribers receive
-     * the full map on every change so they can re-derive any per-row
-     * bucket in one pass — no per-outpoint observable factory needed.
-     */
-    states$ = this.statesSubject.asObservable();
-    /** In-flight per-outpoint subscriptions so concurrent `scan()` calls dedupe. */
-    inFlight = new Map();
-    /**
-     * Read the current state for one outpoint without subscribing.
-     * Default: `not-scanned` for never-touched outpoints.
-     */
-    getState(outpoint) {
-        return this.states.get(outpoint) ?? { kind: 'not-scanned' };
-    }
-    /**
-     * Scan one outpoint. If already scanned, returns the cached state
-     * synchronously via `of(...)`. If scan is in flight, returns the
-     * existing observable so the network request runs once. Otherwise
-     * fires both ord JSON queries in parallel, merges, caches, emits.
-     *
-     * The scan never throws — every failure mode is encoded into the
-     * returned `UtxoScanState`.
-     */
-    scan(outpoint) {
-        const cached = this.states.get(outpoint);
-        if (cached && cached.kind !== 'not-scanned' && cached.kind !== 'scanning') {
-            return of(cached);
-        }
-        const existing = this.inFlight.get(outpoint);
-        if (existing)
-            return existing;
-        this.setState(outpoint, { kind: 'scanning' });
-        const flight = forkJoin({
-            ord: this.fetchOrd(outpoint),
-            cat21Ord: this.fetchCat21Ord(outpoint),
-        }).pipe(map(({ ord, cat21Ord }) => {
-            const c = classifyUtxoContent(ord, cat21Ord);
-            if (c.clean) {
-                return { kind: 'scanned-clean' };
-            }
-            const content = {
-                outpoint,
-                inscriptionIds: c.inscriptionIds,
-                runes: c.runes,
-                catIds: c.catIds,
-                catSat: c.catSat,
-                rareSat: c.rareSat,
-            };
-            return { kind: 'scanned-with-assets', content };
-        }), catchError((err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            return of({ kind: 'scan-failed', message });
-        }), tap((state) => {
-            this.setState(outpoint, state);
-            this.inFlight.delete(outpoint);
-        }), shareReplay({ bufferSize: 1, refCount: true }));
-        this.inFlight.set(outpoint, flight);
-        return flight;
-    }
-    /**
-     * Convenience batch scanner. Scans every outpoint whose UTXO value
-     * is at or below `AUTO_SCAN_MAX_VALUE_SAT`. Throttles HTTP fan-out
-     * via `mergeMap` with `AUTO_SCAN_CONCURRENCY` so a wallet with 30
-     * UTXOs doesn't try to open 60 simultaneous TCP connections (browser
-     * per-host cap is 6, anything above queues anyway). Returns nothing
-     * — the caller reads results off the `states$` stream.
-     */
-    autoScan(utxos) {
-        const targets = [];
-        for (const u of utxos) {
-            if (u.value > AUTO_SCAN_MAX_VALUE_SAT)
-                continue;
-            const outpoint = `${u.txid}:${u.vout}`;
-            if (this.getState(outpoint).kind === 'not-scanned') {
-                targets.push(outpoint);
-            }
-        }
-        if (targets.length === 0)
-            return;
-        from(targets).pipe(mergeMap((outpoint) => this.scan(outpoint), AUTO_SCAN_CONCURRENCY)).subscribe();
-    }
-    /**
-     * Wipe both caches. Call this when the connected wallet changes —
-     * UTXO outpoints from the previous wallet are no longer relevant
-     * and would otherwise accumulate forever on a long-lived session
-     * (the singleton's `states` Map is unbounded).
-     */
-    reset() {
-        this.states.clear();
-        this.inFlight.clear();
-        this.statesSubject.next(new Map());
-    }
-    fetchOrd(outpoint) {
-        return fetchJson(`${trimSlash(this.config.ordApiUrl)}/output/${outpoint}`);
-    }
-    fetchCat21Ord(outpoint) {
-        return fetchJson(`${trimSlash(this.config.cat21OrdApiUrl)}/output/${outpoint}`);
-    }
-    setState(outpoint, state) {
-        this.states.set(outpoint, state);
-        this.statesSubject.next(new Map(this.states));
-    }
-    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: UtxoContentScanner, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: UtxoContentScanner, providedIn: 'root' });
-}
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: UtxoContentScanner, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
-        }] });
-function trimSlash(url) {
-    return url.endsWith('/') ? url.slice(0, -1) : url;
+    // With-change doesn't fit the budget. Spend the whole budget as fee (no change
+    // output; always a valid build for a covered coin) and accept iff that clears
+    // the requested rate for the no-change size.
+    const noChange = simulate(budget);
+    if (budget >= Math.ceil(noChange.vsize * rate))
+        return noChange;
+    return null;
 }
 
 /**
@@ -5876,414 +5740,394 @@ function liftRecommendationByOutpoint(rec, source) {
     };
 }
 
-const outpointKey = (u) => `${u.txid}:${u.vout}`;
+const outpoint = (u) => `${u.txid}:${u.vout}`;
 /**
- * The shared coin-selection brain for EVERY cat action's orchestrator.
+ * Content-checked coin selection — the async, port-driven form of the Angular
+ * `FundingRecommendationService`. Force-classifies every COVERING candidate via
+ * the `ContentScanPort` (regardless of size, so the "never auto-spend a valuable
+ * coin" guarantee holds even for large funding UTXOs), then applies the pure
+ * `recommendFunding`:
  *
- * Given the wallet's funding UTXOs and the spend target, it force-scans the
- * COVERING candidates for content (any size — so the "never auto-spend a
- * valuable coin" guarantee holds even for the large funding UTXOs that
- * `UtxoContentScanner.autoScan`'s size threshold skips), then applies the pure
- * `recommendFunding`. It re-emits as scans resolve: `scanning` while content is
- * unknown, then `auto` (a clean coin covers → auto-select, no picker),
- * `expert-required` (only asset/scan-failed coins cover → recommend best-fit but
- * the UI must confirm), or `insufficient`.
+ * - a content-clean coin covers  -> `auto` (auto-selected, no picker)
+ * - only asset coins cover       -> `expert-required` (surface the picker)
+ * - a covering coin's scan fails -> that coin is `failed` (never auto-spent)
+ * - nothing covers               -> `insufficient`
  *
- * Wiring this into mint / transfer / offer / inscribe gives all four actions
- * identical safe-auto + expert-with-recommendation behaviour, in the SDK, so no
- * consumer (cat21.space, cat21-wallet, bots) re-implements it. The "by value"
- * pick inside `recommendFunding` is ord's best-fit `selectCardinalUtxo`, so an
- * auto-selected clean coin stays byte-aligned with `ord wallet send`.
+ * Non-covering coins stay `unscanned` (never auto-picked anyway, so no wasted
+ * scan). No RxJS, no Angular — the wallet and bots consume it as plain async;
+ * cat21.space wraps it in its reactive veneer.
  */
-class FundingRecommendationService {
-    scanner = inject(UtxoContentScanner);
-    recommend(fundingUtxos$, targetSpendSats$) {
-        return combineLatest([fundingUtxos$, targetSpendSats$]).pipe(switchMap(([utxos, target]) => {
-            if (!target || target <= 0 || utxos.length === 0) {
-                return of(recommendFunding([], target ?? 0));
-            }
-            // Force-scan every covering candidate — safety takes priority over the
-            // scanner's size threshold: any coin we might auto-spend gets checked.
-            // scan() dedupes + caches + completes after one emit, so these
-            // fire-and-forget subscriptions clean themselves up.
-            for (const u of utxos) {
-                if (u.value >= target)
-                    this.scanner.scan(outpointKey(u)).subscribe();
-            }
-            // Re-derive the recommendation on every scan-state change (states$ is a
-            // BehaviorSubject, so this also emits the current snapshot immediately).
-            return this.scanner.states$.pipe(map(() => {
-                const annotated = utxos.map((u) => ({
-                    ...u,
-                    bucket: bucketOf(this.scanner.getState(outpointKey(u))),
-                }));
-                return recommendFunding(annotated, target);
-            }));
-        }));
+async function selectFunding(utxos, targetSats, scan) {
+    if (!targetSats || targetSats <= 0 || utxos.length === 0) {
+        return recommendFunding([], targetSats > 0 ? targetSats : 0);
     }
-    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: FundingRecommendationService, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: FundingRecommendationService, providedIn: 'root' });
-}
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: FundingRecommendationService, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
-        }] });
-
-/**
- * High-level mint flow. Wraps `Cat21Service` (UTXOs, simulation,
- * broadcast) + `WalletService` (the currently connected wallet) into
- * one cohesive surface so both consumers (ordpool/frontend and
- * cat21-indexer/frontend) drive the same state machine and reactive
- * pipelines with thin templates.
- *
- * Singleton (`providedIn: 'root'`) — state persists across route
- * navigations within a session. Auto-resets `feeRate` + `selectedUtxo`
- * + the success/error fields when the connected wallet changes (the
- * old UTXO is gone; the user picks fresh for the new wallet).
- */
-class Cat21MintOrchestrator {
-    wallet = inject(WalletService);
-    cat21 = inject(Cat21Service);
-    fundingRec = inject(FundingRecommendationService);
-    // --- Writable inputs ----------------------------------------------------
-    /** sat/vB the user picked (from the fee picker or manually). null until set. */
-    feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
-    /**
-     * Which UTXO the user explicitly picked (expert mode). When null, `mint()`
-     * falls back to the SAFE auto-recommendation (`fundingRecommendation$`): a
-     * content-clean covering UTXO when one exists (`status: 'auto'`, the invisible
-     * comfortable default), otherwise no auto-mint (`status: 'expert-required'` —
-     * the UI must surface the picker so the user consciously mints on an
-     * asset-carrying coin). Setting this is the expert-mode override, honoured
-     * even for an asset coin the user chose deliberately.
-     */
-    selectedUtxo = signal(null, ...(ngDevMode ? [{ debugName: "selectedUtxo" }] : []));
-    // --- Internals (declared up here because instance-field initialisers
-    // below depend on them at class-construction time).
-    lastWalletAddress = null;
-    feeRateSubject = new BehaviorSubject(null);
-    // --- Output state -------------------------------------------------------
-    state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
-    errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
-    successTxId = signal(null, ...(ngDevMode ? [{ debugName: "successTxId" }] : []));
-    /** Currently connected wallet bridged to a signal for template reads. */
-    connectedWallet = toSignal(this.wallet.connectedWallet$, { initialValue: null });
-    /** Convenience computed for `state() === 'ready'` gating. */
-    isReady = computed(() => this.state() === 'ready', ...(ngDevMode ? [{ debugName: "isReady" }] : []));
-    // --- Derived streams ----------------------------------------------------
-    /**
-     * UTXOs for the connected wallet's payment address. Re-fetches on
-     * wallet change. Errors are mapped to an empty list and an error
-     * state. Shared between subscribers via `shareReplay` so the side
-     * effects on `state` only fire once per emission.
-     *
-     * `startWith(null)` keeps the chain hot before any wallet connects;
-     * downstream `simulations$` then emits `[]` instead of stalling.
-     */
-    utxos$ = this.wallet.connectedWallet$.pipe(startWith(null), 
-    // Guard against `connectedWallet$` re-emitting the same wallet.
-    // WalletService fires `.next(info)` on service construction (rehydrate
-    // from localStorage) AND on every connector `onAccountChange` event —
-    // and connectors like Xverse fire that event repeatedly after a
-    // reload. Without this guard, `switchMap` re-cancels the in-flight
-    // getUtxos + resets `state` to 'loading-utxos' faster than downstream
-    // consumers (paymentOutputs$/auto-pick) can settle, and the mint
-    // form's "found funds" banner never surfaces. Key by paymentAddress
-    // — the sole input to `getUtxos` — so a genuine wallet switch still
-    // re-fetches.
-    distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null)), switchMap((w) => {
-        if (!w) {
-            this.state.set('idle');
-            return of([]);
+    const bucketByOutpoint = new Map();
+    await Promise.all(utxos
+        .filter((u) => u.value >= targetSats)
+        .map(async (u) => {
+        try {
+            const verdict = await scan.classify(outpoint(u));
+            bucketByOutpoint.set(outpoint(u), verdict === 'clean' ? 'clean' : 'assets');
         }
-        this.state.set('loading-utxos');
-        return this.cat21.getUtxos(w.paymentAddress).pipe(tap(() => this.state.set('ready')), catchError((err) => {
-            this.errorMessage.set(`Failed to load UTXOs: ${err instanceof Error ? err.message : String(err)}`);
-            this.state.set('error');
-            return of([]);
-        }));
-    }), shareReplay({ bufferSize: 1, refCount: true }));
-    /**
-     * For each UTXO + current fee rate, run the two-pass simulation
-     * (pass 1 estimates vsize at fee=0; pass 2 uses the real fee
-     * derived from vsize × feeRate). UTXOs that throw on simulation
-     * (insufficient funds at this fee rate) come through with
-     * `insufficient: true` rather than poisoning the whole stream.
-     *
-     * Re-emits whenever utxos$ or feeRate changes.
-     */
-    simulations$ = combineLatest([
-        this.utxos$,
-        // Same distinctUntilChanged guard as utxos$: connectedWallet$ can
-        // re-emit the same wallet repeatedly, which would otherwise re-fire
-        // simulations$ downstream.
-        this.wallet.connectedWallet$.pipe(startWith(null), distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null))),
-        // BehaviorSubject mirror of the writable feeRate signal, fed by
-        // `setFeeRate`. The signal stays as the canonical writable for
-        // template reads; this subject just bridges to the RxJS pipeline
-        // without needing the Angular signal-effect runtime (which
-        // toObservable depends on and isn't available in plain Injector
-        // contexts the SDK tests use).
-        this.feeRateSubject,
-    ]).pipe(map(([utxos, wallet, feeRate]) => this.computeSimulations(utxos, wallet, feeRate)), shareReplay({ bufferSize: 1, refCount: true }));
-    /** Pass-through of the SDK's polled fee tiers. */
-    recommendedFees$ = this.cat21.recommendedFees$;
-    /**
-     * The funding target the coin-selection safety check must cover: the fresh
-     * cat's postage (546) + the miner fee (a generous ~200 vB ceiling; the
-     * two-pass simulation tightens the real fee). A mint UTXO must clear this to
-     * be viable. Null until a fee rate is set.
-     */
-    fundingTarget$ = this.feeRateSubject.pipe(map((rate) => (rate && rate > 0 ? CAT21_POSTAGE_SATS + Math.ceil(rate * 200) : null)));
-    /**
-     * SAFE-by-default coin-selection recommendation for the mint's funding
-     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
-     * `auto` (a content-clean coin covers → auto-selected, no picker),
-     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
-     * picker), `scanning`, or `insufficient`. Degrades to `insufficient` if the
-     * UTXO fetch errors, so a load failure never yields an unsafe auto-mint. The
-     * UI branches on `.status`; the invisible default is `auto`.
-     */
-    fundingRecommendation$ = this.fundingRec.recommend(this.utxos$, this.fundingTarget$).pipe(catchError(() => of({
-        status: 'insufficient',
-        recommended: null,
-        candidates: [],
-    })), shareReplay({ bufferSize: 1, refCount: true }));
-    lastRecommendationSnapshot = {
-        status: 'insufficient',
-        recommended: null,
-        candidates: [],
-    };
-    // --- Setup --------------------------------------------------------------
-    constructor() {
-        // Auto-reset writables when the wallet changes — the old UTXO is
-        // no longer in the new wallet's list, and we don't want stale fee
-        // state leaking across sessions. Subscription leak is fine: the
-        // service is providedIn:'root' so its lifetime is the app's.
-        this.walletChangeSub = this.wallet.connectedWallet$.subscribe((w) => {
-            if (!w) {
-                this.lastWalletAddress = null;
-                this.feeRate.set(null);
-                this.feeRateSubject.next(null);
-                this.selectedUtxo.set(null);
-                this.errorMessage.set(null);
-                this.successTxId.set(null);
-                return;
-            }
-            // Same wallet re-emitted (BehaviorSubject replay etc.) — leave
-            // form state intact so the user doesn't lose what they typed.
-            if (this.lastWalletAddress === w.ordinalsAddress)
-                return;
-            this.lastWalletAddress = w.ordinalsAddress;
-            this.feeRate.set(null);
-            this.feeRateSubject.next(null);
-            this.selectedUtxo.set(null);
-            this.errorMessage.set(null);
-            this.successTxId.set(null);
-        });
-        // Maintain a synchronous snapshot of the safe funding recommendation for
-        // mint()'s auto-fallback. Subscribed AFTER walletChangeSub on purpose: on a
-        // wallet switch the reset (which clears errorMessage) must run before the
-        // utxos$ error path (which sets it), which the connectedWallet$ subscription
-        // order guarantees only when this attaches second.
-        this.recommendationSnapshotSub = this.fundingRecommendation$.subscribe((r) => {
-            this.lastRecommendationSnapshot = r;
-        });
+        catch {
+            bucketByOutpoint.set(outpoint(u), 'failed');
+        }
+    }));
+    const annotated = utxos.map((u) => ({
+        ...u,
+        bucket: bucketByOutpoint.get(outpoint(u)) ?? 'unscanned',
+    }));
+    return recommendFunding(annotated, targetSats);
+}
+/**
+ * Resolve the funding coin a flow will spend: the user's EXPLICIT expert-mode
+ * pick when it still covers the target (honoured even if it carries assets —
+ * they chose it), otherwise the SAFE auto coin (only when a content-clean coin
+ * covers, i.e. `status: 'auto'`). Returns null when there is no safe auto-pick
+ * and no explicit override — the flow then surfaces the picker / an error.
+ */
+function resolveFundingPick(recommendation, target, explicitSelection) {
+    const stillPresent = explicitSelection
+        ? recommendation.candidates.find((c) => c.txid === explicitSelection.txid && c.vout === explicitSelection.vout)
+        : undefined;
+    if (stillPresent && stillPresent.value >= target)
+        return stillPresent;
+    return recommendation.status === 'auto' ? recommendation.recommended : null;
+}
+
+function buildMint(params, funding, feeSats, isSimulation) {
+    const fundingInput = prepareMintInputForWallet({
+        txid: funding.txid,
+        vout: funding.vout,
+        value: funding.value,
+        status: { confirmed: true },
+        transactionHex: funding.transactionHex,
+    }, params.paymentPublicKey, params.paymentAddress, isSimulation, params.network);
+    return buildCat21MintPsbt({
+        walletType: params.walletType,
+        network: params.network,
+        fundingInput,
+        destinations: {
+            recipientAddress: params.recipientAddress,
+            senderChangeAddress: params.paymentAddress,
+            tip: params.tip ? { address: params.tip.address, valueSats: params.tip.valueSats } : undefined,
+        },
+        feeSats,
+    });
+}
+async function planMint(params, ports) {
+    const empty = recommendFunding([], 0);
+    if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
+        return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
     }
-    walletChangeSub;
-    recommendationSnapshotSub;
-    // --- Commands -----------------------------------------------------------
+    const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
+    const tipValue = params.tip?.valueSats ?? 0;
+    const fixedOutputs = CAT21_POSTAGE_SATS + tipValue;
+    const measureVsize = (built) => computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) });
+    // Guess-free coverage target: cat postage + tip + the NO-CHANGE miner fee,
+    // measured from a real build (no vB estimate). The no-change form is the
+    // cheapest a mint can be, so any coin >= this target can mint and any coin
+    // below it cannot — the exact feasibility threshold, replacing the old
+    // eyeballed `* 200` ceiling that wrongly excluded coins between the real
+    // threshold and the inflated one.
+    const largest = utxos.reduce((a, b) => (a && a.value >= b.value ? a : b), null);
+    if (!largest || largest.value < fixedOutputs) {
+        return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+    }
+    const noChangeVsize = measureVsize(buildMint(params, largest, largest.value - fixedOutputs, true));
+    const target = fixedOutputs + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
+    const recommendation = await selectFunding(utxos, target, ports.scan);
+    const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
+    if (!pick) {
+        return {
+            status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
+            recommendation,
+            pick: null,
+            built: null,
+            vsize: null,
+            buildFeeSats: null,
+        };
+    }
+    // Guess-free per-coin fee: measures the with-change form, falls back to the
+    // no-change (absorb-all) form when it doesn't fit — so a coin that genuinely
+    // fits is never falsely rejected.
+    const resolved = resolveCatTxFee({
+        simulate: (feeSats) => {
+            const built = buildMint(params, pick, feeSats, true);
+            return { built, vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+        },
+        feeRatePerVbyte: params.feeRatePerVbyte,
+        feeBudgetSats: pick.value - fixedOutputs,
+    });
+    if (!resolved) {
+        return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
+    }
+    return {
+        status: 'ready',
+        recommendation,
+        pick,
+        built: resolved.built,
+        vsize: resolved.vsize,
+        buildFeeSats: resolved.finalFeeSats,
+    };
+}
+/**
+ * Preview a mint: content-checked funding selection + two-pass fee, no signing.
+ * `ready` = a safe funding coin covers postage + tip + fee; `expert-required` =
+ * only asset coins cover; `insufficient` = nothing covers.
+ */
+async function simulateMint(params, ports) {
+    const plan = await planMint(params, ports);
+    return {
+        status: plan.status,
+        recommendation: plan.recommendation,
+        fundingUtxo: plan.pick,
+        vsize: plan.vsize,
+        feeSats: plan.built ? plan.built.finalFeeSats : null,
+        changeSats: plan.built ? plan.built.changeSats : null,
+    };
+}
+/**
+ * Execute a mint end-to-end: select → fee → build → sign → broadcast. Creates a
+ * fresh 546-sat cat at `recipientAddress`, funded by the safe-auto-selected coin
+ * (or the explicit expert pick). Throws with a clear message when only asset
+ * coins cover or nothing covers.
+ */
+async function executeMint(params, ports) {
+    const plan = await planMint(params, ports);
+    if (plan.status !== 'ready' || !plan.pick || plan.buildFeeSats == null) {
+        throw new Error(plan.status === 'expert-required'
+            ? 'Select a funding UTXO (the available coins carry assets)'
+            : 'Insufficient funds for mint at the current fee rate');
+    }
+    const built = buildMint(params, plan.pick, plan.buildFeeSats, false);
+    const signed = await ports.sign.sign(built.psbt, 'all');
+    const outcome = await ports.broadcast.broadcast(signed.hex);
+    // Realised miner fee (incl. absorbed sub-dust change) so consumers can record
+    // the spend / display the fee without re-simulating.
+    return { ...outcome, feeSats: built.finalFeeSats };
+}
+
+const EMPTY_RECOMMENDATION$3 = {
+    status: 'insufficient',
+    recommended: null,
+    candidates: [],
+};
+class Cat21MintOrchestrator {
+    deps;
+    wallet = null;
+    utxos = [];
+    // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
+    // recompute whose captured seq is stale drops its result instead of
+    // overwriting a newer snapshot (the plain-class replacement for switchMap).
+    recomputeSeq = 0;
+    snap = {
+        state: 'idle',
+        feeRate: null,
+        selectedUtxo: null,
+        fundingRecommendation: EMPTY_RECOMMENDATION$3,
+        simulations: [],
+        errorMessage: null,
+        successTxId: null,
+    };
+    listeners = new Set();
+    constructor(deps) {
+        this.deps = deps;
+    }
+    /** Synchronous snapshot read. */
+    getSnapshot() {
+        return this.snap;
+    }
+    /**
+     * Subscribe to snapshot changes. Fires immediately with the current
+     * snapshot, then on every change. Returns an unsubscribe fn. A consumer
+     * binds this to its reactivity in one line.
+     */
+    subscribe(listener) {
+        this.listeners.add(listener);
+        listener(this.snap);
+        return () => this.listeners.delete(listener);
+    }
+    /**
+     * Set (or clear) the connected wallet. On a genuine wallet change, resets
+     * form state, fetches the new wallet's UTXOs, and recomputes.
+     */
+    async setWallet(wallet) {
+        const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
+        this.wallet = wallet;
+        this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
+        if (changed) {
+            this.patch({ feeRate: null, selectedUtxo: null, errorMessage: null, successTxId: null });
+        }
+        if (!wallet) {
+            this.utxos = [];
+            this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION$3 });
+            return;
+        }
+        this.patch({ state: 'loading-utxos' });
+        try {
+            this.utxos = await this.deps.getUtxos(wallet.paymentAddress);
+            this.patch({ state: 'ready' });
+        }
+        catch (err) {
+            this.utxos = [];
+            this.patch({ state: 'error', errorMessage: `Failed to load UTXOs: ${errMsg$4(err)}` });
+            return;
+        }
+        await this.recompute();
+    }
     setFeeRate(rate) {
         if (!Number.isFinite(rate) || rate <= 0)
             return;
-        this.feeRate.set(rate);
-        this.feeRateSubject.next(rate);
+        this.patch({ feeRate: rate });
+        void this.recompute();
     }
     setSelectedUtxo(utxo) {
-        this.selectedUtxo.set(utxo);
+        this.patch({ selectedUtxo: utxo });
     }
     /**
-     * Trigger the mint. Requires a connected wallet, a feeRate set, and
-     * a selectedUtxo. Computes the precise fee from the simulation,
-     * dispatches `Cat21Service.createCat21Transaction`, transitions
-     * state to `minting` → `success` (with `successTxId`) or `error`
-     * (with `errorMessage`).
+     * Execute the mint: pick (explicit override, else the safe auto-clean
+     * recommendation — never an asset coin unless the user chose it), two-pass
+     * fee, build, and sign+broadcast via the wallet's internal signer. Browser
+     * wallets sign-and-broadcast in one call; watch-only wallets bridge through
+     * `promptForSignedPsbt`.
      */
-    mint(
-    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
-    // wallets ignore it. A watch-only mint throws without it (psbtExportSigner).
-    promptForSignedPsbt) {
-        const wallet = this.connectedWallet();
-        const feeRate = this.feeRate();
-        // Expert-mode pick wins; otherwise fall back to the SAFE auto-recommendation
-        // — but ONLY a content-clean covering coin (`status: 'auto'`). When only
-        // asset coins cover (`expert-required`) there is no safe auto-mint: error so
-        // the UI surfaces the picker instead of silently minting on a valuable coin.
-        const recommendation = this.lastRecommendationSnapshot;
-        const selected = this.selectedUtxo() ??
-            (recommendation.status === 'auto' ? recommendation.recommended : null);
+    async mint(promptForSignedPsbt) {
+        const wallet = this.wallet;
+        const feeRate = this.snap.feeRate;
+        const rec = this.snap.fundingRecommendation;
+        const selected = this.snap.selectedUtxo ?? (rec.status === 'auto' ? rec.recommended : null);
         if (!wallet)
-            return throwError(() => new Error('No wallet connected'));
+            throw new Error('No wallet connected');
         if (!feeRate)
-            return throwError(() => new Error('No fee rate set'));
+            throw new Error('No fee rate set');
         if (!selected) {
-            const msg = recommendation.status === 'expert-required'
+            throw new Error(rec.status === 'expert-required'
                 ? 'Select a funding UTXO (the available coins carry assets)'
-                : 'No UTXO selected';
-            return throwError(() => new Error(msg));
+                : 'No UTXO selected');
         }
-        let transactionFee;
+        const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
+        const resolved = this.resolveFee(wallet, selected, paymentPublicKey, feeRate);
+        if (!resolved) {
+            const msg = 'Insufficient funds for the mint at the current fee rate';
+            this.patch({ state: 'error', errorMessage: msg });
+            throw new Error(msg);
+        }
+        const transactionFee = BigInt(resolved.finalFeeSats);
+        this.patch({ state: 'minting', errorMessage: null, successTxId: null });
         try {
-            // Layer-3 two-pass fee simulation. Pass-1 with placeholder fee
-            // measures vsize; pass-2 with the provisional fee measures the
-            // FINAL vsize (which may differ if the change crossed dust
-            // between passes). The miner gets exactly `vsize × feeRate`,
-            // never a stale over-pay from a single-pass estimate.
-            const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
-            const { finalFeeSats } = twoPassFeeSimulation({
-                simulate: (feeSats) => this.cat21.simulateTransaction(wallet.type, wallet.ordinalsAddress, selected, wallet.paymentAddress, paymentPublicKey, BigInt(feeSats)),
-                feeRatePerVbyte: feeRate,
-                // Seed pass-1 with the SAME fee budget the coin was selected against
-                // (`ceil(feeRate*200)`), not the flat 1000-sat default, so a
-                // small-but-viable clean coin isn't falsely rejected at low fee rates.
-                placeholderFeeSats: Math.ceil(feeRate * 200),
-            });
-            transactionFee = BigInt(finalFeeSats);
+            const { tx } = createTransaction(wallet.type, wallet.ordinalsAddress, selected, paymentPublicKey, wallet.paymentAddress, transactionFee, false, this.deps.network);
+            const signer = findSignerOrThrow(wallet.type);
+            const { txId } = await firstValueFrom(signer.signSingleFundingInput({
+                psbtBytes: tx.toPSBT(0),
+                paymentAddress: wallet.paymentAddress,
+                paymentPublicKey: wallet.paymentPublicKey,
+                network: this.deps.network,
+                broadcast: (txHex) => from(this.deps.broadcast(txHex)),
+                promptForSignedPsbt: promptForSignedPsbt
+                    ? (unsigned) => from(promptForSignedPsbt(unsigned))
+                    : undefined,
+            }));
+            this.patch({ state: 'success', successTxId: txId });
+            return { txId };
         }
         catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => err);
+            this.patch({ state: 'error', errorMessage: errMsg$4(err) });
+            throw err;
         }
-        this.state.set('minting');
-        this.errorMessage.set(null);
-        this.successTxId.set(null);
-        return this.cat21
-            .createCat21Transaction(wallet.type, wallet.ordinalsAddress, selected, wallet.paymentAddress, hex.decode(wallet.paymentPublicKey), transactionFee, promptForSignedPsbt)
-            .pipe(tap(({ txId }) => {
-            this.successTxId.set(txId);
-            this.state.set('success');
-        }), catchError((err) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => err);
-        }));
+    }
+    /** "Mint another" — wipe form state, keep the wallet. */
+    reset() {
+        this.patch({
+            feeRate: null,
+            selectedUtxo: null,
+            simulations: [],
+            fundingRecommendation: EMPTY_RECOMMENDATION$3,
+            errorMessage: null,
+            successTxId: null,
+            state: this.wallet ? 'ready' : 'idle',
+        });
+    }
+    // --- internals ----------------------------------------------------------
+    async recompute() {
+        const seq = ++this.recomputeSeq;
+        const wallet = this.wallet;
+        const feeRate = this.snap.feeRate;
+        if (!wallet || !feeRate || this.utxos.length === 0) {
+            this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION$3 });
+            return;
+        }
+        const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
+        // Per-UTXO grid (no core twin — the expert picker's fee breakdown). Each
+        // row's fee is resolved guess-free (measured vsize, no-change fallback).
+        const simulations = this.utxos.map((utxo) => {
+            const resolved = this.resolveFee(wallet, utxo, paymentPublicKey, feeRate);
+            return resolved
+                ? { utxo, simulation: { ...resolved.sim, finalTransactionFee: BigInt(resolved.finalFeeSats) }, insufficient: false }
+                : { utxo, simulation: null, insufficient: true };
+        });
+        // Safe-auto recommendation: delegate to mint.core's `simulateMint` (the
+        // guess-free target + content-scan selection, single source of truth), then
+        // lift its CoreFundingUtxo picks back into the TxnOutput domain by outpoint.
+        let fundingRecommendation = EMPTY_RECOMMENDATION$3;
+        try {
+            const mintSim = await simulateMint(this.mintParams(wallet, paymentPublicKey, feeRate), {
+                utxos: this.utxosPort(),
+                scan: this.deps.scan,
+            });
+            fundingRecommendation = liftRecommendationByOutpoint(mintSim.recommendation, this.utxos);
+        }
+        catch {
+            fundingRecommendation = EMPTY_RECOMMENDATION$3;
+        }
+        if (seq !== this.recomputeSeq)
+            return; // a newer input superseded this run
+        this.patch({ simulations, fundingRecommendation });
     }
     /**
-     * Wipe form state back to a fresh mint (typically the "Mint another"
-     * button on the success screen). Keeps the wallet connected.
+     * Guess-free realised fee for one funding coin, or null when it can't mint at
+     * the fee rate. Measures the with-change form and falls back to no-change /
+     * absorb, so a coin that genuinely fits is never rejected.
      */
-    reset() {
-        this.feeRate.set(null);
-        this.feeRateSubject.next(null);
-        this.selectedUtxo.set(null);
-        this.errorMessage.set(null);
-        this.successTxId.set(null);
-        this.state.set(this.connectedWallet() ? 'ready' : 'idle');
+    resolveFee(wallet, utxo, paymentPublicKey, feeRate) {
+        const budget = utxo.value - CAT21_POSTAGE_SATS;
+        if (budget < 0)
+            return null;
+        return resolveCatTxFee({
+            simulate: (feeSats) => {
+                const sim = simulateMintTransaction(wallet.type, wallet.ordinalsAddress, utxo, wallet.paymentAddress, paymentPublicKey, BigInt(feeSats), this.deps.network);
+                return { sim, vsize: sim.vsize, finalFeeSats: Number(sim.finalTransactionFee) };
+            },
+            feeRatePerVbyte: feeRate,
+            feeBudgetSats: budget,
+        });
     }
-    // --- Internals ----------------------------------------------------------
-    computeSimulations(utxos, wallet, feeRate) {
-        if (!wallet || !feeRate || utxos.length === 0)
-            return [];
-        const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
-        const out = [];
-        for (const utxo of utxos) {
-            try {
-                // Layer-3 two-pass: pass-1 measures vsize with a placeholder fee,
-                // pass-2 re-measures after change-vs-dust resolves. `finalSimulation`
-                // is the pass-2 result; `finalFeeSats` is the authoritative fee
-                // (rate × pass-2 vsize) — exactly what mint() charges
-                // (createCat21Transaction is called with it).
-                const { finalSimulation, finalFeeSats } = twoPassFeeSimulation({
-                    simulate: (feeSats) => this.cat21.simulateTransaction(wallet.type, wallet.ordinalsAddress, utxo, wallet.paymentAddress, paymentPublicKey, BigInt(feeSats)),
-                    feeRatePerVbyte: feeRate,
-                    // Seed pass-1 with a rate-scaled fee budget, not the flat 1000-sat
-                    // default, so the per-UTXO grid doesn't mis-flag a small-but-viable
-                    // coin as insufficient at low fee rates.
-                    placeholderFeeSats: Math.ceil(feeRate * 200),
-                });
-                // Normalize the DISPLAYED fee to the charged fee. finalSimulation is
-                // built with the provisional (pass-1-vsize) fee, which equals
-                // finalFeeSats in the common case but diverges when the change output
-                // crosses the dust threshold between passes; the grid must never quote
-                // a fee different from what mint() charges. (In the divergent case the
-                // change is absorbed to 0 in both, so only the fee field needs it.)
-                const simulation = { ...finalSimulation, finalTransactionFee: BigInt(finalFeeSats) };
-                out.push({ utxo, simulation, insufficient: false });
-            }
-            catch {
-                // simulateTransaction throws on "Insufficient funds for
-                // transaction" — expected for UTXOs too small to cover the
-                // 546-sat output + the current fee. Surface as a flagged
-                // entry so the picker can grey it out instead of hiding it.
-                out.push({ utxo, simulation: null, insufficient: true });
-            }
-        }
-        return out;
+    mintParams(wallet, paymentPublicKey, feeRate) {
+        return {
+            walletType: wallet.type,
+            network: this.deps.network,
+            paymentPublicKey,
+            paymentAddress: wallet.paymentAddress,
+            recipientAddress: wallet.ordinalsAddress,
+            feeRatePerVbyte: feeRate,
+            selectedFundingUtxo: this.snap.selectedUtxo ? toCore$1(this.snap.selectedUtxo) : undefined,
+        };
     }
-    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21MintOrchestrator, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21MintOrchestrator, providedIn: 'root' });
+    utxosPort() {
+        const utxos = this.utxos;
+        return { spendableUtxos: async () => utxos.map(toCore$1) };
+    }
+    patch(next) {
+        this.snap = { ...this.snap, ...next };
+        for (const l of this.listeners)
+            l(this.snap);
+    }
 }
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21MintOrchestrator, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
-        }], ctorParameters: () => [] });
-
-/**
- * Fake taproot key-path witness: a single 64-byte schnorr signature.
- * `.vsize` measures the same whether the bytes are a real signature or
- * zero-fill, so a module-scoped constant is fine (read-only downstream
- * in scure's `updateInput`).
- */
-const DUMMY_TAPROOT_KEYPATH_WITNESS = new Uint8Array(64);
-/**
- * Fake P2WPKH witness: `<sig ~72><pubkey 33>`. Used as the fallback
- * for any non-taproot non-signable input. A DER-encoded ECDSA sig with
- * a sighash byte is up to ~72 bytes; erring on the larger side means we
- * over- rather than under-estimate the fee for that input.
- */
-const DUMMY_P2WPKH_WITNESS = [new Uint8Array(72), new Uint8Array(33)];
-/**
- * Size the dummy witness for a non-signable input by its scriptPubKey.
- * A cat can be held on a taproot (Xverse/Leather) OR a native-segwit
- * (Unisat/Wizz) ordinals address; faking a taproot 64-byte witness on a
- * real P2WPKH input under-counts ~11 vB and underpays the fee. Read the
- * input's own scriptPubKey (from its witnessUtxo) and match the witness
- * shape. Unknown/absent script falls back to the larger P2WPKH shape.
- */
-function dummyWitnessForNonSignable(script) {
-    // P2TR scriptPubKey: OP_1 (0x51) PUSH32 (0x20) <32-byte key> = 34 bytes.
-    if (script && script.length === 34 && script[0] === 0x51 && script[1] === 0x20) {
-        return [DUMMY_TAPROOT_KEYPATH_WITNESS];
-    }
-    return DUMMY_P2WPKH_WITNESS;
+function toCore$1(u) {
+    return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
 }
-/**
- * Return `tx.vsize` for a freshly-built PSBT by dummy-signing every
- * signable input and attaching a fake witness to any `nonSignableInputs`.
- *
- * scure's `.vsize` throws "Transaction is not finalized" on any input
- * that isn't finalized; this helper handles both the "we're the signer
- * of everything" case (mint, transfer) and the "we're the buyer, seller
- * signs later" case (buy-offer create).
- */
-function computePsbtVsize(args) {
-    const tx = btc.Transaction.fromPSBT(args.psbt);
-    const { dummyPrivateKey } = getDummyKeypair(args.network);
-    const nonSignable = args.nonSignableInputs ? new Set(args.nonSignableInputs) : null;
-    for (let i = 0; i < tx.inputsLength; i++) {
-        if (nonSignable?.has(i)) {
-            const script = tx.getInput(i).witnessUtxo?.script;
-            tx.updateInput(i, { finalScriptWitness: dummyWitnessForNonSignable(script) });
-        }
-        else {
-            tx.signIdx(dummyPrivateKey, i, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-            tx.finalizeIdx(i);
-        }
-    }
-    return tx.vsize;
+function errMsg$4(err) {
+    return err instanceof Error ? err.message : String(err);
 }
 
 /**
@@ -6330,6 +6174,222 @@ function defaultMintVsize() {
  */
 function calculateRecommendedFundingSats(feeRatePerVb) {
     return Math.ceil((CAT21_POSTAGE_SATS + defaultMintVsize() * feeRatePerVb) / 100) * 100;
+}
+
+/**
+ * Native-fetch HTTP primitives for the SDK's Angular services (`Cat21Service`,
+ * `Cat21ApiService`, `UtxoContentScanner`). The SDK uses `fetch`, never
+ * Angular's `HttpClient` — so these services carry no `@angular/common/http`
+ * dependency and load + run anywhere the rest of the SDK does (browser, plain
+ * Node, a regtest jest harness), matching the workspace "use fetch, not axios"
+ * rule.
+ *
+ * Each rejects on a non-2xx status, carrying the response BODY as the error
+ * message (so an electrs/mempool broadcast rejection keeps its reason, e.g.
+ * "txn-mempool-conflict") — the callers' existing `catchError` chains read
+ * `err.message` and surface it unchanged.
+ */
+async function fetchOk(url, init) {
+    const res = await fetch(url, init);
+    if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(body || `${init?.method ?? 'GET'} ${url} failed: HTTP ${res.status}`);
+    }
+    return res;
+}
+/** `GET <url>` → parsed JSON, Promise form. Sends `Accept: application/json`
+ * (the ord hosts gate HTML behind it). The framework-agnostic form used by
+ * plain-async consumers (the `cat21-api.fetch` twin, bots, CLIs). */
+function fetchJsonAsync(url) {
+    return fetchOk(url, { headers: { Accept: 'application/json' } }).then((r) => r.json());
+}
+/** `GET <url>` → parsed JSON, Observable form. Thin RxJS wrapper over
+ * `fetchJsonAsync` for the Angular services' existing `.pipe(catchError)`
+ * chains. */
+function fetchJson(url) {
+    return from(fetchJsonAsync(url));
+}
+/** `GET <url>` → raw text (e.g. an esplora `/tx/:id/hex` response). */
+function fetchText(url) {
+    return from(fetchOk(url).then((r) => r.text()));
+}
+/** `POST <url>` with a raw string body → text response (e.g. esplora `/tx`
+ * returning the broadcast txid). */
+function postText(url, body) {
+    return from(fetchOk(url, { method: 'POST', body }).then((r) => r.text()));
+}
+
+/**
+ * UTXOs at or below this value are auto-scanned by callers that respect
+ * the default policy (the mint-flow components do). Above the threshold
+ * a UTXO is overwhelmingly likely to be a plain payment, so we leave it
+ * `not-scanned` and let the user click "Scan anyway" if they want
+ * certainty. The 50k figure: most ordinal-bearing UTXOs are 546-10k
+ * sat; rare-sat UTXOs are typically dust-postaged too. A 50k+ UTXO is
+ * a deliberate-payment shape.
+ */
+const AUTO_SCAN_MAX_VALUE_SAT = 50_000;
+/**
+ * Concurrency ceiling for `autoScan` HTTP fan-out. Each scan fires two
+ * ord requests in parallel; six is the de-facto browser per-host
+ * connection limit so we batch 5 outpoints (= 10 requests) at a time
+ * to leave one slot for unrelated traffic.
+ */
+const AUTO_SCAN_CONCURRENCY = 5;
+/**
+ * Per-outpoint asset scanner backed by our ord instance
+ * (`ord.ordpool.space`, for inscriptions + runes) and cat21-ord
+ * (`ord.cat21.space`, for CAT-21 cats). Results are cached for the
+ * singleton's lifetime — a UTXO's content is immutable until the UTXO
+ * is spent, and a spent UTXO doesn't appear in the payment-address
+ * list anymore, so the cache never goes stale.
+ *
+ * The scanner does NOT decide which UTXOs to scan; the caller picks
+ * via `scan(outpoint)`. The orchestrator exposes the auto-scan
+ * convenience separately.
+ */
+class UtxoContentScanner {
+    config = inject(cat21Config);
+    /** outpoint → latest state. */
+    states = new Map();
+    statesSubject = new BehaviorSubject(new Map());
+    /**
+     * Live snapshot of every outpoint's scan state. Subscribers receive
+     * the full map on every change so they can re-derive any per-row
+     * bucket in one pass — no per-outpoint observable factory needed.
+     */
+    states$ = this.statesSubject.asObservable();
+    /** In-flight per-outpoint subscriptions so concurrent `scan()` calls dedupe. */
+    inFlight = new Map();
+    /**
+     * Read the current state for one outpoint without subscribing.
+     * Default: `not-scanned` for never-touched outpoints.
+     */
+    getState(outpoint) {
+        return this.states.get(outpoint) ?? { kind: 'not-scanned' };
+    }
+    /**
+     * Scan one outpoint. If already scanned, returns the cached state
+     * synchronously via `of(...)`. If scan is in flight, returns the
+     * existing observable so the network request runs once. Otherwise
+     * fires both ord JSON queries in parallel, merges, caches, emits.
+     *
+     * The scan never throws — every failure mode is encoded into the
+     * returned `UtxoScanState`.
+     */
+    scan(outpoint) {
+        const cached = this.states.get(outpoint);
+        if (cached && cached.kind !== 'not-scanned' && cached.kind !== 'scanning') {
+            return of(cached);
+        }
+        const existing = this.inFlight.get(outpoint);
+        if (existing)
+            return existing;
+        this.setState(outpoint, { kind: 'scanning' });
+        const flight = forkJoin({
+            ord: this.fetchOrd(outpoint),
+            cat21Ord: this.fetchCat21Ord(outpoint),
+        }).pipe(map(({ ord, cat21Ord }) => {
+            const c = classifyUtxoContent(ord, cat21Ord);
+            if (c.clean) {
+                return { kind: 'scanned-clean' };
+            }
+            const content = {
+                outpoint,
+                inscriptionIds: c.inscriptionIds,
+                runes: c.runes,
+                catIds: c.catIds,
+                catSat: c.catSat,
+                rareSat: c.rareSat,
+            };
+            return { kind: 'scanned-with-assets', content };
+        }), catchError((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            return of({ kind: 'scan-failed', message });
+        }), tap((state) => {
+            this.setState(outpoint, state);
+            this.inFlight.delete(outpoint);
+        }), shareReplay({ bufferSize: 1, refCount: true }));
+        this.inFlight.set(outpoint, flight);
+        return flight;
+    }
+    /**
+     * Convenience batch scanner. Scans every outpoint whose UTXO value
+     * is at or below `AUTO_SCAN_MAX_VALUE_SAT`. Throttles HTTP fan-out
+     * via `mergeMap` with `AUTO_SCAN_CONCURRENCY` so a wallet with 30
+     * UTXOs doesn't try to open 60 simultaneous TCP connections (browser
+     * per-host cap is 6, anything above queues anyway). Returns nothing
+     * — the caller reads results off the `states$` stream.
+     */
+    autoScan(utxos) {
+        const targets = [];
+        for (const u of utxos) {
+            if (u.value > AUTO_SCAN_MAX_VALUE_SAT)
+                continue;
+            const outpoint = `${u.txid}:${u.vout}`;
+            if (this.getState(outpoint).kind === 'not-scanned') {
+                targets.push(outpoint);
+            }
+        }
+        if (targets.length === 0)
+            return;
+        from(targets).pipe(mergeMap((outpoint) => this.scan(outpoint), AUTO_SCAN_CONCURRENCY)).subscribe();
+    }
+    /**
+     * Wipe both caches. Call this when the connected wallet changes —
+     * UTXO outpoints from the previous wallet are no longer relevant
+     * and would otherwise accumulate forever on a long-lived session
+     * (the singleton's `states` Map is unbounded).
+     */
+    reset() {
+        this.states.clear();
+        this.inFlight.clear();
+        this.statesSubject.next(new Map());
+    }
+    fetchOrd(outpoint) {
+        return fetchJson(`${trimSlash(this.config.ordApiUrl)}/output/${outpoint}`);
+    }
+    fetchCat21Ord(outpoint) {
+        return fetchJson(`${trimSlash(this.config.cat21OrdApiUrl)}/output/${outpoint}`);
+    }
+    setState(outpoint, state) {
+        this.states.set(outpoint, state);
+        this.statesSubject.next(new Map(this.states));
+    }
+    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: UtxoContentScanner, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
+    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: UtxoContentScanner, providedIn: 'root' });
+}
+i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: UtxoContentScanner, decorators: [{
+            type: Injectable,
+            args: [{ providedIn: 'root' }]
+        }] });
+function trimSlash(url) {
+    return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+/**
+ * Run the two-pass loop and return the final fee + vsize +
+ * the pass-2 simulation result. The pass-2 simulation is the one
+ * the caller should USE for display or broadcast metadata — it's
+ * the simulation that matches the final fee.
+ */
+function twoPassFeeSimulation(args) {
+    if (args.feeRatePerVbyte <= 0) {
+        throw new Error('feeRatePerVbyte must be positive');
+    }
+    const placeholderFee = args.placeholderFeeSats ?? 1_000;
+    // Pass 1 — placeholder fee → vsize.
+    const pass1 = args.simulate(placeholderFee);
+    const provisionalFee = Math.ceil(pass1.vsize * args.feeRatePerVbyte);
+    // Pass 2 — provisional fee → FINAL vsize (different if change
+    // crossed dust). The returned fee is rate × pass2Vsize.
+    const pass2 = args.simulate(provisionalFee);
+    const finalFeeSats = Math.ceil(pass2.vsize * args.feeRatePerVbyte);
+    return {
+        finalFeeSats,
+        vsize: pass2.vsize,
+        finalSimulation: pass2,
+    };
 }
 
 /**
@@ -6426,86 +6486,58 @@ const BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB = 100;
 /** {@link BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB} as sat/vByte (100 / 1000). */
 const BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE = BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB / 1000;
 
-const outpoint = (u) => `${u.txid}:${u.vout}`;
+const outpointKey = (u) => `${u.txid}:${u.vout}`;
 /**
- * Content-checked coin selection — the async, port-driven form of the Angular
- * `FundingRecommendationService`. Force-classifies every COVERING candidate via
- * the `ContentScanPort` (regardless of size, so the "never auto-spend a valuable
- * coin" guarantee holds even for large funding UTXOs), then applies the pure
- * `recommendFunding`:
+ * The shared coin-selection brain for EVERY cat action's orchestrator.
  *
- * - a content-clean coin covers  -> `auto` (auto-selected, no picker)
- * - only asset coins cover       -> `expert-required` (surface the picker)
- * - a covering coin's scan fails -> that coin is `failed` (never auto-spent)
- * - nothing covers               -> `insufficient`
+ * Given the wallet's funding UTXOs and the spend target, it force-scans the
+ * COVERING candidates for content (any size — so the "never auto-spend a
+ * valuable coin" guarantee holds even for the large funding UTXOs that
+ * `UtxoContentScanner.autoScan`'s size threshold skips), then applies the pure
+ * `recommendFunding`. It re-emits as scans resolve: `scanning` while content is
+ * unknown, then `auto` (a clean coin covers → auto-select, no picker),
+ * `expert-required` (only asset/scan-failed coins cover → recommend best-fit but
+ * the UI must confirm), or `insufficient`.
  *
- * Non-covering coins stay `unscanned` (never auto-picked anyway, so no wasted
- * scan). No RxJS, no Angular — the wallet and bots consume it as plain async;
- * cat21.space wraps it in its reactive veneer.
+ * Wiring this into mint / transfer / offer / inscribe gives all four actions
+ * identical safe-auto + expert-with-recommendation behaviour, in the SDK, so no
+ * consumer (cat21.space, cat21-wallet, bots) re-implements it. The "by value"
+ * pick inside `recommendFunding` is ord's best-fit `selectCardinalUtxo`, so an
+ * auto-selected clean coin stays byte-aligned with `ord wallet send`.
  */
-async function selectFunding(utxos, targetSats, scan) {
-    if (!targetSats || targetSats <= 0 || utxos.length === 0) {
-        return recommendFunding([], targetSats > 0 ? targetSats : 0);
+class FundingRecommendationService {
+    scanner = inject(UtxoContentScanner);
+    recommend(fundingUtxos$, targetSpendSats$) {
+        return combineLatest([fundingUtxos$, targetSpendSats$]).pipe(switchMap(([utxos, target]) => {
+            if (!target || target <= 0 || utxos.length === 0) {
+                return of(recommendFunding([], target ?? 0));
+            }
+            // Force-scan every covering candidate — safety takes priority over the
+            // scanner's size threshold: any coin we might auto-spend gets checked.
+            // scan() dedupes + caches + completes after one emit, so these
+            // fire-and-forget subscriptions clean themselves up.
+            for (const u of utxos) {
+                if (u.value >= target)
+                    this.scanner.scan(outpointKey(u)).subscribe();
+            }
+            // Re-derive the recommendation on every scan-state change (states$ is a
+            // BehaviorSubject, so this also emits the current snapshot immediately).
+            return this.scanner.states$.pipe(map(() => {
+                const annotated = utxos.map((u) => ({
+                    ...u,
+                    bucket: bucketOf(this.scanner.getState(outpointKey(u))),
+                }));
+                return recommendFunding(annotated, target);
+            }));
+        }));
     }
-    const bucketByOutpoint = new Map();
-    await Promise.all(utxos
-        .filter((u) => u.value >= targetSats)
-        .map(async (u) => {
-        try {
-            const verdict = await scan.classify(outpoint(u));
-            bucketByOutpoint.set(outpoint(u), verdict === 'clean' ? 'clean' : 'assets');
-        }
-        catch {
-            bucketByOutpoint.set(outpoint(u), 'failed');
-        }
-    }));
-    const annotated = utxos.map((u) => ({
-        ...u,
-        bucket: bucketByOutpoint.get(outpoint(u)) ?? 'unscanned',
-    }));
-    return recommendFunding(annotated, targetSats);
+    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: FundingRecommendationService, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
+    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: FundingRecommendationService, providedIn: 'root' });
 }
-/**
- * Resolve the funding coin a flow will spend: the user's EXPLICIT expert-mode
- * pick when it still covers the target (honoured even if it carries assets —
- * they chose it), otherwise the SAFE auto coin (only when a content-clean coin
- * covers, i.e. `status: 'auto'`). Returns null when there is no safe auto-pick
- * and no explicit override — the flow then surfaces the picker / an error.
- */
-function resolveFundingPick(recommendation, target, explicitSelection) {
-    const stillPresent = explicitSelection
-        ? recommendation.candidates.find((c) => c.txid === explicitSelection.txid && c.vout === explicitSelection.vout)
-        : undefined;
-    if (stillPresent && stillPresent.value >= target)
-        return stillPresent;
-    return recommendation.status === 'auto' ? recommendation.recommended : null;
-}
-
-function resolveCatTxFee(args) {
-    const { simulate, feeRatePerVbyte: rate, feeBudgetSats: budget } = args;
-    if (!(rate > 0))
-        throw new Error('feeRatePerVbyte must be positive');
-    if (budget < 0)
-        return null;
-    // With-change form: fee 0 keeps the leftover maximal, so a change output is
-    // present and we measure the larger of the two possible sizes.
-    const withChange = simulate(0);
-    const withChangeFee = Math.ceil(withChange.vsize * rate);
-    if (withChangeFee <= budget) {
-        // Affordable. Settle at that fee; if the leftover now falls below dust the
-        // builder drops the change output and folds it into `finalFeeSats`.
-        const settled = simulate(withChangeFee);
-        if (Math.ceil(settled.vsize * rate) <= budget)
-            return settled;
-    }
-    // With-change doesn't fit the budget. Spend the whole budget as fee (no change
-    // output; always a valid build for a covered coin) and accept iff that clears
-    // the requested rate for the no-change size.
-    const noChange = simulate(budget);
-    if (budget >= Math.ceil(noChange.vsize * rate))
-        return noChange;
-    return null;
-}
+i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: FundingRecommendationService, decorators: [{
+            type: Injectable,
+            args: [{ providedIn: 'root' }]
+        }] });
 
 /**
  * Dust threshold for the change output. 546 sats is the conservative
@@ -6793,119 +6825,6 @@ async function executeTransfer(params, ports) {
     const signed = await ports.sign.sign(built.psbt, 'all');
     const outcome = await ports.broadcast.broadcast(signed.hex);
     // Realised miner fee (incl. absorbed sub-dust change) for spend recording.
-    return { ...outcome, feeSats: built.finalFeeSats };
-}
-
-function buildMint(params, funding, feeSats, isSimulation) {
-    const fundingInput = prepareMintInputForWallet({
-        txid: funding.txid,
-        vout: funding.vout,
-        value: funding.value,
-        status: { confirmed: true },
-        transactionHex: funding.transactionHex,
-    }, params.paymentPublicKey, params.paymentAddress, isSimulation, params.network);
-    return buildCat21MintPsbt({
-        walletType: params.walletType,
-        network: params.network,
-        fundingInput,
-        destinations: {
-            recipientAddress: params.recipientAddress,
-            senderChangeAddress: params.paymentAddress,
-            tip: params.tip ? { address: params.tip.address, valueSats: params.tip.valueSats } : undefined,
-        },
-        feeSats,
-    });
-}
-async function planMint(params, ports) {
-    const empty = recommendFunding([], 0);
-    if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
-        return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
-    }
-    const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
-    const tipValue = params.tip?.valueSats ?? 0;
-    const fixedOutputs = CAT21_POSTAGE_SATS + tipValue;
-    const measureVsize = (built) => computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) });
-    // Guess-free coverage target: cat postage + tip + the NO-CHANGE miner fee,
-    // measured from a real build (no vB estimate). The no-change form is the
-    // cheapest a mint can be, so any coin >= this target can mint and any coin
-    // below it cannot — the exact feasibility threshold, replacing the old
-    // eyeballed `* 200` ceiling that wrongly excluded coins between the real
-    // threshold and the inflated one.
-    const largest = utxos.reduce((a, b) => (a && a.value >= b.value ? a : b), null);
-    if (!largest || largest.value < fixedOutputs) {
-        return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
-    }
-    const noChangeVsize = measureVsize(buildMint(params, largest, largest.value - fixedOutputs, true));
-    const target = fixedOutputs + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
-    const recommendation = await selectFunding(utxos, target, ports.scan);
-    const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
-    if (!pick) {
-        return {
-            status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
-            recommendation,
-            pick: null,
-            built: null,
-            vsize: null,
-            buildFeeSats: null,
-        };
-    }
-    // Guess-free per-coin fee: measures the with-change form, falls back to the
-    // no-change (absorb-all) form when it doesn't fit — so a coin that genuinely
-    // fits is never falsely rejected.
-    const resolved = resolveCatTxFee({
-        simulate: (feeSats) => {
-            const built = buildMint(params, pick, feeSats, true);
-            return { built, vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
-        },
-        feeRatePerVbyte: params.feeRatePerVbyte,
-        feeBudgetSats: pick.value - fixedOutputs,
-    });
-    if (!resolved) {
-        return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
-    }
-    return {
-        status: 'ready',
-        recommendation,
-        pick,
-        built: resolved.built,
-        vsize: resolved.vsize,
-        buildFeeSats: resolved.finalFeeSats,
-    };
-}
-/**
- * Preview a mint: content-checked funding selection + two-pass fee, no signing.
- * `ready` = a safe funding coin covers postage + tip + fee; `expert-required` =
- * only asset coins cover; `insufficient` = nothing covers.
- */
-async function simulateMint(params, ports) {
-    const plan = await planMint(params, ports);
-    return {
-        status: plan.status,
-        recommendation: plan.recommendation,
-        fundingUtxo: plan.pick,
-        vsize: plan.vsize,
-        feeSats: plan.built ? plan.built.finalFeeSats : null,
-        changeSats: plan.built ? plan.built.changeSats : null,
-    };
-}
-/**
- * Execute a mint end-to-end: select → fee → build → sign → broadcast. Creates a
- * fresh 546-sat cat at `recipientAddress`, funded by the safe-auto-selected coin
- * (or the explicit expert pick). Throws with a clear message when only asset
- * coins cover or nothing covers.
- */
-async function executeMint(params, ports) {
-    const plan = await planMint(params, ports);
-    if (plan.status !== 'ready' || !plan.pick || plan.buildFeeSats == null) {
-        throw new Error(plan.status === 'expert-required'
-            ? 'Select a funding UTXO (the available coins carry assets)'
-            : 'Insufficient funds for mint at the current fee rate');
-    }
-    const built = buildMint(params, plan.pick, plan.buildFeeSats, false);
-    const signed = await ports.sign.sign(built.psbt, 'all');
-    const outcome = await ports.broadcast.broadcast(signed.hex);
-    // Realised miner fee (incl. absorbed sub-dust change) so consumers can record
-    // the spend / display the fee without re-simulating.
     return { ...outcome, feeSats: built.finalFeeSats };
 }
 
@@ -9026,623 +8945,385 @@ async function acceptOffer(params, ports) {
  */
 const CAT21_OFFER_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
-/**
- * Buyer-side CAT-21 buy-offer construction. Produces the half-signed
- * PSBT a buyer shares with the cat's current owner.
- *
- * Per the workspace HARD RULE "Offers can be shared in the wild" the
- * artifact is NOT secret — the orchestrator emits bare base64 (and hex)
- * and the consumer is free to wrap it in any transport (URL, QR, gist).
- *
- * Per `validateCat21Operation`'s contract, all protocol invariants
- * (postage = 546, lockTime = 21, SIGHASH_ALL on every input) are
- * enforced INSIDE `buildCat21BuyOfferPsbt` — the orchestrator only
- * threads inputs and calls the builder.
- *
- * Singleton, signal-first. Mirrors Cat21TransferOrchestrator's wallet-
- * change reset semantics (wipe form on actual wallet swap; preserve
- * across BehaviorSubject re-emissions; defaults `buyerReceiveAddress`
- * to the connected wallet's ordinals address).
- */
+const EMPTY_RECOMMENDATION$2 = {
+    status: 'insufficient',
+    recommended: null,
+    candidates: [],
+};
 class Cat21CreateOfferOrchestrator {
-    wallet = inject(WalletService);
-    cat21 = inject(Cat21Service);
-    network = inject(bitcoinNetwork);
-    fundingRec = inject(FundingRecommendationService);
-    // --- Writable inputs ----------------------------------------------------
-    /** Which cat the buyer wants to bid on. */
-    targetCat = signal(null, ...(ngDevMode ? [{ debugName: "targetCat" }] : []));
-    /** Where the seller wants payment (their own address; usually the seller's payment address). */
-    sellerPaymentAddress = signal(null, ...(ngDevMode ? [{ debugName: "sellerPaymentAddress" }] : []));
-    /** Sats the buyer offers (net to seller). The seller's payout output carries `priceSats + sellerInput.value` (ord parity); the seller nets exactly priceSats. */
-    priceSats = signal(null, ...(ngDevMode ? [{ debugName: "priceSats" }] : []));
-    /** Where the cat lands after the seller signs + broadcasts. Default = connected wallet's ordinals address. */
-    buyerReceiveAddress = signal(null, ...(ngDevMode ? [{ debugName: "buyerReceiveAddress" }] : []));
-    feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
-    /**
-     * User's explicit funding-UTXO pick from the buyer-side picker (expert
-     * mode). When null the orchestrator uses the SAFE auto-recommendation
-     * (`buyerFundingRecommendation$`): a content-clean best-fit covering UTXO
-     * when one exists (`status: 'auto'`, invisible default), otherwise no
-     * auto-pick (`status: 'expert-required'` — the UI surfaces the picker so
-     * the buyer consciously spends an asset-carrying coin). Setting this here is
-     * the expert-mode override: honoured even for an asset coin the buyer chose
-     * deliberately.
-     */
-    selectedFundingUtxo = signal(null, ...(ngDevMode ? [{ debugName: "selectedFundingUtxo" }] : []));
-    // --- Internals (declared above derived streams to control field-init order) ---
-    lastWalletAddress = null;
-    priceSatsSubject = new BehaviorSubject(null);
-    feeRateSubject = new BehaviorSubject(null);
-    selectedFundingUtxoSubject = new BehaviorSubject(null);
-    // Subject mirrors of the target/seller/buyer-receive signals. The buy-offer
-    // fee depends on all three (the seller cat input's script, the seller
-    // payout output's script, and the buyer receive output's script all change
-    // the vsize), so simulation$ must re-fire when any change. BehaviorSubject
-    // (not toObservable) for the same plain-Injector reason as the other mirrors.
-    targetCatSubject = new BehaviorSubject(null);
-    sellerPaymentAddressSubject = new BehaviorSubject(null);
-    buyerReceiveAddressSubject = new BehaviorSubject(null);
-    /** Write-through: keep each signal and its RxJS-mirror subject in lockstep. */
-    writeTargetCat(v) {
-        this.targetCat.set(v);
-        this.targetCatSubject.next(v);
+    deps;
+    wallet = null;
+    utxos = [];
+    // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
+    // recompute whose captured seq is stale drops its result instead of
+    // overwriting a newer snapshot (the plain-class replacement for switchMap).
+    recomputeSeq = 0;
+    snap = {
+        state: 'idle',
+        targetCat: null,
+        priceSats: null,
+        sellerPaymentAddress: null,
+        buyerReceiveAddress: null,
+        feeRate: null,
+        selectedFundingUtxo: null,
+        fundingRecommendation: EMPTY_RECOMMENDATION$2,
+        simulation: null,
+        bid: null,
+        errorMessage: null,
+    };
+    listeners = new Set();
+    constructor(deps) {
+        this.deps = deps;
     }
-    writeSellerPaymentAddress(v) {
-        this.sellerPaymentAddress.set(v);
-        this.sellerPaymentAddressSubject.next(v);
+    getSnapshot() {
+        return this.snap;
     }
-    writeBuyerReceiveAddress(v) {
-        this.buyerReceiveAddress.set(v);
-        this.buyerReceiveAddressSubject.next(v);
+    subscribe(listener) {
+        this.listeners.add(listener);
+        listener(this.snap);
+        return () => this.listeners.delete(listener);
     }
-    // --- Output state -------------------------------------------------------
-    state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
-    errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
-    /**
-     * The half-signed buy-offer PSBT (base64 + hex). Populated by
-     * `createOffer()` on success. This IS the offer artifact the buyer
-     * shares with the seller.
-     */
-    offerArtifact = signal(null, ...(ngDevMode ? [{ debugName: "offerArtifact" }] : []));
-    connectedWallet = toSignal(this.wallet.connectedWallet$, { initialValue: null });
-    isReady = computed(() => this.state() === 'ready', ...(ngDevMode ? [{ debugName: "isReady" }] : []));
-    /**
-     * Auto-reset form fields when the wallet's ordinals address actually
-     * changes. Field-init-order discipline as Cat21TransferOrchestrator
-     * (BEFORE the derived streams below).
-     */
-    walletChangeSub = this.wallet.connectedWallet$.subscribe((w) => {
-        if (!w) {
-            if (this.lastWalletAddress !== null)
-                this.resetFormFields();
-            this.lastWalletAddress = null;
+    async setWallet(wallet) {
+        const changed = (this.wallet?.paymentAddress ?? null) !== (wallet?.paymentAddress ?? null);
+        this.wallet = wallet;
+        this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
+        if (changed) {
+            this.patch({
+                targetCat: null, priceSats: null, sellerPaymentAddress: null, buyerReceiveAddress: wallet?.ordinalsAddress ?? null,
+                feeRate: null, selectedFundingUtxo: null, bid: null, errorMessage: null,
+            });
+        }
+        if (!wallet) {
+            this.utxos = [];
+            this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION$2 });
             return;
         }
-        if (this.lastWalletAddress === null || this.lastWalletAddress === w.ordinalsAddress) {
-            this.lastWalletAddress = w.ordinalsAddress;
-            // Default buyerReceive to the connected wallet's ordinals address.
-            if (!this.buyerReceiveAddress())
-                this.writeBuyerReceiveAddress(w.ordinalsAddress);
-            return;
-        }
-        this.lastWalletAddress = w.ordinalsAddress;
-        this.resetFormFields();
-        this.writeBuyerReceiveAddress(w.ordinalsAddress);
-    });
-    // --- Derived streams ----------------------------------------------------
-    /**
-     * Buyer's funding UTXOs (their payment address). The seller's cat
-     * UTXO is at the seller's address — not in this list.
-     */
-    buyerFundingUtxos$ = this.wallet.connectedWallet$.pipe(startWith(null), switchMap((w) => {
-        if (!w) {
-            this.state.set('idle');
-            return of([]);
-        }
-        this.state.set('loading-utxos');
-        return this.cat21.getUtxos(w.paymentAddress).pipe(tap(() => this.state.set('ready')), catchError((err) => {
-            this.errorMessage.set(`Failed to load buyer UTXOs: ${err instanceof Error ? err.message : String(err)}`);
-            this.state.set('error');
-            return of([]);
-        }));
-    }), shareReplay({ bufferSize: 1, refCount: true }));
-    recommendedFees$ = this.cat21.recommendedFees$;
-    /**
-     * The buyer's funding target the coin-selection safety check must cover:
-     * `price + cat.value + fee` (ord parity — the buyer funds the seller payout,
-     * the whole cat UTXO sent back to the buyer at output 0, and the miner fee).
-     * A generous ~220 vB fee ceiling; the two-pass simulation tightens the real
-     * fee later. Null until price + target cat + fee rate are all set.
-     */
-    fundingTarget$ = combineLatest([
-        this.priceSatsSubject,
-        this.targetCatSubject,
-        this.feeRateSubject,
-    ]).pipe(map(([price, target, rate]) => price && price > 0 && target && rate && rate > 0
-        ? price + target.value + Math.ceil(rate * 220)
-        : null));
-    /**
-     * SAFE-by-default coin-selection recommendation for the buyer's funding
-     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
-     * `auto` (a content-clean coin covers → auto-selected, no picker),
-     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
-     * picker with the recommended coin pre-highlighted), `scanning`, or
-     * `insufficient`. The UI branches on `.status`; the invisible default is
-     * `auto`.
-     */
-    buyerFundingRecommendation$ = this.fundingRec.recommend(this.buyerFundingUtxos$, this.fundingTarget$).pipe(catchError(() => of({
-        status: 'insufficient',
-        recommended: null,
-        candidates: [],
-    })), shareReplay({ bufferSize: 1, refCount: true }));
-    /**
-     * Two-pass fee simulation against the SAFE recommended buyer UTXO.
-     * Re-emits when target / price / funding recommendation / feeRate change. The
-     * funding coin comes from the buyer's expert-mode pick when set, else the
-     * safe auto-recommendation (only when `status: 'auto'`) — never a
-     * content-unaware value-only pick.
-     */
-    simulation$ = combineLatest([
-        this.buyerFundingRecommendation$,
-        this.wallet.connectedWallet$.pipe(startWith(null)),
-        this.priceSatsSubject,
-        this.feeRateSubject,
-        this.selectedFundingUtxoSubject,
-        this.targetCatSubject,
-        this.sellerPaymentAddressSubject,
-        this.buyerReceiveAddressSubject,
-    ]).pipe(
-    // computeSimulation reads target/seller/buyerReceive from their signals
-    // (written in lockstep with the subjects above); the extra sources are
-    // present to RE-FIRE the stream when any of them change.
-    map(([recommendation, wallet, priceSats, feeRate, selected]) => this.computeSimulation(recommendation, wallet, priceSats, feeRate, selected)), shareReplay({ bufferSize: 1, refCount: true }));
-    // --- Commands -----------------------------------------------------------
-    setTargetCat(cat) {
-        this.writeTargetCat(cat);
-    }
-    /**
-     * Set the seller's PAYMENT address (where sale proceeds land). The
-     * branded `PaymentAddress` type makes the "is this really a payment
-     * address, not an ordinals one?" question un-skippable at every
-     * callsite — either the value came from `parseBuyOfferQueryParams`
-     * (which brands the URL `payTo=` param at ingress) or the caller
-     * used `toPaymentAddress()` on a raw string. See SDK HARD RULE
-     * "Never derive a payment address from an on-chain lookup".
-     */
-    setSellerPaymentAddress(address) {
-        this.writeSellerPaymentAddress(address);
-    }
-    setPriceSats(price) {
-        if (!Number.isFinite(price) || price <= 0)
-            return;
-        const floored = Math.floor(price);
-        this.priceSats.set(floored);
-        this.priceSatsSubject.next(floored);
-    }
-    setBuyerReceiveAddress(address) {
-        this.writeBuyerReceiveAddress(address && address.trim() ? address.trim() : null);
-    }
-    setFeeRate(rate) {
-        if (!Number.isFinite(rate) || rate <= 0)
-            return;
-        this.feeRate.set(rate);
-        this.feeRateSubject.next(rate);
-    }
-    /**
-     * Push the buyer's funding-UTXO pick (or null to auto-pick). Called
-     * from the picker UI whenever the buyer clicks a row in the
-     * scanner-annotated funding list.
-     */
-    setSelectedFundingUtxo(utxo) {
-        this.selectedFundingUtxo.set(utxo);
-        this.selectedFundingUtxoSubject.next(utxo);
-    }
-    /**
-     * Build the buy-offer PSBT, ask the connected wallet to sign all
-     * buyer inputs (1..N), and expose the result as `offerArtifact()`.
-     * **Does NOT broadcast** — the offer is incomplete until the seller
-     * signs input 0 in their own accept flow.
-     */
-    createOffer(
-    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
-    // wallets ignore it. A watch-only offer-create throws without it.
-    promptForSignedPsbt) {
-        const wallet = this.connectedWallet();
-        const target = this.targetCat();
-        const sellerAddress = this.sellerPaymentAddress();
-        const priceSats = this.priceSats();
-        const buyerReceive = this.buyerReceiveAddress();
-        const feeRate = this.feeRate();
-        if (!wallet)
-            return throwError(() => new Error('No wallet connected'));
-        if (!target)
-            return throwError(() => new Error('No target cat selected'));
-        if (!sellerAddress)
-            return throwError(() => new Error("No seller payment address"));
-        if (!priceSats)
-            return throwError(() => new Error('No price set'));
-        if (!buyerReceive)
-            return throwError(() => new Error('No buyer receive address'));
-        if (!feeRate)
-            return throwError(() => new Error('No fee rate set'));
-        const sim = this.computeSimulation(this.lastRecommendationSnapshot, wallet, priceSats, feeRate, this.selectedFundingUtxo());
-        if (sim.insufficient || !sim.simulation) {
-            // Distinguish a genuine shortfall from "there's money, but only on a
-            // valuable coin" (expert-required) or "scans still resolving".
-            let msg;
-            if (sim.insufficient) {
-                msg = 'Insufficient funds for buy-offer at the current price + fee rate';
-            }
-            else if (this.lastRecommendationSnapshot.status === 'expert-required') {
-                msg = 'Select a funding UTXO (the available coins carry assets)';
-            }
-            else {
-                msg = 'Still checking your coins for assets, one moment';
-            }
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => new Error(msg));
-        }
-        const simulation = sim.simulation;
-        this.state.set('signing');
-        this.errorMessage.set(null);
-        this.offerArtifact.set(null);
-        let psbtBytes;
+        this.patch({ state: 'loading-utxos' });
         try {
-            psbtBytes = this.buildOfferPsbt(wallet, target, sellerAddress, priceSats, buyerReceive, simulation);
+            this.utxos = await this.deps.getUtxos(wallet.paymentAddress);
+            this.patch({ state: 'ready' });
         }
         catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => err);
+            this.utxos = [];
+            this.patch({ state: 'error', errorMessage: `Failed to load UTXOs: ${errMsg$3(err)}` });
+            return;
         }
-        // Buyer signs input 1+ only (their funding UTXOs at their payment
-        // address). Input 0 (seller's cat) stays unsigned by design — that
-        // omission IS what makes this a buy-offer artifact, not a tx.
-        const signer = findSignerOrThrow(wallet.type);
-        return signer
-            .signOfferCreatePsbt({
-            psbtBytes,
-            paymentAddress: wallet.paymentAddress,
-            fundingInputCount: 1,
-            network: this.network,
-            promptForSignedPsbt,
-        })
-            .pipe(tap((signedPsbtBytes) => {
-            const artifact = {
+        await this.recompute();
+    }
+    setTargetCat(cat) { this.patch({ targetCat: cat }); void this.recompute(); }
+    setPriceSats(price) {
+        // Floor to whole sats: a fractional price reaches BigInt(price + value) in
+        // the offer builder, which throws RangeError on a non-integer.
+        const p = Math.floor(price);
+        if (Number.isFinite(price) && p > 0) {
+            this.patch({ priceSats: p });
+            void this.recompute();
+        }
+    }
+    setSellerPaymentAddress(addr) { this.patch({ sellerPaymentAddress: addr }); void this.recompute(); }
+    setBuyerReceiveAddress(addr) { this.patch({ buyerReceiveAddress: addr }); void this.recompute(); }
+    setFeeRate(rate) { if (Number.isFinite(rate) && rate > 0) {
+        this.patch({ feeRate: rate });
+        void this.recompute();
+    } }
+    setSelectedFundingUtxo(utxo) { this.patch({ selectedFundingUtxo: utxo }); void this.recompute(); }
+    /**
+     * Build + buyer-sign the bid PSBT (the artifact). No broadcast — the seller
+     * accepts + broadcasts later. `bid` on success carries the shareable base64/hex.
+     */
+    async createOffer(promptForSignedPsbt) {
+        const params = this.params();
+        const sim = this.snap.simulation;
+        if (!params)
+            throw new Error(this.missingInputError());
+        if (!sim) {
+            throw new Error(this.snap.fundingRecommendation.status === 'expert-required'
+                ? 'Select a funding UTXO (the available coins carry assets)'
+                : 'Insufficient funds for buy-offer at the current price + fee rate');
+        }
+        this.patch({ state: 'creating', errorMessage: null, bid: null });
+        try {
+            const built = buildOffer(params, sim.buyerFundingUtxo, sim.feeSats, false);
+            const signer = findSignerOrThrow(params.walletType);
+            const signedPsbtBytes = await firstValueFrom(signer.signOfferCreatePsbt({
+                psbtBytes: built.psbt,
+                paymentAddress: params.paymentAddress,
+                fundingInputCount: 1,
+                network: this.deps.network,
+                promptForSignedPsbt: promptForSignedPsbt
+                    ? (unsigned) => from(promptForSignedPsbt(unsigned))
+                    : undefined,
+            }));
+            const bid = {
                 base64: base64.encode(signedPsbtBytes),
                 hex: hex.encode(signedPsbtBytes),
             };
-            this.offerArtifact.set(artifact);
-            this.state.set('success');
-        }), map((signedPsbtBytes) => ({
-            base64: base64.encode(signedPsbtBytes),
-            hex: hex.encode(signedPsbtBytes),
-        })), catchError((err) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => err);
-        }));
+            this.patch({ state: 'success', bid });
+            return bid;
+        }
+        catch (err) {
+            this.patch({ state: 'error', errorMessage: errMsg$3(err) });
+            throw err;
+        }
     }
-    /**
-     * Wipe form + result back to a fresh create-offer attempt. Keeps the
-     * wallet connected; restores `buyerReceiveAddress` to the wallet's
-     * ordinals address.
-     */
     reset() {
-        this.resetFormFields();
-        this.errorMessage.set(null);
-        this.offerArtifact.set(null);
-        const w = this.connectedWallet();
-        if (w) {
-            this.writeBuyerReceiveAddress(w.ordinalsAddress);
-            this.state.set('ready');
-        }
-        else {
-            this.state.set('idle');
-        }
+        this.patch({
+            targetCat: null, priceSats: null, sellerPaymentAddress: null,
+            buyerReceiveAddress: this.wallet?.ordinalsAddress ?? null,
+            feeRate: null, selectedFundingUtxo: null, simulation: null, bid: null, errorMessage: null,
+            state: this.wallet ? 'ready' : 'idle',
+        });
     }
-    // --- Internals ----------------------------------------------------------
-    lastRecommendationSnapshot = {
-        status: 'insufficient',
-        recommended: null,
-        candidates: [],
-    };
-    recommendationSnapshotSub = this.buyerFundingRecommendation$.subscribe((r) => {
-        this.lastRecommendationSnapshot = r;
-    });
-    resetFormFields() {
-        this.writeTargetCat(null);
-        this.writeSellerPaymentAddress(null);
-        this.priceSats.set(null);
-        this.priceSatsSubject.next(null);
-        // Don't clear buyerReceiveAddress here — the walletChangeSub
-        // restores it to the new wallet's ordinals address anyway.
-        this.feeRate.set(null);
-        this.feeRateSubject.next(null);
-        this.selectedFundingUtxo.set(null);
-        this.selectedFundingUtxoSubject.next(null);
-    }
-    computeSimulation(recommendation, wallet, priceSats, feeRate, selected = null) {
-        const target = this.targetCat();
-        const sellerAddress = this.sellerPaymentAddress();
-        const buyerReceive = this.buyerReceiveAddress();
-        // The target cat is required up front: its REAL UTXO value sizes output 0
-        // (ord parity: the whole cat UTXO goes to the buyer) and therefore drives
-        // the buyer's funding requirement.
-        if (!wallet || !priceSats || !feeRate
-            || !target || !sellerAddress || !buyerReceive) {
-            return { simulation: null, insufficient: false };
-        }
-        // Buyer must cover: priceSats (net to seller) + the cat UTXO's REAL value
-        // (output 0, the whole UTXO sent to the buyer, ord parity) + fee. The
-        // seller's input (V) flows back to the seller in output 1 (priceSats + V),
-        // but the buyer funds output 0 at that same size V, so V does NOT cancel:
-        // the requirement is priceSats + V + fee.
-        const targetSpend = priceSats + target.value + Math.ceil(feeRate * 220); // ~220 vB ceiling for offer
-        // Expert-mode override: the buyer's explicit pick wins when it still covers
-        // the target, even if it carries assets (they chose it deliberately).
-        // Otherwise use the SAFE auto-recommendation — but ONLY when a content-clean
-        // coin covers (`status: 'auto'`). When only asset coins cover
-        // (`expert-required`) or a scan is still resolving (`scanning`), there is no
-        // safe auto-pick: the simulation stays null and the UI surfaces the picker
-        // (via `buyerFundingRecommendation$`). Never auto-spend a valuable coin.
-        const selectedStillPresent = selected
-            ? recommendation.candidates.find((u) => u.txid === selected.txid && u.vout === selected.vout)
-            : undefined;
-        const pick = selectedStillPresent && selectedStillPresent.value >= targetSpend
-            ? selectedStillPresent
-            : recommendation.status === 'auto'
-                ? recommendation.recommended
-                : null;
-        if (!pick) {
-            return { simulation: null, insufficient: recommendation.status === 'insufficient' };
+    // --- internals ----------------------------------------------------------
+    async recompute() {
+        const seq = ++this.recomputeSeq;
+        const params = this.params();
+        if (!params) {
+            this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION$2 });
+            return;
         }
         try {
-            const { vsize, finalFeeSats } = twoPassFeeSimulation({
-                simulate: (feeSats) => this.simulateOffer(wallet, target, sellerAddress, priceSats, buyerReceive, pick, feeSats),
-                feeRatePerVbyte: feeRate,
-                // Seed pass-1 with the SAME fee budget the coin was selected against
-                // (the ~220 vB ceiling), not the flat 1000-sat default, so the picked
-                // coin (which covers price + cat value + this fee) always builds in
-                // pass-1 instead of being falsely rejected at low fee rates.
-                placeholderFeeSats: Math.ceil(feeRate * 220),
+            const sim = await simulateCreateOffer(params, { utxos: this.utxosPort(), scan: this.deps.scan });
+            if (seq !== this.recomputeSeq)
+                return; // a newer input superseded this run
+            this.patch({
+                fundingRecommendation: sim.recommendation,
+                simulation: sim.status === 'ready' && sim.buyerFundingUtxo && sim.feeSats != null
+                    ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, buyerFundingUtxo: sim.buyerFundingUtxo }
+                    : null,
             });
-            // Buyer funds priceSats + cat value (output 0, size V) + fee. The
-            // pre-pick used a 220 vB fee ceiling; twoPassFeeSimulation may return a
-            // higher `finalFeeSats` for wider inputs (multi-input P2SH-P2WPKH,
-            // legacy). If the pick no longer covers the real requirement, surface
-            // insufficient EXPLICITLY rather than silently clamping change to 0 and
-            // letting the build step throw at sign time. The UI's "insufficient"
-            // branch renders a clear message; the raw-error path did not.
-            const requiredBuyerFunding = priceSats + target.value + finalFeeSats;
-            if (pick.value < requiredBuyerFunding) {
-                return { simulation: null, insufficient: true };
-            }
-            const changeSats = pick.value - requiredBuyerFunding;
-            return {
-                simulation: {
-                    vsize,
-                    feeSats: finalFeeSats,
-                    changeSats,
-                    buyerFundingUtxo: pick,
-                },
-                insufficient: false,
-            };
         }
         catch {
-            return { simulation: null, insufficient: true };
+            if (seq !== this.recomputeSeq)
+                return;
+            this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION$2 });
         }
     }
-    simulateOffer(wallet, target, sellerAddress, priceSats, buyerReceive, buyerFunding, feeSats) {
-        const sellerInput = {
-            txid: target.txid,
-            vout: target.vout,
-            value: target.value,
-            scriptPubKey: target.scriptPubKey,
-        };
-        const buyerInput = prepareBuyOfferBuyerInput({
-            utxo: buyerFunding,
-            paymentPublicKey: hex.decode(wallet.paymentPublicKey),
-            paymentAddress: wallet.paymentAddress,
-            isSimulation: true,
-            network: this.network,
-        });
-        const built = buildCat21BuyOfferPsbt({
-            walletType: wallet.type,
-            network: this.network,
-            sellerInput,
-            buyerInputs: [buyerInput],
-            destinations: {
-                buyerReceiveAddress: buyerReceive,
-                sellerPaymentAddress: sellerAddress,
-                buyerChangeAddress: wallet.paymentAddress,
-            },
-            priceSats,
-            feeSats,
-        });
-        // Input 0 is the seller's cat UTXO — they sign it later, so we
-        // tell computePsbtVsize to fake a taproot key-path witness there
-        // instead of trying to sign with our dummy key.
+    /** Build the core params, or null when a required input is missing. */
+    params() {
+        const w = this.wallet;
+        const { targetCat, priceSats, sellerPaymentAddress, buyerReceiveAddress, feeRate, selectedFundingUtxo } = this.snap;
+        if (!w || !targetCat || !priceSats || !sellerPaymentAddress || !buyerReceiveAddress || !feeRate)
+            return null;
         return {
-            vsize: computePsbtVsize({
-                psbt: built.psbt,
-                network: toScureNetwork(this.network),
-                nonSignableInputs: [0],
-            }),
-        };
-    }
-    buildOfferPsbt(wallet, target, sellerAddress, priceSats, buyerReceive, simulation) {
-        const sellerInput = {
-            txid: target.txid,
-            vout: target.vout,
-            value: target.value,
-            scriptPubKey: target.scriptPubKey,
-        };
-        const buyerInput = prepareBuyOfferBuyerInput({
-            utxo: simulation.buyerFundingUtxo,
-            paymentPublicKey: hex.decode(wallet.paymentPublicKey),
-            paymentAddress: wallet.paymentAddress,
-            isSimulation: false,
-            network: this.network,
-        });
-        const built = buildCat21BuyOfferPsbt({
-            walletType: wallet.type,
-            network: this.network,
-            sellerInput,
-            buyerInputs: [buyerInput],
-            destinations: {
-                buyerReceiveAddress: buyerReceive,
-                sellerPaymentAddress: sellerAddress,
-                buyerChangeAddress: wallet.paymentAddress,
-            },
+            walletType: w.type,
+            network: this.deps.network,
+            paymentPublicKey: hex.decode(w.paymentPublicKey),
+            paymentAddress: w.paymentAddress,
+            buyerReceiveAddress,
+            sellerPaymentAddress,
+            targetCat: { txid: targetCat.txid, vout: targetCat.vout, value: targetCat.value, scriptPubKey: targetCat.scriptPubKey },
             priceSats,
-            feeSats: simulation.feeSats,
-        });
-        return built.psbt;
+            feeRatePerVbyte: feeRate,
+            selectedFundingUtxo: selectedFundingUtxo ?? undefined,
+        };
     }
-    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21CreateOfferOrchestrator, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21CreateOfferOrchestrator, providedIn: 'root' });
+    missingInputError() {
+        if (!this.wallet)
+            return 'No wallet connected';
+        if (!this.snap.targetCat)
+            return 'No target cat selected';
+        if (!this.snap.sellerPaymentAddress)
+            return 'No seller payment address';
+        if (!this.snap.priceSats)
+            return 'No price set';
+        if (!this.snap.buyerReceiveAddress)
+            return 'No buyer receive address';
+        return 'No fee rate set';
+    }
+    utxosPort() {
+        const utxos = this.utxos;
+        return {
+            spendableUtxos: async () => utxos.map((u) => ({ txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex })),
+        };
+    }
+    patch(next) {
+        this.snap = { ...this.snap, ...next };
+        for (const l of this.listeners)
+            l(this.snap);
+    }
 }
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21CreateOfferOrchestrator, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
-        }] });
+function errMsg$3(err) {
+    return err instanceof Error ? err.message : String(err);
+}
 
 /**
- * Seller-side CAT-21 buy-offer accept. Pastes a base64 PSBT, validates
- * (right cat / right price / right address / sniping-proof shape),
- * lets the seller sign input 0, broadcasts.
- *
- * Validation uses `validateCat21BuyOfferPsbt` from the helper layer —
- * the seller's UI never reimplements protocol invariants.
+ * Maximum acceptable paste size in bytes. PSBTs above this are rejected before
+ * decoding to prevent OOM / tab-crash via a malicious `?offer=…` link. A real
+ * CAT-21 buy-offer is <1 KB on chain; 256 KiB is generous headroom.
  */
+const MAX_PASTED_OFFER_BYTES = 256 * 1024;
 class Cat21AcceptOfferOrchestrator {
-    wallet = inject(WalletService);
-    cat21 = inject(Cat21Service);
-    network = inject(bitcoinNetwork);
-    // --- Writable inputs ----------------------------------------------------
-    /** Offer artifact pasted by the seller (base64 or hex). */
-    pastedOffer = signal(null, ...(ngDevMode ? [{ debugName: "pastedOffer" }] : []));
-    /**
-     * Minimum price the seller is willing to accept. The orchestrator
-     * REFUSES to validate until the consumer sets this explicitly — a
-     * forgotten value would let any 1-sat offer pass the floor check.
-     * No default. Human UI consumers that show the price in a summary
-     * panel before signing (where the human IS the floor check) should
-     * call `disableFloorGate()` at construction; headless / bot
-     * consumers must set it programmatically via `setFloorPriceSats(n)`.
-     */
-    floorPriceSats = signal(null, ...(ngDevMode ? [{ debugName: "floorPriceSats" }] : []));
-    /**
-     * The cat the seller is selling (txid + vout). When set, validation
-     * checks input 0 against this UTXO and rejects offers for the wrong
-     * cat. UI typically derives this from the seller's selected cat-to-sell.
-     */
-    expectedCatUtxo = signal(null, ...(ngDevMode ? [{ debugName: "expectedCatUtxo" }] : []));
-    /**
-     * The address the seller wants the payment to land at. When set,
-     * validation rejects offers whose Output 1 (seller payment) doesn't
-     * decode to this exact address. Strongly recommended; matches
-     * `validateCat21BuyOfferPsbt`'s `expectedSellerPaymentAddress` arg.
-     */
-    expectedSellerPaymentAddress = signal(null, ...(ngDevMode ? [{ debugName: "expectedSellerPaymentAddress" }] : []));
-    // --- Output state -------------------------------------------------------
-    state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
-    errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
-    successTxId = signal(null, ...(ngDevMode ? [{ debugName: "successTxId" }] : []));
-    /** Parsed + validated offer (set only when validation succeeds). */
-    parsedOffer = signal(null, ...(ngDevMode ? [{ debugName: "parsedOffer" }] : []));
-    /**
-     * Latest validation result (success or failure). Surfaces the typed
-     * rejection reason in the UI without re-parsing.
-     */
-    validationResult = signal(null, ...(ngDevMode ? [{ debugName: "validationResult" }] : []));
-    connectedWallet = toSignal(this.wallet.connectedWallet$, { initialValue: null });
-    canAccept = computed(() => this.state() === 'parsed' && !!this.connectedWallet(), ...(ngDevMode ? [{ debugName: "canAccept" }] : []));
-    // --- Setup --------------------------------------------------------------
+    deps;
+    static MAX_PASTED_OFFER_BYTES = MAX_PASTED_OFFER_BYTES;
+    wallet = null;
     lastWalletAddress = null;
-    /**
-     * Auto-reset paste + parse state when the wallet's ordinals address
-     * actually changes. Field-init order before any derived stream
-     * (none here, but kept for symmetry with the other orchestrators).
-     */
-    walletChangeSub = this.wallet.connectedWallet$.subscribe((w) => {
-        if (!w) {
+    humanUiOptOut = false;
+    snap = {
+        state: 'idle',
+        pastedOffer: null,
+        floorPriceSats: null,
+        expectedCatUtxo: null,
+        expectedSellerPaymentAddress: null,
+        preview: null,
+        validationResult: null,
+        errorMessage: null,
+        successTxId: null,
+        channel: null,
+    };
+    listeners = new Set();
+    constructor(deps) {
+        this.deps = deps;
+    }
+    getSnapshot() {
+        return this.snap;
+    }
+    subscribe(listener) {
+        this.listeners.add(listener);
+        listener(this.snap);
+        return () => this.listeners.delete(listener);
+    }
+    /** Connect / swap the seller wallet. Auto-resets the form on address change. */
+    setWallet(wallet) {
+        this.wallet = wallet;
+        if (!wallet) {
             if (this.lastWalletAddress !== null)
                 this.resetFormFields();
             this.lastWalletAddress = null;
             return;
         }
-        if (this.lastWalletAddress === null || this.lastWalletAddress === w.ordinalsAddress) {
-            this.lastWalletAddress = w.ordinalsAddress;
+        if (this.lastWalletAddress === null || this.lastWalletAddress === wallet.ordinalsAddress) {
+            this.lastWalletAddress = wallet.ordinalsAddress;
             return;
         }
-        this.lastWalletAddress = w.ordinalsAddress;
+        this.lastWalletAddress = wallet.ordinalsAddress;
         this.resetFormFields();
-    });
-    // --- Commands -----------------------------------------------------------
+    }
     /**
-     * Maximum acceptable paste size in bytes. PSBTs above this are rejected
-     * before decoding to prevent OOM / tab-crash attacks via a malicious
-     * `?offer=…` link. The on-chain shape of a real CAT-21 buy-offer is
-     * <1 KB; 256 KiB is generous headroom for future protocol extensions
-     * while still blocking DoS payloads.
-     */
-    static MAX_PASTED_OFFER_BYTES = 256 * 1024;
-    /**
-     * Decode + validate the pasted offer. Sets `parsedOffer` + `validationResult`
-     * + transitions `state` to `parsed` or `invalid`. Pure transition — no
-     * wallet calls. Safe to call repeatedly as the user edits the paste.
-     *
-     * **Hardening:**
-     * - Paste length capped at MAX_PASTED_OFFER_BYTES (audit finding C2).
-     * - Validator only runs when `expectedSellerPaymentAddress` AND
-     *   `floorPriceSats` are set (audit findings H1, H2). Without them
-     *   the orchestrator stays in `idle` so the UI prompts the seller to
-     *   complete the form before any wallet interaction.
+     * Decode + validate the pasted offer. Pure transition — no wallet calls.
+     * Safe to call repeatedly as the user edits. Stays `idle` until the expected
+     * cat, seller payout address, AND floor are all set (without them any offer
+     * could redirect payment / pass a 1-sat price).
      */
     setPastedOffer(paste) {
         const trimmed = paste && paste.trim() ? paste.trim() : null;
-        this.pastedOffer.set(trimmed);
         if (!trimmed) {
-            this.parsedOffer.set(null);
-            this.validationResult.set(null);
-            this.state.set('idle');
+            this.patch({ pastedOffer: null, preview: null, validationResult: null, state: 'idle' });
             return;
         }
-        if (trimmed.length > Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES) {
-            const msg = `Pasted offer too large: ${trimmed.length} bytes > ${Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES} cap`;
-            this.errorMessage.set(msg);
-            this.validationResult.set({ ok: false, reason: 'malformed-offer-psbt', detail: msg });
-            this.parsedOffer.set(null);
-            this.state.set('invalid');
+        if (trimmed.length > MAX_PASTED_OFFER_BYTES) {
+            const msg = `Pasted offer too large: ${trimmed.length} bytes > ${MAX_PASTED_OFFER_BYTES} cap`;
+            this.patch({
+                pastedOffer: trimmed, errorMessage: msg, preview: null, state: 'invalid',
+                validationResult: { ok: false, reason: 'malformed-offer-psbt', detail: msg },
+            });
+            return;
+        }
+        this.patch({ pastedOffer: trimmed });
+        this.revalidate();
+    }
+    setFloorPriceSats(sats) {
+        if (!Number.isFinite(sats) || sats < 0)
+            return;
+        this.patch({ floorPriceSats: Math.floor(sats) });
+        this.revalidate();
+    }
+    /**
+     * Human-UI opt-out for the floor safety-net: floor stays 0 across resets (the
+     * seller reads `pricePaidSats` in the summary before signing — the human is
+     * the check). Bot / headless consumers must NOT call this; they set an
+     * explicit floor per-run so a forgotten value can't pass a 1-sat offer.
+     */
+    disableFloorGate() {
+        this.humanUiOptOut = true;
+        this.patch({ floorPriceSats: 0 });
+        this.revalidate();
+    }
+    setExpectedCatUtxo(utxo) {
+        this.patch({ expectedCatUtxo: utxo });
+        this.revalidate();
+    }
+    /**
+     * Set the address the seller expects the payment output (output 1) at.
+     * Branded `PaymentAddress` (SDK HARD RULE "Never derive a payment address
+     * from an on-chain lookup"): pass a value from the connected wallet or the
+     * URL permalink, never from an ord / electrs ownership query.
+     */
+    setExpectedSellerPaymentAddress(address) {
+        this.patch({ expectedSellerPaymentAddress: address });
+        this.revalidate();
+    }
+    /**
+     * Sign the seller's cat input 0 and broadcast. Delegates to
+     * `accept-offer.core`'s `acceptOffer` (validate → sign → broadcast), which
+     * re-validates and refuses to sign a mismatched offer. Requires a validated
+     * paste (`state === 'parsed'`) and a connected wallet.
+     */
+    async acceptOffer(promptForSignedPsbt) {
+        const wallet = this.wallet;
+        const preview = this.snap.preview;
+        const expectedCat = this.snap.expectedCatUtxo;
+        const expectedAddr = this.snap.expectedSellerPaymentAddress;
+        const floor = this.snap.floorPriceSats;
+        if (!wallet)
+            throw new Error('No wallet connected');
+        if (!preview || this.snap.state !== 'parsed')
+            throw new Error('No validated offer to accept');
+        if (!expectedCat || !expectedAddr || floor === null)
+            throw new Error('Offer form incomplete');
+        this.patch({ state: 'accepting', errorMessage: null, successTxId: null, channel: null });
+        try {
+            const params = {
+                walletType: wallet.type,
+                network: this.deps.network,
+                ordinalsAddress: wallet.ordinalsAddress,
+                ordinalsPublicKey: wallet.ordinalsPublicKey,
+                offerPsbt: preview.psbtBytes,
+                expectedSellerUtxo: { txid: expectedCat.txid, vout: expectedCat.vout },
+                floorPriceSats: floor,
+                expectedSellerPaymentAddress: expectedAddr,
+            };
+            const outcome = await acceptOffer(params, {
+                broadcast: { broadcast: (txHex) => this.deps.broadcast(txHex) },
+                promptForSignedPsbt,
+            });
+            this.patch({ state: 'success', successTxId: outcome.txid, channel: outcome.channel });
+            return outcome;
+        }
+        catch (err) {
+            this.patch({ state: 'error', errorMessage: errMsg$2(err) });
+            throw err;
+        }
+    }
+    /** Wipe paste + parse result + any prior outcome. Keeps the wallet connected. */
+    reset() {
+        this.resetFormFields();
+    }
+    // --- internals ----------------------------------------------------------
+    revalidate() {
+        const paste = this.snap.pastedOffer;
+        if (!paste) {
+            this.patch({ preview: null, validationResult: null, state: 'idle' });
             return;
         }
         let psbtBytes;
         try {
-            psbtBytes = decodePastedPsbt(trimmed);
+            psbtBytes = decodePastedPsbt(paste);
         }
         catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.validationResult.set({ ok: false, reason: 'malformed-offer-psbt', detail: msg });
-            this.parsedOffer.set(null);
-            this.state.set('invalid');
+            const msg = errMsg$2(err);
+            this.patch({
+                errorMessage: msg, preview: null, state: 'invalid',
+                validationResult: { ok: false, reason: 'malformed-offer-psbt', detail: msg },
+            });
             return;
         }
-        const expectedCat = this.expectedCatUtxo();
-        const expectedAddr = this.expectedSellerPaymentAddress();
-        const floor = this.floorPriceSats();
+        const expectedCat = this.snap.expectedCatUtxo;
+        const expectedAddr = this.snap.expectedSellerPaymentAddress;
+        const floor = this.snap.floorPriceSats;
         if (!expectedCat || !expectedAddr || floor === null) {
-            // Form incomplete — never run the validator. Without an expected
-            // cat the validator has no UTXO to pin; without an expected seller
-            // address the buyer can redirect payment to themselves; without a
-            // floor every 1-sat offer passes. Stay idle.
-            this.state.set('idle');
+            // Form incomplete — never run the validator (see setPastedOffer doc). Stay idle.
+            this.patch({ state: 'idle' });
             return;
         }
         let validation;
@@ -9652,160 +9333,51 @@ class Cat21AcceptOfferOrchestrator {
                 expectedSellerUtxo: expectedCat,
                 floorPriceSats: floor,
                 expectedSellerPaymentAddress: expectedAddr,
-                network: this.network,
+                network: this.deps.network,
             });
         }
         catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            validation = { ok: false, reason: 'malformed-offer-psbt', detail: msg };
+            validation = { ok: false, reason: 'malformed-offer-psbt', detail: errMsg$2(err) };
         }
-        this.validationResult.set(validation);
-        this.errorMessage.set(null);
         if (validation.ok) {
-            this.parsedOffer.set({
-                psbtBytes,
-                catUtxo: expectedCat,
-                pricePaidSats: validation.pricePaidSats,
-                postageSats: validation.postageSats,
+            this.patch({
+                validationResult: validation,
+                errorMessage: null,
+                preview: { psbtBytes, catUtxo: expectedCat, pricePaidSats: validation.pricePaidSats, postageSats: validation.postageSats },
+                state: 'parsed',
             });
-            this.state.set('parsed');
         }
         else {
-            this.parsedOffer.set(null);
-            this.state.set('invalid');
+            this.patch({ validationResult: validation, errorMessage: null, preview: null, state: 'invalid' });
         }
     }
-    setFloorPriceSats(sats) {
-        if (!Number.isFinite(sats) || sats < 0)
-            return;
-        this.floorPriceSats.set(Math.floor(sats));
-        // Re-validate against the new floor if a paste is in the box.
-        const paste = this.pastedOffer();
-        if (paste)
-            this.setPastedOffer(paste);
-    }
-    /**
-     * Human-UI opt-out for the floor safety-net.
-     *
-     * Sets floor to 0 AND keeps it there across resets — the seller
-     * sees `pricePaidSats` in the validated summary before clicking
-     * sign; the human is the check. Under the hood, this flips
-     * `resetFormFields()` so `floorPriceSats` no longer wipes back to
-     * `null` on wallet-swap / reset.
-     *
-     * Call once at construction / ngOnInit. `setFloorPriceSats(n)`
-     * still works after — the seller can raise the floor to enable the
-     * auto-reject-lowballs behaviour without touching this flag.
-     *
-     * Bot / headless consumers should NOT call this — they must set a
-     * floor explicitly per-run so a forgotten value doesn't silently
-     * pass a 1-sat offer. See audit finding H2 for the rationale.
-     */
-    disableFloorGate() {
-        this.humanUiOptOut = true;
-        this.floorPriceSats.set(0);
-    }
-    humanUiOptOut = false;
-    /**
-     * MAX_PASTED_OFFER_BYTES exposed for the UI's pre-paste textarea
-     * `maxlength` attribute. Mirrors the static class field so consumers
-     * don't need to reach for the constructor.
-     */
-    maxPastedOfferBytes = Cat21AcceptOfferOrchestrator.MAX_PASTED_OFFER_BYTES;
-    setExpectedCatUtxo(utxo) {
-        this.expectedCatUtxo.set(utxo);
-        const paste = this.pastedOffer();
-        if (paste)
-            this.setPastedOffer(paste);
-    }
-    /**
-     * Set the address the seller expects the payment output to land at.
-     * Symmetric with `Cat21CreateOfferOrchestrator.setSellerPaymentAddress`
-     * — branded for the same reason (SDK HARD RULE "Never derive a
-     * payment address from an on-chain lookup"). Value must be
-     * constructed via `toPaymentAddress()` or come pre-branded from the
-     * URL parser / wallet fixture.
-     */
-    setExpectedSellerPaymentAddress(address) {
-        this.expectedSellerPaymentAddress.set(address);
-        const paste = this.pastedOffer();
-        if (paste)
-            this.setPastedOffer(paste);
-    }
-    /**
-     * Sign input 0 (the seller's cat UTXO) at the ordinals address and
-     * broadcast. Requires a validated paste (`state === 'parsed'`) and
-     * a connected wallet.
-     */
-    acceptOffer(
-    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
-    // wallets ignore it. A watch-only offer-accept throws without it.
-    promptForSignedPsbt) {
-        const wallet = this.connectedWallet();
-        const offer = this.parsedOffer();
-        if (!wallet)
-            return throwError(() => new Error('No wallet connected'));
-        if (!offer)
-            return throwError(() => new Error('No validated offer to accept'));
-        this.state.set('accepting');
-        this.errorMessage.set(null);
-        this.successTxId.set(null);
-        try {
-            const signer = findSignerOrThrow(wallet.type);
-            return signer
-                .signOfferAccept({
-                psbtBytes: offer.psbtBytes,
-                ordinalsAddress: wallet.ordinalsAddress,
-                ordinalsPublicKey: wallet.ordinalsPublicKey,
-                network: this.network,
-                broadcast: (txHex) => this.cat21.postTransaction(txHex),
-                promptForSignedPsbt,
-            })
-                .pipe(tap(({ txId }) => {
-                this.successTxId.set(txId);
-                this.state.set('success');
-            }), catchError((err) => {
-                const msg = err instanceof Error ? err.message : String(err);
-                this.errorMessage.set(msg);
-                this.state.set('error');
-                return throwError(() => err);
-            }));
-        }
-        catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => err);
-        }
-    }
-    /** Wipe paste + parse result. Keeps the wallet connected. */
-    reset() {
-        this.resetFormFields();
-        this.errorMessage.set(null);
-        this.successTxId.set(null);
-        this.state.set('idle');
-    }
-    // --- Internals ----------------------------------------------------------
     resetFormFields() {
-        this.pastedOffer.set(null);
-        this.parsedOffer.set(null);
-        this.validationResult.set(null);
-        // Reset floor to `null` so the audit-H2 gate — "orchestrator
-        // refuses to leave idle without an explicit floor" — fires again
-        // on the next paste. Human UI consumers that opted out via
-        // `disableFloorGate()` keep the 0 across resets; bot / headless
-        // consumers get the null-required behaviour back.
-        this.floorPriceSats.set(this.humanUiOptOut ? 0 : null);
-        this.expectedCatUtxo.set(null);
-        this.expectedSellerPaymentAddress.set(null);
+        this.patch({
+            pastedOffer: null,
+            preview: null,
+            validationResult: null,
+            // Reset floor to null so the "explicit floor required" gate fires again
+            // on the next paste. Human-UI opt-out keeps 0 across resets.
+            floorPriceSats: this.humanUiOptOut ? 0 : null,
+            expectedCatUtxo: null,
+            expectedSellerPaymentAddress: null,
+            // A wallet swap must not leave a prior accept's success/error/txid on the
+            // snapshot under the new wallet; return to a clean idle.
+            state: 'idle',
+            errorMessage: null,
+            successTxId: null,
+            channel: null,
+        });
     }
-    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21AcceptOfferOrchestrator, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21AcceptOfferOrchestrator, providedIn: 'root' });
+    patch(next) {
+        this.snap = { ...this.snap, ...next };
+        for (const l of this.listeners)
+            l(this.snap);
+    }
 }
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21AcceptOfferOrchestrator, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
-        }] });
+function errMsg$2(err) {
+    return err instanceof Error ? err.message : String(err);
+}
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}, kept for legacy import paths. The
@@ -9814,459 +9386,203 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
  */
 const CAT21_TRANSFER_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
-/**
- * High-level CAT-21 transfer flow. Mirrors `Cat21MintOrchestrator` in
- * shape so consumers can drive both flows with identical state-machine
- * templates.
- *
- * Singleton (`providedIn: 'root'`); state persists across route
- * navigations within a session. Auto-resets writable inputs when the
- * connected wallet changes — the cat UTXOs aren't visible to a
- * different wallet, the funding UTXOs are gone, and the recipient the
- * user typed for the previous wallet shouldn't quietly carry forward.
- */
+const EMPTY_RECOMMENDATION$1 = {
+    status: 'insufficient',
+    recommended: null,
+    candidates: [],
+};
 class Cat21TransferOrchestrator {
-    wallet = inject(WalletService);
-    cat21 = inject(Cat21Service);
-    network = inject(bitcoinNetwork);
-    fundingRec = inject(FundingRecommendationService);
-    // --- Writable inputs ----------------------------------------------------
-    /** Which cat the user picked from their gallery. */
-    catUtxo = signal(null, ...(ngDevMode ? [{ debugName: "catUtxo" }] : []));
-    /** Where the cat should go after the transfer. */
-    recipientAddress = signal(null, ...(ngDevMode ? [{ debugName: "recipientAddress" }] : []));
-    /** sat/vB from the fee picker or manual input. */
-    feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
-    /**
-     * User's explicit funding-UTXO pick from the picker (expert mode). When
-     * null the orchestrator uses the SAFE auto-recommendation
-     * (`fundingRecommendation$`): a content-clean best-fit covering UTXO when
-     * one exists (`status: 'auto'`, invisible default), otherwise no auto-pick
-     * (`status: 'expert-required'` — the UI must surface the picker so the user
-     * consciously spends an asset-carrying coin). Setting this here is the
-     * expert-mode override: the user's pick is honoured even if it carries
-     * assets, because they chose it deliberately.
-     */
-    selectedFundingUtxo = signal(null, ...(ngDevMode ? [{ debugName: "selectedFundingUtxo" }] : []));
-    // --- Internals (declared up here because instance-field initialisers
-    // below depend on them at class-construction time).
-    lastWalletAddress = null;
-    catUtxoSubject = new BehaviorSubject(null);
-    feeRateSubject = new BehaviorSubject(null);
-    selectedFundingUtxoSubject = new BehaviorSubject(null);
-    // The recipient's script type changes the transfer's output vsize (P2TR
-    // vs P2WPKH vs legacy), so the quoted fee depends on it. simulation$ must
-    // re-fire when the recipient changes, hence a subject alongside the signal.
-    recipientAddressSubject = new BehaviorSubject(null);
-    // --- Output state -------------------------------------------------------
-    state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
-    errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
-    successTxId = signal(null, ...(ngDevMode ? [{ debugName: "successTxId" }] : []));
-    /** Currently connected wallet bridged to a signal for template reads. */
-    connectedWallet = toSignal(this.wallet.connectedWallet$, { initialValue: null });
-    /** Convenience computed for `state() === 'ready'` gating. */
-    isReady = computed(() => this.state() === 'ready', ...(ngDevMode ? [{ debugName: "isReady" }] : []));
-    /**
-     * Auto-reset form fields when the wallet changes. Field-init order
-     * matters: this subscription is declared BEFORE `fundingUtxos$` so
-     * that `walletSubject.next(...)` notifies this handler FIRST,
-     * clearing form state, and only then propagates through the loading
-     * chain. Reverse order causes the form-reset to wipe a freshly-set
-     * error message that the UTXO-fetch error path just wrote.
-     *
-     * Only the FORM is reset — not `errorMessage` or `successTxId`.
-     * Operation-result state is owned by `transfer()` and `reset()`,
-     * not by wallet-change events.
-     */
-    walletChangeSub = this.wallet.connectedWallet$.subscribe((w) => {
-        if (!w) {
-            // Wallet disconnected — only reset if a wallet was previously
-            // connected. The very first `null` emission (BehaviorSubject's
-            // initial value before the user connects) has nothing to clear.
-            if (this.lastWalletAddress !== null) {
-                this.resetFormFields();
-            }
-            this.lastWalletAddress = null;
-            return;
-        }
-        // Same-wallet re-emission (BehaviorSubject replay etc.) — leave
-        // form intact. First-connect (lastWalletAddress === null) also
-        // skips the reset; the user may have set the form already.
-        if (this.lastWalletAddress === null || this.lastWalletAddress === w.ordinalsAddress) {
-            this.lastWalletAddress = w.ordinalsAddress;
-            return;
-        }
-        this.lastWalletAddress = w.ordinalsAddress;
-        this.resetFormFields();
-    });
-    // --- Derived streams ----------------------------------------------------
-    /**
-     * Funding UTXOs for the connected wallet's payment address, with
-     * the cat-bearing UTXO filtered out (we MUST NOT spend the cat as
-     * funding — it has to ride input 0 of the transfer tx and end up
-     * at output 0). Re-fetches on wallet change.
-     */
-    fundingUtxos$ = combineLatest([
-        this.wallet.connectedWallet$.pipe(startWith(null)),
-        this.catUtxoSubject,
-    ]).pipe(switchMap(([w, cat]) => {
-        if (!w) {
-            this.state.set('idle');
-            return of([]);
-        }
-        this.state.set('loading-utxos');
-        return this.cat21.getUtxos(w.paymentAddress).pipe(map((utxos) => {
-            if (!cat)
-                return utxos;
-            return utxos.filter((u) => !(u.txid === cat.txid && u.vout === cat.vout));
-        }), tap(() => this.state.set('ready')), catchError((err) => {
-            this.errorMessage.set(`Failed to load funding UTXOs: ${err instanceof Error ? err.message : String(err)}`);
-            this.state.set('error');
-            return of([]);
-        }));
-    }), shareReplay({ bufferSize: 1, refCount: true }));
-    /**
-     * Pass-through of the SDK's polled fee tiers. Mirrors mint's API.
-     */
-    recommendedFees$ = this.cat21.recommendedFees$;
-    /**
-     * The funding target that the coin-selection safety check must cover. A
-     * transfer preserves the cat UTXO (output 0 = `cat.value`), so the funding
-     * pays ONLY the miner fee; the target is a generous ~200 vB fee ceiling (the
-     * two-pass simulation tightens the real fee later). Null while no fee rate is
-     * set, which makes the recommendation `insufficient` until the user picks a
-     * rate.
-     */
-    fundingTarget$ = this.feeRateSubject.pipe(map((rate) => (rate && rate > 0 ? Math.ceil(rate * 200) : null)));
-    /**
-     * SAFE-by-default coin-selection recommendation for the transfer's funding
-     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
-     * `auto` (a content-clean coin covers → auto-selected, no picker needed),
-     * `expert-required` (only asset-bearing coins cover → the UI must surface the
-     * picker with the recommended coin pre-highlighted), `scanning`, or
-     * `insufficient`. The UI branches on `.status` to decide whether to show the
-     * picker; the invisible default is `auto`.
-     */
-    fundingRecommendation$ = this.fundingRec.recommend(this.fundingUtxos$, this.fundingTarget$).pipe(catchError(() => of({
-        status: 'insufficient',
-        recommended: null,
-        candidates: [],
-    })), shareReplay({ bufferSize: 1, refCount: true }));
-    /**
-     * Best-funding-UTXO + two-pass-fee simulation for the current
-     * (cat, funding recommendation, recipient, feeRate) tuple. Re-emits when any
-     * of those change. `insufficient: true` when no funding UTXO covers the fee.
-     * The funding coin comes from the user's expert-mode pick when set, else the
-     * SAFE auto-recommendation (only when `status: 'auto'`) — never a
-     * content-unaware value-only pick.
-     */
-    simulation$ = combineLatest([
-        this.fundingRecommendation$,
-        this.wallet.connectedWallet$.pipe(startWith(null)),
-        this.catUtxoSubject,
-        this.feeRateSubject,
-        this.selectedFundingUtxoSubject,
-        this.recipientAddressSubject,
-    ]).pipe(
-    // computeSimulation reads the recipient from its signal (set synchronously
-    // in setRecipientAddress before the subject emits, so it's current here);
-    // the recipient source is present to RE-FIRE the stream on recipient change.
-    map(([recommendation, wallet, cat, feeRate, selected]) => this.computeSimulation(recommendation, wallet, cat, feeRate, selected)), shareReplay({ bufferSize: 1, refCount: true }));
-    // --- Commands -----------------------------------------------------------
-    setCatUtxo(cat) {
-        this.catUtxo.set(cat);
-        this.catUtxoSubject.next(cat);
+    deps;
+    wallet = null;
+    utxos = [];
+    // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
+    // recompute whose captured seq is stale drops its result instead of
+    // overwriting a newer snapshot (the plain-class replacement for switchMap).
+    recomputeSeq = 0;
+    snap = {
+        state: 'idle',
+        catUtxo: null,
+        recipientAddress: null,
+        feeRate: null,
+        selectedFundingUtxo: null,
+        fundingRecommendation: EMPTY_RECOMMENDATION$1,
+        simulation: null,
+        errorMessage: null,
+        successTxId: null,
+    };
+    listeners = new Set();
+    constructor(deps) {
+        this.deps = deps;
     }
-    setRecipientAddress(address) {
-        const value = address && address.trim() ? address.trim() : null;
-        this.recipientAddress.set(value);
-        this.recipientAddressSubject.next(value);
+    getSnapshot() {
+        return this.snap;
+    }
+    subscribe(listener) {
+        this.listeners.add(listener);
+        listener(this.snap);
+        return () => this.listeners.delete(listener);
+    }
+    async setWallet(wallet) {
+        const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
+        this.wallet = wallet;
+        this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
+        if (changed) {
+            this.patch({
+                catUtxo: null, recipientAddress: null, feeRate: null, selectedFundingUtxo: null,
+                errorMessage: null, successTxId: null,
+            });
+        }
+        if (!wallet) {
+            this.utxos = [];
+            this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION$1 });
+            return;
+        }
+        this.patch({ state: 'loading-utxos' });
+        try {
+            this.utxos = await this.deps.getUtxos(wallet.paymentAddress);
+            this.patch({ state: 'ready' });
+        }
+        catch (err) {
+            this.utxos = [];
+            this.patch({ state: 'error', errorMessage: `Failed to load UTXOs: ${errMsg$1(err)}` });
+            return;
+        }
+        await this.recompute();
+    }
+    setCatUtxo(cat) {
+        this.patch({ catUtxo: cat });
+        void this.recompute();
+    }
+    setRecipientAddress(recipient) {
+        this.patch({ recipientAddress: recipient });
+        void this.recompute();
     }
     setFeeRate(rate) {
         if (!Number.isFinite(rate) || rate <= 0)
             return;
-        this.feeRate.set(rate);
-        this.feeRateSubject.next(rate);
+        this.patch({ feeRate: rate });
+        void this.recompute();
     }
-    /**
-     * Push the user's funding-UTXO pick (or null to fall back to
-     * auto-pick). The picker UI calls this every time the seller clicks
-     * a row in the scanner-annotated funding list.
-     */
     setSelectedFundingUtxo(utxo) {
-        this.selectedFundingUtxo.set(utxo);
-        this.selectedFundingUtxoSubject.next(utxo);
+        this.patch({ selectedFundingUtxo: utxo });
+        void this.recompute();
     }
     /**
-     * Trigger the transfer. Requires a connected wallet, a selected cat,
-     * a recipient address, a fee rate, and a fundable funding UTXO.
-     * Builds the PSBT, signs at both addresses, broadcasts.
-     *
-     * State transitions: ready → transferring → success | error.
+     * Execute the transfer: build the real PSBT with the previewed funding + fee
+     * and sign+broadcast via the wallet's internal `signTransfer` (input 0 = cat
+     * at the ordinals address; funding inputs 1..N at the payment address).
      */
-    transfer(
-    // Watch-only (xpub) wallets sign via this export/paste bridge; injected
-    // wallets ignore it. A watch-only transfer throws without it.
-    promptForSignedPsbt) {
-        const wallet = this.connectedWallet();
-        const cat = this.catUtxo();
-        const recipient = this.recipientAddress();
-        const feeRate = this.feeRate();
+    async transfer(promptForSignedPsbt) {
+        const wallet = this.wallet;
+        const cat = this.snap.catUtxo;
+        const recipient = this.snap.recipientAddress;
+        const feeRate = this.snap.feeRate;
+        const sim = this.snap.simulation;
         if (!wallet)
-            return throwError(() => new Error('No wallet connected'));
+            throw new Error('No wallet connected');
         if (!cat)
-            return throwError(() => new Error('No cat selected'));
+            throw new Error('No cat selected');
         if (!recipient)
-            return throwError(() => new Error('No recipient address'));
+            throw new Error('No recipient address');
         if (!feeRate)
-            return throwError(() => new Error('No fee rate set'));
-        // Snapshot the latest derived simulation so we can ensure the
-        // fee + funding UTXO match what we'll actually broadcast.
-        let simulationOutcome;
+            throw new Error('No fee rate set');
+        if (!sim) {
+            throw new Error(this.snap.fundingRecommendation.status === 'expert-required'
+                ? 'Select a funding UTXO (the available coins carry assets)'
+                : 'Insufficient funds for transfer at the current fee rate');
+        }
+        this.patch({ state: 'transferring', errorMessage: null, successTxId: null });
         try {
-            simulationOutcome = this.computeSimulation(
-            // Sync snapshot of the safe funding recommendation (the async scan has
-            // resolved by the time Transfer is clickable — the UI gates the button
-            // on a present simulation). Re-running the calc here guarantees the
-            // broadcast uses the exact coin the preview showed.
-            this.lastRecommendationSnapshot, wallet, cat, feeRate, this.selectedFundingUtxo());
-        }
-        catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => err);
-        }
-        if (simulationOutcome.insufficient || !simulationOutcome.simulation) {
-            // Distinguish a genuine shortfall from "there's money, but only on a
-            // valuable coin" (expert-required) or "scans still resolving" — a flat
-            // "insufficient funds" would misreport the last two.
-            let msg;
-            if (simulationOutcome.insufficient) {
-                msg = 'Insufficient funds for transfer at the current fee rate';
-            }
-            else if (this.lastRecommendationSnapshot.status === 'expert-required') {
-                msg = 'Select a funding UTXO (the available coins carry assets)';
-            }
-            else {
-                msg = 'Still checking your coins for assets, one moment';
-            }
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => new Error(msg));
-        }
-        const { simulation } = simulationOutcome;
-        this.state.set('transferring');
-        this.errorMessage.set(null);
-        this.successTxId.set(null);
-        try {
-            const psbtBytes = this.buildTransferPsbt(wallet, cat, recipient, simulation);
+            const built = buildTransfer(this.paramsFor(wallet, cat, recipient, feeRate), sim.fundingUtxo, sim.feeSats, false);
             const signer = findSignerOrThrow(wallet.type);
-            return signer.signTransfer({
-                psbtBytes,
+            const { txId } = await firstValueFrom(signer.signTransfer({
+                psbtBytes: built.psbt,
                 ordinalsAddress: wallet.ordinalsAddress,
                 paymentAddress: wallet.paymentAddress,
                 fundingInputCount: 1,
-                network: this.network,
-                broadcast: (txHex) => this.cat21.postTransaction(txHex),
-                promptForSignedPsbt,
-            }).pipe(tap(({ txId }) => {
-                this.successTxId.set(txId);
-                this.state.set('success');
-            }), catchError((err) => {
-                const msg = err instanceof Error ? err.message : String(err);
-                this.errorMessage.set(msg);
-                this.state.set('error');
-                return throwError(() => err);
+                network: this.deps.network,
+                broadcast: (txHex) => from(this.deps.broadcast(txHex)),
+                promptForSignedPsbt: promptForSignedPsbt
+                    ? (unsigned) => from(promptForSignedPsbt(unsigned))
+                    : undefined,
             }));
+            this.patch({ state: 'success', successTxId: txId });
+            return { txId };
         }
         catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => err);
+            this.patch({ state: 'error', errorMessage: errMsg$1(err) });
+            throw err;
         }
     }
-    /**
-     * Wipe writables AND operation-result state back to a fresh
-     * transfer (typically the "Transfer another" button on success).
-     * Keeps the wallet connected.
-     */
     reset() {
-        this.resetFormFields();
-        this.errorMessage.set(null);
-        this.successTxId.set(null);
-        this.state.set(this.connectedWallet() ? 'ready' : 'idle');
+        this.patch({
+            catUtxo: null, recipientAddress: null, feeRate: null, selectedFundingUtxo: null,
+            simulation: null, errorMessage: null, successTxId: null,
+            state: this.wallet ? 'ready' : 'idle',
+        });
     }
-    // --- Internals ----------------------------------------------------------
-    /**
-     * Latest snapshot of the safe funding recommendation maintained by the
-     * `fundingRecommendation$` subscription. Lets `transfer()` synchronously
-     * re-compute the simulation against the most recent recommendation (the
-     * clean auto-pick + full candidate list) without juggling RxJS take(1).
-     */
-    lastRecommendationSnapshot = {
-        status: 'insufficient',
-        recommended: null,
-        candidates: [],
-    };
-    recommendationSnapshotSub = this.fundingRecommendation$.subscribe((r) => {
-        this.lastRecommendationSnapshot = r;
-    });
-    resetFormFields() {
-        this.catUtxo.set(null);
-        this.catUtxoSubject.next(null);
-        this.recipientAddress.set(null);
-        this.recipientAddressSubject.next(null);
-        this.feeRate.set(null);
-        this.feeRateSubject.next(null);
-        this.selectedFundingUtxo.set(null);
-        this.selectedFundingUtxoSubject.next(null);
-    }
-    computeSimulation(recommendation, wallet, cat, feeRate, selected = null) {
-        if (!wallet || !cat || !feeRate) {
-            return { simulation: null, insufficient: false };
+    // --- internals ----------------------------------------------------------
+    async recompute() {
+        const seq = ++this.recomputeSeq;
+        const wallet = this.wallet;
+        const feeRate = this.snap.feeRate;
+        const cat = this.snap.catUtxo;
+        const recipient = this.snap.recipientAddress;
+        if (!wallet || !feeRate || !cat || !recipient || this.utxos.length === 0) {
+            this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION$1 });
+            return;
         }
-        // GOLDEN RULE: the cat UTXO is preserved (output 0 = cat.value, funded by
-        // the cat input itself), so the funding must cover ONLY the miner fee.
-        // Use a generous fee over-estimate in the pick stage; the two-pass
-        // simulation below tightens it.
-        const target = Math.ceil(feeRate * 200); // ~200 vB ceiling for transfer
-        // Expert-mode override: the user's explicit pick wins when it still covers
-        // the target, even if it carries assets (they chose it deliberately).
-        // Otherwise use the SAFE auto-recommendation — but ONLY when a content-clean
-        // coin covers (`status: 'auto'`). When only asset coins cover
-        // (`expert-required`) or a scan is still resolving (`scanning`), there is no
-        // safe auto-pick: the simulation stays null and the UI surfaces the picker
-        // (via `fundingRecommendation$`). This is the "never auto-spend a valuable
-        // coin" guarantee, enforced at the orchestrator, shared by every flow.
-        const selectedStillPresent = selected
-            ? recommendation.candidates.find((u) => u.txid === selected.txid && u.vout === selected.vout)
-            : undefined;
-        const pick = selectedStillPresent && selectedStillPresent.value >= target
-            ? selectedStillPresent
-            : recommendation.status === 'auto'
-                ? recommendation.recommended
-                : null;
-        if (!pick) {
-            return { simulation: null, insufficient: recommendation.status === 'insufficient' };
-        }
+        let sim;
         try {
-            const { vsize, finalFeeSats } = twoPassFeeSimulation({
-                simulate: (feeSats) => this.simulateTransfer(wallet, cat, pick, feeSats),
-                feeRatePerVbyte: feeRate,
-                // Seed pass-1 with the SAME fee budget the coin was selected against
-                // (`target`), not the flat 1000-sat default. The picked coin covers
-                // `target` by construction, so pass-1 always builds; a flat 1000 would
-                // falsely reject a small-but-viable clean coin at low fee rates.
-                placeholderFeeSats: target,
-            });
-            // GOLDEN RULE: the cat UTXO is preserved (output 0 = cat.value), so the
-            // funding pays ONLY the fee — change = funding - fee (the cat's sats all
-            // went to output 0 untouched). Mirror the builder's dust rule: sub-dust
-            // change is absorbed into the miner fee (no change output emitted), so
-            // report 0 rather than a "you'll get N sats" figure that never lands.
-            const changeRaw = pick.value - finalFeeSats;
-            let changeDustLimit;
-            try {
-                changeDustLimit = getMinimumUtxoSize(wallet.paymentAddress);
-            }
-            catch {
-                changeDustLimit = CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS;
-            }
-            const changeSats = changeRaw >= changeDustLimit ? changeRaw : 0;
-            return {
-                simulation: {
-                    vsize,
-                    feeSats: finalFeeSats,
-                    changeSats,
-                    fundingUtxo: pick,
-                },
-                insufficient: false,
-            };
+            sim = await simulateTransfer(this.paramsFor(wallet, cat, recipient, feeRate), { utxos: this.utxosPort(), scan: this.deps.scan });
         }
         catch {
-            return { simulation: null, insufficient: true };
+            if (seq !== this.recomputeSeq)
+                return;
+            this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION$1 });
+            return;
         }
-    }
-    /**
-     * Build a dummy-signed transfer PSBT for fee/vsize measurement.
-     * Uses the wallet's real public keys + addresses + script types
-     * (so the witness shape and vsize match the real broadcast) but a
-     * dummy fee placeholder per `twoPassFeeSimulation`'s contract.
-     */
-    simulateTransfer(wallet, cat, funding, feeSats) {
-        const catInput = prepareTransferCatInput({
-            utxo: { txid: cat.txid, vout: cat.vout, value: cat.value, status: { confirmed: true } },
-            paymentPublicKey: hex.decode(wallet.ordinalsPublicKey),
-            paymentAddress: wallet.ordinalsAddress,
-            isSimulation: true,
-            network: this.network,
+        if (seq !== this.recomputeSeq)
+            return; // a newer input superseded this run
+        this.patch({
+            fundingRecommendation: sim.recommendation,
+            simulation: sim.status === 'ready' && sim.fundingUtxo && sim.feeSats != null
+                ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, fundingUtxo: sim.fundingUtxo }
+                : null,
         });
-        const fundingInput = prepareTransferFundingInput({
-            utxo: funding,
+    }
+    paramsFor(wallet, cat, recipient, feeRate) {
+        return {
+            walletType: wallet.type,
+            network: this.deps.network,
+            ordinalsPublicKey: hex.decode(wallet.ordinalsPublicKey),
+            ordinalsAddress: wallet.ordinalsAddress,
             paymentPublicKey: hex.decode(wallet.paymentPublicKey),
             paymentAddress: wallet.paymentAddress,
-            isSimulation: true,
-            network: this.network,
-        });
-        const built = buildCat21TransferPsbt({
-            walletType: wallet.type,
-            network: this.network,
-            catUtxo: catInput,
-            fundingInputs: [fundingInput],
-            destinations: {
-                recipientAddress: this.recipientAddress() ?? wallet.paymentAddress,
-                senderChangeAddress: wallet.paymentAddress,
-            },
-            feeSats,
-        });
-        return {
-            vsize: computePsbtVsize({
-                psbt: built.psbt,
-                network: toScureNetwork(this.network),
-            }),
+            catUtxo: { txid: cat.txid, vout: cat.vout, value: cat.value },
+            recipientAddress: recipient,
+            feeRatePerVbyte: feeRate,
+            selectedFundingUtxo: this.snap.selectedFundingUtxo ?? undefined,
         };
     }
-    /**
-     * Build the REAL unsigned transfer PSBT, using the pass-2 fee from
-     * `simulation`. Caller hands the bytes to the wallet for signing.
-     */
-    buildTransferPsbt(wallet, cat, recipient, simulation) {
-        const catInput = prepareTransferCatInput({
-            utxo: { txid: cat.txid, vout: cat.vout, value: cat.value, status: { confirmed: true } },
-            paymentPublicKey: hex.decode(wallet.ordinalsPublicKey),
-            paymentAddress: wallet.ordinalsAddress,
-            isSimulation: false,
-            network: this.network,
-        });
-        const fundingInput = prepareTransferFundingInput({
-            utxo: simulation.fundingUtxo,
-            paymentPublicKey: hex.decode(wallet.paymentPublicKey),
-            paymentAddress: wallet.paymentAddress,
-            isSimulation: false,
-            network: this.network,
-        });
-        const built = buildCat21TransferPsbt({
-            walletType: wallet.type,
-            network: this.network,
-            catUtxo: catInput,
-            fundingInputs: [fundingInput],
-            destinations: {
-                recipientAddress: recipient,
-                senderChangeAddress: wallet.paymentAddress,
-            },
-            feeSats: simulation.feeSats,
-        });
-        return built.psbt;
+    utxosPort() {
+        const utxos = this.utxos;
+        return {
+            spendableUtxos: async () => utxos.map(toCore),
+        };
     }
-    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21TransferOrchestrator, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21TransferOrchestrator, providedIn: 'root' });
+    patch(next) {
+        this.snap = { ...this.snap, ...next };
+        for (const l of this.listeners)
+            l(this.snap);
+    }
 }
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: Cat21TransferOrchestrator, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
-        }] });
+function toCore(u) {
+    return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
+}
+function errMsg$1(err) {
+    return err instanceof Error ? err.message : String(err);
+}
 
 /**
  * # DORMANT — currently unused by any SDK consumer.
@@ -11480,354 +10796,180 @@ function inscribeChildAndBroadcast(args) {
     });
 }
 
-/**
- * High-level inscribe flow. Wraps `Cat21Service` (UTXOs, broadcast) +
- * `WalletService` (connected wallet) + the pure `simulateInscribeFees`
- * / `inscribeAndBroadcast` helpers into one cohesive surface, so
- * consumers drive the same state machine + reactive pipelines with
- * thin templates. Sibling of `Cat21MintOrchestrator`.
- *
- * Singleton (`providedIn: 'root'`) — state persists across route
- * navigations within a session. Auto-resets `feeRate`, `selectedUtxo`,
- * `content`, and the success/error fields when the connected wallet
- * changes (old UTXO is gone; the user picks fresh for the new wallet).
- *
- * # Two-tx model
- *
- * Every inscribe produces a commit + reveal pair. Simulations show
- * the sum of both fees + the funding requirement. `mint()` calls
- * `inscribeAndBroadcast` which signs commit via the wallet, broadcasts
- * both txs sequentially via `Cat21Service.postTransaction`, and returns
- * the pair of txids + the ephemeral bearer key.
- *
- * # Bearer key
- *
- * The ephemeral private key that controls the commit output is
- * returned in `successResult().ephemeral`. Between commit broadcast
- * and reveal broadcast (a few seconds) losing this key means the
- * commit output is unrecoverable. The orchestrator does not persist
- * it — that is a consumer concern.
- */
+const EMPTY_RECOMMENDATION = {
+    status: 'insufficient',
+    recommended: null,
+    candidates: [],
+};
+/** Deterministic dummy x-only pubkey — only sizes the envelope (all 32-byte keys equal). */
+const DUMMY_PUBKEY_XONLY = new Uint8Array(32).fill(0x02);
 class InscribeMintOrchestrator {
-    wallet = inject(WalletService);
-    cat21 = inject(Cat21Service);
-    network = inject(bitcoinNetwork);
-    fundingRec = inject(FundingRecommendationService);
-    // --- Writable inputs ----------------------------------------------------
-    /** sat/vB the user picked (from the fee picker or manually). null until set. */
-    feeRate = signal(null, ...(ngDevMode ? [{ debugName: "feeRate" }] : []));
-    /**
-     * Which UTXO the user explicitly picked (expert mode). When null, `mint()`
-     * falls back to the SAFE auto-recommendation (`fundingRecommendation$`): a
-     * content-clean covering UTXO when one exists (`status: 'auto'`, the invisible
-     * comfortable default — so the inscribe flow never opens on a coin-selection
-     * puzzle), otherwise no auto-inscribe (`status: 'expert-required'` — the UI
-     * must surface the picker so the user consciously spends an asset-carrying
-     * coin). Setting this is the expert-mode override, honoured even for an asset
-     * coin the user chose deliberately.
-     */
-    selectedUtxo = signal(null, ...(ngDevMode ? [{ debugName: "selectedUtxo" }] : []));
-    /** The inscription payload. Simulations only fire when this is set. */
-    content = signal(null, ...(ngDevMode ? [{ debugName: "content" }] : []));
-    // --- Internals ----------------------------------------------------------
-    lastWalletAddress = null;
-    feeRateSubject = new BehaviorSubject(null);
-    contentSubject = new BehaviorSubject(null);
-    // --- Output state -------------------------------------------------------
-    state = signal('idle', ...(ngDevMode ? [{ debugName: "state" }] : []));
-    errorMessage = signal(null, ...(ngDevMode ? [{ debugName: "errorMessage" }] : []));
-    successResult = signal(null, ...(ngDevMode ? [{ debugName: "successResult" }] : []));
-    /** Currently connected wallet bridged to a signal for template reads. */
-    connectedWallet = toSignal(this.wallet.connectedWallet$, { initialValue: null });
-    /** Convenience computed for `state() === 'ready'` gating. */
-    isReady = computed(() => this.state() === 'ready', ...(ngDevMode ? [{ debugName: "isReady" }] : []));
-    // --- Derived streams ----------------------------------------------------
-    /**
-     * UTXOs for the connected wallet's payment address. Re-fetches on
-     * wallet change. Errors are mapped to an empty list and an error
-     * state. Shared between subscribers via `shareReplay` so the side
-     * effects on `state` only fire once per emission.
-     *
-     * `startWith(null)` keeps the chain hot before any wallet connects;
-     * downstream `simulations$` then emits `[]` instead of stalling.
-     */
-    utxos$ = this.wallet.connectedWallet$.pipe(startWith(null), 
-    // Guard against `connectedWallet$` re-emitting the same wallet.
-    // WalletService fires `.next(info)` on service construction (rehydrate
-    // from localStorage) AND on every connector `onAccountChange` event —
-    // and connectors like Xverse fire that event repeatedly after a
-    // reload. Without this guard, `switchMap` re-cancels the in-flight
-    // getUtxos + resets `state` to 'loading-utxos' faster than downstream
-    // consumers (paymentOutputs$/auto-pick) can settle, and the mint
-    // form's "found funds" banner never surfaces. Key by paymentAddress
-    // — the sole input to `getUtxos` — so a genuine wallet switch still
-    // re-fetches.
-    distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null)), switchMap((w) => {
-        if (!w) {
-            this.state.set('idle');
-            return of([]);
-        }
-        this.state.set('loading-utxos');
-        return this.cat21.getUtxos(w.paymentAddress).pipe(tap(() => this.state.set('ready')), catchError((err) => {
-            this.errorMessage.set(`Failed to load UTXOs: ${err instanceof Error ? err.message : String(err)}`);
-            this.state.set('error');
-            return of([]);
-        }));
-    }), shareReplay({ bufferSize: 1, refCount: true }));
-    /**
-     * For each UTXO + current fee rate + set content, run
-     * `simulateInscribeFees` to produce the commit + reveal fee
-     * breakdown. UTXOs that can't cover `fundingRequirementSats` come
-     * through with `insufficient: true` rather than poisoning the whole
-     * stream.
-     *
-     * Re-emits whenever utxos$, wallet, feeRate, or content changes.
-     * Emits `[]` when content is null (consumer hasn't wired the
-     * inscription payload yet).
-     */
-    simulations$ = combineLatest([
-        this.utxos$,
-        // Same distinctUntilChanged guard as utxos$: connectedWallet$ can
-        // re-emit the same wallet repeatedly (localStorage rehydrate +
-        // Xverse's onAccountChange firing continuously), which would
-        // otherwise re-fire simulations$ on every emission — producing
-        // fresh output arrays that flip the downstream paymentOutputs$
-        // signal fast enough to prevent it from settling.
-        this.wallet.connectedWallet$.pipe(startWith(null), distinctUntilChanged((a, b) => (a?.paymentAddress ?? null) === (b?.paymentAddress ?? null))),
-        // BehaviorSubject mirrors of the writable signals, fed by
-        // `setFeeRate` / `setContent`. Signals stay as canonical writables
-        // for template reads; these subjects bridge to the RxJS pipeline
-        // without needing the Angular signal-effect runtime (which
-        // toObservable depends on and isn't available in plain Injector
-        // contexts the SDK tests use).
-        this.feeRateSubject,
-        this.contentSubject,
-    ]).pipe(map(([utxos, wallet, feeRate, content]) => this.computeSimulations(utxos, wallet, feeRate, content)), shareReplay({ bufferSize: 1, refCount: true }));
-    /** Pass-through of the SDK's polled fee tiers. */
-    recommendedFees$ = this.cat21.recommendedFees$;
-    /**
-     * The funding target the coin-selection safety check must cover: the
-     * inscription's `fundingRequirementSats` (commit output + commit fee), derived
-     * from the content + fee rate via `simulateInscribeFees` against a
-     * wallet-default-shaped dummy funding input (the requirement depends on the
-     * content + fee + input script type, not the input's value). Null until wallet
-     * + fee rate + content are all set, or if the simulation throws.
-     */
-    fundingTarget$ = combineLatest([
-        this.wallet.connectedWallet$.pipe(startWith(null)),
-        this.feeRateSubject,
-        this.contentSubject,
-    ]).pipe(map(([wallet, feeRate, content]) => {
-        if (!wallet || !feeRate || feeRate <= 0 || !content)
-            return null;
-        try {
-            // Mirrors computeSimulations' simulateInscribeFees call, but against a
-            // synthetic large-value funding input so the requirement is known
-            // before any specific coin is chosen.
-            const fundingInput = prepareInscribeFundingInput({
-                utxo: { txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } },
-                paymentPublicKey: hex.decode(wallet.paymentPublicKey),
-                paymentAddress: wallet.paymentAddress,
-                isSimulation: true,
-                network: this.network,
-            });
-            const sim = simulateInscribeFees({
-                feeRatePerVbyte: feeRate,
-                body: content.body,
-                contentType: content.contentType,
-                envelopeFields: content.envelopeFields,
-                minimalTagPush: content.minimalTagPush,
-                fundingInput,
-                senderChangeAddress: wallet.paymentAddress,
-                recipientAddress: content.recipient ?? wallet.ordinalsAddress,
-                ephemeralPubkeyXonly: new Uint8Array(32).fill(0x02),
-                tip: content.tip,
-                walletType: wallet.type,
-                network: this.network,
-            });
-            return sim.fundingRequirementSats;
-        }
-        catch {
-            return null;
-        }
-    }));
-    /**
-     * SAFE-by-default coin-selection recommendation for the inscribe's funding
-     * (shared brain, identical across mint / transfer / offer / inscribe). Emits
-     * `auto` (a content-clean coin covers → auto-selected, no picker),
-     * `expert-required` (only asset-bearing coins cover → the UI surfaces the
-     * picker), `scanning`, or `insufficient`. Degrades to `insufficient` if the
-     * UTXO fetch errors, so a load failure never yields an unsafe auto-inscribe.
-     * The UI branches on `.status`; the invisible default is `auto`.
-     */
-    fundingRecommendation$ = this.fundingRec.recommend(this.utxos$, this.fundingTarget$).pipe(catchError(() => of({
-        status: 'insufficient',
-        recommended: null,
-        candidates: [],
-    })), shareReplay({ bufferSize: 1, refCount: true }));
-    lastRecommendationSnapshot = {
-        status: 'insufficient',
-        recommended: null,
-        candidates: [],
+    deps;
+    wallet = null;
+    utxos = [];
+    // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
+    // recompute whose captured seq is stale drops its result instead of
+    // overwriting a newer snapshot (the plain-class replacement for switchMap).
+    recomputeSeq = 0;
+    snap = {
+        state: 'idle',
+        feeRate: null,
+        selectedUtxo: null,
+        content: null,
+        simulations: [],
+        fundingRecommendation: EMPTY_RECOMMENDATION,
+        errorMessage: null,
+        successResult: null,
     };
-    // --- Setup --------------------------------------------------------------
-    constructor() {
-        // Auto-reset writables when the wallet changes — the old UTXO is
-        // no longer in the new wallet's list, and stale fee / content
-        // state must not leak across sessions. Subscription leak is fine:
-        // the service is providedIn:'root' so its lifetime is the app's.
-        this.walletChangeSub = this.wallet.connectedWallet$.subscribe((w) => {
-            if (!w) {
-                this.lastWalletAddress = null;
-                this.resetFormState();
-                return;
-            }
-            if (this.lastWalletAddress === w.ordinalsAddress)
-                return;
-            this.lastWalletAddress = w.ordinalsAddress;
-            this.resetFormState();
-        });
-        // Maintain a synchronous snapshot of the safe funding recommendation for
-        // mint()'s auto-fallback. Subscribed AFTER walletChangeSub so the
-        // wallet-switch reset (which clears errorMessage) runs before the utxos$
-        // error path (which sets it), which the connectedWallet$ subscription order
-        // guarantees only when this attaches second.
-        this.recommendationSnapshotSub = this.fundingRecommendation$.subscribe((r) => {
-            this.lastRecommendationSnapshot = r;
-        });
+    listeners = new Set();
+    constructor(deps) {
+        this.deps = deps;
     }
-    walletChangeSub;
-    recommendationSnapshotSub;
-    // --- Commands -----------------------------------------------------------
+    getSnapshot() {
+        return this.snap;
+    }
+    /**
+     * Subscribe to snapshot changes. Fires immediately with the current snapshot,
+     * then on every change. Returns an unsubscribe fn — bind in one line.
+     */
+    subscribe(listener) {
+        this.listeners.add(listener);
+        listener(this.snap);
+        return () => this.listeners.delete(listener);
+    }
+    /** Set (or clear) the connected wallet. On a genuine change, resets + refetches. */
+    async setWallet(wallet) {
+        const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
+        this.wallet = wallet;
+        this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
+        if (changed) {
+            this.patch({ feeRate: null, selectedUtxo: null, content: null, errorMessage: null, successResult: null });
+        }
+        if (!wallet) {
+            this.utxos = [];
+            this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
+            return;
+        }
+        this.patch({ state: 'loading-utxos' });
+        try {
+            this.utxos = await this.deps.getUtxos(wallet.paymentAddress);
+            this.patch({ state: 'ready' });
+        }
+        catch (err) {
+            this.utxos = [];
+            this.patch({ state: 'error', errorMessage: `Failed to load UTXOs: ${errMsg(err)}` });
+            return;
+        }
+        await this.recompute();
+    }
     setFeeRate(rate) {
         if (!Number.isFinite(rate) || rate <= 0)
             return;
-        this.feeRate.set(rate);
-        this.feeRateSubject.next(rate);
+        this.patch({ feeRate: rate });
+        void this.recompute();
     }
     setSelectedUtxo(utxo) {
-        this.selectedUtxo.set(utxo);
+        this.patch({ selectedUtxo: utxo });
     }
     setContent(content) {
-        this.content.set(content);
-        this.contentSubject.next(content);
+        this.patch({ content });
+        void this.recompute();
     }
     /**
-     * Trigger the inscribe. Requires a connected wallet, a feeRate set,
-     * a selectedUtxo, and content set. Composes:
-     *   1. `simulateInscribeFees` for the picked UTXO to derive the
-     *      exact commit / reveal fee at broadcast time.
-     *   2. `inscribeAndBroadcast` — signs the commit input via the
-     *      wallet, broadcasts commit, signs reveal internally,
-     *      broadcasts reveal — via `Cat21Service.postTransaction`.
-     *
-     * Transitions state to `minting` → `success` (with `successResult`)
-     * or `error` (with `errorMessage`).
+     * Execute the inscribe: pick (explicit override, else the safe auto-clean
+     * recommendation — never an asset coin unless the user chose it), then
+     * `inscribeAndBroadcast` (build commit + reveal, wallet-sign the commit's
+     * single funding input, broadcast both). Watch-only wallets bridge through
+     * `promptForSignedPsbt`.
      */
-    mint(
-    // Watch-only (xpub) wallets sign the commit via this export/paste bridge;
-    // injected wallets ignore it. A watch-only inscribe throws without it
-    // (psbtExportSigner). Same contract as the four cat21 orchestrators.
-    promptForSignedPsbt) {
-        const wallet = this.connectedWallet();
-        const feeRate = this.feeRate();
-        const content = this.content();
-        // Expert-mode pick wins; otherwise fall back to the SAFE auto-recommendation
-        // — but ONLY a content-clean covering coin (`status: 'auto'`). When only
-        // asset coins cover (`expert-required`) there is no safe auto-inscribe:
-        // error so the UI surfaces the picker instead of spending a valuable coin.
-        const recommendation = this.lastRecommendationSnapshot;
-        const selected = this.selectedUtxo() ??
-            (recommendation.status === 'auto' ? recommendation.recommended : null);
+    async mint(promptForSignedPsbt) {
+        const wallet = this.wallet;
+        const feeRate = this.snap.feeRate;
+        const content = this.snap.content;
+        const rec = this.snap.fundingRecommendation;
+        const selected = this.snap.selectedUtxo ?? (rec.status === 'auto' ? rec.recommended : null);
         if (!wallet)
-            return throwError(() => new Error('No wallet connected'));
+            throw new Error('No wallet connected');
         if (!feeRate)
-            return throwError(() => new Error('No fee rate set'));
+            throw new Error('No fee rate set');
         if (!selected) {
-            const msg = recommendation.status === 'expert-required'
+            throw new Error(rec.status === 'expert-required'
                 ? 'Select a funding UTXO (the available coins carry assets)'
-                : 'No UTXO selected';
-            return throwError(() => new Error(msg));
+                : 'No UTXO selected');
         }
         if (!content)
-            return throwError(() => new Error('No inscription content set'));
-        const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
-        const recipient = content.recipient ?? wallet.ordinalsAddress;
-        this.state.set('minting');
-        this.errorMessage.set(null);
-        this.successResult.set(null);
-        return inscribeAndBroadcast({
-            walletType: wallet.type,
-            paymentOutput: selected,
-            paymentPublicKey,
-            paymentAddress: wallet.paymentAddress,
-            recipientAddress: recipient,
-            body: content.body,
-            contentType: content.contentType,
-            envelopeFields: content.envelopeFields,
-            feeRatePerVbyte: feeRate,
-            tip: content.tip,
-            note: content.note,
-            parent: content.parent,
-            contentEncoding: content.contentEncoding,
-            pointer: content.pointer,
-            metadata: content.metadata,
-            metaprotocol: content.metaprotocol,
-            delegate: content.delegate,
-            rune: content.rune,
-            properties: content.properties,
-            propertyEncoding: content.propertyEncoding,
-            minimalTagPush: content.minimalTagPush,
-            network: this.network,
-            broadcast: (txHex) => this.cat21.postTransaction(txHex),
-            promptForSignedPsbt,
-        }).pipe(tap((result) => {
-            this.successResult.set(result);
-            this.state.set('success');
-        }), catchError((err) => {
-            const msg = err instanceof Error ? err.message : String(err);
-            this.errorMessage.set(msg);
-            this.state.set('error');
-            return throwError(() => err);
-        }));
+            throw new Error('No inscription content set');
+        this.patch({ state: 'minting', errorMessage: null, successResult: null });
+        try {
+            const result = await firstValueFrom(inscribeAndBroadcast({
+                walletType: wallet.type,
+                paymentOutput: selected,
+                paymentPublicKey: hex.decode(wallet.paymentPublicKey),
+                paymentAddress: wallet.paymentAddress,
+                recipientAddress: content.recipient ?? wallet.ordinalsAddress,
+                body: content.body,
+                contentType: content.contentType,
+                envelopeFields: content.envelopeFields,
+                feeRatePerVbyte: feeRate,
+                tip: content.tip,
+                note: content.note,
+                parent: content.parent,
+                contentEncoding: content.contentEncoding,
+                pointer: content.pointer,
+                metadata: content.metadata,
+                metaprotocol: content.metaprotocol,
+                delegate: content.delegate,
+                rune: content.rune,
+                properties: content.properties,
+                propertyEncoding: content.propertyEncoding,
+                minimalTagPush: content.minimalTagPush,
+                network: this.deps.network,
+                broadcast: (txHex) => from(this.deps.broadcast(txHex)),
+                promptForSignedPsbt: promptForSignedPsbt
+                    ? (unsigned) => from(promptForSignedPsbt(unsigned))
+                    : undefined,
+            }));
+            this.patch({ state: 'success', successResult: result });
+            return result;
+        }
+        catch (err) {
+            this.patch({ state: 'error', errorMessage: errMsg(err) });
+            throw err;
+        }
     }
-    /**
-     * Wipe form state back to a fresh mint (typically the "Mint another"
-     * button on the success screen). Keeps the wallet connected.
-     */
+    /** "Inscribe another" — wipe form state, keep the wallet. */
     reset() {
-        this.resetFormState();
-        this.state.set(this.connectedWallet() ? 'ready' : 'idle');
+        this.patch({
+            feeRate: null,
+            selectedUtxo: null,
+            content: null,
+            simulations: [],
+            fundingRecommendation: EMPTY_RECOMMENDATION,
+            errorMessage: null,
+            successResult: null,
+            state: this.wallet ? 'ready' : 'idle',
+        });
     }
-    // --- Internals ----------------------------------------------------------
-    resetFormState() {
-        this.feeRate.set(null);
-        this.feeRateSubject.next(null);
-        this.selectedUtxo.set(null);
-        this.content.set(null);
-        this.contentSubject.next(null);
-        this.errorMessage.set(null);
-        this.successResult.set(null);
-    }
-    computeSimulations(utxos, wallet, feeRate, content) {
-        if (!wallet || !feeRate || !content || utxos.length === 0)
-            return [];
+    // --- internals ----------------------------------------------------------
+    async recompute() {
+        const seq = ++this.recomputeSeq;
+        const wallet = this.wallet;
+        const feeRate = this.snap.feeRate;
+        const content = this.snap.content;
+        if (!wallet || !feeRate || !content || this.utxos.length === 0) {
+            this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
+            return;
+        }
         const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
         const recipient = content.recipient ?? wallet.ordinalsAddress;
-        // Deterministic dummy x-only pubkey; simulateInscribeFees only
-        // uses it to size the envelope (all 32-byte pubkeys produce the
-        // same envelope byte count). The real ephemeral key is generated
-        // inside `inscribeAndBroadcast` at mint time.
-        const dummyPubkeyXonly = new Uint8Array(32).fill(0x02);
-        const out = [];
-        for (const utxo of utxos) {
+        const simulations = this.utxos.map((utxo) => {
             try {
                 const fundingInput = prepareInscribeFundingInput({
                     utxo,
                     paymentPublicKey,
                     paymentAddress: wallet.paymentAddress,
                     isSimulation: true,
-                    network: this.network,
+                    network: this.deps.network,
                 });
                 const simulation = simulateInscribeFees({
                     feeRatePerVbyte: feeRate,
@@ -11838,41 +10980,75 @@ class InscribeMintOrchestrator {
                     fundingInput,
                     senderChangeAddress: wallet.paymentAddress,
                     recipientAddress: recipient,
-                    ephemeralPubkeyXonly: dummyPubkeyXonly,
+                    ephemeralPubkeyXonly: DUMMY_PUBKEY_XONLY,
                     tip: content.tip,
                     walletType: wallet.type,
-                    network: this.network,
+                    network: this.deps.network,
                 });
-                // Second gate: the UTXO must fund the whole commit
-                // (commitOutputValueSats + commitFeeSats). `simulateInscribeFees`
-                // itself doesn't reject on insufficient — it just reports the
-                // requirement. The commit builder would throw at real mint
-                // time on inputs < requirement; flag here so the picker
-                // greys out unusable rows.
-                if (utxo.value < simulation.fundingRequirementSats) {
-                    out.push({ utxo, simulation, insufficient: true });
-                }
-                else {
-                    out.push({ utxo, simulation, insufficient: false });
-                }
+                // The UTXO must fund the whole commit (commitOutputValueSats +
+                // commitFeeSats); simulateInscribeFees reports the requirement but
+                // doesn't reject. Flag unusable rows so the picker greys them out.
+                return { utxo, simulation, insufficient: utxo.value < simulation.fundingRequirementSats };
             }
-            catch (err) {
-                // Layer-1 / Layer-2 refused this UTXO (e.g., legacy P2PKH
-                // without transactionHex, or address adapter rejection).
-                // Surface as insufficient so the picker greys it out.
-                console.error('[inscribe-mint-orchestrator] simulation threw for utxo', utxo.txid, ':', err);
-                out.push({ utxo, simulation: null, insufficient: true });
+            catch {
+                return { utxo, simulation: null, insufficient: true };
+            }
+        });
+        // The funding target is the requirement against a synthetic large-value
+        // input (depends on content + fee + input script type, not the coin's
+        // value), so coin-selection safety is known before any coin is chosen.
+        let target = null;
+        try {
+            const fundingInput = prepareInscribeFundingInput({
+                utxo: { txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } },
+                paymentPublicKey,
+                paymentAddress: wallet.paymentAddress,
+                isSimulation: true,
+                network: this.deps.network,
+            });
+            target = simulateInscribeFees({
+                feeRatePerVbyte: feeRate,
+                body: content.body,
+                contentType: content.contentType,
+                envelopeFields: content.envelopeFields,
+                minimalTagPush: content.minimalTagPush,
+                fundingInput,
+                senderChangeAddress: wallet.paymentAddress,
+                recipientAddress: recipient,
+                ephemeralPubkeyXonly: DUMMY_PUBKEY_XONLY,
+                tip: content.tip,
+                walletType: wallet.type,
+                network: this.deps.network,
+            }).fundingRequirementSats;
+        }
+        catch {
+            target = null;
+        }
+        let fundingRecommendation;
+        if (target === null) {
+            fundingRecommendation = EMPTY_RECOMMENDATION;
+        }
+        else {
+            try {
+                fundingRecommendation = await selectFunding(this.utxos, target, this.deps.scan);
+            }
+            catch {
+                fundingRecommendation = EMPTY_RECOMMENDATION;
             }
         }
-        return out;
+        if (seq !== this.recomputeSeq)
+            return; // a newer input superseded this run
+        this.patch({ simulations, fundingRecommendation });
     }
-    static ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: InscribeMintOrchestrator, deps: [], target: i0.ɵɵFactoryTarget.Injectable });
-    static ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: InscribeMintOrchestrator, providedIn: 'root' });
+    patch(next) {
+        this.snap = { ...this.snap, ...next };
+        for (const l of this.listeners)
+            l(this.snap);
+    }
 }
-i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImport: i0, type: InscribeMintOrchestrator, decorators: [{
-            type: Injectable,
-            args: [{ providedIn: 'root' }]
-        }], ctorParameters: () => [] });
+function errMsg(err) {
+    return err instanceof Error ? err.message : String(err);
+}
 
 /* eslint-disable */
 // @ts-nocheck
@@ -13098,5 +12274,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, liftRecommendationByOutpoint, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decodePastedPsbt, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, liftRecommendationByOutpoint, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map
