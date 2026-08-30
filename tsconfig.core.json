@@ -73,6 +73,8 @@
     "src/cat21-offer/cat21-offer.types.ts",
     "src/cat21-offer/cat21-offer-input-adapter.ts",
     "src/cat21-offer/cat21-create-offer-orchestrator.ts",
+    "src/cat21-offer/decode-pasted-psbt.ts",
+    "src/cat21-offer/cat21-accept-offer-orchestrator.ts",
     "src/cat21-broadcast/broadcast.helper.ts",
     "src/cat21-broadcast/slipstream.helper.ts",
     "src/cat21-share/index.ts",

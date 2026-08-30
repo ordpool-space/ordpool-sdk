@@ -1,7 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { base64, hex } from '@scure/base';
-import * as btc from '@scure/btc-signer';
 import { Observable, Subscription, catchError, of, switchMap, tap, throwError } from 'rxjs';
 
 import { Cat21Service } from '../cat21-mint/cat21.service';
@@ -16,6 +14,7 @@ import {
   Cat21OfferValidationResult,
 } from './cat21-offer.types';
 import { validateCat21BuyOfferPsbt } from './cat21-offer.helper';
+import { decodePastedPsbt } from './decode-pasted-psbt';
 
 /**
  * The seller's view of a pasted offer PSBT after validation. Carries
@@ -367,17 +366,3 @@ export class Cat21AcceptOfferOrchestrator {
   }
 }
 
-/**
- * Decode a base64- or hex-encoded PSBT to raw bytes. Same sniff logic
- * as `psbt-export.signer.ts` — kept duplicated here so the offer flow
- * doesn't depend on the watch-only signer module.
- */
-function decodePastedPsbt(input: string): Uint8Array {
-  const trimmed = input.trim();
-  if (!trimmed) throw new Error('Pasted offer is empty');
-  if (trimmed.startsWith('cHNidP')) return base64.decode(trimmed);
-  if (/^70736274ff/i.test(trimmed) && trimmed.length % 2 === 0) {
-    return hex.decode(trimmed.toLowerCase());
-  }
-  throw new Error('Offer must be base64 or hex PSBT (start: "cHNidP" or "70736274ff")');
-}

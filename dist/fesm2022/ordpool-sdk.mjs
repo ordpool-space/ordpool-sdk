@@ -9454,6 +9454,25 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
         }] });
 
 /**
+ * Decode a base64- or hex-encoded PSBT paste to raw bytes. All standard PSBTs
+ * start with the magic bytes `0x70736274ff` ("psbt" + 0xff): base64-encoded
+ * that is the prefix `cHNidP`, hex-encoded it is literally `70736274ff`. The
+ * accept-offer flow uses this to turn a seller's pasted `?offer=…` artifact
+ * into bytes without depending on the watch-only signer module.
+ */
+function decodePastedPsbt(input) {
+    const trimmed = input.trim();
+    if (!trimmed)
+        throw new Error('Pasted offer is empty');
+    if (trimmed.startsWith('cHNidP'))
+        return base64.decode(trimmed);
+    if (/^70736274ff/i.test(trimmed) && trimmed.length % 2 === 0) {
+        return hex.decode(trimmed.toLowerCase());
+    }
+    throw new Error('Offer must be base64 or hex PSBT (start: "cHNidP" or "70736274ff")');
+}
+
+/**
  * Seller-side CAT-21 buy-offer accept. Pastes a base64 PSBT, validates
  * (right cat / right price / right address / sniping-proof shape),
  * lets the seller sign input 0, broadcasts.
@@ -9747,22 +9766,6 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.3.25", ngImpo
             type: Injectable,
             args: [{ providedIn: 'root' }]
         }] });
-/**
- * Decode a base64- or hex-encoded PSBT to raw bytes. Same sniff logic
- * as `psbt-export.signer.ts` — kept duplicated here so the offer flow
- * doesn't depend on the watch-only signer module.
- */
-function decodePastedPsbt(input) {
-    const trimmed = input.trim();
-    if (!trimmed)
-        throw new Error('Pasted offer is empty');
-    if (trimmed.startsWith('cHNidP'))
-        return base64.decode(trimmed);
-    if (/^70736274ff/i.test(trimmed) && trimmed.length % 2 === 0) {
-        return hex.decode(trimmed.toLowerCase());
-    }
-    throw new Error('Offer must be base64 or hex PSBT (start: "cHNidP" or "70736274ff")');
-}
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}, kept for legacy import paths. The
