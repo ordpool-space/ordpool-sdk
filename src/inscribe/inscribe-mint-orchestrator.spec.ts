@@ -144,4 +144,31 @@ describe('InscribeMintOrchestrator (framework-agnostic)', () => {
     expect(s.fundingRecommendation.status).toBe('insufficient');
     expect(s.state).toBe('ready');
   });
+
+  it('disconnect (setWallet(null)) returns to idle and clears the grid', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent(content);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
+    await o.setWallet(null);
+    expect(o.getSnapshot().state).toBe('idle');
+    expect(o.getSnapshot().simulations).toEqual([]);
+  });
+
+  it('reset() with no wallet connected returns to idle', () => {
+    const o = new InscribeMintOrchestrator(deps());
+    o.reset();
+    expect(o.getSnapshot().state).toBe('idle');
+  });
+
+  it('mint() drives state:error when the wallet signer is unavailable', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent(content);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
+    await expect(o.mint()).rejects.toThrow();
+    expect(o.getSnapshot().state).toBe('error');
+  });
 });

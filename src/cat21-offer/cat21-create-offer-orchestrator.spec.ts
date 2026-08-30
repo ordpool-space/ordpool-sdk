@@ -165,4 +165,29 @@ describe('Cat21CreateOfferOrchestrator (framework-agnostic)', () => {
     expect(o.getSnapshot().simulation).toBeNull();
     await expect(o.createOffer()).rejects.toThrow(/Insufficient funds for buy-offer/);
   });
+
+  it('disconnect (setWallet(null)) returns to idle and clears the simulation', async () => {
+    const o = new Cat21CreateOfferOrchestrator(deps());
+    await o.setWallet(wallet);
+    fillInputs(o);
+    await waitFor(o, (s) => s.simulation !== null);
+    await o.setWallet(null);
+    expect(o.getSnapshot().state).toBe('idle');
+    expect(o.getSnapshot().simulation).toBeNull();
+  });
+
+  it('reset() with no wallet connected returns to idle', () => {
+    const o = new Cat21CreateOfferOrchestrator(deps());
+    o.reset();
+    expect(o.getSnapshot().state).toBe('idle');
+  });
+
+  it('createOffer() drives state:error when the wallet signer is unavailable', async () => {
+    const o = new Cat21CreateOfferOrchestrator(deps());
+    await o.setWallet(wallet);
+    fillInputs(o);
+    await waitFor(o, (s) => s.simulation !== null);
+    await expect(o.createOffer()).rejects.toThrow();
+    expect(o.getSnapshot().state).toBe('error');
+  });
 });

@@ -114,6 +114,36 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     expect(seen).toHaveLength(countAtUnsub); // no more after unsubscribe
   });
 
+  it('disconnect (setWallet(null)) returns to idle and clears the grid', async () => {
+    const o = new Cat21MintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
+    await o.setWallet(null);
+    const s = o.getSnapshot();
+    expect(s.state).toBe('idle');
+    expect(s.simulations).toEqual([]);
+    expect(s.fundingRecommendation.status).toBe('insufficient');
+  });
+
+  it('reset() with no wallet connected returns to idle', () => {
+    const o = new Cat21MintOrchestrator(deps());
+    o.reset();
+    expect(o.getSnapshot().state).toBe('idle');
+  });
+
+  it('mint() drives state:error when the wallet signer is unavailable (no browser provider)', async () => {
+    const o = new Cat21MintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
+    // Inputs are valid, so this passes every guard and reaches the signer,
+    // which has no browser provider in node -> the catch arm must fire.
+    await expect(o.mint()).rejects.toThrow();
+    expect(o.getSnapshot().state).toBe('error');
+    expect(o.getSnapshot().errorMessage).toBeTruthy();
+  });
+
   it('a genuine wallet change resets fee + selection', async () => {
     const o = new Cat21MintOrchestrator(deps());
     await o.setWallet(wallet);

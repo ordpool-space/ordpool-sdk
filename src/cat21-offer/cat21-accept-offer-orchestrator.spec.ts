@@ -178,4 +178,27 @@ describe('Cat21AcceptOfferOrchestrator (framework-agnostic)', () => {
     bot.reset();
     expect(bot.getSnapshot().floorPriceSats).toBeNull(); // the "explicit floor" gate re-arms
   });
+
+  it('reset() returns to idle', () => {
+    const o = new Cat21AcceptOfferOrchestrator(deps());
+    o.setWallet(wallet);
+    fillIntent(o);
+    o.setPastedOffer(buildOfferBase64());
+    expect(o.getSnapshot().state).toBe('parsed');
+    o.reset();
+    expect(o.getSnapshot().state).toBe('idle');
+    expect(o.getSnapshot().preview).toBeNull();
+  });
+
+  it('acceptOffer() drives state:error when the wallet signer is unavailable', async () => {
+    const o = new Cat21AcceptOfferOrchestrator(deps());
+    o.setWallet(wallet);
+    fillIntent(o);
+    o.setPastedOffer(buildOfferBase64());
+    expect(o.getSnapshot().state).toBe('parsed');
+    // Valid parsed offer -> passes the guards, reaches the seller signer, which
+    // has no browser provider in node -> the catch arm must fire.
+    await expect(o.acceptOffer()).rejects.toThrow();
+    expect(o.getSnapshot().state).toBe('error');
+  });
 });

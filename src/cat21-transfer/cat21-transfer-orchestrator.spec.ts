@@ -144,6 +144,35 @@ describe('Cat21TransferOrchestrator (framework-agnostic)', () => {
     await expect(o.transfer()).rejects.toThrow(/Insufficient funds for transfer/);
   });
 
+  it('disconnect (setWallet(null)) returns to idle and clears the simulation', async () => {
+    const o = new Cat21TransferOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.simulation !== null);
+    await o.setWallet(null);
+    expect(o.getSnapshot().state).toBe('idle');
+    expect(o.getSnapshot().simulation).toBeNull();
+  });
+
+  it('reset() with no wallet connected returns to idle', () => {
+    const o = new Cat21TransferOrchestrator(deps());
+    o.reset();
+    expect(o.getSnapshot().state).toBe('idle');
+  });
+
+  it('transfer() drives state:error when the wallet signer is unavailable', async () => {
+    const o = new Cat21TransferOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.simulation !== null);
+    await expect(o.transfer()).rejects.toThrow();
+    expect(o.getSnapshot().state).toBe('error');
+  });
+
   it('race: a stale recompute never overwrites a newer snapshot (seq guard)', async () => {
     // Gate scan.classify so recomputes can be resolved out of order.
     const gates: Array<(v: 'clean' | 'has-assets') => void> = [];
