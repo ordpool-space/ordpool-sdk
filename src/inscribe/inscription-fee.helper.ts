@@ -2,7 +2,7 @@ import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
-import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
@@ -178,10 +178,16 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   const revealVsize = reveal.revealVsize;
   const revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
 
-  // ---- Step 2: commit two-pass with revealFeeReserve = revealFeeSats. ----
-  // Reuse the existing twoPassFeeSimulation pattern.
-  const { finalFeeSats: commitFeeSats, vsize: commitVsize, finalSimulation } = twoPassFeeSimulation({
+  // ---- Step 2: commit fee (revealFeeReserve = revealFeeSats). ----
+  // The funding coin covers the commit output (cat postage + reveal-fee reserve
+  // + tip) + the commit miner fee + change. `resolveCatTxFee` measures both tx
+  // forms (with-change / no-change) from real builds — no vB seed — and a coin
+  // that only fits the no-change/absorb form is not falsely rejected.
+  const commitOutputValueSats = INSCRIBE_POSTAGE_SATS + revealFeeSats + tipValueSats;
+  const commitFeeBudget = args.fundingInput.value - commitOutputValueSats;
+  const resolvedCommit = resolveCatTxFee({
     feeRatePerVbyte: args.feeRatePerVbyte,
+    feeBudgetSats: commitFeeBudget,
     simulate: (feeSats: number) => {
       const commit = buildInscribeCommitPsbt({
         fundingInput: args.fundingInput,
@@ -195,21 +201,23 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         changeDustLimitSats: args.changeDustLimitSats,
         network: args.network,
       });
-      // Decode the PSBT, dummy-sign the funding input, finalize,
-      // read vsize. Same pattern cat21's simulateTransaction uses
-      // (cat21.service.ts:176). Allows both DEFAULT and ALL
-      // sighash because the funding input is taproot when the
-      // caller passes a Taproot wallet via the Layer-2 adapter's
-      // simulation mode.
+      // Dummy-sign the funding input + finalize to read the real vsize. DEFAULT
+      // and ALL are both accepted (taproot funding via the Layer-2 sim adapter).
       const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
       const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
       tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
       tx.finalize();
-      return { vsize: tx.vsize, commit };
+      return { vsize: tx.vsize, finalFeeSats: commitFeeBudget - commit.changeSats };
     },
   });
-
-  const commitOutputValueSats = finalSimulation.commit.commitOutputValueSats;
+  if (!resolvedCommit) {
+    throw new Error(
+      `Funding insufficient for inscribe commit: input=${args.fundingInput.value} < ` +
+      `${commitOutputValueSats} (commit output) + fee`,
+    );
+  }
+  const commitFeeSats = resolvedCommit.finalFeeSats;
+  const commitVsize = resolvedCommit.vsize;
   return {
     commitFeeSats,
     revealFeeSats,

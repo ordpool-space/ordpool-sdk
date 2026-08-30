@@ -8077,10 +8077,16 @@ function simulateInscribeFees(args) {
     });
     const revealVsize = reveal.revealVsize;
     const revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
-    // ---- Step 2: commit two-pass with revealFeeReserve = revealFeeSats. ----
-    // Reuse the existing twoPassFeeSimulation pattern.
-    const { finalFeeSats: commitFeeSats, vsize: commitVsize, finalSimulation } = twoPassFeeSimulation({
+    // ---- Step 2: commit fee (revealFeeReserve = revealFeeSats). ----
+    // The funding coin covers the commit output (cat postage + reveal-fee reserve
+    // + tip) + the commit miner fee + change. `resolveCatTxFee` measures both tx
+    // forms (with-change / no-change) from real builds — no vB seed — and a coin
+    // that only fits the no-change/absorb form is not falsely rejected.
+    const commitOutputValueSats = INSCRIBE_POSTAGE_SATS + revealFeeSats + tipValueSats;
+    const commitFeeBudget = args.fundingInput.value - commitOutputValueSats;
+    const resolvedCommit = resolveCatTxFee({
         feeRatePerVbyte: args.feeRatePerVbyte,
+        feeBudgetSats: commitFeeBudget,
         simulate: (feeSats) => {
             const commit = buildInscribeCommitPsbt({
                 fundingInput: args.fundingInput,
@@ -8094,20 +8100,21 @@ function simulateInscribeFees(args) {
                 changeDustLimitSats: args.changeDustLimitSats,
                 network: args.network,
             });
-            // Decode the PSBT, dummy-sign the funding input, finalize,
-            // read vsize. Same pattern cat21's simulateTransaction uses
-            // (cat21.service.ts:176). Allows both DEFAULT and ALL
-            // sighash because the funding input is taproot when the
-            // caller passes a Taproot wallet via the Layer-2 adapter's
-            // simulation mode.
+            // Dummy-sign the funding input + finalize to read the real vsize. DEFAULT
+            // and ALL are both accepted (taproot funding via the Layer-2 sim adapter).
             const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
             const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
             tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
             tx.finalize();
-            return { vsize: tx.vsize, commit };
+            return { vsize: tx.vsize, finalFeeSats: commitFeeBudget - commit.changeSats };
         },
     });
-    const commitOutputValueSats = finalSimulation.commit.commitOutputValueSats;
+    if (!resolvedCommit) {
+        throw new Error(`Funding insufficient for inscribe commit: input=${args.fundingInput.value} < ` +
+            `${commitOutputValueSats} (commit output) + fee`);
+    }
+    const commitFeeSats = resolvedCommit.finalFeeSats;
+    const commitVsize = resolvedCommit.vsize;
     return {
         commitFeeSats,
         revealFeeSats,
@@ -8564,9 +8571,14 @@ function createChildInscribeTransactions(args) {
         });
         revealVsize = simChildReveal.revealVsize;
         revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
-        // Commit two-pass with revealFeeReserve = the CHILD reveal fee.
-        const twoPass = twoPassFeeSimulation({
+        // Commit fee via the guess-free two-topology resolver (revealFeeReserve =
+        // the CHILD reveal fee). No vB seed; no-change/absorb fallback so a coin
+        // that only fits the no-change form isn't falsely rejected.
+        commitOutputValueSats = INSCRIBE_POSTAGE_SATS + revealFeeSats + tipValueSats;
+        const commitFeeBudget = simFundingInput.value - commitOutputValueSats;
+        const resolvedCommit = resolveCatTxFee({
             feeRatePerVbyte: args.feeRatePerVbyte,
+            feeBudgetSats: commitFeeBudget,
             simulate: (feeSats) => {
                 const commit = buildInscribeCommitPsbt({
                     fundingInput: simFundingInput,
@@ -8583,12 +8595,15 @@ function createChildInscribeTransactions(args) {
                 const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
                 tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
                 tx.finalize();
-                return { vsize: tx.vsize, commit };
+                return { vsize: tx.vsize, finalFeeSats: commitFeeBudget - commit.changeSats };
             },
         });
-        commitFeeSats = twoPass.finalFeeSats;
-        commitVsize = twoPass.vsize;
-        commitOutputValueSats = twoPass.finalSimulation.commit.commitOutputValueSats;
+        if (!resolvedCommit) {
+            throw new Error(`Funding insufficient for inscribe commit: input=${simFundingInput.value} < ` +
+                `${commitOutputValueSats} (commit output) + fee`);
+        }
+        commitFeeSats = resolvedCommit.finalFeeSats;
+        commitVsize = resolvedCommit.vsize;
     }
     catch (err) {
         if (err instanceof Error && /Funding insufficient/.test(err.message)) {

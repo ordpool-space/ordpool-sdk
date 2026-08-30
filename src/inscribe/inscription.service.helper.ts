@@ -30,9 +30,9 @@ import {
 } from './inscription-reveal.helper';
 import {
   simulateInscribeFees,
-  twoPassFeeSimulation,
   type SimulateInscribeFeesResult,
 } from './inscription-fee.helper';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import {
   buildChildInscribeRevealTx,
   type ChildRevealParent,
@@ -728,9 +728,14 @@ export function createChildInscribeTransactions(
     revealVsize = simChildReveal.revealVsize;
     revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
 
-    // Commit two-pass with revealFeeReserve = the CHILD reveal fee.
-    const twoPass = twoPassFeeSimulation({
+    // Commit fee via the guess-free two-topology resolver (revealFeeReserve =
+    // the CHILD reveal fee). No vB seed; no-change/absorb fallback so a coin
+    // that only fits the no-change form isn't falsely rejected.
+    commitOutputValueSats = INSCRIBE_POSTAGE_SATS + revealFeeSats + tipValueSats;
+    const commitFeeBudget = simFundingInput.value - commitOutputValueSats;
+    const resolvedCommit = resolveCatTxFee({
       feeRatePerVbyte: args.feeRatePerVbyte,
+      feeBudgetSats: commitFeeBudget,
       simulate: (feeSats: number) => {
         const commit = buildInscribeCommitPsbt({
           fundingInput: simFundingInput,
@@ -747,12 +752,17 @@ export function createChildInscribeTransactions(
         const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
         tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
         tx.finalize();
-        return { vsize: tx.vsize, commit };
+        return { vsize: tx.vsize, finalFeeSats: commitFeeBudget - commit.changeSats };
       },
     });
-    commitFeeSats = twoPass.finalFeeSats;
-    commitVsize = twoPass.vsize;
-    commitOutputValueSats = twoPass.finalSimulation.commit.commitOutputValueSats;
+    if (!resolvedCommit) {
+      throw new Error(
+        `Funding insufficient for inscribe commit: input=${simFundingInput.value} < ` +
+        `${commitOutputValueSats} (commit output) + fee`,
+      );
+    }
+    commitFeeSats = resolvedCommit.finalFeeSats;
+    commitVsize = resolvedCommit.vsize;
   } catch (err) {
     if (err instanceof Error && /Funding insufficient/.test(err.message)) {
       throw new Error(
