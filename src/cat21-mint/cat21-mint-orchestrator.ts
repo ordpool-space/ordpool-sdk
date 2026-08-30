@@ -1,11 +1,14 @@
 import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
-import { ContentScanPort } from '../cat21-core/ports';
-import { MINT_FEE_VBYTE_CEILING } from '../cat21-core/mint.core';
-import { selectFunding } from '../cat21-core/select-funding';
-import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
-import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety';
+import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports';
+import { MintCoreParams, simulateMint } from '../cat21-core/mint.core';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
+import {
+  AnnotatedFundingUtxo,
+  FundingRecommendation,
+  liftRecommendationByOutpoint,
+} from '../cat21-fee/funding-safety';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { Network } from '../network';
 import { findSignerOrThrow } from '../wallet/signers';
@@ -179,27 +182,13 @@ export class Cat21MintOrchestrator {
     }
 
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
-    let transactionFee: bigint;
-    try {
-      const { finalFeeSats } = twoPassFeeSimulation({
-        simulate: (feeSats) =>
-          simulateMintTransaction(
-            wallet.type,
-            wallet.ordinalsAddress,
-            selected,
-            wallet.paymentAddress,
-            paymentPublicKey,
-            BigInt(feeSats),
-            this.deps.network,
-          ),
-        feeRatePerVbyte: feeRate,
-        placeholderFeeSats: Math.ceil(feeRate * MINT_FEE_VBYTE_CEILING),
-      });
-      transactionFee = BigInt(finalFeeSats);
-    } catch (err) {
-      this.patch({ state: 'error', errorMessage: errMsg(err) });
-      throw err;
+    const resolved = this.resolveFee(wallet, selected, paymentPublicKey, feeRate);
+    if (!resolved) {
+      const msg = 'Insufficient funds for the mint at the current fee rate';
+      this.patch({ state: 'error', errorMessage: msg });
+      throw new Error(msg);
     }
+    const transactionFee = BigInt(resolved.finalFeeSats);
 
     this.patch({ state: 'minting', errorMessage: null, successTxId: null });
     try {
@@ -258,37 +247,24 @@ export class Cat21MintOrchestrator {
       return;
     }
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
+    // Per-UTXO grid (no core twin — the expert picker's fee breakdown). Each
+    // row's fee is resolved guess-free (measured vsize, no-change fallback).
     const simulations = this.utxos.map<UtxoSimulationRow>((utxo) => {
-      try {
-        const { finalSimulation, finalFeeSats } = twoPassFeeSimulation({
-          simulate: (feeSats) =>
-            simulateMintTransaction(
-              wallet.type,
-              wallet.ordinalsAddress,
-              utxo,
-              wallet.paymentAddress,
-              paymentPublicKey,
-              BigInt(feeSats),
-              this.deps.network,
-            ),
-          feeRatePerVbyte: feeRate,
-          placeholderFeeSats: Math.ceil(feeRate * MINT_FEE_VBYTE_CEILING),
-        });
-        return {
-          utxo,
-          simulation: { ...finalSimulation, finalTransactionFee: BigInt(finalFeeSats) },
-          insufficient: false,
-        };
-      } catch {
-        return { utxo, simulation: null, insufficient: true };
-      }
+      const resolved = this.resolveFee(wallet, utxo, paymentPublicKey, feeRate);
+      return resolved
+        ? { utxo, simulation: { ...resolved.sim, finalTransactionFee: BigInt(resolved.finalFeeSats) }, insufficient: false }
+        : { utxo, simulation: null, insufficient: true };
     });
-
-    // Funding covers the fresh cat's postage (546) + the miner fee ceiling.
-    const target = CAT21_POSTAGE_SATS + Math.ceil(feeRate * MINT_FEE_VBYTE_CEILING);
-    let fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
+    // Safe-auto recommendation: delegate to mint.core's `simulateMint` (the
+    // guess-free target + content-scan selection, single source of truth), then
+    // lift its CoreFundingUtxo picks back into the TxnOutput domain by outpoint.
+    let fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = EMPTY_RECOMMENDATION;
     try {
-      fundingRecommendation = await selectFunding<TxnOutput>(this.utxos, target, this.deps.scan);
+      const mintSim = await simulateMint(this.mintParams(wallet, paymentPublicKey, feeRate), {
+        utxos: this.utxosPort(),
+        scan: this.deps.scan,
+      });
+      fundingRecommendation = liftRecommendationByOutpoint(mintSim.recommendation, this.utxos);
     } catch {
       fundingRecommendation = EMPTY_RECOMMENDATION;
     }
@@ -296,10 +272,62 @@ export class Cat21MintOrchestrator {
     this.patch({ simulations, fundingRecommendation });
   }
 
+  /**
+   * Guess-free realised fee for one funding coin, or null when it can't mint at
+   * the fee rate. Measures the with-change form and falls back to no-change /
+   * absorb, so a coin that genuinely fits is never rejected.
+   */
+  private resolveFee(
+    wallet: MintWalletContext,
+    utxo: TxnOutput,
+    paymentPublicKey: Uint8Array,
+    feeRate: number,
+  ): { sim: SimulateTransactionResult; vsize: number; finalFeeSats: number } | null {
+    const budget = utxo.value - CAT21_POSTAGE_SATS;
+    if (budget < 0) return null;
+    return resolveCatTxFee({
+      simulate: (feeSats) => {
+        const sim = simulateMintTransaction(
+          wallet.type,
+          wallet.ordinalsAddress,
+          utxo,
+          wallet.paymentAddress,
+          paymentPublicKey,
+          BigInt(feeSats),
+          this.deps.network,
+        );
+        return { sim, vsize: sim.vsize, finalFeeSats: Number(sim.finalTransactionFee) };
+      },
+      feeRatePerVbyte: feeRate,
+      feeBudgetSats: budget,
+    });
+  }
+
+  private mintParams(wallet: MintWalletContext, paymentPublicKey: Uint8Array, feeRate: number): MintCoreParams {
+    return {
+      walletType: wallet.type,
+      network: this.deps.network,
+      paymentPublicKey,
+      paymentAddress: wallet.paymentAddress,
+      recipientAddress: wallet.ordinalsAddress,
+      feeRatePerVbyte: feeRate,
+      selectedFundingUtxo: this.snap.selectedUtxo ? toCore(this.snap.selectedUtxo) : undefined,
+    };
+  }
+
+  private utxosPort() {
+    const utxos = this.utxos;
+    return { spendableUtxos: async (): Promise<CoreFundingUtxo[]> => utxos.map(toCore) };
+  }
+
   private patch(next: Partial<MintSnapshot>): void {
     this.snap = { ...this.snap, ...next };
     for (const l of this.listeners) l(this.snap);
   }
+}
+
+function toCore(u: TxnOutput): CoreFundingUtxo {
+  return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
 }
 
 function errMsg(err: unknown): string {

@@ -98,3 +98,30 @@ export function recommendFunding<T extends AnnotatedFundingUtxo>(
   const best = selectCardinalUtxo(covering, targetSpendSats, false)!;
   return { status: 'expert-required', recommended: annotatedFor(best), candidates };
 }
+
+/**
+ * Re-key a recommendation onto a richer source type by outpoint. The core
+ * flows return `FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>`;
+ * a consumer that holds fuller UTXO objects (e.g. `TxnOutput` with confirmation
+ * status) uses this to lift the recommendation back into its own type — the
+ * scan annotation is preserved, the source object supplies its extra fields.
+ * Candidates with no matching outpoint in `source` are dropped.
+ */
+export function liftRecommendationByOutpoint<
+  S extends AnnotatedFundingUtxo,
+  T extends { txid: string; vout: number },
+>(
+  rec: FundingRecommendation<S>,
+  source: readonly T[],
+): FundingRecommendation<T & AnnotatedFundingUtxo> {
+  const byOutpoint = new Map(source.map((u) => [`${u.txid}:${u.vout}`, u] as const));
+  const lift = (c: S): (T & AnnotatedFundingUtxo) | null => {
+    const u = byOutpoint.get(`${c.txid}:${c.vout}`);
+    return u ? ({ ...c, ...u } as T & AnnotatedFundingUtxo) : null;
+  };
+  return {
+    status: rec.status,
+    recommended: rec.recommended ? lift(rec.recommended) : null,
+    candidates: rec.candidates.map(lift).filter((x): x is T & AnnotatedFundingUtxo => x !== null),
+  };
+}

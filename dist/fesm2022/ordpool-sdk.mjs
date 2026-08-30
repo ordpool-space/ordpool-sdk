@@ -5855,6 +5855,26 @@ function recommendFunding(candidates, targetSpendSats) {
     const best = selectCardinalUtxo(covering, targetSpendSats, false);
     return { status: 'expert-required', recommended: annotatedFor(best), candidates };
 }
+/**
+ * Re-key a recommendation onto a richer source type by outpoint. The core
+ * flows return `FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>`;
+ * a consumer that holds fuller UTXO objects (e.g. `TxnOutput` with confirmation
+ * status) uses this to lift the recommendation back into its own type — the
+ * scan annotation is preserved, the source object supplies its extra fields.
+ * Candidates with no matching outpoint in `source` are dropped.
+ */
+function liftRecommendationByOutpoint(rec, source) {
+    const byOutpoint = new Map(source.map((u) => [`${u.txid}:${u.vout}`, u]));
+    const lift = (c) => {
+        const u = byOutpoint.get(`${c.txid}:${c.vout}`);
+        return u ? { ...c, ...u } : null;
+    };
+    return {
+        status: rec.status,
+        recommended: rec.recommended ? lift(rec.recommended) : null,
+        candidates: rec.candidates.map(lift).filter((x) => x !== null),
+    };
+}
 
 const outpointKey = (u) => `${u.txid}:${u.vout}`;
 /**
@@ -6461,6 +6481,32 @@ function resolveFundingPick(recommendation, target, explicitSelection) {
     return recommendation.status === 'auto' ? recommendation.recommended : null;
 }
 
+function resolveCatTxFee(args) {
+    const { simulate, feeRatePerVbyte: rate, feeBudgetSats: budget } = args;
+    if (!(rate > 0))
+        throw new Error('feeRatePerVbyte must be positive');
+    if (budget < 0)
+        return null;
+    // With-change form: fee 0 keeps the leftover maximal, so a change output is
+    // present and we measure the larger of the two possible sizes.
+    const withChange = simulate(0);
+    const withChangeFee = Math.ceil(withChange.vsize * rate);
+    if (withChangeFee <= budget) {
+        // Affordable. Settle at that fee; if the leftover now falls below dust the
+        // builder drops the change output and folds it into `finalFeeSats`.
+        const settled = simulate(withChangeFee);
+        if (Math.ceil(settled.vsize * rate) <= budget)
+            return settled;
+    }
+    // With-change doesn't fit the budget. Spend the whole budget as fee (no change
+    // output; always a valid build for a covered coin) and accept iff that clears
+    // the requested rate for the no-change size.
+    const noChange = simulate(budget);
+    if (budget >= Math.ceil(noChange.vsize * rate))
+        return noChange;
+    return null;
+}
+
 /**
  * Dust threshold for the change output. 546 sats is the conservative
  * cross-address-type floor (taproot 330, segwit 294, p2sh 540 — 546
@@ -6612,8 +6658,6 @@ function prepareTransferFundingInput(args) {
     return prepareCat21Input(args);
 }
 
-/** ~200 vB fee ceiling: the funding budget a transfer coin must cover. */
-const TRANSFER_FEE_VBYTE_CEILING = 200;
 /** Build the transfer PSBT for one funding pick + fee (sim or real). */
 /**
  * Build the transfer PSBT for one funding pick + fee (simulation or real).
@@ -6665,8 +6709,22 @@ async function planTransfer(params, ports) {
         return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
     }
     const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
-    // Cat preserved (funded by input 0); funding covers ONLY the miner fee.
-    const target = Math.ceil(params.feeRatePerVbyte * TRANSFER_FEE_VBYTE_CEILING);
+    const measureVsize = (built) => computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) });
+    // Cat preserved (funded by input 0); funding covers ONLY the miner fee. GROW
+    // spends some funding on the padded cat output; SHRINK frees the cat's surplus
+    // into the fee budget. `feeBudget(coinValue)` is the max fee a given funding
+    // value can pay (whole coin, no change).
+    const catOutputSats = params.targetPostageSats ?? params.catUtxo.value;
+    const feeBudget = (coinValue) => coinValue + params.catUtxo.value - catOutputSats;
+    // Guess-free coverage target: the no-change transfer fee, measured from a real
+    // build (vsize depends on input/output TYPES, not values), replacing the old
+    // eyeballed `* 200` ceiling.
+    const largest = utxos.reduce((a, b) => (a && a.value >= b.value ? a : b), null);
+    if (!largest) {
+        return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+    }
+    const noChangeVsize = measureVsize(buildTransfer(params, largest, feeBudget(largest.value), true));
+    const target = Math.ceil(noChangeVsize * params.feeRatePerVbyte);
     const recommendation = await selectFunding(utxos, target, ports.scan);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
@@ -6679,29 +6737,26 @@ async function planTransfer(params, ports) {
             buildFeeSats: null,
         };
     }
-    try {
-        const two = twoPassFeeSimulation({
-            simulate: (feeSats) => {
-                const built = buildTransfer(params, pick, feeSats, true);
-                return { built, vsize: computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) }) };
-            },
-            feeRatePerVbyte: params.feeRatePerVbyte,
-            // Same fee budget the coin was selected against, so a small-but-viable
-            // clean coin isn't falsely rejected in pass-1 at low fee rates.
-            placeholderFeeSats: target,
-        });
-        return {
-            status: 'ready',
-            recommendation,
-            pick,
-            built: two.finalSimulation.built,
-            vsize: two.vsize,
-            buildFeeSats: two.finalFeeSats,
-        };
-    }
-    catch {
+    // Guess-free per-coin fee: with-change form, falling back to no-change/absorb.
+    const resolved = resolveCatTxFee({
+        simulate: (feeSats) => {
+            const built = buildTransfer(params, pick, feeSats, true);
+            return { built, vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+        },
+        feeRatePerVbyte: params.feeRatePerVbyte,
+        feeBudgetSats: feeBudget(pick.value),
+    });
+    if (!resolved) {
         return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
     }
+    return {
+        status: 'ready',
+        recommendation,
+        pick,
+        built: resolved.built,
+        vsize: resolved.vsize,
+        buildFeeSats: resolved.finalFeeSats,
+    };
 }
 /**
  * Preview a transfer: content-checked funding selection + two-pass fee, no
@@ -6741,15 +6796,6 @@ async function executeTransfer(params, ports) {
     return { ...outcome, feeSats: built.finalFeeSats };
 }
 
-/**
- * Conservative vB ceiling for a CAT-21 mint (1 funding input + 1 P2TR cat
- * output + 1 change output; the largest such tx measures well under this).
- * Used only as a coverage over-estimate + two-pass seed — never a charged fee;
- * the real fee is the two-pass `finalFeeSats`. Exported as the single source
- * of truth so the framework-agnostic mint orchestrator's per-UTXO grid seeds
- * its two-pass from the same value instead of re-declaring it.
- */
-const MINT_FEE_VBYTE_CEILING = 200;
 function buildMint(params, funding, feeSats, isSimulation) {
     const fundingInput = prepareMintInputForWallet({
         txid: funding.txid,
@@ -6777,9 +6823,20 @@ async function planMint(params, ports) {
     }
     const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
     const tipValue = params.tip?.valueSats ?? 0;
-    const feeCeiling = Math.ceil(params.feeRatePerVbyte * MINT_FEE_VBYTE_CEILING);
-    // Funding covers the fresh cat's postage + tip + the miner fee.
-    const target = CAT21_POSTAGE_SATS + tipValue + feeCeiling;
+    const fixedOutputs = CAT21_POSTAGE_SATS + tipValue;
+    const measureVsize = (built) => computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) });
+    // Guess-free coverage target: cat postage + tip + the NO-CHANGE miner fee,
+    // measured from a real build (no vB estimate). The no-change form is the
+    // cheapest a mint can be, so any coin >= this target can mint and any coin
+    // below it cannot — the exact feasibility threshold, replacing the old
+    // eyeballed `* 200` ceiling that wrongly excluded coins between the real
+    // threshold and the inflated one.
+    const largest = utxos.reduce((a, b) => (a && a.value >= b.value ? a : b), null);
+    if (!largest || largest.value < fixedOutputs) {
+        return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+    }
+    const noChangeVsize = measureVsize(buildMint(params, largest, largest.value - fixedOutputs, true));
+    const target = fixedOutputs + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
     const recommendation = await selectFunding(utxos, target, ports.scan);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
@@ -6792,29 +6849,28 @@ async function planMint(params, ports) {
             buildFeeSats: null,
         };
     }
-    try {
-        const two = twoPassFeeSimulation({
-            simulate: (feeSats) => {
-                const built = buildMint(params, pick, feeSats, true);
-                return { built, vsize: computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) }) };
-            },
-            feeRatePerVbyte: params.feeRatePerVbyte,
-            // Seed pass-1 with the fee component of the selection budget, not a flat
-            // 1000, so a small-but-viable clean coin isn't rejected at low fee rates.
-            placeholderFeeSats: feeCeiling,
-        });
-        return {
-            status: 'ready',
-            recommendation,
-            pick,
-            built: two.finalSimulation.built,
-            vsize: two.vsize,
-            buildFeeSats: two.finalFeeSats,
-        };
-    }
-    catch {
+    // Guess-free per-coin fee: measures the with-change form, falls back to the
+    // no-change (absorb-all) form when it doesn't fit — so a coin that genuinely
+    // fits is never falsely rejected.
+    const resolved = resolveCatTxFee({
+        simulate: (feeSats) => {
+            const built = buildMint(params, pick, feeSats, true);
+            return { built, vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+        },
+        feeRatePerVbyte: params.feeRatePerVbyte,
+        feeBudgetSats: pick.value - fixedOutputs,
+    });
+    if (!resolved) {
         return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
     }
+    return {
+        status: 'ready',
+        recommendation,
+        pick,
+        built: resolved.built,
+        vsize: resolved.vsize,
+        buildFeeSats: resolved.finalFeeSats,
+    };
 }
 /**
  * Preview a mint: content-checked funding selection + two-pass fee, no signing.
@@ -7279,8 +7335,6 @@ function prepareBuyOfferBuyerInput(args) {
     return prepareCat21Input(args);
 }
 
-/** ~220 vB fee ceiling for the buy-offer fee component. */
-const OFFER_FEE_VBYTE_CEILING = 220;
 /**
  * Build the buy-offer PSBT for one buyer funding pick + fee. Exported so the
  * framework-agnostic create-offer orchestrator reuses it instead of
@@ -7318,7 +7372,7 @@ function buildOffer(params, funding, feeSats, isSimulation) {
         priceSats: params.priceSats,
         feeSats,
     });
-    return { psbt: built.psbt };
+    return { psbt: built.psbt, changeSats: built.changeSats };
 }
 async function planOffer(params, ports) {
     const empty = recommendFunding([], 0);
@@ -7326,9 +7380,23 @@ async function planOffer(params, ports) {
         return { status: 'insufficient', recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null };
     }
     const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
-    const feeCeiling = Math.ceil(params.feeRatePerVbyte * OFFER_FEE_VBYTE_CEILING);
     // Buyer funds price + the cat's REAL UTXO value (output 0, ord parity) + fee.
-    const target = params.priceSats + params.targetCat.value + feeCeiling;
+    // `feeBudget(coinValue)` is the max fee once price + cat value are set aside.
+    const feeBudget = (coinValue) => coinValue - params.priceSats - params.targetCat.value;
+    const offerVsize = (built) => computePsbtVsize({
+        psbt: built.psbt,
+        network: toScureNetwork(params.network),
+        // Input 0 is the seller's cat UTXO (they sign later); fake its witness.
+        nonSignableInputs: [0],
+    });
+    // Guess-free coverage target: price + cat value + the NO-CHANGE offer fee,
+    // measured from a real build (no vB estimate), replacing the old `* 220`.
+    const largest = utxos.reduce((a, b) => (a && a.value >= b.value ? a : b), null);
+    if (!largest || feeBudget(largest.value) < 0) {
+        return { status: 'insufficient', recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null };
+    }
+    const noChangeVsize = offerVsize(buildOffer(params, largest, feeBudget(largest.value), true));
+    const target = params.priceSats + params.targetCat.value + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
     const recommendation = await selectFunding(utxos, target, ports.scan);
     const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
     if (!pick) {
@@ -7341,37 +7409,27 @@ async function planOffer(params, ports) {
             changeSats: null,
         };
     }
-    try {
-        const two = twoPassFeeSimulation({
-            simulate: (feeSats) => ({
-                vsize: computePsbtVsize({
-                    psbt: buildOffer(params, pick, feeSats, true).psbt,
-                    network: toScureNetwork(params.network),
-                    // Input 0 is the seller's cat UTXO (they sign later); fake its witness.
-                    nonSignableInputs: [0],
-                }),
-            }),
-            feeRatePerVbyte: params.feeRatePerVbyte,
-            placeholderFeeSats: feeCeiling,
-        });
-        // Buyer must cover price + cat value + the REAL fee; if the tightened fee
-        // pushed the requirement past the pick, surface insufficient explicitly.
-        const requiredBuyerFunding = params.priceSats + params.targetCat.value + two.finalFeeSats;
-        if (pick.value < requiredBuyerFunding) {
-            return { status: 'insufficient', recommendation, pick: null, vsize: null, feeSats: null, changeSats: null };
-        }
-        return {
-            status: 'ready',
-            recommendation,
-            pick,
-            vsize: two.vsize,
-            feeSats: two.finalFeeSats,
-            changeSats: pick.value - requiredBuyerFunding,
-        };
-    }
-    catch {
+    // Guess-free per-coin fee: with-change form, falling back to no-change/absorb.
+    const budget = feeBudget(pick.value);
+    const resolved = resolveCatTxFee({
+        simulate: (feeSats) => {
+            const built = buildOffer(params, pick, feeSats, true);
+            return { built, vsize: offerVsize(built), finalFeeSats: budget - built.changeSats };
+        },
+        feeRatePerVbyte: params.feeRatePerVbyte,
+        feeBudgetSats: budget,
+    });
+    if (!resolved) {
         return { status: 'insufficient', recommendation, pick: null, vsize: null, feeSats: null, changeSats: null };
     }
+    return {
+        status: 'ready',
+        recommendation,
+        pick,
+        vsize: resolved.vsize,
+        feeSats: resolved.finalFeeSats,
+        changeSats: resolved.built.changeSats,
+    };
 }
 /**
  * Preview a buy-offer: content-checked buyer-funding selection + two-pass fee,
@@ -13040,5 +13098,5 @@ function deny(reason, detail) {
  * Generated bundle index. Do not edit.
  */
 
-export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, MINT_FEE_VBYTE_CEILING, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
+export { AUTO_SCAN_MAX_VALUE_SAT, BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB, BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE, CAT21_LISTING_MESSAGE_VERSION, CAT21_LOCK_TIME, CAT21_OFFER_POSTAGE_SATS, CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE, CAT21_POSTAGE_SATS, CAT21_QUERY_KEYS, CAT21_SESSION_MAX_VALIDITY_MS, CAT21_SESSION_VALIDITY_MS, CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS, CAT21_TRANSFER_POSTAGE_SATS, CAT21_WALLET_INPUT_SEQUENCE, CapabilitySupport, Cat21AcceptOfferOrchestrator, Cat21ApiService, Cat21CreateOfferOrchestrator, Cat21MintOrchestrator, Cat21Service, Cat21TransferOrchestrator, DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS, FundingRecommendationService, INSCRIBE_POSTAGE_SATS, INSCRIPTION_CONTENT_ENCODINGS, InscribeMintOrchestrator, KnownOrdinalWalletType, KnownOrdinalWallets, LAST_CONNECTED_WALLET, MAX_ASK_SATS, MAX_BUY_OFFER_PSBT_BYTES, Network, ORD_ADDITIONAL_INPUT_VBYTES, ORD_ADDITIONAL_OUTPUT_VBYTES, ORD_SCHNORR_SIGNATURE_SIZE, ORD_TAGS, RARE_SAT_MAX_RANGES, SLIPSTREAM_BODY_TX_FIELD, SLIPSTREAM_DEFAULT_BASE_URL, SLIPSTREAM_SUBMIT_PATH, SMALL_UTXO_WARNING_THRESHOLD_SAT, STANDARD_TX_WEIGHT_LIMIT, UtxoContentScanner, WALLET_MATRIX, WalletCapability, WalletPlatform, WalletService, WatchOnlyDeriveError, acceptOffer, addCat21Input, addressHoldsCat, addressesEquivalent, allowlistContainsAddress, assertCat21LockTime, assessCompression, bitcoinNetwork, broadcastCat21, broadcastInscribePackage, bucketOf, buildAcceptOfferQueryParams, buildAskQueryParams, buildBuyOfferQueryParams, buildCat21BuyOfferPsbt, buildCat21SessionMessage, buildCat21TransferPsbt, buildChildInscribeRevealTx, buildInputScript, buildInscribeCommitPsbt, buildInscribeRevealTx, buildInscriptionEnvelope, buildListingMessage, buildOffer, buildTransfer, buildTransferQueryParams, calculateRecommendedFundingSats, capabilityOf, cat21Config, catsAtAddress, checkSessionValidity, chunkFieldValue, classifyOutpoint, compressGzip, createChildInscribeTransactions, createInscribeTransactions, createOffer, createTransaction, decideBroadcastChannel, decompressGzip, deriveRevealPubkeyXonly, deriveWatchOnlyAddresses, eitherAsString, encodeCborDeterministic, encodeInscriptionId, encodeParentInscriptionId, encodePointerValue, encodeRuneCommitment, estimateFeeSats, estimateTaprootVbytes, evaluateAgentPolicy, executeInscribe, executeMint, executeTransfer, findRareSatInRange, findRareSatInRanges, getAddressFormat, getAddressNetwork, getDummyKeypair, getDummyLegacyTransaction, getMinimumUtxoSize, inscribeAndBroadcast, inscribeChildAndBroadcast, isAddressCompatibleWithNetwork, isInscribeSupportedPaymentAddress, isScanComplete, isSegWit, isValidPersistedWalletInfo, leatherOrdinalsAddressType, leatherPaymentAddressType, liftRecommendationByOutpoint, listFundingUtxosThatCover, locateSat, makeWatchOnlyProbe, nativeBrotliAvailable, parseAcceptOfferQueryParams, parseAskQueryParams, parseBuyOfferQueryParams, parseCatsList, parseTransferQueryParams, pickLargestFundingUtxoThatCovers, pickSmallestFundingUtxoThatCovers, prepareBuyOfferBuyerInput, prepareCat21Input, prepareInscribeFundingInput, prepareMintInputForWallet, prepareTransferCatInput, prepareTransferFundingInput, rarityOfBlockFirstSat, rarityOfSat, recommendFunding, resolveCat21MintInputSequence, resolveFundingPick, runeNamesFromContent, scanWatchOnly, selectCardinalUtxo, selectFunding, selectOrdParityFunding, serializeCats, simulateCreateOffer, simulateInscribe, simulateInscribeFees, simulateMint, simulateMintTransaction, simulateTransfer, storage, submitToSlipstream, supportsCapability, synthesizeEnvelopeFields, toBitcoinNetworkType, toLeatherNetworkString, toOrdinalsAddress, toPaymentAddress, toScureNetwork, toXOnly, twoPassFeeSimulation, validateCat21BuyOfferPsbt, validateInscribeOperation, validateOffer, verifyBip322Signature, verifyListingSignature, walletInAppBrowserDeepLink, walletMatrixEntry, walletsForPlatform, walletsSupporting, watchOnlyScriptType };
 //# sourceMappingURL=ordpool-sdk.mjs.map

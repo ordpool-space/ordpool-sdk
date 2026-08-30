@@ -1,5 +1,5 @@
 import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
-import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
@@ -17,8 +17,6 @@ import {
 } from './ports';
 import { resolveFundingPick, selectFunding } from './select-funding';
 
-/** ~220 vB fee ceiling for the buy-offer fee component. */
-const OFFER_FEE_VBYTE_CEILING = 220;
 
 /**
  * Everything the create-offer core needs, framework-agnostic. The BUYER builds
@@ -83,7 +81,7 @@ export function buildOffer(
   funding: CoreFundingUtxo,
   feeSats: number,
   isSimulation: boolean,
-): { psbt: Uint8Array } {
+): { psbt: Uint8Array; changeSats: number } {
   const buyerInput = prepareBuyOfferBuyerInput({
     utxo: {
       txid: funding.txid,
@@ -115,7 +113,7 @@ export function buildOffer(
     priceSats: params.priceSats,
     feeSats,
   });
-  return { psbt: built.psbt };
+  return { psbt: built.psbt, changeSats: built.changeSats };
 }
 
 async function planOffer(
@@ -127,9 +125,25 @@ async function planOffer(
     return { status: 'insufficient', recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
-  const feeCeiling = Math.ceil(params.feeRatePerVbyte * OFFER_FEE_VBYTE_CEILING);
   // Buyer funds price + the cat's REAL UTXO value (output 0, ord parity) + fee.
-  const target = params.priceSats + params.targetCat.value + feeCeiling;
+  // `feeBudget(coinValue)` is the max fee once price + cat value are set aside.
+  const feeBudget = (coinValue: number) => coinValue - params.priceSats - params.targetCat.value;
+  const offerVsize = (built: { psbt: Uint8Array }) =>
+    computePsbtVsize({
+      psbt: built.psbt,
+      network: toScureNetwork(params.network),
+      // Input 0 is the seller's cat UTXO (they sign later); fake its witness.
+      nonSignableInputs: [0],
+    });
+
+  // Guess-free coverage target: price + cat value + the NO-CHANGE offer fee,
+  // measured from a real build (no vB estimate), replacing the old `* 220`.
+  const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
+  if (!largest || feeBudget(largest.value) < 0) {
+    return { status: 'insufficient', recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null };
+  }
+  const noChangeVsize = offerVsize(buildOffer(params, largest, feeBudget(largest.value), true));
+  const target = params.priceSats + params.targetCat.value + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
   const recommendation = await selectFunding(utxos, target, ports.scan);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
@@ -142,36 +156,27 @@ async function planOffer(
       changeSats: null,
     };
   }
-  try {
-    const two = twoPassFeeSimulation({
-      simulate: (feeSats) => ({
-        vsize: computePsbtVsize({
-          psbt: buildOffer(params, pick, feeSats, true).psbt,
-          network: toScureNetwork(params.network),
-          // Input 0 is the seller's cat UTXO (they sign later); fake its witness.
-          nonSignableInputs: [0],
-        }),
-      }),
-      feeRatePerVbyte: params.feeRatePerVbyte,
-      placeholderFeeSats: feeCeiling,
-    });
-    // Buyer must cover price + cat value + the REAL fee; if the tightened fee
-    // pushed the requirement past the pick, surface insufficient explicitly.
-    const requiredBuyerFunding = params.priceSats + params.targetCat.value + two.finalFeeSats;
-    if (pick.value < requiredBuyerFunding) {
-      return { status: 'insufficient', recommendation, pick: null, vsize: null, feeSats: null, changeSats: null };
-    }
-    return {
-      status: 'ready',
-      recommendation,
-      pick,
-      vsize: two.vsize,
-      feeSats: two.finalFeeSats,
-      changeSats: pick.value - requiredBuyerFunding,
-    };
-  } catch {
+  // Guess-free per-coin fee: with-change form, falling back to no-change/absorb.
+  const budget = feeBudget(pick.value);
+  const resolved = resolveCatTxFee({
+    simulate: (feeSats) => {
+      const built = buildOffer(params, pick, feeSats, true);
+      return { built, vsize: offerVsize(built), finalFeeSats: budget - built.changeSats };
+    },
+    feeRatePerVbyte: params.feeRatePerVbyte,
+    feeBudgetSats: budget,
+  });
+  if (!resolved) {
     return { status: 'insufficient', recommendation, pick: null, vsize: null, feeSats: null, changeSats: null };
   }
+  return {
+    status: 'ready',
+    recommendation,
+    pick,
+    vsize: resolved.vsize,
+    feeSats: resolved.finalFeeSats,
+    changeSats: resolved.built.changeSats,
+  };
 }
 
 /**

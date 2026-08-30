@@ -1,5 +1,5 @@
 import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
-import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
@@ -25,8 +25,6 @@ import {
 } from './ports';
 import { resolveFundingPick, selectFunding } from './select-funding';
 
-/** ~200 vB fee ceiling: the funding budget a transfer coin must cover. */
-const TRANSFER_FEE_VBYTE_CEILING = 200;
 
 /**
  * Everything the transfer core needs, framework-agnostic. Pubkeys are raw bytes
@@ -137,8 +135,24 @@ async function planTransfer(
     return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
-  // Cat preserved (funded by input 0); funding covers ONLY the miner fee.
-  const target = Math.ceil(params.feeRatePerVbyte * TRANSFER_FEE_VBYTE_CEILING);
+  const measureVsize = (built: { psbt: Uint8Array }) =>
+    computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) });
+  // Cat preserved (funded by input 0); funding covers ONLY the miner fee. GROW
+  // spends some funding on the padded cat output; SHRINK frees the cat's surplus
+  // into the fee budget. `feeBudget(coinValue)` is the max fee a given funding
+  // value can pay (whole coin, no change).
+  const catOutputSats = params.targetPostageSats ?? params.catUtxo.value;
+  const feeBudget = (coinValue: number) => coinValue + params.catUtxo.value - catOutputSats;
+
+  // Guess-free coverage target: the no-change transfer fee, measured from a real
+  // build (vsize depends on input/output TYPES, not values), replacing the old
+  // eyeballed `* 200` ceiling.
+  const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
+  if (!largest) {
+    return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+  }
+  const noChangeVsize = measureVsize(buildTransfer(params, largest, feeBudget(largest.value), true));
+  const target = Math.ceil(noChangeVsize * params.feeRatePerVbyte);
   const recommendation = await selectFunding(utxos, target, ports.scan);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
@@ -151,28 +165,26 @@ async function planTransfer(
       buildFeeSats: null,
     };
   }
-  try {
-    const two = twoPassFeeSimulation({
-      simulate: (feeSats) => {
-        const built = buildTransfer(params, pick, feeSats, true);
-        return { built, vsize: computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) }) };
-      },
-      feeRatePerVbyte: params.feeRatePerVbyte,
-      // Same fee budget the coin was selected against, so a small-but-viable
-      // clean coin isn't falsely rejected in pass-1 at low fee rates.
-      placeholderFeeSats: target,
-    });
-    return {
-      status: 'ready',
-      recommendation,
-      pick,
-      built: two.finalSimulation.built,
-      vsize: two.vsize,
-      buildFeeSats: two.finalFeeSats,
-    };
-  } catch {
+  // Guess-free per-coin fee: with-change form, falling back to no-change/absorb.
+  const resolved = resolveCatTxFee({
+    simulate: (feeSats) => {
+      const built = buildTransfer(params, pick, feeSats, true);
+      return { built, vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+    },
+    feeRatePerVbyte: params.feeRatePerVbyte,
+    feeBudgetSats: feeBudget(pick.value),
+  });
+  if (!resolved) {
     return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
   }
+  return {
+    status: 'ready',
+    recommendation,
+    pick,
+    built: resolved.built,
+    vsize: resolved.vsize,
+    buildFeeSats: resolved.finalFeeSats,
+  };
 }
 
 /**

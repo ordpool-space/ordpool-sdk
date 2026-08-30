@@ -124,6 +124,16 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     expect(o.getSnapshot().selectedUtxo).toBeNull();
   });
 
+  it('AUTO-picks a danger-band coin the old fixed-200 ceiling would have rejected', async () => {
+    // 2200 < old target (546 + 200*10 = 2546) => used to show insufficient.
+    const o = new Cat21MintOrchestrator(deps({ getUtxos: async () => [coin('c', 2200)] }));
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.fundingRecommendation.status === 'auto');
+    expect(s.simulations[0].insufficient).toBe(false);
+    expect(Number(s.simulations[0].simulation!.finalTransactionFee)).toBeLessThanOrEqual(2200 - 546);
+  });
+
   it('getUtxos rejection => state error + cleared grid', async () => {
     const o = new Cat21MintOrchestrator(
       deps({ getUtxos: async () => { throw new Error('electrs 502'); } }),

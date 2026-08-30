@@ -1,5 +1,5 @@
 import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
-import { twoPassFeeSimulation } from '../cat21-fee/fee-simulation.helper';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
@@ -23,15 +23,6 @@ import {
 } from './ports';
 import { resolveFundingPick, selectFunding } from './select-funding';
 
-/**
- * Conservative vB ceiling for a CAT-21 mint (1 funding input + 1 P2TR cat
- * output + 1 change output; the largest such tx measures well under this).
- * Used only as a coverage over-estimate + two-pass seed — never a charged fee;
- * the real fee is the two-pass `finalFeeSats`. Exported as the single source
- * of truth so the framework-agnostic mint orchestrator's per-UTXO grid seeds
- * its two-pass from the same value instead of re-declaring it.
- */
-export const MINT_FEE_VBYTE_CEILING = 200;
 
 /**
  * Everything the mint core needs, framework-agnostic. A mint CREATES a fresh
@@ -118,9 +109,23 @@ async function planMint(
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
   const tipValue = params.tip?.valueSats ?? 0;
-  const feeCeiling = Math.ceil(params.feeRatePerVbyte * MINT_FEE_VBYTE_CEILING);
-  // Funding covers the fresh cat's postage + tip + the miner fee.
-  const target = CAT21_POSTAGE_SATS + tipValue + feeCeiling;
+  const fixedOutputs = CAT21_POSTAGE_SATS + tipValue;
+  const measureVsize = (built: { psbt: Uint8Array }) =>
+    computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) });
+
+  // Guess-free coverage target: cat postage + tip + the NO-CHANGE miner fee,
+  // measured from a real build (no vB estimate). The no-change form is the
+  // cheapest a mint can be, so any coin >= this target can mint and any coin
+  // below it cannot — the exact feasibility threshold, replacing the old
+  // eyeballed `* 200` ceiling that wrongly excluded coins between the real
+  // threshold and the inflated one.
+  const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
+  if (!largest || largest.value < fixedOutputs) {
+    return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+  }
+  const noChangeVsize = measureVsize(buildMint(params, largest, largest.value - fixedOutputs, true));
+  const target = fixedOutputs + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
+
   const recommendation = await selectFunding(utxos, target, ports.scan);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
@@ -133,28 +138,28 @@ async function planMint(
       buildFeeSats: null,
     };
   }
-  try {
-    const two = twoPassFeeSimulation({
-      simulate: (feeSats) => {
-        const built = buildMint(params, pick, feeSats, true);
-        return { built, vsize: computePsbtVsize({ psbt: built.psbt, network: toScureNetwork(params.network) }) };
-      },
-      feeRatePerVbyte: params.feeRatePerVbyte,
-      // Seed pass-1 with the fee component of the selection budget, not a flat
-      // 1000, so a small-but-viable clean coin isn't rejected at low fee rates.
-      placeholderFeeSats: feeCeiling,
-    });
-    return {
-      status: 'ready',
-      recommendation,
-      pick,
-      built: two.finalSimulation.built,
-      vsize: two.vsize,
-      buildFeeSats: two.finalFeeSats,
-    };
-  } catch {
+  // Guess-free per-coin fee: measures the with-change form, falls back to the
+  // no-change (absorb-all) form when it doesn't fit — so a coin that genuinely
+  // fits is never falsely rejected.
+  const resolved = resolveCatTxFee({
+    simulate: (feeSats) => {
+      const built = buildMint(params, pick, feeSats, true);
+      return { built, vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+    },
+    feeRatePerVbyte: params.feeRatePerVbyte,
+    feeBudgetSats: pick.value - fixedOutputs,
+  });
+  if (!resolved) {
     return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
   }
+  return {
+    status: 'ready',
+    recommendation,
+    pick,
+    built: resolved.built,
+    vsize: resolved.vsize,
+    buildFeeSats: resolved.finalFeeSats,
+  };
 }
 
 /**

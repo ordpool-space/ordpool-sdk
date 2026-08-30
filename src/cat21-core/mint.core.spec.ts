@@ -60,6 +60,24 @@ describe('mint.core — simulateMint', () => {
     const sim = await simulateMint(params(), { utxos: utxosPort([coin('c', 600)]), scan: scanPort() });
     expect(sim.status).toBe('insufficient');
   });
+
+  it('mints a "danger-band" coin the old fixed-200 ceiling wrongly rejected', async () => {
+    // value 2200 < the old coverage target (546 + 200*10 = 2546), so the fixed
+    // vB ceiling reported insufficient — but the coin fits a real mint (the
+    // with-change fee's leftover is sub-dust, so it settles as no-change/absorb).
+    const small = coin('c', 2200);
+    const sim = await simulateMint(params({ feeRatePerVbyte: 10 }), { utxos: utxosPort([small]), scan: scanPort() });
+    expect(sim.status).toBe('ready');
+    expect(sim.fundingUtxo?.txid).toBe(small.txid);
+    // Real fee, and never more than the coin's spendable surplus (no over-charge).
+    expect(sim.feeSats!).toBeGreaterThan(0);
+    expect(sim.feeSats!).toBeLessThanOrEqual(2200 - 546);
+  });
+
+  it('a coin below the true no-change floor is still insufficient (no false-mint)', async () => {
+    const sim = await simulateMint(params({ feeRatePerVbyte: 10 }), { utxos: utxosPort([coin('c', 1000)]), scan: scanPort() });
+    expect(sim.status).toBe('insufficient');
+  });
 });
 
 describe('mint.core — executeMint', () => {
