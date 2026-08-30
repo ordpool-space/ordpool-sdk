@@ -179,6 +179,8 @@ export * from './inscribe/inscription-fee.helper';
 export * from './inscribe/inscription.service.helper';
 export * from './inscribe/inscribe-broadcast.helper';
 export * from './inscribe/inscribe-orchestrator';
+// --- inscribe framework-agnostic mint orchestrator (subscribe-based). ---
+export * from './inscribe/inscribe-mint-orchestrator';
 export * from './inscribe/inscribe-child-orchestrator';
 export * from './inscribe/inscribe-compression.helper';
 

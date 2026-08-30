@@ -6124,17 +6124,40 @@ interface InscribeChildAndBroadcastResult {
 declare function inscribeChildAndBroadcast(args: InscribeChildAndBroadcastArgs): Observable<InscribeChildAndBroadcastResult>;
 
 /**
- * The per-mint payload the consumer wires into the orchestrator via
- * `setContent`. `body` and `contentType` land in the inscription
- * envelope; `tip` becomes the reveal's vout[1] output; the rest are
- * optional ord envelope tags. Recipient is optional — when unset the
- * inscription lands on the connected wallet's ordinals address.
+ * FRAMEWORK-AGNOSTIC high-level inscribe API. Plain class — no Angular, no
+ * `@Injectable`, no signals. Sibling of `Cat21MintOrchestrator`: the SDK owns
+ * this orchestration; a consumer IMPORTS it ready-made and binds its
+ * `subscribe(listener)` callback to whatever reactivity it uses in ONE line.
+ * The orchestrator wires wallet-backed commit signing internally (the signer
+ * registry, via `inscribeAndBroadcast`) and the fee/selection logic (the shared
+ * `simulateInscribeFees` + the force-scanning `selectFunding`); the consumer
+ * supplies only its I/O (electrs/ord/broadcast) as `InscribeOrchestratorDeps`
+ * and the connected wallet via `setWallet`.
+ *
+ * The Angular `InscribeMintOrchestrator`
+ * (`inscribe-mint-orchestrator.service.ts`) is a thin veneer over the same
+ * helpers; both share one implementation surface.
+ *
+ * # Two-tx model
+ *
+ * Every inscribe produces a commit + reveal pair. The simulation grid shows the
+ * sum of both fees + the funding requirement. `mint()` calls
+ * `inscribeAndBroadcast`, which signs the commit's single funding input via the
+ * wallet, broadcasts commit, signs the reveal with the ephemeral key, and
+ * broadcasts the reveal. The ephemeral bearer key lands on
+ * `successResult.ephemeral` — persistence is a consumer concern.
+ */
+/**
+ * The per-mint payload the consumer wires in via `setContent`. `body` +
+ * `contentType` land in the inscription envelope; `tip` becomes the reveal's
+ * vout[1]; the rest are optional ord envelope tags. `recipient` defaults to the
+ * connected wallet's ordinals address when unset.
  */
 interface InscribeContent {
     body: Uint8Array;
     contentType?: string;
     envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
-    /** Optional reveal vout[1] tip. Cubes-frontend pins its donation address here. */
+    /** Optional reveal vout[1] tip. */
     tip?: {
         address: string;
         value: number;
@@ -6142,9 +6165,9 @@ interface InscribeContent {
     note?: string;
     parent?: string;
     contentEncoding?: InscriptionContentEncoding;
-    /** Pointer (tag 0x02) sat offset; must be < 546. See createInscribeTransactions. */
+    /** Pointer (tag 0x02) sat offset; must be < 546. */
     pointer?: number;
-    /** CBOR metadata (tag 0x05), pre-encoded via encodeCborDeterministic; chunked over 520. */
+    /** CBOR metadata (tag 0x05), pre-encoded; chunked over 520. */
     metadata?: Uint8Array;
     /** Metaprotocol identifier (tag 0x07), UTF-8. */
     metaprotocol?: string;
@@ -6159,32 +6182,26 @@ interface InscribeContent {
     /**
      * Tag push-encoding choice. `false` (default) = data push (ord-standard,
      * charm-free); `true` = pushnum for tags 1–16 (1 byte smaller, ord's
-     * `vindicated` charm). Threads to both the fee preview and the mint so
-     * the quoted vsize matches the broadcast tx. See createInscribeTransactions.
+     * `vindicated` charm). Threads to both the fee preview and the mint.
      */
     minimalTagPush?: boolean;
     /** Override for the inscription's recipient. Defaults to wallet.ordinalsAddress. */
     recipient?: string;
 }
 /**
- * One row in the orchestrator's `simulations$` stream. Same shape
- * as the cat21 sibling but with the inscribe-specific fee result:
- * - `insufficient: true` — UTXO can't cover
- *   `commitOutputValueSats + commitFeeSats` at the current rate.
- * - `insufficient: false` — UTXO is viable; `simulation` carries the
- *   commit + reveal vsize / fee breakdown for the "this is what'll
- *   happen" panel.
+ * One row in the per-UTXO simulation grid (the expert picker).
+ * `insufficient: true` — the UTXO can't cover `fundingRequirementSats` at the
+ * current rate; `false` — viable, `simulation` carries the commit + reveal
+ * vsize / fee breakdown.
  */
 interface InscribeUtxoSimulation {
     utxo: TxnOutput;
     simulation: SimulateInscribeFeesResult | null;
     insufficient: boolean;
 }
-/**
- * State machine the consumer's template branches on. Same six-state
- * shape as the cat21 mint orchestrator.
- */
+/** State machine the consumer's template branches on. Sibling of the cat21 mint. */
 type InscribeMintState = 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
+
 /**
  * High-level inscribe flow. Wraps `Cat21Service` (UTXOs, broadcast) +
  * `WalletService` (connected wallet) + the pure `simulateInscribeFees`

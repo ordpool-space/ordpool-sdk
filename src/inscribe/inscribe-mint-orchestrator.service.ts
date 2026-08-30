@@ -32,72 +32,18 @@ import { WalletService } from '../wallet/wallet.service';
 import { WalletInfo } from '../wallet/wallet.service.types';
 
 import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orchestrator';
-import type { InscriptionContentEncoding } from './inscribe-compression.helper';
-import { OrdEnvelopeField } from './inscription-envelope';
-import { SimulateInscribeFeesResult, simulateInscribeFees } from './inscription-fee.helper';
+import { simulateInscribeFees } from './inscription-fee.helper';
 import { prepareInscribeFundingInput } from './inscription-input-adapter';
+import type {
+  InscribeContent,
+  InscribeMintState,
+  InscribeUtxoSimulation,
+} from './inscribe-mint-orchestrator';
 
-/**
- * The per-mint payload the consumer wires into the orchestrator via
- * `setContent`. `body` and `contentType` land in the inscription
- * envelope; `tip` becomes the reveal's vout[1] output; the rest are
- * optional ord envelope tags. Recipient is optional — when unset the
- * inscription lands on the connected wallet's ordinals address.
- */
-export interface InscribeContent {
-  body: Uint8Array;
-  contentType?: string;
-  envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
-  /** Optional reveal vout[1] tip. Cubes-frontend pins its donation address here. */
-  tip?: { address: string; value: number };
-  note?: string;
-  parent?: string;
-  contentEncoding?: InscriptionContentEncoding;
-  /** Pointer (tag 0x02) sat offset; must be < 546. See createInscribeTransactions. */
-  pointer?: number;
-  /** CBOR metadata (tag 0x05), pre-encoded via encodeCborDeterministic; chunked over 520. */
-  metadata?: Uint8Array;
-  /** Metaprotocol identifier (tag 0x07), UTF-8. */
-  metaprotocol?: string;
-  /** Delegate inscription id (tag 0x0b); ord serves the delegate's content. */
-  delegate?: string;
-  /** Rune-name commitment (tag 0x0d) as the rune's u128 value. */
-  rune?: bigint;
-  /** CBOR properties (tag 0x11), pre-encoded; chunked over 520. */
-  properties?: Uint8Array;
-  /** Properties-encoding hint (tag 0x13); only alongside properties. */
-  propertyEncoding?: 'br';
-  /**
-   * Tag push-encoding choice. `false` (default) = data push (ord-standard,
-   * charm-free); `true` = pushnum for tags 1–16 (1 byte smaller, ord's
-   * `vindicated` charm). Threads to both the fee preview and the mint so
-   * the quoted vsize matches the broadcast tx. See createInscribeTransactions.
-   */
-  minimalTagPush?: boolean;
-  /** Override for the inscription's recipient. Defaults to wallet.ordinalsAddress. */
-  recipient?: string;
-}
-
-/**
- * One row in the orchestrator's `simulations$` stream. Same shape
- * as the cat21 sibling but with the inscribe-specific fee result:
- * - `insufficient: true` — UTXO can't cover
- *   `commitOutputValueSats + commitFeeSats` at the current rate.
- * - `insufficient: false` — UTXO is viable; `simulation` carries the
- *   commit + reveal vsize / fee breakdown for the "this is what'll
- *   happen" panel.
- */
-export interface InscribeUtxoSimulation {
-  utxo: TxnOutput;
-  simulation: SimulateInscribeFeesResult | null;
-  insufficient: boolean;
-}
-
-/**
- * State machine the consumer's template branches on. Same six-state
- * shape as the cat21 mint orchestrator.
- */
-export type InscribeMintState = 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
+// The inscribe payload + simulation-row + state types are framework-agnostic
+// and live with the SDK's plain-class orchestrator (single source of truth);
+// re-export so Angular consumers can keep importing them from this service.
+export type { InscribeContent, InscribeMintState, InscribeUtxoSimulation };
 
 /**
  * High-level inscribe flow. Wraps `Cat21Service` (UTXOs, broadcast) +
