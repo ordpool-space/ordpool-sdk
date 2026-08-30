@@ -58,6 +58,7 @@
     "src/cat21-fee/min-relay-fee.ts",
     "src/cat21-fee/ord-coin-select.ts",
     "src/cat21-fee/funding-safety.ts",
+    "src/cat21-fee/resolve-cat-tx-fee.helper.ts",
     "src/cat21-core/ports.ts",
     "src/cat21-core/select-funding.ts",
     "src/cat21-core/transfer.core.ts",
