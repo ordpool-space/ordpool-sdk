@@ -127,6 +127,9 @@ export * from './cat21-offer/cat21-offer.helper';
 export * from './cat21-offer/cat21-offer.types';
 export * from './cat21-offer/cat21-offer-input-adapter';
 
+// --- CAT-21 create-offer framework-agnostic orchestrator (subscribe-based). ---
+export * from './cat21-offer/cat21-create-offer-orchestrator';
+
 // --- CAT-21 broadcast (mempool / Slipstream dispatcher) ---
 export * from './cat21-broadcast/broadcast.helper';
 export * from './cat21-broadcast/slipstream.helper';
