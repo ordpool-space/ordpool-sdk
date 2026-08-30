@@ -20,6 +20,7 @@ import { buildInscriptionEnvelope, ORD_TAGS, type OrdEnvelopeField } from '../..
 import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
 import { Network, toScureNetwork } from '../../src/network';
 import {
+  getStockOrdOutputInscriptions,
   inscriptionId,
   mineBlocks,
   ordCreateWallet,
@@ -44,6 +45,37 @@ const TXT_CONTENT_TYPE = 'text/plain;charset=utf-8'; // ord's inferred type for 
 
 function bitcoinCliPsbtWallet(...args: string[]): string {
   return rpc('-rpcwallet=' + PSBT_WALLET, ...args);
+}
+
+/**
+ * Fund a fresh address with 1 BTC from a sat stock ord has NOT already
+ * inscribed. The shared `ordpool-e2e` wallet is mined + spent across ~10
+ * inscribe specs, and those specs deposit reveal outputs to SDK addresses whose
+ * WIF lives in this wallet, so its UTXO pool can carry a previously-inscribed
+ * sat. Inscribing on such a sat is a reinscription, which stock ord curses
+ * (post-jubilee: the `vindicated` charm) — the dirty-state flake this file hit.
+ * Re-fund with a fresh coin until ord reports the funding output carries no
+ * inscription, so the SDK inscription is always the FIRST on its sat.
+ */
+async function fundUninscribed(): Promise<{
+  fundingAddr: string;
+  fundingPubkey: Uint8Array;
+  utxo: { txid: string; vout: number; value: number };
+}> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const fundingAddr = bitcoinCliPsbtWallet('getnewaddress', '', 'bech32');
+    const fundingPubkey = hex.decode(JSON.parse(bitcoinCliPsbtWallet('getaddressinfo', fundingAddr)).pubkey);
+    bitcoinCliPsbtWallet('sendtoaddress', fundingAddr, '1.0');
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdStockSync(tip);
+    const utxo = await waitForUtxoAt(fundingAddr, 100_000_000);
+    if ((await getStockOrdOutputInscriptions(`${utxo.txid}:${utxo.vout}`)).length === 0) {
+      return { fundingAddr, fundingPubkey, utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value } };
+    }
+    // The pool handed us a previously-inscribed sat; discard and try again.
+  }
+  throw new Error('no un-inscribed 1 BTC funding UTXO after 8 attempts');
 }
 
 /**
@@ -112,11 +144,7 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
     const recipientKey = secp256k1.utils.randomPrivateKey();
     const recipientAddress = btc.p2tr(schnorr.getPublicKey(recipientKey), undefined, scureRegtest, true).address!;
 
-    const fundingAddr = bitcoinCliPsbtWallet('getnewaddress', '', 'bech32');
-    const fundingPubkey = hex.decode(JSON.parse(bitcoinCliPsbtWallet('getaddressinfo', fundingAddr)).pubkey);
-    bitcoinCliPsbtWallet('sendtoaddress', fundingAddr, '1.0');
-    await waitForElectrsSync(mineBlocks(1));
-    const utxo = await waitForUtxoAt(fundingAddr, 100_000_000);
+    const { fundingAddr, fundingPubkey, utxo } = await fundUninscribed();
 
     const body = new TextEncoder().encode('blessed, same as ord');
     const inscribed = createInscribeTransactions({
@@ -161,11 +189,7 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
     const recipientKey = secp256k1.utils.randomPrivateKey();
     const recipientAddress = btc.p2tr(schnorr.getPublicKey(recipientKey), undefined, scureRegtest, true).address!;
 
-    const fundingAddr = bitcoinCliPsbtWallet('getnewaddress', '', 'bech32');
-    const fundingPubkey = hex.decode(JSON.parse(bitcoinCliPsbtWallet('getaddressinfo', fundingAddr)).pubkey);
-    bitcoinCliPsbtWallet('sendtoaddress', fundingAddr, '1.0');
-    await waitForElectrsSync(mineBlocks(1));
-    const utxo = await waitForUtxoAt(fundingAddr, 100_000_000);
+    const { fundingAddr, fundingPubkey, utxo } = await fundUninscribed();
 
     const body = new TextEncoder().encode('vindicated by pushnum');
     const inscribed = createInscribeTransactions({

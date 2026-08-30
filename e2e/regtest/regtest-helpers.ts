@@ -685,6 +685,27 @@ export async function getStockOrdInscription(id: string): Promise<StockOrdInscri
 }
 
 /**
+ * Inscription IDs currently located on an output, per stock ord's
+ * `/output/<txid:vout>` JSON (empty when the output carries none). Used to
+ * guarantee a funding UTXO sits on an un-inscribed sat before an inscription is
+ * built on it: inscribing a sat that already carries one is a reinscription,
+ * which stock ord curses (post-jubilee: the `vindicated` charm). The shared
+ * `ordpool-e2e` pool can hand out such a sat (inscribe specs deposit reveal
+ * outputs to SDK addresses whose WIF lives in that wallet), so a blessing test
+ * must re-fund until this returns empty.
+ */
+export async function getStockOrdOutputInscriptions(outpoint: string): Promise<string[]> {
+  const res = await fetch(`${ORD_STOCK_URL}/output/${outpoint}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`stock ord /output/${outpoint} returned ${res.status}: ${await res.text()}`);
+  }
+  const body = (await res.json()) as { inscriptions?: string[] };
+  return body.inscriptions ?? [];
+}
+
+/**
  * Fetch the raw body bytes of an inscription from stock ord's
  * `/content/<id>` endpoint. ord returns the bytes verbatim with the
  * envelope's content-type as the response Content-Type header — same
