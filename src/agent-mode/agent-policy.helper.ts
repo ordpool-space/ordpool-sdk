@@ -6,33 +6,19 @@ import {
 } from './agent-policy.types';
 
 /**
- * Pure-functional policy gate for agent-mode autonomous CAT-21 actions.
+ * Pure-functional policy gate for agent-mode CAT-21 actions.
  *
- * Every autonomous `cat21_*` action must pass through this gate BEFORE
- * the agent constructs a PSBT or asks the wallet to sign. A deny
- * decision short-circuits the action with a typed reason; the caller
- * surfaces the reason verbatim to the user (or logs it for the bot).
- *
- * Order of checks is cheapest first so we don't burn CPU on an action
- * that fails for a simple reason. The action-cap is usually more
- * restrictive than the daily-cap so it comes first.
- *
- * Counterparty check is substring/equality on Bitcoin addresses — no
- * BIP-32 re-derivation, no DNS resolution. The caller already knows the
- * exact address being paid / received and passes it through.
- *
- * Floor-price check fires on the two flows where the policy has price
- * agency:
- *   - `cat21_accept_offer`: a counterparty's inbound PSBT pays us less
- *     than our floor (REACTIVE — we either sign or don't).
- *   - `cat21_create_offer`: the bot autonomously proposes to list our
- *     cat below our floor (PROACTIVE — the bot picks the price). The
- *     undercut-prevention case the audit caught; arguably the more
- *     important of the two since publish-time is the moment the
- *     autonomous policy actually has agency.
- *
- * `cat21_mint` and `cat21_transfer` have no price semantic; spend caps
- * + fee-rate ceiling are sufficient there.
+ * Two entry points. `evaluateAgentPolicy` gates an AUTONOMOUS action: it
+ * first refuses when agent mode is off (`agent-disabled`), then delegates
+ * to `evaluateAgentPolicyCaps`. `evaluateAgentPolicyCaps` is the CAP
+ * portion alone: every user-configured limit, WITHOUT the `enabled`
+ * check, because a configured cap binds every action regardless of
+ * signing mode. cat21-wallet enforces the caps on Path 2 (manual,
+ * human-confirmed) exactly as on Path 3 (autonomous), so a misclicked
+ * amount or pasted-wrong address is caught before signing in both, and
+ * there is NO override: to raise a cap you change the policy value, you
+ * never bypass it. A deny decision short-circuits the action with a
+ * typed reason; the caller surfaces it to the user (or logs it).
  */
 export function evaluateAgentPolicy(
   policy: AgentPolicy,
@@ -41,7 +27,42 @@ export function evaluateAgentPolicy(
   if (!policy.enabled) {
     return deny('agent-disabled');
   }
+  return evaluateAgentPolicyCaps(policy, action);
+}
 
+/**
+ * The cap checks alone: shape guards + spend / daily / fee / floor /
+ * counterparty. The `enabled` flag is deliberately NOT consulted here.
+ * `enabled` governs only whether autonomous silent-sign is permitted (the
+ * caller's mode resolver owns that decision); the caps themselves apply in
+ * BOTH modes. So a policy with `enabled: false` but caps set STILL has its
+ * caps enforced on a manual action.
+ *
+ * Order of checks is cheapest first so we don't burn CPU on an action
+ * that fails for a simple reason. The action-cap is usually more
+ * restrictive than the daily-cap so it comes first.
+ *
+ * Counterparty check is substring/equality on Bitcoin addresses: no
+ * BIP-32 re-derivation, no DNS resolution. The caller already knows the
+ * exact address being paid / received and passes it through.
+ *
+ * Floor-price check fires on the two flows where the policy has price
+ * agency:
+ *   - `cat21_accept_offer`: a counterparty's inbound PSBT pays us less
+ *     than our floor (REACTIVE, we either sign or don't).
+ *   - `cat21_create_offer`: the bot autonomously proposes to list our
+ *     cat below our floor (PROACTIVE, the bot picks the price). The
+ *     undercut-prevention case the audit caught; arguably the more
+ *     important of the two since publish-time is the moment the
+ *     autonomous policy actually has agency.
+ *
+ * `cat21_mint` and `cat21_transfer` have no price semantic; spend caps
+ * + fee-rate ceiling are sufficient there.
+ */
+export function evaluateAgentPolicyCaps(
+  policy: AgentPolicy,
+  action: AgentActionContext
+): AgentPolicyDecision {
   // Shape guards. NaN silently bypasses every `>` comparison below
   // (`NaN > anything === false`), so a caller that hands us
   // `spendSats: NaN` — an LLM tool-call that parsed a bad number,

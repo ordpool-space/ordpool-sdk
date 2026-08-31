@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { evaluateAgentPolicy } from './agent-policy.helper';
+import { evaluateAgentPolicy, evaluateAgentPolicyCaps } from './agent-policy.helper';
 import { AgentActionContext, AgentActionKind, AgentPolicy } from './agent-policy.types';
 
 const basePolicy: AgentPolicy = {
@@ -473,5 +473,76 @@ describe('evaluateAgentPolicy', () => {
       });
       expect(decision).toEqual({ allowed: true });
     });
+  });
+});
+
+describe('evaluateAgentPolicyCaps: caps bind regardless of enabled (both signing modes)', () => {
+
+  // These pin the split that lets cat21-wallet enforce the user's caps on
+  // MANUAL actions too, not just autonomous. `enabled` must NOT gate the
+  // caps here; only the caller's mode resolver consults it for silent-sign.
+
+  it('ignores enabled: a disabled policy STILL enforces the per-action cap', () => {
+    const decision = evaluateAgentPolicyCaps(
+      { ...basePolicy, enabled: false, maxSpendPerActionSats: 10_000 },
+      { ...baseAction, spendSats: 1_000_000 }
+    );
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.reason).toBe('spend-above-action-cap');
+  });
+
+  it('ignores enabled: a disabled policy STILL enforces the daily cap', () => {
+    const decision = evaluateAgentPolicyCaps(
+      { ...basePolicy, enabled: false, dailyCapSats: 10_000 },
+      { ...baseAction, spendSats: 6_000, spentTodaySats: 6_000 }
+    );
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.reason).toBe('spend-above-daily-cap');
+  });
+
+  it('ignores enabled: a disabled policy STILL enforces the fee-rate ceiling', () => {
+    const decision = evaluateAgentPolicyCaps(
+      { ...basePolicy, enabled: false, maxFeeRateSatPerVbyte: 10 },
+      { ...baseAction, feeRateSatPerVbyte: 900 }
+    );
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.reason).toBe('fee-rate-above-ceiling');
+  });
+
+  it('ignores enabled: a disabled policy STILL enforces the floor price on create-offer', () => {
+    const decision = evaluateAgentPolicyCaps(
+      { ...basePolicy, enabled: false, floorPriceSatsPerCat: 50_000 },
+      {
+        ...baseAction,
+        kind: 'cat21_create_offer',
+        receivePriceSats: 21_000,
+        counterpartyAddress: 'bc1qbuyer',
+      }
+    );
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.reason).toBe('price-below-floor');
+  });
+
+  it('ignores enabled: a disabled policy STILL enforces the counterparty allowlist', () => {
+    const decision = evaluateAgentPolicyCaps(
+      { ...basePolicy, enabled: false, allowedCounterparties: ['bc1qknown'] },
+      { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: 'bc1qstranger' }
+    );
+    expect(decision.allowed).toBe(false);
+    if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
+  });
+
+  it('never returns agent-disabled: a disabled policy whose caps all pass is ALLOWED', () => {
+    // The whole point: enabled gates silent-sign, not the caps. A manual
+    // action under an enabled:false-but-capped policy clears the caps.
+    const decision = evaluateAgentPolicyCaps({ ...basePolicy, enabled: false }, baseAction);
+    expect(decision).toEqual({ allowed: true });
+  });
+
+  it('matches evaluateAgentPolicy when enabled: true (delegation parity)', () => {
+    const overCap = { ...baseAction, spendSats: 1_000_000 };
+    expect(evaluateAgentPolicy(basePolicy, overCap)).toEqual(
+      evaluateAgentPolicyCaps(basePolicy, overCap)
+    );
   });
 });
