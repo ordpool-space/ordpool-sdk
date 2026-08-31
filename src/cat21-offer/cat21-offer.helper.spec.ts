@@ -373,6 +373,46 @@ describe('validateCat21BuyOfferPsbt', () => {
     }
   });
 
+  it('rejects a legacy seller input (no witnessUtxo) whose value the sighash does not commit', () => {
+    // A cat on a legacy P2PKH UTXO carries its value only in nonWitnessUtxo,
+    // and the pre-BIP143 sighash does NOT commit the input amount. If the
+    // validator silently valued that input at 0, a buyer could under-declare
+    // the seller's contribution and still clear the floor-price net check
+    // (pricePaid = output1 - sellerInputValue), draining the seller's own UTXO
+    // value into buyer change. The seller input here matches the expected UTXO
+    // (passes the identity check) but has NO witnessUtxo, and output 1 (21_546)
+    // would clear a 21_000 floor if the seller value were taken as 0 — so this
+    // asserts the value-not-committed guard fires before the price math.
+    const args = makeBaseArgs();
+    const tx = new btc.Transaction({ allowUnknownInputs: true, lockTime: 21 });
+    tx.addInput({
+      txid: args.sellerInput.txid,
+      index: args.sellerInput.vout,
+      sequence: 0xfffffffd,
+      sighashType: btc.SigHash.ALL,
+      // deliberately NO witnessUtxo — the legacy-input shape
+    });
+    tx.addInput({
+      txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+      index: 1,
+      sequence: 0xfffffffd,
+      witnessUtxo: { script: p2wpkhTestnet.script, amount: BigInt(50_000) },
+      sighashType: btc.SigHash.ALL,
+    });
+    tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(546), btc.TEST_NETWORK);
+    tx.addOutputAddress(p2wpkhTestnet.address!, BigInt(21_546), btc.TEST_NETWORK);
+    tx.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+    const result = validateCat21BuyOfferPsbt({
+      psbt: tx.toPSBT(),
+      expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+      floorPriceSats: 21_000,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+      network: Network.Testnet3,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('wrong-seller-input-value');
+  });
+
   it('rejects a non-PSBT blob (magic-byte mismatch) as malformed-offer-psbt', () => {
     const notAPsbt = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00]);
     const result = validateCat21BuyOfferPsbt({

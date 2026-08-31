@@ -389,11 +389,28 @@ export function validateCat21BuyOfferPsbt(
 
   // 1b. Read the seller's input value for the price calculation below. It can
   //     be ANY size: a cat sits on whatever UTXO it was minted on, not
-  //     necessarily 546. A buyer who lies about this amount only breaks their
-  //     own tx — the seller signs over the claimed amount, so a wrong amount
-  //     fails sig-verify at mempool — and the floor-price check (step 6)
-  //     protects the seller's net regardless of the claimed value.
-  const sellerInputValueSats = Number(sellerInput.witnessUtxo?.amount ?? 0n);
+  //     necessarily 546.
+  //
+  //     A buyer who lies about this amount only breaks their own tx FOR
+  //     SEGWIT/TAPROOT inputs: the BIP-143/341 sighash commits the input
+  //     amount, so a wrong `witnessUtxo.amount` invalidates the seller's
+  //     signature at mempool, and the floor-price check (step 6) stays honest.
+  //     A LEGACY (P2PKH) seller input carries no `witnessUtxo` (its prevout
+  //     lives in `nonWitnessUtxo`), and legacy (pre-BIP-143) sighash does NOT
+  //     commit the input amount — so a `0` fallback here would let a buyer
+  //     under-declare the seller's contribution and drain the seller's own
+  //     UTXO value into buyer change while still clearing the floor-price net
+  //     check. Reject rather than assume 0: a value the sighash does not
+  //     commit cannot be trusted for the net-price gate. (Legacy sellers must
+  //     hold the cat on a segwit/taproot UTXO to sell here; deriving the value
+  //     from `nonWitnessUtxo` for legacy inputs is a follow-up.)
+  if (sellerInput.witnessUtxo?.amount == null) {
+    return fail(
+      'wrong-seller-input-value',
+      'seller input 0 has no witnessUtxo (legacy P2PKH): its value is not committed by the sighash and cannot be safely valued'
+    );
+  }
+  const sellerInputValueSats = Number(sellerInput.witnessUtxo.amount);
 
   // 2a. SIGHASH_ALL on every input (PSBT field check). Already-finalised
   //     inputs may have sighashType undefined; for those see 2b below.
