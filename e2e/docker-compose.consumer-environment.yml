@@ -66,8 +66,23 @@ services:
       # the retry budget before the daemon's even up.
       start_period: 30s
 
+  # OUR electrs — the ordpool-electrs fork, built from the sibling
+  # checkout at `../../ordpool-electrs/` (same convention as cat21-ord
+  # in docker-compose.regtest.yml). NOT the upstream mempool/electrs
+  # image: consumer E2E must exercise the electrs we actually ship. Its
+  # own Dockerfile builds a current-toolchain binary. First build
+  # compiles Rust + RocksDB (a few minutes); then Docker-layer-cached.
   electrs:
-    image: mempool/electrs:latest
+    build:
+      # ELECTRS_SRC lets a CONSUMER point at wherever it checked out the
+      # ordpool-electrs fork. This file is consumed from the consumer's
+      # node_modules/ordpool-sdk/e2e/, so the default `../../ordpool-electrs`
+      # would resolve into node_modules/ — consumers MUST export
+      # ELECTRS_SRC=<abs path to their ordpool-electrs checkout>. The
+      # default suits an in-repo / sibling layout (SDK repo, workspace HQ).
+      context: ${ELECTRS_SRC:-../../ordpool-electrs}
+      dockerfile: Dockerfile
+    image: ordpool-e2e-electrs:local
     container_name: ordpool-e2e-consumer-electrs
     depends_on:
       bitcoind:
@@ -78,28 +93,22 @@ services:
       - --cookie=ordpool:ordpool
       - --http-addr=0.0.0.0:3000
       - --electrum-rpc-addr=0.0.0.0:50001
+      - --db-dir=/data
       - --jsonrpc-import
       - -vvvv
+    volumes:
+      - electrs-data:/data
     ports:
       - "3000:3000"
       - "50001:50001"
     healthcheck:
-      # Bash /dev/tcp socket probe. The mempool/electrs:latest image is
-      # debian-slim based — no wget, no curl, no netcat — so the
-      # upstream-style wget healthcheck always fails even when the
-      # REST server is up on :3000. Confirmed by container logs
-      # showing "REST server running on 0.0.0.0:3000" right next to
-      # docker marking the container unhealthy. bash IS in the image
-      # and its /dev/tcp magic file checks the port for free.
+      # debian-slim runtime has no wget/curl/nc; bash /dev/tcp socket
+      # probe checks the REST port for free. electrs opens RocksDB +
+      # runs the initial index before binding :3000, hence start_period.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3000"]
       interval: 2s
       timeout: 2s
       retries: 30
-      # electrs needs to open RocksDB + run the initial 0-block index
-      # before the REST server binds. Observed at ~150s on cold
-      # ubuntu-latest runs (image pull + cold init). 90s of
-      # start_period absorbs init while the socket-listening retries
-      # cover any remaining slack.
       start_period: 90s
 
   mariadb:
@@ -135,3 +144,6 @@ services:
       interval: 2s
       timeout: 2s
       retries: 10
+
+volumes:
+  electrs-data:

@@ -4,9 +4,9 @@
 # private chain we control. The test bootstrapper mines blocks at
 # will via `bitcoin-cli generatetoaddress`, no faucet, no waiting.
 #
-# mempool/electrs serves the Esplora-compatible API the SDK actually
-# hits (`/api/address/{addr}/utxo`, `/api/tx/{txid}/hex`, `POST /api/tx`).
-# Connects to bitcoind over RPC, indexes the chain on the fly.
+# electrs (our ordpool-electrs fork) serves the Esplora-compatible API
+# the SDK actually hits (`/api/address/{addr}/utxo`, `/api/tx/{txid}/hex`,
+# `POST /api/tx`). Connects to bitcoind over RPC, indexes on the fly.
 
 services:
   bitcoind:
@@ -39,9 +39,18 @@ services:
       timeout: 2s
       retries: 15
 
+  # OUR electrs — the ordpool-electrs fork, built from the sibling
+  # checkout at the workspace-standard path `../../ordpool-electrs/`
+  # (same convention as cat21-ord below). NOT the upstream
+  # mempool/electrs image: the whole point of these E2E stacks is to
+  # exercise the code we ship. ordpool-electrs's own Dockerfile builds
+  # a current-toolchain binary, so we use it directly. First build
+  # compiles Rust + RocksDB (a few minutes); then Docker-layer-cached.
   electrs:
-    image: mempool/electrs:latest
-    platform: linux/amd64
+    build:
+      context: ../../ordpool-electrs
+      dockerfile: Dockerfile
+    image: ordpool-e2e-electrs:local
     container_name: ordpool-e2e-electrs
     depends_on:
       bitcoind:
@@ -52,16 +61,22 @@ services:
       - --cookie=ordpool:ordpool
       - --http-addr=0.0.0.0:3000
       - --electrum-rpc-addr=0.0.0.0:50001
+      - --db-dir=/data
       - --jsonrpc-import
       - -vvvv
+    volumes:
+      - electrs-data:/data
     ports:
       - "3000:3000"     # Esplora HTTP API
       - "50001:50001"   # Electrum protocol
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000/blocks/tip/height"]
+      # debian-slim runtime has no wget/curl; bash /dev/tcp probes the port.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3000"]
       interval: 2s
       timeout: 2s
       retries: 30
+      # electrs opens RocksDB + runs the initial index before binding :3000.
+      start_period: 90s
 
   # cat21-ord. The cat21 fork of ord (https://github.com/ordpool-space/cat21-ord)
   # with --index-cat21 active. Two roles in the regtest spec:
@@ -168,5 +183,6 @@ services:
       - ord-stock-data:/data
 
 volumes:
+  electrs-data:
   ord-data:
   ord-stock-data:

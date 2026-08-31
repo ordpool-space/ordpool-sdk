@@ -175,16 +175,29 @@ jobs:
       - name: Build SDK harness bundle for the fixtures server
         run: npm run e2e:harness:build
 
+      # OUR electrs source — EVERY shard needs it: docker-compose.regtest.yml
+      # builds the electrs service from ../../ordpool-electrs (the fork), so
+      # even the default `up` (bitcoind + electrs) compiles our code now.
+      #
+      # actions/checkout v5 rejects paths outside $GITHUB_WORKSPACE, but the
+      # compose build context `../../ordpool-electrs` (relative to
+      # e2e/docker-compose.regtest.yml) resolves to the workspace's PARENT.
+      # So we check out under the workspace, then symlink at the parent.
+      - name: Checkout ordpool-electrs source (for the electrs container)
+        uses: actions/checkout@v5
+        with:
+          repository: ordpool-space/ordpool-electrs
+          ref: ordpool
+          path: _ordpool-electrs-src
+      - name: Symlink ordpool-electrs at compose's expected location
+        run: ln -s "$GITHUB_WORKSPACE/_ordpool-electrs-src" "$(dirname "$GITHUB_WORKSPACE")/ordpool-electrs"
+
       # cat21-ord source — `docker compose --profile cat21-ord up`
       # below builds the ord image from this checkout. Only the ord
       # shard (cat21wallet) needs it; its transfer/offer/accept specs
       # poll `/status` on ord.
       #
-      # actions/checkout v5 rejects paths outside $GITHUB_WORKSPACE,
-      # but the compose's build context is `../../cat21-ord` (relative
-      # to e2e/docker-compose.regtest.yml → resolves to the workspace's
-      # PARENT directory). So we check out under the workspace, then
-      # symlink at the parent for compose's resolution to land.
+      # Same PARENT-directory symlink dance as ordpool-electrs above.
       - name: Checkout cat21-ord source (for the cat21-ord container)
         if: matrix.wallet == 'cat21wallet'
         uses: actions/checkout@v5
@@ -201,13 +214,13 @@ jobs:
       # cat21-ord (profile-gated; default `up` is bitcoind + electrs only).
       - name: Start regtest stack (bitcoind + electrs)
         if: matrix.wallet != 'cat21wallet'
-        run: docker compose -f e2e/docker-compose.regtest.yml up -d
+        # electrs builds from our fork on first run; --build is explicit.
+        run: docker compose -f e2e/docker-compose.regtest.yml up -d --build
 
       - name: Start regtest stack (bitcoind + electrs + cat21-ord)
         if: matrix.wallet == 'cat21wallet'
-        # --wait would block on electrs's wget healthcheck which the
-        # mempool/electrs image lacks; the curl polls below handle
-        # the actual readiness checks.
+        # regtest-bootstrap.sh + the curl polls below handle readiness, so
+        # no --wait. electrs + cat21-ord build from our forks on first run.
         run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d --build
 
       - name: Mine 101 blocks (coinbase maturity) + verify electrs is indexing

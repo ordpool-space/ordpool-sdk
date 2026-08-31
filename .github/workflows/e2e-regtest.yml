@@ -34,6 +34,17 @@ jobs:
           ref: index-cat21
           path: cat21-ord
 
+      # OUR electrs. docker-compose.regtest.yml builds the electrs service
+      # from ../../ordpool-electrs/ (the ordpool-electrs fork), not the
+      # upstream mempool/electrs image — the E2E stack must run our code.
+      # Co-located as a sibling to match the compose's build context.
+      - name: Checkout ordpool-electrs (sibling)
+        uses: actions/checkout@v5
+        with:
+          repository: ordpool-space/ordpool-electrs
+          ref: ordpool
+          path: ordpool-electrs
+
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -47,9 +58,9 @@ jobs:
         run: npm run build
 
       - name: Start bitcoind + electrs + cat21-ord + ord-stock (regtest)
-        # --wait would block on electrs's wget healthcheck which the
-        # mempool/electrs image lacks; regtest-bootstrap.sh polls the
-        # actual readiness check itself.
+        # regtest-bootstrap.sh polls readiness itself, so no --wait.
+        # electrs + both ord services build from source (our forks) on
+        # first run; --build makes the rebuild-on-change explicit.
         #
         # Two ord variants:
         #   cat21-ord (port 8080) — with --index-cat21, used by
@@ -60,7 +71,7 @@ jobs:
         # Both build from the same cat21-ord image — one build, two
         # containers.
         working-directory: ordpool-sdk
-        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord --profile ord-stock up -d
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord --profile ord-stock up -d --build
 
       - name: Bootstrap regtest funds (101 blocks, emit funder keypair)
         id: bootstrap
