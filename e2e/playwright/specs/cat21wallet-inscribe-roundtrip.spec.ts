@@ -14,13 +14,11 @@ import {
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
+import { onboardCat21Wallet } from '../onboard-cat21wallet';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/cat21wallet');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
-
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_PASSWORD = 'correct-horse-battery-staple-Tr0ub4dor-9876';
 
 const FUND_AMOUNT_BTC = 0.001;
 const INSCRIPTION_BODY_TEXT = 'cat21-wallet inscribed me on regtest';
@@ -38,31 +36,6 @@ async function shot(p: Page, name: string): Promise<void> {
 
 function utf8ToHex(s: string): string {
   return Array.from(new TextEncoder().encode(s)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function onboardCat21Wallet(page: Page): Promise<void> {
-  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('sign-in-link')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('sign-in-link').click();
-
-  const inputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(inputs.first()).toBeVisible({ timeout: 15_000 });
-  const words = TEST_MNEMONIC.split(' ');
-  for (let i = 0; i < 12; i++) {
-    await inputs.nth(i).fill(words[i]);
-  }
-  await page.getByRole('button', { name: /continue|sign in|restore|confirm/i }).first().click();
-
-  const pwInput = page.getByTestId('set-or-enter-password-input');
-  await expect(pwInput).toBeVisible({ timeout: 15_000 });
-  await pwInput.click();
-  await pwInput.pressSequentially(TEST_PASSWORD, { delay: 15 });
-  await page.getByTestId('set-password-btn').click();
-
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('bitcoin');
-  }, undefined, { timeout: 30_000, polling: 250 });
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
@@ -96,7 +69,7 @@ test.beforeAll(async () => {
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
-  await onboardCat21Wallet(onboardPage);
+  await onboardCat21Wallet(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
 

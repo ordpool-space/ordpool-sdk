@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { waitForApprovalPopup } from '../approval-popup';
+import { onboardCat21Wallet } from '../onboard-cat21wallet';
 
 /**
  * Iteration 3 of the Cat21 Wallet E2E pipeline: SDK ↔ Cat21 Wallet handshake.
@@ -28,9 +29,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/cat21wallet');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_PASSWORD = 'correct-horse-battery-staple-Tr0ub4dor-9876';
-
 // Expected derivations for `abandon × 11 + about` on mainnet:
 //   m/84'/0'/0'/0/0  BIP-84 P2WPKH  Native SegWit  = paymentAddress
 //   m/86'/0'/0'/0/0  BIP-86 P2TR    Taproot        = ordinalsAddress
@@ -45,37 +43,6 @@ async function shot(page: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `cat21wallet-handshake-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-async function onboardCat21Wallet(page: Page): Promise<void> {
-  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-
-  await expect(page.getByTestId('sign-in-link')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('sign-in-link').click();
-
-  // Fill the first 12 mnemonic boxes (per-word). Boxes are
-  // input[type=password] for masking; first one becomes visible
-  // when the restore screen renders.
-  const inputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(inputs.first()).toBeVisible({ timeout: 15_000 });
-  const words = TEST_MNEMONIC.split(' ');
-  for (let i = 0; i < 12; i++) {
-    await inputs.nth(i).fill(words[i]);
-  }
-  await page.getByRole('button', { name: /continue|sign in|restore|confirm/i }).first().click();
-
-  // Password screen: testid-driven.
-  const pwInput = page.getByTestId('set-or-enter-password-input');
-  await expect(pwInput).toBeVisible({ timeout: 15_000 });
-  await pwInput.click();
-  await pwInput.pressSequentially(TEST_PASSWORD, { delay: 15 });
-  await page.getByTestId('set-password-btn').click();
-
-  // Wait for dashboard.
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('bitcoin');
-  }, undefined, { timeout: 30_000, polling: 250 });
 }
 
 test.beforeAll(async () => {
@@ -101,7 +68,7 @@ test.beforeAll(async () => {
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
-  await onboardCat21Wallet(onboardPage);
+  await onboardCat21Wallet(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
 
