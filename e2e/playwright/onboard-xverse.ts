@@ -108,10 +108,13 @@ export async function primeAndSwitchToRegtest(context: BrowserContext, extension
   const primer = await context.newPage();
   await primer.setViewportSize({ width: 400, height: 800 });
   await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
+  // 60s, not 30s: the wallet matrix runs several extension jobs in parallel on
+  // shared CI runners, so Xverse's popup can be slow to hydrate here — it flaked
+  // on a 30s ceiling once under matrix load.
   await primer.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('account 1') || t.includes('not now') || t.includes('zest');
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { timeout: 60_000, polling: 250 });
   const notNow = primer.getByText('Not now', { exact: true }).first();
   if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
     await notNow.click({ force: true }).catch(() => undefined);
