@@ -257,6 +257,10 @@ jobs:
           exit 1
 
       - name: Run ${{ matrix.wallet }} Playwright specs under xvfb
+        env:
+          # global-setup.ts skips the ~25s Xverse seed onboarding in every
+          # non-xverse shard (only xverse-*.spec.ts clone the seed).
+          WALLET: ${{ matrix.wallet }}
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e:playwright -- ${{ matrix.wallet }}
 
       - name: Stop regtest stack

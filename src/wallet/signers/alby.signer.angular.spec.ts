@@ -121,3 +121,85 @@ describe('albySigner.signSingleFundingInput', () => {
     expect(result).toEqual({ txId: 'TXID-FROM-BROADCAST' });
   });
 });
+
+
+/**
+ * Pipeline A (mock-based) — pins OUR Alby adapter's rejection of every
+ * per-input signing flow. Alby's `webbtc.signPsbt` signs EVERY input in
+ * the PSBT with one Taproot key (verified against background.bundle.js;
+ * no `toSignInputs` / `signInputs` knob), so `alby.signer.ts` refuses
+ * transfer / offer-accept / offer-create up front rather than hand Alby a
+ * PSBT it would over-sign. This proves OUR adapter errors with the exact
+ * message and does NOT reach the wallet — it says nothing about Alby itself.
+ *
+ * These paths are otherwise untested: the Alby e2e roundtrips drive Alby's
+ * internal `webbtc/signPsbt` route directly and bypass `alby.signer.ts`, so
+ * a regression that let these methods fall through to signing would ship
+ * green without this guard.
+ */
+describe('albySigner rejects per-input flows (Alby has no per-input signing knob)', () => {
+
+  let signPsbtMock: jest.Mock;
+  let broadcastMock: jest.Mock;
+
+  beforeEach(() => {
+    // A distinct, resolvable stand-in: if a regression made any of these
+    // flows fall through to the wallet, the observable would EMIT this
+    // sentinel-derived txId instead of erroring — the assertions below
+    // (rejects.toThrow) positively catch that leak.
+    signPsbtMock = jest.fn();
+    signPsbtMock.mockResolvedValue({ signed: 'LEAKED-WIRE-TX' } as never);
+    (window as unknown as { alby: { enable: jest.Mock; webbtc: unknown } }).alby = {
+      enable: jest.fn(),
+      webbtc: { enable: jest.fn(), signPsbt: signPsbtMock },
+    };
+    broadcastMock = jest.fn();
+    broadcastMock.mockReturnValue(of('LEAKED-TXID'));
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { alby?: unknown }).alby;
+  });
+
+  it('signTransfer errors with the "no per-input signing" message', async () => {
+    const result$ = albySigner.signTransfer({
+      psbtBytes: new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]),
+      ordinalsAddress: 'bc1pordinals',
+      paymentAddress: 'bc1qpayment',
+      fundingInputCount: 1,
+      network: Network.Mainnet,
+      broadcast: broadcastMock as never,
+    });
+
+    await expect(firstValueFrom(result$)).rejects.toThrow(
+      'Alby does not support per-input signing yet (no toSignInputs / signInputs knob in current webbtc API). Use Xverse, Leather, Unisat, or CAT-21 wallet for transfer / offer flows.',
+    );
+  });
+
+  it('signOfferAccept errors with the "no per-input signing" message', async () => {
+    const result$ = albySigner.signOfferAccept({
+      psbtBytes: new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]),
+      ordinalsAddress: 'bc1pordinals',
+      ordinalsPublicKey: '02'.padEnd(66, '0'),
+      network: Network.Mainnet,
+      broadcast: broadcastMock as never,
+    });
+
+    await expect(firstValueFrom(result$)).rejects.toThrow(
+      'Alby does not support per-input signing yet (no toSignInputs / signInputs knob in current webbtc API). Use Xverse, Leather, Unisat, or CAT-21 wallet for transfer / offer flows.',
+    );
+  });
+
+  it('signOfferCreatePsbt errors with the offer-create "no per-input signing" message', async () => {
+    const result$ = albySigner.signOfferCreatePsbt({
+      psbtBytes: new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]),
+      paymentAddress: 'bc1qpayment',
+      fundingInputCount: 1,
+      network: Network.Mainnet,
+    });
+
+    await expect(firstValueFrom(result$)).rejects.toThrow(
+      'Alby does not support per-input signing yet (no toSignInputs / signInputs knob in current webbtc API). Use Xverse, Leather, Unisat, or CAT-21 wallet for offer-create.',
+    );
+  });
+});

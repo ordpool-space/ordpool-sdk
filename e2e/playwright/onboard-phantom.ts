@@ -1,8 +1,6 @@
 import { expect, Page } from '@playwright/test';
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
-const TEST_PASSWORD = 'TestPassword123!';
+import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 
 /**
  * Drive Phantom v26 onboarding from welcome to the "You're good to go"
@@ -28,7 +26,15 @@ const TEST_PASSWORD = 'TestPassword123!';
  *     CDP+pointer-event volley and leave the wallet on the completion
  *     screen — callers can navigate to popup.html afterwards.
  */
-export async function onboardPhantom(page: Page, extensionId: string): Promise<void> {
+export async function onboardPhantom(
+  page: Page,
+  extensionId: string,
+  opts: { password?: string; mnemonicWords?: string } = {},
+): Promise<void> {
+  const password = opts.password ?? PASSWORD_BY_WALLET.phantom;
+  const mnemonicWords = (opts.mnemonicWords ?? TEST_MNEMONIC_WORDS.join(' ')).split(' ');
+  const mnemonic = mnemonicWords.join(' ');
+
   if (page.url() === 'about:blank') {
     await page.setViewportSize({ width: 400, height: 800 });
     await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
@@ -61,11 +67,11 @@ export async function onboardPhantom(page: Page, extensionId: string): Promise<v
   await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
   const inputCount = await mnemonicInputs.count();
   if (inputCount >= 12) {
-    for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-      await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
+    for (let i = 0; i < mnemonicWords.length; i++) {
+      await mnemonicInputs.nth(i).fill(mnemonicWords[i]);
     }
   } else {
-    await mnemonicInputs.first().fill(TEST_MNEMONIC);
+    await mnemonicInputs.first().fill(mnemonic);
   }
   const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
   await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
@@ -116,8 +122,8 @@ export async function onboardPhantom(page: Page, extensionId: string): Promise<v
 
   const pwInputs = page.locator('input[type="password"]');
   await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
-  await pwInputs.nth(0).fill(TEST_PASSWORD);
-  await pwInputs.nth(1).fill(TEST_PASSWORD);
+  await pwInputs.nth(0).fill(password);
+  await pwInputs.nth(1).fill(password);
 
   // Reach UI hidden checkbox — native .click() via JS.
   await page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"]')

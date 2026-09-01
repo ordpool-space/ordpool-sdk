@@ -20,28 +20,17 @@ export async function waitForSingletonLockGone(
   const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
   const stillThere = () => lockFiles.some(f => fs.existsSync(path.join(userDataDir, f)));
 
-  if (!stillThere()) return;
-
-  return new Promise<void>((resolve, reject) => {
-    let settled = false;
-    const finish = (err?: Error) => {
-      if (settled) return;
-      settled = true;
-      watcher.close();
-      clearTimeout(timer);
-      err ? reject(err) : resolve();
-    };
-
-    const watcher = fs.watch(userDataDir, (_evt, filename) => {
-      if (!filename || !lockFiles.includes(String(filename))) return;
-      if (!stillThere()) finish();
-    });
-
-    const timer = setTimeout(
-      () => finish(new Error(`SingletonLock still present in ${userDataDir} after ${timeoutMs}ms`)),
-      timeoutMs,
-    );
-  });
+  // Poll rather than fs.watch: fs.watch has a check-then-watch race (a lock
+  // removed between the initial stillThere() and arming the watcher is missed,
+  // and the caller then eats the full timeout) and silently drops events on
+  // some platforms. A 100ms poll has no such gap.
+  const deadline = Date.now() + timeoutMs;
+  while (stillThere()) {
+    if (Date.now() > deadline) {
+      throw new Error(`SingletonLock still present in ${userDataDir} after ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 /**

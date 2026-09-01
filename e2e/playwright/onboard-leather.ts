@@ -27,7 +27,7 @@ export async function onboardLeather(
   const inputs = page.locator('input[type="text"], input[type="password"]');
   await expect(inputs.first()).toBeVisible({ timeout: 15_000 });
   const words = mnemonic.split(' ');
-  for (let i = 0; i < 12; i++) await inputs.nth(i).fill(words[i]);
+  for (let i = 0; i < words.length; i++) await inputs.nth(i).fill(words[i]);
   await page.getByRole('button', { name: /continue|sign in|restore|confirm/i }).first().click();
 
   const pwInput = page.getByTestId('set-or-enter-password-input');

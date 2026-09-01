@@ -1,4 +1,4 @@
-import { chromium, BrowserContext } from '@playwright/test';
+import { chromium } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -28,50 +28,39 @@ import { onboardXverse, primeAndSwitchToRegtest, overrideRegtestElectrsUrl } fro
  */
 
 const EXT_PATH = path.resolve(__dirname, '../extensions/xverse');
-const DUMP_PATH = process.env.XVERSE_STORAGE_DUMP
-  ?? path.resolve(__dirname, '../../test-results/xverse-storage.json');
 // Seeded chromium user-data-dir — specs clone this per-test so each
 // gets a fresh context but skip the onboarding click flow.
 export const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
   ?? path.resolve(__dirname, '../../test-results/xverse-seed-user-data-dir');
-
-async function dumpStorage(context: BrowserContext, extensionId: string): Promise<Record<string, unknown>> {
-  // chrome.storage.local is only available from extension-origin
-  // pages. Open a fresh extension page, evaluate get(null) to grab
-  // every key.
-  const dumper = await context.newPage();
-  await dumper.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  // Settle on a Xverse boot marker (unlock screen text or the
-  // already-unlocked account heading) rather than a fixed sleep —
-  // chrome.storage.local writes flush deterministically by the time
-  // the UI has finished hydrating from them.
-  await dumper.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('unlock') || t.includes('account 1') || t.includes('zest');
-  }, undefined, { timeout: 30_000, polling: 250 });
-  const data = await dumper.evaluate(() => new Promise<Record<string, unknown>>((resolve) => {
-    (window as unknown as { chrome: { storage: { local: { get: (k: null, cb: (v: Record<string, unknown>) => void) => void } } } })
-      .chrome.storage.local.get(null, (v) => resolve(v));
-  }));
-  await dumper.close();
-  return data;
-}
 
 export default async function globalSetup(): Promise<void> {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
     throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. Run e2e/playwright/playwright-bootstrap.sh.`);
   }
 
-  // Skip re-onboarding if the seed dir + dump already exist from
-  // a previous run with the same Xverse version. Saves ~25s on
-  // local re-runs.
+  // The wallet-matrix runs one shard per wallet (the CI sets WALLET);
+  // only the xverse-*.spec.ts clone this seed, so every non-xverse shard
+  // skips the ~25s Xverse onboarding entirely.
+  if (process.env.WALLET && process.env.WALLET !== 'xverse') {
+    // eslint-disable-next-line no-console
+    console.log(`[globalSetup] ${process.env.WALLET} shard — skipping Xverse seed (only xverse specs use it)`);
+    return;
+  }
+
+  // Reuse the seeded dir only when it exists AND was produced by the
+  // SAME extension version. Keying on mere existence let a local .crx
+  // bump silently reuse a stale profile, masking the selector drift the
+  // onboard spec exists to catch.
+  const extVersion = (JSON.parse(fs.readFileSync(path.join(EXT_PATH, 'manifest.json'), 'utf8')) as { version: string }).version;
+  const versionMarker = path.join(SEED_USER_DATA_DIR, '.xverse-ext-version');
   if (
-    fs.existsSync(DUMP_PATH) &&
     fs.existsSync(path.join(SEED_USER_DATA_DIR, 'Default')) &&
+    fs.existsSync(versionMarker) &&
+    fs.readFileSync(versionMarker, 'utf8') === extVersion &&
     !process.env.XVERSE_FORCE_REONBOARD
   ) {
     // eslint-disable-next-line no-console
-    console.log(`[globalSetup] reusing existing seed user-data-dir at ${SEED_USER_DATA_DIR}`);
+    console.log(`[globalSetup] reusing seed user-data-dir (Xverse ${extVersion}) at ${SEED_USER_DATA_DIR}`);
     return;
   }
 
@@ -105,13 +94,7 @@ export default async function globalSetup(): Promise<void> {
     await overrideRegtestElectrsUrl(context, extensionId, electrsUrl);
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] overrode bitcoin-regtest.electrsApiUrl = ${electrsUrl}`);
-    const dump = await dumpStorage(context, extensionId);
-
-    fs.mkdirSync(path.dirname(DUMP_PATH), { recursive: true });
-    fs.writeFileSync(DUMP_PATH, JSON.stringify(dump, null, 2));
-    // eslint-disable-next-line no-console
-    console.log(`[globalSetup] dumped ${Object.keys(dump).length} keys to ${DUMP_PATH}`);
-    // Gate the close on the dumped state having actually materialised
+    // Gate the close on the onboarded state having actually materialised
     // in chrome.storage.local — confirms LevelDB flushed the final
     // writes from primeAndSwitchToRegtest. Without this gate, the
     // cloned user-data-dir misses the last few writes and the wallet

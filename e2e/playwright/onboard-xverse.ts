@@ -119,21 +119,33 @@ export async function primeAndSwitchToRegtest(context: BrowserContext, extension
 
   await primer.goto(`chrome-extension://${extensionId}/popup.html#/settings/change-network`, { waitUntil: 'domcontentloaded' });
   await primer.waitForFunction(() => /testnet mode/i.test(document.body.innerText || ''), undefined, { timeout: 15_000 });
-  const switchEl = primer.locator('[role="switch"], [role="checkbox"], input[type="checkbox"]').first();
-  if (await switchEl.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    await switchEl.click({ force: true });
-  } else {
-    const rowBox = await primer.getByText('Testnet mode', { exact: true }).first().boundingBox();
-    if (!rowBox) throw new Error('Could not locate "Testnet mode" row');
-    await primer.mouse.click(rowBox.x + 320, rowBox.y + rowBox.height / 2);
-  }
+  // Toggle Testnet mode via a DOM-relative locator (no coordinate clicks —
+  // E2E_BEST_PRACTICES). Scope the switch to the settings row that holds the
+  // "Testnet mode" label so we never flip an unrelated control; fall back to the
+  // single switch on the change-network page if the row scoping finds none.
+  const rowSwitch = primer
+    .getByText('Testnet mode', { exact: true })
+    .locator('xpath=ancestor-or-self::*[.//*[@role="switch"] or .//*[@role="checkbox"] or .//input[@type="checkbox"]][1]')
+    .locator('[role="switch"], [role="checkbox"], input[type="checkbox"]')
+    .first();
+  const pageSwitch = primer.locator('[role="switch"], [role="checkbox"], input[type="checkbox"]').first();
+  const testnetToggle = (await rowSwitch.count()) > 0 ? rowSwitch : pageSwitch;
+  await expect(testnetToggle).toBeVisible({ timeout: 10_000 });
+  await testnetToggle.click({ force: true });
   await primer.waitForFunction(() => {
     const txt = document.body.innerText || '';
     return /testnet/i.test(txt) && /BITCOIN[\s\S]{0,80}testnet/i.test(txt);
   }, undefined, { timeout: 10_000, polling: 250 });
   await primer.getByText('Regtest', { exact: true }).first().click({ force: true });
-  await primer.waitForFunction(() => /BITCOIN[\s\S]{0,40}\bRegtest\b/.test(document.body.innerText || ''),
-    undefined, { timeout: 10_000, polling: 250 }).catch(() => undefined);
+  // Verify the switch actually took. A failed network switch must surface HERE,
+  // not downstream as a mystery zero-balance — throw a clear error if the popup
+  // never reflects BITCOIN → Regtest.
+  await primer.waitForFunction(
+    () => /BITCOIN[\s\S]{0,40}\bRegtest\b/.test(document.body.innerText || ''),
+    undefined, { timeout: 10_000, polling: 250 },
+  ).catch(() => {
+    throw new Error('Xverse Regtest switch not verified: popup never showed BITCOIN → Regtest');
+  });
 }
 
 /**

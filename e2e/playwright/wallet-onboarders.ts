@@ -50,7 +50,14 @@ export const walletOnboarders: Record<string, WalletOnboarder> = {
     caveat: 'connect blocked — v26 desktop ships btc.js dormant: onboards, but cannot connect or sign',
   },
   alby: {
-    onboard: onPage((p) => seedAlbyAccount(p)),
+    // seedAlbyAccount talks to Alby's service worker via chrome.runtime.sendMessage,
+    // which only exists on a chrome-extension:// origin — so land on options.html
+    // before seeding (mirrors the real alby-*.spec.ts setup); a bare about:blank page
+    // has no chrome.runtime and the seed throws.
+    onboard: onPage(async (p, id) => {
+      await p.goto(`chrome-extension://${id}/options.html`, { waitUntil: 'domcontentloaded' });
+      return seedAlbyAccount(p);
+    }),
     password: PASSWORD_BY_WALLET.alby,
     caveat: 'sign blocked headless — its popup confirm() never resolves (seeded programmatically via the SW)',
   },

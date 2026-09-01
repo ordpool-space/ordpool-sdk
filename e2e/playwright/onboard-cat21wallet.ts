@@ -14,11 +14,10 @@ import { PASSWORD_BY_WALLET } from './wallet-test-vectors';
 export async function onboardCat21Wallet(
   page: Page,
   extensionId: string,
-  mnemonic?: string,
-  password?: string,
+  opts: { mnemonic?: string; password?: string } = {},
 ): Promise<void> {
   return onboardLeather(page, extensionId, {
-    mnemonic,
-    password: password ?? PASSWORD_BY_WALLET.cat21wallet,
+    mnemonic: opts.mnemonic,
+    password: opts.password ?? PASSWORD_BY_WALLET.cat21wallet,
   });
 }

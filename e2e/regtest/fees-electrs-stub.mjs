@@ -118,6 +118,16 @@ function proxyToElectrs(req, res) {
     // Log non-trivial responses so a "stub returned [] when it shouldn't"
     // failure has something to grep for in fees-stub.log.
     if (/\/address\/.*\/utxo/.test(upstreamPath)) {
+      // We buffer the whole body to log it, then re-emit it as a fresh
+      // discrete `res.end(buffer)`. The upstream framing headers describe
+      // the UPSTREAM wire body, not these re-emitted bytes, so drop
+      // content-length / transfer-encoding / content-encoding and let Node
+      // recompute content-length for the new buffer. A forwarded stale
+      // framing header truncates or hangs the UTXO JSON in the browser.
+      const bufferedHeaders = { ...headers };
+      delete bufferedHeaders['content-length'];
+      delete bufferedHeaders['transfer-encoding'];
+      delete bufferedHeaders['content-encoding'];
       const chunks = [];
       upRes.on('data', (c) => chunks.push(c));
       upRes.on('end', () => {
@@ -125,19 +135,33 @@ function proxyToElectrs(req, res) {
         console.log(
           `[utxo] ${req.method} ${upstreamPath} → ${upRes.statusCode} ${body.length}B ${body.length < 200 ? body.toString() : '…'}`,
         );
-        res.writeHead(upRes.statusCode ?? 502, headers);
+        res.writeHead(upRes.statusCode ?? 502, bufferedHeaders);
         res.end(body);
       });
       upRes.on('error', (err) => {
+        // A late upstream error can fire after we've already answered;
+        // guard writeHead to avoid ERR_HTTP_HEADERS_SENT.
+        if (res.headersSent) { res.destroy(); return; }
         res.writeHead(502, { 'content-type': 'text/plain', ...CORS_BASE });
         res.end(`upstream read error: ${err.message}`);
       });
       return;
     }
+    // Streaming branch: writeHead fires before the pipe below, so a
+    // mid-stream upstream error arrives after headers are sent — tear the
+    // socket down instead of a second (throwing) writeHead.
+    upRes.on('error', (err) => {
+      if (res.headersSent) { res.destroy(); return; }
+      res.writeHead(502, { 'content-type': 'text/plain', ...CORS_BASE });
+      res.end(`upstream read error: ${err.message}`);
+    });
     res.writeHead(upRes.statusCode ?? 502, headers);
     upRes.pipe(res);
   });
   upstream.on('error', (err) => {
+    // If a streamed response already put headers on the wire, we can't
+    // send a 502 status — just destroy the socket.
+    if (res.headersSent) { res.destroy(); return; }
     res.writeHead(502, { 'content-type': 'text/plain', ...CORS_BASE });
     res.end(`upstream electrs error: ${err.message}`);
   });
@@ -148,6 +172,10 @@ const CATS_NUMBERS_RE = /^\/api\/cats\/numbers\/(\d+)\/(\d+)\/?$/;
 const CATS_PAGE_RE = /^\/api\/cats\/(\d+)\/(\d+)\/?$/;
 
 const server = http.createServer((req, res) => {
+  // Match local routes against the path only — a trailing `?foo` must not
+  // push /api/status or /output/... into the electrs proxy. The proxy
+  // branch keeps forwarding the full `req.url` so the query reaches electrs.
+  const pathname = req.url.split('?')[0];
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
@@ -157,12 +185,12 @@ const server = http.createServer((req, res) => {
     res.end();
     return;
   }
-  if (req.url === '/healthz') {
+  if (pathname === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain', ...CORS_BASE });
     res.end('ok');
     return;
   }
-  if (req.method === 'GET' && req.url === '/api/v1/fees/recommended') {
+  if (req.method === 'GET' && pathname === '/api/v1/fees/recommended') {
     jsonResponse(res, JSON.stringify(currentFees));
     return;
   }
@@ -170,7 +198,7 @@ const server = http.createServer((req, res) => {
   // client so the picker reflects the change without a reload.
   //   POST /admin/fees      body: a (partial) RecommendedFees JSON
   //   POST /admin/fees/reset    no body — restores DEFAULT_FEES
-  if (req.method === 'POST' && req.url === '/admin/fees') {
+  if (req.method === 'POST' && pathname === '/admin/fees') {
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
@@ -188,7 +216,7 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-  if (req.method === 'POST' && req.url === '/admin/fees/reset') {
+  if (req.method === 'POST' && pathname === '/admin/fees/reset') {
     currentFees = { ...DEFAULT_FEES };
     broadcastSnapshot();
     console.log(`[admin] fees → reset to default`);
@@ -196,7 +224,7 @@ const server = http.createServer((req, res) => {
     res.end();
     return;
   }
-  if (req.method === 'GET' && req.url === '/api/status') {
+  if (req.method === 'GET' && pathname === '/api/status') {
     jsonResponse(res, EMPTY_STATUS_BODY);
     return;
   }
@@ -211,7 +239,7 @@ const server = http.createServer((req, res) => {
   // lets the marketplace round-trip prove PSBT-byte fidelity + the
   // backend validator + the accept UI without adding an ord container
   // to the CI substrate.
-  const outputMatch = req.method === 'GET' && /^\/output\/([0-9a-f]{64}):(\d+)/i.exec(req.url);
+  const outputMatch = req.method === 'GET' && /^\/output\/([0-9a-f]{64}):(\d+)/i.exec(pathname);
   if (outputMatch) {
     jsonResponse(res, JSON.stringify({
       cats: [0],
@@ -223,12 +251,12 @@ const server = http.createServer((req, res) => {
     }));
     return;
   }
-  const numbersMatch = req.method === 'GET' && CATS_NUMBERS_RE.exec(req.url);
+  const numbersMatch = req.method === 'GET' && CATS_NUMBERS_RE.exec(pathname);
   if (numbersMatch) {
     jsonResponse(res, emptyCatsBody(numbersMatch[1], numbersMatch[2]));
     return;
   }
-  const pageMatch = req.method === 'GET' && CATS_PAGE_RE.exec(req.url);
+  const pageMatch = req.method === 'GET' && CATS_PAGE_RE.exec(pathname);
   if (pageMatch) {
     jsonResponse(res, emptyCatsBody(pageMatch[1], pageMatch[2]));
     return;
@@ -241,8 +269,13 @@ const server = http.createServer((req, res) => {
 // real work when the WS path is wired up below. Default no-op so the
 // admin endpoints can call it unconditionally.
 let broadcastSnapshot = () => {};
+// Holds the WebSocketServer once created, so clean shutdown can close it
+// (it holds the port) before closing the HTTP server. Stays null when
+// WS is disabled or its setup failed.
+let wss = null;
 
 if (WS_ENABLED) {
+  try {
   // ESM resolves bare imports against the script's directory, not cwd,
   // so a plain `import 'ws'` from this file fails even when invoked
   // from frontend/. Resolve the path explicitly against process.cwd()
@@ -256,7 +289,7 @@ if (WS_ENABLED) {
     ?? nodePath.resolve(process.cwd(), 'node_modules/ws');
   const wsEntry = pathToFileURL(nodePath.join(wsDir, 'wrapper.mjs')).href;
   const { WebSocketServer } = await import(wsEntry);
-  const wss = new WebSocketServer({ server, path: '/api/v1/ws' });
+  wss = new WebSocketServer({ server, path: '/api/v1/ws' });
   // Mempool's frontend sends a JSON command to subscribe to channels
   // (`{"action":"want","data":[...]}`). The state-service consumes
   // top-level keys on every incoming server message. We only need to
@@ -316,11 +349,33 @@ if (WS_ENABLED) {
     });
     ws.on('close', () => console.log('[ws] client disconnected'));
   });
+  } catch (err) {
+    // A failing `ws` import (e.g. run from a dir without the transitive
+    // dep) must NOT sink the whole stub — the fee/status/proxy paths need
+    // no WS. Degrade to the no-op broadcastSnapshot and let the HTTP
+    // server still bind. Set WS_PACKAGE_DIR if a real WS is required here.
+    wss = null;
+    console.error(`[ws] setup failed, continuing without WebSocket: ${err?.stack ?? err}`);
+  }
 }
 
 server.listen(PORT, () => {
   console.log(`fees-electrs-stub listening on :${PORT} → ${ELECTRS_URL}${WS_ENABLED ? ' (WS enabled)' : ''}`);
 });
 
-process.on('SIGTERM', () => server.close(() => process.exit(0)));
-process.on('SIGINT', () => server.close(() => process.exit(0)));
+// Idempotent: a fast double-signal (SIGINT then SIGTERM) must not
+// double-close. Close the WS server first — it holds the listening port
+// via the shared HTTP server — then close the HTTP server itself.
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const closeHttp = () => server.close(() => process.exit(0));
+  if (wss) {
+    wss.close(closeHttp);
+  } else {
+    closeHttp();
+  }
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
