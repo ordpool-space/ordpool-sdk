@@ -1,0 +1,36 @@
+# CI-ONLY read-only companion to docker-compose.gha-cache.yml: imports the
+# electrs / cat21-ord build cache but never exports it. Used by workflows
+# that should READ the cache the e2e-regtest workflow writes, without
+# paying the export cost themselves.
+#
+# Why a reader-only variant exists: e2e-playwright runs a wallet matrix, so
+# every shard builds electrs on its own runner. If each shard also exported
+# (cache_to), a cold run would fire N concurrent uploads to the same
+# scope=electrs (redundant, since the content is identical) and add ~90s of
+# export time per shard on top of the compile. That extra time tipped the
+# heaviest shard (xverse) over its job timeout on a cold run. Making the
+# matrix import-only keeps the warm-run win (the compile is a cache hit)
+# while restoring cold-run timing to the pre-cache baseline. e2e-regtest is
+# a single job and remains the sole writer (docker-compose.gha-cache.yml),
+# so both scopes still get populated.
+#
+# Same rules as the writer overlay: NEVER pass this to a local `docker
+# compose` (type=gha needs the Actions runtime token). Applied in CI as:
+#
+#   COMPOSE_BAKE=true docker compose \
+#     -f docker-compose.regtest.yml -f docker-compose.gha-cache-ro.yml build
+services:
+  electrs:
+    build:
+      cache_from:
+        - type=gha,scope=electrs
+
+  ord:
+    build:
+      cache_from:
+        - type=gha,scope=cat21-ord
+
+  ord-stock:
+    build:
+      cache_from:
+        - type=gha,scope=cat21-ord

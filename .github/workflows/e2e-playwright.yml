@@ -38,11 +38,14 @@ permissions:
 jobs:
   playwright:
     runs-on: ubuntu-latest
-    # Per-shard cap. A .crx shard is npm ci + cached extension + a
-    # bitcoind/electrs stack + one wallet's specs (~8-12 min). The
-    # cat21wallet shard also builds the wallet from source and the
-    # cat21-ord image (~18-22 min) — the long pole, still under cap.
-    timeout-minutes: 30
+    # Per-shard cap. On a WARM cache the electrs/cat21-ord image build is an
+    # ~8s import, so a shard is npm ci + stack + one wallet's specs. The
+    # heaviest shard is xverse (its specs run ~17 min: it seeds the shared
+    # vault and carries the widest matrix). On a COLD cache the shard also
+    # recompiles electrs (~10 min), so cold xverse ≈ 29 min — which the old
+    # 30-min cap could not absorb. 40 covers the cold case with margin for
+    # runner variance; warm shards finish in ~13-21 min well under it.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -245,9 +248,11 @@ jobs:
         if: matrix.wallet != 'cat21wallet'
         env:
           COMPOSE_BAKE: "true"
-        # Scope to `electrs`: these shards don't check out cat21-ord, so
-        # never let compose touch the profiled ord/ord-stock build context.
-        run: docker compose -f e2e/docker-compose.regtest.yml -f e2e/docker-compose.gha-cache.yml build electrs
+        # Read-only overlay: the matrix imports the cache e2e-regtest writes,
+        # but each shard must NOT export it (redundant + tips the heaviest
+        # shard over its timeout on cold runs). Scope to `electrs`: these
+        # shards don't check out cat21-ord, so never touch the ord context.
+        run: docker compose -f e2e/docker-compose.regtest.yml -f e2e/docker-compose.gha-cache-ro.yml build electrs
 
       - name: Start regtest stack (bitcoind + electrs)
         if: matrix.wallet != 'cat21wallet'
@@ -257,7 +262,8 @@ jobs:
         if: matrix.wallet == 'cat21wallet'
         env:
           COMPOSE_BAKE: "true"
-        run: docker compose -f e2e/docker-compose.regtest.yml -f e2e/docker-compose.gha-cache.yml --profile cat21-ord build
+        # Read-only (see above): import e2e-regtest's cache, don't export.
+        run: docker compose -f e2e/docker-compose.regtest.yml -f e2e/docker-compose.gha-cache-ro.yml --profile cat21-ord build
 
       - name: Start regtest stack (bitcoind + electrs + cat21-ord)
         if: matrix.wallet == 'cat21wallet'
