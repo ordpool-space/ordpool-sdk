@@ -6,6 +6,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { onboardWizz } from '../onboard-wizz';
 
 /**
  * Iteration 5 — full cat21 mint roundtrip with the real Wizz
@@ -20,10 +21,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
-const TEST_PASSWORD = 'TestPassword123!';
-
 const FUND_AMOUNT_BTC = 0.001;
 
 let context: BrowserContext;
@@ -34,52 +31,6 @@ async function shot(p: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `wizz-mint-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-async function onboardWizz(page: Page): Promise<void> {
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-
-  await expect(page.getByText('I already have a wallet', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await page.getByText('I already have a wallet', { exact: true }).click();
-
-  const pwInputs = page.locator('input[type="password"]');
-  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
-  const pwCount = await pwInputs.count();
-  for (let i = 0; i < pwCount; i++) {
-    await pwInputs.nth(i).fill(TEST_PASSWORD);
-  }
-  await page.getByRole('button', { name: /^continue$/i }).first().click();
-
-  await expect(page.getByText('Wizz Wallet', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
-  await page.getByText('Wizz Wallet', { exact: true }).first().click({ force: true });
-
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
-  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-    await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
-  }
-  await page.getByRole('button', { name: /^continue$/i }).first().click();
-
-  await expect(page.getByText('Native Segwit (P2WPKH)', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
-  await page.getByText('Native Segwit (P2WPKH)', { exact: true }).first().click({ force: true });
-  const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-  await continueBtn.scrollIntoViewIfNeeded();
-  await continueBtn.click();
-
-  await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
-  const checkboxes = page.locator('label.ant-checkbox-wrapper');
-  await expect(checkboxes).toHaveCount(3, { timeout: 10_000 });
-  const cbCount = await checkboxes.count();
-  for (let i = 0; i < cbCount; i++) {
-    await checkboxes.nth(i).click();
-  }
-  await page.getByRole('button', { name: /^ok$/i }).click();
-
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('receive') || t.includes('send') || t.includes('balance');
-  }, undefined, { timeout: 60_000, polling: 500 });
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
@@ -169,7 +120,7 @@ test.beforeAll(async () => {
 
   const onboardPage = await context.newPage();
   test.setTimeout(180_000);
-  await onboardWizz(onboardPage);
+  await onboardWizz(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
 

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { waitForApprovalPopup } from '../approval-popup';
+import { onboardWizz } from '../onboard-wizz';
 
 /**
  * Iteration 3 of the Wizz E2E pipeline: SDK ↔ Wizz handshake.
@@ -24,10 +25,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
-const TEST_PASSWORD = 'TestPassword123!';
-
 // BIP-84 native segwit derivation of TEST_MNEMONIC on mainnet:
 //   m/84'/0'/0'/0/0
 // Same address Unisat returns for the same seed (Wizz inherits
@@ -46,68 +43,6 @@ async function shot(page: Page, name: string): Promise<void> {
   } catch {
     // diagnostic, never fatal
   }
-}
-
-async function onboardWizz(page: Page): Promise<void> {
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-
-  await expect(page.getByText('I already have a wallet', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await page.getByText('I already have a wallet', { exact: true }).click();
-
-  const pwInputs = page.locator('input[type="password"]');
-  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
-  const pwCount = await pwInputs.count();
-  for (let i = 0; i < pwCount; i++) {
-    await pwInputs.nth(i).fill(TEST_PASSWORD);
-  }
-  const pwContinue = page.getByRole('button', { name: /^continue$/i }).first();
-  await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-  await pwContinue.click();
-
-  const sourceWizz = page.getByText('Wizz Wallet', { exact: true }).first();
-  await expect(sourceWizz).toBeVisible({ timeout: 10_000 });
-  await sourceWizz.click({ force: true });
-
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
-  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-    await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
-  }
-  const mnemonicContinue = page.getByRole('button', { name: /^continue$/i }).first();
-  await expect(mnemonicContinue).toBeEnabled({ timeout: 10_000 });
-  await mnemonicContinue.click();
-
-  // MUST pick Native SegWit (BIP-84) — the default selection is Wizz's
-  // non-standard "Legacy & Taproot" which would change the address.
-  const nativeSegwitRow = page.getByText('Native Segwit (P2WPKH)', { exact: true }).first();
-  await expect(nativeSegwitRow).toBeVisible({ timeout: 10_000 });
-  await nativeSegwitRow.click({ force: true });
-
-  const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-  await expect(continueBtn).toBeVisible({ timeout: 10_000 });
-  await continueBtn.scrollIntoViewIfNeeded();
-  await continueBtn.click();
-
-  // Security Tips modal: three checkboxes gate OK. Click the visible
-  // `.ant-checkbox-wrapper` (Ant Design's canonical click target,
-  // wraps an opacity:0 input) — not the hidden input itself.
-  await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
-  const checkboxWrappers = page.locator('label.ant-checkbox-wrapper');
-  await expect(checkboxWrappers).toHaveCount(3, { timeout: 10_000 });
-  await expect(checkboxWrappers.first()).toBeVisible({ timeout: 5_000 });
-  const cbCount = await checkboxWrappers.count();
-  for (let i = 0; i < cbCount; i++) {
-    await checkboxWrappers.nth(i).click();
-  }
-  const okBtn = page.getByRole('button', { name: /^ok$/i });
-  await expect(okBtn).toBeEnabled({ timeout: 5_000 });
-  await okBtn.click();
-
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('receive') || t.includes('send') || t.includes('balance') || t.includes('account');
-  }, undefined, { timeout: 60_000, polling: 500 });
 }
 
 test.beforeAll(async () => {
@@ -142,7 +77,7 @@ test.beforeAll(async () => {
   // The onboard helper runs the same flow as wizz-onboard.spec.ts;
   // override the test timeout because of the multi-step traversal.
   test.setTimeout(180_000);
-  await onboardWizz(onboardPage);
+  await onboardWizz(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
 

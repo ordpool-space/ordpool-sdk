@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { waitForApprovalPopup } from '../approval-popup';
+import { onboardWizz } from '../onboard-wizz';
 
 /**
  * Iteration 4 of the Wizz E2E pipeline: matrix spec across the
@@ -31,10 +32,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
-const TEST_PASSWORD = 'TestPassword123!';
-
 interface WizzAddressTypeVariant {
   /** Exact label on the Step-3 address-type row */
   rowLabel: string;
@@ -62,77 +59,6 @@ async function shot(p: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `wizz-matrix-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-async function onboardWizzWithAddressType(
-  context: BrowserContext,
-  extensionId: string,
-  variant: WizzAddressTypeVariant,
-): Promise<Page> {
-  const page = await context.newPage();
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-
-  await expect(page.getByText('I already have a wallet', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await page.getByText('I already have a wallet', { exact: true }).click();
-
-  const pwInputs = page.locator('input[type="password"]');
-  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
-  const pwCount = await pwInputs.count();
-  for (let i = 0; i < pwCount; i++) {
-    await pwInputs.nth(i).fill(TEST_PASSWORD);
-  }
-  const pwContinue = page.getByRole('button', { name: /^continue$/i }).first();
-  await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
-  await pwContinue.click();
-
-  const sourceWizz = page.getByText('Wizz Wallet', { exact: true }).first();
-  await expect(sourceWizz).toBeVisible({ timeout: 10_000 });
-  await sourceWizz.click({ force: true });
-
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
-  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-    await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
-  }
-  const mnemonicContinue = page.getByRole('button', { name: /^continue$/i }).first();
-  await expect(mnemonicContinue).toBeEnabled({ timeout: 10_000 });
-  await mnemonicContinue.click();
-
-  // Pick the address type for this matrix variant.
-  const row = page.getByText(variant.rowLabel, { exact: true }).first();
-  await expect(row).toBeVisible({ timeout: 10_000 });
-  await row.click({ force: true });
-
-  const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-  await expect(continueBtn).toBeVisible({ timeout: 10_000 });
-  await continueBtn.scrollIntoViewIfNeeded();
-  await continueBtn.click();
-
-  // Security Tips modal: three checkboxes gate OK.
-  await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
-  const checkboxWrappers = page.locator('label.ant-checkbox-wrapper');
-  await expect(checkboxWrappers).toHaveCount(3, { timeout: 10_000 });
-  await expect(checkboxWrappers.first()).toBeVisible({ timeout: 5_000 });
-  const cbCount = await checkboxWrappers.count();
-  for (let i = 0; i < cbCount; i++) {
-    await checkboxWrappers.nth(i).click();
-  }
-  const okBtn = page.getByRole('button', { name: /^ok$/i });
-  await expect(okBtn).toBeEnabled({ timeout: 5_000 });
-  await okBtn.click();
-
-  // Match the dashboard gate from wizz-mint-roundtrip's onboardWizz
-  // (which passes consistently): wait for any of the generic dashboard
-  // markers, NOT for the ARC20 badge. The badge depends on
-  // configs.wizz.cash hydration which we abort at the route layer; the
-  // wait would silently hang or surface "ARC20 (0)" in a degraded
-  // wallet state that fails connect.
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('receive') || t.includes('send') || t.includes('balance');
-  }, undefined, { timeout: 60_000, polling: 500 });
-  return page;
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, variantTag: string): Promise<void> {
@@ -278,7 +204,8 @@ for (const variant of VARIANTS) {
       if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
       const extensionId = worker.url().split('/')[2];
 
-      const dashboardPage = await onboardWizzWithAddressType(context, extensionId, variant);
+      const dashboardPage = await context.newPage();
+      await onboardWizz(dashboardPage, extensionId, { addressTypeRowLabel: variant.rowLabel });
 
       // Source-dive of wizz background.js byte 2285200: -32603
       // "Connection error" fires from the per-tab session router when

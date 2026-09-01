@@ -20,6 +20,7 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { onboardWizz } from '../onboard-wizz';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 
@@ -49,10 +50,6 @@ import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
-
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
-const TEST_PASSWORD = 'TestPassword123!';
 
 // BIP-86 Taproot derivation of `abandon × 11 + about` on mainnet — the
 // value wizz-matrix.spec.ts pins for the P2TR variant, and the value Wizz
@@ -91,62 +88,6 @@ function bytesHex(b: Uint8Array): string {
 function xOnlyHex(pubHex: string): string {
   const s = pubHex.startsWith('0x') ? pubHex.slice(2) : pubHex;
   return s.length === 66 ? s.slice(2) : s;
-}
-
-// Onboarding copied verbatim from wizz-inscribe-child-roundtrip.spec.ts:
-// Taproot (P2TR) address type so the single active account is the taproot
-// key that signs the cat (input 0).
-async function onboardWizz(page: Page): Promise<void> {
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-
-  await expect(page.getByText('I already have a wallet', { exact: true })).toBeVisible({ timeout: 30_000 });
-  await page.getByText('I already have a wallet', { exact: true }).click();
-
-  const pwInputs = page.locator('input[type="password"]');
-  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
-  const pwCount = await pwInputs.count();
-  for (let i = 0; i < pwCount; i++) {
-    await pwInputs.nth(i).fill(TEST_PASSWORD);
-  }
-  await page.getByRole('button', { name: /^continue$/i }).first().click();
-
-  await expect(page.getByText('Wizz Wallet', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
-  await page.getByText('Wizz Wallet', { exact: true }).first().click({ force: true });
-
-  const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
-  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-    await mnemonicInputs.nth(i).fill(TEST_MNEMONIC_WORDS[i]);
-  }
-  await page.getByRole('button', { name: /^continue$/i }).first().click();
-
-  // Pick BIP-86 Taproot (P2TR): Wizz's active account = the taproot key
-  // that signs input 0 (the cat). Row matched by exact text (Wizz strips
-  // data-testid). Guarded with isVisible for layout drift.
-  const taprootRow = page.getByText('Taproot (P2TR)', { exact: true }).first();
-  if (await taprootRow.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await taprootRow.click({ force: true });
-  }
-  const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-  if (await continueBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await continueBtn.scrollIntoViewIfNeeded();
-    await continueBtn.click();
-  }
-
-  await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
-  const checkboxes = page.locator('label.ant-checkbox-wrapper');
-  await expect(checkboxes).toHaveCount(3, { timeout: 10_000 });
-  const cbCount = await checkboxes.count();
-  for (let i = 0; i < cbCount; i++) {
-    await checkboxes.nth(i).click();
-  }
-  await page.getByRole('button', { name: /^ok$/i }).click();
-
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('receive') || t.includes('send') || t.includes('balance');
-  }, undefined, { timeout: 60_000, polling: 500 });
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
@@ -218,7 +159,7 @@ test.beforeAll(async () => {
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
-  await onboardWizz(onboardPage);
+  await onboardWizz(onboardPage, extensionId, { addressTypeRowLabel: 'Taproot (P2TR)' });
   await shot(onboardPage, '00-onboarded');
 });
 

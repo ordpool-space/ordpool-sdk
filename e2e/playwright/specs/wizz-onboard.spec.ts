@@ -8,6 +8,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { TEST_MNEMONIC, TEST_MNEMONIC_WORDS, PASSWORD_BY_WALLET } from '../wallet-test-vectors';
+
 /**
  * Iteration 2 of the Wizz E2E pipeline: drive the onboarding flow
  * from the BIP-39 test seed.
@@ -23,10 +25,6 @@ import * as fs from 'node:fs';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
-const TEST_PASSWORD = 'TestPassword123!';
 
 let context: BrowserContext;
 let extensionId: string;
@@ -104,7 +102,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // same value so the Continue button enables.
   const pwCount = await pwInputs.count();
   for (let i = 0; i < pwCount; i++) {
-    await pwInputs.nth(i).fill(TEST_PASSWORD);
+    await pwInputs.nth(i).fill(PASSWORD_BY_WALLET.wizz);
   }
   await shot(page, '03-password-typed');
 

@@ -2,6 +2,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { seedAlbyAccount } from '../onboard-alby';
+
 
 /**
  * Pipeline B handshake for Alby: seed the wallet via SW messages
@@ -22,9 +24,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/alby');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_PASSWORD = 'TestPassword123!';
-
 // BIP-86 mainnet test-vector first address for the abandon×11+about
 // seed at m/86'/0'/0'/0/0. Same value published in BIP-86's
 // "Test vectors" → "Account 0, second receiving address" is bc1p4qhj...,
@@ -40,43 +39,6 @@ async function shot(p: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `alby-handshake-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-/**
- * Seed an Alby mnemonic account by firing the three internal SW
- * actions (setPassword → addAccount → setMnemonic) inside one
- * page.evaluate. Same flow alby-mint-roundtrip uses; full
- * archaeology of how this envelope was reverse-engineered lives
- * in that spec's comment block.
- */
-async function seedAlbyAccount(page: Page, bitcoinNetwork: 'bitcoin' | 'regtest'): Promise<string> {
-  const result = await page.evaluate(async ({ password, mnemonic, bitcoinNetwork }) => {
-    const c = (globalThis as unknown as { chrome: { runtime: {
-      sendMessage: (msg: unknown) => Promise<unknown>;
-    } } }).chrome;
-    const send = (action: string, args: Record<string, unknown>) =>
-      c.runtime.sendMessage({
-        application: 'LBE',
-        prompt: true,
-        action,
-        args,
-        origin: { internal: true },
-      }) as Promise<{ data?: unknown; error?: string } | null>;
-
-    await send('setPassword', { password });
-    const addAccResp = await send('addAccount', {
-      name: 'ordpool-handshake',
-      connector: 'lndhub',
-      config: { url: 'https://example.invalid', login: 'x', password: 'x' },
-      bitcoinNetwork,
-    }) as { data?: { accountId: string }; error?: string } | null;
-    const accountId = addAccResp?.data?.accountId;
-    if (accountId) await send('setMnemonic', { id: accountId, mnemonic });
-    return accountId;
-  }, { password: TEST_PASSWORD, mnemonic: TEST_MNEMONIC, bitcoinNetwork });
-
-  if (!result) throw new Error('Alby addAccount returned no accountId');
-  return result;
 }
 
 test.beforeAll(async () => {
@@ -115,7 +77,7 @@ test.beforeAll(async () => {
   await seedPage.waitForFunction(() => true, undefined, { timeout: 2_000 }).catch(() => undefined);
 
   test.setTimeout(180_000);
-  await seedAlbyAccount(seedPage, 'bitcoin');
+  await seedAlbyAccount(seedPage, { bitcoinNetwork: 'bitcoin' });
   await shot(seedPage, '00-after-seed');
 });
 

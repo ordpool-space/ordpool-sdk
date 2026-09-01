@@ -2,6 +2,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from '../wallet-test-vectors';
+
 
 /**
  * Onboard smoke test for Alby. Alby's UI is Lightning-first and
@@ -27,9 +29,6 @@ import * as fs from 'node:fs';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/alby');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_PASSWORD = 'TestPassword123!';
 
 // BIP-86 mainnet first-receiving address for the abandon×11+about
 // seed at m/86'/0'/0'/0/0. Same value used by alby-sdk-handshake.
@@ -108,7 +107,7 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
       ? await send('setMnemonic', { id: accountId, mnemonic }) as { data?: { accountId?: string }; error?: string } | null
       : null;
     return { setPwResp, addAccResp, setMnemoResp, accountId };
-  }, { password: TEST_PASSWORD, mnemonic: TEST_MNEMONIC });
+  }, { password: PASSWORD_BY_WALLET.alby, mnemonic: TEST_MNEMONIC });
 
   // eslint-disable-next-line no-console
   console.log(`[alby-onboard] seed = ${JSON.stringify(seed)}`);

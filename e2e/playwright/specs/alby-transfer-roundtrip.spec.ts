@@ -22,6 +22,8 @@ import {
   assertAllInputsSighashAll,
 } from '../../regtest/regtest-helpers';
 
+import { seedAlbyAccount } from '../onboard-alby';
+
 /**
  * Full cat21 TRANSFER roundtrip with the real Alby Browser Extension.
  *
@@ -63,8 +65,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/alby');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_PASSWORD = 'TestPassword123!';
 const EXPECTED_REGTEST_TAPROOT = 'bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg';
 
 const FUND_AMOUNT_BTC = 0.001;
@@ -81,45 +81,6 @@ async function shot(p: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `alby-transfer-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-/**
- * Seed Alby's account state (setPassword → addAccount → setMnemonic)
- * in one page.evaluate. Copied verbatim from `alby-mint-roundtrip
- * .spec.ts`; see its docstring for the router-envelope rationale.
- */
-async function seedAlbyAccount(page: Page): Promise<string> {
-  const result = await page.evaluate(async ({ password, mnemonic }) => {
-    const c = (globalThis as unknown as { chrome: { runtime: {
-      sendMessage: (msg: unknown) => Promise<unknown>;
-    } } }).chrome;
-    const send = (action: string, args: Record<string, unknown>) =>
-      c.runtime.sendMessage({
-        application: 'LBE',
-        prompt: true,
-        action,
-        args,
-        origin: { internal: true },
-      }) as Promise<{ data?: unknown; error?: string } | null>;
-
-    const setPwResp = await send('setPassword', { password });
-    const addAccResp = await send('addAccount', {
-      name: 'ordpool-e2e',
-      connector: 'lndhub',
-      config: { url: 'https://example.invalid', login: 'x', password: 'x' },
-      bitcoinNetwork: 'regtest',
-    }) as { data?: { accountId: string }; error?: string } | null;
-    const accountId = addAccResp?.data?.accountId;
-    const setMnemoResp = accountId
-      ? await send('setMnemonic', { id: accountId, mnemonic })
-      : null;
-    return { setPwResp, addAccResp, accountId, setMnemoResp };
-  }, { password: TEST_PASSWORD, mnemonic: TEST_MNEMONIC });
-
-  if (!result.accountId) {
-    throw new Error(`Alby addAccount failed: ${JSON.stringify(result.addAccResp)}`);
-  }
-  return result.accountId;
 }
 
 /**

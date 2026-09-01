@@ -20,6 +20,7 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { onboardUnisat } from '../onboard-unisat';
 
 /**
  * Unisat CAT-21 TRANSFER roundtrip on regtest — full popup-driven path,
@@ -53,10 +54,6 @@ import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-p
 const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
-
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_MNEMONIC_WORDS = TEST_MNEMONIC.split(' ');
-const TEST_PASSWORD = 'TestPassword123!';
 
 // BIP-86 Taproot derivation of `abandon × 11 + about` on mainnet — the
 // same value pinned by unisat-matrix.spec.ts's P2TR variant. Unisat's
@@ -94,56 +91,6 @@ function bytesHex(b: Uint8Array): string {
 function xOnlyHex(pubHex: string): string {
   const s = pubHex.startsWith('0x') ? pubHex.slice(2) : pubHex;
   return s.length === 66 ? s.slice(2) : s;
-}
-
-// Onboarding copied from unisat-inscribe-child-roundtrip.spec.ts: Taproot
-// (P2TR) address type (card index 2) so the single active account is the
-// taproot key. The transfer's cat input (and the funding change) are P2TR
-// spends only the active-type key can sign.
-async function onboardUnisat(page: Page): Promise<void> {
-  await page.setViewportSize({ width: 400, height: 800 });
-  await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-
-  await expect(page.getByTestId('welcome-title')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('import-wallet-button').click();
-
-  await expect(page.getByTestId('create-password-input')).toBeVisible({ timeout: 15_000 });
-  await page.getByTestId('create-password-input').fill(TEST_PASSWORD);
-  await page.getByTestId('create-password-confirm-input').fill(TEST_PASSWORD);
-  await page.getByTestId('create-password-continue-button').click();
-
-  await expect(page.getByTestId('restore-wallet-type-option-0')).toBeVisible({ timeout: 10_000 });
-  await page.getByTestId('restore-wallet-type-option-0').click();
-
-  await expect(page.getByTestId('mnemonic-import-word-0')).toBeVisible({ timeout: 15_000 });
-  for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
-    await page.getByTestId(`mnemonic-import-word-${i}`).fill(TEST_MNEMONIC_WORDS[i]);
-  }
-  await page.getByTestId('mnemonic-import-continue-button').click();
-
-  // Pick the BIP-86 Taproot address type (card index 2) so Unisat's single
-  // active account IS the taproot key. Guarded so a differing card layout
-  // doesn't break onboarding — the mainnet-address pin below catches a
-  // missed selection.
-  const taprootCard = page.getByTestId('address-type-card-2');
-  if (await taprootCard.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await taprootCard.click();
-  }
-  const addressTypeContinue = page.getByTestId('address-type-continue-button');
-  if (await addressTypeContinue.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await addressTypeContinue.click();
-  }
-
-  const noticeCheckbox = page.getByTestId('notice-checkbox-1');
-  if (await noticeCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await noticeCheckbox.click();
-    const noticeOk = page.getByTestId('notice-ok-button');
-    if (await noticeOk.isEnabled({ timeout: 3_000 }).catch(() => false)) {
-      await noticeOk.click();
-    }
-  }
-
-  await expect(page.getByTestId('tab-home')).toBeVisible({ timeout: 30_000 });
 }
 
 async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
@@ -204,7 +151,9 @@ test.beforeAll(async () => {
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
-  await onboardUnisat(onboardPage);
+  // Taproot address type (card index 2): the single active account IS the
+  // taproot key, so it signs the cat input 0 and the funding change.
+  await onboardUnisat(onboardPage, extensionId, { addressTypeIndex: 2 });
   await shot(onboardPage, '00-onboarded');
 });
 

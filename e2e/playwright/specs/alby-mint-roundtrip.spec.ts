@@ -6,6 +6,8 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 
+import { seedAlbyAccount } from '../onboard-alby';
+
 /**
  * Iteration 1 — full cat21 mint roundtrip with the real Alby
  * Browser Extension.
@@ -47,9 +49,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/alby');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 
-const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const TEST_PASSWORD = 'TestPassword123!';
-
 // Alby v3.14.2's m/86'/1'/0'/0/0 derivation for the abandon×11+
 // about seed (bitcoinNetwork: "regtest" → testnet coin-type). Value
 // observed in iter 100 with the actual extension binary. Earlier
@@ -76,59 +75,6 @@ async function shot(p: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `alby-mint-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-/**
- * Seed Alby's account state by firing all three router messages
- * (setPassword → addAccount → setMnemonic) inside a single
- * page.evaluate. Iter 93 confirmed each call individually
- * succeeds, but Alby's React app on options.html navigates the
- * page reactively once `unlocked:true` lands, so between two
- * separate page.evaluate calls the page can close on us. Batching
- * keeps the page alive for one synchronous-from-Playwright's-view
- * sequence.
- *
- * Envelope shape per Alby's common/lib/msg.ts → msg.request.
- */
-async function seedAlbyAccount(page: Page): Promise<string> {
-  const result = await page.evaluate(async ({ password, mnemonic }) => {
-    const c = (globalThis as unknown as { chrome: { runtime: {
-      sendMessage: (msg: unknown) => Promise<unknown>;
-    } } }).chrome;
-    const send = (action: string, args: Record<string, unknown>) =>
-      c.runtime.sendMessage({
-        application: 'LBE',
-        prompt: true,
-        action,
-        args,
-        origin: { internal: true },
-      }) as Promise<{ data?: unknown; error?: string } | null>;
-
-    const setPwResp = await send('setPassword', { password });
-    const addAccResp = await send('addAccount', {
-      name: 'ordpool-e2e',
-      connector: 'lndhub',
-      config: { url: 'https://example.invalid', login: 'x', password: 'x' },
-      bitcoinNetwork: 'regtest',
-    }) as { data?: { accountId: string }; error?: string } | null;
-    const accountId = addAccResp?.data?.accountId;
-    const setMnemoResp = accountId
-      ? await send('setMnemonic', { id: accountId, mnemonic })
-      : null;
-    return { setPwResp, addAccResp, accountId, setMnemoResp };
-  }, { password: TEST_PASSWORD, mnemonic: TEST_MNEMONIC });
-
-  // eslint-disable-next-line no-console
-  console.log(`[alby-mint:seed] setPassword resp = ${JSON.stringify(result.setPwResp).slice(0, 200)}`);
-  // eslint-disable-next-line no-console
-  console.log(`[alby-mint:seed] addAccount resp = ${JSON.stringify(result.addAccResp).slice(0, 200)}`);
-  // eslint-disable-next-line no-console
-  console.log(`[alby-mint:seed] setMnemonic resp = ${JSON.stringify(result.setMnemoResp).slice(0, 200)}`);
-
-  if (!result.accountId) {
-    throw new Error(`Alby addAccount failed: ${JSON.stringify(result.addAccResp)}`);
-  }
-  return result.accountId;
 }
 
 test.beforeAll(async () => {
