@@ -21,6 +21,10 @@
       "types": "./dist-core/core.d.ts",
       "default": "./dist-core/core.js"
     },
+    "./e2e": {
+      "types": "./dist-e2e/index.d.ts",
+      "default": "./dist-e2e/index.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }
@@ -28,6 +32,7 @@
   "files": [
     "dist",
     "dist-core",
+    "dist-e2e",
     "src",
     "e2e",
     "wasm",
@@ -55,9 +60,15 @@
     "@angular/common": ">=20",
     "@angular/core": ">=20",
     "@noble/curves": ">=1",
+    "@playwright/test": ">=1.50",
     "@scure/btc-signer": "1.2.x",
     "rxjs": ">=7",
     "sats-connect": ">=4"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    }
   },
   "sideEffects": false
 }
