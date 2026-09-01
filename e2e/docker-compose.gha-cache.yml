@@ -1,0 +1,50 @@
+# CI-ONLY overlay that routes the cold Rust image builds (electrs,
+# cat21-ord) through the GitHub Actions cache backend. On a run whose
+# source tree is unchanged (the common case: electrs and cat21-ord are
+# checked out at a fixed branch ref while only the SDK / consumer code
+# moves), buildx restores the previously compiled image instead of
+# recompiling Rust + RocksDB from scratch.
+#
+# NEVER pass this file to a local `docker compose` invocation. `type=gha`
+# needs the Actions runtime token (ACTIONS_RUNTIME_TOKEN + cache service
+# URLs) that only exists inside a GitHub Actions job, and buildx errors
+# without it. Local dev (regtest/Makefile on colima) uses the base
+# compose files only, so this overlay never touches that path.
+#
+# Applied in CI on top of docker-compose.regtest.yml (or
+# docker-compose.consumer-environment.yml) as:
+#
+#   COMPOSE_BAKE=true docker compose \
+#     -f docker-compose.regtest.yml -f docker-compose.gha-cache.yml \
+#     build
+#
+# with a buildx docker-container builder (docker/setup-buildx-action) and
+# the runtime env exported (crazy-max/ghaction-github-runtime). Compose's
+# bake integration loads the built images into the local docker store
+# (each service here has an `image:` name), so a following
+# `up -d --no-build` finds them.
+#
+# Per-service `scope` keeps the two images' caches in separate namespaces.
+# ord and ord-stock share one image (ordpool-e2e-cat21-ord:local) built
+# from the same context, so they share the cat21-ord scope; the `ord`
+# service owns the export (writer) and ord-stock only imports (reader),
+# which avoids two concurrent writers to one scope.
+services:
+  electrs:
+    build:
+      cache_from:
+        - type=gha,scope=electrs
+      cache_to:
+        - type=gha,scope=electrs,mode=max
+
+  ord:
+    build:
+      cache_from:
+        - type=gha,scope=cat21-ord
+      cache_to:
+        - type=gha,scope=cat21-ord,mode=max
+
+  ord-stock:
+    build:
+      cache_from:
+        - type=gha,scope=cat21-ord

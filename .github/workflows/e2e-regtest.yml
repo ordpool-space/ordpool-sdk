@@ -57,10 +57,38 @@ jobs:
         working-directory: ordpool-sdk
         run: npm run build
 
+      # A docker-container builder is what makes `type=gha` cache export
+      # possible — the default `docker` driver can't export a cache.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Exports ACTIONS_RUNTIME_TOKEN + the cache-service URLs into the
+      # job env so buildx's `type=gha` backend can authenticate. Without
+      # this, cache_to/from type=gha fails outside docker/build-push-action.
+      - name: Export GitHub Actions runtime for the gha cache backend
+        uses: crazy-max/ghaction-github-runtime@v3
+
+      # Compile the electrs + cat21-ord images through buildx bake so the
+      # gha overlay's cache_from/to take effect. On an unchanged source
+      # tree (electrs + cat21-ord are pinned to a branch ref) this is a
+      # full cache hit and skips the multi-minute Rust compile. COMPOSE_BAKE
+      # routes `compose build` through bake; bake loads each image (they all
+      # have an `image:` name) into the local store for the up step.
+      - name: Build electrs + cat21-ord images (buildx, gha-cached)
+        working-directory: ordpool-sdk
+        env:
+          COMPOSE_BAKE: "true"
+        run: >
+          docker compose
+          -f e2e/docker-compose.regtest.yml
+          -f e2e/docker-compose.gha-cache.yml
+          --profile cat21-ord --profile ord-stock
+          build
+
       - name: Start bitcoind + electrs + cat21-ord + ord-stock (regtest)
         # regtest-bootstrap.sh polls readiness itself, so no --wait.
-        # electrs + both ord services build from source (our forks) on
-        # first run; --build makes the rebuild-on-change explicit.
+        # Images are pre-built by the buildx step above (--no-build), so
+        # the base compose is enough here (no gha overlay at up time).
         #
         # Two ord variants:
         #   cat21-ord (port 8080) — with --index-cat21, used by
@@ -68,10 +96,10 @@ jobs:
         #   ord-stock (port 8081) — without --index-cat21 (= stock ord),
         #     used by inscribe-ord-indexing-roundtrip to prove the SDK's
         #     inscriptions are recognised by an upstream-style ord.
-        # Both build from the same cat21-ord image — one build, two
+        # Both run from the same cat21-ord image — one build, two
         # containers.
         working-directory: ordpool-sdk
-        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord --profile ord-stock up -d --build
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord --profile ord-stock up -d --no-build
 
       - name: Bootstrap regtest funds (101 blocks, emit funder keypair)
         id: bootstrap
