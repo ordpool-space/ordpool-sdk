@@ -59,6 +59,13 @@ const DEFAULT_FEES = {
 // the next WS broadcast read off this object.
 let currentFees = { ...DEFAULT_FEES };
 
+// Live ord /output overrides, keyed by "<txid>:<vout>". A regtest spec that
+// just minted a cat at a known outpoint POSTs the REAL cat number here via
+// /admin/output, so the backend's getCatsAtOutput is checked against the
+// actual minted cat instead of a constant (breaks the stub-vs-stub
+// circularity the marketplace assertion otherwise has).
+const outputOverrides = new Map();
+
 const EMPTY_STATUS_BODY = JSON.stringify({
   totalCats: 0,
   lastSyncTime: null,
@@ -224,24 +231,59 @@ const server = http.createServer((req, res) => {
     res.end();
     return;
   }
+  // Register the REAL cat(s) at a freshly-minted outpoint so /output answers
+  // with them instead of the fixed fallback.
+  //   POST /admin/output       body: { outpoint: "<txid>:<vout>", cats: number[], value?: number }
+  //   POST /admin/output/reset no body — clears all overrides
+  if (req.method === 'POST' && pathname === '/admin/output/reset') {
+    outputOverrides.clear();
+    res.writeHead(204, CORS_BASE);
+    res.end();
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/admin/output') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      try {
+        const { outpoint, cats, value } = JSON.parse(Buffer.concat(chunks).toString() || '{}');
+        if (typeof outpoint !== 'string' || !Array.isArray(cats)) {
+          throw new Error('outpoint (string) + cats (array) required');
+        }
+        outputOverrides.set(outpoint, {
+          cats,
+          inscriptions: [],
+          runes: {},
+          sat_ranges: [],
+          value: typeof value === 'number' ? value : 546,
+          script_pubkey: '',
+        });
+        console.log(`[admin] output ${outpoint} → cats ${JSON.stringify(cats)}`);
+        res.writeHead(204, CORS_BASE);
+        res.end();
+      } catch (err) {
+        res.writeHead(400, { 'content-type': 'text/plain', ...CORS_BASE });
+        res.end(`bad json: ${err.message}`);
+      }
+    });
+    return;
+  }
   if (req.method === 'GET' && pathname === '/api/status') {
     jsonResponse(res, EMPTY_STATUS_BODY);
     return;
   }
-  // Stub ord's `/output/<txid>:<vout>` endpoint. Used by the bid
-  // marketplace regtest test — both the test (Node fetch) and the
-  // cat21-indexer backend (ordClient.getCatsAtOutput) query this to
-  // read the cats bundle on a UTXO. Returns a fixed `cats: [0]` so
-  // the marketplace flow can assert bundle-drift-free bytes without
-  // needing a real ord to walk the chain.
-  //
-  // For real regtest runs we'd want a proper ord instance; this stub
-  // lets the marketplace round-trip prove PSBT-byte fidelity + the
-  // backend validator + the accept UI without adding an ord container
-  // to the CI substrate.
+  // Stub ord's `/output/<txid>:<vout>` endpoint. Both the marketplace test
+  // (Node fetch) and the cat21-indexer backend (ordClient.getCatsAtOutput)
+  // query this to read the cats bundle on a UTXO. A spec that just minted a
+  // cat registers the REAL number for its outpoint via /admin/output, so the
+  // assertion + the backend validator check the actual cat (not a constant);
+  // any other outpoint falls back to the historical fixed body so unrelated
+  // /output probes still resolve. A full ord instance in the substrate would
+  // remove even the fallback.
   const outputMatch = req.method === 'GET' && /^\/output\/([0-9a-f]{64}):(\d+)/i.exec(pathname);
   if (outputMatch) {
-    jsonResponse(res, JSON.stringify({
+    const outpoint = `${outputMatch[1]}:${outputMatch[2]}`;
+    jsonResponse(res, JSON.stringify(outputOverrides.get(outpoint) ?? {
       cats: [0],
       inscriptions: [],
       runes: {},
