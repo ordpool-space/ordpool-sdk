@@ -209,19 +209,61 @@ jobs:
         if: matrix.wallet == 'cat21wallet'
         run: ln -s "$GITHUB_WORKSPACE/_cat21-ord-src" "$(dirname "$GITHUB_WORKSPACE")/cat21-ord"
 
+      # A docker-container builder + the Actions runtime env are what make
+      # the type=gha cache in docker-compose.gha-cache.yml usable (the
+      # default `docker` driver can't export a cache, and type=gha needs
+      # the runtime token). Every matrix shard rebuilds electrs on its own
+      # runner from the same pinned source, and this repo's e2e-regtest
+      # workflow builds the same electrs + cat21-ord under the same cache
+      # scopes — so a shard reads a warm cache instead of recompiling Rust.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Export GitHub Actions runtime for the gha cache backend
+        uses: crazy-max/ghaction-github-runtime@v3
+
+      # Exclude each fresh checkout's volatile `.git/` from the `COPY . .`
+      # build context so the COPY layer digest (and the cargo-build layer
+      # beneath it) is stable across runs and the compile cache-hits.
+      # Same reasoning as e2e-regtest.yml. Written into the checkout dirs
+      # (symlinked at the parent as the compose build context) so the
+      # electrs / cat21-ord forks stay untouched.
+      - name: Stabilise the electrs build context for layer caching
+        run: printf '.git\ntarget\n' > _ordpool-electrs-src/.dockerignore
+
+      - name: Stabilise the cat21-ord build context for layer caching
+        if: matrix.wallet == 'cat21wallet'
+        run: printf '.git\ntarget\n' > _cat21-ord-src/.dockerignore
+
       # Regtest stack. Every shard needs bitcoind + electrs to fund,
       # broadcast and mine. The ord shard additionally brings up
       # cat21-ord (profile-gated; default `up` is bitcoind + electrs only).
+      # Build through buildx bake (COMPOSE_BAKE) so the gha overlay's
+      # cache_from/to take effect; bake loads each image (they have an
+      # `image:` name) so the following `up --no-build` finds them.
+      - name: Build electrs image (buildx, gha-cached)
+        if: matrix.wallet != 'cat21wallet'
+        env:
+          COMPOSE_BAKE: "true"
+        # Scope to `electrs`: these shards don't check out cat21-ord, so
+        # never let compose touch the profiled ord/ord-stock build context.
+        run: docker compose -f e2e/docker-compose.regtest.yml -f e2e/docker-compose.gha-cache.yml build electrs
+
       - name: Start regtest stack (bitcoind + electrs)
         if: matrix.wallet != 'cat21wallet'
-        # electrs builds from our fork on first run; --build is explicit.
-        run: docker compose -f e2e/docker-compose.regtest.yml up -d --build
+        run: docker compose -f e2e/docker-compose.regtest.yml up -d --no-build
+
+      - name: Build electrs + cat21-ord images (buildx, gha-cached)
+        if: matrix.wallet == 'cat21wallet'
+        env:
+          COMPOSE_BAKE: "true"
+        run: docker compose -f e2e/docker-compose.regtest.yml -f e2e/docker-compose.gha-cache.yml --profile cat21-ord build
 
       - name: Start regtest stack (bitcoind + electrs + cat21-ord)
         if: matrix.wallet == 'cat21wallet'
         # regtest-bootstrap.sh + the curl polls below handle readiness, so
-        # no --wait. electrs + cat21-ord build from our forks on first run.
-        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d --build
+        # no --wait.
+        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d --no-build
 
       - name: Mine 101 blocks (coinbase maturity) + verify electrs is indexing
         env:

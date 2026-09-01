@@ -68,6 +68,21 @@ jobs:
       - name: Export GitHub Actions runtime for the gha cache backend
         uses: crazy-max/ghaction-github-runtime@v3
 
+      # Without this the buildx cache never helps: the Dockerfiles do
+      # `COPY . .`, so the copied context includes each fresh checkout's
+      # `.git/` (fetch metadata, reflog, pack names) whose bytes differ
+      # every run. That churns the COPY layer digest, which busts the
+      # cargo-build layer beneath it — the multi-minute Rust compile
+      # recompiles every time despite a warm cache. Excluding `.git`
+      # (and any stray `target/`) makes the context content-identical
+      # across checkouts of the same commit, so COPY and the compile
+      # both cache-hit. Injected here so the electrs / cat21-ord forks
+      # stay untouched.
+      - name: Stabilise the build contexts for layer caching
+        run: |
+          printf '.git\ntarget\n' > ordpool-electrs/.dockerignore
+          printf '.git\ntarget\n' > cat21-ord/.dockerignore
+
       # Compile the electrs + cat21-ord images through buildx bake so the
       # gha overlay's cache_from/to take effect. On an unchanged source
       # tree (electrs + cat21-ord are pinned to a branch ref) this is a
