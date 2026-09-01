@@ -1,0 +1,569 @@
+"use strict";
+// Small helpers shared across regtest E2E specs. Hits the local
+// bitcoind RPC + electrs HTTP API directly — no Angular, no DI.
+//
+// Expects the regtest stack to be up via `e2e/regtest-bootstrap.sh`
+// and `REGTEST_FUNDED_ADDR` / `REGTEST_FUNDED_WIF` set in env.
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.getFundedAccount = getFundedAccount;
+exports.rpc = rpc;
+exports.mineBlocks = mineBlocks;
+exports.mineBlockWithRawTxs = mineBlockWithRawTxs;
+exports.waitForElectrsSync = waitForElectrsSync;
+exports.waitForUtxoMatching = waitForUtxoMatching;
+exports.waitForUtxoAt = waitForUtxoAt;
+exports.waitForAddressTxIndexed = waitForAddressTxIndexed;
+exports.getUtxos = getUtxos;
+exports.getTxHex = getTxHex;
+exports.postTx = postTx;
+exports.getTxStatus = getTxStatus;
+exports.waitForTxConfirmed = waitForTxConfirmed;
+exports.getTx = getTx;
+exports.catInscriptionId = catInscriptionId;
+exports.waitForOrdReady = waitForOrdReady;
+exports.waitForOrdSync = waitForOrdSync;
+exports.getOrdInscription = getOrdInscription;
+exports.waitForCatAtAddress = waitForCatAtAddress;
+exports.ordCli = ordCli;
+exports.ordCreateOffer = ordCreateOffer;
+exports.ordWalletSend = ordWalletSend;
+exports.ordCreateWallet = ordCreateWallet;
+exports.writeCat21OrdFile = writeCat21OrdFile;
+exports.ordWalletInscribe = ordWalletInscribe;
+exports.assertAllInputsSighashAll = assertAllInputsSighashAll;
+exports.inscriptionId = inscriptionId;
+exports.waitForOrdStockReady = waitForOrdStockReady;
+exports.waitForOrdStockSync = waitForOrdStockSync;
+exports.getStockOrdInscription = getStockOrdInscription;
+exports.getStockOrdOutputInscriptions = getStockOrdOutputInscriptions;
+exports.getStockOrdContent = getStockOrdContent;
+exports.waitForOrdStockInscription = waitForOrdStockInscription;
+const node_child_process_1 = require("node:child_process");
+const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ?? 'http://localhost:3000';
+const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
+// Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
+// service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`
+// spec to verify a real upstream-ord recognises the SDK's inscriptions.
+const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
+// The bitcoind container name. Defaults to the SDK's own stack
+// (`ordpool-e2e-bitcoind`); consumer repos (cubes-frontend, ordpool)
+// stand up their own compose with a different name (e.g.
+// `ordpool-e2e-consumer-bitcoind`) and override via env.
+const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? 'ordpool-e2e-bitcoind';
+function getFundedAccount() {
+    const address = process.env.REGTEST_FUNDED_ADDR;
+    const wif = process.env.REGTEST_FUNDED_WIF;
+    if (!address || !wif) {
+        throw new Error('REGTEST_FUNDED_ADDR and REGTEST_FUNDED_WIF must be set — run e2e/regtest-bootstrap.sh first');
+    }
+    return { address, wif };
+}
+/** Run a bitcoin-cli command inside the bitcoind container. */
+/**
+ * Pipe a `bitcoin-cli` command into the regtest container. Args go
+ * through execFileSync (no shell), so JSON payloads with braces and
+ * colons don't need extra escaping.
+ */
+function rpc(...args) {
+    return (0, node_child_process_1.execFileSync)('docker', ['exec', BITCOIND_CONTAINER, 'bitcoin-cli',
+        '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args], { encoding: 'utf8' }).trim();
+}
+/** Mine N blocks to a throwaway address. Returns the new tip height. */
+function mineBlocks(n) {
+    const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'legacy');
+    rpc('-rpcwallet=ordpool-e2e', 'generatetoaddress', String(n), address);
+    return Number(rpc('getblockcount'));
+}
+/**
+ * Mine a block that INCLUDES the given raw transactions, bypassing mempool
+ * relay policy (the `generateblock` RPC). This is how a transaction relay
+ * would reject — e.g. one carrying a sub-dust output — reaches the chain
+ * out-of-band, exactly as a direct-to-miner submission (Slipstream / MARA)
+ * would. Returns the new tip height.
+ */
+function mineBlockWithRawTxs(rawTxHexes) {
+    const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'legacy');
+    rpc('generateblock', address, JSON.stringify(rawTxHexes));
+    return Number(rpc('getblockcount'));
+}
+/** Wait until electrs has indexed up to (at least) the given height. */
+async function waitForElectrsSync(targetHeight, timeoutMs = 15_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const tipText = await fetch(`${ELECTRS_URL}/blocks/tip/height`).then(r => r.text()).catch(() => '0');
+        if (Number(tipText) >= targetHeight)
+            return;
+        await new Promise(r => setTimeout(r, 200));
+    }
+    throw new Error(`electrs didn't reach height ${targetHeight} within ${timeoutMs}ms`);
+}
+/**
+ * Wait for a UTXO matching `predicate` to appear at `address`.
+ * `waitForElectrsSync` only guarantees the block tip is at the
+ * target height — electrs still needs additional time to index
+ * that block's transactions into per-address UTXO sets. Any
+ * spec that calls `getUtxos(addr)` immediately after
+ * `mineBlocks(1)` + `waitForElectrsSync(tip)` is racing the
+ * address-history pass.
+ *
+ * `description` is a short human-readable label of what the
+ * predicate matches (e.g. `value=100_000_000`,
+ * `txid=abc… value=100_000_000`). It surfaces in the timeout
+ * error so the failure tells you which UTXO didn't show up.
+ */
+async function waitForUtxoMatching(address, predicate, description, timeoutMs = 15_000) {
+    const deadline = Date.now() + timeoutMs;
+    let lastUtxos = [];
+    while (Date.now() < deadline) {
+        lastUtxos = await getUtxos(address);
+        const hit = lastUtxos.find(predicate);
+        if (hit)
+            return hit;
+        await new Promise(r => setTimeout(r, 200));
+    }
+    throw new Error(`UTXO matching "${description}" at ${address} didn't appear within ${timeoutMs}ms; got ${JSON.stringify(lastUtxos)}`);
+}
+/** Common case: poll for a UTXO of exactly `expectedSats`. */
+async function waitForUtxoAt(address, expectedSats, timeoutMs = 15_000) {
+    return waitForUtxoMatching(address, u => u.value === expectedSats, `value=${expectedSats}`, timeoutMs);
+}
+/**
+ * Wait until electrs's address-history index lists `expectedTxid`
+ * against `address` (in either the spending or receiving slot).
+ * Use this when you need to assert on the SAME tx from multiple
+ * addresses' perspectives (e.g. confirm a redirect inscription
+ * landed at B and NOT at A) — once the recipient sees the txid,
+ * the sender's view is reliably up-to-date from the same
+ * electrs.
+ */
+async function waitForAddressTxIndexed(address, expectedTxid, timeoutMs = 15_000) {
+    await waitForUtxoMatching(address, u => u.txid === expectedTxid, `txid=${expectedTxid}`, timeoutMs);
+}
+async function getUtxos(address) {
+    const res = await fetch(`${ELECTRS_URL}/address/${address}/utxo`);
+    if (!res.ok)
+        throw new Error(`utxo fetch failed: ${res.status} ${await res.text()}`);
+    return res.json();
+}
+async function getTxHex(txid) {
+    const res = await fetch(`${ELECTRS_URL}/tx/${txid}/hex`);
+    if (!res.ok)
+        throw new Error(`tx hex fetch failed: ${res.status} ${await res.text()}`);
+    return (await res.text()).trim();
+}
+async function postTx(hexPayload) {
+    const res = await fetch(`${ELECTRS_URL}/tx`, {
+        method: 'POST',
+        body: hexPayload,
+    });
+    const body = (await res.text()).trim();
+    if (!res.ok)
+        throw new Error(`broadcast failed (${res.status}): ${body}`);
+    return body;
+}
+async function getTxStatus(txid) {
+    const res = await fetch(`${ELECTRS_URL}/tx/${txid}/status`);
+    if (!res.ok)
+        throw new Error(`tx status fetch failed: ${res.status}`);
+    return res.json();
+}
+/**
+ * Wait until electrs has CONFIRMED `txid` — i.e. the per-tx status
+ * endpoint returns `confirmed: true` AND a non-empty `block_hash`.
+ *
+ * Why this exists separately from `waitForElectrsSync`:
+ * `waitForElectrsSync` only checks the chain-tip height endpoint
+ * (`/blocks/tip/height`). electrs serves that endpoint the moment
+ * it sees the new block header, but the per-tx status (`/tx/:id/
+ * status`) needs an extra pass to map the tx into its containing
+ * block. That gap is hundreds of ms to a few seconds on a cold
+ * runner. Without this helper a mint roundtrip's subsequent
+ * `getTx(txid)` call intermittently returns `block_hash: undefined`
+ * (iter 114 — `block_hash=undefined` race, observed flaking on
+ * xverse-mint, leather-mint, and any other mint spec that
+ * inspects the confirmation status).
+ *
+ * Polls every 200ms by default. Returns the EsploraTx once the
+ * confirmation is observable; throws if the deadline is reached.
+ */
+async function waitForTxConfirmed(txid, timeoutMs = 15_000) {
+    const deadline = Date.now() + timeoutMs;
+    let lastSeen;
+    while (Date.now() < deadline) {
+        const tx = await getTx(txid).catch(() => undefined);
+        if (tx) {
+            lastSeen = tx;
+            if (tx.status.confirmed && tx.status.block_hash)
+                return tx;
+        }
+        await new Promise(r => setTimeout(r, 200));
+    }
+    throw new Error(`tx ${txid} not confirmed within ${timeoutMs}ms; ` +
+        `last status: ${lastSeen ? JSON.stringify(lastSeen.status) : 'not-found'}`);
+}
+async function getTx(txid) {
+    const res = await fetch(`${ELECTRS_URL}/tx/${txid}`);
+    if (!res.ok)
+        throw new Error(`tx fetch failed: ${res.status} ${await res.text()}`);
+    return res.json();
+}
+/**
+ * Throws unless every signed input in `tx` commits to all outputs
+ * under SIGHASH_ALL semantics. Used by every cat21 mint roundtrip
+ * spec — a SIGHASH_NONE / SINGLE / ANYONECANPAY signature on the
+ * mint input would let a relay-or-miner-side counterparty swap the
+ * outputs (and steal the cat sat) while keeping the lockTime=21
+ * commitment intact.
+ *
+ * Encoding per BIP-341 / BIP-143 / Bitcoin legacy:
+ *  - Taproot key-path (witness item 0 is the Schnorr sig):
+ *      64 bytes → SIGHASH_DEFAULT (encodes identically to
+ *                 SIGHASH_ALL on the wire — both commit to all
+ *                 outputs; the explicit-default form is shorter)
+ *      65 bytes → last byte is the sighash flag; must be 0x01
+ *  - ECDSA SegWit (P2WPKH, witness item 0 is DER sig + sighash):
+ *      last byte of the sig must be 0x01
+ *  - Legacy P2PKH (scriptsig starts with a push of DER sig):
+ *      last byte of the pushed sig must be 0x01
+ */
+// ─── cat21-ord helpers ───────────────────────────────────────────────
+//
+// Used by the multi-step `cat21-flow-roundtrip` spec for two things:
+//   1. Verifying the cat's current address after each step (the spec
+//      asks ord which address owns inscription <minting_tx>i0).
+//   2. Producing ord's reference buy-offer PSBT for byte-comparison
+//      against the SDK's `buildCat21BuyOfferPsbt` output.
+//
+// ord serves HTML by default; every query here sends
+// `Accept: application/json` to get structured output. ord recognises
+// the inscription path by id (`<txid>i<index>`); for cat21 fake-
+// inscriptions, the index is always 0.
+/** Build a cat21 inscription id from its minting txid. */
+function catInscriptionId(mintTxid) {
+    return `${mintTxid}i0`;
+}
+/**
+ * Poll ord's HTTP server until it answers `/status` with a 2xx — the
+ * binary takes a moment to warm its index before binding. The compose
+ * file has no healthcheck because the slim runtime image lacks wget/curl,
+ * so the test bootstrap polls here.
+ */
+async function waitForOrdReady(timeoutMs = 60_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const ok = await fetch(`${ORD_URL}/status`).then(r => r.ok).catch(() => false);
+        if (ok)
+            return;
+        await new Promise(r => setTimeout(r, 500));
+    }
+    throw new Error(`ord didn't respond on /status within ${timeoutMs}ms`);
+}
+/**
+ * Block until ord has indexed up to (at least) `targetHeight`. ord's
+ * indexer is one step behind electrs/bitcoind — it sees the new block
+ * via ZMQ or polling and runs its CAT-21 filter on every tx. Without
+ * this gate the cat-state assertions race the indexer.
+ */
+async function waitForOrdSync(targetHeight, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const status = await fetch(`${ORD_URL}/status`, {
+            headers: { Accept: 'application/json' },
+        }).then(r => r.ok ? r.json() : null).catch(() => null);
+        if (status && typeof status.height === 'number' && status.height >= targetHeight)
+            return;
+        await new Promise(r => setTimeout(r, 300));
+    }
+    throw new Error(`ord didn't reach height ${targetHeight} within ${timeoutMs}ms`);
+}
+/**
+ * Fetch a cat's inscription record from ord. Returns the owner address,
+ * current UTXO, and other ord-side state. Throws on any non-2xx — the
+ * caller passes through after asserting on shape.
+ */
+async function getOrdInscription(inscriptionId) {
+    const res = await fetch(`${ORD_URL}/inscription/${inscriptionId}`, {
+        headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+        throw new Error(`ord /inscription/${inscriptionId} returned ${res.status}: ${await res.text()}`);
+    }
+    return res.json();
+}
+/**
+ * Wait until ord reports the cat at `inscriptionId` is owned by
+ * `expectedAddress`. Polls every 300ms; throws on timeout with the
+ * last-observed owner.
+ *
+ * Use this after each broadcast + confirm step in the multi-step spec
+ * to assert the cat actually moved where the SDK said it would.
+ */
+async function waitForCatAtAddress(inscriptionId, expectedAddress, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    let lastSeen;
+    while (Date.now() < deadline) {
+        const insc = await getOrdInscription(inscriptionId).catch(() => undefined);
+        if (insc) {
+            lastSeen = insc;
+            if (insc.address === expectedAddress)
+                return insc;
+        }
+        await new Promise(r => setTimeout(r, 300));
+    }
+    throw new Error(`cat ${inscriptionId} not at ${expectedAddress} within ${timeoutMs}ms; ` +
+        `last owner: ${lastSeen?.address ?? 'unknown'}`);
+}
+/**
+ * Invoke ord's CLI inside the regtest container. Returns stdout
+ * trimmed. Errors bubble up via execFileSync's non-zero-exit throw.
+ *
+ * The container's `command:` runs `ord ... server ...`; this helper
+ * spawns a SECOND ord process via `docker exec` for one-shot wallet
+ * commands. Both processes read the same regtest bitcoind + index dir,
+ * so wallet operations are immediately visible to the running server.
+ */
+function ordCli(...args) {
+    return (0, node_child_process_1.execFileSync)('docker', [
+        'exec', 'ordpool-e2e-cat21-ord',
+        'ord',
+        '--regtest',
+        '--index-cat21',
+        '--index-sats',
+        '--index-addresses',
+        '--bitcoin-rpc-url=bitcoind:18443',
+        '--bitcoin-rpc-username=ordpool',
+        '--bitcoin-rpc-password=ordpool',
+        '--data-dir=/data',
+        ...args,
+    ], { encoding: 'utf8' }).trim();
+}
+/**
+ * `ord wallet …` requires `--name <NAME>` + `--server-url <URL>` on the
+ * wallet subcommand (NOT global). Inside the container the running
+ * ord-server is reachable at localhost:8080.
+ *
+ * `--no-sync`: ord's wallet constructor refuses to run when the ord
+ * server is even a few blocks behind bitcoind ("`ord server` N blocks
+ * behind `bitcoind`"). Jest runs the regtest spec FILES in parallel
+ * workers against ONE shared bitcoind, so a sibling spec mining blocks
+ * makes the tip a moving target while this wallet command runs — the
+ * guard then fires on address derivation or tx construction that don't
+ * depend on the exact tip. Every caller that needs the server actually
+ * caught up gates it explicitly with `waitForOrdSync` /
+ * `waitForOrdStockSync` before READING an inscription, so dropping the
+ * constructor's tip check here is safe: the wallet still uses whatever
+ * the server has already indexed.
+ */
+function ordWalletCli(walletName, ...subcommandArgs) {
+    return ordCli('wallet', '--no-sync', '--name', walletName, '--server-url', 'http://localhost:8080', ...subcommandArgs);
+}
+function ordCreateOffer(inscriptionId, amountSats, feeRateSatPerVb, wallet = 'ord') {
+    const stdout = ordWalletCli(wallet, 'offer', 'create', '--inscription', inscriptionId, '--amount', `${amountSats}sat`, '--fee-rate', String(feeRateSatPerVb));
+    return JSON.parse(stdout);
+}
+/**
+ * Reference `ord wallet send` (the stock transfer). `--dry-run` returns the
+ * constructed PSBT without broadcasting, for byte-comparison against the SDK's
+ * transfer. `postageSats` maps to ord's `--postage` (default 10000 when
+ * omitted). The wallet must OWN the inscription being sent.
+ */
+function ordWalletSend(recipientAddress, inscriptionId, feeRateSatPerVb, postageSats, wallet = 'ord') {
+    const args = ['send', '--dry-run', '--fee-rate', String(feeRateSatPerVb)];
+    if (postageSats !== undefined)
+        args.push('--postage', `${postageSats}sat`);
+    args.push(recipientAddress, inscriptionId);
+    return JSON.parse(ordWalletCli(wallet, ...args));
+}
+/**
+ * Create + restore (idempotent) an ord-side bitcoin wallet. ord stores
+ * the wallet inside the regtest bitcoind via `wallet_process_psbt`-
+ * shaped RPCs; this helper exists so the test setup can construct one
+ * deterministically before mining funding blocks to it.
+ *
+ * Returns a fresh receive address from the wallet.
+ */
+function ordCreateWallet(name = 'ord') {
+    // ord's `wallet create` is idempotent only on the wallet's existence;
+    // we ignore the "wallet already exists" error path so the helper can
+    // be called from a clean spec setup or a re-run.
+    try {
+        ordWalletCli(name, 'create');
+    }
+    catch (e) {
+        const msg = e.message ?? '';
+        if (!msg.includes('already exists') && !msg.includes('already loaded'))
+            throw e;
+    }
+    const stdout = ordWalletCli(name, 'receive');
+    const parsed = JSON.parse(stdout);
+    if (parsed.address)
+        return parsed.address;
+    if (parsed.addresses && parsed.addresses.length > 0)
+        return parsed.addresses[0];
+    throw new Error(`unexpected ord wallet receive shape: ${stdout}`);
+}
+/**
+ * Write arbitrary bytes to a file inside the cat21-ord container (via
+ * base64 to survive any byte value / the shell). Used to feed `ord wallet
+ * inscribe --file` a known content for byte-parity comparison.
+ */
+function writeCat21OrdFile(containerPath, content) {
+    const b64 = Buffer.from(content).toString('base64');
+    (0, node_child_process_1.execFileSync)('docker', ['exec', 'ordpool-e2e-cat21-ord', 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`], { encoding: 'utf8' });
+}
+/**
+ * Run ord's OWN `wallet inscribe` (the reference implementation). Returns
+ * the commit + reveal txids. `--no-backup` avoids ord's recovery-key
+ * import into bitcoind (which fails on the shared regtest wallet). The
+ * envelope-construction code (`append_reveal_script`) is identical to
+ * stock ord, so the reveal's envelope bytes are ord-canonical.
+ */
+function ordWalletInscribe(walletName, containerFilePath, feeRateSatPerVb, extraArgs = []) {
+    const stdout = ordWalletCli(walletName, 'inscribe', '--no-backup', '--fee-rate', String(feeRateSatPerVb), '--file', containerFilePath, ...extraArgs);
+    const parsed = JSON.parse(stdout);
+    return { commit: parsed.commit, reveal: parsed.reveal };
+}
+function assertAllInputsSighashAll(tx) {
+    for (let i = 0; i < tx.vin.length; i++) {
+        const input = tx.vin[i];
+        if (input.is_coinbase)
+            continue;
+        const witness = input.witness ?? [];
+        if (witness.length > 0) {
+            const sigHex = witness[0];
+            const isTaproot = input.prevout?.scriptpubkey_type === 'v1_p2tr';
+            if (isTaproot) {
+                if (sigHex.length === 128)
+                    continue;
+                if (sigHex.length === 130) {
+                    const flag = sigHex.slice(-2);
+                    if (flag === '01')
+                        continue;
+                    throw new Error(`Input ${i}: Taproot sighash flag 0x${flag} (expected 0x01 = SIGHASH_ALL)`);
+                }
+                throw new Error(`Input ${i}: Taproot sig wrong length ${sigHex.length / 2} bytes (expected 64 or 65)`);
+            }
+            const flag = sigHex.slice(-2);
+            if (flag !== '01')
+                throw new Error(`Input ${i}: SegWit sighash flag 0x${flag} (expected 0x01 = SIGHASH_ALL)`);
+        }
+        else if (input.scriptsig) {
+            const ss = input.scriptsig;
+            const pushLen = parseInt(ss.slice(0, 2), 16);
+            const sigEnd = (1 + pushLen) * 2;
+            const sigHex = ss.slice(2, sigEnd);
+            const flag = sigHex.slice(-2);
+            if (flag !== '01')
+                throw new Error(`Input ${i}: Legacy sighash flag 0x${flag} (expected 0x01 = SIGHASH_ALL)`);
+        }
+    }
+}
+// ─── stock-ord helpers (no --index-cat21) ────────────────────────────
+//
+// Used by `inscribe-ord-indexing-roundtrip.spec.ts` to verify that
+// a real upstream-style ord recognises the SDK's inscriptions. The
+// cat21-ord container above runs with --index-cat21 which filters
+// out regular inscriptions; stock ord indexes them like upstream.
+/** Build an inscription id from txid + output index (`<txid>i<index>`). */
+function inscriptionId(txid, index = 0) {
+    return `${txid}i${index}`;
+}
+/**
+ * Poll stock ord's HTTP server until it answers `/status` with a
+ * 2xx. Same warm-up rationale as `waitForOrdReady`.
+ */
+async function waitForOrdStockReady(timeoutMs = 60_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const ok = await fetch(`${ORD_STOCK_URL}/status`).then(r => r.ok).catch(() => false);
+        if (ok)
+            return;
+        await new Promise(r => setTimeout(r, 500));
+    }
+    throw new Error(`stock ord didn't respond on /status within ${timeoutMs}ms (is the ord-stock profile up?)`);
+}
+/**
+ * Block until stock ord has indexed up to (at least) `targetHeight`.
+ * ord's indexer lags bitcoind by a few hundred ms; without this gate
+ * the inscription-lookup assertions race the indexer.
+ */
+async function waitForOrdStockSync(targetHeight, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const status = await fetch(`${ORD_STOCK_URL}/status`, {
+            headers: { Accept: 'application/json' },
+        }).then(r => r.ok ? r.json() : null).catch(() => null);
+        if (status && typeof status.height === 'number' && status.height >= targetHeight)
+            return;
+        await new Promise(r => setTimeout(r, 300));
+    }
+    throw new Error(`stock ord didn't reach height ${targetHeight} within ${timeoutMs}ms`);
+}
+/**
+ * Fetch an inscription record from stock ord. Throws on any non-2xx;
+ * callers wrap in `waitForOrdStockInscription` if they need to poll.
+ */
+async function getStockOrdInscription(id) {
+    const res = await fetch(`${ORD_STOCK_URL}/inscription/${id}`, {
+        headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+        throw new Error(`stock ord /inscription/${id} returned ${res.status}: ${await res.text()}`);
+    }
+    return res.json();
+}
+/**
+ * Inscription IDs currently located on an output, per stock ord's
+ * `/output/<txid:vout>` JSON (empty when the output carries none). Used to
+ * guarantee a funding UTXO sits on an un-inscribed sat before an inscription is
+ * built on it: inscribing a sat that already carries one is a reinscription,
+ * which stock ord curses (post-jubilee: the `vindicated` charm). The shared
+ * `ordpool-e2e` pool can hand out such a sat (inscribe specs deposit reveal
+ * outputs to SDK addresses whose WIF lives in that wallet), so a blessing test
+ * must re-fund until this returns empty.
+ */
+async function getStockOrdOutputInscriptions(outpoint) {
+    const res = await fetch(`${ORD_STOCK_URL}/output/${outpoint}`, {
+        headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+        throw new Error(`stock ord /output/${outpoint} returned ${res.status}: ${await res.text()}`);
+    }
+    const body = (await res.json());
+    return body.inscriptions ?? [];
+}
+/**
+ * Fetch the raw body bytes of an inscription from stock ord's
+ * `/content/<id>` endpoint. ord returns the bytes verbatim with the
+ * envelope's content-type as the response Content-Type header — same
+ * shape every recursive-inscription consumer sees.
+ */
+async function getStockOrdContent(id) {
+    const res = await fetch(`${ORD_STOCK_URL}/content/${id}`);
+    if (!res.ok) {
+        throw new Error(`stock ord /content/${id} returned ${res.status}: ${await res.text()}`);
+    }
+    const buf = new Uint8Array(await res.arrayBuffer());
+    return { bytes: buf, contentType: res.headers.get('content-type') };
+}
+/**
+ * Poll until stock ord serves the inscription. ord indexes inscriptions
+ * one or two blocks after the reveal lands; this helper hides the
+ * polling boilerplate.
+ */
+async function waitForOrdStockInscription(id, timeoutMs = 30_000) {
+    const deadline = Date.now() + timeoutMs;
+    let lastError;
+    while (Date.now() < deadline) {
+        try {
+            return await getStockOrdInscription(id);
+        }
+        catch (e) {
+            lastError = e;
+        }
+        await new Promise(r => setTimeout(r, 300));
+    }
+    throw new Error(`stock ord did not surface inscription ${id} within ${timeoutMs}ms; ` +
+        `last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+//# sourceMappingURL=regtest-helpers.js.map

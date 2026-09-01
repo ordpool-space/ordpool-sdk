@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-e2e",
+    "rootDir": "e2e",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "lib": ["dom", "esnext"],
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": ["e2e/index.ts", "e2e/globals.d.ts"],
+  "exclude": ["node_modules", "**/*.spec.ts", "**/*.angular.spec.ts"]
+}

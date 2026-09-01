@@ -1,0 +1,1 @@
+{"version":3,"file":"wallet-test-vectors.d.ts","sourceRoot":"","sources":["../../e2e/playwright/wallet-test-vectors.ts"],"names":[],"mappings":"AAMA,eAAO,MAAM,aAAa,kGACuE,CAAC;AAClG,eAAO,MAAM,mBAAmB,UAA2B,CAAC;AAK5D,eAAO,MAAM,eAAe,qBAAqB,CAAC;AAClD,eAAO,MAAM,uBAAuB,gDAAgD,CAAC;AAErF,eAAO,MAAM,kBAAkB,EAAE,MAAM,CAAC,MAAM,EAAE,MAAM,CASrD,CAAC"}

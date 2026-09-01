@@ -1,0 +1,121 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.waitForApprovalPopup = waitForApprovalPopup;
+exports.closeLeftoverExtensionPages = closeLeftoverExtensionPages;
+/**
+ * Wait for a wallet-extension approval popup to open in the given
+ * browser context, identified by a caller-supplied predicate.
+ *
+ * Event-driven, no polling sleeps. Strategy:
+ *   - For every chrome-extension page (existing + new via
+ *     `context.on('page')`), kick off `isApproval(page)`.
+ *   - Each `isApproval` blocks until it observes the approval surface
+ *     on that page (via `page.waitForURL` for URL-anchored matches
+ *     or `locator.waitFor({state:'visible'})` for testid/role
+ *     matches). When ANY page's `isApproval` resolves truthy, that
+ *     page wins and the outer promise resolves with it.
+ *
+ * Caller patterns:
+ *   - URL-anchored (Unisat / Wizz):
+ *       isApproval: async p => {
+ *         await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
+ *         return true;
+ *       }
+ *   - Element-anchored (Leather testid, Xverse role+name):
+ *       isApproval: async p => {
+ *         await p.getByTestId('…approve-button')
+ *                .waitFor({ state: 'visible', timeout: 60_000 });
+ *         return true;
+ *       }
+ *
+ * `isApproval` may throw (e.g. its internal timeout fires) — the
+ * helper swallows the throw and keeps waiting on the OTHER pages,
+ * which is the right behaviour: one page failing the match shouldn't
+ * abort the search.
+ *
+ * The outer `timeoutMs` is the deadline beyond which we reject. It
+ * is NOT a poll interval — it's a hard rejection timer enforced via
+ * a single setTimeout.
+ */
+async function waitForApprovalPopup(opts) {
+    const { context, knownPages, isApproval } = opts;
+    const timeoutMs = opts.timeoutMs ?? 60_000;
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finishOk = (p) => {
+            if (settled)
+                return;
+            settled = true;
+            cleanup();
+            resolve(p);
+        };
+        const finishErr = (err) => {
+            if (settled)
+                return;
+            settled = true;
+            cleanup();
+            reject(err);
+        };
+        const tryPage = async (p) => {
+            if (settled || knownPages.has(p))
+                return;
+            try {
+                const res = await isApproval(p);
+                if (res === true)
+                    finishOk(p);
+            }
+            catch {
+                // isApproval rejected (e.g. internal timeout). Don't abort
+                // the search — another page may still match.
+            }
+        };
+        const onPage = (p) => void tryPage(p);
+        const timer = setTimeout(() => finishErr(new Error(`approval popup did not appear within ${timeoutMs}ms`)), timeoutMs);
+        const cleanup = () => {
+            clearTimeout(timer);
+            context.off('page', onPage);
+        };
+        context.on('page', onPage);
+        for (const p of context.pages())
+            void tryPage(p);
+    });
+}
+/**
+ * Close every chrome-extension page in the context except those
+ * in `keep`. Defensive — wallets like Xverse, OKX, Phantom, Alby
+ * routinely leave a "Connected" dashboard tab open after approval,
+ * which then races against the next sign popup (sometimes the
+ * wallet reuses that tab; sometimes it opens a fresh one). The
+ * `knownPages` filter inside `waitForApprovalPopup` excludes the
+ * dashboard, so if the wallet reuses it, the test times out
+ * waiting for a sign popup that's actually rendering on the
+ * filtered tab.
+ *
+ * Always call this AFTER the connect/approval result resolved —
+ * we never close a popup that's still mid-handshake with the
+ * wallet's SW, only ones that already did their job.
+ */
+async function closeLeftoverExtensionPages(context, keep) {
+    const keepSet = new Set(keep);
+    for (const p of context.pages()) {
+        if (keepSet.has(p))
+            continue;
+        // OKX (and other wallets) tear their own pages down the instant they
+        // auto-approve, so a page enumerated here can already be closing.
+        // `p.url()` on a closed page throws "guid not bound" — uncaught, that
+        // failed the whole spec during the connect/commit cleanup, before the
+        // flow even reached the next sign. Skip closed pages and swallow a page
+        // that closes between the isClosed() check and the url() read.
+        if (p.isClosed())
+            continue;
+        try {
+            if (!p.url().startsWith('chrome-extension://'))
+                continue;
+        }
+        catch {
+            continue;
+        }
+        await p.close().catch(() => undefined);
+    }
+}
+//# sourceMappingURL=approval-popup.js.map

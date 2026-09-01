@@ -1,0 +1,1 @@
+{"version":3,"file":"onboard-leather.d.ts","sourceRoot":"","sources":["../../e2e/playwright/onboard-leather.ts"],"names":[],"mappings":"AAAA,OAAO,EAAU,IAAI,EAAE,MAAM,kBAAkB,CAAC;AAIhD;;;;;;;;;GASG;AACH,wBAAsB,cAAc,CAClC,IAAI,EAAE,IAAI,EACV,WAAW,EAAE,MAAM,EACnB,IAAI,GAAE;IAAE,QAAQ,CAAC,EAAE,MAAM,CAAC;IAAC,QAAQ,CAAC,EAAE,MAAM,CAAA;CAAO,GAClD,OAAO,CAAC,IAAI,CAAC,CAwBf"}

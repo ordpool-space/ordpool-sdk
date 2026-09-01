@@ -1,0 +1,1 @@
+{"version":3,"file":"onboard-alby.d.ts","sourceRoot":"","sources":["../../e2e/playwright/onboard-alby.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,IAAI,EAAE,MAAM,kBAAkB,CAAC;AAIxC;;;;;;GAMG;AACH,wBAAsB,eAAe,CACnC,IAAI,EAAE,IAAI,EACV,IAAI,GAAE;IAAE,cAAc,CAAC,EAAE,SAAS,GAAG,SAAS,CAAC;IAAC,QAAQ,CAAC,EAAE,MAAM,CAAC;IAAC,QAAQ,CAAC,EAAE,MAAM,CAAA;CAAO,GAC1F,OAAO,CAAC,MAAM,CAAC,CA4BjB"}

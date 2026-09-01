@@ -41,3 +41,13 @@ jobs:
       run: |
         npm run build:angular
         git diff --exit-code dist/
+
+    # dist-e2e/ (compiled e2e helpers, imported by consumers as
+    # `ordpool-sdk/e2e`) IS checked in so they import instead of copying raw
+    # .ts out of node_modules. Rebuild + fail on drift, and smoke-load the
+    # barrel so a missing include fails HERE, not in a consumer's regtest CI.
+    - name: Verify committed dist-e2e/ matches a fresh build + loads
+      run: |
+        npm run build:e2e
+        node -e "require('./dist-e2e/index.js')"
+        git diff --exit-code dist-e2e/

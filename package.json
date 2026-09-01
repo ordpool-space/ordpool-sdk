@@ -20,11 +20,16 @@
     "./core": {
       "types": "./dist-core/core.d.ts",
       "default": "./dist-core/core.js"
+    },
+    "./e2e": {
+      "types": "./dist-e2e/index.d.ts",
+      "default": "./dist-e2e/index.js"
     }
   },
   "files": [
     "dist",
     "dist-core",
+    "dist-e2e",
     "src",
     "e2e",
     "wasm",
@@ -32,10 +37,11 @@
     "*.json"
   ],
   "scripts": {
-    "clean": "rimraf dist dist-core",
-    "build": "npm run build:angular && npm run build:core",
+    "clean": "rimraf dist dist-core dist-e2e",
+    "build": "npm run build:angular && npm run build:core && npm run build:e2e",
     "build:angular": "ng-packagr -p ng-package.json",
     "build:core": "tsc -p tsconfig.core.json && node -e \"require('fs').writeFileSync('dist-core/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
+    "build:e2e": "tsc -p tsconfig.e2e.json && node -e \"require('fs').writeFileSync('dist-e2e/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
     "prepare": "npm run build:core",
     "start": "npm run test",
     "test": "npm run test:node && npm run test:browser",
@@ -72,9 +78,15 @@
     "@angular/common": ">=20",
     "@angular/core": ">=20",
     "@noble/curves": ">=1",
+    "@playwright/test": ">=1.50",
     "@scure/btc-signer": "1.2.x",
     "rxjs": ">=7",
     "sats-connect": ">=4"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@angular/common": "^20.3.25",

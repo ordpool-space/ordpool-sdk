@@ -1,0 +1,1 @@
+{"version":3,"file":"onboard-cat21wallet.d.ts","sourceRoot":"","sources":["../../e2e/playwright/onboard-cat21wallet.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,IAAI,EAAE,MAAM,kBAAkB,CAAC;AAKxC;;;;;;;GAOG;AACH,wBAAsB,kBAAkB,CACtC,IAAI,EAAE,IAAI,EACV,WAAW,EAAE,MAAM,EACnB,IAAI,GAAE;IAAE,QAAQ,CAAC,EAAE,MAAM,CAAC;IAAC,QAAQ,CAAC,EAAE,MAAM,CAAA;CAAO,GAClD,OAAO,CAAC,IAAI,CAAC,CAKf"}
