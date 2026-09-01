@@ -10,6 +10,12 @@
 #   ./e2e/consumer-environment-bootstrap.sh --with-redis     # + redis
 #   ./e2e/consumer-environment-bootstrap.sh --extra-file ord.yml --extra-file cat21.yml
 #       (consumer-specific compose files layered on top of the base)
+#   ./e2e/consumer-environment-bootstrap.sh --buildx-cache
+#       (CI-only: build electrs through buildx bake with a type=gha cache
+#        so an unchanged ordpool-electrs source reuses the compiled image
+#        instead of recompiling Rust ~10 min every run — see
+#        docker-compose.consumer-gha-cache.yml. Requires a buildx builder
+#        + the Actions runtime env, which the caller sets up.)
 #
 # Consumer CI workflows call this once before invoking Playwright,
 # capturing the JSON to an env var or a file the test can read via
@@ -21,6 +27,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_BASE=( -f "$HERE/docker-compose.consumer-environment.yml" )
 PROFILES=()
 EXTRA_FILES=()
+BUILDX_CACHE=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,6 +38,11 @@ while [ $# -gt 0 ]; do
     --extra-file)
       EXTRA_FILES+=( -f "$2" )
       shift 2
+      ;;
+    --buildx-cache)
+      BUILDX_CACHE=1
+      EXTRA_FILES+=( -f "$HERE/docker-compose.consumer-gha-cache.yml" )
+      shift
       ;;
     *)
       echo "Unknown argument: $1" >&2
@@ -44,7 +56,15 @@ RPC="docker exec ordpool-e2e-consumer-bitcoind bitcoin-cli -regtest -rpcuser=ord
 
 # --- bring containers up if not already running ---
 if ! docker ps --format '{{.Names}}' | grep -q 'ordpool-e2e-consumer-bitcoind'; then
-  "${COMPOSE[@]}" up -d >&2
+  if [ "$BUILDX_CACHE" = 1 ]; then
+    # Build electrs first through buildx bake so the gha overlay's
+    # cache_from/to take effect; bake loads the image (it has an `image:`
+    # name) for the following --no-build up.
+    COMPOSE_BAKE=true "${COMPOSE[@]}" build electrs >&2
+    "${COMPOSE[@]}" up -d --no-build >&2
+  else
+    "${COMPOSE[@]}" up -d >&2
+  fi
 fi
 
 # --- wait for bitcoind RPC to respond ---

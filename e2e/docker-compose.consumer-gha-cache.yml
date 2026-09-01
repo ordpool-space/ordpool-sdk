@@ -1,0 +1,20 @@
+# CI-ONLY overlay for the CONSUMER environment: routes the cold electrs
+# Rust build through the GitHub Actions cache backend. The consumer stack
+# (docker-compose.consumer-environment.yml) builds only electrs — it uses
+# a mock for ord — so this overlay carries just the electrs service.
+#
+# Consumers are WRITERS: each consumer repo has its own gha cache namespace
+# (gha cache is repo-scoped), so every repo must populate scope=electrs
+# itself. Unlike e2e-playwright's read-only matrix overlay, this one both
+# imports and exports.
+#
+# NEVER pass this to a local `docker compose`: type=gha needs the Actions
+# runtime token that only exists inside a GitHub Actions job. The consumer
+# bootstrap adds it only under `--buildx-cache` (a CI-only flag).
+services:
+  electrs:
+    build:
+      cache_from:
+        - type=gha,scope=electrs
+      cache_to:
+        - type=gha,scope=electrs,mode=max
