@@ -25,10 +25,11 @@
 # `up -d --no-build` finds them.
 #
 # Per-service `scope` keeps the two images' caches in separate namespaces.
-# ord and ord-stock share one image (ordpool-e2e-cat21-ord:local) built
-# from the same context, so they share the cat21-ord scope; the `ord`
-# service owns the export (writer) and ord-stock only imports (reader),
-# which avoids two concurrent writers to one scope.
+# ord and ord-stock share one image built from the same context +
+# dockerfile, so bake dedups them into one build and they share the
+# cat21-ord scope. Both are writers so the overlay populates cat21-ord no
+# matter which service a consumer builds: this repo's e2e-regtest builds
+# both, while the genesis cubes regtest builds only ord-stock.
 services:
   electrs:
     build:
@@ -48,3 +49,5 @@ services:
     build:
       cache_from:
         - type=gha,scope=cat21-ord
+      cache_to:
+        - type=gha,scope=cat21-ord,mode=max

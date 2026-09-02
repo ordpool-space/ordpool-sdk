@@ -17,7 +17,7 @@ services:
     # wallet and supplies the SDK signer's WIF itself, so no legacy/BDB
     # wallet (removed in Core 29) and no -deprecatedrpc escape hatch.
     image: bitcoin/bitcoin:30
-    container_name: ordpool-e2e-bitcoind
+    container_name: ${E2E_PREFIX:-ordpool-e2e}-bitcoind
     command:
       - -regtest
       - -server=1
@@ -48,10 +48,13 @@ services:
   # compiles Rust + RocksDB (a few minutes); then Docker-layer-cached.
   electrs:
     build:
-      context: ../../ordpool-electrs
+      # ELECTRS_SRC lets a consumer point the build context at its own
+      # ordpool-electrs checkout (absolute path); the default is the
+      # workspace-sibling used by this repo's own workflows + local dev.
+      context: ${ELECTRS_SRC:-../../ordpool-electrs}
       dockerfile: Dockerfile
-    image: ordpool-e2e-electrs:local
-    container_name: ordpool-e2e-electrs
+    image: ${E2E_PREFIX:-ordpool-e2e}-electrs:local
+    container_name: ${E2E_PREFIX:-ordpool-e2e}-electrs
     depends_on:
       bitcoind:
         condition: service_healthy
@@ -104,13 +107,27 @@ services:
     profiles:
       - cat21-ord
     build:
-      context: ../../cat21-ord
-      # Use a Dockerfile we maintain in this repo so cat21-ord's own
-      # Dockerfile (rust:1.85.0, correct for happysrv prod) stays
-      # untouched. ord@0.27 + redb@3.1 need rust 1.89+; we use 1.90 here.
-      dockerfile: ../ordpool-sdk/e2e/cat21-ord.Dockerfile
-    image: ordpool-e2e-cat21-ord:local
-    container_name: ordpool-e2e-cat21-ord
+      # CAT21_ORD_SRC lets a consumer point the build context at its own
+      # cat21-ord checkout (absolute path); the default is the
+      # workspace-sibling used by this repo's own workflows + local dev.
+      context: ${CAT21_ORD_SRC:-../../cat21-ord}
+      # Inline the build recipe so this compose is self-contained and
+      # resolves from any layout: a consumer loading it out of
+      # node_modules has no ../ordpool-sdk sibling to reach a Dockerfile
+      # file. cat21-ord's own Dockerfile pins rust:1.85 for the happysrv
+      # prod image; ord@0.27 + redb@3.1 need 1.89+, so we override to 1.90.
+      dockerfile_inline: |
+        FROM rust:1.90-bookworm AS builder
+        WORKDIR /usr/src/ord
+        COPY . .
+        RUN cargo build --bin ord --release
+        FROM debian:bookworm-slim
+        COPY --from=builder /usr/src/ord/target/release/ord /usr/local/bin
+        RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+        ENV RUST_BACKTRACE=1
+        ENV RUST_LOG=info
+    image: ${E2E_PREFIX:-ordpool-e2e}-cat21-ord:local
+    container_name: ${E2E_PREFIX:-ordpool-e2e}-cat21-ord
     depends_on:
       bitcoind:
         condition: service_healthy
@@ -153,11 +170,20 @@ services:
   ord-stock:
     profiles:
       - ord-stock
-    image: ordpool-e2e-cat21-ord:local
+    image: ${E2E_PREFIX:-ordpool-e2e}-cat21-ord:local
     build:
-      context: ../../cat21-ord
-      dockerfile: ../ordpool-sdk/e2e/cat21-ord.Dockerfile
-    container_name: ordpool-e2e-ord-stock
+      context: ${CAT21_ORD_SRC:-../../cat21-ord}
+      dockerfile_inline: |
+        FROM rust:1.90-bookworm AS builder
+        WORKDIR /usr/src/ord
+        COPY . .
+        RUN cargo build --bin ord --release
+        FROM debian:bookworm-slim
+        COPY --from=builder /usr/src/ord/target/release/ord /usr/local/bin
+        RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+        ENV RUST_BACKTRACE=1
+        ENV RUST_LOG=info
+    container_name: ${E2E_PREFIX:-ordpool-e2e}-ord-stock
     depends_on:
       bitcoind:
         condition: service_healthy
