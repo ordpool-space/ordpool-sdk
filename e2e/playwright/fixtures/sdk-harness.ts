@@ -23,6 +23,7 @@ import { okxConnector } from '../../../src/wallet/connectors/okx.connector';
 import { phantomConnector } from '../../../src/wallet/connectors/phantom.connector';
 import { albyConnector } from '../../../src/wallet/connectors/alby.connector';
 import { findSignerOrThrow } from '../../../src/wallet/signers';
+import { verifyBip322Signature } from '../../../src/wallet/verify-bip322-signature';
 import { createTransaction } from '../../../src/cat21-mint/cat21.service.helper';
 import { createInscribeTransactions, createChildInscribeTransactions } from '../../../src/inscribe/inscription.service.helper';
 import { buildCat21TransferPsbt } from '../../../src/cat21-transfer/cat21-transfer.helper';
@@ -61,6 +62,19 @@ declare global {
       runOperation(input: RunOperationCreateOfferInput): Promise<RunOperationCreateOfferResult>;
       runOperation(input: RunOperationAcceptOfferInput): Promise<RunOperationAcceptOfferResult>;
       runOperation(input: RunOperationInput): Promise<RunOperationResult>;
+
+      /**
+       * Sign-message roundtrip: the connected wallet signs `message` under its
+       * mainnet-view ordinals `address` (BIP-322), and the harness verifies the
+       * returned signature with the SDK's `verifyBip322Signature`. Proves the
+       * SignMessage capability end-to-end (real extension → valid signature).
+       * No chain interaction — message signing never broadcasts.
+       */
+      signMessage(input: { walletType: KnownOrdinalWalletType; address: string; message: string }): Promise<{
+        signature: string;
+        verified: boolean;
+        reason: string | null;
+      }>;
 
       detectXverse(): boolean;
       connectXverse(network: 'mainnet' | 'testnet3' | 'testnet4' | 'regtest'): Promise<{
@@ -1069,6 +1083,33 @@ function walletSidePaymentAddressFor(
     }
   }
 }
+
+/**
+ * Sign-message roundtrip driver. Calls the wallet's real `signMessage`
+ * provider RPC via the SDK signer, then verifies the returned BIP-322
+ * signature with `verifyBip322Signature` — the exact check
+ * `WalletService.signMessage` runs. `address` is the mainnet-view ordinals
+ * address from connect (what the wallet signs under); no regtest shim, since
+ * message signing never touches the chain.
+ */
+window.ordpoolSdkHarness.signMessage = async (input: { walletType: KnownOrdinalWalletType; address: string; message: string }) => {
+  const signer = findSignerOrThrow(input.walletType);
+  const result = await firstValueFrom(signer.signMessage({
+    address: input.address,
+    message: input.message,
+    network: Network.Mainnet,
+  }));
+  const verify = verifyBip322Signature({
+    address: input.address,
+    message: input.message,
+    signatureBase64: result.signature,
+  });
+  return {
+    signature: result.signature,
+    verified: verify.ok === true,
+    reason: verify.ok === true ? null : verify.reason,
+  };
+};
 
 window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promise<RunOperationResult> => {
   if (input.walletType === KnownOrdinalWalletType.alby) {
