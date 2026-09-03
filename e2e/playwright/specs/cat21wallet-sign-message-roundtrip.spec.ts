@@ -109,7 +109,8 @@ test('sign a BIP-322 message via Cat21 Wallet: real extension signs, SDK verifie
   });
 
   const result = await resultPromise;
-  console.log(`[cat21wallet-sign-message] signature (${result.signature.length} chars), verified=${result.verified}, reason=${result.reason}`);
+  console.log(`[cat21wallet-sign-message] signature=${result.signature}`);
+  console.log(`[cat21wallet-sign-message] message=${JSON.stringify(MESSAGE)} verified=${result.verified} reason=${result.reason}`);
 
   expect(result.signature.length).toBeGreaterThan(0);
   expect(result.reason).toBeNull();

@@ -99,7 +99,16 @@ export function verifyBip322Signature(args: {
   //   2. Full BIP-322 witness serialization: [numItems=1, sigLen, sig].
   //      Xverse + Leather use this shape.
   let sig: Uint8Array;
-  let sighashType: number;
+  // A taproot signature only carries an explicit sighash-type byte when it is
+  // 65 bytes long (raw 64+1) or a serialized witness with sigLen 0x41. A bare
+  // 64-byte sig is AMBIGUOUS: BIP-322 "simple" convention drops the trailing
+  // byte for SIGHASH_DEFAULT, but Leather (and its forks, incl. cat21wallet)
+  // compute the taproot sighash with SIGHASH_ALL (0x01) and still return the
+  // bare 64 bytes. Both commit to the same single-input / single-output
+  // BIP-322 virtual tx, so when the byte is absent we try BOTH sighash types —
+  // there is no other input or output for them to disagree on, so accepting
+  // either cannot verify a different message.
+  let explicitSighashType: number | null;
   const isRawSig = signatureBytes.length === 64 || signatureBytes.length === 65;
   const isSerializedWitness =
     signatureBytes.length >= 3 &&
@@ -107,7 +116,7 @@ export function verifyBip322Signature(args: {
     (signatureBytes[1] === 0x40 || signatureBytes[1] === 0x41);
   if (isRawSig) {
     sig = signatureBytes.slice(0, 64);
-    sighashType = signatureBytes.length === 65 ? signatureBytes[64] : 0x00;
+    explicitSighashType = signatureBytes.length === 65 ? signatureBytes[64] : null;
   } else if (isSerializedWitness) {
     const sigLen = signatureBytes[1];
     if (signatureBytes.length !== 2 + sigLen) {
@@ -118,7 +127,7 @@ export function verifyBip322Signature(args: {
       };
     }
     sig = signatureBytes.slice(2, 2 + 64);
-    sighashType = sigLen === 0x41 ? signatureBytes[2 + 64] : 0x00;
+    explicitSighashType = sigLen === 0x41 ? signatureBytes[2 + 64] : null;
   } else {
     return {
       ok: false,
@@ -132,19 +141,20 @@ export function verifyBip322Signature(args: {
   const toSpend = buildToSpend(messageHash, scriptPubKey);
   const toSpendTxid = doubleSha256(toSpend);
 
-  // to_sign taproot sighash. sighashType 0x00 = SIGHASH_DEFAULT
-  // (BIP-341: default is behaviourally SIGHASH_ALL for key-path).
-  const sighash = computeToSignTaprootSighash({
-    toSpendTxid,
-    prevScriptPubKey: scriptPubKey,
-    sighashType,
-  });
-
-  const verified = schnorr.verify(sig, sighash, xOnlyPubkey);
-  if (!verified) {
-    return { ok: false, reason: 'signature-does-not-verify' };
+  // With an explicit byte, verify exactly that sighash type; without one, the
+  // sig is ambiguous, so try SIGHASH_DEFAULT (0x00) then SIGHASH_ALL (0x01).
+  const candidateSighashTypes = explicitSighashType !== null ? [explicitSighashType] : [0x00, 0x01];
+  for (const sighashType of candidateSighashTypes) {
+    const sighash = computeToSignTaprootSighash({
+      toSpendTxid,
+      prevScriptPubKey: scriptPubKey,
+      sighashType,
+    });
+    if (schnorr.verify(sig, sighash, xOnlyPubkey)) {
+      return { ok: true };
+    }
   }
-  return { ok: true };
+  return { ok: false, reason: 'signature-does-not-verify' };
 }
 
 // ---------- Internals (shared with verifyListingSignature) ---------------
