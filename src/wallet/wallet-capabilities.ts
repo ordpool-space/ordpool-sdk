@@ -182,7 +182,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
         support: CapabilitySupport.Proven,
         caveat: 'Collections use three approvals in a row on OKX and can occasionally not complete the first time; if that happens, just try again.',
       },
-      [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
     note: 'Signs with your Taproot (bc1p) account. Supports mint, send, buy and sell, and inscribe. Works in the desktop extension and in the OKX mobile app browser.',
   },
