@@ -17,6 +17,9 @@ name: E2E (wallet matrix)
 # fresh container per run.
 
 on:
+  # Manual trigger: validate wallet-shard stability (e.g. re-sample a
+  # previously flaky wallet) without pushing a commit.
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
