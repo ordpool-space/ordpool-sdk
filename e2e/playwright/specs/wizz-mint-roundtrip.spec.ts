@@ -7,6 +7,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
+import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
 /**
  * Iteration 5 — full cat21 mint roundtrip with the real Wizz
@@ -110,9 +111,10 @@ test.beforeAll(async () => {
     ],
   });
 
-  // Wizz fans out to configs.wizz.cash on mount — CI has no outbound
-  // internet so the fetch hangs. Abort at the browser layer.
-  await context.route('**/configs.wizz.cash/**', route => route.abort());
+  // Wizz is mainnet-only + offline in CI: abort configs.wizz.cash and
+  // fulfil the external esplora balance endpoints so the sign popup
+  // stops showing "Failed to load balance" (which disables Sign).
+  await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
