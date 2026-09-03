@@ -75,7 +75,14 @@ test.beforeAll(async () => {
 
   context = await chromium.launchPersistentContext('', {
     headless: false,
-    args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox', '--disable-dev-shm-usage'],
+    args: [
+      `--disable-extensions-except=${EXT_PATH}`,
+      `--load-extension=${EXT_PATH}`,
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      // OKX absorbs the welcome-screen click unless navigator.webdriver is hidden.
+      '--disable-blink-features=AutomationControlled',
+    ],
   });
 
   let [worker] = context.serviceWorkers();
