@@ -102,7 +102,13 @@ function signBip322Simple(args: {
 
   const tx = new btc.Transaction({ allowUnknownInputs: true, allowUnknownOutputs: true, version: 0, lockTime: 0 });
   tx.addInput({
-    txid: toSpendTxid,
+    // @scure/btc-signer reverses `txid` internally when serializing, so pass
+    // the display-order (reversed) hash to make it serialize the internal-order
+    // to_spend txid a real wallet signs over. Mirrors the same reverse in
+    // `verify-bip322-signature.ts → computeToSignTaprootSighash`; without it
+    // this helper would sign a byte-reversed prevout that the real verifier
+    // (correctly) rejects, so this test must sign the way a real wallet does.
+    txid: new Uint8Array(toSpendTxid).reverse(),
     index: 0,
     sequence: 0,
     witnessUtxo: { script: scriptPubKey, amount: BigInt(0) },

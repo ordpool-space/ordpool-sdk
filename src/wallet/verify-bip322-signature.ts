@@ -227,8 +227,20 @@ function computeToSignTaprootSighash(args: {
     version: 0,
     lockTime: 0,
   });
+  // `args.toSpendTxid` is the raw double-SHA256 of the to_spend tx — INTERNAL
+  // (little-endian) byte order, the same bytes bitcoinjs's
+  // `Transaction.getHash()` returns and that real wallets (Leather /
+  // cat21wallet, Xverse, …) place directly into the to_sign prevout. But
+  // `@scure/btc-signer`'s `addInput({ txid })` expects the txid in DISPLAY
+  // (big-endian) order and reverses it internally when serializing. So we
+  // reverse here to make @scure serialize the identical internal-order hash
+  // the wallet signed over. Without this the to_sign sighash silently
+  // referenced a byte-reversed prevout, and EVERY real taproot BIP-322
+  // signature failed to verify — invisible to the self-signed spec, which
+  // reverses the same bytes on both sign and verify.
+  const txidForScure = new Uint8Array(args.toSpendTxid).reverse();
   tx.addInput({
-    txid: args.toSpendTxid,
+    txid: txidForScure,
     index: 0,
     sequence: 0,
     witnessUtxo: { script: args.prevScriptPubKey, amount: BigInt(0) },
