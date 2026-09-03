@@ -1,7 +1,7 @@
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { defer, from, Observable, map, switchMap } from 'rxjs';
-import Wallet, { MessageSigningProtocols, request, signTransaction } from 'sats-connect';
+import { MessageSigningProtocols, request, signTransaction } from 'sats-connect';
 
 import { toBitcoinNetworkType } from '../../network';
 import { broadcastSignedPsbt, extractWireTxFromPsbt } from '../psbt-extract';
@@ -117,7 +117,14 @@ const legacy = {
 };
 
 /**
- * BIP-322 message signing via sats-connect v3+ `Wallet.request('signMessage', ...)`.
+ * BIP-322 message signing via the low-level sats-connect `request`
+ * helper (re-exported from `@sats-connect/core`), NOT the default
+ * `Wallet.request` method. Same reason as `callXverseSignPsbtModern`
+ * above: `Wallet.request` wraps calls in sats-connect's in-page UI
+ * (`loadSelector`/`walletOpen`) — a "Choose wallet to connect" picker
+ * that a programmatic caller can't dismiss and that a connected user
+ * should never see just to sign a message. Bare `request` reaches
+ * `provider.request('signMessage', …)` directly.
  *
  * `protocol: MessageSigningProtocols.BIP322` selects BIP-322 (vs
  * ECDSA — the older Sparrow-style prefixed-message format). Xverse
@@ -130,7 +137,7 @@ const legacy = {
  * `wallet.ordinalsAddress`.
  */
 function callXverseSignMessage(address: string, message: string): Promise<string> {
-  return Wallet.request('signMessage', {
+  return request('signMessage', {
     address,
     message,
     protocol: MessageSigningProtocols.BIP322,

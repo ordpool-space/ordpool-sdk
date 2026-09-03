@@ -26,7 +26,7 @@ jest.mock('./child-reveal-finalize.helper', () => {
     mergeParentSigAndBroadcast: jest.fn(),
   };
 });
-import { signTransaction, request } from 'sats-connect';
+import { signTransaction, request, MessageSigningProtocols } from 'sats-connect';
 import { broadcastSignedPsbt } from '../psbt-extract';
 import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
 
@@ -245,5 +245,41 @@ describe('xverseSigner.signOfferCreatePsbt', () => {
     expect(payload.broadcast).toBe(false);
     // Returns the signed partial PSBT bytes verbatim (no broadcast on this path).
     expect(signed).toEqual(base64.decode('c2lnbmVk'));
+  });
+});
+
+describe('xverseSigner.signMessage', () => {
+  const requestMock = request as unknown as jest.Mock;
+
+  beforeEach(() => { requestMock.mockReset(); });
+
+  it('signs via the low-level sats-connect request (not Wallet.request, which pops an un-dismissable in-page wallet picker): BIP-322 protocol, ordinals address, returns the base64 signature', async () => {
+    requestMock.mockResolvedValue({ status: 'success', result: { signature: 'BASE64_BIP322_SIG' } } as never);
+
+    const result = await firstValueFrom(xverseSigner.signMessage({
+      address: 'bc1pordinals',
+      message: 'ordpool sign-message',
+      network: Network.Mainnet,
+    }));
+
+    // The whole point of the fix: bare `request('signMessage', …)`, so a
+    // connected wallet never re-opens the "Choose wallet to connect" picker.
+    expect(requestMock).toHaveBeenCalledTimes(1);
+    expect(requestMock.mock.calls[0][0]).toBe('signMessage');
+    const payload = requestMock.mock.calls[0][1] as { address: string; message: string; protocol: unknown };
+    expect(payload.address).toBe('bc1pordinals');
+    expect(payload.message).toBe('ordpool sign-message');
+    expect(payload.protocol).toBe(MessageSigningProtocols.BIP322);
+    expect(result).toEqual({ signature: 'BASE64_BIP322_SIG' });
+  });
+
+  it('throws with the wallet-reported reason when sats-connect returns a non-success status', async () => {
+    requestMock.mockResolvedValue({ status: 'error', error: { message: 'user rejected', code: 4001 } } as never);
+
+    await expect(firstValueFrom(xverseSigner.signMessage({
+      address: 'bc1pordinals',
+      message: 'x',
+      network: Network.Mainnet,
+    }))).rejects.toThrow('user rejected');
   });
 });

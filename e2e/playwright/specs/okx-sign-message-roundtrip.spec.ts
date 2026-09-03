@@ -89,7 +89,21 @@ test.beforeAll(async () => {
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
 
-  const onboardPage = await context.newPage();
+  // OKX auto-opens its own onboarding tab on install; reuse it. Creating a
+  // fresh page and navigating it collides with OKX's auto-navigation and
+  // closes the context (all-attempts onboarding failure). Fall back to a new
+  // page only if the auto-opened tab never appears.
+  let onboardPage: Page | undefined;
+  try {
+    onboardPage = await context.waitForEvent('page', {
+      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
+      timeout: 15_000,
+    });
+  } catch {
+    /* fall back below */
+  }
+  test.setTimeout(240_000);
+  if (!onboardPage) onboardPage = await context.newPage();
   await onboardOkx(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
