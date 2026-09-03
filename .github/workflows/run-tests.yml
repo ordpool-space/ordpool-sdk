@@ -32,15 +32,17 @@ jobs:
         npm run build:core
         node -e "require('./dist-core/core.js')"
 
-    # Enforce the "build before commit" HARD RULE from
-    # .claude/CLAUDE.md: rebuild dist/ (Angular fesm2022) and fail
-    # if it drifts from what was committed. dist-core/ is NOT
-    # checked in — regenerated per-install via the prepare hook —
-    # so we only diff dist/.
-    - name: Verify committed dist/ matches a fresh build
+    # dist/ (the main entry) is NOT checked in — regenerated per-install
+    # via the prepare hook (plain tsc, ESM). Rebuild it and bundle-check the
+    # barrel with esbuild (deps external) — the same bundler resolution a
+    # consumer uses — so a broken internal import graph fails HERE, at the
+    # source, instead of in a consumer's CI. (Node's native ESM loader can't
+    # resolve tsc's extensionless directory imports; a bundler can, which is
+    # exactly how every consumer imports this package.)
+    - name: Bundle-check the main entry
       run: |
-        npm run build:angular
-        git diff --exit-code dist/
+        npm run build:main
+        node -e "require('esbuild').build({entryPoints:['dist/index.js'],bundle:true,write:false,format:'esm',packages:'external'}).catch(() => process.exit(1))"
 
     # dist-e2e/ (compiled e2e helpers, imported by consumers as
     # `ordpool-sdk/e2e`) IS checked in so they import instead of copying raw

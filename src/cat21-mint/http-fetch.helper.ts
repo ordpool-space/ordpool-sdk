@@ -1,17 +1,16 @@
 import { Observable, from } from 'rxjs';
 
 /**
- * Native-fetch HTTP primitives for the SDK's Angular services (`Cat21Service`,
- * `Cat21ApiService`, `UtxoContentScanner`). The SDK uses `fetch`, never
- * Angular's `HttpClient` — so these services carry no `@angular/common/http`
- * dependency and load + run anywhere the rest of the SDK does (browser, plain
- * Node, a regtest jest harness), matching the workspace "use fetch, not axios"
- * rule.
+ * Native-`fetch` HTTP primitives for the SDK's stateful clients
+ * (`Cat21Service`, `Cat21ApiService`, `UtxoContentScanner`). They load and run
+ * anywhere the rest of the SDK does (browser, plain Node, a regtest jest
+ * harness), matching the workspace "use fetch, not axios" rule.
  *
  * Each rejects on a non-2xx status, carrying the response BODY as the error
  * message (so an electrs/mempool broadcast rejection keeps its reason, e.g.
- * "txn-mempool-conflict") — the callers' existing `catchError` chains read
- * `err.message` and surface it unchanged.
+ * "txn-mempool-conflict") — the callers' `catchError` chains read `err.message`
+ * and surface it unchanged. The `Observable` form wraps the async form so the
+ * clients' RxJS pipelines consume it directly.
  */
 async function fetchOk(url: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(url, init);
@@ -30,8 +29,7 @@ export function fetchJsonAsync<T>(url: string): Promise<T> {
 }
 
 /** `GET <url>` → parsed JSON, Observable form. Thin RxJS wrapper over
- * `fetchJsonAsync` for the Angular services' existing `.pipe(catchError)`
- * chains. */
+ * `fetchJsonAsync` for the stateful clients' `.pipe(catchError)` chains. */
 export function fetchJson<T>(url: string): Observable<T> {
   return from(fetchJsonAsync<T>(url));
 }

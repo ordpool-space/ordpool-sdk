@@ -1,8 +1,3 @@
-// jest-preset-angular needs the zoneless test environment bootstrapped
-// before any spec imports @angular/core. This loads the JIT compiler
-// facade so partial-compilation output (ng-packagr fesm2022) can run.
-import 'jest-preset-angular/setup-env/zoneless';
-
 // Adds support for TextEncoder and TextDecoder
 // see https://stackoverflow.com/a/68468204
 // see https://github.com/jsdom/jsdom/issues/2524

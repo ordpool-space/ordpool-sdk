@@ -1,4 +1,3 @@
-import { Injectable, inject } from '@angular/core';
 import { Observable, combineLatest, map, of, switchMap } from 'rxjs';
 
 import { UtxoContentScanner } from '../cat21-mint/utxo-content-scanner.service';
@@ -30,9 +29,8 @@ const outpointKey = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
  * pick inside `recommendFunding` is ord's best-fit `selectCardinalUtxo`, so an
  * auto-selected clean coin stays byte-aligned with `ord wallet send`.
  */
-@Injectable({ providedIn: 'root' })
 export class FundingRecommendationService {
-  private scanner = inject(UtxoContentScanner);
+  constructor(private readonly scanner: UtxoContentScanner) {}
 
   /**
    * `preferredSpendSats$` (optional, defaults to no bias) is the WITH-CHANGE +

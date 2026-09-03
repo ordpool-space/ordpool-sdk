@@ -1,8 +1,7 @@
-import { Injectable, inject } from '@angular/core';
 import { BehaviorSubject, Observable, catchError, firstValueFrom, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
 
 import { ContentScanPort, UtxoClassification } from '../cat21-core/ports';
-import { cat21Config } from './cat21-sdk-config';
+import { Cat21SdkConfig } from './cat21-sdk-config';
 import { fetchJson } from './http-fetch.helper';
 import { classifyUtxoContent } from './utxo-content.classify';
 import {
@@ -43,9 +42,8 @@ const AUTO_SCAN_CONCURRENCY = 5;
  * via `scan(outpoint)`. The orchestrator exposes the auto-scan
  * convenience separately.
  */
-@Injectable({ providedIn: 'root' })
 export class UtxoContentScanner implements ContentScanPort {
-  private config = inject(cat21Config);
+  constructor(private readonly config: Cat21SdkConfig) {}
 
   /** outpoint → latest state. */
   private readonly states = new Map<string, UtxoScanState>();

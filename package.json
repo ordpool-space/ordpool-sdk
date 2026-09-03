@@ -1,7 +1,7 @@
 {
   "name": "ordpool-sdk",
   "version": "0.1.0",
-  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool \u2014 REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Angular library; built with ng-packagr.",
+  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool \u2014 REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Framework-agnostic; runs in the browser and in plain Node.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ordpool-space/ordpool-sdk.git"
@@ -9,13 +9,13 @@
   "bugs": {
     "url": "https://github.com/ordpool-space/ordpool-sdk/issues"
   },
-  "main": "./dist/fesm2022/ordpool-sdk.mjs",
-  "module": "./dist/fesm2022/ordpool-sdk.mjs",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
   "typings": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/fesm2022/ordpool-sdk.mjs"
+      "default": "./dist/index.js"
     },
     "./core": {
       "types": "./dist-core/core.d.ts",
@@ -38,11 +38,11 @@
   ],
   "scripts": {
     "clean": "rimraf dist dist-core dist-e2e",
-    "build": "npm run build:angular && npm run build:core && npm run build:e2e",
-    "build:angular": "ng-packagr -p ng-package.json",
+    "build": "npm run build:main && npm run build:core && npm run build:e2e",
+    "build:main": "tsc -p tsconfig.lib.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({type:'module'},null,2))\"",
     "build:core": "tsc -p tsconfig.core.json && node -e \"require('fs').writeFileSync('dist-core/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
     "build:e2e": "tsc -p tsconfig.e2e.json && node -e \"require('fs').writeFileSync('dist-e2e/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
-    "prepare": "npm run build:core",
+    "prepare": "npm run build:main && npm run build:core",
     "start": "npm run test",
     "test": "npm run test:node && npm run test:browser",
     "test:node": "jest --config jest.config.node.js",
@@ -75,8 +75,6 @@
     "@scure/bip32": "1.4.x"
   },
   "peerDependencies": {
-    "@angular/common": ">=20",
-    "@angular/core": ">=20",
     "@noble/curves": ">=1",
     "@playwright/test": ">=1.50",
     "@scure/btc-signer": "1.2.x",
@@ -89,12 +87,6 @@
     }
   },
   "devDependencies": {
-    "@angular/common": "^20.3.25",
-    "@angular/compiler": "^20.3.25",
-    "@angular/compiler-cli": "^20.3.25",
-    "@angular/core": "^20.3.25",
-    "@angular/platform-browser": "^20.3.25",
-    "@angular/platform-browser-dynamic": "^20.3.25",
     "@babel/preset-env": "^7.29.5",
     "@babel/preset-typescript": "^7.28.5",
     "@noble/curves": "^1.4.0",
@@ -110,8 +102,6 @@
     "esbuild": "^0.24.0",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
-    "jest-preset-angular": "^16.1.5",
-    "ng-packagr": "^20.3.2",
     "ordpool-parser": "github:ordpool-space/ordpool-parser#f090777a95ac3b9ca46cca1eac194b003f657ad6",
     "rimraf": "^5.0.7",
     "rxjs": "^7.8.1",

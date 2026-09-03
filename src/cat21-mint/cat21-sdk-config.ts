@@ -1,8 +1,8 @@
-import { InjectionToken } from '@angular/core';
-
 /**
- * Runtime config the cat21-mint services need. Provided by the
- * consumer's DI; the SDK doesn't know about specific environments.
+ * Runtime config the cat21-mint services need. The consumer passes it
+ * to `new Cat21Service(config, network)` / `new Cat21ApiService(config)`
+ * / `new UtxoContentScanner(config)`; the SDK doesn't know about
+ * specific environments.
  *
  * - `mempoolApiUrl` — base URL of the Esplora-compatible backend
  *   (utxo lookups, raw-tx fetch, broadcast). The network the URL
@@ -24,5 +24,3 @@ export interface Cat21SdkConfig {
   ordApiUrl: string;
   cat21OrdApiUrl: string;
 }
-
-export const cat21Config = new InjectionToken<Cat21SdkConfig>('cat21Config');

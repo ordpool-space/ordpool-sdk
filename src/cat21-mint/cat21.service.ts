@@ -1,5 +1,3 @@
-import { HttpClient } from '@angular/common/http';
-import { inject, Injectable } from '@angular/core';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import {
@@ -20,11 +18,11 @@ import {
   toArray,
 } from 'rxjs';
 
-import { toScureNetwork } from '../network';
-import { bitcoinNetwork } from '../network-token';
+import { Network, toScureNetwork } from '../network';
 import { findSignerOrThrow } from '../wallet/signers';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { cat21Config } from './cat21-sdk-config';
+import { Cat21SdkConfig } from './cat21-sdk-config';
+import { fetchJson, fetchText, postText } from './http-fetch.helper';
 import {
   createTransaction,
   getDummyKeypair,
@@ -59,16 +57,33 @@ const PENDING_MINTS_POLL_MS = 30_000;
 const RECOMMENDED_FEES_POLL_MS = 30_000;
 
 
-@Injectable({ providedIn: 'root' })
+/**
+ * Stateful `Observable`-returning client for the CAT-21 mint flow (utxo
+ * lookups, raw-tx fetch, broadcast, mempool polling, PSBT build + sign). Plain
+ * class: the consumer passes the SDK config + network to the constructor and
+ * owns the instance. HTTP is native `fetch` (via `http-fetch.helper`); RxJS is
+ * the reactivity surface, so any consumer (Angular, a bot, a CLI) subscribes
+ * the same way.
+ */
 export class Cat21Service {
 
-  private config = inject(cat21Config);
-  private network = inject(bitcoinNetwork);
-  mempoolApiUrl = this.config.mempoolApiUrl;
-
-  http = inject(HttpClient);
+  private readonly network: Network;
+  readonly mempoolApiUrl: string;
+  readonly recommendedFees$: Observable<RecommendedFees>;
 
   private txHexCache: { [transactionId: string]: string } = {}; // Cache object
+
+  constructor(config: Cat21SdkConfig, network: Network) {
+    this.network = network;
+    this.mempoolApiUrl = config.mempoolApiUrl;
+    // Assigned here (not as a field initializer) so `mempoolApiUrl` is set
+    // first — field initializers would run before the constructor sets it.
+    this.recommendedFees$ = interval(RECOMMENDED_FEES_POLL_MS).pipe(
+      startWith(0),
+      switchMap(() => fetchJson<RecommendedFees>(`${this.mempoolApiUrl}/api/v1/fees/recommended`)),
+      shareReplay({ bufferSize: 1, refCount: true }),
+    );
+  }
 
   /**
    * Get the list of unspent transaction outputs associated with the address/scripthash.
@@ -92,7 +107,7 @@ export class Cat21Service {
       return throwError(() => new Error('No wallet connected'));
     }
 
-    const $utxos = this.http.get<TxnOutput[]>(`${this.mempoolApiUrl}/api/address/${address}/utxo`);
+    const $utxos = fetchJson<TxnOutput[]>(`${this.mempoolApiUrl}/api/address/${address}/utxo`);
 
     if (isSegWit(address)) {
       return $utxos;
@@ -126,9 +141,7 @@ export class Cat21Service {
       return of(cachedHex);
     }
 
-    return this.http.get(`${this.mempoolApiUrl}/api/tx/${transactionId}/hex`, {
-      responseType: 'text'
-    }).pipe(
+    return fetchText(`${this.mempoolApiUrl}/api/tx/${transactionId}/hex`).pipe(
       tap((hex) => {
         this.txHexCache[transactionId] = hex;
       })
@@ -143,7 +156,7 @@ export class Cat21Service {
    * @see https://github.com/Blockstream/esplora/blob/master/API.md#post-tx
    */
   postTransaction(hexPayload: string): Observable<string> {
-    return this.http.post<string>(`${this.mempoolApiUrl}/api/tx`, hexPayload, { responseType: 'text' as 'json'});
+    return postText(`${this.mempoolApiUrl}/api/tx`, hexPayload);
   }
 
   /**
@@ -274,23 +287,6 @@ export class Cat21Service {
    * polling chain. Multiple subscribers of the SAME returned
    * observable share the chain via `shareReplay({refCount:true})`.
    */
-  /**
-   * Stream of mempool-framework recommended fee rates, polled every
-   * 30s. Built lazily on first subscribe via `shareReplay({refCount:
-   * true})` so multiple subscribers share one polling chain.
-   *
-   * The endpoint (`/api/v1/fees/recommended`) is served by the same
-   * `mempoolApiUrl` as the rest of the mint flow — on prod for
-   * cat21.space that's `api.ordpool.space` (we run it ourselves);
-   * for ordpool's own frontend it's whatever ordpool's environment
-   * points at. No third-party dependency.
-   */
-  readonly recommendedFees$: Observable<RecommendedFees> = interval(RECOMMENDED_FEES_POLL_MS).pipe(
-    startWith(0),
-    switchMap(() => this.http.get<RecommendedFees>(`${this.mempoolApiUrl}/api/v1/fees/recommended`)),
-    shareReplay({ bufferSize: 1, refCount: true }),
-  );
-
   pendingMints$(addresses: string[]): Observable<PendingMint[]> {
     if (addresses.length === 0) return of([]);
 
@@ -304,8 +300,7 @@ export class Cat21Service {
       startWith(0),
       switchMap(() => {
         const requests = addresses.map((addr) =>
-          this.http
-            .get<MempoolTx[]>(`${this.mempoolApiUrl}/api/address/${addr}/txs/mempool`)
+          fetchJson<MempoolTx[]>(`${this.mempoolApiUrl}/api/address/${addr}/txs/mempool`)
             .pipe(catchError(() => of([] as MempoolTx[]))),
         );
         return forkJoin(requests);

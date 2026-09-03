@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
-import { Injector, runInInjectionContext } from '@angular/core';
 import { firstValueFrom, of } from 'rxjs';
 
-import { cat21Config } from './cat21-sdk-config';
+import { Cat21SdkConfig } from './cat21-sdk-config';
 import { UtxoContentScanner } from './utxo-content-scanner.service';
 import { UtxoScanState } from './utxo-content.types';
 
@@ -13,6 +12,7 @@ afterEach(() => {
 
 const ordApiUrl = 'https://ord.test';
 const cat21OrdApiUrl = 'https://cat21ord.test';
+const cfg: Cat21SdkConfig = { mempoolApiUrl: '', cat21ApiUrl: '', ordApiUrl, cat21OrdApiUrl };
 
 /**
  * Genesis cat, with the two `GET /output/<outpoint>` bodies its hosts really
@@ -43,13 +43,7 @@ function buildScanner(ordBody: HttpGetResult, cat21OrdBody: HttpGetResult) {
   });
   globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-  const injector = Injector.create({
-    providers: [
-      { provide: cat21Config, useValue: { ordApiUrl, cat21OrdApiUrl } },
-    ],
-  });
-
-  const scanner = runInInjectionContext(injector, () => new UtxoContentScanner());
+  const scanner = new UtxoContentScanner(cfg);
   return { scanner, fetchMock };
 }
 
@@ -119,10 +113,7 @@ describe('UtxoContentScanner catSat', () => {
 
 describe('UtxoContentScanner.classify (ContentScanPort adapter)', () => {
   function makeScanner(): UtxoContentScanner {
-    const injector = Injector.create({
-      providers: [{ provide: cat21Config, useValue: { ordApiUrl, cat21OrdApiUrl } }],
-    });
-    return runInInjectionContext(injector, () => new UtxoContentScanner());
+    return new UtxoContentScanner(cfg);
   }
   it('scanned-clean => clean', async () => {
     const scanner = makeScanner();

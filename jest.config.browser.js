@@ -1,23 +1,22 @@
-const { createCjsPreset } = require('jest-preset-angular/presets');
-
-/** @type {import('jest').Config} */
+/** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
-  ...createCjsPreset(),
+  preset: 'ts-jest',
+  // jsdom for specs that touch browser globals (wallet signers reading
+  // `window.<wallet>`, WebCrypto, DecompressionStream, TextEncoder).
   testEnvironment: 'jsdom',
   setupFilesAfterEnv: ['<rootDir>/jest.config.browser.setup.ts'],
-  // RESCUE/ holds code rescued from cat21-wallet pending port to
-  // the SDK proper — see jest.config.node.js for the full rationale.
-  // `.node.spec.ts` is the node-only counterpart to the node config's
-  // browser-only `.angular.spec.ts` skip: a spec that needs a runtime
-  // global jsdom doesn't implement (e.g. `CompressionStream` /
-  // `DecompressionStream` for native gzip) and so must run under node.
+  // RESCUE/ holds code rescued from cat21-wallet pending port to the SDK
+  // proper — see jest.config.node.js for the full rationale. `.node.spec.ts`
+  // is the node-only counterpart: a spec that needs a runtime global jsdom
+  // doesn't implement (e.g. `CompressionStream` / `DecompressionStream` for
+  // native gzip) and so must run under node.
   testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/', '\\.node\\.spec\\.ts$'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // Transform every node_modules file except snapshots — sats-connect
   // v4 ships ESM-only. Same rationale as jest.config.node.js.
   transformIgnorePatterns: ['node_modules/.*\\.snap$'],
   transform: {
-    ...createCjsPreset().transform,
+    '^.+\\.tsx?$': 'ts-jest',
     '^.+\\.(js|jsx|mjs|cjs)$': 'babel-jest',
   },
   testEnvironmentOptions: {
@@ -32,6 +31,6 @@ module.exports = {
   // see https://github.com/jestjs/jest/issues/11617#issuecomment-1028651059
   maxWorkers: 1,
 
-  // SDK is empty for now -- no specs yet. Don't fail CI on "no tests found".
+  // Don't fail CI on "no tests found" for a filtered run.
   passWithNoTests: true,
 };

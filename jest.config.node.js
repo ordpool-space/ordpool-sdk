@@ -4,16 +4,14 @@ module.exports = {
   // this test runs in a normal node environment
   testEnvironment: 'node',
 
-  // Angular-DI specs (anything that imports @angular/core directly)
-  // live in *.angular.spec.ts and run only under the browser config,
-  // where jest-preset-angular handles the @angular/* ESM transforms.
   // RESCUE/ holds code rescued from cat21-wallet (commit 397c997)
   // pending port to the SDK proper. Its specs import @leather.io/*
   // packages that aren't in the SDK's node_modules, so they fail
   // outside the wallet's own monorepo. Skip until the port lands.
-  // `.angular.spec.ts` + `.browser.spec.ts` run only under the jsdom
-  // (browser) config; the node config skips both.
-  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/', '\\.angular\\.spec\\.ts$', '\\.browser\\.spec\\.ts$'],
+  // `.browser.spec.ts` needs jsdom globals (wallet signers reading
+  // `window.<wallet>`, WebCrypto), so it runs only under the browser
+  // config; the node config skips it.
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/', '\\.browser\\.spec\\.ts$'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // Transform every node_modules file except snapshots — sats-connect
   // v4 and several of its transitive deps (synckit, base58-js,

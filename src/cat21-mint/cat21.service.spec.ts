@@ -1,86 +1,99 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { HttpClient } from '@angular/common/http';
-import { Injector, runInInjectionContext } from '@angular/core';
-import { firstValueFrom, Observable, of, throwError } from 'rxjs';
+import { firstValueFrom, of } from 'rxjs';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network';
-import { bitcoinNetwork } from '../network-token';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { cat21Config } from './cat21-sdk-config';
+import { Cat21SdkConfig } from './cat21-sdk-config';
 import { Cat21Service } from './cat21.service';
 import { MempoolTx, RecommendedFees, TxnOutput } from './cat21.service.types';
 
 
 const mempoolApiUrl = 'https://mempool.test';
 const cat21ApiUrl = 'https://api.cat21.test';
+const config: Cat21SdkConfig = { mempoolApiUrl, cat21ApiUrl, ordApiUrl: '', cat21OrdApiUrl: '' };
 
-type HttpGetResult = TxnOutput[] | string | MempoolTx[] | RecommendedFees;
-type MockHttp = {
-  get: jest.MockedFunction<(url: string, opts?: { responseType: 'text' }) => Observable<HttpGetResult>>;
-  post: jest.MockedFunction<(url: string, body: string, opts?: { responseType: 'text' }) => Observable<string>>;
-};
+// Response factories for the mocked `fetch`. `http-fetch.helper` reads
+// `res.ok`, then `res.json()` (fetchJson) or `res.text()` (fetchText/postText);
+// a non-ok response makes the helper throw with the body text (electrs's
+// rejection reason), which the callers' `catchError` chains read.
+const jsonOk = (data: unknown) => ({
+  ok: true, status: 200,
+  json: () => Promise.resolve(data),
+  text: () => Promise.resolve(typeof data === 'string' ? data : JSON.stringify(data)),
+}) as unknown as Response;
+const textOk = (t: string) => ({
+  ok: true, status: 200,
+  json: () => Promise.resolve(t),
+  text: () => Promise.resolve(t),
+}) as unknown as Response;
+const httpFail = (message: string) => ({
+  ok: false, status: 500,
+  json: () => Promise.resolve(message),
+  text: () => Promise.resolve(message),
+}) as unknown as Response;
+
+const originalFetch = globalThis.fetch;
+afterEach(() => { globalThis.fetch = originalFetch; });
+
+/** URLs the mocked `fetch` was called with, in order. */
+const calledUrls = (m: jest.MockedFunction<typeof fetch>): string[] =>
+  m.mock.calls.map((c) => String(c[0]));
 
 const buildService = (): {
   service: Cat21Service;
-  http: MockHttp;
+  fetchMock: jest.MockedFunction<typeof fetch>;
 } => {
-  const http: MockHttp = {
-    get: jest.fn<MockHttp['get']>(),
-    post: jest.fn<MockHttp['post']>(),
-  };
+  const fetchMock = jest.fn() as jest.MockedFunction<typeof fetch>;
+  // Harmless default so an unrelated call (e.g. a broadcast reached after the
+  // assertion under test) resolves instead of rejecting unhandled.
+  fetchMock.mockResolvedValue(textOk(''));
+  globalThis.fetch = fetchMock;
 
-  const injector = Injector.create({
-    providers: [
-      { provide: HttpClient, useValue: http },
-      { provide: bitcoinNetwork, useValue: Network.Mainnet },
-      { provide: cat21Config, useValue: { mempoolApiUrl, cat21ApiUrl } },
-    ],
-  });
-
-  const service = runInInjectionContext(injector, () => new Cat21Service());
-  return { service, http };
+  const service = new Cat21Service(config, Network.Mainnet);
+  return { service, fetchMock };
 };
 
 
 describe('Cat21Service.getUtxos', () => {
 
   it('passes through the UTXO list unchanged for a SegWit address (no hex fan-out)', async () => {
-    const { service, http } = buildService();
+    const { service, fetchMock } = buildService();
     const utxos = [
       { txid: 'a'.repeat(64), vout: 0, value: 10000, status: { confirmed: true } },
       { txid: 'b'.repeat(64), vout: 1, value: 5000,  status: { confirmed: true } },
     ];
-    http.get.mockReturnValue(of(utxos));
+    fetchMock.mockResolvedValue(jsonOk(utxos));
 
     const result = await firstValueFrom(service.getUtxos('bc1qexample'));
 
-    expect(http.get).toHaveBeenCalledTimes(1);
-    expect(http.get).toHaveBeenCalledWith(`${mempoolApiUrl}/api/address/bc1qexample/utxo`);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(calledUrls(fetchMock)).toContain(`${mempoolApiUrl}/api/address/bc1qexample/utxo`);
     expect(result).toEqual(utxos);
   });
 
   it('fans out to /tx/<txid>/hex for each UTXO when the address is legacy', async () => {
-    const { service, http } = buildService();
+    const { service, fetchMock } = buildService();
     const utxos = [
       { txid: 'aa'.repeat(32), vout: 0, value: 10000, status: { confirmed: true } },
       { txid: 'bb'.repeat(32), vout: 0, value: 5000,  status: { confirmed: true } },
     ];
 
-    http.get.mockImplementation(url => {
-      if (url.endsWith('/utxo')) return of(utxos);
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith('/utxo')) return Promise.resolve(jsonOk(utxos));
       if (url.includes('/tx/') && url.endsWith('/hex')) {
         const txid = url.split('/tx/')[1].split('/')[0];
-        return of(`hex-of-${txid}`);
+        return Promise.resolve(textOk(`hex-of-${txid}`));
       }
-      return throwError(() => new Error(`unexpected GET: ${url}`));
+      return Promise.resolve(httpFail(`unexpected GET: ${url}`));
     });
 
     const result = await firstValueFrom(service.getUtxos('1LegacyAddress'));
 
     // 1 UTXO list call + N per-utxo hex calls
-    expect(http.get).toHaveBeenCalledTimes(1 + utxos.length);
+    expect(fetchMock).toHaveBeenCalledTimes(1 + utxos.length);
     expect(result).toHaveLength(2);
     expect(result[0]).toMatchObject({ txid: utxos[0].txid, transactionHex: `hex-of-${utxos[0].txid}` });
     expect(result[1]).toMatchObject({ txid: utxos[1].txid, transactionHex: `hex-of-${utxos[1].txid}` });
@@ -101,59 +114,56 @@ describe('Cat21Service.getUtxos', () => {
 
 describe('Cat21Service.getTransactionHex', () => {
 
-  it('GETs /api/tx/<id>/hex with responseType text and returns the hex string', async () => {
-    const { service, http } = buildService();
-    http.get.mockReturnValue(of('0200000001abcdef'));
+  it('GETs /api/tx/<id>/hex and returns the hex string', async () => {
+    const { service, fetchMock } = buildService();
+    fetchMock.mockResolvedValue(textOk('0200000001abcdef'));
 
     const result = await firstValueFrom(service.getTransactionHex('deadbeef'));
 
-    expect(http.get).toHaveBeenCalledWith(
-      `${mempoolApiUrl}/api/tx/deadbeef/hex`,
-      { responseType: 'text' },
-    );
+    expect(calledUrls(fetchMock)).toContain(`${mempoolApiUrl}/api/tx/deadbeef/hex`);
     expect(result).toBe('0200000001abcdef');
   });
 
   it('caches the hex by txid — second call does not re-fetch', async () => {
-    const { service, http } = buildService();
-    http.get.mockReturnValue(of('cached-hex'));
+    const { service, fetchMock } = buildService();
+    fetchMock.mockResolvedValue(textOk('cached-hex'));
 
     const first = await firstValueFrom(service.getTransactionHex('cafe'));
     const second = await firstValueFrom(service.getTransactionHex('cafe'));
 
     expect(first).toBe('cached-hex');
     expect(second).toBe('cached-hex');
-    expect(http.get).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('caches per-txid independently', async () => {
-    const { service, http } = buildService();
-    http.get.mockImplementation(url => {
-      if (url.includes('/tx/aaa/')) return of('hex-a');
-      if (url.includes('/tx/bbb/')) return of('hex-b');
-      return throwError(() => new Error('unexpected'));
+    const { service, fetchMock } = buildService();
+    fetchMock.mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('/tx/aaa/')) return Promise.resolve(textOk('hex-a'));
+      if (url.includes('/tx/bbb/')) return Promise.resolve(textOk('hex-b'));
+      return Promise.resolve(httpFail('unexpected'));
     });
 
     expect(await firstValueFrom(service.getTransactionHex('aaa'))).toBe('hex-a');
     expect(await firstValueFrom(service.getTransactionHex('bbb'))).toBe('hex-b');
     expect(await firstValueFrom(service.getTransactionHex('aaa'))).toBe('hex-a');
-    expect(http.get).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
 
 describe('Cat21Service.postTransaction', () => {
 
-  it('POSTs to /api/tx with the raw hex payload and text responseType', async () => {
-    const { service, http } = buildService();
-    http.post.mockReturnValue(of('returned-txid'));
+  it('POSTs to /api/tx with the raw hex payload', async () => {
+    const { service, fetchMock } = buildService();
+    fetchMock.mockResolvedValue(textOk('returned-txid'));
 
     const result = await firstValueFrom(service.postTransaction('0200beef'));
 
-    expect(http.post).toHaveBeenCalledWith(
+    expect(fetchMock).toHaveBeenCalledWith(
       `${mempoolApiUrl}/api/tx`,
-      '0200beef',
-      { responseType: 'text' },
+      expect.objectContaining({ method: 'POST', body: '0200beef' }),
     );
     expect(result).toBe('returned-txid');
   });
@@ -163,8 +173,9 @@ describe('Cat21Service.postTransaction', () => {
 describe('Cat21Service.pendingMints$', () => {
 
   // The polling chain uses RxJS `interval(30_000)`. Fake timers let us
-  // advance through poll cycles synchronously without sleeping the
-  // test suite for 30 seconds per tick.
+  // advance through poll cycles without sleeping 30s per tick; the async
+  // variant (`advanceTimersByTimeAsync`) also drains the `fetch` promises
+  // each poll fires before we assert on the emitted value.
   beforeEach(() => { jest.useFakeTimers(); });
   afterEach(() => { jest.useRealTimers(); });
 
@@ -184,21 +195,23 @@ describe('Cat21Service.pendingMints$', () => {
   });
 
   it('returns of([]) without polling when given an empty address list', async () => {
-    const { service, http } = buildService();
+    const { service, fetchMock } = buildService();
     const value = await firstValueFrom(service.pendingMints$([]));
     expect(value).toEqual([]);
-    expect(http.get).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('polls electrs mempool for each supplied address on subscribe and emits the filtered union', async () => {
-    const { service, http } = buildService();
-    http.get.mockReturnValueOnce(of([sampleMint()]));
-    http.get.mockReturnValueOnce(of([])); // payment-address mempool empty
+    const { service, fetchMock } = buildService();
+    fetchMock.mockResolvedValueOnce(jsonOk([sampleMint()]));
+    fetchMock.mockResolvedValueOnce(jsonOk([])); // payment-address mempool empty
 
-    const value = await firstValueFrom(service.pendingMints$([ORDINALS, PAYMENT]));
+    const promise = firstValueFrom(service.pendingMints$([ORDINALS, PAYMENT]));
+    await jest.advanceTimersByTimeAsync(0); // drain the startWith(0) poll's fetches
+    const value = await promise;
 
-    expect(http.get).toHaveBeenCalledWith(`${mempoolApiUrl}/api/address/${ORDINALS}/txs/mempool`);
-    expect(http.get).toHaveBeenCalledWith(`${mempoolApiUrl}/api/address/${PAYMENT}/txs/mempool`);
+    expect(calledUrls(fetchMock)).toContain(`${mempoolApiUrl}/api/address/${ORDINALS}/txs/mempool`);
+    expect(calledUrls(fetchMock)).toContain(`${mempoolApiUrl}/api/address/${PAYMENT}/txs/mempool`);
     expect(value).toHaveLength(1);
     expect(value[0]).toMatchObject({
       txid: 'a'.repeat(64),
@@ -210,41 +223,42 @@ describe('Cat21Service.pendingMints$', () => {
   });
 
   it('keeps polling every 30 seconds while subscribed (cross-device mint scenario)', async () => {
-    const { service, http } = buildService();
+    const { service, fetchMock } = buildService();
     // Three polling cycles' worth of responses: empty, empty, then a mint
     // shows up (e.g. user minted from another device).
-    http.get
-      .mockReturnValueOnce(of([])) // poll 1, addr 1
-      .mockReturnValueOnce(of([])) // poll 1, addr 2
-      .mockReturnValueOnce(of([])) // poll 2, addr 1
-      .mockReturnValueOnce(of([])) // poll 2, addr 2
-      .mockReturnValueOnce(of([sampleMint({ txid: 'b'.repeat(64) })])) // poll 3, addr 1
-      .mockReturnValueOnce(of([])); // poll 3, addr 2
+    fetchMock
+      .mockResolvedValueOnce(jsonOk([])) // poll 1, addr 1
+      .mockResolvedValueOnce(jsonOk([])) // poll 1, addr 2
+      .mockResolvedValueOnce(jsonOk([])) // poll 2, addr 1
+      .mockResolvedValueOnce(jsonOk([])) // poll 2, addr 2
+      .mockResolvedValueOnce(jsonOk([sampleMint({ txid: 'b'.repeat(64) })])) // poll 3, addr 1
+      .mockResolvedValueOnce(jsonOk([])); // poll 3, addr 2
 
     const emissions: number[] = [];
     const sub = service.pendingMints$([ORDINALS, PAYMENT]).subscribe((mints) => {
       emissions.push(mints.length);
     });
 
-    // Poll 1 fires synchronously via startWith(0).
+    // Poll 1 fires via startWith(0); drain its fetches.
+    await jest.advanceTimersByTimeAsync(0);
     expect(emissions).toEqual([0]);
 
     // Advance to poll 2.
-    jest.advanceTimersByTime(30_000);
+    await jest.advanceTimersByTimeAsync(30_000);
     expect(emissions).toEqual([0, 0]);
 
     // Advance to poll 3 — the new mint surfaces.
-    jest.advanceTimersByTime(30_000);
+    await jest.advanceTimersByTimeAsync(30_000);
     expect(emissions).toEqual([0, 0, 1]);
 
     sub.unsubscribe();
   });
 
   it('stamps seenAt with the first-sight time, not the most-recent poll time', async () => {
-    const { service, http } = buildService();
+    const { service, fetchMock } = buildService();
     const tx = sampleMint({ txid: 'c'.repeat(64) });
     // Same tx returned across three poll cycles.
-    http.get.mockReturnValue(of([tx]));
+    fetchMock.mockResolvedValue(jsonOk([tx]));
 
     // Pin Date.now so the ISO timestamp is deterministic.
     const start = new Date('2026-06-08T12:00:00.000Z').getTime();
@@ -255,17 +269,18 @@ describe('Cat21Service.pendingMints$', () => {
       if (mints.length) emissions.push(mints[0].seenAt);
     });
 
+    await jest.advanceTimersByTimeAsync(0);
     expect(emissions).toEqual(['2026-06-08T12:00:00.000Z']);
 
     jest.setSystemTime(start + 30_000);
-    jest.advanceTimersByTime(30_000);
+    await jest.advanceTimersByTimeAsync(30_000);
     expect(emissions).toEqual([
       '2026-06-08T12:00:00.000Z',
       '2026-06-08T12:00:00.000Z', // still first-sight time
     ]);
 
     jest.setSystemTime(start + 60_000);
-    jest.advanceTimersByTime(30_000);
+    await jest.advanceTimersByTimeAsync(30_000);
     expect(emissions).toEqual([
       '2026-06-08T12:00:00.000Z',
       '2026-06-08T12:00:00.000Z',
@@ -276,12 +291,14 @@ describe('Cat21Service.pendingMints$', () => {
   });
 
   it('survives a per-address electrs failure by treating it as an empty list (one address down does not kill the chain)', async () => {
-    const { service, http } = buildService();
+    const { service, fetchMock } = buildService();
     // ORDINALS endpoint returns a mint; PAYMENT endpoint errors out.
-    http.get.mockReturnValueOnce(of([sampleMint()]));
-    http.get.mockReturnValueOnce(throwError(() => new Error('electrs is grumpy')));
+    fetchMock.mockResolvedValueOnce(jsonOk([sampleMint()]));
+    fetchMock.mockResolvedValueOnce(httpFail('electrs is grumpy'));
 
-    const value = await firstValueFrom(service.pendingMints$([ORDINALS, PAYMENT]));
+    const promise = firstValueFrom(service.pendingMints$([ORDINALS, PAYMENT]));
+    await jest.advanceTimersByTimeAsync(0);
+    const value = await promise;
 
     expect(value).toHaveLength(1);
     expect(value[0].txid).toBe('a'.repeat(64));
@@ -304,12 +321,14 @@ describe('Cat21Service.recommendedFees$', () => {
   });
 
   it('hits /api/v1/fees/recommended on the configured mempoolApiUrl and emits the full tier set', async () => {
-    const { service, http } = buildService();
-    http.get.mockReturnValueOnce(of(fees()));
+    const { service, fetchMock } = buildService();
+    fetchMock.mockResolvedValue(jsonOk(fees()));
 
-    const value = await firstValueFrom(service.recommendedFees$);
+    const promise = firstValueFrom(service.recommendedFees$);
+    await jest.advanceTimersByTimeAsync(0);
+    const value = await promise;
 
-    expect(http.get).toHaveBeenCalledWith(`${mempoolApiUrl}/api/v1/fees/recommended`);
+    expect(calledUrls(fetchMock)).toContain(`${mempoolApiUrl}/api/v1/fees/recommended`);
     expect(value).toEqual({
       fastestFee: 12,
       halfHourFee: 8,
@@ -320,35 +339,36 @@ describe('Cat21Service.recommendedFees$', () => {
   });
 
   it('re-polls every 30 seconds and emits each fresh response (fee rates change while user lingers on the form)', async () => {
-    const { service, http } = buildService();
-    http.get
-      .mockReturnValueOnce(of(fees({ hourFee: 5 })))
-      .mockReturnValueOnce(of(fees({ hourFee: 7 })))
-      .mockReturnValueOnce(of(fees({ hourFee: 6 })));
+    const { service, fetchMock } = buildService();
+    fetchMock
+      .mockResolvedValueOnce(jsonOk(fees({ hourFee: 5 })))
+      .mockResolvedValueOnce(jsonOk(fees({ hourFee: 7 })))
+      .mockResolvedValueOnce(jsonOk(fees({ hourFee: 6 })));
 
     const emissions: number[] = [];
     const sub = service.recommendedFees$.subscribe((f) => emissions.push(f.hourFee));
 
+    await jest.advanceTimersByTimeAsync(0);
     expect(emissions).toEqual([5]);
 
-    jest.advanceTimersByTime(30_000);
+    await jest.advanceTimersByTimeAsync(30_000);
     expect(emissions).toEqual([5, 7]);
 
-    jest.advanceTimersByTime(30_000);
+    await jest.advanceTimersByTimeAsync(30_000);
     expect(emissions).toEqual([5, 7, 6]);
 
     sub.unsubscribe();
   });
 
   it('shares one polling chain across multiple subscribers (refCount semantics)', async () => {
-    const { service, http } = buildService();
-    http.get.mockReturnValue(of(fees()));
+    const { service, fetchMock } = buildService();
+    fetchMock.mockResolvedValue(jsonOk(fees()));
 
     const subA = service.recommendedFees$.subscribe();
     const subB = service.recommendedFees$.subscribe();
 
     // Two subscribers on the same observable — only one HTTP call.
-    expect(http.get).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     subA.unsubscribe();
     subB.unsubscribe();
@@ -356,7 +376,7 @@ describe('Cat21Service.recommendedFees$', () => {
 });
 
 
-describe('Cat21Service.createCat21Transaction — watch-only promptForSignedPsbt threading', () => {
+describe('Cat21Service.createCat21Transaction - watch-only promptForSignedPsbt threading', () => {
 
   // A valid Taproot payment identity so createTransaction builds a real
   // P2TR-funded mint PSBT (the xpub/watch-only funding shape).

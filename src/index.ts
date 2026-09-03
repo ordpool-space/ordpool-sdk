@@ -5,7 +5,6 @@ export * from './cat21-protocol';
 export * from './cat21-script';
 export * from './storage-like';
 export * from './network';
-export * from './network-token';
 
 // --- wallet (Xverse / Leather / Unisat picker + connect flow) ---
 export * from './wallet/wallet.service';

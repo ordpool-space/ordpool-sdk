@@ -1,4 +1,3 @@
-import { inject, Injectable } from '@angular/core';
 import {
   BehaviorSubject,
   defer,
@@ -21,8 +20,7 @@ import {
   isAddressCompatibleWithNetwork,
 } from '../cat21-script/address-format';
 import { Network } from '../network';
-import { bitcoinNetwork } from '../network-token';
-import { storage } from '../storage-like';
+import { StorageLike } from '../storage-like';
 import { detectInstalledWallets, walletConnectors } from './connectors';
 import { findSignerOrThrow } from './signers';
 import { verifyBip322Signature } from './verify-bip322-signature';
@@ -94,11 +92,16 @@ function walletBucketKey(buckets: {
     + '||' + buckets.notInstalledWallets.map((w) => w.type).join(',');
 }
 
-@Injectable({ providedIn: 'root' })
+/**
+ * Stateful wallet-connection service (detect / connect / persist / account-
+ * change / watch-only). Plain class: the consumer passes its storage
+ * implementation + network to the constructor and owns the instance.
+ * Reactivity is RxJS, so any consumer subscribes the same way.
+ */
 export class WalletService {
 
-  storageService = inject(storage);
-  network = inject(bitcoinNetwork);
+  private readonly storageService: StorageLike;
+  readonly network: Network;
 
   walletConnectRequested$ = new Subject<boolean>();
 
@@ -130,22 +133,20 @@ export class WalletService {
       distinctUntilChanged((prev, curr) => walletBucketKey(prev) === walletBucketKey(curr))
     );
 
-  // Static derivation from the injected network. Kept as a boolean field
-  // (read by frontend consumers that pick a mainnet-vs-testnet endpoint)
-  // and as a single-emission Observable for legacy subscribers — neither
-  // ever changes after construction; ordpool no longer routes a testnet UI.
-  readonly isMainnet = this.network === Network.Mainnet;
-  readonly isMainnet$: Observable<boolean> = of(this.isMainnet);
+  // Static derivation from the network. Kept as a boolean field (read by
+  // consumers that pick a mainnet-vs-testnet endpoint) and as a single-
+  // emission Observable for legacy subscribers — neither ever changes after
+  // construction; ordpool no longer routes a testnet UI. Assigned in the
+  // constructor once `network` is known.
+  readonly isMainnet: boolean;
+  readonly isMainnet$: Observable<boolean>;
 
   /**
    * Coarse network group ('mainnet' | 'regtest' | 'testnet') the
    * consumer is configured against. Compared against the connected
    * wallet's address prefix to surface the "wrong network" red banner.
    */
-  readonly expectedNetworkGroup: AddressNetworkGroup =
-    this.network === Network.Mainnet ? 'mainnet'
-      : this.network === Network.Regtest ? 'regtest'
-        : 'testnet';
+  readonly expectedNetworkGroup: AddressNetworkGroup;
 
   /**
    * Emits `true` when the connected wallet's address prefix is
@@ -154,19 +155,7 @@ export class WalletService {
    * connected (nothing to compare against) AND when the prefix
    * matches the expected group.
    */
-  readonly networkMismatch$: Observable<boolean> = this.connectedWallet$.pipe(
-    map((info) => {
-      if (!info?.paymentAddress) return false;
-      try {
-        return !isAddressCompatibleWithNetwork(info.paymentAddress, this.expectedNetworkGroup);
-      } catch {
-        // Unrecognized prefix counts as a mismatch — better to warn
-        // than to silently accept an unknown shape.
-        return true;
-      }
-    }),
-    distinctUntilChanged(),
-  );
+  readonly networkMismatch$: Observable<boolean>;
 
   /**
    * Last-seen unsubscribe handle returned by the active connector's
@@ -174,7 +163,30 @@ export class WalletService {
    */
   private accountChangeUnsubscribe: (() => void) | null = null;
 
-  constructor() {
+  constructor(deps: { storage: StorageLike; network: Network }) {
+    this.storageService = deps.storage;
+    this.network = deps.network;
+
+    this.isMainnet = this.network === Network.Mainnet;
+    this.isMainnet$ = of(this.isMainnet);
+    this.expectedNetworkGroup =
+      this.network === Network.Mainnet ? 'mainnet'
+        : this.network === Network.Regtest ? 'regtest'
+          : 'testnet';
+    this.networkMismatch$ = this.connectedWallet$.pipe(
+      map((info) => {
+        if (!info?.paymentAddress) return false;
+        try {
+          return !isAddressCompatibleWithNetwork(info.paymentAddress, this.expectedNetworkGroup);
+        } catch {
+          // Unrecognized prefix counts as a mismatch — better to warn
+          // than to silently accept an unknown shape.
+          return true;
+        }
+      }),
+      distinctUntilChanged(),
+    );
+
     const raw = this.storageService.getValue(LAST_CONNECTED_WALLET);
     if (!raw) return;
 

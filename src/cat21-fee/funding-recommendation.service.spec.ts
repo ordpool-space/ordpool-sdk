@@ -1,4 +1,3 @@
-import { Injector, runInInjectionContext } from '@angular/core';
 import { describe, expect, it, beforeEach } from '@jest/globals';
 import { BehaviorSubject, Observable, firstValueFrom, of } from 'rxjs';
 
@@ -36,10 +35,7 @@ describe('FundingRecommendationService', () => {
 
   beforeEach(() => {
     scanner = new FakeScanner();
-    const injector = Injector.create({
-      providers: [{ provide: UtxoContentScanner, useValue: scanner }],
-    });
-    service = runInInjectionContext(injector, () => new FundingRecommendationService());
+    service = new FundingRecommendationService(scanner as unknown as UtxoContentScanner);
   });
 
   it('AUTO: a clean covering UTXO is auto-selected (best-fit clean)', async () => {
