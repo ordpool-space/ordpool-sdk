@@ -30,14 +30,19 @@ interface OkxBtcRpc {
     options?: { autoFinalized?: boolean; from?: string; toSignInputs?: OkxToSignInput[] }
   ): Promise<string>;
   /**
-   * `signMessage(message, {from, protocol})`. `protocol =
-   * 'bip322-simple'` returns a base64 BIP-322 witness. Without
-   * `from`, OKX signs under the selected address (usually taproot
-   * for ordinals users, but caller passes explicitly to be safe).
+   * `signMessage(signStr[, type])` per the OKX Bitcoin provider API
+   * (https://web3.okx.com/build/docs/sdks/chains/bitcoin/provider).
+   * `type` is a POSITIONAL string, not an options object, and OKX
+   * DEFAULTS TO 'ecdsa' when it is omitted or unreadable — an ECDSA
+   * recoverable signature that does NOT verify against a Taproot
+   * address. Taproot (our ordinals key) REQUIRES 'bip322-simple',
+   * which returns a base64 BIP-322 witness. OKX has no `from` param;
+   * it signs under the active address. (Same class of bug as
+   * reown-com/appkit#4162 + okx/js-wallet-sdk#158.)
    */
   signMessage(
     message: string,
-    options?: { from?: string; protocol?: 'ecdsa' | 'bip322-simple' }
+    type?: 'ecdsa' | 'bip322-simple'
   ): Promise<string>;
 }
 
@@ -123,10 +128,13 @@ const legacy = {
 
 /**
  * BIP-322 message signing via `window.okxwallet.bitcoin.signMessage(
- * message, {from, protocol: 'bip322-simple'})`. Returns base64
- * witness bytes directly (no envelope). `from` pins the signing
- * address to the ordinals key so OKX doesn't fall back to a
- * different address when the user has multiple.
+ * message, 'bip322-simple')`. The signature type is OKX's POSITIONAL
+ * second argument; it MUST be the string 'bip322-simple' for a Taproot
+ * ordinals key. Passing anything else (an omitted arg, or an options
+ * object) makes OKX default to 'ecdsa', which returns a 65-byte
+ * recoverable signature that cannot verify against a bech32m address.
+ * OKX signs under its active address (Taproot by default), so there is
+ * no `from` argument to pin. Returns base64 BIP-322 witness bytes.
  */
 export const okxSigner: WalletSigner = {
   providerId: KnownOrdinalWalletType.okx,
@@ -134,7 +142,7 @@ export const okxSigner: WalletSigner = {
   signMessage: (input: SignMessageArgs): Observable<SignMessageResult> => {
     const okxBtc = (window as unknown as { okxwallet: { bitcoin: OkxBtcRpc } }).okxwallet.bitcoin;
     return wrapSignMessage(() =>
-      okxBtc.signMessage(input.message, { from: input.address, protocol: 'bip322-simple' }),
+      okxBtc.signMessage(input.message, 'bip322-simple'),
     );
   },
 

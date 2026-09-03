@@ -144,3 +144,37 @@ describe('okxSigner.signChildRevealParentInputs', () => {
     expect(result).toEqual({ txId: 'CHILD-TXID' });
   });
 });
+
+describe('okxSigner.signMessage', () => {
+
+  let signMessageMock: jest.Mock;
+
+  beforeEach(() => {
+    signMessageMock = jest.fn();
+    (window as unknown as { okxwallet: { bitcoin: { signMessage: jest.Mock } } }).okxwallet = {
+      bitcoin: { signMessage: signMessageMock },
+    };
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { okxwallet?: unknown }).okxwallet;
+  });
+
+  it("passes 'bip322-simple' as OKX's POSITIONAL type arg (not an options object) so a Taproot key does not fall back to ecdsa, and returns the witness verbatim", async () => {
+    signMessageMock.mockResolvedValue('AUD...bip322witness' as never);
+
+    const result = await firstValueFrom(okxSigner.signMessage({
+      address: 'bc1pordinals',
+      message: 'ordpool sign-message',
+      network: Network.Mainnet,
+    }));
+
+    // The whole point of the fix: type is OKX's positional 2nd arg. An
+    // options object here would leave type unread and OKX defaults to
+    // ecdsa (unverifiable for Taproot). See reown-com/appkit#4162.
+    expect(signMessageMock).toHaveBeenCalledTimes(1);
+    expect(signMessageMock.mock.calls[0][0]).toBe('ordpool sign-message');
+    expect(signMessageMock.mock.calls[0][1]).toBe('bip322-simple');
+    expect(result).toEqual({ signature: 'AUD...bip322witness' });
+  });
+});

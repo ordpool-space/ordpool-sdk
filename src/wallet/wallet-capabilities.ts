@@ -115,7 +115,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
-      [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
     note: 'On mobile, open this site inside the Xverse in-app browser (not the default mobile browser).',
   },
