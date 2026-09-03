@@ -10,7 +10,7 @@
  * `wasm/brotli_wasm_bg.wasm` (shipped as a PACKAGE ASSET, not bundled into
  * JS). Loading follows the standard wasm-library pattern (onnxruntime-web,
  * sql.js, ffmpeg.wasm): the CONSUMER hosts the `.wasm` on its own origin
- * (Angular `assets`) and passes the URL; we `fetch` + instantiate on
+ * (e.g. the frontend's static assets) and passes the URL; we `fetch` + instantiate on
  * demand, once, cached. So the ~1 MB never touches the JS bundle and is
  * only fetched when a Chrome user actually inscribes compressible content.
  */

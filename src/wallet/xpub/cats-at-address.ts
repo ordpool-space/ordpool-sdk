@@ -26,7 +26,7 @@
  * not number cats, so it cannot answer cat membership. The caller passes
  * `cat21OrdApiUrl` explicitly so the two ord instances can't be miswired.
  *
- * Pure + Angular-free (`/core`): native `fetch` + an optional
+ * Pure (`/core`): native `fetch` + an optional
  * `AbortSignal`, no axios.
  */
 

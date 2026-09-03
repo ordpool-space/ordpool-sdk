@@ -2,7 +2,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { of, throwError } from 'rxjs';
 
-// Restores the sign coverage (deleted Angular spec mocked Cat21Service): mock
+// Restores the sign coverage (deleted spec mocked Cat21Service): mock
 // the signer so createOffer() reaches a controllable buyer-signer. Pins the
 // creating->success/error state machine + that the returned bytes are encoded
 // into the shareable base64/hex bid artifact.

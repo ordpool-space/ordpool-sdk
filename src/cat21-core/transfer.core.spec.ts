@@ -13,7 +13,7 @@ import {
 } from './ports';
 import { TransferCoreParams, executeTransfer, simulateTransfer } from './transfer.core';
 
-// Plain NODE unit test — no Angular, no jsdom. Real keys so the PSBT builds.
+// Plain NODE unit test — no jsdom. Real keys so the PSBT builds.
 
 const PAYMENT_PUB = hex.decode('0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b');
 const ORDINALS_PUB = hex.decode('5df12ac222a1cd78dd4681c7c7a56f3e273884a086b2b6100957d20c73be3c37');

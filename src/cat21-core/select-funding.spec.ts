@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { ContentScanPort, UtxoClassification } from './ports';
 import { selectFunding } from './select-funding';
 
-// A plain NODE unit test — no Angular, no jsdom. That the framework-agnostic
+// A plain NODE unit test — no jsdom. That the framework-agnostic
 // core selection is testable this way is the whole point of the migration.
 
 const u = (id: string, value: number, vout = 0) => ({

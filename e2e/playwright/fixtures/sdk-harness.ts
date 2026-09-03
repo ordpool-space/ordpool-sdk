@@ -4,7 +4,7 @@
  * connectors / signers + helpers and exposes them on `window` so
  * Playwright can drive them via `page.evaluate`.
  *
- * Nothing under here imports Angular. Connector + signer + helper
+ * Nothing under here is framework-specific. Connector + signer + helper
  * code is plain TS that depends on `sats-connect`, `@noble/curves`,
  * `@scure/base`, `@scure/btc-signer`. esbuild bundles all of that
  * into a single ESM file for the browser.

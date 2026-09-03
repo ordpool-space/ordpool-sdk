@@ -9,7 +9,7 @@ import { Cat21OfferValidation } from './cat21-offer.types';
 import { decodePastedPsbt } from './decode-pasted-psbt';
 
 /**
- * FRAMEWORK-AGNOSTIC seller-side accept-offer API. Plain class — no Angular.
+ * FRAMEWORK-AGNOSTIC seller-side accept-offer API. Plain class.
  * The seller pastes a buyer-built buy-offer PSBT; the orchestrator decodes it,
  * validates against the seller's intent (right cat / price floor / payout
  * address / sniping-proof shape) via the shared `validateCat21BuyOfferPsbt`,

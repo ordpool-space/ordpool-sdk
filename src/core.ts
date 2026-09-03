@@ -1,25 +1,26 @@
 /**
- * `ordpool-sdk/core` — the SDK's pure-functional entry point.
+ * `ordpool-sdk/core` — the CommonJS entry point (`dist-core`).
  *
- * Re-exports only the helpers, constants and types that have ZERO
- * runtime dependency on Angular. Consumers without an Angular runtime
- * (the cat21-wallet Chrome extension, CLIs, GitHub Actions, any plain
- * Node service) import from here:
+ * Re-exports the pure helpers, constants, types and the subscribe-based
+ * orchestrators. The cat21-wallet extension, CLIs, GitHub Actions and any
+ * plain Node service import from here:
  *
  *     import { buildCat21TransferPsbt } from 'ordpool-sdk/core';
  *
- * The main entry point (`ordpool-sdk`) still re-exports everything in
- * this file PLUS the Angular-aware services (`WalletService`,
- * `Cat21Service`, `Cat21MintOrchestrator`, etc.) for cat21.space and
- * any other Angular consumer.
+ * The main entry point (`ordpool-sdk`, ESM `dist`) re-exports everything in
+ * this file PLUS the stateful, `Observable`-returning service classes
+ * (`WalletService`, `Cat21Service`, `Cat21ApiService`, `UtxoContentScanner`)
+ * that the frontends compose. Everything in the whole SDK is framework-
+ * agnostic; the two entries differ only by module format (CJS vs ESM) and by
+ * whether the stateful classes are included.
  *
- * Convention: when adding a new pure helper to the SDK, export it from
- * its own file as usual AND add a re-export here. Adding an Angular
- * dependency to a file already re-exported from this entry point is a
- * structural regression — the architecture spec in the cat21-wallet
- * repo (apps/extension/src/__architecture__/architecture.spec.ts)
- * pins that all wallet imports of SDK symbols go through `'ordpool-
- * sdk/core'`, never through bare `'ordpool-sdk'`.
+ * Convention: when adding a new pure helper, export it from its own file AND
+ * add a re-export here AND add the file to `tsconfig.core.json`'s `include`
+ * list (its build is include-only, not graph-following). The architecture
+ * spec in the cat21-wallet repo
+ * (apps/extension/src/__architecture__/architecture.spec.ts) pins that all
+ * wallet imports of SDK symbols go through `'ordpool-sdk/core'`, never
+ * through bare `'ordpool-sdk'`.
  */
 
 // --- Protocol-wide constants (postage, lockTime, per-wallet sequence) ---
@@ -54,7 +55,7 @@ export {
 
 // --- Branded Bitcoin address types (compile-time separation of
 //     OrdinalsAddress vs PaymentAddress). Belongs at core so any
-//     consumer — Angular or plain-Node bot — can opt into the
+//     consumer — a frontend or a plain-Node bot — can opt into the
 //     compile-time protection at critical boundaries.
 export * from './wallet/address-types';
 export * from './wallet/wallet-capabilities';
@@ -65,18 +66,17 @@ export * from './wallet/xpub/cats-at-address';
 export * from './wallet/xpub/classify-outpoint';
 export * from './wallet/xpub/make-watch-only-probe';
 
-// --- CAT-21 mint (PSBT-build helpers; the Angular Cat21Service that
-//     orchestrates is at the main entry only). ---
+// --- CAT-21 mint (PSBT-build helpers; the stateful Cat21Service is at the
+//     main entry only). ---
 export * from './cat21-mint/cat21.service.helper';
 export * from './cat21-mint/cat21.service.types';
 export * from './cat21-mint/cat21-mint.helper';
 export * from './cat21-mint/cat21-mint-input-adapter';
 
-// --- CAT-21 mint framework-agnostic orchestrator (subscribe-based high-level
-//     API; the Angular Cat21MintOrchestrator is a thin veneer over this). ---
+// --- CAT-21 mint orchestrator (subscribe-based high-level API). ---
 export * from './cat21-mint/cat21-mint-orchestrator';
 
-// --- CAT-21 data API: framework-agnostic fetch twin of the Angular
+// --- CAT-21 data API: the fetch twin of the Observable-returning
 //     Cat21ApiService (status + latest-cat-numbers), the shared wire
 //     types, and the pure URL builders. Consumers own caching/reactivity. ---
 export * from './cat21-mint/cat21-api.types';
@@ -84,13 +84,12 @@ export * from './cat21-mint/cat21-api.urls';
 export * from './cat21-mint/cat21-api.fetch';
 
 // --- UTXO content-safety scanner: pure types + detection primitives.
-//     The Angular @Injectable `UtxoContentScanner` service stays in
-//     the main entry only; the pure detection primitives (bucketOf,
-//     rune-name extraction, thresholds, all type aliases) belong at
-//     core so non-Angular consumers — bots, cat21-wallet autonomous
-//     flows, CLIs — can reach them. Content-safe funding auto-pick is
-//     `selectFunding` (force-scans covering candidates), not a raw
-//     bucket helper.
+//     The stateful `UtxoContentScanner` class stays in the main entry
+//     only; the pure detection primitives (bucketOf, rune-name
+//     extraction, thresholds, all type aliases) belong at core so
+//     bots, cat21-wallet autonomous flows and CLIs can reach them.
+//     Content-safe funding auto-pick is `selectFunding` (force-scans
+//     covering candidates), not a raw bucket helper.
 export * from './cat21-mint/utxo-content.types';
 export * from './cat21-mint/recommended-funding.helper';
 export * from './cat21-mint/sat-rarity.helper';
@@ -103,8 +102,8 @@ export * from './cat21-fee/min-relay-fee';
 export * from './cat21-fee/ord-coin-select';
 export * from './cat21-fee/funding-safety';
 
-// --- Framework-agnostic orchestration core (ports + async flows; no Angular,
-//     no RxJS — the single source of truth all three CAT-21 paths compose) ---
+// --- Orchestration core (ports + async flows; no RxJS — the single source
+//     of truth all three CAT-21 paths compose) ---
 export * from './cat21-core/ports';
 export * from './cat21-core/select-funding';
 export * from './cat21-core/transfer.core';

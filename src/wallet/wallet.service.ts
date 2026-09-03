@@ -48,14 +48,14 @@ export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
  * Guard that a parsed `LAST_CONNECTED_WALLET` payload has the fields
  * the constructor is about to dereference. Prevents both malformed
  * JSON (caught upstream by try/catch) and schema-drifted payloads
- * from wedging Angular DI. Deliberately lax on optional fields —
+ * from wedging construction. Deliberately lax on optional fields —
  * only asserts the four the constructor + armAccountChangeSubscription
  * actually read. Extra fields pass through untouched; missing extras
  * become undefined and reveal themselves later on flow-specific paths
  * where a re-connect prompt is the right recovery.
  *
- * Exported for direct spec coverage — the constructor is behind
- * Angular DI, this helper isn't.
+ * Exported for direct spec coverage — the constructor consumes it,
+ * this helper is standalone.
  */
 export function isValidPersistedWalletInfo(v: unknown): v is WalletInfo {
   if (!v || typeof v !== 'object') return false;
@@ -194,8 +194,8 @@ export class WalletService {
     // by a browser storage-quota event, an out-of-app DevTools mis-
     // write, an older SDK format that predates the current shape, a
     // sync-corrupted transfer between browsers. Without the try/catch
-    // the throw propagates out of the Angular DI constructor,
-    // WalletService fails to instantiate, and every component that
+    // the throw propagates out of the constructor, WalletService fails
+    // to instantiate, and every component that
     // injects it fails to render — the app is bricked with a white
     // page and no visible way to recover. Discard the corrupt entry
     // and behave as a first-time visitor: the user reconnects, no
@@ -448,7 +448,7 @@ export class WalletService {
     // Soft lookup — a stale LAST_CONNECTED_WALLET pointing at a wallet
     // whose connector was retired (e.g. `binance` after it left the
     // roster) would otherwise throw synchronously in the constructor
-    // and wedge Angular DI on hard reload with no recovery path. If the
+    // and wedge construction on hard reload with no recovery path. If the
     // connector is gone, silently skip re-arming; the cached wallet
     // stays in place until the user explicitly disconnects.
     const connector = walletConnectors.find(c => c.providerId === type);

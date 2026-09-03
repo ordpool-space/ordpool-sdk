@@ -12,7 +12,7 @@
  *
  * This is pure: it takes candidates already annotated with their content
  * `bucket` (from `UtxoContentScanner` / `classifyOutpoint`) and returns what to
- * do. The Angular orchestrators run the scan, then call this. The "by value"
+ * do. The orchestrators run the scan, then call this. The "by value"
  * pick is ord's best-fit `selectCardinalUtxo`, so an auto-selected clean coin
  * stays byte-aligned with ord.
  */

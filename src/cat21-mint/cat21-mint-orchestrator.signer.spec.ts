@@ -2,7 +2,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { map, of, throwError } from 'rxjs';
 
-// Restores the sign+broadcast coverage the deleted Angular spec had (which
+// Restores the sign+broadcast coverage the deleted spec had (which
 // mocked Cat21Service): here we mock the signer registry so mint() reaches a
 // controllable signer. Pins the orchestrator's minting->success/error state
 // machine + the broadcast-callback wiring — NOT the real wallet (that's the

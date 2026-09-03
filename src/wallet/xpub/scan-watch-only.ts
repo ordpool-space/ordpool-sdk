@@ -8,7 +8,7 @@
  * cat can sit at any derivation index (the Genesis Cat is not
  * necessarily at index 0), and index-0-only would miss it.
  *
- * Pure + Angular-free (in `/core`): the actual UTXO / cat lookup is a
+ * Pure (in `/core`): the actual UTXO / cat lookup is a
  * consumer-provided `probe` callback (wired to electrs + the cat
  * index), so this helper holds only the derive → rank logic and all
  * three consumer sites share one identical auto-pick. The regtest

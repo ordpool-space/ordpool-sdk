@@ -7,7 +7,7 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import { ContentScanPort, CoreFundingUtxo, OfferCreateSignPort, UtxosPort } from './ports';
 import { CreateOfferCoreParams, createOffer, simulateCreateOffer } from './create-offer.core';
 
-// Plain NODE unit test — no Angular, no jsdom.
+// Plain NODE unit test — no jsdom.
 
 const BUYER_KEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
 const SELLER_KEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000002');

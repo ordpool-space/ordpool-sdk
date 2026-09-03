@@ -5,7 +5,7 @@ import { FundingUtxo } from '../cat21-fee/coin-selection.helper';
  * differs per consumer (where UTXOs come from, how deep the content scan goes,
  * how a PSBT is signed, how a tx is broadcast) is one of these four Promise-
  * based interfaces. The core owns the shared sequencing; the consumer owns the
- * ports. No Angular, no RxJS — plain `async`.
+ * ports. No RxJS — plain `async`.
  */
 
 /**

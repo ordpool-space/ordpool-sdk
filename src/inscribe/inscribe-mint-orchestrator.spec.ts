@@ -12,7 +12,7 @@ import {
   InscribeWalletContext,
 } from './inscribe-mint-orchestrator';
 
-// Node unit test — no Angular. Real keys/addresses so simulateInscribeFees +
+// Node unit test. Real keys/addresses so simulateInscribeFees +
 // prepareInscribeFundingInput actually run. Pins the framework-agnostic
 // inscribe orchestration: state machine, the per-UTXO fee grid, safe-auto
 // funding pick, and mint()'s pre-signing guards. The signer happy-path (commit

@@ -1,5 +1,5 @@
 // Small helpers shared across regtest E2E specs. Hits the local
-// bitcoind RPC + electrs HTTP API directly — no Angular, no DI.
+// bitcoind RPC + electrs HTTP API directly — no framework, no DI.
 //
 // Expects the regtest stack to be up via `e2e/regtest-bootstrap.sh`
 // and `REGTEST_FUNDED_ADDR` / `REGTEST_FUNDED_WIF` set in env.

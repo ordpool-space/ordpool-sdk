@@ -232,7 +232,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
  */
 /**
  * Hard cap on the raw PSBT bytes passed to the validator. Mirrors the
- * `Cat21OperationGate`'s cap so non-Angular callers (cat21-wallet,
+ * `Cat21OperationGate`'s cap so direct callers (cat21-wallet,
  * scripts) get the same protection. A real CAT-21 buy-offer is <1 KB;
  * 128 KiB is generous headroom while still blocking adversarial blobs.
  */

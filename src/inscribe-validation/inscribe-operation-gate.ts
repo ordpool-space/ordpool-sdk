@@ -246,7 +246,7 @@ const DEFAULT_MAX_CONTENT_BYTES = 350_000;
  * `if (x.ok === false) return x.result;` — explicit `=== false` is
  * used because the caller's outer `InscribeOperationGateResult`
  * union also has an `ok: true` variant, and truthy-narrowing on
- * plain `!x.ok` fails to discriminate under Angular's strict
+ * plain `!x.ok` fails to discriminate under a strict
  * tsconfig.
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type

@@ -20,7 +20,7 @@ import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { Cat21Holding } from './cat21-transfer.types';
 
 /**
- * FRAMEWORK-AGNOSTIC high-level transfer API. Plain class — no Angular. Owns
+ * FRAMEWORK-AGNOSTIC high-level transfer API. Plain class. Owns
  * the transfer state machine; delegates the preview (content-checked funding
  * pick + two-pass fee + dust-absorb) to `transfer.core`'s `simulateTransfer`
  * and the build to `buildTransfer` (no duplication), and wires wallet-backed

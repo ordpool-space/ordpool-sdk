@@ -1,8 +1,8 @@
 /**
- * Framework-agnostic cat21 data-API client — the fetch-based twin of the
- * Angular `Cat21ApiService`. Plain async functions over `fetch`; the caller
- * passes the base URL (from its own config/port) and owns any caching or
- * reactivity (a signal, a memo). No Angular, no HttpClient, no shared state.
+ * Framework-agnostic cat21 data-API client — the plain-async twin of the
+ * Observable-returning `Cat21ApiService`. Plain async functions over `fetch`;
+ * the caller passes the base URL (from its own config/port) and owns any
+ * caching or reactivity (a signal, a memo). No shared state.
  *
  * The image URL is a pure builder (`buildCatImageUrl`), not a fetch — call it
  * directly; there is no twin function for it.

@@ -3,7 +3,7 @@ import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { map, throwError } from 'rxjs';
 
-// Restores the sign+broadcast coverage (deleted Angular spec mocked
+// Restores the sign+broadcast coverage (deleted spec mocked
 // Cat21Service): mock the signer so acceptOffer() reaches a controllable
 // seller-signer (via accept-offer.core). Pins accepting->success/error + the
 // broadcast wiring on a validated offer.

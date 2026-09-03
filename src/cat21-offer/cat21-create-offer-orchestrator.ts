@@ -15,8 +15,8 @@ import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { BuyOfferTargetCat } from './cat21-offer.types';
 
 /**
- * FRAMEWORK-AGNOSTIC high-level create-offer (buyer bid) API. Plain class — no
- * Angular. Owns the bid state machine + safe-auto funding pick (via
+ * FRAMEWORK-AGNOSTIC high-level create-offer (buyer bid) API. Plain class.
+ * Owns the bid state machine + safe-auto funding pick (via
  * `selectFunding`'s force-scan inside `simulateCreateOffer`), reuses
  * `create-offer.core`'s `buildOffer` (no duplication), and buyer-signs via the
  * internal `signer.signOfferCreatePsbt`. This flow produces a bid ARTIFACT

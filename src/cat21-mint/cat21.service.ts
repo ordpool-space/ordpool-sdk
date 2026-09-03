@@ -62,7 +62,7 @@ const RECOMMENDED_FEES_POLL_MS = 30_000;
  * lookups, raw-tx fetch, broadcast, mempool polling, PSBT build + sign). Plain
  * class: the consumer passes the SDK config + network to the constructor and
  * owns the instance. HTTP is native `fetch` (via `http-fetch.helper`); RxJS is
- * the reactivity surface, so any consumer (Angular, a bot, a CLI) subscribes
+ * the reactivity surface, so any consumer (a frontend, a bot, a CLI) subscribes
  * the same way.
  */
 export class Cat21Service {
@@ -177,7 +177,7 @@ export class Cat21Service {
     transactionFee: bigint
   ): SimulateTransactionResult {
     // Delegates to the framework-agnostic helper — one implementation shared
-    // with the wallet + any non-Angular consumer (`simulateMintTransaction`).
+    // with the wallet + every other consumer (`simulateMintTransaction`).
     return simulateMintTransaction(
       walletType,
       recipientAddress,

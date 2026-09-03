@@ -11,7 +11,7 @@ import {
 } from './cat21-mint-orchestrator';
 import { TxnOutput } from './cat21.service.types';
 
-// Node unit test — no Angular, no browser. Real keys so simulateMintTransaction
+// Node unit test — no browser. Real keys so simulateMintTransaction
 // actually builds a PSBT. Pins the framework-agnostic orchestration: the state
 // machine, the safe-auto funding pick (via selectFunding), and mint()'s
 // pre-signing guards. The signer happy-path needs a browser wallet provider,

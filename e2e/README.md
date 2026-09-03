@@ -51,9 +51,9 @@ classify: async (outpoint) => {
 (value + sat_ranges + address + cat info), so a fresh funding UTXO
 classifies `clean`.
 
-### For an Angular consumer (ordpool / cat21-indexer / cubes)
+### For a frontend consumer (ordpool / cat21-indexer / cubes)
 
-The Angular `UtxoContentScanner` reads `cat21Config.ordApiUrl` +
+The `UtxoContentScanner` reads `cat21Config.ordApiUrl` +
 `cat21OrdApiUrl`. To make a mint/inscribe regtest pass after bumping to
 the safe-layer SDK:
 

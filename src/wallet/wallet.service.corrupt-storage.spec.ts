@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { isValidPersistedWalletInfo } from './wallet.service';
 import { KnownOrdinalWalletType } from './wallet.service.types';
 
-describe('isValidPersistedWalletInfo — protects the WalletService constructor from wedging Angular DI', () => {
+describe('isValidPersistedWalletInfo — protects the WalletService constructor from wedging construction', () => {
 
   const validPayload = {
     type: KnownOrdinalWalletType.xverse,

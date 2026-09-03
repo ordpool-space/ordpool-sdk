@@ -78,7 +78,7 @@ export interface WalletConnector {
  * - **Leather**: signs the PSBT and returns it. The signer finalizes
  *   via scure and then delegates broadcasting back to the caller
  *   via the `broadcast` callback — the caller owns the mempool API
- *   (electrs `POST /tx` via the configured HttpClient).
+ *   (electrs `POST /tx` via the caller's own `fetch`).
  * - **PSBT-export (Sparrow / Electrum / Coldcard / Ledger / Trezor /
  *   …)**: signing happens out-of-band in the user's own wallet
  *   software. The signer hands the unsigned PSBT to

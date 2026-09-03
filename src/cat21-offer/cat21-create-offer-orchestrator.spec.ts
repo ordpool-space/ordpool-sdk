@@ -12,7 +12,7 @@ import {
 } from './cat21-create-offer-orchestrator';
 import { BuyOfferTargetCat } from './cat21-offer.types';
 
-// Node unit test — no Angular. Real keys so buildOffer/simulateCreateOffer
+// Node unit test. Real keys so buildOffer/simulateCreateOffer
 // actually build a PSBT. Pins the framework-agnostic create-offer (buyer bid)
 // orchestration: state machine, safe-auto funding pick (funds price + cat REAL
 // value + fee, ord parity), and createOffer()'s pre-signing guards. The signer

@@ -2,7 +2,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { map, of, throwError } from 'rxjs';
 
-// Restores the sign+broadcast coverage (deleted Angular spec mocked
+// Restores the sign+broadcast coverage (deleted spec mocked
 // Cat21Service): mock the signer registry so transfer() reaches a controllable
 // signer. Pins the transferring->success/error state machine + broadcast wiring.
 const mockSignTransfer = jest.fn();

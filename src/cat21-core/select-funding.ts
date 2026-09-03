@@ -10,7 +10,7 @@ import { ContentScanPort } from './ports';
 const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
 
 /**
- * Content-checked coin selection — the async, port-driven form of the Angular
+ * Content-checked coin selection — the async, port-driven form of
  * `FundingRecommendationService`. Force-classifies every COVERING candidate via
  * the `ContentScanPort` (regardless of size, so the "never auto-spend a valuable
  * coin" guarantee holds even for large funding UTXOs), then applies the pure
@@ -22,7 +22,7 @@ const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
  * - nothing covers               -> `insufficient`
  *
  * Non-covering coins stay `unscanned` (never auto-picked anyway, so no wasted
- * scan). No RxJS, no Angular — the wallet and bots consume it as plain async;
+ * scan). No RxJS — the wallet and bots consume it as plain async;
  * cat21.space wraps it in its reactive veneer.
  *
  * `preferredSats` (optional) is the WITH-CHANGE + dust headroom target, above

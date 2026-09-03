@@ -12,7 +12,7 @@ import {
 } from './cat21-transfer-orchestrator';
 import { Cat21Holding } from './cat21-transfer.types';
 
-// Node unit test — no Angular. Real keys so buildTransfer actually builds a
+// Node unit test. Real keys so buildTransfer actually builds a
 // PSBT. Pins the framework-agnostic transfer orchestration: state machine,
 // safe-auto funding pick (cat preserved, funding covers only the fee), and
 // transfer()'s pre-signing guards. Signer happy-path needs a browser wallet

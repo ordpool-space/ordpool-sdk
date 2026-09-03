@@ -74,7 +74,7 @@ describe('wasm brotli encoder (Chrome/Edge fallback)', () => {
 });
 
 describe('generated glue — bundler-safety guard', () => {
-  it('contains no `import.meta` (would break Angular esbuild/webpack + CommonJS)', () => {
+  it('contains no `import.meta` (would break esbuild/webpack + CommonJS)', () => {
     const glue = readFileSync(join(__dirname, 'brotli-wasm-glue.generated.ts'), 'utf8');
     expect(glue).not.toMatch(/import\.meta/);
   });

@@ -17,20 +17,14 @@ import { createTransaction, simulateMintTransaction } from './cat21.service.help
 import { SimulateTransactionResult, TxnOutput } from './cat21.service.types';
 
 /**
- * FRAMEWORK-AGNOSTIC high-level mint API. Plain class — no Angular, no
- * `@Injectable`, no signals. The SDK owns this orchestration; a consumer
- * IMPORTS it ready-made and binds its `subscribe(listener)` callback to
- * whatever reactivity it uses in ONE line (`orch.subscribe(s => sig.set(s))`).
- * The orchestrator wires wallet-backed signing internally (the signer
- * registry) and the fee/selection/build logic (the shared helpers + the
- * force-scanning `selectFunding`); the consumer supplies only the I/O it
- * owns (electrs/ord/broadcast) as the `MintOrchestratorDeps` callbacks and
- * the connected wallet via `setWallet`.
- *
- * The Angular `Cat21MintOrchestrator` (`cat21-mint-orchestrator.service.ts`)
- * is a parallel Angular-signal implementation that composes the same
- * lower-level helpers (`createTransaction` / `simulateMintTransaction` /
- * `selectFunding`); the two do not share this class.
+ * High-level mint API. Plain class, no signals. The SDK owns this
+ * orchestration; a consumer IMPORTS it ready-made and binds its
+ * `subscribe(listener)` callback to whatever reactivity it uses in ONE line
+ * (`orch.subscribe(s => sig.set(s))`). The orchestrator wires wallet-backed
+ * signing internally (the signer registry) and the fee/selection/build logic
+ * (the shared helpers + the force-scanning `selectFunding`); the consumer
+ * supplies only the I/O it owns (electrs/ord/broadcast) as the
+ * `MintOrchestratorDeps` callbacks and the connected wallet via `setWallet`.
  */
 
 /** State machine the UI branches on. */

@@ -1,6 +1,6 @@
 // Pure functions for the pendingMints$ pipeline. Extracted from the
-// service so the filter + dedupe logic is testable without touching
-// Angular DI, HttpClient mocks, or fake timers.
+// service so the filter + dedupe logic is testable without HTTP mocks
+// or fake timers.
 
 import { MempoolTx, PendingMint } from './cat21.service.types';
 

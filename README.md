@@ -39,8 +39,8 @@ integrations).
 
 ## Consumers
 
-- **cat21.space** (Angular 21 site) — mint + offer UI, wallet
-  picker, cat21-ord API client.
+- **cat21.space** — mint + offer UI, wallet picker, cat21-ord
+  API client.
 - **cat21-wallet** (Chrome extension, ordpool-space/cat21-wallet)
   — uses the SDK's pure helpers; the wallet owns no PSBT
   construction logic.
@@ -98,7 +98,7 @@ npm install                 # also runs `prepare` → builds dist/
 npm test                    # node + browser test suites
 npm run test:node           # node tests only
 npm run test:browser        # jsdom browser tests only
-npm run build               # ng-packagr (ESM + CJS dual output)
+npm run build               # plain tsc: ESM main + CJS core + e2e
 ```
 
 ## Why two packages

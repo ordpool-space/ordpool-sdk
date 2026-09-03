@@ -1,7 +1,7 @@
 /**
  * Response shapes for the cat21 data API (`backend2.cat21.space` /
- * cat21-indexer). Framework-agnostic — shared by the Angular
- * `Cat21ApiService` and the fetch-based `cat21-api.fetch` twin so the
+ * cat21-indexer). Framework-agnostic — shared by the Observable-returning
+ * `Cat21ApiService` and the plain-async `cat21-api.fetch` twin so the
  * wire contract has ONE definition.
  */
 

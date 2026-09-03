@@ -1,8 +1,8 @@
 /**
  * Pure classification of one outpoint's ordinals content, shared by the
- * Angular `UtxoContentScanner` (HttpClient-backed, cached) and the
- * Angular-free watch-only probe (`classifyOutpoint` / `makeWatchOnlyProbe`,
- * fetch-backed). Both fetch the same two ord responses through different
+ * stateful `UtxoContentScanner` (cached) and the watch-only probe
+ * (`classifyOutpoint` / `makeWatchOnlyProbe`). Both fetch the same two ord
+ * responses (via `fetch`) through different
  * HTTP layers, then hand them here so the "is this UTXO spendable" decision
  * has ONE implementation and cannot drift between the consumers.
  *

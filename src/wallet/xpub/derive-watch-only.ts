@@ -19,7 +19,7 @@
  * (BIP-44 legacy vs BIP-86 taproot share the same version bytes), so
  * the caller supplies `scriptType` for those.
  *
- * Pure + Angular-free (lives in `/core`): no I/O. The scan/auto-pick
+ * Pure (lives in `/core`): no I/O. The scan/auto-pick
  * step that picks WHICH derived address is the active identity takes
  * these outputs plus a UTXO-fetch callback; see the scan helper.
  */

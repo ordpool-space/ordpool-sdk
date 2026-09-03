@@ -14,7 +14,7 @@ import {
   Cat21AcceptOfferOrchestrator,
 } from './cat21-accept-offer-orchestrator';
 
-// Node unit test — no Angular. Builds a REAL buyer-signed offer so the paste
+// Node unit test. Builds a REAL buyer-signed offer so the paste
 // reaches `parsed`. Pins the framework-agnostic accept-offer orchestration:
 // decode + validate state machine, the form-incomplete gate, and acceptOffer()'s
 // pre-signing guards. The signer happy-path needs a browser wallet provider →

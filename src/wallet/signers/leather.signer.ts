@@ -62,8 +62,8 @@ interface LeatherRpcWindow {
  * Leather signs and hands the signed PSBT back to us; broadcasting
  * is our job. The signed PSBT is finalised via @scure/btc-signer,
  * then we delegate the broadcast to the caller's `broadcast`
- * callback (which hits electrs `POST /tx` via the configured
- * HttpClient).
+ * callback (which hits electrs `POST /tx` via the caller's own
+ * `fetch`).
  *
  * Namespace: `window.LeatherProvider`, NOT the historical
  * `window.btc`. The `window.btc` global is the old Hiro namespace

@@ -23,7 +23,7 @@
  * `/Work/ordpool/CLAUDE.md` and its SDK companion. Distribution is
  * *not* the security boundary; the sniping-proof PSBT structure is.
  *
- * Pure functions. No Angular, no I/O.
+ * Pure functions. No I/O.
  */
 
 import { PaymentAddress, toPaymentAddress } from '../wallet/address-types';

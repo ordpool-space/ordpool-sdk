@@ -86,8 +86,8 @@ export function createTransaction(
  * Dummy-signed simulation of a mint transaction, framework-agnostic. Builds
  * the mint PSBT (via `createTransaction`, simulation mode), dummy-signs input 0
  * with the SDK's well-known key, finalises, and returns the result plus the
- * measured `vsize`. Never broadcast — the fee-estimation path uses it (the
- * Angular `Cat21Service.simulateTransaction` delegates here). Taproot inputs
+ * measured `vsize`. Never broadcast — the fee-estimation path uses it
+ * (`Cat21Service.simulateTransaction` delegates here). Taproot inputs
  * omit `sighashType` (SIGHASH_DEFAULT is wire-equivalent to SIGHASH_ALL for
  * key-path spends per BIP-341), so `[DEFAULT, ALL]` covers both PSBT shapes.
  */

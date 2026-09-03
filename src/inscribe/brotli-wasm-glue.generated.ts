@@ -5,7 +5,7 @@
  *
  * Vendored wasm-bindgen glue from brotli-wasm@3.0.1 (pkg.web), with its
  * module-relative wasm-URL default removed so it bundles in any tool
- * (Angular esbuild + webpack). `init(urlOrBytes)`: pass the URL of a hosted
+ * (esbuild, webpack, …). `init(urlOrBytes)`: pass the URL of a hosted
  * `brotli_wasm_bg.wasm` (or its bytes in Node).
  */
 

@@ -11,7 +11,7 @@ import { prepareBuyOfferBuyerInput } from '../cat21-offer/cat21-offer-input-adap
 import { BroadcastPort } from './ports';
 import { AcceptOfferCoreParams, acceptOffer, validateOffer } from './accept-offer.core';
 
-// Plain NODE unit test — no Angular, no jsdom. Builds a REAL buyer-signed offer.
+// Plain NODE unit test — no jsdom. Builds a REAL buyer-signed offer.
 
 const SELLER_KEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000002');
 const SELLER_P2TR = btc.p2tr(SELLER_KEY.slice(1, 33), undefined, btc.NETWORK);

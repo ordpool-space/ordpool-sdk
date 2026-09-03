@@ -3,7 +3,7 @@
  *
  * The inscribe UI needs a browser brotli ENCODER for Chrome/Edge, which
  * lack native `CompressionStream('brotli')` (Safari/Firefox/Node have it).
- * `brotli-wasm`'s own entrypoints don't work in a stock Angular build:
+ * `brotli-wasm`'s own entrypoints don't work in a stock bundler build:
  * the `web` variant fetches the `.wasm` via `new URL(..., import.meta.url)`
  * (webpack/esbuild process that token statically; `import.meta` is also
  * invalid in the CommonJS `dist-core` output), and the `bundler` variant
@@ -17,7 +17,7 @@
  *      for hosts that don't send `application/wasm`).
  *   2. `wasm/brotli_wasm_bg.wasm` — the reference Rust brotli, shipped as a
  *      PACKAGE ASSET (not bundled into JS). Consumers copy it to their own
- *      origin (Angular `assets`) and pass the URL to `assessCompression`.
+ *      origin (the frontend's static assets) and pass the URL to `assessCompression`.
  *
  * Regenerate after a `brotli-wasm` bump: `node scripts/gen-brotli-wasm.mjs`.
  */
@@ -56,7 +56,7 @@ const header = `/* eslint-disable */
  *
  * Vendored wasm-bindgen glue from brotli-wasm@${pkgVersion} (pkg.web), with its
  * module-relative wasm-URL default removed so it bundles in any tool
- * (Angular esbuild + webpack). \`init(urlOrBytes)\`: pass the URL of a hosted
+ * (esbuild, webpack, …). \`init(urlOrBytes)\`: pass the URL of a hosted
  * \`brotli_wasm_bg.wasm\` (or its bytes in Node).
  */
 `;

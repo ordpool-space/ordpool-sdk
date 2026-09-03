@@ -4,7 +4,7 @@ import { base58 } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 // The HIGH-LEVEL orchestrated flow, on-chain, over REAL ports — the proof the
-// pyramid was missing. The framework-agnostic core (no Angular, no JIT shim)
+// pyramid was missing. The framework-agnostic core (no JIT shim)
 // runs its real content-checked selection + fee + build + sign + broadcast
 // against the live regtest stack, and cat21-ord confirms the cat.
 import { executeMint, simulateMint } from '../../src/cat21-core/mint.core';

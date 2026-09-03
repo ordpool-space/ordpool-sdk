@@ -15,21 +15,14 @@ import { prepareInscribeFundingInput } from './inscription-input-adapter';
 import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orchestrator';
 
 /**
- * FRAMEWORK-AGNOSTIC high-level inscribe API. Plain class — no Angular, no
- * `@Injectable`, no signals. Sibling of `Cat21MintOrchestrator`: the SDK owns
- * this orchestration; a consumer IMPORTS it ready-made and binds its
- * `subscribe(listener)` callback to whatever reactivity it uses in ONE line.
- * The orchestrator wires wallet-backed commit signing internally (the signer
- * registry, via `inscribeAndBroadcast`) and the fee/selection logic (the shared
- * `simulateInscribeFees` + the force-scanning `selectFunding`); the consumer
- * supplies only its I/O (electrs/ord/broadcast) as `InscribeOrchestratorDeps`
- * and the connected wallet via `setWallet`.
- *
- * The Angular `InscribeMintOrchestrator`
- * (`inscribe-mint-orchestrator.service.ts`) is a parallel Angular-signal
- * implementation composing the same lower-level helpers
- * (`simulateInscribeFees` / `inscribeAndBroadcast`); it re-exports the shared
- * content/simulation/state types from this file but does not share this class.
+ * High-level inscribe API. Plain class, no signals. Sibling of
+ * `Cat21MintOrchestrator`: the SDK owns this orchestration; a consumer IMPORTS
+ * it ready-made and binds its `subscribe(listener)` callback to whatever
+ * reactivity it uses in ONE line. The orchestrator wires wallet-backed commit
+ * signing internally (the signer registry, via `inscribeAndBroadcast`) and the
+ * fee/selection logic (the shared `simulateInscribeFees` + the force-scanning
+ * `selectFunding`); the consumer supplies only its I/O (electrs/ord/broadcast)
+ * as `InscribeOrchestratorDeps` and the connected wallet via `setWallet`.
  *
  * # Two-tx model
  *

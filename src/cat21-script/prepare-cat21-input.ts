@@ -53,8 +53,7 @@ export interface PrepareCat21InputArgs {
  * irrelevant to script construction; only the payment address shape
  * matters. Handles taproot (`tapInternalKey`), P2SH-wrapped SegWit
  * (`redeemScript`), and legacy P2PKH (`nonWitnessUtxo`, since scure
- * refuses witnessUtxo on legacy inputs). Pure function. No I/O, no
- * Angular.
+ * refuses witnessUtxo on legacy inputs). Pure function. No I/O.
  */
 export function prepareCat21Input(args: PrepareCat21InputArgs): Cat21PreparedInput {
   const scureNetwork = toScureNetwork(args.network);

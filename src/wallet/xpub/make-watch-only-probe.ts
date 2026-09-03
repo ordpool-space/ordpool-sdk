@@ -45,9 +45,9 @@ interface EsploraUtxo {
 }
 
 /**
- * Build the ordinals-safe `probe` for {@link scanWatchOnly}. Pure +
- * Angular-free: native `fetch`, composed from the same `classifyOutpoint`
- * the Angular `UtxoContentScanner` delegates to.
+ * Build the ordinals-safe `probe` for {@link scanWatchOnly}. Pure:
+ * native `fetch`, composed from the same `classifyOutpoint` the
+ * `UtxoContentScanner` delegates to.
  */
 export function makeWatchOnlyProbe(
   config: WatchOnlyProbeConfig,

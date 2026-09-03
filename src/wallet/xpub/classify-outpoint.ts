@@ -1,9 +1,9 @@
 /**
- * Fetch-based, Angular-free classification of one outpoint's ordinals
- * content. Fires the two ord `/output` requests in parallel (the full ord
- * for inscriptions + runes + rare sats; cat21-ord for cats) and delegates
- * the decision to `classifyUtxoContent`, so the "is this UTXO spendable"
- * logic is shared byte-for-byte with the Angular `UtxoContentScanner`.
+ * Fetch-based classification of one outpoint's ordinals content. Fires the
+ * two ord `/output` requests in parallel (the full ord for inscriptions +
+ * runes + rare sats; cat21-ord for cats) and delegates the decision to
+ * `classifyUtxoContent`, so the "is this UTXO spendable" logic is shared
+ * byte-for-byte with the `UtxoContentScanner`.
  *
  * Building block for `makeWatchOnlyProbe`. Throws on any non-2xx from
  * either ord (the caller decides how to treat an unclassifiable outpoint;
