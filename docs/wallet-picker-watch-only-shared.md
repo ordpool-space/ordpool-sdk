@@ -15,9 +15,9 @@ Three layers, each proven on regtest, composed into one connect call:
 |---|---|---|---|
 | Derive | `deriveWatchOnlyAddresses` | `ordpool-sdk` + `/core` | unit (BIP-84/86 vectors) + regtest vs `bitcoin-cli deriveaddresses` |
 | Scan / auto-pick | `scanWatchOnly` | `ordpool-sdk` + `/core` | unit (mock probe) + regtest (real electrs) |
-| Connect | `WalletService.connectXpub` | `ordpool-sdk` (Angular) | unit (WalletInfo assembly) |
+| Connect | `WalletService.connectXpub` | `ordpool-sdk` (main entry) | unit (WalletInfo assembly) |
 | End-to-end signer path | — | — | node-regtest: pasted xpub → scan → build → sign → broadcast (`watch-only-mint-roundtrip.spec.ts`); `createCat21Transaction` calls this exact signer |
-| Orchestrator forwards `promptForSignedPsbt` | — | — | browser (jsdom) positive + negative tests on mint / transfer / create-offer orchestrators (Angular services can't run in the node regtest harness) |
+| Orchestrator forwards `promptForSignedPsbt` | — | — | browser (jsdom) positive + negative tests on mint / transfer / create-offer orchestrators |
 
 The `signingMode: 'watch-only'` entry means **no key in the browser**: the
 SDK derives the identity from the account PUBLIC key, and the user signs
@@ -25,7 +25,7 @@ each operation's PSBT in their own wallet via the export/paste bridge —
 you pass a `promptForSignedPsbt` callback to each operation's action
 method (see "The signing bridge" below).
 
-## The connect flow (Angular consumers: cat21.space, ordpool.space)
+## The connect flow (frontend consumers: cat21.space, ordpool.space)
 
 ```ts
 // 1. The user pastes an account extended public key. For a plain
@@ -65,7 +65,7 @@ cat-bearing address (else receive index 0); **payment** = the
 highest-funded address (else index 0). A cat can sit at any index — the
 Genesis Cat is not necessarily at index 0 — so index-0-only would miss it.
 
-## Non-Angular consumers (cubes uses `/core`)
+## CommonJS consumers (cubes uses `/core`)
 
 cubes-frontend imports from `ordpool-sdk/core` and has no `WalletService`.
 Compose the two pure layers directly, then feed the result to the inscribe

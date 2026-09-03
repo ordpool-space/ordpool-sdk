@@ -22,8 +22,8 @@ the two shared specs, then build.
 Then update the lockfile and commit `package.json` + the lockfile together
 (CI caches by lockfile hash). Import surface:
 
-- **Angular sites** (cat21.space, ordpool.space): `import { … } from 'ordpool-sdk'`
-- **cubes** (Angular 16, avoid Angular-version coupling): `import { … } from 'ordpool-sdk/core'`
+- **Frontend sites** (cat21.space, ordpool.space): `import { … } from 'ordpool-sdk'`
+- **cubes**: `import { … } from 'ordpool-sdk/core'` (CommonJS entry)
 
 `Run Tests` and `E2E (regtest)` are green at this SHA.
 
@@ -56,7 +56,7 @@ import {
 - `walletInAppBrowserDeepLink(wallet, targetUrl)` — a docs-verified in-app
   browser deep link, or `null` (only Xverse is verified today).
 
-Watch-only (xpub), Angular sites:
+Watch-only (xpub), frontend sites:
 
 ```ts
 const info = await firstValueFrom(walletService.connectXpub({

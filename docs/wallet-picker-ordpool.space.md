@@ -1,6 +1,6 @@
 # Wallet-picker handover — ordpool.space
 
-For the ordpool.space consumer session (`ordpool/frontend`, Angular 20).
+For the ordpool.space consumer session (`ordpool/frontend`).
 ordpool.space is the block explorer; its wallet surface is the CAT-21 mint
 page (`/cat21-mint`). This is how to drive that picker off the SDK's
 capability matrix so it only offers wallets that can actually mint for the
@@ -20,7 +20,7 @@ page actually uses.
 import {
   WalletCapability, WalletPlatform, CapabilitySupport,
   walletsSupporting, capabilityOf,
-} from 'ordpool-sdk';           // Angular entry
+} from 'ordpool-sdk';           // main entry
 ```
 
 - `walletsSupporting(capability, { platform, minSupport })` — the wallets
@@ -83,7 +83,7 @@ but two still apply:
 - **Watch-only (xpub)**: `signingMode === 'watch-only'` — no in-page
   signing; the mint ends by handing the user a PSBT to sign elsewhere.
   Present it as an export step, not a "Connect" button.
-  **Wired now**: connect with `WalletService.connectXpub` (Angular) or
+  **Wired now**: connect with `WalletService.connectXpub` (main entry) or
   compose `scanWatchOnly` from `/core` (cubes); full contract +
   probe-wiring in `wallet-picker-watch-only-shared.md`. Proven end to end
   on regtest (pasted xpub → scan → mint → broadcast).

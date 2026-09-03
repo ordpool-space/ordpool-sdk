@@ -1,6 +1,6 @@
 # Wallet-picker handover — cat21.space
 
-For the cat21.space consumer session (`cat21-indexer/frontend`, Angular 21).
+For the cat21.space consumer session (`cat21-indexer/frontend`).
 This is how to drive the wallet picker off the SDK's capability matrix so
 the site only ever offers wallets that can actually serve the current user
 and the current action.
@@ -23,7 +23,7 @@ of truth for which wallets exist, on which platform, for which operation.
 import {
   WALLET_MATRIX, WalletCapability, WalletPlatform, CapabilitySupport,
   walletsSupporting, walletsForPlatform, capabilityOf, supportsCapability,
-} from 'ordpool-sdk';           // Angular entry
+} from 'ordpool-sdk';           // main entry
 ```
 
 - `WalletCapability` — the operation: `Cat21Mint`, `Cat21Transfer`,
@@ -120,7 +120,7 @@ show it:
   in-page signing; the flow ends by handing the user a PSBT to sign in
   their own wallet (Sparrow, Coldcard, Ledger, …). Present it as an export
   step, not a "Connect" button.
-  **Wired now**: connect with `WalletService.connectXpub` (Angular) or
+  **Wired now**: connect with `WalletService.connectXpub` (main entry) or
   compose `scanWatchOnly` from `/core` (cubes); full contract +
   probe-wiring in `wallet-picker-watch-only-shared.md`. Proven end to end
   on regtest (pasted xpub → scan → mint → broadcast).

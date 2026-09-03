@@ -5,111 +5,101 @@
 **ordpool-sdk** is the higher-level domain library for the ordpool ecosystem. It sits one layer above [`ordpool-parser`](https://github.com/ordpool-space/ordpool-parser): the parser extracts artifacts from raw transactions; the SDK does everything one step up from that — REST wrappers, calendar clients, signing helpers, anything that needs to talk to a network or hold side-effecting logic.
 
 - **MIT licensed.**
-- **Two entry points** (see "Two entry points" section below):
-  - `ordpool-sdk` — Angular Package Format bundle for cat21.space.
-  - `ordpool-sdk/core` — plain CommonJS for cat21-wallet and any
-    other non-Angular consumer.
-- Works in Node.js AND browsers.
+- **Framework-agnostic.** Plain classes and functions, no framework
+  dependency. RxJS backs the stateful clients' reactivity (RxJS runs
+  everywhere; it is not a framework). Works in Node.js AND browsers.
+- **Two entry points, same framework-agnostic code** (see "Two entry
+  points" below):
+  - `ordpool-sdk` — ESM (`dist/`), for the frontends' bundlers.
+  - `ordpool-sdk/core` — CommonJS (`dist-core/`), for cat21-wallet and
+    any plain Node/Webpack/Vite consumer.
 - No external consumers yet — only `ordpool.space`, `cat21.space`, and
   `cat21-wallet` use it. No CHANGELOG, no semver gymnastics.
 
 ## Two entry points: `ordpool-sdk` vs `ordpool-sdk/core`
 
-The SDK ships pure helpers AND Angular `@Injectable` services in the
-same source tree. Both genuinely belong here — pure helpers are the
-reusable primitives, Angular services are cat21.space's stateful
-orchestrators. They cannot share one entry point because Angular's
-bundler emits `import * as i0 from '@angular/core'` at the top of
-the fesm bundle, and any consumer that imports from that bundle
-pulls Angular into their build.
-
-So the SDK has two parallel build outputs:
+The whole SDK is framework-agnostic — plain classes, plain functions,
+RxJS for the stateful clients' reactivity. There are two build outputs
+so each consumer gets the module format its bundler wants, and so the
+wallet's build stays lean (it doesn't pull in the stateful classes it
+never uses):
 
 | Entry point | Build tool | Output | For |
 |---|---|---|---|
-| `ordpool-sdk` | `ng-packagr` (Angular AOT) | `dist/fesm2022/ordpool-sdk.mjs` + `dist/index.d.ts` | cat21.space (Angular app) |
-| `ordpool-sdk/core` | plain `tsc` | `dist-core/core.js` (CommonJS) + `dist-core/core.d.ts` + per-file emit | cat21-wallet, any plain Node/Webpack/Vite consumer |
+| `ordpool-sdk` | `tsc` (ESM) | `dist/index.js` + `dist/index.d.ts` (per-file, `moduleResolution: bundler`) | cat21.space + cubes frontends (their bundlers) |
+| `ordpool-sdk/core` | `tsc` (CommonJS) | `dist-core/core.js` + `dist-core/core.d.ts` (per-file) | cat21-wallet, any plain Node/Webpack/Vite consumer |
 
-`package.json` `exports` map wires the resolution. Consumers
-write:
+The `dist/` ESM uses extensionless / directory imports — resolved by
+any bundler (every consumer uses one), NOT by Node's native ESM loader
+directly. `package.json` `exports` wires resolution. Consumers write:
 
 ```ts
-// cat21.space (Angular):
+// cat21.space + cubes (bundler):
 import { Cat21Service, buildCat21TransferPsbt } from 'ordpool-sdk';
 
-// cat21-wallet (React + Webpack, no Angular):
+// cat21-wallet (Webpack, CommonJS):
 import { buildCat21TransferPsbt } from 'ordpool-sdk/core';
 ```
 
+The stateful, `Observable`-returning service classes — `WalletService`,
+`Cat21Service`, `Cat21ApiService`, `UtxoContentScanner` — are plain
+classes taking their config in the constructor (no DI container):
+
+```ts
+new WalletService({ storage, network });   // storage: StorageLike, network: Network
+new Cat21Service(config, network);          // config: Cat21SdkConfig
+new Cat21ApiService(config);
+new UtxoContentScanner(config);
+```
+
+A consumer instantiates them and, if it uses a DI framework, registers
+them itself (e.g. `{ provide: Cat21Service, useFactory: () => new
+Cat21Service(cfg, net) }`). These four live at the MAIN entry only; the
+wallet doesn't need them (it composes the pure helpers +
+`executeMint` / `executeTransfer` functional flows). There is no
+DI-token layer; the config interfaces (`Cat21SdkConfig`, `StorageLike`,
+`Network`) are plain exported types the constructor takes directly.
+
 ### What goes in `core.ts`
 
-`src/core.ts` is the manifest for the `/core` subpath. Re-export
-ONLY symbols whose entire transitive import graph is Angular-free.
+`src/core.ts` is the manifest for the `/core` subpath (`dist-core`,
+CommonJS). Its build (`tsconfig.core.json`) is INCLUDE-ONLY, not
+graph-following, so every file reachable from `core.ts` must ALSO be
+listed in that tsconfig's `include`.
 
-Allowed:
-- Pure functions and types (`buildCat21TransferPsbt`,
-  `evaluateAgentPolicy`, `Network`, `KnownOrdinalWalletType`, …).
-- Constants and enums.
-- Files under `cat21-mint/cat21.service.helper.ts`,
-  `cat21-mint/cat21.service.types.ts`,
-  `cat21-mint/cat21-mint.helper.ts`,
-  `cat21-transfer/*`,
-  `cat21-offer/*`,
-  `cat21-broadcast/*`,
-  `agent-mode/*`,
-  `wallet/wallet.service.types.ts`,
-  `wallet/wallet-logos.ts`,
-  `network.ts`.
-
-NOT allowed (stays in main entry only):
-- `WalletService`, `Cat21Service`, `Cat21ApiService`,
-  `UtxoContentScanner` — the supporting Angular `@Injectable`
-  services a consumer wires as the framework-agnostic
-  orchestrators' deps (getUtxos / scan / broadcast / wallet).
-- `InjectionToken` constants (`storage`, `bitcoinNetwork`,
-  `cat21SdkConfig`).
-- Anything that imports `@angular/*`.
+Re-export the pure helpers, types, constants and the subscribe-based
+orchestrators. Keep the four stateful service classes (`WalletService`,
+`Cat21Service`, `Cat21ApiService`, `UtxoContentScanner`) at the main
+entry only.
 
 The five orchestrators (`Cat21MintOrchestrator`,
 `Cat21TransferOrchestrator`, `Cat21CreateOfferOrchestrator`,
 `Cat21AcceptOfferOrchestrator`, `InscribeMintOrchestrator`) are the
-framework-agnostic subscribe-based plain classes, exported from BOTH
-`core.ts` and `index.ts` — the single Bitcoin-operation surface for
-every consumer. The legacy Angular `@Injectable` orchestrator
-services were deleted (2026-08-30) to force consumers off the
-duplicated, guessed-fee flow logic and onto these.
+subscribe-based plain classes, exported from BOTH `core.ts` and
+`index.ts` — the single Bitcoin-operation surface for every consumer.
 
 When adding a new pure helper:
 
 1. Create the file under `src/`.
-2. Export from its own file as usual.
+2. Export from its own file.
 3. Re-export from `src/core.ts`.
 4. Add the source file to the `include` list in `tsconfig.core.json`.
 5. `npm run build` (or just `npm run build:core` if you only
-   changed pure code) — regenerates BOTH dist outputs.
-
-When adding a new Angular-using piece:
-
-1. Create the file under `src/`.
-2. Export from `src/index.ts` ONLY (NOT `src/core.ts`).
-3. Don't add to `tsconfig.core.json`.
-
-If a refactor accidentally adds an Angular dependency to a file
-that's already in `core.ts`, the tsc-only build at `npm run
-build:core` fails (no Angular shims in the core tsconfig). That's
-the structural guard.
+   changed pure code) — regenerates the dist outputs.
 
 ### Build commands
 
 ```bash
-npm run build           # builds both entry points
-npm run build:angular   # ng-packagr for the main entry only
-npm run build:core      # tsc for the /core entry only
-npm run clean           # removes dist/ AND dist-core/
+npm run build           # ESM main + CJS core + e2e (all plain tsc)
+npm run build:main      # tsc -> dist/ (ESM main entry) only
+npm run build:core      # tsc -> dist-core/ (CommonJS /core entry) only
+npm run build:e2e       # tsc -> dist-e2e/ (/e2e entry) only
+npm run clean           # removes dist/ dist-core/ dist-e2e/
 ```
 
-`prepare` hook on install runs `npm run build`, so a fresh clone
-or `npm install` produces both outputs.
+`prepare` hook on install runs `build:main` + `build:core`, so a fresh
+clone or `npm install` produces the two runtime outputs. `dist-e2e/` is
+committed (see Shipped artifacts).
 
 ### Consumer-side staleness guard
 
@@ -193,9 +183,8 @@ Bitcoin-operation surface is orchestrators.
 2. Add a sibling signer method to `WalletSigner` (operation-named,
    hardcoded topology). Implement on every signer via the
    `operationNamedDefaults` helper or inline.
-3. Add an orchestrator under `src/<operation>/<operation>-orchestrator.ts`
-   (pure function for non-Angular consumers) and/or a sibling
-   Angular `@Injectable` for Angular consumers. Export through
+3. Add a subscribe-based orchestrator (plain class) under
+   `src/<operation>/<operation>-orchestrator.ts`. Export through
    `core.ts` + `index.ts`.
 4. Per-signer specs pin the operation's invariants (positive-equality
    asserts on the wire-tx bytes); orchestrator spec proves the full
@@ -401,9 +390,9 @@ the cat21-wallet repo (provider discovery contract).
 |---|---|
 | **ordpool-parser** | Pure function, zero runtime deps, no I/O. Byte-twiddling, hex/base64, format detection, parsers, hash utilities. Anything that could run unchanged in a Cloudflare Worker or a fetch event handler. |
 | **ordpool-sdk** | Higher-level domain code with a sane runtime dependency footprint OR networked / stateful logic. REST clients, calendar walkers, signing helpers, ordpool API wrappers. |
-| **ordpool/frontend & ordpool/backend** | Anything that imports Angular, the mempool framework, or the upstream's internal types. |
+| **ordpool/frontend & ordpool/backend** | Anything that imports a frontend framework, the mempool framework, or the upstream's internal types. |
 
-When in doubt, ask: "could this be the basis for a standalone npm package, a CLI, or a GitHub Action?" If yes → parser or SDK. If it imports Angular or mempool internals → fork.
+When in doubt, ask: "could this be the basis for a standalone npm package, a CLI, or a GitHub Action?" If yes → parser or SDK. If it imports a frontend framework or mempool internals → fork.
 
 **No duplication.** If a primitive lives in the parser already, the SDK imports it. The SDK declares `ordpool-parser` as a runtime dependency via the same `github:` shorthand the rest of the org uses (no npm publish involved). Do not copy parser code into the SDK.
 
@@ -418,44 +407,32 @@ There is no npm publish for this package. Consumers pin a git SHA:
 
 ## Shipped artifacts
 
-Split posture:
+Neither `dist/` nor `dist-core/` is checked in. Both are plain `tsc`
+builds regenerated by the `prepare` hook at consumer-install time
+(`npm run build:main && npm run build:core`). `dist-e2e/` IS checked in.
 
-  - **`dist/`** (Angular ng-packagr fesm2022 bundle) — **checked
-    in to git**. Every commit on `main` ships with the pre-built
-    Angular bundle.
-  - **`dist-core/`** (plain TS/ESM core entry, CommonJS) — **NOT
-    checked in**. Regenerated at consumer-install time by the
-    `prepare` script (`npm run build:core`, plain tsc — unaffected
-    by the ng-packagr-in-node_modules bug).
-
-Why the split:
-
-1. ng-packagr's tsc has an unresolved bug: run from inside a
-   parent's `node_modules/`, it emits incomplete tmp-typings and
-   fails with `Could not resolve "./cat21-protocol" from
-   dist/tmp-typings/index.d.ts`. Same directory copied to `/tmp`
-   builds clean. Root cause unknown. So `build:angular` genuinely
-   cannot run in the prepare hook — the Angular bundle has to ship
-   pre-built in git.
-2. `build:core` (plain tsc, no ng-packagr) DOES work from inside
-   `node_modules/`. So the Angular-free entry can be prepared at
-   install time and doesn't need to pollute git with dist churn.
+  - **`dist/`** (ESM main entry) — gitignored, prepare-built.
+  - **`dist-core/`** (CommonJS `/core` entry) — gitignored, prepare-built.
+  - **`dist-e2e/`** (`/e2e` entry) — **checked in**. Its barrel imports
+    the Playwright onboarding helpers, and `@playwright/test` is an
+    OPTIONAL peer dep, so building it in the prepare hook would fail for
+    consumers without Playwright. Shipping the compiled bytes lets a
+    consumer import `ordpool-sdk/e2e` without that dev dep. Rebuild +
+    commit it when its source changes; CI diffs it.
 
 Consumer contract:
 
-  - **Angular consumers** (ordpool/frontend, cat21-indexer/frontend)
-    import from `ordpool-sdk` (main entry, `dist/`). The shipped
-    tarball bytes are what they get.
-  - **Non-Angular consumers** (cat21-wallet, cat21.space core code)
-    import from `ordpool-sdk/core` (`dist-core/`), which the
-    `prepare` script generates at install time. Install scripts
-    must be enabled for this to work — in this workspace they are:
-    `/Work/ordpool/.npmrc` sets `ignore-scripts=false` for every
-    project below it (the old global `ignore-scripts=true` posture
-    was retired 2026-07-17 and the global `~/.npmrc` deleted). If
-    `dist-core/` is missing after an install, the script didn't
-    run — check `npm config get ignore-scripts` resolves to
-    `false` from the consumer's directory.
+  - **Frontend consumers** (cat21.space, cubes) import from `ordpool-sdk`
+    (ESM `dist/`); their bundlers resolve the per-file ESM.
+  - **CommonJS consumers** (cat21-wallet, plain Node) import from
+    `ordpool-sdk/core` (`dist-core/`).
+  Both dist outputs are generated by the `prepare` script at install
+  time. Install scripts must be enabled — in this workspace they are:
+  `/Work/ordpool/.npmrc` sets `ignore-scripts=false` for every project
+  below it (the old global `ignore-scripts=true` posture was retired
+  2026-07-17 and the global `~/.npmrc` deleted). If a dist output is
+  missing after an install, the script didn't run — check `npm config
+  get ignore-scripts` resolves to `false` from the consumer's directory.
 
 Trade-off accepted: install scripts running means Shai-Hulud-class
 attack surface across the dep tree (npm has no per-package script
@@ -463,29 +440,26 @@ whitelist). The mitigation is lockfile discipline, not script
 blocking — see the workspace `CLAUDE.md` "Local npm setup" section
 and the header comment in `/Work/ordpool/.npmrc`.
 
-## HARD RULE: build before commit
+## HARD RULE: rebuild + commit `dist-e2e/` when its source changes
 
-When you change any source file under `src/`, you MUST run
-`npm run build:angular` and commit the regenerated `dist/`
-alongside the source change in the same commit. `dist-core/` is
-generated per-install by the `prepare` hook — do not commit it.
+`dist/` and `dist-core/` are NOT committed — the `prepare` hook builds
+them from the pinned SHA's source at consumer-install time, so a normal
+source change has NO "commit the build" step. Edit `src/`, run
+`npm test`, commit + push to `main`.
 
-Reason: consumers pin SHAs. If you push source-only, the next
-Angular consumer install pulls the STALE `dist/` from the tarball
-and runs the old behaviour silently.
-
-The CI workflow re-verifies this invariant: every push runs
-`npm run build:angular` and `git diff --exit-code dist/` — if the
-committed `dist/` doesn't match a fresh build, the push fails.
+The ONE committed build output is `dist-e2e/` (the `/e2e` entry — see
+Shipped artifacts). When you change anything under `e2e/` that the
+`/e2e` barrel emits, run `npm run build:e2e` and commit the regenerated
+`dist-e2e/` in the SAME commit. CI runs `npm run build:e2e` +
+`git diff --exit-code dist-e2e/` and fails on drift.
 
 To ship a change to a consumer:
 
 1. Edit `src/`.
-2. `npm run build:angular` (regenerates `dist/`).
-3. `npm test` (node + browser unit tests).
-4. `git add src/ dist/` + commit + push to `main`. **DO NOT** add
-   `dist-core/` — it's gitignored.
-5. In the consumer: bump the SHA in `package.json`, run
+2. `npm test` (node + browser unit tests).
+3. `git add src/` + commit + push to `main`. (If you touched `/e2e`
+   source, also `npm run build:e2e` + `git add dist-e2e/`.)
+4. In the consumer: bump the SHA in `package.json`, run
    `npm install --package-lock-only ordpool-sdk@github:ordpool-space/ordpool-sdk#<sha>`
    to update the lockfile, commit BOTH `package.json` and
    `package-lock.json` together (CI caches node_modules by
@@ -493,8 +467,7 @@ To ship a change to a consumer:
 
 For live local development (no commit needed), `npm link` still
 works — the consumer's link target is the locally-built `dist/`
-or `dist-core/`. Faster iteration than rebuilding + committing
-every keystroke. Just remember to `npm run build` in the SDK
+or `dist-core/`. Just remember to `npm run build` in the SDK
 between iterations.
 
 ## Commands
@@ -503,10 +476,11 @@ between iterations.
 npm test                    # node + browser test suites
 npm run test:node           # node tests only
 npm run test:browser        # jsdom browser tests only
-npm run build               # Angular fesm2022 + plain TS/ESM core
-npm run build:angular       # ng-packagr → dist/ only
-npm run build:core          # tsc → dist-core/ only
-npm run clean               # rimraf dist/ dist-core/
+npm run build               # ESM main + CJS core + e2e (all plain tsc)
+npm run build:main          # tsc → dist/ (ESM main) only
+npm run build:core          # tsc → dist-core/ (CJS core) only
+npm run build:e2e           # tsc → dist-e2e/ (/e2e) only
+npm run clean               # rimraf dist/ dist-core/ dist-e2e/
 npm run create-link         # build + npm link (for local dev consumers)
 ```
 

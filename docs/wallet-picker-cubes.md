@@ -1,7 +1,6 @@
 # Wallet-picker handover — cubes.haushoppe.art
 
-For the cubes consumer session (`genesis/apps/cubes-frontend`, Angular 16 +
-NgRx). cubes.haushoppe.art mints Ordinal Cubes, which are HTML inscriptions
+For the cubes consumer session (`genesis/apps/cubes-frontend`). cubes.haushoppe.art mints Ordinal Cubes, which are HTML inscriptions
 on Bitcoin. This is how to drive its wallet picker off the SDK's capability
 matrix so it only offers wallets that can actually inscribe for the current
 user.
@@ -31,10 +30,8 @@ Why not `/core` here: the genesis cubes e2e workflow
 SDK's `prepare` step never runs and `dist-core/` (what `/core` maps to, and
 which is NOT checked into git) is never built. `import … from
 'ordpool-sdk/core'` then fails the CI build with `Could not resolve
-"ordpool-sdk/core"`. The main entry's `dist/` IS checked into git and
-resolves with no build step. The matrix is pure data + functions, so the
-Angular fesm bundle loads fine under cubes' Angular 16 with no version
-coupling. Use the same main entry cubes already imports its SDK inscribe
+"ordpool-sdk/core"`. The matrix is pure data + functions, so the main entry loads fine under
+cubes with no version coupling. Use the same main entry cubes already imports its SDK inscribe
 helpers from.
 
 ## The picker flow
@@ -82,7 +79,7 @@ wallet-level notes apply:
 - **Watch-only (xpub)**: `signingMode === 'watch-only'` — no in-page
   signing; the flow ends by handing the user a PSBT to sign in their own
   wallet. Present it as an export step, not a "Connect" button.
-  **Wired now**: connect with `WalletService.connectXpub` (Angular) or
+  **Wired now**: connect with `WalletService.connectXpub` (main entry) or
   compose `scanWatchOnly` from the main `ordpool-sdk` entry (cubes); full contract +
   probe-wiring in `wallet-picker-watch-only-shared.md`. Proven end to end
   on regtest (pasted xpub → scan → mint → broadcast).

@@ -30,9 +30,7 @@ That was the right call. Thank you.
     `watch-only-mint-roundtrip.spec.ts` (pasted xpub → scan → build → sign →
     broadcast → confirmed CAT-21). `createCat21Transaction` calls exactly
     this signer.
-  - *Orchestrator forwards the callback* — browser (jsdom) tests, because
-    the orchestrators are Angular `@Injectable`s and can't load in the node
-    regtest harness. Positive (the callback fires with the built PSBT) +
+  - *Orchestrator forwards the callback* — browser (jsdom) tests. Positive (the callback fires with the built PSBT) +
     negative (omitting it throws `/promptForSignedPsbt/`) for mint
     (`createCat21Transaction`), transfer, and create-offer. accept-offer
     threads the identical verified one-liner as its sibling create-offer.
