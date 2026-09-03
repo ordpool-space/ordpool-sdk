@@ -99,7 +99,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
-      [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter },
+      [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
     note: 'Our own wallet (Leather fork). Full regtest coverage across every operation.',
   },
