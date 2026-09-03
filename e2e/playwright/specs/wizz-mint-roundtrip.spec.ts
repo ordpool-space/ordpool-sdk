@@ -111,9 +111,8 @@ test.beforeAll(async () => {
     ],
   });
 
-  // Wizz is mainnet-only + offline in CI: abort configs.wizz.cash and
-  // fulfil the external esplora balance endpoints so the sign popup
-  // stops showing "Failed to load balance" (which disables Sign).
+  // Hermetic Wizz: stub the wallet's third-party balance/asset backends
+  // so the sign popup can enable Sign without Wizz server uptime.
   await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();

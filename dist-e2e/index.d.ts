@@ -1,5 +1,6 @@
 export * from './playwright/onboard-unisat';
 export * from './playwright/onboard-wizz';
+export * from './playwright/wizz-offline-routes';
 export * from './playwright/onboard-leather';
 export * from './playwright/onboard-okx';
 export * from './playwright/onboard-phantom';

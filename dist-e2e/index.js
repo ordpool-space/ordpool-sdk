@@ -30,6 +30,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 // imported, so it stays a plain .mjs shipped in the tarball.
 __exportStar(require("./playwright/onboard-unisat"), exports);
 __exportStar(require("./playwright/onboard-wizz"), exports);
+__exportStar(require("./playwright/wizz-offline-routes"), exports);
 __exportStar(require("./playwright/onboard-leather"), exports);
 __exportStar(require("./playwright/onboard-okx"), exports);
 __exportStar(require("./playwright/onboard-phantom"), exports);

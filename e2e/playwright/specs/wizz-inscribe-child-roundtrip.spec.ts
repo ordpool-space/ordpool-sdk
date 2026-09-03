@@ -18,6 +18,7 @@ import {
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
+import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
 /**
  * Wizz PARENT/CHILD inscribe roundtrip on regtest: proof that the real
@@ -153,6 +154,10 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+
+  // Hermetic Wizz: stub the wallet's third-party balance/asset backends
+  // so the sign popup can enable Sign without Wizz server uptime.
+  await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
