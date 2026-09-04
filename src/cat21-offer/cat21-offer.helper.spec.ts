@@ -1323,7 +1323,7 @@ describe('validateCat21BuyOfferPsbt — security rejections (sighash splice + ca
     expect(result.ok).toBe(true);
   });
 
-  it('rejects an offer whose cat output (output 0) is an OP_RETURN (buyer burns the cat after the seller signs)', () => {
+  it('rejects an offer whose cat output (output 0) is an OP_RETURN (a provably unspendable output 0 strands the cat sat after the seller signs)', () => {
     // updateOutput refuses a raw-script swap, so rebuild the offer tx
     // with output 0 replaced by OP_RETURN "cat" (no address form exists).
     const source = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(makeBaseArgs()).psbt);
