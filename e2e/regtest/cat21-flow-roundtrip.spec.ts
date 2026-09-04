@@ -524,7 +524,9 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     // buyer's funding inputs in Core-chosen order, so locate the seller
     // input by outpoint, not by index.
     const tx = btc.Transaction.fromPSBT(base64.decode(ordOffer.psbt));
-    const sellerTxidBytes = hex.decode(catUtxoAfterTransfer.txid).reverse();
+    // @scure parses prevout txids back into DISPLAY order (it reverses
+    // the wire bytes on read), so compare against the display hex as-is.
+    const sellerTxidBytes = hex.decode(catUtxoAfterTransfer.txid);
     let sellerIdx = -1;
     for (let i = 0; i < tx.inputsLength; i++) {
       const input = tx.getInput(i);
