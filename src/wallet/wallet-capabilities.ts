@@ -147,7 +147,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21OfferAccept]: { support: CapabilitySupport.Proven },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
-      [WalletCapability.SignMessage]: { support: CapabilitySupport.Adapter, caveat: 'the SDK verifier is P2TR-only (CAT-21 signs under the taproot ordinals key); a native-segwit unisat account produces a p2wpkh BIP-322 signature it cannot verify' },
+      [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
     },
     note: 'Desktop extension only. The UniSat mobile app is not supported here.',
   },
