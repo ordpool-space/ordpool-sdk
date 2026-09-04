@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 
@@ -279,6 +279,8 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
   const esploraTx = await waitForTxConfirmed(broadcastTxid);
   console.log(`[okx-mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);
+  // The cat LANDED: vout[0] pays the recipient ordinals address at 546.
+  assertCatLandsAtRecipient(esploraTx, paymentBcrt1p);
   expect(esploraTx.status.block_hash).toBeTruthy();
   assertAllInputsSighashAll(esploraTx);
 

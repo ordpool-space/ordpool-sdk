@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 
 import { seedAlbyAccount } from '../onboard-alby';
 
@@ -322,6 +322,8 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   const esploraTx = await waitForTxConfirmed(broadcastTxid);
   console.log(`[alby-mint] locktime=${esploraTx.locktime}`);
   expect(esploraTx.locktime).toBe(21);
+  // The cat LANDED: vout[0] pays the recipient ordinals address at 546.
+  assertCatLandsAtRecipient(esploraTx, connectInfo.address);
   assertAllInputsSighashAll(esploraTx);
 
   // Cat-sat guard: every input's sequence MUST be >= 0xfffffffe (RBF-

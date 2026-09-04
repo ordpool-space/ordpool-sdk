@@ -5,6 +5,8 @@ import * as fs from 'node:fs';
 
 import { closeLeftoverExtensionPages } from '../approval-popup';
 import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
+import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
+import { Network } from '../../../src/network';
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
 
 /**
@@ -115,4 +117,36 @@ test('sign a BIP-322 message via Cat21 Wallet: real extension signs, SDK verifie
   expect(result.signature.length).toBeGreaterThan(0);
   expect(result.reason).toBeNull();
   expect(result.verified).toBe(true);
+
+  // ── The REAL listing message: multi-line, exactly what the shipping
+  // sell flow signs (build-listing-message.ts joins 10 fields with \n).
+  // A wallet that normalizes newlines (CRLF conversion, trailing trim,
+  // or a UI rejecting them) would produce unverifiable listing
+  // signatures while the single-line roundtrip above stays green.
+  const listingMessage = buildListingMessage({
+    catNumber: 42,
+    cats: [42],
+    askSats: 21_000,
+    payTo: wallet.paymentAddress,
+    catTxid: 'ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df',
+    catVout: 0,
+    ordinalsAddress: wallet.ordinalsAddress,
+    network: Network.Mainnet,
+    signedAt: 1_756_944_000,
+  });
+  expect(listingMessage.split('\n').length).toBe(10);
+  const listingKnownPages = new Set(context.pages());
+  const listingPromise = harness.evaluate(
+    (args) => window.ordpoolSdkHarness.signMessage(args),
+    { walletType: 'cat21wallet' as const, address: wallet.ordinalsAddress, message: listingMessage },
+  );
+  await approveCat21WalletSignPopup({
+    context,
+    knownPages: listingKnownPages,
+    screenshot: p => shot(p, '03a-listing-sign-approval'),
+  });
+  const listingResult = await listingPromise;
+  console.log(`[cat21wallet-sign-message] listing verified=${listingResult.verified} reason=${listingResult.reason}`);
+  expect(listingResult.reason).toBeNull();
+  expect(listingResult.verified).toBe(true);
 });

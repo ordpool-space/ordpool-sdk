@@ -30,6 +30,7 @@ exports.ordWalletSend = ordWalletSend;
 exports.ordCreateWallet = ordCreateWallet;
 exports.writeCat21OrdFile = writeCat21OrdFile;
 exports.ordWalletInscribe = ordWalletInscribe;
+exports.assertCatLandsAtRecipient = assertCatLandsAtRecipient;
 exports.assertAllInputsSighashAll = assertAllInputsSighashAll;
 exports.inscriptionId = inscriptionId;
 exports.waitForOrdStockReady = waitForOrdStockReady;
@@ -422,6 +423,25 @@ function ordWalletInscribe(walletName, containerFilePath, feeRateSatPerVb, extra
     const stdout = ordWalletCli(walletName, 'inscribe', '--no-backup', '--fee-rate', String(feeRateSatPerVb), '--file', containerFilePath, ...extraArgs);
     const parsed = JSON.parse(stdout);
     return { commit: parsed.commit, reveal: parsed.reveal };
+}
+/**
+ * Assert the cat actually LANDED: output 0 of the confirmed tx pays the
+ * recipient ordinals address with the fresh-cat postage. Ordinal theory
+ * assigns the cat to the first sat of the first output, so a builder or
+ * signer regression that swaps output order (change at vout 0) or routes
+ * vout 0 to the payment address mints the cat onto the WRONG sat while
+ * locktime/parser checks stay green. Chain-truth from electrs, not from
+ * locally decoded bytes.
+ */
+function assertCatLandsAtRecipient(tx, recipientAddress, expectedPostageSats = 546) {
+    const vout0 = tx.vout[0];
+    if (vout0?.scriptpubkey_address !== recipientAddress) {
+        throw new Error(`Cat did NOT land at the recipient: vout[0] pays ${vout0?.scriptpubkey_address ?? '(none)'}, ` +
+            `expected ${recipientAddress}`);
+    }
+    if (vout0.value !== expectedPostageSats) {
+        throw new Error(`Cat output has wrong postage: vout[0].value = ${vout0.value}, expected ${expectedPostageSats}`);
+    }
 }
 function assertAllInputsSighashAll(tx) {
     for (let i = 0; i < tx.vin.length; i++) {

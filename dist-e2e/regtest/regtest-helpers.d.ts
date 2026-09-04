@@ -252,6 +252,16 @@ export declare function ordWalletInscribe(walletName: string, containerFilePath:
     commit: string;
     reveal: string;
 };
+/**
+ * Assert the cat actually LANDED: output 0 of the confirmed tx pays the
+ * recipient ordinals address with the fresh-cat postage. Ordinal theory
+ * assigns the cat to the first sat of the first output, so a builder or
+ * signer regression that swaps output order (change at vout 0) or routes
+ * vout 0 to the payment address mints the cat onto the WRONG sat while
+ * locktime/parser checks stay green. Chain-truth from electrs, not from
+ * locally decoded bytes.
+ */
+export declare function assertCatLandsAtRecipient(tx: EsploraTx, recipientAddress: string, expectedPostageSats?: number): void;
 export declare function assertAllInputsSighashAll(tx: EsploraTx): void;
 /** Build an inscription id from txid + output index (`<txid>i<index>`). */
 export declare function inscriptionId(txid: string, index?: number): string;

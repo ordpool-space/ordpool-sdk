@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { installContextErrorGuard } from '../browser-error-guard';
 
@@ -305,6 +305,8 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // eslint-disable-next-line no-console
   console.log(`[mint] locktime=${esploraTx.locktime}  block_hash=${esploraTx.status.block_hash}`);
   expect(esploraTx.locktime).toBe(21);
+  // The cat LANDED: vout[0] pays the recipient ordinals address at 546.
+  assertCatLandsAtRecipient(esploraTx, wallet.ordinalsAddress);
   expect(esploraTx.status.block_hash).toBeTruthy();
   assertAllInputsSighashAll(esploraTx);
 
