@@ -1,7 +1,7 @@
 # CI-ONLY overlay for the CONSUMER environment: routes the cold electrs
 # Rust build through the GitHub Actions cache backend. The consumer stack
-# (docker-compose.consumer-environment.yml) builds only electrs — it uses
-# a mock for ord — so this overlay carries just the electrs service.
+# (docker-compose.consumer-environment.yml) builds electrs and, when the
+# cat21-ord profile is enabled, the cat21-ord image.
 #
 # Consumers are WRITERS: each consumer repo has its own gha cache namespace
 # (gha cache is repo-scoped), so every repo must populate scope=electrs
@@ -18,3 +18,9 @@ services:
         - type=gha,scope=electrs
       cache_to:
         - type=gha,scope=electrs,mode=max
+  cat21-ord:
+    build:
+      cache_from:
+        - type=gha,scope=cat21-ord
+      cache_to:
+        - type=gha,scope=cat21-ord,mode=max

@@ -35,6 +35,13 @@ while [ $# -gt 0 ]; do
       PROFILES+=( --profile redis )
       shift
       ;;
+    --with-cat21-ord)
+      # Requires CAT21_ORD_SRC pointing at a cat21-ord checkout (or the
+      # ../../cat21-ord workspace sibling). Consumers poll :8080/status
+      # for readiness before running ord-dependent specs.
+      PROFILES+=( --profile cat21-ord )
+      shift
+      ;;
     --extra-file)
       EXTRA_FILES+=( -f "$2" )
       shift 2

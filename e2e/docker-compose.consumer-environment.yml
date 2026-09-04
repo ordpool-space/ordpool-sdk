@@ -145,5 +145,58 @@ services:
       timeout: 2s
       retries: 10
 
+  # cat21-ord — profile-gated, for consumer specs that must prove
+  # ord-driven UI against a REAL cat index (e.g. cat21.space's transfer
+  # holdings picker). Mirrors the regtest stack's service: built from a
+  # cat21-ord checkout the consumer provides via CAT21_ORD_SRC. Enable
+  # with the bootstrap's --with-cat21-ord flag.
+  cat21-ord:
+    profiles:
+      - cat21-ord
+    build:
+      context: ${CAT21_ORD_SRC:-../../cat21-ord}
+      # Inline recipe: self-contained when loaded out of node_modules
+      # (no ../ordpool-sdk sibling to reach a Dockerfile). cat21-ord's
+      # own Dockerfile pins rust:1.85; ord@0.27 + redb@3.1 need 1.89+.
+      dockerfile_inline: |
+        FROM rust:1.90-bookworm AS builder
+        WORKDIR /usr/src/ord
+        COPY . .
+        RUN cargo build --bin ord --release
+        FROM debian:bookworm-slim
+        COPY --from=builder /usr/src/ord/target/release/ord /usr/local/bin
+        RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+        ENV RUST_BACKTRACE=1
+        ENV RUST_LOG=info
+    image: ordpool-e2e-consumer-cat21-ord:local
+    container_name: ordpool-e2e-consumer-cat21-ord
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+    command:
+      - ord
+      - --regtest
+      - --index-cat21
+      - --index-sats
+      - --index-addresses
+      - --bitcoin-rpc-url=bitcoind:18443
+      - --bitcoin-rpc-username=ordpool
+      - --bitcoin-rpc-password=ordpool
+      - --data-dir=/data
+      - server
+      - --http
+      - --http-port=8080
+      - --address=0.0.0.0
+    ports:
+      - "8080:8080"     # ord HTTP API + UI
+    volumes:
+      - cat21-ord-data:/data
+    # No healthcheck: the slim runtime image has no wget/curl. Consumers
+    # poll the host-exposed :8080/status before running specs.
+
 volumes:
   electrs-data:
+  cat21-ord-data:
