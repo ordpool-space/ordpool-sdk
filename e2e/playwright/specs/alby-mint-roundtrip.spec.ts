@@ -152,10 +152,9 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
       // error https://example.invalid") covering the Connect button.
       // Source: our dummy lndhub config triggers an auto-validate
       // balance fetch that fails — harmless but the toast occludes
-      // clicks for ~5s. Wait it out, then enumerate buttons so we
-      // can pick the actual Connect by aria/text rather than first-
-      // matching anything.
-      await popup.waitForTimeout(6_000);
+      // clicks for a few seconds. Enumerate buttons so we can pick
+      // the actual Connect by aria/text rather than first-matching
+      // anything; the trial-click below waits out the toast by STATE.
       const buttons = await popup.locator('button').all();
       const labels: string[] = [];
       for (const b of buttons) {
@@ -166,7 +165,11 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
       // eslint-disable-next-line no-console
       console.log(`[alby-mint] popup #${idx} buttons: ${labels.join(' | ')}`);
       const connect = popup.locator('button', { hasText: /^(connect|allow|confirm|approve|sign)$/i }).first();
-      await connect.waitFor({ state: 'visible', timeout: 5_000 });
+      await connect.waitFor({ state: 'visible', timeout: 15_000 });
+      // trial:true = full actionability (visible, stable, enabled,
+      // RECEIVES EVENTS): resolves the moment the toast stops
+      // intercepting the pointer, instead of a blind timeout.
+      await connect.click({ trial: true, timeout: 15_000 });
       await connect.click({ timeout: 5_000 });
       // eslint-disable-next-line no-console
       console.log(`[alby-mint] clicked Connect on popup #${idx}: ${popup.url().slice(0, 80)}`);

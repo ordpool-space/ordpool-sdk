@@ -99,9 +99,11 @@ test('albyConnector.connect via the harness page returns the BIP-86 mainnet Tapr
       await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
       if (!popup.url().startsWith('chrome-extension://')) return;
       await shot(popup, `popup-${idx}-loaded`).catch(() => undefined);
-      await popup.waitForTimeout(6_000);
       const btn = popup.locator('button', { hasText: /^(connect|allow|confirm|approve)$/i }).first();
-      await btn.waitFor({ state: 'visible', timeout: 5_000 });
+      await btn.waitFor({ state: 'visible', timeout: 15_000 });
+      // trial:true waits for full actionability (Alby's regtest error
+      // toast stops intercepting the pointer) instead of a blind timeout.
+      await btn.click({ trial: true, timeout: 15_000 });
       await btn.click({ timeout: 5_000 });
       // eslint-disable-next-line no-console
       console.log(`[alby-handshake] auto-clicked popup #${idx}`);

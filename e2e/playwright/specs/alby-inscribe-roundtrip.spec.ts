@@ -13,6 +13,7 @@ import {
   postTx,
 } from '../../regtest/regtest-helpers';
 
+import { installAlbyAutoApprove } from '../alby-auto-approve';
 import { seedAlbyAccount } from '../onboard-alby';
 
 /**
@@ -103,16 +104,7 @@ test('inscribe an artifact on regtest via Alby: build commit+reveal in SDK, sign
   test.setTimeout(360_000);
 
   // Auto-click any extension popup so alby.enable() goes through.
-  context.on('page', async (popup) => {
-    try {
-      await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
-      if (!popup.url().startsWith('chrome-extension://')) return;
-      await popup.waitForTimeout(6_000);
-      const connect = popup.locator('button', { hasText: /^(connect|allow|confirm|approve|sign)$/i }).first();
-      await connect.waitFor({ state: 'visible', timeout: 5_000 });
-      await connect.click({ timeout: 5_000 });
-    } catch { /* swallow */ }
-  });
+  installAlbyAutoApprove(context);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });

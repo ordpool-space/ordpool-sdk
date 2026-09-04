@@ -7,6 +7,7 @@ import * as btc from '@scure/btc-signer';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
+import { installAlbyAutoApprove } from '../alby-auto-approve';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
@@ -177,16 +178,7 @@ test.fixme('accept a CAT-21 buy offer on regtest via Alby (seller): mint, buyer 
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
   // Auto-confirm the alby.enable() permission popup during connect.
-  context.on('page', async (popup) => {
-    try {
-      await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
-      if (!popup.url().startsWith('chrome-extension://')) return;
-      await popup.waitForTimeout(6_000);
-      const connect = popup.locator('button', { hasText: /^(connect|allow|confirm|approve|sign)$/i }).first();
-      await connect.waitFor({ state: 'visible', timeout: 5_000 });
-      await connect.click({ timeout: 5_000 });
-    } catch { /* swallow */ }
-  });
+  installAlbyAutoApprove(context);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });

@@ -2,6 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { installAlbyAutoApprove } from '../alby-auto-approve';
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from '../wallet-test-vectors';
 
 
@@ -123,16 +124,7 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
   // the public alby.webbtc API. We need to auto-click any Alby
   // popups that appear (alby.enable() permission, getAddress
   // confirmation).
-  context.on('page', async (popup) => {
-    try {
-      await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
-      if (!popup.url().startsWith('chrome-extension://')) return;
-      await popup.waitForTimeout(6_000);
-      const btn = popup.locator('button', { hasText: /^(connect|allow|confirm|approve)$/i }).first();
-      await btn.waitFor({ state: 'visible', timeout: 5_000 });
-      await btn.click({ timeout: 5_000 });
-    } catch { /* swallow; we just want best-effort approve */ }
-  });
+  installAlbyAutoApprove(context, { labels: /^(connect|allow|confirm|approve)$/i });
 
   const probePage = await context.newPage();
   await probePage.goto('http://localhost:4500/', { waitUntil: 'domcontentloaded' });

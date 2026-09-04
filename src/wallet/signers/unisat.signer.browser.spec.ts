@@ -115,3 +115,25 @@ describe('unisatSigner.signSingleFundingInput', () => {
     await expect(firstValueFrom(result$)).rejects.toThrow('txn-mempool-conflict');
   });
 });
+
+describe('unisatSigner.signMessage', () => {
+
+  afterEach(() => {
+    delete (window as unknown as { unisat?: unknown }).unisat;
+  });
+
+  it("signs via unisat.signMessage(msg, 'bip322-simple') — the positional type string, NOT ecdsa — and returns the witness verbatim", async () => {
+    const signMessageMock = jest.fn(async (_message: string, _type: string) => 'BASE64_BIP322_WITNESS');
+    (window as unknown as { unisat: unknown }).unisat = { signMessage: signMessageMock };
+
+    const result = await firstValueFrom(unisatSigner.signMessage({
+      address: 'bc1pordinals',
+      message: 'ordpool sign-message',
+      network: Network.Mainnet,
+    }));
+
+    expect(signMessageMock).toHaveBeenCalledTimes(1);
+    expect(signMessageMock).toHaveBeenCalledWith('ordpool sign-message', 'bip322-simple');
+    expect(result).toEqual({ signature: 'BASE64_BIP322_WITNESS' });
+  });
+});

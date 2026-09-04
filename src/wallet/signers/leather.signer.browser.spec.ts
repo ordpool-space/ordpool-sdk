@@ -99,3 +99,25 @@ describe('leatherSigner.signSingleFundingInput', () => {
     expect(params.network).toBe('testnet');
   });
 });
+
+describe('leatherSigner.signMessage', () => {
+
+  afterEach(() => {
+    delete (window as unknown as { LeatherProvider?: unknown }).LeatherProvider;
+  });
+
+  it("signs via LeatherProvider.request('signMessage', {message, paymentType: 'p2tr'}) — p2tr pins the ordinals key — and unwraps result.signature", async () => {
+    const request = jest.fn(async (_method: string, _params: unknown) => ({ result: { signature: 'BASE64_BIP322_SIG' } }));
+    (window as unknown as { LeatherProvider: unknown }).LeatherProvider = { request };
+
+    const result = await firstValueFrom(leatherSigner.signMessage({
+      address: 'bc1pordinals',
+      message: 'ordpool sign-message',
+      network: Network.Mainnet,
+    }));
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith('signMessage', { message: 'ordpool sign-message', paymentType: 'p2tr' });
+    expect(result).toEqual({ signature: 'BASE64_BIP322_SIG' });
+  });
+});
