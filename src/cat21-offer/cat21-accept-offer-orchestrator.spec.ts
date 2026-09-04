@@ -17,8 +17,11 @@ import {
 // Node unit test. Builds a REAL buyer-signed offer so the paste
 // reaches `parsed`. Pins the framework-agnostic accept-offer orchestration:
 // decode + validate state machine, the form-incomplete gate, and acceptOffer()'s
-// pre-signing guards. The signer happy-path needs a browser wallet provider →
-// covered by the wallet-matrix e2e.
+// pre-signing guards. The signer happy-path needs a browser wallet provider.
+// NOTE: the wallet-matrix accept-offer specs drive validateCat21BuyOfferPsbt
+// + the signer methods DIRECTLY, not this orchestrator — no e2e composes
+// build → orchestrator → signer today. The orchestrator's own compose step
+// is covered only by this unit spec.
 
 const SELLER_KEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000002');
 const SELLER_P2TR = btc.p2tr(SELLER_KEY.slice(1, 33), undefined, btc.NETWORK);

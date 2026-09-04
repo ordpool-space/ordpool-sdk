@@ -335,8 +335,9 @@ describe('validateCat21BuyOfferPsbt', () => {
     // uses 9000), output 1 = amount + postage, lockTime = 0. An
     // inscription with nLockTime=21 carries a cat on the same sat, so a
     // stock-ord buyer's offer for it must validate here. Build by hand —
-    // the SDK builder always emits 546 at output 0, so only a hand-built
-    // tx reproduces ord's shape.
+    // the SDK builder also preserves the seller UTXO's size at output 0
+    // (ord parity), but ord's lockTime=0 + fundrawtransaction shape can
+    // only be reproduced by a hand-built tx.
     const catUtxoValue = 9_000; // ord: inscription.value (any size)
     const price = 21_000;
     const args = makeBaseArgs();
