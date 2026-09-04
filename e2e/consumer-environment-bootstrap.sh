@@ -64,10 +64,11 @@ RPC="docker exec ordpool-e2e-consumer-bitcoind bitcoin-cli -regtest -rpcuser=ord
 # --- bring containers up if not already running ---
 if ! docker ps --format '{{.Names}}' | grep -q 'ordpool-e2e-consumer-bitcoind'; then
   if [ "$BUILDX_CACHE" = 1 ]; then
-    # Build electrs first through buildx bake so the gha overlay's
-    # cache_from/to take effect; bake loads the image (it has an `image:`
-    # name) for the following --no-build up.
-    COMPOSE_BAKE=true "${COMPOSE[@]}" build electrs >&2
+    # Build every buildable service of the ACTIVE profile set through
+    # buildx bake so the gha overlay's cache_from/to take effect (electrs
+    # always; cat21-ord when --with-cat21-ord is on); bake loads the
+    # images (they have `image:` names) for the following --no-build up.
+    COMPOSE_BAKE=true "${COMPOSE[@]}" build >&2
     "${COMPOSE[@]}" up -d --no-build >&2
   else
     "${COMPOSE[@]}" up -d >&2
