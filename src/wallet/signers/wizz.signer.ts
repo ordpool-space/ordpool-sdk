@@ -55,6 +55,7 @@ const legacy = {
       KnownOrdinalWalletType.wizz,
       input.paymentAddress,
       input.paymentPublicKey,
+      input.network,
     );
     const toSignInputs: WizzToSignInput[] = [{ index: 0, address: walletAddress }];
 
@@ -70,7 +71,7 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: WizzToSignInput[] = [];
     for (const t of targets) {
-      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey);
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey, input.network);
       for (const i of t.indexes) {
         toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
       }
@@ -87,7 +88,7 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: WizzToSignInput[] = [];
     for (const t of targets) {
-      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey);
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey, input.network);
       for (const i of t.indexes) {
         toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
       }

@@ -25,6 +25,12 @@ async function getBasicBinanceInfo(): Promise<{ address: string; publicKey: stri
   const binanceBtc = (window as unknown as { binancew3w: { bitcoin: BinanceBtcApi } }).binancew3w.bitcoin;
   const accounts = await binanceBtc.requestAccounts();
   const [address] = accounts;
+  // Fail closed: an empty accounts array would otherwise produce a
+  // WalletInfo with undefined addresses that flows silently into every
+  // downstream PSBT builder.
+  if (!address) {
+    throw new Error('Binance requestAccounts returned no accounts (wallet locked or user rejected)');
+  }
   const publicKey = await binanceBtc.getPublicKey();
   return { address, publicKey };
 }

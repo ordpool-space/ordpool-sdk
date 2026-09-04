@@ -31,6 +31,6 @@ module.exports = {
   // see https://github.com/jestjs/jest/issues/11617#issuecomment-1028651059
   maxWorkers: 1,
 
-  // Don't fail CI on "no tests found" for a filtered run.
-  passWithNoTests: true,
+  // A run matching zero tests is a broken filter, not a pass.
+  passWithNoTests: false,
 };

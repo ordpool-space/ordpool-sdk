@@ -24,12 +24,20 @@ on:
     branches: [main]
     paths:
       - 'e2e/playwright/**'
+      # The matrix suite also depends on the regtest helpers (imported by
+      # the specs), the compose stack, and the bootstrap script.
+      - 'e2e/regtest/**'
+      - 'e2e/docker-compose.*.yml'
+      - 'e2e/regtest-bootstrap.sh'
       - '.github/workflows/e2e-playwright.yml'
       - 'src/**'
       - 'package*.json'
   pull_request:
     paths:
       - 'e2e/playwright/**'
+      - 'e2e/regtest/**'
+      - 'e2e/docker-compose.*.yml'
+      - 'e2e/regtest-bootstrap.sh'
       - '.github/workflows/e2e-playwright.yml'
       - 'src/**'
       - 'package*.json'

@@ -109,9 +109,18 @@ export function walletSidePaymentAddress(
   walletType: KnownOrdinalWalletType,
   appAddress: string,
   publicKeyHex: string | undefined,
+  appNetwork?: Network,
 ): string {
   if (!publicKeyHex) return appAddress;
-  if (!appAddress.startsWith('bcrt')) return appAddress;
+  // bech32 regtest addresses (bcrt1*) are unambiguous. The base58 forms
+  // ('2' = P2SH, 'm'/'n' = P2PKH) share their version bytes with TESTNET,
+  // so they are rewritten only when the caller states the app network is
+  // regtest — rewriting a real testnet address to mainnet would make the
+  // wallet refuse the toSignInputs row (address not in its set) and the
+  // sign popup would silently never open.
+  const isRegtestAddress = appAddress.startsWith('bcrt')
+    || (appNetwork === Network.Regtest && /^[2mn]/.test(appAddress));
+  if (!isRegtestAddress) return appAddress;
   return isNativeRegtestWallet(walletType)
     ? appAddress
     : toMainnetAddress(appAddress, publicKeyHex);

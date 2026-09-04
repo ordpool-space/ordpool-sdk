@@ -2,7 +2,7 @@ import { hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
 import { broadcastSignedPsbt } from '../psbt-extract';
-import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
+import { BIP341_KEYPATH_SIGHASHES, keypathSighashWhitelist } from '../sighash';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -79,7 +79,11 @@ const legacy = {
     const toSignInputs: { index: number; address?: string; sighashTypes?: number[] }[] = [];
     for (const t of targets) {
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+        // Binance proxies window.unisat (per its own docs): apply the same
+        // per-address sighash whitelist as the Unisat-family signers, so a
+        // Taproot key-path input encoded SIGHASH_DEFAULT passes the policy
+        // check instead of being refused by an ALL-only row.
+        toSignInputs.push({ index: i, address: t.address, sighashTypes: keypathSighashWhitelist(t.sigHash, t.address) });
       }
     }
 
@@ -95,7 +99,11 @@ const legacy = {
     const toSignInputs: { index: number; address?: string; sighashTypes?: number[] }[] = [];
     for (const t of targets) {
       for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: t.address, sighashTypes: [t.sigHash] });
+        // Binance proxies window.unisat (per its own docs): apply the same
+        // per-address sighash whitelist as the Unisat-family signers, so a
+        // Taproot key-path input encoded SIGHASH_DEFAULT passes the policy
+        // check instead of being refused by an ALL-only row.
+        toSignInputs.push({ index: i, address: t.address, sighashTypes: keypathSighashWhitelist(t.sigHash, t.address) });
       }
     }
     return from(binanceBtc.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(

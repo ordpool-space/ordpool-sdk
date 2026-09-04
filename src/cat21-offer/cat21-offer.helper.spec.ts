@@ -1235,3 +1235,110 @@ describe('validateCat21BuyOfferPsbt', () => {
     });
   });
 });
+
+describe('validateCat21BuyOfferPsbt — security rejections (sighash splice + cat burn)', () => {
+
+  /** A valid built offer with the buyer input carrying the given ECDSA sig bytes. */
+  function psbtWithBuyerEcdsaSig(sig: Uint8Array): Uint8Array {
+    const built = buildCat21BuyOfferPsbt(makeBaseArgs());
+    const tx = btc.Transaction.fromPSBT(built.psbt);
+    tx.updateInput(1, { partialSig: [[publicKey, sig]] });
+    return tx.toPSBT();
+  }
+
+  function validate(psbt: Uint8Array) {
+    const args = makeBaseArgs();
+    return validateCat21BuyOfferPsbt({
+      psbt,
+      expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+      floorPriceSats: 21_000,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+      network: Network.Testnet3,
+    });
+  }
+
+  it("rejects an ECDSA buyer sig whose trailing flag byte is SIGHASH_SINGLE|ANYONECANPAY (the splice-attack shape: the PSBT's sighashType field is unset, only the sig byte carries the flag)", () => {
+    const sig = new Uint8Array(71).fill(1);
+    sig[70] = 0x83; // SIGHASH_SINGLE | ANYONECANPAY
+    const result = validate(psbtWithBuyerEcdsaSig(sig));
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('sighash-flag-byte-not-all');
+      expect(result.detail).toContain('0x83');
+    }
+  });
+
+  it('rejects a 65-byte Schnorr buyer sig whose 65th byte is not SIGHASH_ALL', () => {
+    const taprootPayment = btc.p2tr(publicKey.slice(1, 33), undefined, btc.TEST_NETWORK);
+    const args = makeBaseArgs({
+      buyerInputs: [{
+        txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+        vout: 1,
+        value: 50_000,
+        scriptPubKey: taprootPayment.script,
+        tapInternalKey: publicKey.slice(1, 33),
+      }],
+    });
+    const built = buildCat21BuyOfferPsbt(args);
+    const tx = btc.Transaction.fromPSBT(built.psbt);
+    const schnorrSig = new Uint8Array(65).fill(2);
+    schnorrSig[64] = 0x82; // SIGHASH_NONE | ANYONECANPAY
+    tx.updateInput(1, { tapKeySig: schnorrSig });
+    const result = validateCat21BuyOfferPsbt({
+      psbt: tx.toPSBT(),
+      expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+      floorPriceSats: 21_000,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+      network: Network.Testnet3,
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('sighash-flag-byte-not-all');
+      expect(result.detail).toContain('0x82');
+    }
+  });
+
+  it('accepts a 64-byte Schnorr buyer sig (SIGHASH_DEFAULT is wire-equivalent to ALL)', () => {
+    const taprootPayment = btc.p2tr(publicKey.slice(1, 33), undefined, btc.TEST_NETWORK);
+    const args = makeBaseArgs({
+      buyerInputs: [{
+        txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+        vout: 1,
+        value: 50_000,
+        scriptPubKey: taprootPayment.script,
+        tapInternalKey: publicKey.slice(1, 33),
+      }],
+    });
+    const built = buildCat21BuyOfferPsbt(args);
+    const tx = btc.Transaction.fromPSBT(built.psbt);
+    tx.updateInput(1, { tapKeySig: new Uint8Array(64).fill(2) });
+    const result = validateCat21BuyOfferPsbt({
+      psbt: tx.toPSBT(),
+      expectedSellerUtxo: { txid: args.sellerInput.txid, vout: args.sellerInput.vout },
+      floorPriceSats: 21_000,
+      expectedSellerPaymentAddress: toPaymentAddress(p2wpkhTestnet.address!),
+      network: Network.Testnet3,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects an offer whose cat output (output 0) is an OP_RETURN (buyer burns the cat after the seller signs)', () => {
+    // updateOutput refuses a raw-script swap, so rebuild the offer tx
+    // with output 0 replaced by OP_RETURN "cat" (no address form exists).
+    const source = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(makeBaseArgs()).psbt);
+    const burn = new btc.Transaction({ allowUnknownOutputs: true, lockTime: source.lockTime });
+    for (let i = 0; i < source.inputsLength; i++) burn.addInput(source.getInput(i));
+    burn.addOutput({ script: new Uint8Array([0x6a, 0x03, 0x63, 0x61, 0x74]), amount: source.getOutput(0).amount! });
+    for (let o = 1; o < source.outputsLength; o++) {
+      const out = source.getOutput(o);
+      burn.addOutput({ script: out.script!, amount: out.amount! });
+    }
+    // Sign AFTER the output set is complete — a partialSig freezes the tx.
+    burn.updateInput(1, { partialSig: [[publicKey, new Uint8Array(71).fill(1)]] });
+    const result = validate(burn.toPSBT());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('cat-output-not-spendable');
+    }
+  });
+});

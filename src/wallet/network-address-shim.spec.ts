@@ -122,6 +122,22 @@ describe('toMainnetAddress', () => {
     expect(scriptBytesOf(mainnet, MAINNET)).toBe(scriptBytesOf(bcrt, REGTEST));
   });
 
+  it('regtest-2… P2SH-P2WPKH → mainnet-3… with identical script hash', () => {
+    const regtest = btc.p2sh(btc.p2wpkh(PUBKEY, REGTEST), REGTEST).address!;
+    expect(regtest.startsWith('2')).toBe(true);
+    const mainnet = toMainnetAddress(regtest, PUBKEY_HEX);
+    expect(mainnet.startsWith('3')).toBe(true);
+    expect(scriptBytesOf(mainnet, MAINNET)).toBe(hex.encode(btc.p2sh(btc.p2wpkh(PUBKEY, MAINNET), MAINNET).script));
+  });
+
+  it('regtest-m/n… P2PKH → mainnet-1… with identical pubkey hash', () => {
+    const regtest = btc.p2pkh(PUBKEY, REGTEST).address!;
+    expect(/^[mn]/.test(regtest)).toBe(true);
+    const mainnet = toMainnetAddress(regtest, PUBKEY_HEX);
+    expect(mainnet.startsWith('1')).toBe(true);
+    expect(scriptBytesOf(mainnet, MAINNET)).toBe(hex.encode(btc.p2pkh(PUBKEY, MAINNET).script));
+  });
+
   it('throws on an unsupported address prefix', () => {
     expect(() => toMainnetAddress('bogus_address', PUBKEY_HEX))
       .toThrow(/unsupported bcrt address type/i);
@@ -162,6 +178,33 @@ describe('walletSidePaymentAddress', () => {
     ]) {
       expect(walletSidePaymentAddress(walletType, mainnet, PUBKEY_HEX)).toBe(mainnet);
     }
+  });
+
+  it('rewrites a regtest P2SH (2…) address to its mainnet 3… twin for mainnet-only wallets WHEN the app network says Regtest', () => {
+    // Unisat-family Nested-SegWit accounts produce base58 '2…' regtest
+    // addresses; without the network-gated rewrite these passed unshimmed
+    // and the wallet's toSignInputs address check silently never opened
+    // the sign popup.
+    const regtest = btc.p2sh(btc.p2wpkh(PUBKEY, REGTEST), REGTEST).address!;
+    const shimmed = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, regtest, PUBKEY_HEX, Network.Regtest);
+    expect(shimmed).toBe(btc.p2sh(btc.p2wpkh(PUBKEY, MAINNET), MAINNET).address!);
+  });
+
+  it('rewrites a regtest P2PKH (m/n…) address to its mainnet 1… twin for mainnet-only wallets WHEN the app network says Regtest', () => {
+    const regtest = btc.p2pkh(PUBKEY, REGTEST).address!;
+    const shimmed = walletSidePaymentAddress(KnownOrdinalWalletType.okx, regtest, PUBKEY_HEX, Network.Regtest);
+    expect(shimmed).toBe(btc.p2pkh(PUBKEY, MAINNET).address!);
+  });
+
+  it('does NOT rewrite a base58 2… address without an explicit Regtest network (testnet shares the prefix; rewriting a real testnet address would break signing)', () => {
+    const testnetStyle = btc.p2sh(btc.p2wpkh(PUBKEY, REGTEST), REGTEST).address!;
+    expect(walletSidePaymentAddress(KnownOrdinalWalletType.unisat, testnetStyle, PUBKEY_HEX)).toBe(testnetStyle);
+    expect(walletSidePaymentAddress(KnownOrdinalWalletType.unisat, testnetStyle, PUBKEY_HEX, Network.Testnet3)).toBe(testnetStyle);
+  });
+
+  it('returns a regtest base58 address unchanged for native-regtest wallets even on Regtest', () => {
+    const regtest = btc.p2sh(btc.p2wpkh(PUBKEY, REGTEST), REGTEST).address!;
+    expect(walletSidePaymentAddress(KnownOrdinalWalletType.xverse, regtest, PUBKEY_HEX, Network.Regtest)).toBe(regtest);
   });
 
   it('returns app address unchanged when no publicKey provided (backwards-compat path)', () => {

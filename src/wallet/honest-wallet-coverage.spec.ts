@@ -52,40 +52,146 @@ describe('Honest wallet coverage (audit gate)', () => {
     );
   });
 
-  it('every harness passes its OWN walletType to createTransaction (no lying)', () => {
+  it('the harness runOperation exists and threads input.walletType into every builder/signer call (no lying)', () => {
     const src = fs.readFileSync(HARNESS_PATH, 'utf8');
-    const variants = Object.values(KnownOrdinalWalletType) as string[];
 
-    // Extract every `buildAndSignMintVia<Wallet> = async (...) => { ... }`
-    // block and check that the createTransaction inside (if any) is
-    // called with KnownOrdinalWalletType.<same wallet>.
-    const blockRe = /buildAndSignMintVia(\w+)\s*=\s*async\s*\([^)]*\)\s*=>\s*\{([\s\S]*?)\n\};/g;
+    // Anchor: the audited surface must exist. A rename of runOperation
+    // fails HERE, loudly, instead of silently emptying the audit (the
+    // pre-2026-09-04 version regexed for buildAndSignMintVia*, which the
+    // runOperation refactor had removed, so its loop matched nothing and
+    // the gate passed vacuously forever).
+    const anchors = src.match(/window\.ordpoolSdkHarness\.runOperation = async/g) ?? [];
+    expect(anchors.length).toBe(1);
+
+    // Identity-argument positions: the wallet type handed to the PSBT
+    // builder and to the signer registry IS the wallet identity. Both
+    // must be the caller's `input.walletType` pass-through.
+    expect(src).toMatch(/createTransaction\(\s*\n?\s*input\.walletType/);
+    expect(src).toMatch(/findSignerOrThrow\(input\.walletType\)/);
+    expect(src.match(/findSignerOrThrow\(\s*KnownOrdinalWalletType\./g) ?? []).toEqual([]);
+
+    // A hardcoded KnownOrdinalWalletType literal in a builder call is a
+    // lie UNLESS it sits inside a per-wallet named helper whose name
+    // matches the literal (the Alby SW-bypass helpers are alby-only by
+    // construction). Split the harness into `window.ordpoolSdkHarness.X`
+    // sections and enforce per section.
+    const sections = src.split(/window\.ordpoolSdkHarness\./).slice(1);
+    expect(sections.length).toBeGreaterThan(3);
     const violations: string[] = [];
-    let match: RegExpExecArray | null;
-    while ((match = blockRe.exec(src)) !== null) {
-      const walletName = match[1].toLowerCase();   // 'Wizz' → 'wizz'
-      const body = match[2];
-      // cat21wallet doesn't match by direct name comparison because
-      // harness function is `buildAndSignMintViaCat21Wallet`; normalise.
-      const normalised = walletName === 'cat21wallet' ? 'cat21wallet' : walletName;
-      const expectedToken = `KnownOrdinalWalletType.${normalised}`;
-      const createTxCalls = body.match(/KnownOrdinalWalletType\.(\w+)/g) ?? [];
-      const lies = createTxCalls.filter(c => c !== expectedToken);
-      if (lies.length > 0) {
-        violations.push(
-          `buildAndSignMintVia${match[1]} passes ${lies.join(', ')} but should pass ${expectedToken}`,
-        );
-      }
-      // The function exists; make sure the wallet name is also a real
-      // variant of KnownOrdinalWalletType. If not, the harness invents
-      // a wallet that doesn't actually exist in the registry.
-      if (!variants.includes(normalised)) {
-        violations.push(
-          `buildAndSignMintVia${match[1]} targets '${normalised}' which is NOT in KnownOrdinalWalletType`,
-        );
+    for (const section of sections) {
+      const name = (section.match(/^(\w+)/) ?? [])[1] ?? '(unnamed)';
+      const literalCalls = section.match(/createTransaction\(\s*\n?\s*KnownOrdinalWalletType\.(\w+)/g) ?? [];
+      for (const call of literalCalls) {
+        const literal = (call.match(/KnownOrdinalWalletType\.(\w+)/) ?? [])[1];
+        if (!name.toLowerCase().includes(literal.toLowerCase())) {
+          violations.push(`${name} hardcodes KnownOrdinalWalletType.${literal} in a createTransaction call`);
+        }
       }
     }
     expect(violations).toEqual([]);
+  });
+
+  it('every Proven capability in WALLET_MATRIX is backed by a live (non-fixme) roundtrip spec', () => {
+    // Ties the matrix's Proven claims to the spec files that justify
+    // them: deleting or fixme-ing a roundtrip spec while the matrix
+    // keeps advertising Proven to the cat21.space wallet picker fails
+    // HERE. `Proven` is defined as "a real regtest e2e roundtrip …
+    // green in CI" — no file, no claim.
+    const { WALLET_MATRIX, WalletCapability, CapabilitySupport } = require('./wallet-capabilities');
+    const SPEC_SUFFIX_BY_CAPABILITY: Record<string, string> = {
+      [WalletCapability.Cat21Mint]: 'mint-roundtrip',
+      [WalletCapability.Cat21Transfer]: 'transfer-roundtrip',
+      [WalletCapability.Cat21OfferCreate]: 'create-offer-roundtrip',
+      [WalletCapability.Cat21OfferAccept]: 'accept-offer-roundtrip',
+      [WalletCapability.Inscription]: 'inscribe-roundtrip',
+      [WalletCapability.InscriptionParentChild]: 'inscribe-child-roundtrip',
+      [WalletCapability.SignMessage]: 'sign-message-roundtrip',
+    };
+    // xpub has no browser binary; its Proven rows are backed by the
+    // regtest psbt-export specs asserted elsewhere in this file.
+    const PROVEN_OUTSIDE_PIPELINE_B = new Set(['xpub']);
+
+    const violations: string[] = [];
+    for (const row of WALLET_MATRIX) {
+      if (PROVEN_OUTSIDE_PIPELINE_B.has(row.wallet)) continue;
+      for (const [capability, entry] of Object.entries(row.capabilities) as [string, { support: string }][]) {
+        if (entry.support !== CapabilitySupport.Proven) continue;
+        const specFile = `${row.wallet}-${SPEC_SUFFIX_BY_CAPABILITY[capability]}.spec.ts`;
+        const specPath = path.join(SPECS_DIR, specFile);
+        if (!fs.existsSync(specPath)) {
+          violations.push(`${row.wallet}/${capability} is Proven but ${specFile} does not exist`);
+          continue;
+        }
+        const content = fs.readFileSync(specPath, 'utf8');
+        const liveTests = (content.match(/\btest(?:\.only)?\(/g) ?? []).length;
+        if (liveTests === 0) {
+          violations.push(`${row.wallet}/${capability} is Proven but ${specFile} has no live test( — all fixme'd?`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('no live roundtrip spec contradicts an Unsupported matrix claim (except documented binary-evidence cases)', () => {
+    // The reverse direction: a green roundtrip spec for a capability the
+    // matrix calls Unsupported is a live contradiction — either users
+    // are denied a workable capability, or the spec proves something
+    // other than the shipping path and must be documented as such.
+    const { WALLET_MATRIX, WalletCapability, CapabilitySupport } = require('./wallet-capabilities');
+    const SPEC_SUFFIX_BY_CAPABILITY: Record<string, string> = {
+      [WalletCapability.Cat21Mint]: 'mint-roundtrip',
+      [WalletCapability.Cat21Transfer]: 'transfer-roundtrip',
+      [WalletCapability.Cat21OfferCreate]: 'create-offer-roundtrip',
+      [WalletCapability.Cat21OfferAccept]: 'accept-offer-roundtrip',
+      [WalletCapability.Inscription]: 'inscribe-roundtrip',
+      [WalletCapability.InscriptionParentChild]: 'inscribe-child-roundtrip',
+      [WalletCapability.SignMessage]: 'sign-message-roundtrip',
+    };
+    // alby-transfer-roundtrip drives Alby's INTERNAL service-worker
+    // route, proving the BINARY can sign a multi-input transfer when
+    // driven from an extension-origin page. The in-page API the SDK
+    // ships exposes no per-input signing, so the capability stays
+    // Unsupported: the spec is binary-capability evidence, not a
+    // shipping-path proof. Documented here so the contradiction is a
+    // decision, not an oversight.
+    const BINARY_EVIDENCE_ONLY = new Set(['alby-transfer-roundtrip.spec.ts']);
+
+    const violations: string[] = [];
+    for (const row of WALLET_MATRIX) {
+      for (const [capability, entry] of Object.entries(row.capabilities) as [string, { support: string }][]) {
+        if (entry.support !== CapabilitySupport.Unsupported) continue;
+        const specFile = `${row.wallet}-${SPEC_SUFFIX_BY_CAPABILITY[capability]}.spec.ts`;
+        const specPath = path.join(SPECS_DIR, specFile);
+        if (!fs.existsSync(specPath)) continue;
+        if (BINARY_EVIDENCE_ONLY.has(specFile)) continue;
+        const content = fs.readFileSync(specPath, 'utf8');
+        const liveTests = (content.match(/\btest(?:\.only)?\(/g) ?? []).length;
+        if (liveTests > 0) {
+          violations.push(
+            `${row.wallet}/${capability} is Unsupported but ${specFile} has ${liveTests} live test(s) — ` +
+            `reconcile the matrix or document the spec in BINARY_EVIDENCE_ONLY`,
+          );
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('the CI shard matrix runs exactly the Pipeline-B-drivable wallet set', () => {
+    // The drivable-wallet set exists in three hand-copied places: this
+    // gate's carve-outs, the workflow's shard matrix, and the connector
+    // registry. A new drivable wallet whose specs exist but has no CI
+    // shard would pass every other gate while its specs never run.
+    const WALLETS_WITHOUT_PIPELINE_B = new Set(['xpub', 'binance']);
+    const drivable = (Object.values(KnownOrdinalWalletType) as string[])
+      .filter(v => !WALLETS_WITHOUT_PIPELINE_B.has(v))
+      .sort();
+    const workflow = fs.readFileSync(
+      path.join(REPO_ROOT, '.github', 'workflows', 'e2e-playwright.yml'), 'utf8');
+    const shardWallets = [...workflow.matchAll(/- \{ wallet: (\w+),?/g)]
+      .map(m => m[1])
+      .sort();
+    expect(shardWallets).toEqual(drivable);
   });
 
   it('every PIPELINE-B-DRIVABLE wallet has a *-inscribe-roundtrip.spec.ts file', () => {

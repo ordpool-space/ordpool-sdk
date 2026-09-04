@@ -80,6 +80,7 @@ const legacy = {
           KnownOrdinalWalletType.okx,
           input.paymentAddress,
           input.paymentPublicKey,
+          input.network,
         ),
         // BIP-341 key-path DEFAULT (0x00) and ALL (0x01) commit to
         // identical wire bytes; accept either so OKX's policy check
@@ -98,7 +99,7 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: OkxToSignInput[] = [];
     for (const t of targets) {
-      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, t.publicKey ?? input.paymentPublicKey);
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, t.publicKey ?? input.paymentPublicKey, input.network);
       for (const i of t.indexes) {
         toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
       }
@@ -115,7 +116,7 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: OkxToSignInput[] = [];
     for (const t of targets) {
-      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, t.publicKey ?? input.paymentPublicKey);
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.okx, t.address, t.publicKey ?? input.paymentPublicKey, input.network);
       for (const i of t.indexes) {
         toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
       }

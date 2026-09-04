@@ -40,6 +40,8 @@ module.exports = {
   // see https://github.com/jestjs/jest/issues/11617#issuecomment-1028651059
   maxWorkers: 1,
 
-  // SDK is empty for now -- no specs yet. Don't fail CI on "no tests found".
-  passWithNoTests: true,
+  // A run matching zero tests is a broken filter, not a pass: with 90+
+  // spec files, "no tests found" means testPathIgnorePatterns (or a CLI
+  // filter typo) silently excluded everything.
+  passWithNoTests: false,
 };

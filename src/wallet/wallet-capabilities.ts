@@ -208,7 +208,16 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     platforms: [WalletPlatform.Desktop],
     signingMode: 'injected',
     capabilities: {
-      [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
+      // The mint/inscribe e2e evidence drives Alby's INTERNAL service-worker
+      // route (webbtc/signPsbt from an extension-origin page), not the
+      // in-page provider + approval-popup path the SDK ships: Alby's popup
+      // uses a native confirm() dialog CI cannot drive. The binary provably
+      // signs + broadcasts correct bytes, but the end-to-end user path is
+      // unverified, so these stay Adapter, not Proven.
+      [WalletCapability.Cat21Mint]: {
+        support: CapabilitySupport.Adapter,
+        caveat: 'the signing itself is proven against the real Alby binary in CI via an internal route; the in-page approval-popup path is not CI-drivable (native confirm() dialog), so the end-to-end user path is not verified',
+      },
       [WalletCapability.Cat21Transfer]: {
         support: CapabilitySupport.Unsupported,
         caveat: "Alby cannot transfer: its API exposes no per-input signing, so it cannot sign a transfer's cat input plus the funding inputs. Single-input flows (mint, plain inscription) work.",
@@ -221,7 +230,10 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
         support: CapabilitySupport.Unsupported,
         caveat: 'Alby cannot accept offers: it signs every input with your one key, so it cannot co-sign the trade with the seller.',
       },
-      [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
+      [WalletCapability.Inscription]: {
+        support: CapabilitySupport.Adapter,
+        caveat: 'the signing itself is proven against the real Alby binary in CI via an internal route; the in-page approval-popup path is not CI-drivable (native confirm() dialog), so the end-to-end user path is not verified',
+      },
       [WalletCapability.InscriptionParentChild]: {
         support: CapabilitySupport.Unsupported,
         caveat: 'Alby cannot build collections: it signs every input with your one key, so it cannot leave the helper input unsigned. Plain inscriptions work.',

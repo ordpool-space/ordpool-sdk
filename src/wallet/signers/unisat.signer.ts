@@ -76,6 +76,7 @@ const legacy = {
       KnownOrdinalWalletType.unisat,
       input.paymentAddress,
       input.paymentPublicKey,
+      input.network,
     );
     const toSignInputs: UnisatToSignInput[] = [
       { index: 0, address: walletAddress },
@@ -93,7 +94,7 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: UnisatToSignInput[] = [];
     for (const t of targets) {
-      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey);
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey, input.network);
       for (const i of t.indexes) {
         toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
       }
@@ -111,7 +112,7 @@ const legacy = {
     const targets = resolveSigningTargets(input);
     const toSignInputs: UnisatToSignInput[] = [];
     for (const t of targets) {
-      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey);
+      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.unisat, t.address, t.publicKey ?? input.paymentPublicKey, input.network);
       for (const i of t.indexes) {
         toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
       }
