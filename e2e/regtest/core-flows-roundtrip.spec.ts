@@ -17,6 +17,7 @@ import {
 } from '../../src/cat21-core/ports';
 import { Network, toScureNetwork } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
+import { UtxoContentScanner } from '../../src/cat21-mint/utxo-content-scanner.service';
 import {
   getFundedAccount,
   getTx,
@@ -26,9 +27,12 @@ import {
   rpc,
   waitForCatAtAddress,
   waitForElectrsSync,
+  waitForOrdSync,
 } from './regtest-helpers';
 
 const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
+const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
+const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ?? 'http://localhost:3000';
 
 /** Regtest WIF → raw 32-byte private key (version byte 0xef, compressed). */
 function wifToPrivateKey(wif: string): Uint8Array {
@@ -72,16 +76,22 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
         (await getUtxos(addr)).map((u) => ({ txid: u.txid, vout: u.vout, value: u.value })),
     };
     scanned = [];
+    // The SHIPPING funding-safety scanner against the LIVE indexes —
+    // UtxoContentScanner + classifyUtxoContent parse real /output JSON
+    // from stock ord (inscriptions/runes) and cat21-ord (cats). A field
+    // rename in either server (precedent: the cat21-ord serde rename this
+    // repo documents) breaks HERE instead of only in production. The thin
+    // wrapper records which outpoints the selection actually scanned.
+    const scanner = new UtxoContentScanner({
+      mempoolApiUrl: ELECTRS_URL,
+      cat21ApiUrl: '',
+      ordApiUrl: ORD_STOCK_URL,
+      cat21OrdApiUrl: ORD_URL,
+    });
     scan = {
       classify: async (outpoint) => {
         scanned.push(outpoint);
-        const res = await fetch(`${ORD_URL}/output/${outpoint}`, { headers: { Accept: 'application/json' } });
-        if (!res.ok) return 'clean';
-        const body = (await res.json()) as { cats?: unknown[]; inscriptions?: unknown[] };
-        const hasAssets =
-          (Array.isArray(body.cats) && body.cats.length > 0) ||
-          (Array.isArray(body.inscriptions) && body.inscriptions.length > 0);
-        return hasAssets ? 'has-assets' : 'clean';
+        return scanner.classify(outpoint);
       },
     };
     sign = {
@@ -222,4 +232,58 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     const remaining = await getUtxos(mpPayment);
     expect(remaining.some((u) => u.value === 13689)).toBe(true);
   }, 120_000);
+  it('funding safety vs the LIVE index: a cat-bearing coin is scanned, classified by the SHIPPING scanner, and NEVER auto-spent', async () => {
+    // Seed a 5 000-sat nLockTime=21 cat directly onto the PAYMENT
+    // address: small enough to be the best-fit (smallest covering)
+    // candidate for the next mint, so the safe-auto selection would
+    // spend it if the content scan lied. This is the first e2e that
+    // proves the EXCLUSION side of the funding-safety layer against a
+    // real cat21-ord index through the shipping classify path (the
+    // mocked unit specs and the previous inline scan port could not
+    // catch an ord-server field rename).
+    const funding = (await getUtxos(paymentAddress)).sort((a, b) => b.value - a.value)[0];
+    const seedTx = new btc.Transaction({ lockTime: 21 });
+    seedTx.addInput({
+      txid: funding.txid,
+      index: funding.vout,
+      witnessUtxo: { script: btc.p2wpkh(pub, scure).script, amount: BigInt(funding.value) },
+      sequence: 0xfffffffe,
+    });
+    seedTx.addOutputAddress(paymentAddress, 5_000n, scure);
+    seedTx.addOutputAddress(paymentAddress, BigInt(funding.value - 5_000 - 400), scure);
+    seedTx.sign(priv);
+    seedTx.finalize();
+    const seedTxid = await postTx(seedTx.hex);
+    const catOutpoint = `${seedTxid}:0`;
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdSync(tip);
+
+    scanned.length = 0;
+    const out = await executeMint(
+      {
+        walletType: KnownOrdinalWalletType.cat21wallet,
+        network: net,
+        paymentPublicKey: pub,
+        paymentAddress,
+        recipientAddress: ordinalsAddress,
+        feeRatePerVbyte: 2,
+      },
+      { utxos, scan, sign, broadcast },
+    );
+    expect(out.txid).toMatch(/^[0-9a-f]{64}$/);
+
+    // The selection CONSIDERED the cat coin (it was the smallest covering
+    // candidate, so the scan ran against the live index)...
+    expect(scanned).toContain(catOutpoint);
+
+    // ...and the broadcast mint did NOT spend it: chain-truth from
+    // electrs, not from selection-internal state.
+    const mintTx = await getTx(out.txid);
+    const spentOutpoints = (mintTx.vin as { txid: string; vout: number }[]).map(v => `${v.txid}:${v.vout}`);
+    expect(spentOutpoints).not.toContain(catOutpoint);
+    // Exactly one funding input: the mint spends the single clean pick.
+    expect(spentOutpoints.length).toBe(1);
+  });
+
 });
