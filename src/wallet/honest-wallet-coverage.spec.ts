@@ -134,11 +134,11 @@ describe('Honest wallet coverage (audit gate)', () => {
     expect(violations).toEqual([]);
   });
 
-  it('no live roundtrip spec contradicts an Unsupported matrix claim (except documented binary-evidence cases)', () => {
+  it('no live roundtrip spec contradicts an Unsupported matrix claim — zero exceptions', () => {
     // The reverse direction: a green roundtrip spec for a capability the
     // matrix calls Unsupported is a live contradiction — either users
     // are denied a workable capability, or the spec proves something
-    // other than the shipping path and must be documented as such.
+    // other than the shipping path. Both are lies; neither is allowed.
     const { WALLET_MATRIX, WalletCapability, CapabilitySupport } = require('./wallet-capabilities');
     const SPEC_SUFFIX_BY_CAPABILITY: Record<string, string> = {
       [WalletCapability.Cat21Mint]: 'mint-roundtrip',
@@ -149,10 +149,6 @@ describe('Honest wallet coverage (audit gate)', () => {
       [WalletCapability.InscriptionParentChild]: 'inscribe-child-roundtrip',
       [WalletCapability.SignMessage]: 'sign-message-roundtrip',
     };
-    // No exemptions: every live spec must agree with the matrix. (The
-    // former alby-transfer SW-bypass spec was deleted with the rest of
-    // the bypass machinery — bypass evidence is not proof.)
-    const BINARY_EVIDENCE_ONLY = new Set<string>();
 
     const violations: string[] = [];
     for (const row of WALLET_MATRIX) {
@@ -161,13 +157,12 @@ describe('Honest wallet coverage (audit gate)', () => {
         const specFile = `${row.wallet}-${SPEC_SUFFIX_BY_CAPABILITY[capability]}.spec.ts`;
         const specPath = path.join(SPECS_DIR, specFile);
         if (!fs.existsSync(specPath)) continue;
-        if (BINARY_EVIDENCE_ONLY.has(specFile)) continue;
         const content = fs.readFileSync(specPath, 'utf8');
         const liveTests = (content.match(/\btest(?:\.only)?\(/g) ?? []).length;
         if (liveTests > 0) {
           violations.push(
             `${row.wallet}/${capability} is Unsupported but ${specFile} has ${liveTests} live test(s) — ` +
-            `reconcile the matrix or document the spec in BINARY_EVIDENCE_ONLY`,
+            `either the matrix is wrong or the spec proves a path users cannot take; fix the truth, not the gate`,
           );
         }
       }
