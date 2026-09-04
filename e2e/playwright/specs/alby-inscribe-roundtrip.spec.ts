@@ -19,12 +19,11 @@ import { seedAlbyAccount } from '../onboard-alby';
 /**
  * Full inscribe roundtrip with the real Alby Browser Extension.
  *
- * Same SW-message bypass as `alby-mint-roundtrip.spec.ts`: seed
- * Alby's account state directly via the LBE background-script
- * router, then sign the commit PSBT by calling the internal
- * `webbtc/signPsbt` route from an extension-origin page — bypassing
- * the React ConfirmSignPsbt popup whose confirm() never resolves in
- * headless CI.
+ * Account SEED goes via the LBE background-script router (Alby's
+ * real onboarding needs an OAuth/NWC backend CI cannot provide);
+ * SIGNING goes through the SHIPPING in-page path — alby.enable() +
+ * alby.webbtc.signPsbt() with the real ConfirmSignPsbt popup,
+ * auto-approved by the state-based handler.
  *
  * Alby's signPsbt is Taproot-only (`signTaprootInput` only); both
  * the inscribe funding input and the reveal recipient are P2TR on
@@ -94,13 +93,15 @@ test.beforeAll(async () => {
 
   await seedAlbyAccount(seedPage);
   await shot(seedPage, '00-after-seed').catch(() => undefined);
+  // Seeding done — signing uses the in-page provider, not this page.
+  await seedPage.close();
 });
 
 test.afterAll(async () => {
   await context?.close();
 });
 
-test('inscribe an artifact on regtest via Alby: build commit+reveal in SDK, sign commit via SW message, broadcast both via local electrs, verify via ordpool-parser', async () => {
+test('inscribe an artifact on regtest via Alby: build commit+reveal in SDK, sign commit in the REAL popup, broadcast both via local electrs, verify via ordpool-parser', async () => {
   test.setTimeout(360_000);
 
   // Auto-click any extension popup so alby.enable() goes through.
@@ -137,15 +138,15 @@ test('inscribe an artifact on regtest via Alby: build commit+reveal in SDK, sign
   await waitForElectrsSync(mineBlocks(1));
   const utxo = await waitForUtxoAt(connectInfo.address, Math.round(FUND_AMOUNT_BTC * 1e8));
 
-  // Build the commit + reveal via the SDK orchestrator. The reveal
-  // is already finalized by the orchestrator; Alby only signs the
-  // commit's funding input. The orchestrator returns the ephemeral
-  // key on `built.ephemeralPrivKeyHex` so the spec can rebuild
-  // alternate reveals if it wants (this happy-path test uses the
-  // default reveal as-is).
-  const built = await harness.evaluate((args) => {
-    return window.ordpoolSdkHarness.buildInscribePsbtForAlby(args);
-  }, {
+  // Build + sign via the SHIPPING path — the same runOperation route
+  // every other wallet uses: createInscribeTransactions builds commit
+  // + finalized reveal, then albySigner.signSingleFundingInput signs
+  // the commit via alby.enable() + alby.webbtc.signPsbt() — the REAL
+  // ConfirmSignPsbt popup, auto-approved by the handler above. Alby
+  // returns wire-format raw commit hex.
+  const built = await harness.evaluate((args) => window.ordpoolSdkHarness.runOperation(args), {
+    kind: 'inscribe' as const,
+    walletType: 'alby' as const,
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
     paymentAddress: connectInfo.address,
     paymentPublicKey: connectInfo.publicKey,
@@ -158,26 +159,9 @@ test('inscribe an artifact on regtest via Alby: build commit+reveal in SDK, sign
   expect(built.commitTxid).toMatch(/^[0-9a-f]{64}$/);
   expect(built.revealTxid).toMatch(/^[0-9a-f]{64}$/);
 
-  // Sign the commit PSBT via Alby's internal SW route — the same
-  // route mint uses. Returns wire-format raw tx hex.
-  const signResult = await seedPage.evaluate(async (psbtHex) => {
-    const c = (globalThis as unknown as { chrome: { runtime: {
-      sendMessage: (msg: unknown) => Promise<unknown>;
-    } } }).chrome;
-    return await c.runtime.sendMessage({
-      application: 'LBE',
-      prompt: true,
-      action: 'webbtc/signPsbt',
-      args: { psbt: psbtHex },
-      origin: { internal: true },
-    }) as { data?: { signed: string }; error?: string };
-  }, built.commitPsbtHex);
-  if (signResult.error || !signResult.data?.signed) {
-    throw new Error(`Alby webbtc/signPsbt failed: ${JSON.stringify(signResult)}`);
-  }
-  const commitHex = signResult.data.signed;
-
-  const commitTxid = await postTx(commitHex);
+  const commitTxid = await postTx(built.commitHex);
+  // Non-witness-byte pin: broadcast txid == txid computed from the
+  // unsigned commit, so Alby provably did not mutate non-witness bytes.
   expect(commitTxid).toBe(built.commitTxid);
   await waitForElectrsSync(mineBlocks(1));
   await waitForTxConfirmed(commitTxid);

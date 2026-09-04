@@ -48,10 +48,6 @@ declare global {
        * / Phantom) are handled inside this method; specs stay
        * wallet-agnostic.
        *
-       * Alby has its own build-only entry (`buildInscribePsbtForAlby`
-       * + buildCat21MintPsbtForAlby`) because its public RPC is
-       * structurally unreachable from the harness origin — see
-       * `alby-mint-roundtrip.spec.ts` for the SW-bypass writeup.
        * Phantom mint / inscribe specs assert connect-step rejection
        * and never reach runOperation.
        */
@@ -156,7 +152,6 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
-      buildInscribePsbtForAlby(input: InscribeRequest): { commitPsbtHex: string; revealHex: string; commitTxid: string; revealTxid: string; ephemeralPrivKeyHex: string; ephemeralPubkeyXonlyHex: string };
       detectAlby(): boolean;
       connectAlby(): Promise<{
         type: KnownOrdinalWalletType;
@@ -166,19 +161,6 @@ declare global {
         paymentPublicKey: string;
         signingSupported: boolean;
       }>;
-      /**
-       * Alby mint — pure PSBT build (no signing). Returns the
-       * unfinalized PSBT bytes the Alby spec then hands to Alby's
-       * background-script signPsbt. Builds via the real SDK API
-       * (`createTransaction(KnownOrdinalWalletType.alby, ...)`).
-       */
-      buildCat21MintPsbtForAlby(input: {
-        utxo: { txid: string; vout: number; value: number };
-        paymentAddress: string;
-        paymentPublicKey: string;
-        recipientAddress: string;
-        feeSats: number;
-      }): { psbtHex: string };
     };
   }
 }
@@ -973,54 +955,6 @@ function orchestrateInscribe(input: InscribeRequest): {
 
 
 
-window.ordpoolSdkHarness.buildInscribePsbtForAlby = (input: InscribeRequest) => {
-  // Alby's signing path runs through the REAL SDK in the spec (NWC
-  // signMessage doesn't expose signPsbt; Alby Hub does). The harness
-  // only ships the unsigned commit PSBT + the reveal artifacts; the
-  // spec hands the PSBT to Hub via Alby's API and finalizes there.
-  const o = orchestrateInscribe(input);
-  return {
-    commitPsbtHex: bytesToHex(o.commitPsbt),
-    revealHex: o.revealHex,
-    commitTxid: o.commitTxid,
-    revealTxid: o.revealTxid,
-    ephemeralPrivKeyHex: o.ephemeralPrivKeyHex,
-    ephemeralPubkeyXonlyHex: o.ephemeralPubkeyXonlyHex,
-  };
-};
-
-/**
- * Alby mint via the REAL SDK API. Goes through `createTransaction`
- * with the actual walletType — the universal address-format-driven
- * helper produces a P2TR input shape with `sighashType` OMITTED
- * (SIGHASH_DEFAULT, BIP-341-equivalent to SIGHASH_ALL on key-path
- * spends), which is exactly what Alby's bitcoinjs-lib signer wants.
- *
- * No sighash workaround needed at the harness layer — the SDK
- * itself does the right thing now.
- */
-window.ordpoolSdkHarness.buildCat21MintPsbtForAlby = (input) => {
-  const paymentPubkey = hexToBytes(input.paymentPublicKey);
-  const txnOutput: TxnOutput = {
-    txid: input.utxo.txid,
-    vout: input.utxo.vout,
-    value: input.utxo.value,
-  };
-  const result = createTransaction(
-    KnownOrdinalWalletType.alby,
-    input.recipientAddress,
-    txnOutput,
-    paymentPubkey,
-    input.paymentAddress,
-    BigInt(input.feeSats),
-    false,
-    Network.Regtest,
-  );
-  const psbtHex = bytesToHex(result.tx.toPSBT());
-  log('mint.psbt-built-for-alby', { bytes: psbtHex.length / 2, fee: input.feeSats });
-  return { psbtHex };
-};
-
 /* ──────────────────────────  runOperation  ────────────────────────── */
 
 /**
@@ -1112,11 +1046,6 @@ window.ordpoolSdkHarness.signMessage = async (input: { walletType: KnownOrdinalW
 };
 
 window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promise<RunOperationResult> => {
-  if (input.walletType === KnownOrdinalWalletType.alby) {
-    throw new Error(
-      'runOperation: Alby requires the SW-bypass path. Use buildCat21MintPsbtForAlby / buildInscribePsbtForAlby and sign via seedPage.',
-    );
-  }
   if (input.walletType === KnownOrdinalWalletType.phantom) {
     throw new Error(
       'runOperation: Phantom v26.x SW lacks btc_* handlers; the connect step fails before any sign happens. Specs assert connect rejection.',

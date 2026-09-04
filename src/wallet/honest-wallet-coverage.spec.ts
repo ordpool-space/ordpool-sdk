@@ -76,7 +76,9 @@ describe('Honest wallet coverage (audit gate)', () => {
     // construction). Split the harness into `window.ordpoolSdkHarness.X`
     // sections and enforce per section.
     const sections = src.split(/window\.ordpoolSdkHarness\./).slice(1);
-    expect(sections.length).toBeGreaterThan(3);
+    // Sanity that the split found the assignment sections at all: the
+    // audited runOperation must be among them.
+    expect(sections.map(sec => (sec.match(/^(\w+)/) ?? [])[1])).toContain('runOperation');
     const violations: string[] = [];
     for (const section of sections) {
       const name = (section.match(/^(\w+)/) ?? [])[1] ?? '(unnamed)';
@@ -147,14 +149,10 @@ describe('Honest wallet coverage (audit gate)', () => {
       [WalletCapability.InscriptionParentChild]: 'inscribe-child-roundtrip',
       [WalletCapability.SignMessage]: 'sign-message-roundtrip',
     };
-    // alby-transfer-roundtrip drives Alby's INTERNAL service-worker
-    // route, proving the BINARY can sign a multi-input transfer when
-    // driven from an extension-origin page. The in-page API the SDK
-    // ships exposes no per-input signing, so the capability stays
-    // Unsupported: the spec is binary-capability evidence, not a
-    // shipping-path proof. Documented here so the contradiction is a
-    // decision, not an oversight.
-    const BINARY_EVIDENCE_ONLY = new Set(['alby-transfer-roundtrip.spec.ts']);
+    // No exemptions: every live spec must agree with the matrix. (The
+    // former alby-transfer SW-bypass spec was deleted with the rest of
+    // the bypass machinery — bypass evidence is not proof.)
+    const BINARY_EVIDENCE_ONLY = new Set<string>();
 
     const violations: string[] = [];
     for (const row of WALLET_MATRIX) {

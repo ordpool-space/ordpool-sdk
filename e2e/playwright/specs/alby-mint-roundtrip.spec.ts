@@ -61,13 +61,10 @@ const FUND_AMOUNT_BTC = 0.001;
 
 let context: BrowserContext;
 let extensionId: string;
-// Long-lived extension-origin page kept open after the seed step so
-// we can fire chrome.runtime.sendMessage at the SW's internal routes
-// (webbtc/signPsbt) directly, bypassing Alby's prompt UI altogether.
-// Iter 107 finding: the public/prompt path's React popup never
-// returns from confirm(), but the internal direct route is the same
-// code Alby's own popup calls — and works fine from any extension-
-// origin page.
+// Extension-origin page used ONLY for the account seed (Alby's real
+// onboarding requires an OAuth/NWC backend CI cannot provide). All
+// SIGNING goes through the shipping in-page path: alby.enable() +
+// alby.webbtc.signPsbt() with the real ConfirmSignPsbt popup.
 let seedPage: Page;
 
 async function shot(p: Page, name: string): Promise<void> {
@@ -125,8 +122,8 @@ test.beforeAll(async () => {
   await seedAlbyAccount(seedPage);
 
   await shot(seedPage, '00-after-seed').catch(() => undefined);
-  // KEEP seedPage open — the mint test uses it to talk to the SW
-  // directly for signing. Closing it is done in afterAll.
+  // Seeding done — signing uses the in-page provider, not this page.
+  await seedPage.close();
 });
 
 test.afterAll(async () => {
@@ -143,6 +140,12 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   // signPsbt confirmation that follows.
   let popupCount = 0;
   context.on('page', async (popup) => {
+    // Diagnostic: surface the popup page's own console (ConfirmSignPsbt
+    // logs console.error when its confirm() rejects) in the CI log.
+    popup.on('console', (m) => {
+      // eslint-disable-next-line no-console
+      console.log(`[alby-popup console] ${m.type()}: ${m.text().slice(0, 300)}`);
+    });
     const idx = ++popupCount;
     try {
       await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
@@ -249,74 +252,31 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   const utxo = await waitForUtxoAt(connectInfo.address, Math.round(FUND_AMOUNT_BTC * 1e8));
   console.log(`[alby-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
-  // Build via the real SDK. The mint pipeline dispatches on
-  // address format via buildInputScript and omits sighashType on
-  // Taproot inputs (BIP-341-equivalent to SIGHASH_ALL on the wire
-  // for key-path spends). Alby exercises the same
-  // `createTransaction(KnownOrdinalWalletType.alby, ...)` path as
-  // every other wallet.
-  const psbtBuildResult = await harness.evaluate((args) => {
-    return window.ordpoolSdkHarness.buildCat21MintPsbtForAlby(args);
-  }, {
+  // Sign via the SHIPPING path — the same runOperation route every
+  // other wallet uses: createTransaction(alby, ...) → albySigner.
+  // signSingleFundingInput → alby.enable() + alby.webbtc.signPsbt().
+  // That call opens Alby's REAL ConfirmSignPsbt popup, which the
+  // context page-handler above auto-approves (trial-click waits out
+  // the error toast; the click retries until the popup closes). Alby
+  // signs every input with its taproot key, finalizes, and returns
+  // wire-format raw tx hex, which the harness captures via the
+  // broadcast callback.
+  const signed = await harness.evaluate((args) => window.ordpoolSdkHarness.runOperation(args), {
+    kind: 'mint' as const,
+    walletType: 'alby' as const,
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
     paymentAddress: connectInfo.address,
     paymentPublicKey: connectInfo.publicKey,
     recipientAddress: connectInfo.address, // self-recipient for the smoke roundtrip
     feeSats: 1500,
-  }).catch((e) => ({ error: String(e) } as { psbtHex?: string; error?: string }));
-  if ('error' in psbtBuildResult && psbtBuildResult.error) {
-    throw new Error(`harness PSBT build failed: ${psbtBuildResult.error}`);
-  }
-  const psbtHex = (psbtBuildResult as { psbtHex: string }).psbtHex;
-  console.log(`[alby-mint] PSBT hex length = ${psbtHex.length}`);
+  });
+  console.log(`[alby-mint] signed tx hex (${signed.txHex.length} chars)`);
 
-  // Sign the PSBT via Alby. Reading
-  // background-script/bitcoin/index.ts signPsbt(): it parses the
-  // PSBT, signs every input with the Taproot key derived from the
-  // mnemonic, FINALIZES, and returns extractTransaction().toHex()
-  // — i.e. wire-format raw tx hex, NOT signed-PSBT hex. The
-  // {signed: <string>} response from the WebBTC layer wraps that
-  // wire-tx hex.
-  // Iter 107 breakthrough: bypass Alby's prompt UI entirely.
-  //
-  // The public alby.webbtc.signPsbt() routes through:
-  //   inpage → content-script → SW (public/webbtc/signPsbtWithPrompt)
-  //   → openPrompt → React ConfirmSignPsbt → confirm()
-  //   → api.bitcoin.signPsbt() → SW (webbtc/signPsbt)
-  //
-  // The popup's confirm() never returns from its await (iter 105's
-  // 5+ iterations of debugging confirmed). But the LAST link in
-  // that chain — webbtc/signPsbt — is the same internal route
-  // Alby's own popup calls. It runs bitcoinjs-lib synchronously
-  // and returns {data: {signed}}.
-  //
-  // seedPage is still on options.html (extension-origin), so it
-  // can fire chrome.runtime.sendMessage directly to that internal
-  // route. No React popup, no msg.reply round-trip, no openPrompt
-  // listener race. Same code path Alby's own popup would take if
-  // it could complete its post-sign UI step.
-  const signResult = await seedPage.evaluate(async (psbtHex) => {
-    const c = (globalThis as unknown as { chrome: { runtime: {
-      sendMessage: (msg: unknown) => Promise<unknown>;
-    } } }).chrome;
-    return await c.runtime.sendMessage({
-      application: 'LBE',
-      prompt: true,
-      action: 'webbtc/signPsbt',
-      args: { psbt: psbtHex },
-      origin: { internal: true },
-    }) as { data?: { signed: string }; error?: string };
-  }, psbtHex);
-  console.log(`[alby-mint] signPsbt response = ${JSON.stringify(signResult).slice(0, 400)}`);
-
-  if (signResult.error || !signResult.data?.signed) {
-    throw new Error(`Alby webbtc/signPsbt failed: ${JSON.stringify(signResult)}`);
-  }
-  // Per Alby's bitcoin/index.ts signPsbt(): signs every input,
-  // finalizes, returns extractTransaction().toHex() — i.e. wire-
-  // format raw tx hex, not signed-PSBT hex.
-  const signed = signResult.data.signed;
-  const broadcastTxid = await postTx(signed);
+  const broadcastTxid = await postTx(signed.txHex);
+  // Non-witness-byte pin: the broadcast txid must equal the txid
+  // computed from the UNSIGNED PSBT (SegWit txids exclude witness
+  // data), so Alby provably did not mutate any non-witness byte.
+  expect(broadcastTxid).toBe(signed.expectedTxid);
   console.log(`[alby-mint] broadcast txid = ${broadcastTxid}`);
   expect(broadcastTxid).toMatch(/^[0-9a-f]{64}$/);
 
