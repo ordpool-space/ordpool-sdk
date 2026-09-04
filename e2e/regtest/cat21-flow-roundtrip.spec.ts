@@ -28,7 +28,7 @@
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { base58, base64 } from '@scure/base';
+import { base58, base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { CAT21_POSTAGE_SATS } from '../../src/cat21-protocol/cat21-postage';
@@ -494,6 +494,55 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     // ordinal (wallet HARD RULE #1).
     expect(ordTx.lockTime).toBe(0);
     expect(sdkTx.lockTime).toBe(21);
+  });
+
+  it('step 3d: accept-side cross-compat — the LIVE ord-built PSBT passes the SDK validator, B signs it, bitcoind accepts the settlement', () => {
+    // The flagship 'buy an inscription from stock ord' claim, proven on
+    // the accept side with the REAL artifact: a fundrawtransaction-built
+    // `ord wallet offer create` PSBT (Core-signed buyer inputs arrive
+    // FINALIZED, input order unpinned, lockTime=0) — not a hand-built
+    // fixture. testmempoolaccept instead of broadcast: this settlement
+    // spends the same seller UTXO as step 4's SDK settlement, and only
+    // one of the two may confirm; allowed:true from bitcoind is the
+    // consensus + standardness proof without consuming the UTXO.
+    const ordOffer = ordCreateOffer(inscriptionId, PRICE_SATS, 1);
+
+    // 1. The SDK's seller-side validator accepts the stock-ord artifact.
+    const validation = validateCat21BuyOfferPsbt({
+      psbt: base64.decode(ordOffer.psbt),
+      expectedSellerUtxo: catUtxoAfterTransfer,
+      floorPriceSats: PRICE_SATS,
+      expectedSellerPaymentAddress: toPaymentAddress(bAddress),
+      network: Network.Regtest,
+    });
+    expect(validation.ok).toBe(true);
+    if (validation.ok) {
+      expect(validation.pricePaidSats).toBe(PRICE_SATS);
+    }
+
+    // 2. B (seller) signs the cat input. fundrawtransaction appends the
+    // buyer's funding inputs in Core-chosen order, so locate the seller
+    // input by outpoint, not by index.
+    const tx = btc.Transaction.fromPSBT(base64.decode(ordOffer.psbt));
+    const sellerTxidBytes = hex.decode(catUtxoAfterTransfer.txid).reverse();
+    let sellerIdx = -1;
+    for (let i = 0; i < tx.inputsLength; i++) {
+      const input = tx.getInput(i);
+      if (input.index !== catUtxoAfterTransfer.vout || !input.txid) continue;
+      if (input.txid.length === sellerTxidBytes.length && input.txid.every((byte, j) => byte === sellerTxidBytes[j])) {
+        sellerIdx = i;
+        break;
+      }
+    }
+    expect(sellerIdx).toBeGreaterThanOrEqual(0);
+    signP2WPKHInputAt(tx, sellerIdx, bPriv);
+    // Core delivered the buyer inputs with finalScriptWitness already
+    // set; only the freshly signed seller input still needs finalizing.
+    tx.finalizeIdx(sellerIdx);
+
+    // 3. bitcoind blesses the fully signed settlement.
+    const accept = JSON.parse(rpc('testmempoolaccept', JSON.stringify([tx.hex])));
+    expect(accept[0].allowed).toBe(true);
   });
 
   it('step 4: B signs the buyer-built offer; cat returns to A', async () => {
