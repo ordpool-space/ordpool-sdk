@@ -56,6 +56,8 @@ export interface TransferSimulationView {
   feeSats: number;
   changeSats: number;
   fundingUtxo: CoreFundingUtxo;
+  /** Output-0 size the build will emit (= the incoming cat value under PRESERVE, or the explicit targetPostageSats). */
+  catOutputSats: number;
 }
 
 export interface TransferSnapshot {
@@ -64,6 +66,12 @@ export interface TransferSnapshot {
   recipientAddress: string | null;
   feeRate: number | null;
   selectedFundingUtxo: TxnOutput | null;
+  /**
+   * Optional cat-UTXO resize (GROW to rescue a sub-dust cat or
+   * self-provision a cold wallet; SHRINK to trim a chunky one).
+   * null = PRESERVE the incoming size (the golden-rule default).
+   */
+  targetPostageSats: number | null;
   // Candidates are lifted back to the consumer's TxnOutput domain (carrying
   // `status`, `transactionHex`, …) so a picker UI renders them directly.
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
@@ -91,6 +99,7 @@ export class Cat21TransferOrchestrator {
     recipientAddress: null,
     feeRate: null,
     selectedFundingUtxo: null,
+    targetPostageSats: null,
     fundingRecommendation: EMPTY_RECOMMENDATION,
     simulation: null,
     errorMessage: null,
@@ -117,7 +126,7 @@ export class Cat21TransferOrchestrator {
     if (changed) {
       this.patch({
         catUtxo: null, recipientAddress: null, feeRate: null, selectedFundingUtxo: null,
-        errorMessage: null, successTxId: null,
+        targetPostageSats: null, errorMessage: null, successTxId: null,
       });
     }
     if (!wallet) {
@@ -155,6 +164,19 @@ export class Cat21TransferOrchestrator {
 
   setSelectedFundingUtxo(utxo: TxnOutput | null): void {
     this.patch({ selectedFundingUtxo: utxo });
+    void this.recompute();
+  }
+
+  /**
+   * Opt-in cat-UTXO resize. A positive value GROWs (pad output 0 up to the
+   * target: rescue a sub-dust cat, or self-provision a cold wallet) or
+   * SHRINKs (trim a chunky cat, surplus self-funds the fee) — the builder
+   * enforces the recipient's dust floor on any explicit target. null
+   * restores the PRESERVE default (output 0 = the incoming cat value).
+   */
+  setTargetPostageSats(sats: number | null): void {
+    if (sats !== null && (!Number.isFinite(sats) || sats <= 0)) return;
+    this.patch({ targetPostageSats: sats });
     void this.recompute();
   }
 
@@ -217,7 +239,7 @@ export class Cat21TransferOrchestrator {
   reset(): void {
     this.patch({
       catUtxo: null, recipientAddress: null, feeRate: null, selectedFundingUtxo: null,
-      simulation: null, errorMessage: null, successTxId: null,
+      targetPostageSats: null, simulation: null, errorMessage: null, successTxId: null,
       state: this.wallet ? 'ready' : 'idle',
     });
   }
@@ -250,7 +272,7 @@ export class Cat21TransferOrchestrator {
       fundingRecommendation: liftRecommendationByOutpoint(sim.recommendation, this.utxos),
       simulation:
         sim.status === 'ready' && sim.fundingUtxo && sim.feeSats != null
-          ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, fundingUtxo: sim.fundingUtxo }
+          ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, fundingUtxo: sim.fundingUtxo, catOutputSats: sim.catOutputSats ?? this.snap.catUtxo!.value }
           : null,
     });
   }
@@ -272,6 +294,7 @@ export class Cat21TransferOrchestrator {
       recipientAddress: recipient,
       feeRatePerVbyte: feeRate,
       selectedFundingUtxo: this.snap.selectedFundingUtxo ? toCore(this.snap.selectedFundingUtxo) : undefined,
+      targetPostageSats: this.snap.targetPostageSats ?? undefined,
     };
   }
 

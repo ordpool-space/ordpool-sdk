@@ -206,3 +206,51 @@ describe('Cat21TransferOrchestrator (framework-agnostic)', () => {
     expect(o.getSnapshot().simulation).toBeNull();
   });
 });
+
+describe('Cat21TransferOrchestrator.setTargetPostageSats (GROW / SHRINK / PRESERVE)', () => {
+  it('PRESERVE default: no target set => simulation catOutputSats equals the incoming cat value', async () => {
+    const o = new Cat21TransferOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.simulation !== null);
+    expect(s.targetPostageSats).toBeNull();
+    expect(s.simulation?.catOutputSats).toBe(546);
+  });
+
+  it('GROW: setTargetPostageSats(10_000) => output 0 is padded to exactly 10 000 sats', async () => {
+    const o = new Cat21TransferOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    await waitFor(o, (x) => x.simulation !== null);
+    o.setTargetPostageSats(10_000);
+    const s = await waitFor(o, (x) => x.simulation?.catOutputSats === 10_000);
+    expect(s.targetPostageSats).toBe(10_000);
+    expect(s.simulation?.catOutputSats).toBe(10_000);
+  });
+
+  it('setTargetPostageSats(null) restores PRESERVE (re-simulates back to the incoming value)', async () => {
+    const o = new Cat21TransferOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    await waitFor(o, (x) => x.simulation !== null);
+    o.setTargetPostageSats(10_000);
+    await waitFor(o, (x) => x.simulation?.catOutputSats === 10_000);
+    o.setTargetPostageSats(null);
+    const s = await waitFor(o, (x) => x.simulation?.catOutputSats === 546);
+    expect(s.targetPostageSats).toBeNull();
+  });
+
+  it('rejects a non-positive target (snapshot unchanged)', async () => {
+    const o = new Cat21TransferOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setTargetPostageSats(0);
+    o.setTargetPostageSats(-5);
+    expect(o.getSnapshot().targetPostageSats).toBeNull();
+  });
+});
