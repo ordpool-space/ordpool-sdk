@@ -62,11 +62,9 @@ export function verifyBip322Signature(args: {
 }): VerifyBip322SignatureResult {
   const { address, message, signatureBase64 } = args;
 
-  // Decode the address to its scriptPubKey. Two SDK-supported
-  // networks (mainnet + testnet3); the HRP (`bc`/`tb`) implies the
-  // network. bcrt (regtest) falls through — cats are mainnet-only
-  // in production, and regtest wallets don't produce shareable
-  // artifacts.
+  // Decode the address to its scriptPubKey. The HRP (`bc`/`tb`/`bcrt`)
+  // implies the network; regtest is accepted so the Bazaar backend can
+  // verify BIP-322 sessions from a regtest wallet in the E2E suite.
   let scriptPubKey: Uint8Array;
   let xOnlyPubkey: Uint8Array;
   try {
@@ -159,9 +157,17 @@ export function verifyBip322Signature(args: {
 
 // ---------- Internals (shared with verifyListingSignature) ---------------
 
+// regtest (bcrt) shares mainnet's script encoding; only the bech32 HRP
+// differs. @scure/btc-signer ships mainnet (`bc`) and testnet (`tb`) but no
+// regtest constant, so we supply the descriptor. Needed so a verifier (the
+// Bazaar backend) can accept BIP-322 sessions from a regtest wallet in the
+// E2E chain-truth suite. Inert for mainnet callers — a `bc1p…` address never
+// reaches this entry.
+const REGTEST_NETWORK = { bech32: 'bcrt', pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
+
 function decodeP2TRAddress(address: string): { scriptPubKey: Uint8Array; xOnlyPubkey: Uint8Array } {
   let scriptPubKey: Uint8Array | undefined;
-  for (const network of [btc.NETWORK, btc.TEST_NETWORK]) {
+  for (const network of [btc.NETWORK, btc.TEST_NETWORK, REGTEST_NETWORK]) {
     try {
       const decoded = btc.Address(network).decode(address);
       scriptPubKey = btc.OutScript.encode(decoded);
@@ -171,7 +177,9 @@ function decodeP2TRAddress(address: string): { scriptPubKey: Uint8Array; xOnlyPu
     }
   }
   if (!scriptPubKey) {
-    throw new Error(`address ${JSON.stringify(address)} does not decode against mainnet or testnet3`);
+    throw new Error(
+      `address ${JSON.stringify(address)} does not decode against mainnet, testnet3, or regtest`
+    );
   }
   if (scriptPubKey.length !== 34 || scriptPubKey[0] !== 0x51 || scriptPubKey[1] !== 0x20) {
     throw new Error(`not p2tr: scriptPubKey is not a taproot witness program`);

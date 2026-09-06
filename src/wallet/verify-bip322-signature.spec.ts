@@ -45,3 +45,29 @@ describe('verifyBip322Signature — real cat21wallet (Leather-fork) P2TR vector'
     if (!r.ok) expect(r.reason).toBe('signature-does-not-verify');
   });
 });
+
+describe('verifyBip322Signature — regtest (bcrt) P2TR address decoding', () => {
+  // regtest shares mainnet's script encoding; only the bech32 HRP differs.
+  const REGTEST = { bech32: 'bcrt', pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
+  const bcrtAddress = btc.p2tr(
+    hex.decode('f9308a019258c31049344f85f89d5229b531c845836f99b08601f113bce036f9'),
+    undefined,
+    REGTEST
+  ).address!;
+
+  it('decodes a bcrt (regtest) address and reaches signature verification', () => {
+    // A bcrt address used to be rejected as `invalid-address` before its
+    // signature was ever checked. With regtest support it decodes, so an
+    // unrelated signature must fail at VERIFICATION, not at decoding. Real
+    // regtest BIP-322 roundtrips are proven end to end by the wallet's cat21
+    // create-offer chain-truth e2e against the real Bazaar backend.
+    const r = verifyBip322Signature({
+      address: bcrtAddress,
+      message: 'ordpool regtest bip322 decode probe',
+      signatureBase64:
+        'AUAzQKkIhYTU9toEwG71UwPpYXdd0I6w1NK+VLV/KTZApvxu+c+Cra5fc5rDQ5TSr+tcSxfsYJOblv5yEDNPMCDQ',
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toBe('signature-does-not-verify');
+  });
+});
