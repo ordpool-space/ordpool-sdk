@@ -165,7 +165,9 @@ describe('buildCat21MintPsbt', () => {
       })
     );
     const tx = btc.Transaction.fromPSBT(result.psbt);
-    expect(tx.getInput(0).tapInternalKey).toBeDefined();
+    // The x-only key must be the one we supplied, not merely present: a
+    // wrong 32-byte value still satisfies a presence check but breaks signing.
+    expect(tx.getInput(0).tapInternalKey).toEqual(publicKey.slice(1, 33));
   });
 
   // Finding #12 — the post-build sequence check used to `continue`

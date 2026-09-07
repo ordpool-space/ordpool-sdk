@@ -156,8 +156,7 @@ describe('getDummyLegacyTransaction', () => {
 
 describe('proof that we can create+sign a taproot input + output with dummy data', () => {
 
-  // will first throw an exception (Invalid checksum!), but the second try should pass
-  it('should execute flawlessly', () => {
+  it('signs a taproot key-path input and finalizes it into a single Schnorr witness', () => {
 
     const { dummyPrivateKey, xOnlyDummyPublicKey } = getDummyKeypair(btc.TEST_NETWORK);
     const tx = new btc.Transaction();
@@ -178,6 +177,13 @@ describe('proof that we can create+sign a taproot input + output with dummy data
     // Sign the input with the dummy private key
     tx.signIdx(dummyPrivateKey, 0);
     tx.finalize();
+
+    // Positive proof the key-path spend produced a real witness: exactly one
+    // Schnorr signature (64 bytes, or 65 when a sighash byte is appended).
+    // Without this the test only proved "nothing threw".
+    const witness = tx.getInput(0).finalScriptWitness ?? [];
+    expect(witness.length).toBe(1);
+    expect([64, 65]).toContain(witness[0].length);
   });
 });
 

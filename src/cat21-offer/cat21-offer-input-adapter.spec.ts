@@ -45,8 +45,9 @@ describe('prepareBuyOfferBuyerInput', () => {
       isSimulation: false,
       network: NETWORK,
     });
-    expect(input.tapInternalKey).toBeDefined();
-    expect(input.tapInternalKey!.length).toBe(32);
+    // Exact x-only key (drops the 33-byte prefix), not just "32 bytes present":
+    // a wrong value of the right length would pass a length-only check.
+    expect(input.tapInternalKey).toEqual(PUBKEY.slice(1, 33));
   });
 
   it('returns P2SH-wrapped shape for a P2SH-P2WPKH payment address (with redeemScript)', () => {

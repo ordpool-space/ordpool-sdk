@@ -188,7 +188,9 @@ describe('buildCat21BuyOfferPsbt', () => {
     });
     const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(args).psbt);
     const buyerInput = tx.getInput(1);
-    expect(buyerInput.tapInternalKey).toBeDefined();
+    // The x-only key must be the one we supplied, not merely present: a
+    // wrong 32-byte value still satisfies a presence check but breaks signing.
+    expect(buyerInput.tapInternalKey).toEqual(publicKey.slice(1, 33));
   });
 });
 
