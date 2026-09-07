@@ -37,7 +37,8 @@ import http from 'node:http';
 import { URL } from 'node:url';
 
 const PORT = Number(process.env.PORT ?? 8999);
-const ELECTRS_URL = process.env.ELECTRS_URL ?? 'http://localhost:3000';
+const ELECTRS_URL =
+  process.env.ELECTRS_URL ?? `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3000}`;
 // Optional. Set in the ordpool workflow because that frontend's
 // StateService.recommendedFees$ is fed by mempool's WebSocket
 // pipeline, not by the SDK's REST poll. The cat21-indexer workflow

@@ -70,7 +70,10 @@ services:
     volumes:
       - electrs-data:/data
     ports:
-      - "3000:3000"     # Esplora HTTP API
+      # Host port is configurable so the regtest stack does not squat the
+      # developer's port 3000 (the NestJS default). Container side stays
+      # 3000 — that is the Esplora default every consumer config expects.
+      - "${E2E_ELECTRS_HOST_PORT:-3000}:3000"   # Esplora HTTP API
       - "50001:50001"   # Electrum protocol
     healthcheck:
       # debian-slim runtime has no wget/curl; bash /dev/tcp probes the port.

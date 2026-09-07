@@ -6,7 +6,9 @@
 
 import { execFileSync } from 'node:child_process';
 
-const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ?? 'http://localhost:3000';
+const ELECTRS_URL =
+  process.env.REGTEST_ELECTRS_URL ??
+  `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3000}`;
 const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 // Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
 // service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`

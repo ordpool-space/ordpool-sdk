@@ -23,6 +23,11 @@
 
 set -euo pipefail
 
+# Host port electrs is published on. Container side stays 3000; only the host
+# mapping moves, so a developer can keep port 3000 for their own services.
+# Must match docker-compose.regtest.yml's ${E2E_ELECTRS_HOST_PORT:-3000}.
+ELECTRS_HTTP_URL="http://localhost:${E2E_ELECTRS_HOST_PORT:-3000}"
+
 HERE="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_BASE=( -f "$HERE/docker-compose.consumer-environment.yml" )
 PROFILES=()
@@ -109,7 +114,7 @@ fi
 # --- wait for electrs to catch up to bitcoind's tip ---
 TIP=$($RPC getblockcount)
 for _ in $(seq 1 30); do
-  if [ "$(curl -s http://localhost:3000/blocks/tip/height || echo 0)" -ge "$TIP" ]; then break; fi
+  if [ "$(curl -s "${ELECTRS_HTTP_URL}/blocks/tip/height" || echo 0)" -ge "$TIP" ]; then break; fi
   sleep 1
 done
 
@@ -141,7 +146,7 @@ cat <<EOF
     "zmqRawTx": "tcp://localhost:28333"
   },
   "electrs": {
-    "httpUrl": "http://localhost:3000",
+    "httpUrl": "${ELECTRS_HTTP_URL}",
     "electrumRpcUrl": "tcp://localhost:50001"
   },
   "mariadb": {
