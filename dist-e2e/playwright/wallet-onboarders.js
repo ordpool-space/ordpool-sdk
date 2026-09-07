@@ -25,7 +25,7 @@ exports.walletOnboarders = {
             await (0, onboard_xverse_1.onboardXverse)(ctx, id);
             await (0, onboard_xverse_1.primeAndSwitchToRegtest)(ctx, id);
             const electrsUrl = process.env.XVERSE_REGTEST_ELECTRS_URL ??
-                `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3000}`;
+                `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
             await (0, onboard_xverse_1.overrideRegtestElectrsUrl)(ctx, id, electrsUrl);
         },
         password: wallet_test_vectors_1.PASSWORD_BY_WALLET.xverse,

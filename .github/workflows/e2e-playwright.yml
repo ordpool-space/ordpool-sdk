@@ -283,12 +283,12 @@ jobs:
 
       - name: Mine 101 blocks (coinbase maturity) + verify electrs is indexing
         env:
-          REGTEST_ELECTRS_URL: http://localhost:3000
+          REGTEST_ELECTRS_URL: http://localhost:3010
         run: |
           bash e2e/regtest-bootstrap.sh > /tmp/regtest-bootstrap.json
           cat /tmp/regtest-bootstrap.json
           for i in {1..60}; do
-            if curl -fsS http://localhost:3000/blocks/tip/height >/dev/null; then
+            if curl -fsS http://localhost:3010/blocks/tip/height >/dev/null; then
               echo "electrs ready"
               break
             fi

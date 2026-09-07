@@ -25,8 +25,8 @@ set -euo pipefail
 
 # Host port electrs is published on. Container side stays 3000; only the host
 # mapping moves, so a developer can keep port 3000 for their own services.
-# Must match docker-compose.regtest.yml's ${E2E_ELECTRS_HOST_PORT:-3000}.
-ELECTRS_HTTP_URL="http://localhost:${E2E_ELECTRS_HOST_PORT:-3000}"
+# Must match docker-compose.regtest.yml's ${E2E_ELECTRS_HOST_PORT:-3010}.
+ELECTRS_HTTP_URL="http://localhost:${E2E_ELECTRS_HOST_PORT:-3010}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_BASE=( -f "$HERE/docker-compose.consumer-environment.yml" )

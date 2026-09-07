@@ -99,7 +99,7 @@ services:
     volumes:
       - electrs-data:/data
     ports:
-      - "3000:3000"
+      - "${E2E_ELECTRS_HOST_PORT:-3010}:3000"   # Esplora HTTP API (host 3010: 3000 stays free for local dev servers)
       - "50001:50001"
     healthcheck:
       # debian-slim runtime has no wget/curl/nc; bash /dev/tcp socket

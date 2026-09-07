@@ -31,14 +31,14 @@
  *
  * Zero npm deps; uses node:http only. Run as:
  *
- *   PORT=8999 ELECTRS_URL=http://localhost:3000 node fees-electrs-stub.mjs
+ *   PORT=8999 ELECTRS_URL=http://localhost:3010 node fees-electrs-stub.mjs
  */
 import http from 'node:http';
 import { URL } from 'node:url';
 
 const PORT = Number(process.env.PORT ?? 8999);
 const ELECTRS_URL =
-  process.env.ELECTRS_URL ?? `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3000}`;
+  process.env.ELECTRS_URL ?? `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
 // Optional. Set in the ordpool workflow because that frontend's
 // StateService.recommendedFees$ is fed by mempool's WebSocket
 // pipeline, not by the SDK's REST poll. The cat21-indexer workflow

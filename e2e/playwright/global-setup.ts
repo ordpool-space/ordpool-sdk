@@ -92,7 +92,7 @@ export default async function globalSetup(): Promise<void> {
     // getAddress, no API calls) but matters for signTransaction.
     const electrsUrl =
       process.env.XVERSE_REGTEST_ELECTRS_URL ??
-      `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3000}`;
+      `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
     await overrideRegtestElectrsUrl(context, extensionId, electrsUrl);
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] overrode bitcoin-regtest.electrsApiUrl = ${electrsUrl}`);

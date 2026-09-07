@@ -37,7 +37,7 @@ export const walletOnboarders: Record<string, WalletOnboarder> = {
       await primeAndSwitchToRegtest(ctx, id);
       const electrsUrl =
         process.env.XVERSE_REGTEST_ELECTRS_URL ??
-        `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3000}`;
+        `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
       await overrideRegtestElectrsUrl(ctx, id, electrsUrl);
     },
     password: PASSWORD_BY_WALLET.xverse,

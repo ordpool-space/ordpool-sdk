@@ -34,7 +34,7 @@ const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
 const ELECTRS_URL =
   process.env.REGTEST_ELECTRS_URL ??
-  `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3000}`;
+  `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
 
 /** Regtest WIF → raw 32-byte private key (version byte 0xef, compressed). */
 function wifToPrivateKey(wif: string): Uint8Array {
