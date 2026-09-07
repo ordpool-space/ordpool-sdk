@@ -19,12 +19,12 @@ import { Network, toScureNetwork } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import { UtxoContentScanner } from '../../src/cat21-mint/utxo-content-scanner.service';
 import {
+  fundCommonSats,
   getFundedAccount,
   getTx,
   getUtxos,
   mineBlocks,
   postTx,
-  rpc,
   waitForCatAtAddress,
   waitForElectrsSync,
   waitForOrdSync,
@@ -65,10 +65,11 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     paymentAddress = btc.p2wpkh(pub, scure).address!;
     ordinalsAddress = btc.p2tr(xonly, undefined, scure, true).address!;
 
-    // Fund the payment address from the regtest node's wallet.
-    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', paymentAddress, '1');
-    const tip = mineBlocks(1);
-    await waitForElectrsSync(tip);
+    // Fund the payment address on COMMON sats (deterministic clean funding —
+    // see fundCommonSats; a plain sendtoaddress lands the coinbase boundary sat
+    // on the payment ~half the time, classifying it not-clean and starving the
+    // funding-safety auto-pick this spec exists to prove).
+    await fundCommonSats(paymentAddress, 1);
 
     // --- REAL ports (electrs / cat21-ord / local key / bitcoind) ---
     utxos = {
@@ -205,11 +206,14 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     const simPorts = { utxos, scan };
     const execPorts = { utxos, scan, sign: mpSign, broadcast };
 
-    // Fund the exact 3-coin pool: one dust-cliff coin + two headroom coins.
-    for (const amt of ['0.00013689', '0.00099301', '0.00100000']) {
-      rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', mpPayment, amt);
+    // Fund the exact 3-coin pool on COMMON sats: one dust-cliff coin + two
+    // headroom coins. fundCommonSats mines + syncs per coin, so all three
+    // classify clean and the best-fit assertions below test SELECTION, not
+    // rare-sat exclusion (a plain sendtoaddress would flake the boundary sat
+    // onto a headroom coin and starve the auto-pick).
+    for (const amt of [0.00013689, 0.00099301, 0.001]) {
+      await fundCommonSats(mpPayment, amt);
     }
-    await waitForElectrsSync(mineBlocks(1));
 
     // The auto-pick MUST take a headroom coin (99301/100000), not the smaller
     // (best-fit-by-value) 13689 dust-cliff coin.

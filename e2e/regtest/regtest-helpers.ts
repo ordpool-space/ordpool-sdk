@@ -166,6 +166,50 @@ export async function getTxHex(txid: string): Promise<string> {
   return (await res.text()).trim();
 }
 
+/**
+ * Fund `paymentAddress` with `amountBtc` on COMMON (mid-block) sats, then wait
+ * until electrs and BOTH ord instances have indexed the coin so the mint-time
+ * funding-safety scan classifies it `clean` and the orchestrator auto-picks it.
+ *
+ * ord assigns a tx's input sats to its outputs FIFO by output order, and a
+ * regtest coinbase's first sat is the block-first sat, which ord's `--index-sats`
+ * rarity model reads as `uncommon`. A plain `sendtoaddress` randomizes the change
+ * position, dropping that boundary sat onto the payment output about half the
+ * time -> the coin classifies not-clean -> the funding-safety auto-pick excludes
+ * it -> the mint has no clean coin to spend. `fundrawtransaction` with
+ * `changePosition: 0` forces change to vout 0, so the boundary sat is absorbed by
+ * change and the payment at vout 1 inherits later, common sats. A single explicit
+ * input keeps exactly one boundary sat, which the vout-0 change fully absorbs.
+ * Deterministic clean funding, regardless of which coinbase the wallet selects.
+ */
+export async function fundCommonSats(paymentAddress: string, amountBtc: number): Promise<void> {
+  const unspent = JSON.parse(
+    rpc('-rpcwallet=ordpool-e2e', 'listunspent', '100'),
+  ) as Array<{ txid: string; vout: number; amount: number }>;
+  const coin = [...unspent].sort((a, b) => b.amount - a.amount)[0];
+  if (!coin) throw new Error('fundCommonSats: no mature coin to fund from');
+  const raw = rpc(
+    'createrawtransaction',
+    JSON.stringify([{ txid: coin.txid, vout: coin.vout }]),
+    JSON.stringify([{ [paymentAddress]: amountBtc }]),
+  );
+  const funded = JSON.parse(
+    rpc('-rpcwallet=ordpool-e2e', 'fundrawtransaction', raw, JSON.stringify({ changePosition: 0 })),
+  ) as { hex: string };
+  const signed = JSON.parse(
+    rpc('-rpcwallet=ordpool-e2e', 'signrawtransactionwithwallet', funded.hex),
+  ) as { hex: string };
+  rpc('-rpcwallet=ordpool-e2e', 'sendrawtransaction', signed.hex);
+
+  const tip = mineBlocks(1);
+  await waitForElectrsSync(tip);
+  await waitForUtxoAt(paymentAddress, Math.round(amountBtc * 1e8));
+  // Both ord instances must have indexed the funding block before any content
+  // scan, or /output 404s -> scan-failed -> no auto-pick.
+  await waitForOrdStockSync(tip);
+  await waitForOrdSync(tip);
+}
+
 export async function postTx(hexPayload: string): Promise<string> {
   const res = await fetch(`${ELECTRS_URL}/tx`, {
     method: 'POST',
