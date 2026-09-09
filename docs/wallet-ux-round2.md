@@ -198,6 +198,89 @@ is wrong under any layout):
 What I need from the other sessions: your proposals. I do not decide
 before all four are in.
 
+### genesis/cubes — proposal
+
+Context: a first-time user wants to mint a cube. That is one action —
+inscribe — and their only goal at the picker is to connect. Cubes is a
+single-action site; the SDK matrix already filters the list to wallets
+that can inscribe, so no row is ever offered that can't do the one thing.
+
+Pre-connect: a row is **logo, name, one button**. Nothing else. I delete
+the per-row info (i) popover entirely — the badge, the "Signs in your
+browser" line, "What this action needs", the "Verified end-to-end" line
+and the wallet `note` all go. That popover is what renders across my
+modal header (B2); the fix is that it stops existing before login.
+Button label = the next step in plain words: `Connect` (detected),
+`Install` (not; never "Get wallet"), `Open in X` (mobile in-app deep
+link), `Connect (xpub)` (watch-only).
+
+Post-connect: cubes has exactly one action, so there is no capability
+matrix to show anywhere. The only place a limit can surface is the
+"Mint my cube!" button itself.
+
+Blocked action: at the mint button, one sentence, second person, with
+the fix. The realistic case for me is watch-only: "This account can't
+inscribe until it's a Taproot (bc1p…) xpub — reconnect with a Taproot
+account." No list, no matrix.
+
+My Class-B fixes (mine, not up for debate): B2 — removing the
+pre-connect popover clears the text-on-text over the header; the
+remaining connected-wallet popover I anchor with `container="body"` and
+re-check it doesn't overflow. B4 — "Get wallet" becomes "Install" and
+moves from `btn-outline-secondary` (gray-on-dark, reads disabled) to the
+same `btn-outline-light` the live buttons use, so no button looks
+disabled when it isn't.
+
+What I need from the SDK: almost nothing, because I'm single-action.
+(1) the `Connect` / `Install` button-label convention, so all three
+sites match; (2) the per-wallet install URL I already read from
+`KnownOrdinalWallets[type].downloadLink`; (3) IF a blocked inscribe must
+be worded, one actionable second-person `caveat` string per (wallet,
+Inscription) I can print verbatim. I do NOT need the capability wording
+table, the support-level strings, the platform axis, or the `note`
+field on the picker.
+
+### ordpool — proposal
+
+Context: ordpool.space is a block explorer first; the wallet is optional and
+feeds MANY actions (mint, send, sell, buy, inscribe, sign, watch-only). Nobody
+arrives wanting "the wallet" — they arrive to look at a block and *maybe* act.
+At "Connect Wallet" the only goal is to connect. My answer to the round's
+"hardest job": login says NOTHING about capabilities. Features are discovered
+by using the site, not read from a list at the door.
+
+Pre-connect: the modal is a plain list. Each row = logo, name, one button —
+`Connect` (installed) or `Install` (not). No (i) trigger, no popover, no
+capability list, no platform badge, no "verified" line. One action-neutral line
+of copy: "Connect a wallet to use ordpool." That is the whole screen — there is
+no action yet, so there is nothing to match a wallet against.
+
+Post-connect: capability lives on the action, where context makes it legible —
+the user is already on the mint page / the offer they are accepting / the
+inscribe form, so the page IS the label; no "Sell (create an offer)" needed. If
+the wallet can do it, the button just works; fee/address detail shows there.
+
+Blocked action: the action button itself explains it — one sentence, wallet
+named, alternative named, printed verbatim from the SDK caveat, e.g. "Alby can't
+create an offer. Reconnect with Xverse, Leather, UniSat, Wizz, OKX or Cat21
+Wallet." No list, no matrix, no popover.
+
+My Class-B fixes (B2, mine): the "What X supports" popover renders on top of the
+Connect Wallet modal (text-on-text). Fixed by DELETING the pre-connect popover
+entirely — nothing to disclose before login — which removes B2 by construction.
+I also drop the (i) trigger and the "Download" buttons (per the pre-connect
+rule) and re-check the modal's own z-index/scroll so it never exceeds the
+viewport.
+
+What I need from the SDK:
+1. Per wallet: name, logo, `installed` boolean (to label the button Connect vs
+   Install).
+2. Per (wallet, action): one actionable second-person `caveat` string to print
+   verbatim on a blocked button — no composing on my side.
+3. `canDo(wallet, action)` boolean per action I offer — not a display list.
+4. Confirm the platform axis is a filter (hide wallets unreachable on this
+   device), not a badge — matching your §6 point 5.
+
 ## 7. The binding decision
 
 (SDK session writes this once every proposal is in. Empty until then.)
