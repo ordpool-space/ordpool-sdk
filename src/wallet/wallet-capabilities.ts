@@ -55,7 +55,19 @@ export enum CapabilitySupport {
 
 export interface WalletCapabilityStatus {
   support: CapabilitySupport;
-  /** Short, user-actionable constraint (e.g. "requires the active address type to be Taproot"). */
+  /**
+   * The one thing the user has to know about this wallet and this action,
+   * written to be printed verbatim: a complete sentence, second person,
+   * ending in a full stop. A consumer never composes or reworders it.
+   *
+   * On an `Unsupported` capability it says plainly that the wallet cannot
+   * do it and why, in terms of what the wallet does to a transaction —
+   * not in terms of our API names. On a `Proven` capability it is the
+   * step the user must take first.
+   *
+   * It never names the wallets to use instead: that list changes as the
+   * matrix changes, so it is computed from the matrix at render time.
+   */
   caveat?: string;
 }
 
@@ -87,7 +99,8 @@ export interface WalletMatrixEntry {
   note?: string;
 }
 
-const TAPROOT_ACTIVE_ADDRESS = 'requires the wallet\'s active address type to be Taproot (P2TR)';
+const TAPROOT_ACTIVE_ADDRESS =
+  'Switch your wallet to its Taproot (bc1p…) address, then connect again.';
 
 /**
  * The matrix. One row per wallet the SDK ships a signer for.
@@ -192,7 +205,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: {
         support: CapabilitySupport.Proven,
-        caveat: 'Collections use three approvals in a row on OKX and can occasionally not complete the first time; if that happens, just try again.',
+        caveat: 'OKX asks you to approve three times in a row here, and sometimes drops out partway. Start over and it goes through.',
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
@@ -223,20 +236,20 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
       [WalletCapability.Cat21Transfer]: {
         support: CapabilitySupport.Unsupported,
-        caveat: "Alby cannot transfer: its API exposes no per-input signing, so it cannot sign a transfer's cat input plus the funding inputs. Single-input flows (mint, plain inscription) work.",
+        caveat: 'Alby cannot send a cat. It signs a transaction all at once, and sending needs the cat and the sats you pay with signed separately.',
       },
       [WalletCapability.Cat21OfferCreate]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby cannot create offers: it signs every input in a transaction with your one key, so it cannot co-sign an offer alongside the buyer.',
+        caveat: 'Alby cannot sell a cat. Selling means signing your half and leaving the buyer\'s half open, and Alby signs everything at once.',
       },
       [WalletCapability.Cat21OfferAccept]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby cannot accept offers: it signs every input with your one key, so it cannot co-sign the trade with the seller.',
+        caveat: 'Alby cannot buy a cat. Buying means signing your half of a deal the seller already signed, and Alby signs everything at once.',
       },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby cannot build collections: it signs every input with your one key, so it cannot leave the helper input unsigned. Plain inscriptions work.',
+        caveat: 'Alby cannot add to a collection. That needs one part of the transaction left unsigned, and Alby signs everything at once. Single inscriptions work.',
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },

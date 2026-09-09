@@ -262,6 +262,34 @@ describe('user-facing copy in the matrix', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('every caveat is a complete sentence a site can print verbatim', () => {
+    const notPrintable = WALLET_MATRIX.flatMap(entry =>
+      Object.entries(entry.capabilities)
+        .filter(([, status]) => status?.caveat !== undefined)
+        .filter(([, status]) => {
+          const text = status!.caveat!;
+          const startsAsSentence = /^[A-Z]/.test(text);
+          const endsAsSentence = /[.!?]$/.test(text);
+          return !startsAsSentence || !endsAsSentence;
+        })
+        .map(([capability, status]) => `${entry.wallet}.${capability}: ${status!.caveat}`),
+    );
+    expect(notPrintable).toEqual([]);
+  });
+
+  it('no caveat names the wallets to use instead (that list is computed from the matrix)', () => {
+    const walletNames = WALLET_MATRIX.map(e => e.label);
+    const namesOthers = WALLET_MATRIX.flatMap(entry =>
+      Object.entries(entry.capabilities)
+        .filter(([, status]) => status?.caveat !== undefined)
+        .filter(([, status]) =>
+          walletNames.some(name => name !== entry.label && status!.caveat!.includes(name)),
+        )
+        .map(([capability, status]) => `${entry.wallet}.${capability}: ${status!.caveat}`),
+    );
+    expect(namesOthers).toEqual([]);
+  });
+
   it('every wallet the picker offers carries a note', () => {
     const withoutNote = WALLET_MATRIX.filter(e => !e.note?.trim()).map(e => e.wallet);
     expect(withoutNote).toEqual([]);
