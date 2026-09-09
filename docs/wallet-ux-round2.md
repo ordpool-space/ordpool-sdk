@@ -889,3 +889,41 @@ reimplementation of a shared convention is how three sites drift apart
 again, which is the whole reason this round exists. If you built the
 labels locally to move faster, swap to `walletPickerRows()` before the
 round closes and re-shoot if anything visible changes.
+
+## 8. Follow-ups this round produced but did not do
+
+Recorded so they survive the round rather than living in a chat log.
+None of these is a session's to start unilaterally.
+
+### Needs a maintainer decision
+
+| # | Item |
+|---|---|
+| 1 | **The brand pairing.** White on `#FF9900` is 2.14:1 and fails AA at every size. Dark text on the same orange is 6.89:1, so the identity survives; only "orange AND white text" fails. Whole-site call. |
+| 2 | **The wallet's address rows.** Full-everywhere is built, tested and unpushed. Three of its four rows are comparable and load-bearing; only buy's seller address is a candidate for truncate-plus-reveal. |
+| 3 | **Sats formatting across the ecosystem.** cat21-wallet renders `1 234 567 sats`, ordpool.space renders `299,046 sat`. The wallet's was a correctness fix (locale-dependent output flipped meaning per machine); ordpool's is fixed English and cannot flip. So this is consistency, not correctness. If it is wanted, it wants ONE shared formatter, which puts it in the SDK. |
+| 4 | **The UniSat custody claim.** `custodyCaveat` is encoded from the workspace `CLAUDE.md`, not verified against a current UniSat build. Wallet coin-selection changes; the underlying fact deserves re-checking before that sentence is shown to anyone. |
+
+### Deferred work, owned and documented
+
+| Owner | Item |
+|---|---|
+| cat21.space | Connected-state copy review (form / blocked / success). "PSBT" already spotted in the bid states, so it likely carries the same register problem the pre-connect panels did. Needs a wallet and electrs. |
+| cat21.space | Placing `walletCustodyCaveat` on mint and make-offer. Shipped in the SDK, deliberately NOT placed, because a safety string should be seen rendered before it is trusted. |
+| cat21.space | `data-bs-theme="dark"` as the root fix for the light-mode variable trap, which additionally needs `$body-bg-dark` to keep the orange body plus a full-site visual pass. |
+| cat21.space | An Angular 21 vs ng-bootstrap peer conflict makes every SDK pin bump cost a dependency fight. Left unforced, per lockfile discipline. Worth fixing before the consumer drifts far behind. |
+| cat21.space | Em-dashes across roughly a dozen screens. Scrub-as-you-touch, never a sweep. |
+| cat21-wallet | The inherited Leather sign-message screen truncates the user's own address. Lower risk (nobody forges an address to trick you into proving control of your own) and inherited, so out of scope. |
+| cat21-wallet | The inherited screens carry Leather branding. Deliberate, per that repo's own rule; recorded so nobody "fixes" it. |
+
+### The methodological finding, which outlives the screens
+
+Every defect in this round was found by rendering the real screen and
+looking at it. None came from tests, builds, type-checking or
+self-review, all of which were green throughout, including on the frame
+where a money button sat off the right edge of its own popup.
+
+The corollary that cost the most to learn: **a frame is only evidence
+about the host it was rendered in.** The wallet's approval dialogs looked
+correct through `index.html` and broken through the real 390px popup
+lock. The session threw the good-looking frames away.
