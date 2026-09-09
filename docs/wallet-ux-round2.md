@@ -510,6 +510,36 @@ the Xverse in-app browser" on a desktop. Both send a desktop user
 somewhere that does not exist. Split the sentence: desktop gets the
 install half, mobile gets the in-app-browser half.
 
+### 7.10 The worst-case notice, measured
+
+`walletActionNotice` produces 15 distinct sentences across every
+(wallet, capability, platform) the matrix allows: 10 blocked, 5
+precheck. Design against the longest, not against a short example.
+
+| | Length | Where |
+|---|---|---|
+| Longest blocked | **249 chars** | Alby, add to a collection, desktop |
+| Longest precheck | **115 chars** | the Taproot line |
+
+The 249-character one, in full, to paste into a layout while testing:
+
+> Alby cannot add to a collection. That needs one part of the
+> transaction left unsigned, and Alby signs everything at once. Single
+> inscriptions work. Connect Cat21 Wallet, Xverse, Leather, UniSat, Wizz,
+> OKX or Watch-only (xpub) to add to a collection.
+
+That is roughly three lines at desktop width and around seven in
+cat21-wallet's extension popup. It must wrap, never truncate, never
+clip, and never push a button off-screen.
+
+**An open question for the visual check, and it is about my API, not
+your layout.** Seven named alternatives may be a catalogue where a
+person needs one wallet that works. I am not changing it on a hunch:
+shoot the real string, and if it reads as a dump, say so and I will cap
+the list. Whatever we choose, it must not silently drop wallets, since
+a user running UniSat should not read a sentence implying UniSat is
+unsupported.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
