@@ -697,6 +697,46 @@ truncation removes the only thing they could have checked. Any surface
 that asks someone to approve an address, a cat id or an amount shows
 that value in full.
 
+### 7.15 A number means one thing per screen
+
+ordpool.space's fee control showed presets reading `0.77 / 1.46 / 2.5`
+next to an input reading `2,5`. Two conventions for the same quantity,
+in one frame, on a fee rate.
+
+cat21.space diagnosed the mechanism and it is shared: the presets go
+through Angular's `number` pipe, which uses `LOCALE_ID` and defaults to
+en-US (dot), while the value sits in a native `<input type="number">`,
+which formats by BROWSER locale (comma on a German browser). Neither is
+wrong on its own; they simply disagree, and nothing makes them agree.
+
+**This is not hypothetical, and it is not an edge case: the maintainer's
+own browser is the German one.** The person who will read these screens
+is exactly the person who sees `2.5` above and `2,5` below on the control
+that decides what a transaction costs. That is why it is in this round
+rather than a backlog.
+
+**Fix narrowly.** Make the presets follow the same locale the input
+already uses, so the two cannot diverge. Do NOT take on an app-wide
+`LOCALE_ID` strategy inside a UX round; that is a separate change with
+its own blast radius. Both sites that render a fee control do the narrow
+fix.
+
+### 7.16 Em-dashes: scrub what you touch, sweep nothing
+
+An em-dash in shipped user copy breaks a workspace rule, and one turned
+up in ordpool.space's funding-source paragraph. cat21.space then found
+dozens across roughly a dozen screens and asked whether to sweep.
+
+No. The workspace rule already answers it: scrub em-dashes in the block
+you are editing anyway, never as a retroactive pass, because a sweep
+explodes diffs for prose. So a screen inside this round's shot set gets
+scrubbed as you touch it; a screen you are not otherwise changing keeps
+its em-dashes and waits for the pass that has a reason to open it.
+
+The extent is worth recording so the next person is not surprised by it,
+which is what a follow-up note is for. It is not worth a diff nobody
+asked for.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
