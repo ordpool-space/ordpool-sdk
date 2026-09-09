@@ -760,6 +760,20 @@ Two decisions sit with the maintainer and neither is a session's to make:
 2. **cubes' two dropped spec assertions**, which pinned copy §7 removed
    from every screen. Defensible, but a test deletion is the
    maintainer's call, per the workspace rule.
+3. **cat21.space's core text pairing.** White on the brand orange
+   measures **2.14:1**; AA needs 4.5:1 for normal text and 3.0:1 even for
+   large. It fails both, and it is the SAME ratio this round condemned on
+   the selected fee tier (orange text on white). Blessing one and
+   condemning the other because one is the house style would be
+   inconsistent, so it is recorded rather than waved through.
+
+   The maintainer's ruling that produced it was about SURFACE, dark
+   panel versus orange, and did not appear to be about foreground
+   colour. The identity survives dark text: `#282828` on `#FF9900` is
+   6.89:1 and black is 9.81:1. "Keep the orange" and "meet AA" do not
+   conflict; only "keep the orange AND keep white text" does. Whole-site
+   brand decision, so it belongs to the maintainer and to nobody in this
+   round.
 
 One question waits on evidence rather than on anyone's opinion: whether
 a typed comma reading against dot presets looks wrong. Shoot it, look,
