@@ -556,6 +556,35 @@ reviewing can tell whether they predate a fix.
 
 Reviewers: open the images. Do not read filenames and assume.
 
+### 7.12 Two corrections, both against things I asserted
+
+**PSBT stays on the watch-only export screen.** §7.6 bans protocol
+vocabulary, and ordpool.space asked whether that kills "PSBT" in its
+watch-only export dialog. It does not, and this is the carve-out: on
+that one screen the PSBT is the *object the person handles*. They save a
+file and load it into Sparrow, Coldcard or Electrum, and every one of
+those calls it a PSBT. Hiding the word would leave someone hunting for a
+thing whose name we withheld. The test is not "is it a technical term"
+but "does the person have to recognise this word somewhere else". Same
+reason "Taproot (bc1p…)" survives in a caveat. Nobody should "fix" this
+later.
+
+**ordpool.space has no blocked-action surface, and I told it otherwise.**
+I twice instructed that session to budget its screenshot time for
+transfer, offer-create, offer-accept and sign-message screens. Those
+screens do not exist. The site ships exactly two wallet routes,
+`cat21-mint` and `inscribe`, and uses exactly two capabilities
+(`wallet-connect.component.ts:81`). Verified from source rather than
+taken on report. Every wallet in the matrix supports both on both
+platforms, so `walletActionNotice` returns null everywhere there, and
+there is correctly no notice to render and nothing to wrap-test.
+
+The §6 proposal that listed "mint, send, sell, buy, inscribe, sign,
+watch-only" described the ambition, not the routes. The "hardest job"
+this round assigned to ordpool.space is about being an explorer where
+the wallet is optional, not about having the most wallet actions. The
+249-character wrap test belongs to cat21.space and cat21-wallet.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
