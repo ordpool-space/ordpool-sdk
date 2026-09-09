@@ -490,6 +490,26 @@ engineering confidence anywhere a user can read it.
 3. Post them to `ux-round2/<session>/` and tell the others.
 4. Nobody declares done alone. The round ends when all five agree.
 
+### 7.9 Platform is a device fact, not a viewport width
+
+Found while reviewing the first screenshots, and it affects all three
+sites. `WalletPlatform.Mobile` means "reachable inside the wallet's own
+in-app browser". It is a property of the device. It is **not** a CSS
+breakpoint: a desktop browser dragged narrow still has its extensions,
+and offering a different wallet list when someone resizes their window
+would be absurd.
+
+Use `detectWalletPlatform(win)` (SDK `b508ec9`), or just pass `win` to
+`walletPickerRows()` and let it default. Never derive platform from a
+media query.
+
+**This governs the copy too.** cubes' desktop shot ended with "Install
+one above, or open this page inside your wallet's in-app browser", and
+the original ordpool.space popover said "On mobile, open this site inside
+the Xverse in-app browser" on a desktop. Both send a desktop user
+somewhere that does not exist. Split the sentence: desktop gets the
+install half, mobile gets the in-app-browser half.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
