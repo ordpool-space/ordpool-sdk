@@ -1,5 +1,13 @@
 # Wallet-picker shared UX: capability messaging + the info icon
 
+> **SECTION 2 IS SUSPENDED (2026-09-09).** The maintainer rejected the
+> shipped result: platform badges the user does not need, the same
+> capability listed twice, "Verified end-to-end on our test network"
+> repeated on every row, and internal jargon in user copy. The
+> replacement is decided in `wallet-ux-round2.md`. Do not implement
+> §2 as written below; do not cite it as binding. §1, §3 and §4
+> remain in force.
+
 Binding for all three consumer sessions (cat21.space, ordpool.space, cubes).
 The goal: wherever the wallet matrix surfaces, the three sites read and
 behave identically, while each keeps its own visual design system. Read this
