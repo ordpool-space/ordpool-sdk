@@ -13,6 +13,7 @@ import {
   walletsForPlatform,
   walletMatrixEntry,
   walletActionNotice,
+  walletCustodyCaveat,
 } from './wallet-capabilities';
 
 const ids = (entries: readonly { wallet: KnownOrdinalWalletType }[]): KnownOrdinalWalletType[] =>
@@ -366,5 +367,38 @@ describe('walletActionNotice', () => {
     const notice = walletActionNotice(KnownOrdinalWalletType.unisat, WalletCapability.SignMessage);
     expect(notice?.kind).toBe('precheck');
     expect(notice?.message).toBe('Switch your wallet to its Taproot (bc1p…) address, then connect again.');
+  });
+});
+
+describe('walletCustodyCaveat', () => {
+  it('warns that UniSat can spend the sat a cat lives on', () => {
+    expect(walletCustodyCaveat(KnownOrdinalWalletType.unisat)).toBe(
+      'UniSat keeps your cats and your spendable coins on one address, so it can spend the sat a cat '
+      + 'lives on when it pays a fee. Move a cat you want to keep to a wallet that holds ordinals separately.',
+    );
+  });
+
+  it('says nothing for a wallet that separates ordinals from spendable coins', () => {
+    expect(walletCustodyCaveat(KnownOrdinalWalletType.xverse)).toBeNull();
+    expect(walletCustodyCaveat(KnownOrdinalWalletType.leather)).toBeNull();
+    expect(walletCustodyCaveat(KnownOrdinalWalletType.cat21wallet)).toBeNull();
+  });
+
+  it('is independent of capability level, since a wallet can perform an action and still risk the result', () => {
+    // UniSat is Proven for minting: it does the job correctly, and the
+    // resulting cat is still at risk. One field cannot express both.
+    expect(supportsCapability(KnownOrdinalWalletType.unisat, WalletCapability.Cat21Mint)).toBe(true);
+    expect(walletCustodyCaveat(KnownOrdinalWalletType.unisat)).not.toBeNull();
+  });
+
+  it('describes the mechanism rather than passing a verdict', () => {
+    for (const entry of WALLET_MATRIX) {
+      const text = entry.custodyCaveat;
+      if (!text) continue;
+      expect(text).toMatch(/[.!?]$/);
+      for (const verdict of ['unsafe', 'dangerous', 'insecure', 'bad wallet', 'avoid']) {
+        expect(text.toLowerCase()).not.toContain(verdict);
+      }
+    }
   });
 });

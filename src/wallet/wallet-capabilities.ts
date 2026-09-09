@@ -84,6 +84,24 @@ export interface WalletMatrixEntry {
   /** Capabilities not listed default to {@link CapabilitySupport.Unsupported}. */
   capabilities: Partial<Record<WalletCapability, WalletCapabilityStatus>>;
   /**
+   * What this wallet does with a cat once it HOLDS one, when that is
+   * something the owner has to know.
+   *
+   * Separate from {@link capabilities} on purpose: those answer "can this
+   * wallet perform the operation", which a wallet can do perfectly while
+   * still putting the resulting cat at risk. A wallet that keeps
+   * ordinals and spendable coins on one address can later pay a fee with
+   * the sat a cat lives on, and no capability level expresses that.
+   *
+   * Surface it wherever an action ENDS with a cat in this wallet: a
+   * mint, or accepting an offer. Not on a send, where the cat is leaving.
+   *
+   * Describe the mechanism, never a verdict: "keeps them on one address"
+   * is checkable, "is unsafe" is a judgement about someone else's
+   * product that rots the moment they change it.
+   */
+  custodyCaveat?: string;
+  /**
    * Wallet-level caveat spanning capabilities (address-type default,
    * mobile entry mechanism, backend), written for the person choosing a
    * wallet. It answers "what do I have to know or do differently with
@@ -174,6 +192,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
     },
+    custodyCaveat: 'UniSat keeps your cats and your spendable coins on one address, so it can spend the sat a cat lives on when it pays a fee. Move a cat you want to keep to a wallet that holds ordinals separately.',
     note: 'Desktop extension only. The UniSat mobile app is not supported here.',
   },
   {
@@ -457,4 +476,16 @@ export function walletActionNotice(
     alternatives,
     actionPhrase: phrase,
   };
+}
+
+/**
+ * What the owner has to know about leaving a cat in this wallet, or
+ * `null` when there is nothing to say.
+ *
+ * Ask this wherever an action ends with a cat in the connected wallet,
+ * which is a mint or an accepted offer. A send does not need it: the cat
+ * is on its way out.
+ */
+export function walletCustodyCaveat(wallet: KnownOrdinalWalletType): string | null {
+  return walletMatrixEntry(wallet)?.custodyCaveat ?? null;
 }
