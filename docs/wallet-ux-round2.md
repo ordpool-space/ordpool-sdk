@@ -737,6 +737,34 @@ The extent is worth recording so the next person is not surprised by it,
 which is what a follow-up note is for. It is not worth a diff nobody
 asked for.
 
+### 7.17 What is left (live)
+
+Every login screen is implemented and three of four are photographed and
+reviewed. What remains is almost entirely connected-state: the screens
+where a person spends money, which is where this round's remaining risk
+sits.
+
+| Owner | Outstanding |
+|---|---|
+| cat21.space | re-shoot in progress: focus fix on three modals, watch-only row, notice in list form, empty-state line |
+| cat21-wallet | **no frames yet.** Holds the token next. Approval dialogs, the reachable worst case, the unknown-reason fallback, a real policy denial |
+| ordpool.space | 5-frame re-shoot: both connected forms, plus one frame with a comma TYPED into the fee input |
+| cubes | connected-state pass on a regtest serve: mint form, checkout, commit + reveal, past mints, the PSBT sign modal's focus fix |
+| ordpool-sdk | nothing outstanding |
+
+Two decisions sit with the maintainer and neither is a session's to make:
+
+1. **§7.14, the address a person approves.** cat21-wallet's dialogs show
+   head…tail only. This round or a follow-up. It is the only item that
+   blocks a session from closing.
+2. **cubes' two dropped spec assertions**, which pinned copy §7 removed
+   from every screen. Defensible, but a test deletion is the
+   maintainer's call, per the workspace rule.
+
+One question waits on evidence rather than on anyone's opinion: whether
+a typed comma reading against dot presets looks wrong. Shoot it, look,
+then decide. Nobody implements for it first.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
