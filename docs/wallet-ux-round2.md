@@ -407,7 +407,14 @@ so they cannot drift:
 | provider detected in this browser | `Connect` |
 | not detected, installable here | `Install` |
 | mobile, reachable only in the wallet's own browser | `Open in <wallet>` |
-| watch-only | `Connect (xpub)` |
+| watch-only | `Connect` |
+
+The watch-only button said `Connect (xpub)` until rendered evidence at
+390px showed why it should not: the row is already named "Watch-only
+(xpub)", so the button repeated it, became the widest in the list, and
+squeezed the name column until that one label wrapped to three lines
+while every other row stayed on one. A button never repeats its own
+row's name.
 
 `Download` and `Get wallet` are banned. "Download" describes a file;
 "Get wallet" tested as reading disabled. Every button is styled as

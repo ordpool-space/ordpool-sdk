@@ -37,10 +37,23 @@ describe('walletPickerRows', () => {
     expect(labels).not.toContain('Get wallet');
   });
 
-  it('offers the watch-only row as Connect (xpub), with nothing to install', () => {
+  it('never lets one button be wider than the rest by repeating the row name', () => {
+    const rows = walletPickerRows({ platform: WalletPlatform.Desktop });
+    for (const r of rows) {
+      const rowName = r.label.toLowerCase();
+      const buttonExtras = r.actionLabel.toLowerCase().replace(/^(connect|install|open in )/, '');
+      if (buttonExtras.trim()) {
+        expect(rowName).not.toContain(buttonExtras.trim());
+      }
+    }
+  });
+
+  it('offers the watch-only row as a plain Connect, with nothing to install', () => {
     const xpub = row(walletPickerRows({ platform: WalletPlatform.Desktop }), KnownOrdinalWalletType.xpub);
     expect(xpub?.action).toBe('connect-xpub');
-    expect(xpub?.actionLabel).toBe('Connect (xpub)');
+    // The row name carries "(xpub)"; the button repeating it made this the
+    // widest button in the list and wrapped the name to three lines at 390.
+    expect(xpub?.actionLabel).toBe('Connect');
     expect(xpub?.installUrl).toBeUndefined();
   });
 
@@ -81,7 +94,7 @@ describe('walletPickerRows', () => {
     for (const r of rows) {
       expect(r.logo.startsWith('data:image/svg+xml;base64,')).toBe(true);
       expect(r.label.length).toBeGreaterThan(0);
-      expect(['Connect', 'Install', 'Connect (xpub)']).toContain(
+      expect(['Connect', 'Install']).toContain(
         r.actionLabel.startsWith('Open in ') ? 'Connect' : r.actionLabel,
       );
     }

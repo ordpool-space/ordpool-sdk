@@ -116,7 +116,11 @@ export function walletPickerRows(options: WalletPickerOptions = {}): WalletPicke
         logo: meta.logo,
         installed: true,
         action: 'connect-xpub',
-        actionLabel: 'Connect (xpub)',
+        // Just "Connect": the row's own name already says Watch-only
+        // (xpub), and repeating it made this the widest button in the
+        // list, squeezing the name column until the label wrapped to
+        // three lines while every other row stayed on one.
+        actionLabel: 'Connect',
       };
     }
 
