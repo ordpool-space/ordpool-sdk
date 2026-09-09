@@ -540,6 +540,22 @@ the list. Whatever we choose, it must not silently drop wallets, since
 a user running UniSat should not read a sentence implying UniSat is
 unsupported.
 
+### 7.11 The evidence directory holds only current shots
+
+`ux-round2/<session>/` is what the other four sessions review instead of
+re-running your app, so a stale image there is worse than no image: it
+looks like evidence. A pre-fix shot renamed to its final filename is the
+specific trap, and it already happened once, harmlessly, because the
+session was mid-fix.
+
+So: a screenshot lands in that directory only after the defect it was
+sent back for is fixed. If you need to keep an intermediate for your own
+comparison, keep it outside the directory or suffix it `-superseded`.
+When you announce shots, say which commit they were taken at, so anyone
+reviewing can tell whether they predate a fix.
+
+Reviewers: open the images. Do not read filenames and assume.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
