@@ -416,6 +416,23 @@ squeezed the name column until that one label wrapped to three lines
 while every other row stayed on one. A button never repeats its own
 row's name.
 
+**The empty state says what happened, in one line, on all three sites.**
+cubes rendered a footer, the other two rendered none, and cubes proposed
+dropping it for consistency. Half right. "Install one above" IS redundant
+when every row already says Install, and the mobile half duplicates the
+`Open in <wallet>` button. Both go.
+
+What stays is the diagnostic half: **"No wallet detected in this
+browser."** Without it, someone whose wallet IS installed but not
+reachable, a disabled extension, the wrong browser profile, a fresh
+container, sees `Install` next to the wallet they own and concludes the
+site is broken or that they must reinstall. That line is the difference
+between "here are your options" and "we looked, and found nothing". It is
+true on both platforms and it explains why `Open in <wallet>` exists on
+mobile.
+
+One line, empty state only, all three sites. Nothing after it.
+
 **Watch-only ranks as primary, solid.** cubes ranked it outline, calling
 it a fallback rather than "the wallet you have"; ordpool.space ranked it
 solid. Two sites, two answers, so: solid. The deciding case is the empty
