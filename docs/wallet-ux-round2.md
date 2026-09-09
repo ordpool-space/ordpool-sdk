@@ -927,11 +927,28 @@ buttons, the cost and the breakdown too. Latent on production, where the
 endpoint is always served, and invisible to tests, which all mock it.
 
 Propagated to the two closed sessions rather than left as one repo's
-problem. ordpool.space checked and evidenced a no-op three ways: no
+problem, and it was NOT one repo's problem. **cat21.space had the same
+bug, live**, on its fees-picker: `toSignal(recommendedFees$)` with no
+catch, read in the template, in `activeTier` and in an effect, so one
+failed fee lookup blanked the entire embedding money screen (mint,
+make-offer, transfer), price and action included. Fixed, with a spec that
+drives the stream with `throwError` and asserts the component neither
+throws nor goes blank, mutation-checked both ways.
+
+So the class was live in two of the three consumers and latent in the
+third. Propagating a finding a session could reasonably have kept to
+itself is what turned one repo's blocker into two repos' fixes.
+
+ordpool.space checked and evidenced a no-op three ways: no
 `toSignal` on either money screen, the source is a `ReplaySubject(1)` fed
 by the websocket with no `.error()` anywhere in the tree, and the async
 pipe already falls back to a loading state while the cost line and the
 action button render outside the fees box entirely.
+
+They later grepped the whole frontend rather than only the two money
+screens: exactly one `toSignal` in the entire app, on an indexer-progress
+widget, whose source already pipes `catchError(() => of(null))`. So the
+no-op holds at every point, not just where they first looked.
 
 Their consumption pattern WOULD break the same way if a fallible fee
 source were ever introduced. **Decided: do not pre-harden.** Scattering
