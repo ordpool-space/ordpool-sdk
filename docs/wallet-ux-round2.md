@@ -585,6 +585,37 @@ this round assigned to ordpool.space is about being an explorer where
 the wallet is optional, not about having the most wallet actions. The
 249-character wrap test belongs to cat21.space and cat21-wallet.
 
+### 7.13 Who actually renders the notice
+
+Third correction against my own instructions, so it is worth stating
+plainly rather than burying: **`walletActionNotice` is a SITE surface.**
+It is the sentence a site shows when the wallet a person connected
+cannot do what that page offers.
+
+cat21-wallet does not consume it and cannot. Nobody standing inside
+Cat21 Wallet needs to be told what Alby cannot do, and the wallet renders
+no picker, so that sentence has no path into any of its dialogs. I moved
+the 249-character wrap test onto that session anyway, after ordpool.space
+turned out to have no blocked surface, without checking whether the
+wallet's surface consumes the function. It does not.
+
+The 249-character test therefore belongs to **cat21.space alone**: the
+only consumer with offers and collections, and so the only place an Alby
+block is reachable at all.
+
+The wallet's popup is still the narrowest surface in the ecosystem and
+still worth a layout stress test. It just has to be stressed with the
+wallet's OWN longest reachable copy: its longest humanised error
+including the unknown-reason fallback, a full-length address, the longest
+realistic cat name, in the dialog with the most rows. Same question,
+asked with text a user will really see, and no temporary injection to
+revert.
+
+**The general rule this is an instance of:** before assigning a test,
+check that the thing under test can occur on that surface. A screenshot
+of impossible state answers a question nobody asked, and it costs the
+same as a real one.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
