@@ -916,6 +916,32 @@ None of these is a session's to start unilaterally.
 | cat21-wallet | The inherited Leather sign-message screen truncates the user's own address. Lower risk (nobody forges an address to trick you into proving control of your own) and inherited, so out of scope. |
 | cat21-wallet | The inherited screens carry Leather branding. Deliberate, per that repo's own rule; recorded so nobody "fixes" it. |
 
+### One more, found on the round's very last capture
+
+**A fee-endpoint error can take down a whole money screen.** cubes
+renders its fee presets from a `toSignal` of a fees stream. On regtest
+the endpoint legitimately does not exist, the stream errors, and
+`toSignal` RE-THROWS on read, so the template reading it throws during
+change detection and the entire checkout stops updating: not the tier
+buttons, the cost and the breakdown too. Latent on production, where the
+endpoint is always served, and invisible to tests, which all mock it.
+
+Propagated to the two closed sessions rather than left as one repo's
+problem. ordpool.space checked and evidenced a no-op three ways: no
+`toSignal` on either money screen, the source is a `ReplaySubject(1)` fed
+by the websocket with no `.error()` anywhere in the tree, and the async
+pipe already falls back to a loading state while the cost line and the
+action button render outside the fees box entirely.
+
+Their consumption pattern WOULD break the same way if a fallible fee
+source were ever introduced. **Decided: do not pre-harden.** Scattering
+`catchError` across three consumption sites guards an error the source
+cannot currently produce, which is a code path for an impossible case
+and exactly the over-engineering the workspace rules warn about. It is
+recorded as a shared-layer follow-up instead: if a fallible fee source is
+ever introduced, guard it ONCE at that layer, with a falsifiable
+money-screen spec.
+
 ### The methodological finding, which outlives the screens
 
 Every defect in this round was found by rendering the real screen and
