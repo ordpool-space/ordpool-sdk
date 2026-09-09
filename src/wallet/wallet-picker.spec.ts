@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { KnownOrdinalWalletType, WindowLike } from './wallet.service.types';
 import { WalletCapability, WalletPlatform } from './wallet-capabilities';
-import { walletPickerRows } from './wallet-picker';
+import { detectWalletPlatform, walletPickerRows } from './wallet-picker';
 
 /** A window with only the named providers injected. */
 const windowWith = (...providers: string[]): WindowLike => {
@@ -85,5 +85,45 @@ describe('walletPickerRows', () => {
         r.actionLabel.startsWith('Open in ') ? 'Connect' : r.actionLabel,
       );
     }
+  });
+});
+
+describe('detectWalletPlatform', () => {
+  const withUserAgent = (userAgent: string, maxTouchPoints = 0): WindowLike =>
+    ({ navigator: { userAgent, maxTouchPoints } }) as unknown as WindowLike;
+
+  it.each([
+    ['Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15', WalletPlatform.Mobile],
+    ['Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36', WalletPlatform.Mobile],
+    ['Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/120', WalletPlatform.Desktop],
+    ['Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120', WalletPlatform.Desktop],
+  ])('reads %s as %s', (userAgent, expected) => {
+    expect(detectWalletPlatform(withUserAgent(userAgent))).toBe(expected);
+  });
+
+  it('reads an iPad as mobile despite its desktop user agent', () => {
+    const iPad = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15';
+    expect(detectWalletPlatform(withUserAgent(iPad, 5))).toBe(WalletPlatform.Mobile);
+    expect(detectWalletPlatform(withUserAgent(iPad, 0))).toBe(WalletPlatform.Desktop);
+  });
+
+  it('answers Desktop when it cannot tell, so nobody is sent to an in-app browser they have no way to open', () => {
+    expect(detectWalletPlatform(undefined)).toBe(WalletPlatform.Desktop);
+    expect(detectWalletPlatform({} as WindowLike)).toBe(WalletPlatform.Desktop);
+  });
+
+  it('does not change the wallets on offer when a desktop window is narrow', () => {
+    // The viewport is not an input here; a resized desktop keeps its extensions.
+    const desktop = withUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120');
+    expect(walletPickerRows({ win: desktop }).map(r => r.wallet))
+      .toEqual(walletPickerRows({ win: desktop, platform: WalletPlatform.Desktop }).map(r => r.wallet));
+  });
+
+  it('picker rows follow the detected platform without the caller passing one', () => {
+    const phone = withUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)');
+    expect(walletPickerRows({ win: phone }).map(r => r.wallet))
+      .toContain(KnownOrdinalWalletType.phantom);
+    expect(walletPickerRows({ win: phone }).map(r => r.wallet))
+      .not.toContain(KnownOrdinalWalletType.leather);
   });
 });

@@ -10,6 +10,12 @@ import { Network } from '../network';
  * object with whatever subset we want present.
  */
 export interface WindowLike {
+  /**
+   * Read only to tell a phone from a desktop. A wallet is reachable on
+   * mobile through its own in-app browser, which is a property of the
+   * device, not of the window size.
+   */
+  navigator?: { userAgent?: string; maxTouchPoints?: number; platform?: string };
   XverseProviders?: unknown;
   LeatherProvider?: unknown;
   HiroWalletProvider?: unknown;

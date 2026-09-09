@@ -45,7 +45,11 @@ export interface WalletPickerRow {
 export interface WalletPickerOptions {
   /** The window to detect providers in. Omit in SSR: every row comes back not-installed. */
   win?: WindowLike;
-  /** Where this picker is rendering. Wallets unreachable here are absent, never badged. */
+  /**
+   * Where this picker is rendering. Wallets unreachable here are absent,
+   * never badged. Defaults to {@link detectWalletPlatform} over `win`;
+   * pass it only to override, never from a CSS breakpoint.
+   */
   platform?: WalletPlatform;
   /**
    * Set when the picker serves ONE action ("sell this cat"). Wallets that
@@ -58,6 +62,33 @@ export interface WalletPickerOptions {
 }
 
 /**
+ * Whether wallets here are reached as browser extensions or inside a
+ * wallet's own in-app browser.
+ *
+ * This is a property of the DEVICE, never of the viewport. A desktop
+ * browser dragged narrow is still a desktop: its extensions keep
+ * working, and no in-app browser exists to send anyone to. Deriving it
+ * from a CSS breakpoint would change which wallets a person is offered
+ * when they resize their window.
+ *
+ * Unknown environments answer `Desktop`, which lists more wallets rather
+ * than fewer and never routes anyone to an in-app browser they cannot
+ * open.
+ */
+export function detectWalletPlatform(win: WindowLike | undefined): WalletPlatform {
+  const nav = win?.navigator;
+  const ua = nav?.userAgent ?? '';
+
+  if (/Android|iPhone|iPad|iPod/i.test(ua)) return WalletPlatform.Mobile;
+
+  // iPadOS 13+ reports a desktop Safari user agent; the touch count is
+  // what still separates it from a Mac.
+  if (/Macintosh/i.test(ua) && (nav?.maxTouchPoints ?? 0) > 1) return WalletPlatform.Mobile;
+
+  return WalletPlatform.Desktop;
+}
+
+/**
  * The rows of a wallet picker, in matrix order, ready to render.
  *
  * Platform is a filter here, never a badge: a wallet unreachable on this
@@ -65,7 +96,7 @@ export interface WalletPickerOptions {
  * cannot run a browser extension answers a question they did not ask.
  */
 export function walletPickerRows(options: WalletPickerOptions = {}): WalletPickerRow[] {
-  const platform = options.platform ?? WalletPlatform.Desktop;
+  const platform = options.platform ?? detectWalletPlatform(options.win);
 
   const reachable = options.capability !== undefined
     ? walletsSupporting(options.capability, { platform })
