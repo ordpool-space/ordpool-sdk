@@ -812,6 +812,43 @@ the element so it never falls through to a document default, plus
 leaving a sister repo to wonder whether someone else's finding was theirs
 too.
 
+### 7.19 The register: they came to have fun with cats
+
+The maintainer looked at the round's screenshots and gave a verdict on
+all of them at once:
+
+> the shown screenshots are too technical. the degens just wanna have fun
+> trading cats
+
+They are right, and it is a failure in how this round was run rather
+than in anyone's implementation. We audited contrast, focus, decimal
+separators and overflow. All real, all fixed. Nobody asked whether the
+REGISTER was right. We deleted "nLockTime=21 is preserved" and replaced
+it with "a 546-sat dust output sent to your ordinals address". Less
+wrong; still a Bitcoin-infrastructure explainer written for someone who
+came to get a cat.
+
+**The brief, and it is a COPY pass on screens already in scope, not a
+redesign.**
+
+1. **The default view carries no protocol explanation.** Collapsed
+   expert affordances are fine and stay collapsed.
+2. **Any sentence explaining HOW a transaction is built goes behind an
+   expander or goes away.** Output structure, change handling, dust
+   folding, input indexes, artifact-versus-broadcastable: none of it is
+   something a person minting a cat needs in order to mint a cat.
+3. **Fun never costs anyone money.** What it costs, who gets what, and
+   any warning that prevents loss all STAY, prominently. The asset-loss
+   warning keeps its lead position; the full recipient address keeps its
+   full length. A playful tone around a silent risk is worse than a dry
+   one.
+4. **Tone: plain and light.** They are minting a cat, not filing a tax
+   return.
+
+If a session judges the change to be bigger than copy on the screens
+already in this round, say so and it becomes round 3 rather than growing
+this one.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
