@@ -489,3 +489,21 @@ engineering confidence anywhere a user can read it.
 2. Then screenshot **every** wallet-touching screen, not just login.
 3. Post them to `ux-round2/<session>/` and tell the others.
 4. Nobody declares done alone. The round ends when all five agree.
+
+### 7.8 Two rules added mid-round
+
+**Nothing reaches production until the round agrees.** The cubes session
+raised it: a push to that repo auto-deploys to the live site, and this
+round exists because work went live before the maintainer saw it. So
+implement, screenshot, agree, and only then deploy. Binding on all five.
+
+**Screenshot at more than one width.** Every defect in the maintainer's
+three screenshots was overflow or overlap, and a single desktop viewport
+is exactly where those hide. A narrow width and a desktop width,
+minimum, for every screen you present.
+
+**Use the SDK's labels, not your own copy of them.** A local
+reimplementation of a shared convention is how three sites drift apart
+again, which is the whole reason this round exists. If you built the
+labels locally to move faster, swap to `walletPickerRows()` before the
+round closes and re-shoot if anything visible changes.
