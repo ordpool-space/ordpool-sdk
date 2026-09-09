@@ -691,6 +691,29 @@ being put to them rather than settled between sessions. What is decided
 here: the round does not close with a polished sentence sitting above an
 address nobody can verify.
 
+**The rule that came out of arguing it: show the address in full when it
+is COMPARABLE.** Truncation is not neutral on a verification row. It
+displays exactly the characters an attacker controls, the head and the
+tail that a poisoned lookalike is generated to match, and hides exactly
+the characters that would expose the substitution. So the question is
+never "is a long string ugly", it is "does this person have something to
+compare it against":
+
+| row | comparable to | verdict |
+|---|---|---|
+| mint, recipient | what they typed | full |
+| transfer, recipient | what they typed; THE poisoning target | full |
+| offer create, own payout | their own receive address | full |
+| buy, seller's address | nothing; it arrived in the offer | truncate + reveal is defensible |
+
+Three of four are load-bearing, so the visual relief truncation offers is
+worth exactly one row, which is not worth the inconsistency of having one
+row behave differently from its siblings.
+
+Where a reveal IS used, the expanded state must be what is on screen when
+the approve control first enables. A safety affordance behind a click
+nobody makes is not a safety affordance.
+
 **The generalisation for everyone:** truncation is display convenience
 everywhere except where a person is committing to the value. There,
 truncation removes the only thing they could have checked. Any surface
