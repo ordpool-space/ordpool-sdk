@@ -746,11 +746,17 @@ sits.
 
 | Owner | Outstanding |
 |---|---|
-| cat21.space | re-shoot in progress: focus fix on three modals, watch-only row, notice in list form, empty-state line |
-| cat21-wallet | **no frames yet.** Holds the token next. Approval dialogs, the reachable worst case, the unknown-reason fallback, a real policy denial |
-| ordpool.space | 5-frame re-shoot: both connected forms, plus one frame with a comma TYPED into the fee input |
-| cubes | connected-state pass on a regtest serve: mint form, checkout, commit + reveal, past mints, the PSBT sign modal's focus fix |
+| cat21-wallet | **done.** Nine frames verified: full grouped addresses at 21:1, space-grouped amounts, a real cap denial, and an off-screen Approve button found and fixed |
+| cat21.space | pre-connect done; three CTAs need re-shooting with their rewritten copy |
+| ordpool.space | five connected-form frames, including the typed-comma question |
+| cubes | connected-state pass on a regtest serve, plus the PSBT sign modal's focus fix |
 | ordpool-sdk | nothing outstanding |
+
+Deferred to a connected environment, documented as pending rather than
+silently skipped: placing `walletCustodyCaveat` on cat21.space, and
+reviewing the form / blocked / success copy on its three trade screens,
+which almost certainly carries the same protocol vocabulary the
+pre-connect panels did.
 
 Two decisions sit with the maintainer and neither is a session's to make:
 
