@@ -391,6 +391,19 @@ describe('walletCustodyCaveat', () => {
     expect(walletCustodyCaveat(KnownOrdinalWalletType.unisat)).not.toBeNull();
   });
 
+  it('applies to acquiring a cat, not to the seller who is parting with one', () => {
+    // Cat21OfferAccept is the SELLER accepting a buy-offer, so the cat
+    // leaves; Cat21OfferCreate is the BUYER, who ends up holding it.
+    // Anything reading the verb rather than the direction gets this backwards.
+    const acquiring = [WalletCapability.Cat21Mint, WalletCapability.Cat21OfferCreate];
+    const parting = [WalletCapability.Cat21OfferAccept, WalletCapability.Cat21Transfer];
+    for (const capability of [...acquiring, ...parting]) {
+      expect(supportsCapability(KnownOrdinalWalletType.unisat, capability)).toBe(true);
+    }
+    expect(acquiring).not.toContain(WalletCapability.Cat21OfferAccept);
+    expect(parting).toContain(WalletCapability.Cat21OfferAccept);
+  });
+
   it('describes the mechanism rather than passing a verdict', () => {
     for (const entry of WALLET_MATRIX) {
       const text = entry.custodyCaveat;

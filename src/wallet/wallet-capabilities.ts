@@ -93,8 +93,19 @@ export interface WalletMatrixEntry {
    * ordinals and spendable coins on one address can later pay a fee with
    * the sat a cat lives on, and no capability level expresses that.
    *
-   * Surface it wherever an action ENDS with a cat in this wallet: a
-   * mint, or accepting an offer. Not on a send, where the cat is leaving.
+   * Surface it wherever the connected wallet ENDS UP HOLDING a cat.
+   * Follow the cat, not the verb:
+   *
+   *   `Cat21Mint`         cat arrives   -> show it
+   *   `Cat21OfferCreate`  YOU are the buyer; the cat lands with you when
+   *                       the seller accepts, and this is the moment you
+   *                       choose which wallet receives it  -> show it
+   *   `Cat21OfferAccept`  YOU are the SELLER; the cat leaves  -> do not
+   *   `Cat21Transfer`     you are sending; the cat leaves     -> do not
+   *
+   * The accept/create pair is the trap: "accepting an offer" sounds like
+   * acquiring and is the opposite, because the offer is a BUY-offer and
+   * the seller is the one who accepts it.
    *
    * Describe the mechanism, never a verdict: "keeps them on one address"
    * is checkable, "is unsafe" is a judgement about someone else's
