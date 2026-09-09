@@ -218,3 +218,52 @@ describe('watch-only entry', () => {
     expect(injected.every(e => e.signingMode === 'injected')).toBe(true);
   });
 });
+
+describe('user-facing copy in the matrix', () => {
+  /**
+   * Words that describe OUR engineering rather than the user's wallet.
+   * Coverage claims, CI vocabulary, fork lineage and internal tool names
+   * are not facts a person choosing a wallet can act on, and shipping
+   * them reads as us reassuring ourselves. `CapabilitySupport` carries
+   * that signal inside the SDK instead.
+   */
+  const ENGINEERING_VOCABULARY = [
+    'regtest',
+    'e2e',
+    'end-to-end',
+    'coverage',
+    'test network',
+    'testnet',
+    'ci',
+    'verified',
+    'unit test',
+    'fork',
+    'adapter',
+    'signer',
+    'psbt',
+    'orchestrator',
+    'sdk',
+  ];
+
+  /** Every string the matrix hands a frontend to print verbatim. */
+  const userFacingStrings = (): { where: string; text: string }[] =>
+    WALLET_MATRIX.flatMap(entry => [
+      ...(entry.note ? [{ where: `${entry.wallet}.note`, text: entry.note }] : []),
+      ...Object.entries(entry.capabilities).flatMap(([capability, status]) =>
+        status?.caveat ? [{ where: `${entry.wallet}.${capability}.caveat`, text: status.caveat }] : [],
+      ),
+    ]);
+
+  it.each(ENGINEERING_VOCABULARY)('no matrix copy says "%s"', word => {
+    const boundary = new RegExp(`\\b${word}\\b`, 'i');
+    const offenders = userFacingStrings()
+      .filter(s => boundary.test(s.text))
+      .map(s => `${s.where}: ${s.text}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it('every wallet the picker offers carries a note', () => {
+    const withoutNote = WALLET_MATRIX.filter(e => !e.note?.trim()).map(e => e.wallet);
+    expect(withoutNote).toEqual([]);
+  });
+});

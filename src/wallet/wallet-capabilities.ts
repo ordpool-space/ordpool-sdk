@@ -71,7 +71,19 @@ export interface WalletMatrixEntry {
   signingMode: 'injected' | 'watch-only';
   /** Capabilities not listed default to {@link CapabilitySupport.Unsupported}. */
   capabilities: Partial<Record<WalletCapability, WalletCapabilityStatus>>;
-  /** Wallet-level caveat spanning capabilities (address-type default, mobile entry mechanism, backend). */
+  /**
+   * Wallet-level caveat spanning capabilities (address-type default,
+   * mobile entry mechanism, backend), written for the person choosing a
+   * wallet. It answers "what do I have to know or do differently with
+   * this one" and nothing else.
+   *
+   * Never state how well WE tested it. Our coverage, our CI, our fork
+   * lineage and our internal tooling names are not facts a user can act
+   * on; software working is the baseline, not a selling point. The
+   * engineering signal lives in {@link CapabilitySupport}, which stays
+   * inside the SDK and decides which wallets we offer — it never becomes
+   * a sentence anybody reads.
+   */
   note?: string;
 }
 
@@ -101,7 +113,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
-    note: 'Our own wallet (Leather fork). Full regtest coverage across every operation.',
+    note: 'Our own wallet, built for cats. Mint, send, buy and sell without leaving the extension.',
   },
   {
     wallet: KnownOrdinalWalletType.xverse,
@@ -184,7 +196,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
-    note: 'Signs with your Taproot (bc1p) account. Supports mint, send, buy and sell, and inscribe. Works in the desktop extension and in the OKX mobile app browser.',
+    note: 'Signs with your Taproot (bc1p) account. Works in the desktop extension and in the OKX mobile app browser.',
   },
   {
     wallet: KnownOrdinalWalletType.phantom,
@@ -228,7 +240,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'Signs on-chain with your Alby account key (no Alby Hub needed). Every input it signs must come from your Taproot (bc1p) account. Any address type can hold a cat. No mobile browser support.',
+    note: 'Signs with your Alby account key. The sats it spends must sit on your Taproot (bc1p) account.',
   },
   {
     wallet: KnownOrdinalWalletType.binance,
@@ -260,7 +272,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
-    note: 'Watch-only via extended public key (xpub / ypub / zpub / tpub). Builds a PSBT you sign in your own wallet (Sparrow, Coldcard, Ledger, …); nothing is signed in the browser. Paste your account key to connect; for a plain xpub, choose the Taproot account type. Works on desktop and mobile.',
+    note: 'Paste your account key (xpub / ypub / zpub / tpub) to connect. Nothing is signed here: you get a file to sign in Sparrow, Coldcard, Ledger or any wallet holding that key. For a plain xpub, choose the Taproot account type.',
   },
 ];
 
