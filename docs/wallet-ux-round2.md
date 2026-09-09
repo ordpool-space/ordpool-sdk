@@ -416,6 +416,15 @@ squeezed the name column until that one label wrapped to three lines
 while every other row stayed on one. A button never repeats its own
 row's name.
 
+**Watch-only ranks as primary, solid.** cubes ranked it outline, calling
+it a fallback rather than "the wallet you have"; ordpool.space ranked it
+solid. Two sites, two answers, so: solid. The deciding case is the empty
+state. With nothing installed, every other button on the screen sends the
+person away to download something, and watch-only is the only row that
+works right now, in this browser, with no install. There it is not a
+fallback, it is the only actionable thing on the screen, and it should be
+what the eye lands on.
+
 **Connect outranks Install, visually.** All three sites shipped the two
 as the same control, and all three had to be sent back for it, so it
 belongs in the spec rather than in three review comments. A person opens
