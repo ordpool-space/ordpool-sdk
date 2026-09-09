@@ -340,6 +340,28 @@ describe('walletActionNotice', () => {
     expect(mobile?.message).toContain('Xverse');
   });
 
+  it('hands back the parts so a narrow surface can render the wallets as a list', () => {
+    const notice = walletActionNotice(KnownOrdinalWalletType.alby, WalletCapability.Cat21OfferCreate);
+
+    expect(notice?.reason).toBe(
+      'Alby cannot sell a cat. Selling means signing your half and leaving the buyer\'s half open, '
+      + 'and Alby signs everything at once.',
+    );
+    expect(notice?.alternatives).toEqual([
+      'Cat21 Wallet', 'Xverse', 'Leather', 'UniSat', 'Wizz', 'OKX', 'Watch-only (xpub)',
+    ]);
+    expect(notice?.actionPhrase).toBe('sell a cat');
+    // The prose form stays available and stays consistent with the parts.
+    expect(notice?.message).toBe(`${notice?.reason} Connect ${notice?.alternatives.slice(0, -1).join(', ')}`
+      + ` or ${notice?.alternatives.at(-1)} to ${notice?.actionPhrase}.`);
+  });
+
+  it('names no alternatives on a precondition, since the connected wallet can already do it', () => {
+    const notice = walletActionNotice(KnownOrdinalWalletType.unisat, WalletCapability.SignMessage);
+    expect(notice?.alternatives).toEqual([]);
+    expect(notice?.reason).toBe(notice?.message);
+  });
+
   it('flags a precondition as precheck, not as a block', () => {
     const notice = walletActionNotice(KnownOrdinalWalletType.unisat, WalletCapability.SignMessage);
     expect(notice?.kind).toBe('precheck');

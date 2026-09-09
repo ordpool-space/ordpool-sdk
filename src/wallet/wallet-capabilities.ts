@@ -386,8 +386,28 @@ export type WalletActionNoticeKind = 'blocked' | 'precheck';
 
 export interface WalletActionNotice {
   kind: WalletActionNoticeKind;
-  /** A finished sentence. Print it; do not reword or append to it. */
+  /**
+   * The whole thing as one finished sentence, for a surface with room
+   * for prose. Print it; do not reword or append to it.
+   *
+   * On a narrow surface prefer the parts below. Seven wallet names read
+   * as options inside a wide paragraph and as a wall inside a column,
+   * because prose gives the reader no way to scan them.
+   */
   message: string;
+  /** Why, on its own. Ends in a full stop; never names other wallets. */
+  reason: string;
+  /**
+   * The wallets that CAN do it here, in matrix order, as labels.
+   *
+   * Render them as a list when the surface is narrow. Never truncate:
+   * the reader's question is "is the wallet I already have in here?",
+   * and a shortened list cannot answer it. Empty for a precheck, and
+   * empty when nothing else on this platform can do it either.
+   */
+  alternatives: string[];
+  /** The action in the reader's words, e.g. "sell a cat", for a heading. */
+  actionPhrase: string;
 }
 
 /**
@@ -410,7 +430,15 @@ export function walletActionNotice(
   const phrase = ACTION_PHRASE[capability];
 
   if (status.support !== CapabilitySupport.Unsupported) {
-    return status.caveat ? { kind: 'precheck', message: status.caveat } : null;
+    return status.caveat
+      ? {
+          kind: 'precheck',
+          message: status.caveat,
+          reason: status.caveat,
+          alternatives: [],
+          actionPhrase: phrase,
+        }
+      : null;
   }
 
   const reason = status.caveat ?? `${label} cannot ${phrase}.`;
@@ -422,5 +450,11 @@ export function walletActionNotice(
     ? ` Connect ${orList(alternatives)} to ${phrase}.`
     : '';
 
-  return { kind: 'blocked', message: `${reason}${wayForward}` };
+  return {
+    kind: 'blocked',
+    message: `${reason}${wayForward}`,
+    reason,
+    alternatives,
+    actionPhrase: phrase,
+  };
 }
