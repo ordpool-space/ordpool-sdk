@@ -971,3 +971,38 @@ The corollary that cost the most to learn: **a frame is only evidence
 about the host it was rendered in.** The wallet's approval dialogs looked
 correct through `index.html` and broken through the real 390px popup
 lock. The session threw the good-looking frames away.
+
+## 9. Round closed
+
+All four surfaces implemented, captured and cross-reviewed; the SDK
+shipped what they needed. 48 frames, none stale, every capture condition
+stated. Each session read every other session's frames, so every set had
+four readers rather than one.
+
+**What the round found, none of it caught by tests, builds or type
+checks, all of it green throughout:**
+
+| | |
+|---|---|
+| A money button rendered off-screen | two full-width buttons in a 390px popup summing to 200%, so Approve sat past the right edge on every cat action |
+| Sats that could be misread by 1000x | a bare `toLocaleString` rendered 21000 as "21.000" on a German machine, on a spending prompt |
+| Invisible text on four trading screens | white on a near-white panel, from a Bootstrap semantic variable resolving to its light-mode default |
+| An unverifiable recipient address | head…tail only, hiding exactly the characters a poisoned lookalike is built to match |
+| A fee-stream error blanking a whole checkout | live in two consumers, latent in a third |
+| A price nobody could see | the mint form gave a fee RATE and never a total, while its own sibling screen stated one |
+| Two decimal conventions in one frame | presets and input disagreeing on a fee rate |
+| Three dialogs focusing their close button | a framework default, not three mistakes |
+
+**What it cost to find:** rendering the real screen and looking at it.
+Nothing else.
+
+**The two habits worth keeping:**
+
+1. **A frame is only evidence about the host it was rendered in.** The
+   wallet's dialogs looked correct through `index.html` and broken
+   through the real popup lock. Those good-looking frames were thrown
+   away.
+2. **State the capture conditions with the frames, not after a reviewer
+   asks.** Three times a correct screen was reported as defective for
+   want of one sentence, which cost more reviewer time than any real
+   defect except the off-screen button.
