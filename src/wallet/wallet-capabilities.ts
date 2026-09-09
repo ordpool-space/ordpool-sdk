@@ -266,20 +266,20 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.Cat21Mint]: { support: CapabilitySupport.Proven },
       [WalletCapability.Cat21Transfer]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby cannot send a cat. It signs a transaction all at once, and sending needs the cat and the sats you pay with signed separately.',
+        caveat: "Alby can't send a cat: it signs all or nothing, and sending needs the cat and your fee coins signed apart.",
       },
       [WalletCapability.Cat21OfferCreate]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby cannot sell a cat. Selling means signing your half and leaving the buyer\'s half open, and Alby signs everything at once.',
+        caveat: "Alby can't sell a cat: it signs all or nothing, and a trade needs each side to sign only its own part.",
       },
       [WalletCapability.Cat21OfferAccept]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby cannot buy a cat. Buying means signing your half of a deal the seller already signed, and Alby signs everything at once.',
+        caveat: "Alby can't buy a cat: it signs all or nothing, and a trade needs each side to sign only its own part.",
       },
       [WalletCapability.Inscription]: { support: CapabilitySupport.Proven },
       [WalletCapability.InscriptionParentChild]: {
         support: CapabilitySupport.Unsupported,
-        caveat: 'Alby cannot add to a collection. That needs one part of the transaction left unsigned, and Alby signs everything at once. Single inscriptions work.',
+        caveat: "Alby can't add to a collection: it signs all or nothing, and a collection needs one part left unsigned. Plain inscriptions work.",
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },

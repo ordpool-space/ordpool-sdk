@@ -308,9 +308,8 @@ describe('walletActionNotice', () => {
 
     expect(notice?.kind).toBe('blocked');
     expect(notice?.message).toBe(
-      'Alby cannot sell a cat. Selling means signing your half and leaving the buyer\'s half open, '
-      + 'and Alby signs everything at once. '
-      + 'Connect Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX or Watch-only (xpub) to sell a cat.',
+      "Alby can't sell a cat: it signs all or nothing, and a trade needs each side to sign only its own part."
+      + ' Connect Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX or Watch-only (xpub) to sell a cat.',
     );
   });
 
@@ -345,8 +344,7 @@ describe('walletActionNotice', () => {
     const notice = walletActionNotice(KnownOrdinalWalletType.alby, WalletCapability.Cat21OfferCreate);
 
     expect(notice?.reason).toBe(
-      'Alby cannot sell a cat. Selling means signing your half and leaving the buyer\'s half open, '
-      + 'and Alby signs everything at once.',
+      "Alby can't sell a cat: it signs all or nothing, and a trade needs each side to sign only its own part.",
     );
     expect(notice?.alternatives).toEqual([
       'Cat21 Wallet', 'Xverse', 'Leather', 'UniSat', 'Wizz', 'OKX', 'Watch-only (xpub)',
