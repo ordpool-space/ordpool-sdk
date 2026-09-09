@@ -616,6 +616,44 @@ check that the thing under test can occur on that surface. A screenshot
 of impossible state answers a question nobody asked, and it costs the
 same as a real one.
 
+### 7.14 The address a person approves must be readable in full
+
+**Confirmed defect, cat21-wallet, and the most serious thing this round
+has found.** Its approval dialogs render the destination address only as
+`formatAddress` head…tail, about 17 characters, with no title attribute,
+no copy, no expand, no hover. A person approving a send or a buy cannot
+see the full recipient or seller-payment address anywhere.
+
+Why this outranks every copy question in this document: address
+poisoning works by generating an address whose head and tail match the
+one the victim expects. The 17 characters shown are exactly the part an
+attacker can forge cheaply; the middle, which is what actually
+distinguishes the addresses, is the part we hide. So the dialog cannot
+answer its own §7.6 question, "who gets what", on the one surface in
+this ecosystem where being wrong costs coins rather than clarity.
+
+It surfaced sideways. The wallet session corrected me for telling it to
+stress-test layout with a full-length address, on the grounds that its
+formatter truncates so that string cannot occur. The truncation was the
+finding.
+
+**Proposed fix** (the wallet's own, and it is the right one): render the
+security-critical address rows, send recipient and buy seller-payment,
+in full, monospace, wrapping across the full width. Amounts, fee and cat
+id stay compact. A contained change to how one kind of row renders, not
+a redesign.
+
+**Scope is the maintainer's call**, this round or a follow-up, and it is
+being put to them rather than settled between sessions. What is decided
+here: the round does not close with a polished sentence sitting above an
+address nobody can verify.
+
+**The generalisation for everyone:** truncation is display convenience
+everywhere except where a person is committing to the value. There,
+truncation removes the only thing they could have checked. Any surface
+that asks someone to approve an address, a cat id or an amount shows
+that value in full.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
