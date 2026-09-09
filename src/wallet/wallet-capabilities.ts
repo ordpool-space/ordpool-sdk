@@ -354,3 +354,73 @@ export function walletsSupporting(
 export function walletsForPlatform(platform: WalletPlatform): WalletMatrixEntry[] {
   return WALLET_MATRIX.filter(e => e.platforms.includes(platform));
 }
+
+/**
+ * What each capability is called in a sentence a user reads.
+ *
+ * Reads as a verb phrase after "to": "…to sell a cat", "…to inscribe".
+ * These are not row labels: on the sell screen the page is already the
+ * label, so nothing needs to say "Sell (create an offer)".
+ */
+const ACTION_PHRASE: Record<WalletCapability, string> = {
+  [WalletCapability.Cat21Mint]: 'mint a cat',
+  [WalletCapability.Cat21Transfer]: 'send a cat',
+  [WalletCapability.Cat21OfferCreate]: 'sell a cat',
+  [WalletCapability.Cat21OfferAccept]: 'buy a cat',
+  [WalletCapability.Inscription]: 'inscribe',
+  [WalletCapability.InscriptionParentChild]: 'add to a collection',
+  [WalletCapability.SignMessage]: 'sign a message',
+};
+
+/** "A", "A or B", "A, B or C" — no serial comma, as spoken. */
+function orList(names: readonly string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
+/**
+ * `blocked` - this wallet cannot do it; the button does not work.
+ * `precheck` - it can, once the person changes something first.
+ */
+export type WalletActionNoticeKind = 'blocked' | 'precheck';
+
+export interface WalletActionNotice {
+  kind: WalletActionNoticeKind;
+  /** A finished sentence. Print it; do not reword or append to it. */
+  message: string;
+}
+
+/**
+ * The one thing to say at an action, for the wallet that is connected,
+ * or `null` when there is nothing to say and the button just works.
+ *
+ * A consumer never composes this. The alternatives are read out of the
+ * matrix at call time rather than written into a string, so adding or
+ * removing a wallet updates every site at once and no site can ship a
+ * list that has gone stale.
+ */
+export function walletActionNotice(
+  wallet: KnownOrdinalWalletType,
+  capability: WalletCapability,
+  options: { platform?: WalletPlatform } = {},
+): WalletActionNotice | null {
+  const platform = options.platform ?? WalletPlatform.Desktop;
+  const status = capabilityOf(wallet, capability);
+  const label = walletMatrixEntry(wallet)?.label ?? wallet;
+  const phrase = ACTION_PHRASE[capability];
+
+  if (status.support !== CapabilitySupport.Unsupported) {
+    return status.caveat ? { kind: 'precheck', message: status.caveat } : null;
+  }
+
+  const reason = status.caveat ?? `${label} cannot ${phrase}.`;
+  // No need to exclude this wallet: we only get here when it is
+  // Unsupported, and walletsSupporting never returns those.
+  const alternatives = walletsSupporting(capability, { platform }).map(entry => entry.label);
+
+  const wayForward = alternatives.length
+    ? ` Connect ${orList(alternatives)} to ${phrase}.`
+    : '';
+
+  return { kind: 'blocked', message: `${reason}${wayForward}` };
+}

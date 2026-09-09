@@ -12,6 +12,7 @@ import {
   walletsSupporting,
   walletsForPlatform,
   walletMatrixEntry,
+  walletActionNotice,
 } from './wallet-capabilities';
 
 const ids = (entries: readonly { wallet: KnownOrdinalWalletType }[]): KnownOrdinalWalletType[] =>
@@ -293,5 +294,55 @@ describe('user-facing copy in the matrix', () => {
   it('every wallet the picker offers carries a note', () => {
     const withoutNote = WALLET_MATRIX.filter(e => !e.note?.trim()).map(e => e.wallet);
     expect(withoutNote).toEqual([]);
+  });
+});
+
+describe('walletActionNotice', () => {
+  it('says nothing when the wallet can just do it', () => {
+    expect(walletActionNotice(KnownOrdinalWalletType.xverse, WalletCapability.Cat21OfferCreate)).toBeNull();
+  });
+
+  it('blocks with the reason and the wallets that can, computed from the matrix', () => {
+    const notice = walletActionNotice(KnownOrdinalWalletType.alby, WalletCapability.Cat21OfferCreate);
+
+    expect(notice?.kind).toBe('blocked');
+    expect(notice?.message).toBe(
+      'Alby cannot sell a cat. Selling means signing your half and leaving the buyer\'s half open, '
+      + 'and Alby signs everything at once. '
+      + 'Connect Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX or Watch-only (xpub) to sell a cat.',
+    );
+  });
+
+  it('never offers a wallet that cannot do the action, so a block cannot suggest itself', () => {
+    for (const capability of Object.values(WalletCapability)) {
+      const offered = walletsSupporting(capability).map(e => e.wallet);
+      const incapable = WALLET_MATRIX
+        .filter(e => capabilityOf(e.wallet, capability).support === CapabilitySupport.Unsupported)
+        .map(e => e.wallet);
+      expect(offered.filter(w => incapable.includes(w))).toEqual([]);
+    }
+  });
+
+  it('falls back to a plain sentence when an unsupported capability has no caveat', () => {
+    const notice = walletActionNotice(KnownOrdinalWalletType.alby, WalletCapability.SignMessage);
+    expect(notice?.kind).toBe('blocked');
+    expect(notice?.message.startsWith('Alby cannot sign a message.')).toBe(true);
+  });
+
+  it('reads the alternatives for the platform it is asked about', () => {
+    const mobile = walletActionNotice(
+      KnownOrdinalWalletType.alby,
+      WalletCapability.Cat21OfferCreate,
+      { platform: WalletPlatform.Mobile },
+    );
+    // Leather is desktop-only, so a mobile user must never be sent to it.
+    expect(mobile?.message).not.toContain('Leather');
+    expect(mobile?.message).toContain('Xverse');
+  });
+
+  it('flags a precondition as precheck, not as a block', () => {
+    const notice = walletActionNotice(KnownOrdinalWalletType.unisat, WalletCapability.SignMessage);
+    expect(notice?.kind).toBe('precheck');
+    expect(notice?.message).toBe('Switch your wallet to its Taproot (bc1p…) address, then connect again.');
   });
 });
