@@ -765,6 +765,33 @@ One question waits on evidence rather than on anyone's opinion: whether
 a typed comma reading against dot presets looks wrong. Shoot it, look,
 then decide. Nobody implements for it first.
 
+### 7.18 A theme-less document hands back light-mode colours
+
+cat21.space shipped white text on a near-white panel across make-offer,
+transfer and accept-offer: invisible, on the three screens where a person
+trades. The maintainer's original complaint, relocated onto the money
+screens, and it survived a whole round of review until a screenshot was
+zoomed.
+
+The cause is worth more than the fix. The app sets no `data-bs-theme`,
+so **every** Bootstrap semantic variable resolves to its LIGHT-mode
+default. `.connect-card` asked for `--bs-tertiary-bg`, got `#f8f9fa`, and
+the inherited white text vanished on it. The same trap is loaded in every
+other bare semantic var: `--bs-emphasis-color` is near-BLACK in light
+mode and is by definition applied to text meant to be read.
+
+The distinction that decides whether a use is safe: a var used ALONE is
+dangerous, because one half of the pair comes from our palette and the
+other from Bootstrap's light default. A paired background-and-foreground
+set (the `*-subtle` alert boxes) cannot drift apart and is fine.
+
+ordpool.space was checked before the alarm was propagated and is clear:
+its `--bs-*` use is almost all `--bs-btn-*`, which a `.btn` class sets on
+the element so it never falls through to a document default, plus
+`--bs-border-radius`, which carries no colour. Worth stating rather than
+leaving a sister repo to wonder whether someone else's finding was theirs
+too.
+
 ### 7.8 Two rules added mid-round
 
 **Nothing reaches production until the round agrees.** The cubes session
