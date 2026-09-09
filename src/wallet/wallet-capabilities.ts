@@ -61,7 +61,7 @@ export interface WalletCapabilityStatus {
    * ending in a full stop. A consumer never composes or reworders it.
    *
    * On an `Unsupported` capability it says plainly that the wallet cannot
-   * do it and why, in terms of what the wallet does to a transaction —
+   * do it and why, in terms of what the wallet does to a transaction,
    * not in terms of our API names. On a `Proven` capability it is the
    * step the user must take first.
    *
@@ -93,8 +93,8 @@ export interface WalletMatrixEntry {
    * lineage and our internal tooling names are not facts a user can act
    * on; software working is the baseline, not a selling point. The
    * engineering signal lives in {@link CapabilitySupport}, which stays
-   * inside the SDK and decides which wallets we offer — it never becomes
-   * a sentence anybody reads.
+   * inside the SDK and decides which wallets we offer, and it never
+   * becomes a sentence anybody reads.
    */
   note?: string;
 }
@@ -126,7 +126,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
-    note: 'Our own wallet, built for cats. Mint, send, buy and sell without leaving the extension.',
+    note: 'The wallet for your CAT-21 cats: mint, send and trade them, and it never spends a cat by accident.',
   },
   {
     wallet: KnownOrdinalWalletType.xverse,
