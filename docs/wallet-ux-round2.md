@@ -559,29 +559,29 @@ install half, mobile gets the in-app-browser half.
 (wallet, capability, platform) the matrix allows: 10 blocked, 5
 precheck. Design against the longest, not against a short example.
 
-| | Length | Where |
-|---|---|---|
-| Longest blocked | **249 chars** | Alby, add to a collection, desktop |
-| Longest precheck | **115 chars** | the Taproot line |
+| | Length |
+|---|---|
+| Longest blocked, whole sentence | **230 chars** |
+| Longest `reason` alone (the parts form) | **128 chars** |
+| Longest precheck | **115 chars** |
 
-The 249-character one, in full, to paste into a layout while testing:
+The 230-character one, to paste into a layout while testing:
 
-> Alby cannot add to a collection. That needs one part of the
-> transaction left unsigned, and Alby signs everything at once. Single
-> inscriptions work. Connect Cat21 Wallet, Xverse, Leather, UniSat, Wizz,
-> OKX or Watch-only (xpub) to add to a collection.
+> Alby can't add to a collection: it signs all or nothing, and a
+> collection needs one part left unsigned. Plain inscriptions work.
+> Connect Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX or
+> Watch-only (xpub) to add to a collection.
 
-That is roughly three lines at desktop width and around seven in
-cat21-wallet's extension popup. It must wrap, never truncate, never
-clip, and never push a button off-screen.
+A narrow surface renders the parts instead, so the paragraph it must lay
+out is the 128-character `reason` with the wallets as a list beneath.
 
-**An open question for the visual check, and it is about my API, not
-your layout.** Seven named alternatives may be a catalogue where a
-person needs one wallet that works. I am not changing it on a hunch:
-shoot the real string, and if it reads as a dump, say so and I will cap
-the list. Whatever we choose, it must not silently drop wallets, since
-a user running UniSat should not read a sentence implying UniSat is
-unsupported.
+**Two questions this section once held are now closed, both by rendered
+evidence and both against the first answer given here.** Whether seven
+named alternatives read as a catalogue: they did, as prose in a column,
+and the fix was the shape rather than the length, so the notice gained a
+parts form and nothing was truncated. And whether the reason sentences
+were pitched right: they were not, they explained partial signing to
+people who came to trade cats, and they were rewritten at source.
 
 ### 7.11 The evidence directory holds only current shots
 
