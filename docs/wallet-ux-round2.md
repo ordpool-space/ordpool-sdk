@@ -416,6 +416,16 @@ squeezed the name column until that one label wrapped to three lines
 while every other row stayed on one. A button never repeats its own
 row's name.
 
+**Connect outranks Install, visually.** All three sites shipped the two
+as the same control, and all three had to be sent back for it, so it
+belongs in the spec rather than in three review comments. A person opens
+this list to find the wallet they already have; if every row's button
+carries identical weight they must read all eight to find theirs. Connect
+(and its siblings `Connect` for watch-only and `Open in <wallet>`) is the
+solid primary: you have this, use it now. `Install` is the outline
+secondary: you would have to go get this. Both remain unmistakably
+enabled, which is the separate requirement below.
+
 `Download` and `Get wallet` are banned. "Download" describes a file;
 "Get wallet" tested as reading disabled. Every button is styled as
 enabled, because every button is enabled.
