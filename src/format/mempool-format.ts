@@ -118,8 +118,21 @@ export function groupAddressForVerification(address: string): string {
  * Use this for an address the reader is asked to SEND to, where they will
  * verify it AND copy it. Because no space character exists in the DOM, a
  * dragged selection yields the raw address, so manual copy and the copy
- * button agree. Space the chunks with margin or `word-spacing`, never by
- * putting a space back in.
+ * button agree.
+ *
+ * Two constraints, both load-bearing and both invisible in the markup:
+ *
+ * - **Space the chunks with `margin`, never `word-spacing`.** There are no
+ *   space characters left for `word-spacing` to widen, so it does nothing.
+ *   And never put a space back in.
+ * - **Keep the chunks `display: inline`.** The browser's copy serialiser
+ *   inserts line breaks by LAYOUT, not by text nodes, so chunks laid out as
+ *   flex or grid items can reach the clipboard newline-separated even though
+ *   the DOM holds no whitespace at all.
+ *
+ * That second one also decides how to verify this: select and copy in a real
+ * browser and compare. `textContent` reports the raw address either way, so
+ * it cannot see the defect.
  *
  * Grouping a send-address is worth this much care because the reader's task
  * is genuinely both: they compare it against what their own wallet shows,
