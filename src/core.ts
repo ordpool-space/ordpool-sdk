@@ -58,6 +58,7 @@ export {
 //     consumer — a frontend or a plain-Node bot — can opt into the
 //     compile-time protection at critical boundaries.
 export * from './wallet/address-types';
+export * from './format/mempool-format';
 export * from './wallet/wallet-capabilities';
 export * from './wallet/wallet-deeplink';
 export * from './wallet/xpub/derive-watch-only';
