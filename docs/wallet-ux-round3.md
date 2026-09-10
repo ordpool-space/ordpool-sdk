@@ -704,3 +704,35 @@ other shows.
 If a site has an analogous pre-existing per-coin or per-selection warning, the
 same split applies: leave it sharp, leave it where it is, and do not fold it
 into the standing note.
+
+## 13. Mutation-check the INSTRUMENT, not only the code
+
+The workspace rule says a test that cannot fail is not evidence. There is a
+sharper version, and ordpool.space found it while proving the Fund address
+stays pasteable.
+
+The property to prove was "a person who drags a selection across the grouped
+address gets something their wallet accepts". The obvious instrument,
+`textContent`, cannot see the defect at all: the browser's copy serialiser
+inserts line breaks by LAYOUT, so chunks laid out as flex, grid or block
+children reach the clipboard newline-separated from a DOM holding no
+whitespace, and `textContent` reports the clean address throughout.
+
+Switching to `getSelection().toString()` is better, but "better instrument"
+is a claim of the same kind as "the tests pass", and it deserves the same
+treatment. So they mutated `.addr-chunk` to `display: block` and confirmed
+the selection came back `bc1p\n3z9k\n8xq7…`, then restored it and confirmed
+it came back raw. That establishes the instrument can distinguish the two
+cases, which is the whole reason to trust the green reading.
+
+**The generalisation:** when a check is the only thing standing between you
+and a class of defect, break the code the check is watching and confirm the
+check notices. Not the test around it, the check itself. A test whose
+assertion is sound but whose measurement is blind fails in exactly the way
+that is hardest to see, because everything about it looks correct.
+
+They also reported the limit honestly rather than papering it: page JS cannot
+read the OS clipboard in that browser without a permission grant, so this is
+the selection serialiser and not literally `clipboard.readText()`. Naming the
+gap and then showing the instrument catches the failure mode is worth more
+than a claim to have done the thing they could not do.
