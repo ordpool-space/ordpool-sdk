@@ -537,6 +537,34 @@ export function singleAddressCaveat(assets = 'cats'): string {
 export const SINGLE_ADDRESS_CAVEAT = singleAddressCaveat();
 
 /**
+ * The visible label on the compact indicator that rides a connected-wallet
+ * pill, beside its amber marker.
+ *
+ * Deliberately asset-agnostic and therefore NOT parameterised: it names the
+ * arrangement, and the arrangement is identical on every site. One string
+ * everywhere is one fewer thing that can drift between three repos.
+ *
+ * Sized for a pill. If it ever needs more words, it has stopped being a
+ * compact indicator and the design question is a different one.
+ */
+export const SINGLE_ADDRESS_PILL_LABEL = 'One address';
+
+/**
+ * The accessible name for that marker, for a reader who never sees the amber.
+ *
+ * Colour and shape carry nothing to a screen reader, and amber is exactly the
+ * pairing a colour-blind reader is most likely to miss, so this string is the
+ * whole message rather than a label for the widget. It announces the
+ * CONDITION and the affordance in one breath, never "warning icon".
+ *
+ * Longer than {@link SINGLE_ADDRESS_PILL_LABEL} on purpose: a pill has a
+ * width, an accessible name has a breath.
+ */
+export function singleAddressPillAccessibleName(assets = 'cats'): string {
+  return `This wallet keeps your coins and your ${assets} on one address. Open for details.`;
+}
+
+/**
  * Whether a CONNECTED wallet is handing out one address for both roles.
  *
  * Ground truth, and preferred over the matrix flag whenever a wallet is

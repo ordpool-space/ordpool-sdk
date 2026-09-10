@@ -17,6 +17,8 @@ import {
   usesSingleAddress,
   SINGLE_ADDRESS_CAVEAT,
   singleAddressCaveat,
+  SINGLE_ADDRESS_PILL_LABEL,
+  singleAddressPillAccessibleName,
 } from './wallet-capabilities';
 
 const ids = (entries: readonly { wallet: KnownOrdinalWalletType }[]): KnownOrdinalWalletType[] =>
@@ -479,5 +481,45 @@ describe('usesSingleAddress', () => {
     // "single address" would warn every disconnected user.
     expect(usesSingleAddress({ ordinalsAddress: undefined, paymentAddress: undefined })).toBe(false);
     expect(usesSingleAddress({ ordinalsAddress: '', paymentAddress: '' })).toBe(false);
+  });
+});
+
+describe('the compact single-address indicator', () => {
+  it('labels the arrangement, not the asset, so one string serves every site', () => {
+    expect(SINGLE_ADDRESS_PILL_LABEL).toBe('One address');
+    for (const noun of ['cat', 'cats', 'cube', 'cubes', 'inscription']) {
+      expect(SINGLE_ADDRESS_PILL_LABEL.toLowerCase()).not.toContain(noun);
+    }
+  });
+
+  it('keeps the label short enough to ride a pill', () => {
+    // Not a style preference: past a pill's width this stops being a compact
+    // indicator, and the design question becomes a different one.
+    expect(SINGLE_ADDRESS_PILL_LABEL.length).toBeLessThanOrEqual(14);
+  });
+
+  it('gives a reader who never sees the amber the whole message', () => {
+    const name = singleAddressPillAccessibleName();
+    expect(name).toBe('This wallet keeps your coins and your cats on one address. Open for details.');
+    // The condition, so colour is never the only channel...
+    expect(name).toContain('one address');
+    // ...and the affordance, so they know it opens something.
+    expect(name).toContain('Open for details');
+  });
+
+  it('never announces the widget instead of the condition', () => {
+    const name = singleAddressPillAccessibleName().toLowerCase();
+    for (const widgetWord of ['warning icon', 'alert icon', 'button', 'badge', 'indicator']) {
+      expect(name).not.toContain(widgetWord);
+    }
+  });
+
+  it('names the asset the reader came for', () => {
+    expect(singleAddressPillAccessibleName('cubes')).toContain('your cubes on one address');
+    expect(singleAddressPillAccessibleName('cubes')).not.toContain('cats');
+  });
+
+  it('says more than the label, because it has room to', () => {
+    expect(singleAddressPillAccessibleName().length).toBeGreaterThan(SINGLE_ADDRESS_PILL_LABEL.length * 3);
   });
 });
