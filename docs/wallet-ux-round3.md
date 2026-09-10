@@ -298,3 +298,39 @@ longer be the one shipping.
 Corollary, from the fix: a spec that locates an element by a rendering
 detail breaks when the rendering changes for good reasons. `data-testid`
 names the thing the test means.
+
+## 9. Measure an element against its GROUND, not only its siblings
+
+cat21.space proved its amber pill by putting it beside the normal pill and
+the red error pill: three states, same width, one frame. The amber one was
+obviously different. Recommendation made, and it was the right one.
+
+Comparing the same pills to the PAGE they sit on says something the
+sibling comparison cannot:
+
+| | vs the orange ground |
+|---|---|
+| amber fill | **1.03:1** |
+| normal pill, white | 2.14:1 |
+| amber pill's border | **2.66:1** |
+
+The amber fill is essentially the page colour. It does not delineate the
+pill at all; the 2px dark border does, and that border is a stronger edge
+against orange than the white pill's own edge.
+
+Both are load-bearing, for different readers:
+
+- **fill** is the CHANGE signal, for a returning holder who knows what the
+  white pill looks like and notices it stopped being white
+- **border** is the SHAPE signal, for a first-time single-address user who
+  connects straight into amber and has no baseline to compare against
+
+So: do not lighten or drop that border on the reasoning that "the fill
+already says amber". It would dissolve the pill into the page for exactly
+the person this indicator exists to reach, **and every existing test would
+still pass**, because none of them measure the element against its ground.
+
+**The technique generalises.** A sibling comparison answers "can a person
+tell these apart". A ground comparison answers "can a person find this at
+all". Round 2 spent its effort on the first question. This is the second,
+and it is the one that matters for anybody arriving without a baseline.
