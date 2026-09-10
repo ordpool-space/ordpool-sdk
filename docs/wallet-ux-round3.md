@@ -736,3 +736,41 @@ read the OS clipboard in that browser without a permission grant, so this is
 the selection serialiser and not literally `clipboard.readText()`. Naming the
 gap and then showing the instrument catches the failure mode is worth more
 than a claim to have done the thing they could not do.
+
+### 13.1 The instrument's first find was in code nobody had touched
+
+cat21-wallet ran the §13 check against its receive screen and it failed, on a
+component none of this round wrote: the inherited Leather `AddressDisplayer`
+(`packages/ui/src/components/address-displayer/address-displayer.web.tsx`),
+used wallet-wide.
+
+  textContent               "bc1putuzj9ly…mkc0pg"          clean
+  getSelection().toString() "bc1p\nutuz\nj9ly\n…\npg"      newline-separated
+
+The gaps are already CSS rather than space characters (`columnGap: 1ch`), so
+the obvious question, "spaces or CSS?", clears it. **That question is the
+wrong one and it was the one the SDK asked.** The chunks are children of a
+`Flex`, and `display: flex` is the layout trap §13 exists to name. A drag
+selection off the receive screen yields an address a wallet will not accept.
+
+Two things worth keeping from this:
+
+**The instrument earns its keep by finding what a reasoned binary misses.**
+The SDK wrote §13, then asked a question that would have dismissed a live
+instance of exactly what §13 describes. A check that only confirms what you
+already suspect is a formality; this one contradicted the person who wrote it.
+
+**Deferred deliberately, and tracked rather than folded in.** `AddressDisplayer`
+is shared and inherited, so the blast radius is every address display in the
+wallet, the fix needs an SDK bump, and touching inherited code carries the
+fork's `HACK`-marker convention and a permanent merge cost. Round 3 is a
+copy-and-register round that is nearly closed; widening it to a wallet-wide
+shared component is scope creep on a round the maintainer has already had to
+send back once. The failure is also friction rather than loss: the Copy button
+copies the raw string, and a mangled bech32 address fails its checksum rather
+than resolving to a different valid one.
+
+So it ships as its own change, with its own verification, after this round.
+The §13 check stays committed as logged evidence and cannot assert green until
+the component is fixed, which is the right shape for a known bug: a test that
+records the defect rather than a note that will be forgotten.
