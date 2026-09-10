@@ -334,3 +334,89 @@ still pass**, because none of them measure the element against its ground.
 tell these apart". A ground comparison answers "can a person find this at
 all". Round 2 spent its effort on the first question. This is the second,
 and it is the one that matters for anybody arriving without a baseline.
+
+## 10. Maintainer decisions, and what closes the round
+
+All ruled directly. Each session still needs the maintainer's word in its
+OWN session before shipping; this records what that word will be.
+
+### 10.1 The pill is FILL
+
+Decided. The amber state fills the pill; it does not merely recolour the
+border like the wrong-network error does.
+
+Reasoning worth keeping, because a later pass WILL propose "make these two
+pills consistent": outline lost on measurement, not on taste. The page is
+orange, the normal pill has orange text on white, an amber-outline pill has
+amber text on white, and two warm recolours on the same white shape do not
+separate at a glance. Fill changes the one variable the surrounding chrome
+holds constant. The two states are also different KINDS of thing: wrong
+network is an error you must fix to proceed, single-address is a standing
+condition you may choose to live with.
+
+**The border stays.** Fill is 1.03:1 against the page; the pill's shape comes
+entirely from the 2px dark border at 2.66:1. Dropping it because "the fill
+already says amber" dissolves the pill into the page for the first-time user
+this exists for, and every test still passes.
+
+### 10.2 cat21-wallet's inherited taproot dialog
+
+- The `mailto:support@leather.io` link: **REMOVE**. Not a HARD RULE #6
+  question; #6 covers the dapp-facing provider surface, not our own send
+  screen.
+- The dialog copy claiming we check inscriptions, runes and BRC-20:
+  **CHANGE** it to what is true.
+- What replaces the support address: **link to the repo.** People can open
+  an issue.
+
+### 10.3 The positioning copy
+
+New direction from the maintainer: the wallet is *"a dedicated wallet for
+minting, collection, sending, trading and celebrating cats… not meant to be
+used for other websites outside the ordpool family. Minting inscriptions on
+ordpool is fine, because it also mints a cat."*
+
+That last clause is a fact about the code, not a slogan: every inscribe
+through this SDK carries `lockTime: CAT21_LOCK_TIME`, so inscribing on
+ordpool does mint a cat and the wallet IS the right place for it.
+
+Positioning and safety stay in separate slots, as cat21-wallet argued. The
+receive-screen safety line is unchanged and already measured at 16.5:1.
+
+### 10.4 The dependency conflict was never ng-bootstrap
+
+`@angular/localize` is declared `^21.2.4` in cat21.space's frontend while
+every sibling `@angular/*` is pinned exact. The caret let it drift to
+21.2.17, and localize peers on `@angular/compiler` at exactly its own
+version, against a compiler pinned at 21.2.4.
+
+**Fix: drop the caret.** One character. No dependency fight, no
+`--legacy-peer-deps`.
+
+The SDK has no Angular dependency at all and never did.
+
+*(Separately: cubes runs `ng-bootstrap@20`, which peers on Angular ^21,
+against Angular 22. A real mismatch it has not tripped yet; `ng-bootstrap@21`
+peers on ^22.)*
+
+### 10.5 Every site uses the shared helpers
+
+Instruction from the maintainer. No site retypes what the SDK exports:
+`usesSingleAddress`, `walletCustodyCaveat`, `singleAddressCaveat`,
+`SINGLE_ADDRESS_PILL_LABEL`, `singleAddressPillAccessibleName`, and the
+format helpers `formatSats`, `formatBitcoinAmount`, `shortenId`,
+`groupAddressForVerification`.
+
+The formatters encode mempool's own conventions rather than a house style,
+so adopting them moves each site TOWARD upstream rather than away.
+
+### 10.6 Proposed, not yet ruled: one canonical safety page
+
+The caveat says "start a fresh address and use it only with our tools". That
+is what to do, with no room for how, or for the blunt part: other sites do
+not know what a cat is and will spend it as change.
+
+Proposal: one page on cat21.space, linked from every caveat, every pill
+popover, and the wallet. The SDK exports the URL so all four point at the
+same place and a change updates everyone. A link can be updated; frozen
+copy rots.
