@@ -667,3 +667,40 @@ Sentence order is now itself pinned by a spec, because it is the whole
 difference between an info note and a warning: what is safe HERE lands before
 what goes wrong elsewhere. Mutation-checked (clause removed: 2 failed;
 restored: 1577 passed).
+
+### 12.5 The per-coin warning stays SHARP, and §12 is what finally separates the two
+
+§7.8 already ruled that the wallet-model caveat and the per-coin warning both
+stay, because they answer different questions: "your wallet has no separation"
+is true before any coin is chosen and unfixable by choosing another; "we could
+not verify this coin" is about one coin and fixable by picking a different one.
+That ruling is untouched. cat21.space kept its `showSmallUtxoWarning` and was
+right to; nobody removes a live per-coin warning as a side effect of a register
+change.
+
+**§12's info register applies to the STANDING note only.** A per-coin warning
+fires when a person has selected a specific coin that might be carrying
+something, on the transaction they are about to sign. That is the case where a
+sharp warning is warranted, and the maintainer's objection was never to warning
+people at the moment something is actually about to go wrong. It was to
+greeting them with a hazard sticker at the connect button, before they have
+done anything at all.
+
+So the two are now:
+
+| | register | fires |
+|---|---|---|
+| standing wallet-model note | info, calm, beside the action | whenever a single-address wallet is connected |
+| per-coin warning | sharp, warning grammar, in the picker | only on a risky selection |
+
+**And this is what finally satisfies §7.8's own requirement that the two must
+differ visibly.** While both were amber warnings they looked like the same
+thing said twice, which is how a person learns to skip both. A calm standing
+note next to a sharp per-coin warning reads as what it is: here is how your
+wallet works, and here is a problem with the coin you just picked. Seeing both
+at once is coherent rather than duplicative, so neither is suppressed when the
+other shows.
+
+If a site has an analogous pre-existing per-coin or per-selection warning, the
+same split applies: leave it sharp, leave it where it is, and do not fold it
+into the standing note.
