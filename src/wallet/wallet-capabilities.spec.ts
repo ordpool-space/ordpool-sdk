@@ -430,23 +430,36 @@ describe('walletCustodyCaveat / single-address wallets', () => {
   });
 
   it('names the asset the reader came for, so a cube site does not say cats', () => {
-    expect(singleAddressCaveat('cubes')).toContain('your cubes on one address');
+    expect(singleAddressCaveat('cubes')).toContain('your coins and your cubes at one address');
     expect(singleAddressCaveat('cubes')).not.toContain('your cats');
-    expect(singleAddressCaveat()).toContain('your cats on one address');
+    expect(singleAddressCaveat()).toContain('your coins and your cats at one address');
   });
 
-  it('keeps the closing clause asset-agnostic, because the scan is wider than any one product', () => {
+  it('keeps the scan clause asset-agnostic, because the scan is wider than any one product', () => {
     // We check inscriptions, runes, rare sats and cats. Saying "checks a coin
     // for cubes" would understate it and would be wrong on the other sites.
     for (const noun of ['cats', 'cubes', 'inscriptions']) {
-      expect(singleAddressCaveat(noun)).toContain('check a coin for assets before spending it');
+      expect(singleAddressCaveat(noun)).toContain('checks what a coin is carrying before it spends it');
     }
+  });
+
+  it('opens with reassurance before the risk, so nobody reads a hazard notice', () => {
+    // Sentence order is the whole difference between an info note and a
+    // warning: what is safe HERE lands before what goes wrong elsewhere.
+    const text = singleAddressCaveat();
+    const reassurance = text.indexOf('That is fine here');
+    const risk = text.indexOf('Other sites do not look');
+    // Both present first: a missing clause indexes to -1, which would sort
+    // "before" everything and let this pass while saying nothing.
+    expect(reassurance).toBeGreaterThan(-1);
+    expect(risk).toBeGreaterThan(-1);
+    expect(reassurance).toBeLessThan(risk);
   });
 
   it('changes only the noun, never the mechanism or the ways out', () => {
     const cats = singleAddressCaveat('cats');
     const cubes = singleAddressCaveat('cubes');
-    expect(cats.replace('your cats', 'X')).toBe(cubes.replace('your cubes', 'X'));
+    expect(cats.replaceAll('your cats', 'X')).toBe(cubes.replaceAll('your cubes', 'X'));
   });
 
   it('lists every ordpool-family tool that checks a coin', () => {
@@ -456,8 +469,8 @@ describe('walletCustodyCaveat / single-address wallets', () => {
   });
 
   it('gives both ways out, not just the one that costs a new wallet', () => {
-    expect(SINGLE_ADDRESS_CAVEAT).toContain('keeps the two apart');
-    expect(SINGLE_ADDRESS_CAVEAT).toContain('fresh address');
+    expect(SINGLE_ADDRESS_CAVEAT).toContain('Start a fresh address');
+    expect(SINGLE_ADDRESS_CAVEAT).toContain('keeps your coins and your cats apart');
   });
 });
 

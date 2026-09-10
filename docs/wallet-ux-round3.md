@@ -563,3 +563,94 @@ for their confirmation.
 **No logo chip needed on cat21.space.** Its pill carries a text label and a
 short address; the wallet logo appears only in picker-modal rows. §11.2
 applies wherever a logo sits inside the amber fill, and there it does not.
+
+## 12. The maintainer overrules §7.6's placement and register
+
+> the texts are ok. but full sentences everywhere. smart and joyful. not to
+> complicated and like a safety warning. we are not a government regulating
+> something. people shouldn't be scared at the very start.
+>
+> so don't show this bold warning as the very start. better next to the mint
+> button (like in the past). and more as a info, and not as a warning where
+> someone will die (at least it feels so).
+>
+> fucking the connect button scares everyone
+
+This supersedes §7.6's two-surface design and §10.1's fill ruling for the
+navbar marker. It is a design change, not a repaint.
+
+### 12.1 The amber navbar pill is REMOVED
+
+No marker at connect, on any site. The connect moment is the moment a person
+is deciding whether to trust us at all, and greeting them with a hazard
+sticker is the most expensive place we could have put it.
+
+§7.6 put it there to solve cubes' honest below-the-fold measurement (caveat at
+y=945 desktop / y=1589 mobile at `scrollY=0`). **That measurement was taken at
+the wrong moment.** Nobody mints at `scrollY=0`; they scroll to the button to
+press it. A note beside the action is in view exactly when it matters, so the
+concern that produced the pill dissolves once the note moves to the action.
+Do not re-raise it.
+
+`SINGLE_ADDRESS_PILL_LABEL` and `singleAddressPillAccessibleName` are now
+unused. They stay exported until the round closes, so nothing breaks
+mid-flight, then go with `walletCustodyCaveat`.
+
+### 12.2 One placement: beside the action button
+
+Where the person is about to act, which is where ordpool.space had it before
+any of this:
+
+| site | beside |
+|---|---|
+| ordpool.space | the Mint button, and the Inscribe button |
+| cat21.space | the mint button, and the make-offer button |
+| cubes | the Mint-my-cube button on checkout |
+
+cubes' original §6 proposal ("inside the checkout, under the paying-from line,
+above the cost summary and mint button") was already almost exactly this. It
+was right before the pill was invented.
+
+### 12.3 Register: info, not warning. No acknowledgement.
+
+Not amber-as-hazard, not a triangle, not a bold banner across the top. An
+info note in the site's own quiet register, sized like help text rather than
+an alert.
+
+**The "I understand" button goes too.** Acknowledgement is a warning's
+grammar: it exists so a system can record that you were told. Information
+does not ask to be dismissed, so the per-wallet acknowledgement lifecycle
+(§7.6 step 3) is dropped along with the collapse behaviour it drove.
+
+The measurement discipline still applies to whatever replaces it: measure the
+note against its ground, not against its siblings (§9). Quiet is not an excuse
+for illegible.
+
+### 12.4 The copy, rewritten
+
+Full sentences, reassurance before risk, no scare. Now in
+`singleAddressCaveat(assets)`:
+
+> This wallet keeps your coins and your **cats** at one address. That is fine
+> here, because everything in the ordpool family checks what a coin is
+> carrying before it spends it. Other sites do not look, so a payment made
+> elsewhere can spend the sat one of your **cats** lives on and tip it to a
+> miner. Start a fresh address here and keep it for cat21.space,
+> ordpool.space, cubes.haushoppe.art and Cat21 Wallet, or use a wallet that
+> keeps your coins and your **cats** apart.
+
+Two constraints came from the existing specs rather than from me, and both
+were right:
+
+- **The scan clause stays asset-agnostic.** A first draft said "checks a coin
+  for cubes", which understates it: we scan inscriptions, runes, rare sats and
+  cats. "checks what a coin is carrying" is accurate on every site.
+- **"Start a fresh address" survives.** A first draft collapsed the two ways
+  out into "keep this address for the family", losing the maintainer's own
+  instruction. A fresh address is the point: an address never handed to
+  another site has nothing else able to spend from it.
+
+Sentence order is now itself pinned by a spec, because it is the whole
+difference between an info note and a warning: what is safe HERE lands before
+what goes wrong elsewhere. Mutation-checked (clause removed: 2 failed;
+restored: 1577 passed).

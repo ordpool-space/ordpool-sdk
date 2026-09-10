@@ -540,11 +540,12 @@ export function walletCustodyCaveat(
  */
 export function singleAddressCaveat(assets = 'cats'): string {
   return (
-    `This wallet keeps your spending coins and your ${assets} on one address, so a payment `
-    + 'made anywhere else can spend the sat one of them lives on and send it to a miner. Either '
-    + 'use a wallet that keeps the two apart, or start a fresh address here and use it only with '
-    + 'cat21.space, ordpool.space, cubes.haushoppe.art and Cat21 Wallet, which check a coin for '
-    + 'assets before spending it.'
+    `This wallet keeps your coins and your ${assets} at one address. That is fine here, because `
+    + 'everything in the ordpool family checks what a coin is carrying before it spends it. '
+    + `Other sites do not look, so a payment made elsewhere can spend the sat one of your `
+    + `${assets} lives on and tip it to a miner. Start a fresh address here and keep it for `
+    + 'cat21.space, ordpool.space, cubes.haushoppe.art and Cat21 Wallet, or use a wallet that '
+    + `keeps your coins and your ${assets} apart.`
   );
 }
 
