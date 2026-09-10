@@ -420,3 +420,91 @@ Proposal: one page on cat21.space, linked from every caveat, every pill
 popover, and the wallet. The SDK exports the URL so all four point at the
 same place and a change updates everyone. A link can be updated; frozen
 copy rots.
+
+## 11. Review of the round-3 frames
+
+Frames are reviewed here, not relayed. Every number below was measured off
+the delivered PNGs.
+
+### 11.1 ordpool.space — accepted
+
+The pill pair, the popover and the acknowledgement lifecycle all hold.
+
+**The pair separates with a large margin.** Ground is the navbar, which
+renders `#000000`. Amber fill `#ffc107` against it is **12.88:1**; the normal
+pill is a `#6c757d` icon square at **4.48:1**. The two states also differ in
+footprint (amber 103x62, normal a 48px square), so they separate on shape
+before colour is read at all.
+
+§7.6 asked for the pair "same width, same frame". That is unmeetable here and
+should not have been written as an absolute: the two states genuinely differ
+in width in the built UI, because only one of them carries a label. The
+obligation's PURPOSE (can a person tell these apart) is met, and the width
+difference is itself part of the answer. Two frames at one viewport satisfy it.
+
+**The border is NOT a defect on this site**, and a first pass at this review
+nearly recorded it as one. §10.1's "the border carries the shape" was measured
+on cat21.space, where the fill is 1.03:1 against a white page. Here the ground
+is inverted: the fill carries the shape at 12.88:1 and the border is
+decorative, so `#b8860b` at 2.0:1 against the fill costs nothing. A number
+from one ground does not transfer to its opposite. The border requirement
+stands for cat21.space and only for cat21.space.
+
+**One correction to the capture notes.** They record the ground as
+`--navbar-bg #212121`; the delivered pixels are `#000000` at every sampled
+point in both frames. This makes their amber figure conservative (9.88
+reported, 12.88 actual), so nothing built on it is wrong.
+
+### 11.2 The amber fill erases two of the five logos it will sit behind
+
+This one is real, it is the SDK's, and it lands on every site that puts a
+wallet logo inside the amber pill.
+
+The SDK's logo set is **not uniform**. Some marks ship an opaque backing
+plate; some are transparent artwork:
+
+| carries its own plate | transparent artwork |
+|---|---|
+| xverse, leather, wizz, okx, binance | unisat, alby, phantom, xpub, cat21wallet |
+
+The amber pill recolours the surface behind the logo, and it silently assumed
+a plate. Against the `#ffc107` fill:
+
+| wallet | mark | vs fill |
+|---|---|---|
+| alby | `#FECA00` | **1.06:1** |
+| unisat | `#F4B852` / `#EA8101` | **1.09:1 / 1.69:1** |
+| wizz, okx, binance | their own dark plate | 12+:1 |
+
+Alby and UniSat are two of the five wallets that trigger this pill, so two of
+the five lose their identity in exactly the state that most needs to say
+which wallet is connected. Visible in `pill-single-address-desktop-1280.png`
+and again at 390: the UniSat mark is a ghost.
+
+**Decision: inside the amber pill, the logo always sits on a neutral chip** —
+unconditionally, for all five, so the pill looks the same whichever wallet is
+connected rather than plated-for-two and floating-for-three. This is CSS at
+the pill, not an SDK code change; the SDK's part is that the non-uniformity is
+now written down here instead of being rediscovered per site.
+
+The general rule, which outlives this pill: **a logo is not guaranteed to
+carry its own background.** Any surface that recolours what sits behind one
+has to supply the separation itself.
+
+### 11.3 A frame whose bytes are a duplicate is not a second capture
+
+`pill-amber-narrow-390-instant-after-connect.png` and
+`pill-single-address-narrow-390-menu-open.png` are byte-identical
+(`16beab83…`). The capture notes present the first as an end-to-end
+measurement of the state at the instant the connection resolves.
+
+The mobile finding still closes, because what closes it is the DOM
+measurement (`navbar-collapse.contains(connectButton) === true`, `.show` still
+set after the modal auto-closes, pill top 357 of 844) — and no screenshot
+could have carried that claim either way. But a reader who hashes the
+directory finds a duplicate presented as a distinct capture, which is the
+precise failure mode frame-based evidence exists to avoid.
+
+Label it: either it is a copy, or it is a genuine recapture that came out
+identical because the visible region is static, and that second case deserves
+its own line so nobody has to guess.
