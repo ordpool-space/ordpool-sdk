@@ -214,3 +214,34 @@ Applies to the SDK caveats and to cat21-wallet's disclaimer alike. A name
 frozen into a build rots when the landscape moves and nobody greps a
 disclaimer. "A wallet built for them" stays true. A recommendation, if
 wanted, is a link the maintainer can update.
+
+## 8. A deploy is blessed on the DEPLOYED commit, per workflow
+
+Round 2 shipped ordpool.space at `7a6655f33` with two red lanes, `E2E
+(regtest mint)` and `E2E (regtest mint - cat21-wallet)`, and this repo
+called that deploy verified. No user was affected: round 2 changed the fee
+input from `type="number"` to `type="text"` and the specs still located
+`input[type="number"]`, so it was a selector break, and production was
+checked directly and was fine. ordpool.space found it a day later while
+checking round-3 CI.
+
+The mechanism is worth more than the apology. A session reported "CI green"
+on `cfc4eb84c`; `7a6655f33` landed on top; the deploy was then verified by
+watching `Build Frontend` to green and confirming the origin served
+`GIT_COMMIT_HASH 7a6655f`. That confirms the deploy LANDED. It does not
+confirm the deployed commit is green, and only the first was checked.
+
+The workspace already carries the rule that would have caught it: never
+trust a HEAD check-runs view, enumerate every workflow and take its own
+latest run. It was applied carefully all round and then not applied at the
+one moment that mattered.
+
+**So: before any deploy is blessed, every ACTIVE workflow on the DEPLOYED
+commit is enumerated and green, per workflow, not from a HEAD view.** That
+is the coordinator's job to run, not a session's to report. "A session said
+it was green" is not a check; it is a claim about a commit that may no
+longer be the one shipping.
+
+Corollary, from the fix: a spec that locates an element by a rendering
+detail breaks when the rendering changes for good reasons. `data-testid`
+names the thing the test means.
