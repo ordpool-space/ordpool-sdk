@@ -211,6 +211,58 @@ services:
     volumes:
       - ord-stock-data:/data
 
+  # ordpool-backend — the REAL mempool.space fork (Express + ordpool-parser),
+  # not a stub. Serves GET /content/:id and GET /preview/:id by decoding the
+  # inscription from the parent tx's witness, resolved over bitcoind RPC, and
+  # reads the mempool first — so an UNCONFIRMED cube renders before any block
+  # is mined, exactly what prod api.ordpool.space/preview/<id> does.
+  #
+  # DATABASE_ENABLED=false + MEMPOOL_BACKEND=none => needs ONLY bitcoind (no
+  # MariaDB, no electrs, no redis). Multi-context buildx build (the backend
+  # source + the rust/ workspace), the same shape as ordpool's own docker CI.
+  # Profile-gated so the default stack stays lean:
+  #     docker compose --profile ordpool-backend up -d ordpool-backend
+  ordpool-backend:
+    profiles:
+      - ordpool-backend
+    image: ${E2E_PREFIX:-ordpool-e2e}-ordpool-backend:local
+    build:
+      context: ${ORDPOOL_SRC:-../../ordpool}/backend
+      dockerfile: Dockerfile
+      additional_contexts:
+        backend: ${ORDPOOL_SRC:-../../ordpool}/backend
+        rustgbt: ${ORDPOOL_SRC:-../../ordpool}/rust
+      args:
+        commitHash: e2e-regtest
+    container_name: ${E2E_PREFIX:-ordpool-e2e}-ordpool-backend
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    environment:
+      # Bitcoin Core RPC only; no electrum/esplora client is constructed.
+      - MEMPOOL_BACKEND=none
+      - MEMPOOL_NETWORK=regtest
+      - MEMPOOL_ENABLED=true
+      - CORE_RPC_HOST=bitcoind
+      - CORE_RPC_PORT=18443
+      - CORE_RPC_USERNAME=ordpool
+      - CORE_RPC_PASSWORD=ordpool
+      # No database, no outbound calls (price / pools / assets all off).
+      - DATABASE_ENABLED=false
+      - STATISTICS_ENABLED=false
+      - FIAT_PRICE_ENABLED=false
+      - MEMPOOL_AUTOMATIC_POOLS_UPDATE=false
+      # Only used by the backend's /api/* esplora-proxy middleware; harmless.
+      - ESPLORA_REST_API_URL=http://electrs:3000
+    ports:
+      - "${E2E_ORDPOOL_BACKEND_HOST_PORT:-8999}:8999"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8999/api/v1/backend-info || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 40s
+
 volumes:
   electrs-data:
   ord-data:

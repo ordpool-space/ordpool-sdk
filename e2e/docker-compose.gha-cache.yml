@@ -51,3 +51,13 @@ services:
         - type=gha,scope=cat21-ord
       cache_to:
         - type=gha,scope=cat21-ord,mode=max
+
+  # ordpool-backend: the mempool-fork build (rust-gbt compile + npm install
+  # + package) is expensive, so cache it in its own scope. Only the genesis
+  # cubes regtest builds this service.
+  ordpool-backend:
+    build:
+      cache_from:
+        - type=gha,scope=ordpool-backend
+      cache_to:
+        - type=gha,scope=ordpool-backend,mode=max
