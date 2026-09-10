@@ -47,8 +47,15 @@ export function formatBitcoinAmount(btc: number | string): string {
  *
  * A space cannot be read as a decimal point in any locale, and it is already
  * upstream's choice for the other Bitcoin amount, so it is the one grouping
- * that is both faithful and unambiguous. ordpool.space keeps its own pipes on
- * upstream-adjacent surfaces; this is for the money screens we own.
+ * that is both faithful and unambiguous.
+ *
+ * **Not for ordpool.space.** The fork already renders sats through Angular's
+ * `number` pipe, which IS mempool's convention there, and it builds
+ * single-locale English, so the locale ambiguity this guards against cannot
+ * arise. Swapping would buy nothing and would move the fork away from
+ * upstream, which is the opposite of why these helpers exist. The test is not
+ * "do we own this screen" but "does an upstream equivalent already render
+ * here": if one does, use it.
  */
 export function formatSats(sats: number | bigint): string {
   const negative = sats < 0;
@@ -61,6 +68,12 @@ export function formatSats(sats: number | bigint): string {
  * `shortenString` pipe: half the budget from each end, an ellipsis between.
  *
  *   shortenId('bc1putuz...jqmkc0pg', 12)  ->  "bc1put...mkc0pg"
+ *
+ * **Not for ordpool.space's templates.** The fork HAS this as an Angular pipe
+ * (`| shortenString`), which is the upstream-native affordance and is
+ * byte-identical to this. Importing this function there would replace an
+ * upstream idiom with a reproduction of it. Use it where there is no such
+ * pipe, or in TypeScript rather than a template.
  *
  * **Not for a value someone is committing to.** An address on an approval
  * screen is shown in full when the reader has something to compare it
