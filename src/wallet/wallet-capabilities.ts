@@ -484,6 +484,21 @@ export function walletActionNotice(
 }
 
 /**
+ * @deprecated Prefer `usesSingleAddress(connectedWallet)` as the gate and
+ * {@link singleAddressCaveat} for the sentence. This gates on the matrix
+ * RECORD of how a wallet is built; that gates on the two addresses the
+ * wallet actually returned, which is ground truth and cannot be stale. A
+ * consumer carried a comment listing OKX as address-separating for a year
+ * while its own code did the right thing, which is exactly the gap between
+ * the two.
+ *
+ * This was written for a pre-connect caller, and then §7.2 established that
+ * the warning is connected-only, because address equality is unanswerable
+ * before a wallet connects. That left it with no supported case. Kept for
+ * now only because two consumers are building against this pin and removing
+ * an export mid-round would break them; it goes when the round closes.
+ *
+
  * The sentence to show when a wallet keeps coins and assets on one address,
  * or `null` when it separates them and there is nothing to say.
  *
