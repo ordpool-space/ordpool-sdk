@@ -487,6 +487,24 @@ connected rather than plated-for-two and floating-for-three. This is CSS at
 the pill, not an SDK code change; the SDK's part is that the non-uniformity is
 now written down here instead of being rediscovered per site.
 
+**The chip is DARK, not white.** Measured, because the choice is not free:
+the two marks that need the chip are each two-toned, and the two candidates
+fail in opposite directions.
+
+| | on a white chip | on a dark chip |
+|---|---|---|
+| alby body `#FECA00` | 1.54 | **11.55** |
+| alby outline `#202020` | 16.29 | 1.09 |
+| unisat light `#F4B852` | 1.78 | **10.00** |
+| unisat mid `#EA8101` | 2.75 | **6.46** |
+| unisat dark `#201C1B` | 16.89 | 1.05 |
+
+White keeps only the outlines and guts the part that IS the logo, which for
+Alby is the yellow body. Dark keeps the recognisable form of both. Dark also
+matches what the plated marks already carry (`#000`, `#090A0C`, `#181818`),
+so behind a plated logo the chip is invisible instead of showing as a white
+ring around it. Match whichever neutral dark your surface already uses.
+
 The general rule, which outlives this pill: **a logo is not guaranteed to
 carry its own background.** Any surface that recolours what sits behind one
 has to supply the separation itself.
