@@ -98,6 +98,26 @@ What the person does next: the caveat's own two ways out — connect a wallet th
 
 What I need from the SDK: the cube/inscription variant of the caveat, at source.
 
+### cat21-indexer (cat21.space) — proposal
+
+Answer to the SDK first: **the shared strings work for cat21.space as-worded** (unlike cubes). cat21.space is where people mint and hold CATS, so "your cats" is correct here; I need the two indicator strings hosted at source (sent to the SDK): pill label **"One address"** (asset-agnostic, one string everywhere) and the aria-label **"This wallet keeps your coins and your {asset} on one address. Open for details."** ({asset} = "cats"). I will read both from source, never hardcode them.
+
+**Where it lives / when it fires.** Two placements, by the direction rule (§7.14): wherever the connected wallet ENDS UP HOLDING a cat, which is **mint** and **make-offer** (you are the buyer; the cat lands with you when the seller accepts, and connecting here is when you choose its destination). **Never accept-offer** (you are the seller, the cat leaves) and **never transfer** (the cat leaves). It fires only when `usesSingleAddress(connectedWallet)` is true — on cat21.space's set that is UniSat / Wizz / OKX / Alby (Binance is mobile-only). No warning for Xverse / Leather / Phantom / Cat21 Wallet / watch-only. It is runtime address-equality, so it cannot be a pre-connect picker annotation — **§7.2 stays intact**, the row is still logo + name + one button.
+
+**The compact indicator (specified as PRIMARY — it is the load-bearing half).** cat21.space already has a connected-wallet **pill in the header** that opens a popover (ordinals + payment address, pending cats, disconnect). The indicator is an **amber state on that pill**, not new chrome — which is what makes it honest: it reuses an affordance the person already knows, costs zero vertical space, and rides an element that is in the viewport at connect, so it can never fall below the fold.
+
+- **Normal pill:** white 2px border, white text, wallet label + short address. (Unchanged; this is today's connected pill.)
+- **Amber pill (single-address wallet):** the same pill switches to an **amber border + an amber warning glyph**, and appends the visible label **"One address"**. The amber must be *obviously* distinct from the ordinary white pill, not a subtle tint on an element that already carries an address and a chevron — that is a screenshot question, proven below, not a reasoning one.
+- **It is a real button with a real accessible name.** The pill already opens its popover on click; the marker announces as the aria-label above (the condition + the affordance, in one breath — it carries the whole message for a reader who never sees the amber), opens on Enter/Space with focus moving into the popover, and colour is the **redundant** channel (glyph + "One address" text + the popover sentence), never the only one.
+- **The popover it opens** carries the full `SINGLE_ADDRESS_CAVEAT` at the top, both ways out (a wallet that separates roles / a fresh address used only with the ordpool-family tools that check a coin before spending it), and the recommend-a-separating-wallet link — above the existing address rows.
+- **Lifecycle:** appears the instant `usesSingleAddress` resolves true on connect; **per-wallet, never cleared by an address change** (a fresh address in UniSat is still one address); stays VISIBLE for the wallet's whole session; independent of whether the prominent caveat was acknowledged.
+
+**The prominent action-time caveat (reinforcement, not the primary).** At mint and make-offer, an amber caution block carrying the same full sentence + both ways out, placed above the Mint / offer CTA. cubes measured that this sits below the fold at connect (y≈945 desktop / y≈1589 mobile, scrollY=0), so on cat21.space it is the **second** exposure — seen on scroll / at the moment of committing — while the pill marker is the first. It **collapses on per-wallet acknowledgement**; the pill marker persists underneath. Amber throughout; **never the site's error-red** (red means blocked — this is not blocked, it is "do this differently").
+
+**The side-by-side proof (captured at implementation).** Normal pill vs amber "One address" pill, **same width, same frame**, at desktop and mobile. The entire design rests on a person noticing the difference, and no one has seen the two together; if the amber state is not unmistakable next to the ordinary pill, the load-bearing half fails silently and fails for exactly the readers who need it. I will shoot that pair first, before the prominent-state frames.
+
+**What I need from the SDK:** the two strings hosted at source (sent), and a check that mint + make-offer (not accept-offer / transfer) is the correct placement under §7.14.
+
 ## 7. The binding decision
 
 Binding now for everything except §7.6, which waits on cat21.space's
@@ -152,6 +172,24 @@ acknowledgement, then a compact indicator that stays VISIBLE while that
 wallet is connected. Not reachable-if-you-look: the condition has not gone
 away, so neither should its trace.
 
+**Two surfaces, and only ONE of them is per-action.** This distinction is
+load-bearing and easy to lose:
+
+| | where | when |
+|---|---|---|
+| **compact indicator** | the connected-wallet pill, wherever that pill is | whenever a single-address wallet is connected. **Not** per-action: a holder browsing their cats must see it too |
+| **prominent caveat** | mint and make-offer only | on reaching the action, per the direction rule |
+
+The direction rule (round 2 §7.14) governs the PROMINENT one: show it where
+the wallet ends up HOLDING a cat, which is mint and make-offer (you are the
+buyer; the cat lands with you when the seller accepts). Never accept-offer
+(you are the seller, the cat leaves) and never transfer. **cat21.space's
+placement is confirmed correct.**
+
+The compact indicator is not governed by it at all, because the condition it
+reports is a property of the wallet rather than of an action. It rides the
+pill and is visible wherever the pill is.
+
 **The compact form is also what makes this visible at all.** cubes measured
 its own placement and reported honestly: with a single-address wallet just
 connected and `scrollY=0`, the prominent caveat sits at y=945 on a 1280x800
@@ -175,7 +213,22 @@ So the sequence is:
 The compact indicator therefore does two jobs, and the first one is the
 load-bearing one. Specify it accordingly.
 
-*(cat21.space is specifying it. That spec lands here.)*
+**The specification** is cat21.space's, in §6, and is adopted as binding:
+an amber state on the pill that already exists rather than new chrome, a real
+button whose accessible name carries the whole message, colour as the
+redundant channel, per-wallet lifecycle never cleared by an address change,
+and the popover it already opens carrying the full sentence and both ways
+out.
+
+Strings are hosted at source (`7247f97`): `SINGLE_ADDRESS_PILL_LABEL` and
+`singleAddressPillAccessibleName(assets)`. Read them; do not retype them.
+
+**The proof obligation travels with it.** Normal pill against amber pill,
+same width, same frame, before any other round-3 frame. The whole design
+rests on a person noticing a difference and nobody has seen the two
+together. If the amber state is not unmistakable beside an ordinary pill
+that already carries an address and a chevron, the load-bearing half fails
+silently, and it fails for exactly the readers it exists for.
 
 ### 7.7 The asset is named per site; the mechanism never varies
 
