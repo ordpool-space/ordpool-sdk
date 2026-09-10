@@ -59,6 +59,7 @@ export {
 //     compile-time protection at critical boundaries.
 export * from './wallet/address-types';
 export * from './format/mempool-format';
+export * from './family/ordpool-family';
 export * from './wallet/wallet-capabilities';
 export * from './wallet/wallet-deeplink';
 export * from './wallet/xpub/derive-watch-only';

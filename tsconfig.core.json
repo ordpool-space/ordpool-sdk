@@ -30,6 +30,7 @@
     "src/wallet/wallet.service.types.ts",
     "src/wallet/wallet-logos.ts",
     "src/format/mempool-format.ts",
+    "src/family/ordpool-family.ts",
     "src/wallet/wallet-capabilities.ts",
     "src/wallet/wallet-deeplink.ts",
     "src/wallet/xpub/derive-watch-only.ts",
