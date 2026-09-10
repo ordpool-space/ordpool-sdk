@@ -4,6 +4,7 @@ import {
   formatBitcoinAmount,
   formatSats,
   groupAddressForVerification,
+  addressVerificationChunks,
   shortenId,
 } from './mempool-format';
 
@@ -114,5 +115,34 @@ describe('groupAddressForVerification', () => {
       const value = 'a'.repeat(len - 1) + 'z';
       expect(groupAddressForVerification(value).replace(/ /g, '')).toBe(value);
     }
+  });
+});
+
+describe('addressVerificationChunks', () => {
+  const address = 'bc1putuzj9lyfcm8fef9jpy85nmh33cxuq9u6wyuk536t9kemdk37yjqmkc0pg';
+
+  it('groups in fours, same as the string form', () => {
+    expect(addressVerificationChunks(address).slice(0, 2)).toEqual(['bc1p', 'utuz']);
+  });
+
+  it('carries NO whitespace, so a dragged selection yields a pasteable address', () => {
+    // The whole reason this exists next to groupAddressForVerification: the
+    // gaps are drawn in CSS, so what the reader selects is what their wallet
+    // accepts. A space here would put the footgun straight back.
+    for (const chunk of addressVerificationChunks(address)) {
+      expect(chunk).not.toMatch(/\s/);
+    }
+    expect(addressVerificationChunks(address).join('')).toBe(address);
+  });
+
+  it('never drops or reorders a character, at any length', () => {
+    for (const len of [1, 4, 5, 62, 63]) {
+      const value = 'a'.repeat(len - 1) + 'z';
+      expect(addressVerificationChunks(value).join('')).toBe(value);
+    }
+  });
+
+  it('is empty for an empty address rather than yielding one empty chunk', () => {
+    expect(addressVerificationChunks('')).toEqual([]);
   });
 });

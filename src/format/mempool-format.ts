@@ -98,7 +98,34 @@ export function shortenId(value: string, length = 12): string {
  * The counterpart to {@link shortenId}: this is what a full address gets when
  * it IS the thing being verified. Grouping is display only; strip the spaces
  * before the value reaches a signer.
+ *
+ * **Prefer {@link addressVerificationChunks} whenever the reader might also
+ * COPY the address**, which is any address they are asked to send to. This
+ * function puts real space characters in the text, so a reader who drags a
+ * selection across it instead of pressing the copy button gets an address
+ * their wallet will reject.
  */
 export function groupAddressForVerification(address: string): string {
   return (address.match(/.{1,4}/g) ?? []).join(GROUP);
+}
+
+/**
+ * The same four-character grouping, as chunks to render in their own
+ * elements with the gaps drawn in CSS.
+ *
+ *   ["bc1p", "utuz", ...]  ->  <span>bc1p</span><span>utuz</span>...
+ *
+ * Use this for an address the reader is asked to SEND to, where they will
+ * verify it AND copy it. Because no space character exists in the DOM, a
+ * dragged selection yields the raw address, so manual copy and the copy
+ * button agree. Space the chunks with margin or `word-spacing`, never by
+ * putting a space back in.
+ *
+ * Grouping a send-address is worth this much care because the reader's task
+ * is genuinely both: they compare it against what their own wallet shows,
+ * and then they paste it somewhere. Serving only the second is how the
+ * unreadable-run-of-62-characters problem came back.
+ */
+export function addressVerificationChunks(address: string): string[] {
+  return address.match(/.{1,4}/g) ?? [];
 }
