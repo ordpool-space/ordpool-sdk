@@ -538,9 +538,30 @@ export function walletCustodyCaveat(
  * (`lockTime: CAT21_LOCK_TIME` in the commit and reveal helpers), so a cube
  * holder owns cats too, whether or not they came for them.
  */
-export function singleAddressCaveat(assets = 'cats'): string {
+/**
+ * How the caveat opens: named when we know which wallet is connected,
+ * generic when we do not.
+ *
+ * Naming it is worth doing because "this wallet" makes a reader check which
+ * wallet we mean before they can act; "Your UniSat wallet" is already the
+ * thing sitting in their browser.
+ *
+ * Pass the wallet's display label (`KnownOrdinalWallets[type].label`), which
+ * carries the brand's own casing. The label is NOT always a bare brand name:
+ * Binance ships as "Binance Web3 Wallet", and Binance is one of the five
+ * wallets that trigger this caveat, so appending " wallet" unconditionally
+ * would ship "Your Binance Web3 Wallet wallet" to real readers.
+ */
+function singleAddressCaveatOpener(walletName?: string): string {
+  if (!walletName) return 'This wallet';
+  return /\bwallet$/i.test(walletName.trim())
+    ? `Your ${walletName.trim()}`
+    : `Your ${walletName.trim()} wallet`;
+}
+
+export function singleAddressCaveat(assets = 'cats', walletName?: string): string {
   return (
-    `This wallet keeps your coins and your ${assets} at one address. That is fine here, because `
+    `${singleAddressCaveatOpener(walletName)} keeps your coins and your ${assets} at one address. That is fine here, because `
     + 'everything in the ordpool family checks what a coin is carrying before it spends it. '
     + `Other sites do not look, so a payment made elsewhere can spend the sat one of your `
     + `${assets} lives on and tip it to a miner. Start a fresh address here and keep it for `

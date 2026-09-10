@@ -456,6 +456,34 @@ describe('walletCustodyCaveat / single-address wallets', () => {
     expect(reassurance).toBeLessThan(risk);
   });
 
+  it('names the connected wallet when it is known', () => {
+    expect(singleAddressCaveat('cats', 'UniSat')).toContain(
+      'Your UniSat wallet keeps your coins and your cats at one address',
+    );
+    expect(singleAddressCaveat('cats', 'OKX')).toContain('Your OKX wallet keeps');
+  });
+
+  it('falls back to "This wallet" when the name is unknown', () => {
+    expect(singleAddressCaveat('cats')).toContain('This wallet keeps');
+    expect(singleAddressCaveat('cats')).not.toContain('Your undefined');
+  });
+
+  it('does not say "wallet" twice for a label that already ends in it', () => {
+    // Binance ships as "Binance Web3 Wallet" AND is one of the five wallets
+    // that trigger this caveat, so this is a real reader, not a hypothetical.
+    const text = singleAddressCaveat('cats', 'Binance Web3 Wallet');
+    expect(text).toContain('Your Binance Web3 Wallet keeps');
+    expect(text).not.toContain('Wallet wallet');
+  });
+
+  it('names every single-address wallet without producing a double noun', () => {
+    for (const entry of WALLET_MATRIX.filter(e => e.singleAddress)) {
+      const text = singleAddressCaveat('cats', entry.label);
+      expect(text).toContain(`Your ${entry.label}`);
+      expect(text.toLowerCase()).not.toContain('wallet wallet');
+    }
+  });
+
   it('changes only the noun, never the mechanism or the ways out', () => {
     const cats = singleAddressCaveat('cats');
     const cubes = singleAddressCaveat('cubes');
