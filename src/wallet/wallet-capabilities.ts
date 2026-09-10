@@ -84,34 +84,24 @@ export interface WalletMatrixEntry {
   /** Capabilities not listed default to {@link CapabilitySupport.Unsupported}. */
   capabilities: Partial<Record<WalletCapability, WalletCapabilityStatus>>;
   /**
-   * What this wallet does with a cat once it HOLDS one, when that is
-   * something the owner has to know.
+   * This wallet hands out ONE address and uses it for both spendable coins
+   * and ordinals.
    *
-   * Separate from {@link capabilities} on purpose: those answer "can this
-   * wallet perform the operation", which a wallet can do perfectly while
-   * still putting the resulting cat at risk. A wallet that keeps
-   * ordinals and spendable coins on one address can later pay a fee with
-   * the sat a cat lives on, and no capability level expresses that.
+   * Not a verdict on the wallet: it is a structural fact with a consequence.
+   * With no separation, every coin the wallet might spend on a fee is also a
+   * coin that could be carrying an inscription, a rune, a rare sat or a cat,
+   * so a routine payment made anywhere outside our flows can send an asset to
+   * a miner. A wallet that keeps two addresses cannot do that by accident.
    *
-   * Surface it wherever the connected wallet ENDS UP HOLDING a cat.
-   * Follow the cat, not the verb:
+   * Five of the nine wallets we ship are like this, so it is a category, not
+   * a wallet to single out. Derive the user-facing sentence from
+   * {@link walletCustodyCaveat} rather than writing per-wallet copy.
    *
-   *   `Cat21Mint`         cat arrives   -> show it
-   *   `Cat21OfferCreate`  YOU are the buyer; the cat lands with you when
-   *                       the seller accepts, and this is the moment you
-   *                       choose which wallet receives it  -> show it
-   *   `Cat21OfferAccept`  YOU are the SELLER; the cat leaves  -> do not
-   *   `Cat21Transfer`     you are sending; the cat leaves     -> do not
-   *
-   * The accept/create pair is the trap: "accepting an offer" sounds like
-   * acquiring and is the opposite, because the offer is a BUY-offer and
-   * the seller is the one who accepts it.
-   *
-   * Describe the mechanism, never a verdict: "keeps them on one address"
-   * is checkable, "is unsafe" is a judgement about someone else's
-   * product that rots the moment they change it.
+   * For a CONNECTED wallet prefer {@link usesSingleAddress}, which compares
+   * the two addresses actually returned and is therefore ground truth rather
+   * than our record of it.
    */
-  custodyCaveat?: string;
+  singleAddress?: true;
   /**
    * Wallet-level caveat spanning capabilities (address-type default,
    * mobile entry mechanism, backend), written for the person choosing a
@@ -203,7 +193,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
     },
-    custodyCaveat: 'UniSat keeps your cats and your spendable coins on one address, so it can spend the sat a cat lives on when it pays a fee. Move a cat you want to keep to a wallet that holds ordinals separately.',
+    singleAddress: true,
     note: 'Desktop extension only. The UniSat mobile app is not supported here.',
   },
   {
@@ -220,6 +210,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven, caveat: TAPROOT_ACTIVE_ADDRESS },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
+    singleAddress: true,
     note: 'Desktop extension only.',
   },
   {
@@ -239,6 +230,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
+    singleAddress: true,
     note: 'Signs with your Taproot (bc1p) account. Works in the desktop extension and in the OKX mobile app browser.',
   },
   {
@@ -283,6 +275,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
+    singleAddress: true,
     note: 'Signs with your Alby account key. The sats it spends must sit on your Taproot (bc1p) account.',
   },
   {
@@ -299,6 +292,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Adapter },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Unsupported },
     },
+    singleAddress: true,
     note: 'Bitcoin support is in the Binance Web3 Wallet mobile app browser. The browser extension does not expose a Bitcoin wallet.',
   },
   {
@@ -490,13 +484,49 @@ export function walletActionNotice(
 }
 
 /**
- * What the owner has to know about leaving a cat in this wallet, or
- * `null` when there is nothing to say.
+ * The sentence to show when a wallet keeps coins and assets on one address,
+ * or `null` when it separates them and there is nothing to say.
  *
- * Ask this wherever an action ends with a cat in the connected wallet,
- * which is a mint or an accepted offer. A send does not need it: the cat
- * is on its way out.
+ * One shared sentence for the whole category rather than per-wallet copy:
+ * five of the nine wallets we ship are like this, and singling one out reads
+ * as a verdict on that product when it is a property of half the field.
+ *
+ * Show it wherever the connected wallet ENDS UP HOLDING a cat, which is a
+ * mint or an accepted offer, never a send. See the capability table on
+ * {@link WalletMatrixEntry.singleAddress}.
  */
 export function walletCustodyCaveat(wallet: KnownOrdinalWalletType): string | null {
-  return walletMatrixEntry(wallet)?.custodyCaveat ?? null;
+  if (!walletMatrixEntry(wallet)?.singleAddress) return null;
+  return SINGLE_ADDRESS_CAVEAT;
+}
+
+/**
+ * Shown for every single-address wallet.
+ *
+ * States the mechanism, not a verdict, and gives the two ways out: a wallet
+ * that separates the two, or a fresh address kept for tools that know what a
+ * cat is. Ours are named because they are the ones that check a coin for
+ * assets before spending it; that is a capability claim about our own
+ * products, not a ranking of anyone else's.
+ */
+export const SINGLE_ADDRESS_CAVEAT =
+  'This wallet keeps your spending coins and your cats on one address, so a payment '
+  + 'made anywhere else can spend the sat a cat lives on and send it to a miner. Either '
+  + 'use a wallet that keeps the two apart, or start a fresh address here and use it only '
+  + 'with cat21.space, ordpool.space and Cat21 Wallet, which check a coin for cats before '
+  + 'spending it.';
+
+/**
+ * Whether a CONNECTED wallet is handing out one address for both roles.
+ *
+ * Ground truth, and preferred over the matrix flag whenever a wallet is
+ * connected: it compares the addresses actually returned, so it stays right
+ * if a wallet changes its model or a user configures it unusually. The matrix
+ * flag is for the case where nobody has connected yet.
+ */
+export function usesSingleAddress(
+  wallet: { ordinalsAddress?: string; paymentAddress?: string } | null | undefined,
+): boolean {
+  if (!wallet?.ordinalsAddress || !wallet?.paymentAddress) return false;
+  return wallet.ordinalsAddress === wallet.paymentAddress;
 }

@@ -14,6 +14,8 @@ import {
   walletMatrixEntry,
   walletActionNotice,
   walletCustodyCaveat,
+  usesSingleAddress,
+  SINGLE_ADDRESS_CAVEAT,
 } from './wallet-capabilities';
 
 const ids = (entries: readonly { wallet: KnownOrdinalWalletType }[]): KnownOrdinalWalletType[] =>
@@ -368,48 +370,87 @@ describe('walletActionNotice', () => {
   });
 });
 
-describe('walletCustodyCaveat', () => {
-  it('warns that UniSat can spend the sat a cat lives on', () => {
-    expect(walletCustodyCaveat(KnownOrdinalWalletType.unisat)).toBe(
-      'UniSat keeps your cats and your spendable coins on one address, so it can spend the sat a cat '
-      + 'lives on when it pays a fee. Move a cat you want to keep to a wallet that holds ordinals separately.',
-    );
+describe('walletCustodyCaveat / single-address wallets', () => {
+  const SINGLE = [
+    KnownOrdinalWalletType.unisat,
+    KnownOrdinalWalletType.wizz,
+    KnownOrdinalWalletType.okx,
+    KnownOrdinalWalletType.alby,
+    KnownOrdinalWalletType.binance,
+  ];
+  const SEPARATED = [
+    KnownOrdinalWalletType.cat21wallet,
+    KnownOrdinalWalletType.xverse,
+    KnownOrdinalWalletType.leather,
+    KnownOrdinalWalletType.phantom,
+    KnownOrdinalWalletType.xpub,
+  ];
+
+  it('flags every wallet whose connector fills both address slots from one address', () => {
+    // Ground truth is the connectors: unisatBasicInfoToWalletInfo and its
+    // three siblings each take a single `address`, and Alby assigns the same
+    // string to both slots. Five of nine, not one.
+    expect(WALLET_MATRIX.filter(e => e.singleAddress).map(e => e.wallet).sort())
+      .toEqual([...SINGLE].sort());
   });
 
-  it('says nothing for a wallet that separates ordinals from spendable coins', () => {
-    expect(walletCustodyCaveat(KnownOrdinalWalletType.xverse)).toBeNull();
-    expect(walletCustodyCaveat(KnownOrdinalWalletType.leather)).toBeNull();
-    expect(walletCustodyCaveat(KnownOrdinalWalletType.cat21wallet)).toBeNull();
+  it.each(SINGLE)('%s gets the caveat', wallet => {
+    expect(walletCustodyCaveat(wallet)).toBe(SINGLE_ADDRESS_CAVEAT);
   });
 
-  it('is independent of capability level, since a wallet can perform an action and still risk the result', () => {
-    // UniSat is Proven for minting: it does the job correctly, and the
-    // resulting cat is still at risk. One field cannot express both.
+  it.each(SEPARATED)('%s gets nothing, because it separates the two', wallet => {
+    expect(walletCustodyCaveat(wallet)).toBeNull();
+  });
+
+  it('says the same thing about every wallet in the category', () => {
+    const distinct = new Set(SINGLE.map(w => walletCustodyCaveat(w)));
+    expect(distinct.size).toBe(1);
+  });
+
+  it('is independent of capability level, since a wallet can do the job and still risk the result', () => {
     expect(supportsCapability(KnownOrdinalWalletType.unisat, WalletCapability.Cat21Mint)).toBe(true);
     expect(walletCustodyCaveat(KnownOrdinalWalletType.unisat)).not.toBeNull();
   });
 
-  it('applies to acquiring a cat, not to the seller who is parting with one', () => {
-    // Cat21OfferAccept is the SELLER accepting a buy-offer, so the cat
-    // leaves; Cat21OfferCreate is the BUYER, who ends up holding it.
-    // Anything reading the verb rather than the direction gets this backwards.
-    const acquiring = [WalletCapability.Cat21Mint, WalletCapability.Cat21OfferCreate];
-    const parting = [WalletCapability.Cat21OfferAccept, WalletCapability.Cat21Transfer];
-    for (const capability of [...acquiring, ...parting]) {
-      expect(supportsCapability(KnownOrdinalWalletType.unisat, capability)).toBe(true);
+  it('describes the mechanism and never passes a verdict on a product', () => {
+    expect(SINGLE_ADDRESS_CAVEAT).toMatch(/[.!?]$/);
+    for (const verdict of ['unsafe', 'dangerous', 'insecure', 'bad wallet', 'avoid', 'not safe']) {
+      expect(SINGLE_ADDRESS_CAVEAT.toLowerCase()).not.toContain(verdict);
     }
-    expect(acquiring).not.toContain(WalletCapability.Cat21OfferAccept);
-    expect(parting).toContain(WalletCapability.Cat21OfferAccept);
   });
 
-  it('describes the mechanism rather than passing a verdict', () => {
+  it('names no third-party wallet, so it cannot rot when the matrix changes', () => {
     for (const entry of WALLET_MATRIX) {
-      const text = entry.custodyCaveat;
-      if (!text) continue;
-      expect(text).toMatch(/[.!?]$/);
-      for (const verdict of ['unsafe', 'dangerous', 'insecure', 'bad wallet', 'avoid']) {
-        expect(text.toLowerCase()).not.toContain(verdict);
-      }
+      if (entry.wallet === KnownOrdinalWalletType.cat21wallet) continue;
+      expect(SINGLE_ADDRESS_CAVEAT).not.toContain(entry.label);
     }
+  });
+
+  it('gives both ways out, not just the one that costs a new wallet', () => {
+    expect(SINGLE_ADDRESS_CAVEAT).toContain('keeps the two apart');
+    expect(SINGLE_ADDRESS_CAVEAT).toContain('fresh address');
+  });
+});
+
+describe('usesSingleAddress', () => {
+  it('is true when a connected wallet returns one address for both roles', () => {
+    expect(usesSingleAddress({ ordinalsAddress: 'bc1pabc', paymentAddress: 'bc1pabc' })).toBe(true);
+  });
+
+  it('is false when the two differ', () => {
+    expect(usesSingleAddress({ ordinalsAddress: 'bc1pabc', paymentAddress: '3Xyz' })).toBe(false);
+  });
+
+  it('is false rather than throwing when nothing is connected', () => {
+    expect(usesSingleAddress(null)).toBe(false);
+    expect(usesSingleAddress(undefined)).toBe(false);
+    expect(usesSingleAddress({})).toBe(false);
+  });
+
+  it('does not report a match when both are missing, which is absence not equality', () => {
+    // Two undefined addresses are equal to each other; treating that as
+    // "single address" would warn every disconnected user.
+    expect(usesSingleAddress({ ordinalsAddress: undefined, paymentAddress: undefined })).toBe(false);
+    expect(usesSingleAddress({ ordinalsAddress: '', paymentAddress: '' })).toBe(false);
   });
 });
