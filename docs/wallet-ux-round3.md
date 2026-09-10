@@ -444,7 +444,7 @@ difference is itself part of the answer. Two frames at one viewport satisfy it.
 
 **The border is NOT a defect on this site**, and a first pass at this review
 nearly recorded it as one. §10.1's "the border carries the shape" was measured
-on cat21.space, where the fill is 1.03:1 against a white page. Here the ground
+on cat21.space, where the fill is 1.03:1 against that site's orange page. Here the ground
 is inverted: the fill carries the shape at 12.88:1 and the border is
 decorative, so `#b8860b` at 2.0:1 against the fill costs nothing. A number
 from one ground does not transfer to its opposite. The border requirement
@@ -508,3 +508,40 @@ precise failure mode frame-based evidence exists to avoid.
 Label it: either it is a copy, or it is a genuine recapture that came out
 identical because the visible region is static, and that second case deserves
 its own line so nobody has to guess.
+
+### 11.4 cat21.space's ground is its ORANGE page, and the fill hex moves to the shared token
+
+Two corrections to how §10.1 reads, both from cat21.space re-measuring after
+the border note. Verified independently here; all six figures reproduce
+exactly.
+
+**The ground is `#FF9900`, the site's orange page, not white.** §11.1 said
+"white page" and that is fixed above. The distinction matters because the
+whole point of §9 is measuring an element against the ground it actually sits
+on, and getting that wrong for the site whose ground is the interesting one
+would be a poor advertisement for the rule.
+
+**The fill moves from `#f0a500` to the shared `#ffc107` token**, which on that
+orange ground is better on every axis:
+
+| | `#f0a500` | `#ffc107` |
+|---|---|---|
+| fill vs orange page | 1.03 | **1.31** |
+| ink `#282828` on fill | 7.08 | **9.04** |
+| border `#8a5e00` on fill | 2.74 | **3.50** |
+
+The third row is the one that matters: the proof-frame border was **under the
+3:1 UI bar**, so the element §10.1 declared load-bearing was itself failing
+the threshold that makes it load-bearing. The shared token clears it. A note
+about a different site's border sent them back to their own numbers and found
+a real defect in the frame everyone had already looked at.
+
+The conclusion of §10.1 is unchanged: at 1.31:1 the fill still does not carry
+the shape on that ground, so the border stays load-bearing there. Only the
+hex moves, which is a refinement inside the maintainer's "fill" ruling rather
+than a reversal of it, and the app-rendered frame will show the final amber
+for their confirmation.
+
+**No logo chip needed on cat21.space.** Its pill carries a text label and a
+short address; the wallet logo appears only in picker-modal rows. §11.2
+applies wherever a logo sits inside the amber fill, and there it does not.
