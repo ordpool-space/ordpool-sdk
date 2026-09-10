@@ -16,6 +16,7 @@ import {
   walletCustodyCaveat,
   usesSingleAddress,
   SINGLE_ADDRESS_CAVEAT,
+  singleAddressCaveat,
 } from './wallet-capabilities';
 
 const ids = (entries: readonly { wallet: KnownOrdinalWalletType }[]): KnownOrdinalWalletType[] =>
@@ -423,6 +424,32 @@ describe('walletCustodyCaveat / single-address wallets', () => {
     for (const entry of WALLET_MATRIX) {
       if (entry.wallet === KnownOrdinalWalletType.cat21wallet) continue;
       expect(SINGLE_ADDRESS_CAVEAT).not.toContain(entry.label);
+    }
+  });
+
+  it('names the asset the reader came for, so a cube site does not say cats', () => {
+    expect(singleAddressCaveat('cubes')).toContain('your cubes on one address');
+    expect(singleAddressCaveat('cubes')).not.toContain('your cats');
+    expect(singleAddressCaveat()).toContain('your cats on one address');
+  });
+
+  it('keeps the closing clause asset-agnostic, because the scan is wider than any one product', () => {
+    // We check inscriptions, runes, rare sats and cats. Saying "checks a coin
+    // for cubes" would understate it and would be wrong on the other sites.
+    for (const noun of ['cats', 'cubes', 'inscriptions']) {
+      expect(singleAddressCaveat(noun)).toContain('check a coin for assets before spending it');
+    }
+  });
+
+  it('changes only the noun, never the mechanism or the ways out', () => {
+    const cats = singleAddressCaveat('cats');
+    const cubes = singleAddressCaveat('cubes');
+    expect(cats.replace('your cats', 'X')).toBe(cubes.replace('your cubes', 'X'));
+  });
+
+  it('lists every ordpool-family tool that checks a coin', () => {
+    for (const tool of ['cat21.space', 'ordpool.space', 'cubes.haushoppe.art', 'Cat21 Wallet']) {
+      expect(SINGLE_ADDRESS_CAVEAT).toContain(tool);
     }
   });
 

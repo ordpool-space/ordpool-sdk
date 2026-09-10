@@ -495,26 +495,46 @@ export function walletActionNotice(
  * mint or an accepted offer, never a send. See the capability table on
  * {@link WalletMatrixEntry.singleAddress}.
  */
-export function walletCustodyCaveat(wallet: KnownOrdinalWalletType): string | null {
+export function walletCustodyCaveat(
+  wallet: KnownOrdinalWalletType,
+  options: { assets?: string } = {},
+): string | null {
   if (!walletMatrixEntry(wallet)?.singleAddress) return null;
-  return SINGLE_ADDRESS_CAVEAT;
+  return singleAddressCaveat(options.assets);
 }
 
 /**
  * Shown for every single-address wallet.
  *
  * States the mechanism, not a verdict, and gives the two ways out: a wallet
- * that separates the two, or a fresh address kept for tools that know what a
- * cat is. Ours are named because they are the ones that check a coin for
- * assets before spending it; that is a capability claim about our own
- * products, not a ranking of anyone else's.
+ * that separates the two, or a fresh address kept for tools that check a coin
+ * before spending it. Ours are named because they are the ones that check;
+ * that is a capability claim about our own products, not a ranking of anyone
+ * else's.
+ *
+ * `assets` names what the reader believes they own, so each site says the
+ * thing its audience came for: cats on cat21.space, cubes on cubes. It is
+ * only the noun; the mechanism is identical, because a single-address wallet
+ * can spend the sat ANY asset lives on.
+ *
+ * The closing clause says "assets" rather than the noun, because the scan is
+ * genuinely wider than any one product: inscriptions, runes, rare sats and
+ * cats. Worth knowing that every inscribe through this SDK also mints cats
+ * (`lockTime: CAT21_LOCK_TIME` in the commit and reveal helpers), so a cube
+ * holder owns cats too, whether or not they came for them.
  */
-export const SINGLE_ADDRESS_CAVEAT =
-  'This wallet keeps your spending coins and your cats on one address, so a payment '
-  + 'made anywhere else can spend the sat a cat lives on and send it to a miner. Either '
-  + 'use a wallet that keeps the two apart, or start a fresh address here and use it only '
-  + 'with cat21.space, ordpool.space and Cat21 Wallet, which check a coin for cats before '
-  + 'spending it.';
+export function singleAddressCaveat(assets = 'cats'): string {
+  return (
+    `This wallet keeps your spending coins and your ${assets} on one address, so a payment `
+    + 'made anywhere else can spend the sat one of them lives on and send it to a miner. Either '
+    + 'use a wallet that keeps the two apart, or start a fresh address here and use it only with '
+    + 'cat21.space, ordpool.space, cubes.haushoppe.art and Cat21 Wallet, which check a coin for '
+    + 'assets before spending it.'
+  );
+}
+
+/** The default wording, for a heading or a link that needs the sentence itself. */
+export const SINGLE_ADDRESS_CAVEAT = singleAddressCaveat();
 
 /**
  * Whether a CONNECTED wallet is handing out one address for both roles.
