@@ -27,6 +27,7 @@ export {
 // Branded Bitcoin address types — see core.ts for the rationale.
 export * from './wallet/address-types';
 export * from './format/mempool-format';
+export * from './family/coin-check-promise';
 export * from './family/ordpool-family';
 export * from './wallet/wallet-capabilities';
 export * from './wallet/wallet-picker';

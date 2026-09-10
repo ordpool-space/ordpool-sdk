@@ -12,6 +12,23 @@
  * a title.
  */
 
+import { COIN_CHECK_PROMISE } from './coin-check-promise';
+
+/** What the family block calls itself. */
+export const ORDPOOL_FAMILY_HEADING = 'The Ordpool family';
+
+/**
+ * The sentence under the heading, before the members.
+ *
+ * The first half is the project's own mission line. The second half is the
+ * reason to stay inside the family rather than a list of places to go, and it
+ * is deliberately the same promise {@link singleAddressCaveat} makes, so a
+ * reader who meets both hears one story instead of two.
+ */
+export const ORDPOOL_FAMILY_LEDE =
+  'Sometimes Bitcoin is hard money. Sometimes Bitcoin is a JPEG. We render both, '
+  + `and everything here ${COIN_CHECK_PROMISE}.`;
+
 /** One member of the family, as a footer or a link list renders it. */
 export interface OrdpoolFamilyMember {
   /** Stable key, for a consumer marking its own row "You are here". */

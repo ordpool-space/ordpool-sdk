@@ -1,3 +1,4 @@
+import { COIN_CHECK_PROMISE } from '../family/coin-check-promise';
 import { KnownOrdinalWalletType, KnownOrdinalWallets } from './wallet.service.types';
 
 /**
@@ -562,7 +563,7 @@ function singleAddressCaveatOpener(walletName?: string): string {
 export function singleAddressCaveat(assets = 'cats', walletName?: string): string {
   return (
     `${singleAddressCaveatOpener(walletName)} keeps your coins and your ${assets} at one address. That is fine here, because `
-    + 'everything in the ordpool family checks what a coin is carrying before it spends it. '
+    + `everything in the ordpool family ${COIN_CHECK_PROMISE}. `
     + `Other sites do not look, so a payment made elsewhere can spend the sat one of your `
     + `${assets} lives on and tip it to a miner. Start a fresh address here and keep it for `
     + 'cat21.space, ordpool.space, cubes.haushoppe.art and Cat21 Wallet, or use a wallet that '
