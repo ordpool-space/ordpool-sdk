@@ -152,7 +152,30 @@ acknowledgement, then a compact indicator that stays VISIBLE while that
 wallet is connected. Not reachable-if-you-look: the condition has not gone
 away, so neither should its trace.
 
-*(cat21.space is specifying the compact form. That spec lands here.)*
+**The compact form is also what makes this visible at all.** cubes measured
+its own placement and reported honestly: with a single-address wallet just
+connected and `scrollY=0`, the prominent caveat sits at y=945 on a 1280x800
+desktop and y=1589 on a 390x844 mobile. Both below the fold. Every test
+passed; nobody would have seen it.
+
+That is not a cubes defect and the fix is not a second copy of the prominent
+caveat. It is a requirement on the compact indicator: it lives beside the
+connected-wallet pill, which IS in the viewport at connect, so it is the only
+part of this that can be seen at the moment a person can still act cheaply.
+
+So the sequence is:
+
+1. **On connect** the compact indicator appears immediately, in the header,
+   in view. It does not wait for the prominent one to be acknowledged.
+2. **On reaching the action** the prominent caveat carries the full sentence
+   and both ways out.
+3. **After acknowledgement** the prominent one collapses and the compact
+   indicator remains, unchanged, for as long as that wallet is connected.
+
+The compact indicator therefore does two jobs, and the first one is the
+load-bearing one. Specify it accordingly.
+
+*(cat21.space is specifying it. That spec lands here.)*
 
 ### 7.7 The asset is named per site; the mechanism never varies
 
