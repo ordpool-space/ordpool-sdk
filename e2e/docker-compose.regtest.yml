@@ -227,7 +227,11 @@ services:
       - ordpool-backend
     image: ${E2E_PREFIX:-ordpool-e2e}-ordpool-backend:local
     build:
-      context: ${ORDPOOL_SRC:-../../ordpool}/backend
+      # Context is docker/backend (holds the tracked Dockerfile +
+      # mempool-config.json template + start.sh + wait-for-it.sh). The
+      # backend SOURCE and the rust workspace come in as named contexts,
+      # matching the Dockerfile's `COPY --from=backend` / `--from=rustgbt`.
+      context: ${ORDPOOL_SRC:-../../ordpool}/docker/backend
       dockerfile: Dockerfile
       additional_contexts:
         backend: ${ORDPOOL_SRC:-../../ordpool}/backend
