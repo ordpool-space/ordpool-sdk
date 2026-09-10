@@ -161,6 +161,13 @@ design and push them toward tools that check nothing, which is backwards.
 
 ### 7.6 Acknowledgement is per WALLET, and the quiet state is visible
 
+> **SUPERSEDED by §12.** The compact indicator, the prominent/compact split
+> and the acknowledgement lifecycle described below were all overruled by the
+> maintainer. There is now ONE note, beside the action button, in an info
+> register, with no acknowledgement. Do not implement anything in this
+> section. It is kept because §12 only makes sense against what it replaced,
+> and because the detection guard and the direction rule survive it.
+
 **Not per address.** A fresh address in a single-address wallet is still a
 single address; nothing about switching makes the wallet separate its
 roles. A warning that cleared on address change would vanish exactly when
@@ -341,6 +348,12 @@ All ruled directly. Each session still needs the maintainer's word in its
 OWN session before shipping; this records what that word will be.
 
 ### 10.1 The pill is FILL
+
+> **SUPERSEDED by §12.** There is no pill any more, so fill-versus-outline is
+> moot. What survives is the measuring habit the argument produced, now
+> generalised in §9: an element's ground decides what carries its shape, and
+> a number from one ground never transfers to another. §11.1 and §11.4 are
+> the two times that saved us.
 
 Decided. The amber state fills the pill; it does not merely recolour the
 border like the wrong-network error does.
