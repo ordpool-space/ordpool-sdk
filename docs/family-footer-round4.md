@@ -116,9 +116,12 @@ down as a rule and read as an instruction.
 
 The maintainer, through the ordpool.space session:
 
-> it should look similar on all sites. You [ordpool] already have a footer, so
-> you can lead and let it look nice. Wording is more or less ok, but every
-> session can add their spice to the texts for their own product.
+> Tell all session, that it should look like similar on all sites. You already
+> have a footer, so you can lead and let it look nice. Wording is more or less
+> ok, but every session can add their spice to the texts for their own
+> product. Communicate this to the other sessions
+
+(Verbatim. "You" is ordpool.space, the session it was typed to.)
 
 **The competition in §2-§5 is off.** It is not three proposals and a pick. It
 is: ordpool.space designs the footer, shares its frames, and the other sites
