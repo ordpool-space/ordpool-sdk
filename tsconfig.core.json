@@ -101,6 +101,7 @@
     "src/inscribe/inscription-envelope.ts",
     "src/inscribe/inscription-cbor.ts",
     "src/inscribe/inscription-properties.ts",
+    "src/inscribe/inscription-json-metadata.ts",
     "src/inscribe/inscription-commit.helper.ts",
     "src/inscribe/inscription-reveal.helper.ts",
     "src/inscribe/inscription-child-reveal.helper.ts",

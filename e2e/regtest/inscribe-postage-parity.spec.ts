@@ -29,7 +29,7 @@ import { createInscribeTransactions } from '../../src/inscribe/inscription.servi
 import { Network, toScureNetwork } from '../../src/network';
 import {
   mineBlocks,
-  ordStockCreateWallet,
+  fundOrdStockWallet,
   ordStockWalletInscribe,
   rpc,
   waitForElectrsSync,
@@ -39,7 +39,11 @@ import {
   writeOrdStockFile,
 } from './regtest-helpers';
 
-const ORD_WALLET = 'parity-postage-stock';
+// A fresh ord wallet per run. Every inscribe deposits into ord's own wallet,
+// and reusing a wallet across runs grows a UTXO pool that eventually trips
+// ord's coin-selection invariant (transaction_builder.rs, checked_sub on
+// Target::Value). CI starts from a fresh stack; a reused local stack does not.
+const ORD_WALLET = `parity-postage-stock-${Date.now().toString(36)}`;
 const PSBT_WALLET = 'ordpool-e2e';
 const TXT = 'text/plain;charset=utf-8';
 const FEE_RATE = 5;
@@ -63,13 +67,7 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
 
   beforeAll(async () => {
     await waitForOrdStockReady(60_000);
-    const ordAddr = ordStockCreateWallet(ORD_WALLET);
-    // Several mature coinbases: each ord inscribe below spends one, and ord
-    // will not spend its own unconfirmed change.
-    rpc('generatetoaddress', '110', ordAddr);
-    const tip = Number(rpc('getblockcount'));
-    await waitForElectrsSync(tip);
-    await waitForOrdStockSync(tip);
+    await fundOrdStockWallet(ORD_WALLET);
 
     // A real funded P2WPKH input for the SDK side. We only BUILD the SDK
     // transactions, so it is never spent here.

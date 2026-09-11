@@ -23,7 +23,7 @@ import { synthesizeEnvelopeFields } from '../../src/inscribe/inscription.service
 import type { CreateInscribeTransactionsArgs } from '../../src/inscribe/inscription.service.helper';
 import {
   mineBlocks,
-  ordStockCreateWallet,
+  fundOrdStockWallet,
   ordStockWalletInscribe,
   rpc,
   waitForElectrsSync,
@@ -32,7 +32,11 @@ import {
   writeOrdStockFile,
 } from './regtest-helpers';
 
-const ORD_WALLET = 'parity-parent-stock';
+// A fresh ord wallet per run. Every inscribe deposits into ord's own wallet,
+// and reusing a wallet across runs grows a UTXO pool that eventually trips
+// ord's coin-selection invariant (transaction_builder.rs, checked_sub on
+// Target::Value). CI starts from a fresh stack; a reused local stack does not.
+const ORD_WALLET = `parity-parent-stock-${Date.now().toString(36)}`;
 const TXT = 'text/plain;charset=utf-8';
 
 interface DecodedTx {
@@ -45,11 +49,7 @@ describe('inscribe with a parent → parity with `ord wallet inscribe --parent`'
 
   beforeAll(async () => {
     await waitForOrdStockReady(60_000);
-    const ordAddr = ordStockCreateWallet(ORD_WALLET);
-    rpc('generatetoaddress', '110', ordAddr);
-    const tip = Number(rpc('getblockcount'));
-    await waitForElectrsSync(tip);
-    await waitForOrdStockSync(tip);
+    await fundOrdStockWallet(ORD_WALLET);
 
     writeOrdStockFile('/tmp/parity-parent.txt', new TextEncoder().encode('the parent'));
     const { reveal } = ordStockWalletInscribe(ORD_WALLET, '/tmp/parity-parent.txt', 5);

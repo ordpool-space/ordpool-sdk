@@ -21,7 +21,7 @@ import { synthesizeEnvelopeFields } from '../../src/inscribe/inscription.service
 import type { CreateInscribeTransactionsArgs } from '../../src/inscribe/inscription.service.helper';
 import {
   mineBlocks,
-  ordStockCreateWallet,
+  fundOrdStockWallet,
   ordStockWalletInscribe,
   rpc,
   waitForElectrsSync,
@@ -30,7 +30,11 @@ import {
   writeOrdStockFile,
 } from './regtest-helpers';
 
-const ORD_WALLET = 'parity-properties-stock';
+// A fresh ord wallet per run. Every inscribe deposits into ord's own wallet,
+// and reusing a wallet across runs grows a UTXO pool that eventually trips
+// ord's coin-selection invariant (transaction_builder.rs, checked_sub on
+// Target::Value). CI starts from a fresh stack; a reused local stack does not.
+const ORD_WALLET = `parity-properties-stock-${Date.now().toString(36)}`;
 const TXT = 'text/plain;charset=utf-8';
 
 function ordEnvelopePostPubkey(revealTxid: string): string {
@@ -68,14 +72,7 @@ describe('inscribe properties → byte-parity with stock ord', () => {
 
   beforeAll(async () => {
     await waitForOrdStockReady(60_000);
-    const ordAddr = ordStockCreateWallet(ORD_WALLET);
-    // Coinbase outputs mature at 100 confirmations, so 101 blocks leaves
-    // exactly ONE spendable utxo. This suite inscribes seven times with ord,
-    // so it needs several mature coinbases before the first one.
-    rpc('generatetoaddress', '110', ordAddr);
-    const tip = Number(rpc('getblockcount'));
-    await waitForElectrsSync(tip);
-    await waitForOrdStockSync(tip);
+    await fundOrdStockWallet(ORD_WALLET);
 
     galleryA = await ordInscribePlain('gallery-a');
     galleryB = await ordInscribePlain('gallery-b');

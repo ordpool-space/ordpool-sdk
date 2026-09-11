@@ -21,7 +21,7 @@ import * as btc from '@scure/btc-signer';
 import { compressBrotliWasm } from '../../src/inscribe/brotli-wasm-encoder';
 import {
   mineBlocks,
-  ordStockCreateWallet,
+  fundOrdStockWallet,
   ordStockWalletInscribe,
   rpc,
   waitForElectrsSync,
@@ -30,7 +30,11 @@ import {
   writeOrdStockFile,
 } from './regtest-helpers';
 
-const ORD_WALLET = 'parity-compress-stock';
+// A fresh ord wallet per run. Every inscribe deposits into ord's own wallet,
+// and reusing a wallet across runs grows a UTXO pool that eventually trips
+// ord's coin-selection invariant (transaction_builder.rs, checked_sub on
+// Target::Value). CI starts from a fresh stack; a reused local stack does not.
+const ORD_WALLET = `parity-compress-stock-${Date.now().toString(36)}`;
 const WASM = readFileSync(join(__dirname, '../../wasm/brotli_wasm_bg.wasm'));
 
 /** Pull the body pushes (everything after OP_0 up to OP_ENDIF) out of ord's envelope. */
@@ -49,11 +53,7 @@ function ordBody(revealTxid: string): Uint8Array {
 describe('inscribe --compress → brotli parity with stock ord', () => {
   beforeAll(async () => {
     await waitForOrdStockReady(60_000);
-    const ordAddr = ordStockCreateWallet(ORD_WALLET);
-    rpc('generatetoaddress', '110', ordAddr);
-    const tip = Number(rpc('getblockcount'));
-    await waitForElectrsSync(tip);
-    await waitForOrdStockSync(tip);
+    await fundOrdStockWallet(ORD_WALLET);
   }, 240_000);
 
   // KNOWN GAP, recorded rather than hidden. Measured 2026-09-11: the bodies

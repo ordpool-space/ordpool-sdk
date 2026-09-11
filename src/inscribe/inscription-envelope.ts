@@ -96,11 +96,20 @@ export interface BuildInscriptionEnvelopeArgs {
    */
   contentType?: string;
   /**
-   * Body bytes (raw inscription content). Sliced into 520-byte
-   * pushes after the OP_0 separator. Pass an empty Uint8Array for
-   * inscriptions whose body lives elsewhere (delegate, metadata-only).
+   * Body bytes (raw inscription content), sliced into 520-byte pushes after
+   * the OP_0 body separator.
+   *
+   * These are THREE different envelopes, matching ord's `body: Option<_>`:
+   *
+   *   undefined   no separator at all            ord's `None` (e.g. `--delegate` with no `--file`)
+   *   empty       separator, no body pushes      ord's `Some(vec![])`
+   *   bytes       separator, then the chunks     ord's `Some(bytes)`
+   *
+   * The first two resolve to the same inscription but are not the same
+   * bytes, so byte-parity with ord's delegate-only inscribe needs `undefined`,
+   * not an empty array.
    */
-  body: Uint8Array;
+  body?: Uint8Array;
   /**
    * Additional tags (parent, metadata, metaprotocol, etc.). Order
    * is preserved in the encoded envelope but order doesn't affect
@@ -245,13 +254,15 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
     items.push(field.value);
   }
 
-  // OP_0 separator: marks the boundary between fields and body.
-  // ord's parser uses this as the body start sentinel.
-  items.push('OP_0');
-
-  // Body chunks: 520 bytes max per push.
-  for (let i = 0; i < args.body.length; i += MAX_PUSH_BYTES) {
-    items.push(args.body.subarray(i, i + MAX_PUSH_BYTES));
+  // OP_0 body separator, then the body in 520-byte pushes. Both only when a
+  // body EXISTS: ord emits the separator only for `Some(body)`
+  // (append_reveal_script), so an absent body leaves the envelope closing
+  // straight after the last field.
+  if (args.body !== undefined) {
+    items.push('OP_0');
+    for (let i = 0; i < args.body.length; i += MAX_PUSH_BYTES) {
+      items.push(args.body.subarray(i, i + MAX_PUSH_BYTES));
+    }
   }
 
   // Envelope close.

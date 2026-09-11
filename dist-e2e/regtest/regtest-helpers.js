@@ -44,6 +44,7 @@ exports.ordStockCli = ordStockCli;
 exports.ordStockCreateWallet = ordStockCreateWallet;
 exports.writeOrdStockFile = writeOrdStockFile;
 exports.ordStockWalletInscribe = ordStockWalletInscribe;
+exports.fundOrdStockWallet = fundOrdStockWallet;
 const node_child_process_1 = require("node:child_process");
 const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
     `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
@@ -683,5 +684,27 @@ function ordStockWalletInscribe(walletName, containerFilePath, feeRateSatPerVb, 
     const stdout = ordStockWalletCli(walletName, 'inscribe', '--no-backup', '--fee-rate', String(feeRateSatPerVb), '--file', containerFilePath, ...extraArgs);
     const parsed = JSON.parse(stdout);
     return { commit: parsed.commit, reveal: parsed.reveal };
+}
+/**
+ * Create a stock-ord wallet and fund it by TRANSFER, mining one block.
+ *
+ * Mining coinbases straight to an ord wallet looks simpler and is wrong
+ * twice over. It burns ~100 blocks per wallet to reach coinbase maturity, and
+ * on regtest the subsidy halves every 150 blocks, so late in a long run a
+ * fresh wallet receives coinbases worth a few satoshis and ord reports "not
+ * enough cardinal UTXOs". The shared `ordpool-e2e` funder holds coins mined at
+ * low height, so a transfer from it is worth the same whenever it happens.
+ *
+ * One funding UTXO is enough for a whole spec: each ord inscribe spends it
+ * and returns change, and every caller mines a block after inscribing, so the
+ * change is confirmed before the next inscribe needs it.
+ */
+async function fundOrdStockWallet(walletName, btc = '2.0') {
+    const addr = ordStockCreateWallet(walletName);
+    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', addr, btc);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdStockSync(tip);
+    return addr;
 }
 //# sourceMappingURL=regtest-helpers.js.map
