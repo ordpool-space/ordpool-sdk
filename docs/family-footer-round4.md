@@ -212,3 +212,30 @@ fail to compile until they localise the lede, which is the loud failure we want
 rather than a silently stale sentence. A spec now fails if any lede helper is
 re-added to this module, so the rule is enforced rather than merely written
 down.
+
+## 10. Family links open in the SAME TAB
+
+The maintainer, verbatim (German), via the cubes session, confirmed to the SDK
+as their own instruction:
+
+> innerhalb der ordpool family verlinken wir NICHT per target="_blank", wir
+> linken direkt, damit beim durchklicken nicht super viele tabs aufgehen
+
+> alle sessions führen die änderung durch, danach deploy
+
+No `target="_blank"` on family footer links. A reader walking the family
+should not end up with a tab per member.
+
+**`rel="noopener"` becomes moot** on those links and can go with the target.
+The workspace rule that every `target="_blank"` carries `rel="noopener"` is
+unaffected: it applies where a blank target exists, and here none does.
+
+**The wallet row points at GitHub, not a family site**, so it is the one row
+where "within the family" and "the destination" disagree. It goes same-tab
+too: the wallet IS a family member, the directive is about walking the family
+rather than about destination hosts, and the back button is the answer to
+landing somewhere unexpected. Flagged here rather than decided silently, so it
+can be reversed for that row alone if anyone disagrees.
+
+**The self-row is unaffected.** It is not a link at all (a `span` or `div`,
+per §7's lead), so there is no target to remove.
