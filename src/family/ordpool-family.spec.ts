@@ -2,56 +2,34 @@ import { describe, expect, it } from '@jest/globals';
 
 import { singleAddressCaveat } from '../wallet/wallet-capabilities';
 import { COIN_CHECK_PROMISE } from './coin-check-promise';
+import * as family from './ordpool-family';
 import {
   CAT21_WALLET_POSITIONING,
   ORDPOOL_FAMILY,
   ORDPOOL_FAMILY_HEADING,
-  ordpoolFamilyLede,
   CAT21_LORE_POINTER,
   ordpoolFamilyMember,
 } from './ordpool-family';
 
-describe('ordpoolFamilyLede', () => {
-  it(`names what THIS site renders, in the maintainer's words`, () => {
-    expect(ordpoolFamilyLede('ordpool')).toBe(
-      'Sometimes Bitcoin is hard money. Sometimes Bitcoin is a JPEG.',
-    );
-    expect(ordpoolFamilyLede('cat21')).toBe(
-      'Sometimes Bitcoin is hard money. Sometimes Bitcoin is a pixelated cat.',
-    );
-    expect(ordpoolFamilyLede('cubes')).toBe(
-      'Sometimes Bitcoin is hard money. Sometimes Bitcoin is an artsy rotating cube.',
-    );
+describe('the family module hosts no per-site lede', () => {
+  it('exports no lede helper, because a site\'s tagline is its own repo\'s copy', () => {
+    // The heading and the member lines describe EVERY member, so one copy of
+    // them keeps the family consistent. A site's own tagline describes only
+    // itself, so hosting it put the SDK in the way of a repo editing its own
+    // voice and bought nothing.
+    const mod = family as Record<string, unknown>;
+    expect(mod.ordpoolFamilyLede).toBeUndefined();
+    expect(mod.ORDPOOL_FAMILY_LEDE).toBeUndefined();
   });
 
-  it('keeps the mission half identical everywhere, varying only the tail', () => {
-    const MISSION = 'Sometimes Bitcoin is hard money. ';
-    const tails = (['ordpool', 'cat21', 'cubes'] as const).map(
-      s => ordpoolFamilyLede(s).slice(MISSION.length),
-    );
-    for (const s of ['ordpool', 'cat21', 'cubes'] as const) {
-      expect(ordpoolFamilyLede(s).startsWith(MISSION)).toBe(true);
-    }
-    expect(new Set(tails).size).toBe(3);
-  });
-
-  it('carries NO safety claim, because a footer is not the place for one', () => {
-    // Removed deliberately: it frightened every reader to warn the few who
-    // needed it. The claim lives in singleAddressCaveat, at the action.
-    for (const s of ['ordpool', 'cat21', 'cubes'] as const) {
-      expect(ordpoolFamilyLede(s)).not.toContain(COIN_CHECK_PROMISE);
-      // NOT a bare 'coin' check: 'Bitcoin' contains it, which is how the
-      // first version of this assertion failed on correct copy.
-      expect(ordpoolFamilyLede(s).toLowerCase()).not.toContain('spends it');
-      expect(ordpoolFamilyLede(s).toLowerCase()).not.toContain('carrying');
-    }
-    // ...and it is still there, where it belongs.
-    expect(singleAddressCaveat()).toContain(COIN_CHECK_PROMISE);
-  });
-
-  it('capitalises the project as a proper noun in the heading', () => {
+  it('still hosts what every site prints about every member', () => {
     expect(ORDPOOL_FAMILY_HEADING).toBe('The Ordpool family');
-    expect(ORDPOOL_FAMILY_HEADING).not.toContain('ordpool');
+    expect(ORDPOOL_FAMILY).toHaveLength(4);
+  });
+
+  it('keeps the safety claim out of the footer and in the note', () => {
+    // Where it went when it was removed from the lede, and where it stays.
+    expect(singleAddressCaveat()).toContain(COIN_CHECK_PROMISE);
   });
 
   it('points the wallet at the lore, since it has no footer to carry a lede', () => {

@@ -161,3 +161,54 @@ up on its next bump. One sentence, one place, four renderers.
 The same applies to the wallet's line with one extra consequence:
 `CAT21_WALLET_POSITIONING` IS that line, so spicing it also changes the
 wallet's own positioning copy. A spec pins the two identical on purpose.
+
+## 9. The per-site tagline is NOT the SDK's job
+
+The maintainer, verbatim (German), via the cubes session and confirmed to the
+SDK as their own instruction:
+
+> die individuelle tagline jedes repos ist NICHT aufgabe des SDK
+
+> alle anderen sessions sollen das selbst formatieren, immer nach dem schema:
+> Sometimes Bitcoin is hard money. (newline) Sometimes Bitcoin is ...
+
+`ordpoolFamilyLede` and its tail table are REMOVED from the SDK (they lived
+there for about an hour, between §8 and here). Each site writes and formats its
+own lede, in its own repo, two lines:
+
+```
+Sometimes Bitcoin is hard money.
+Sometimes Bitcoin is <this site's own tail>.
+```
+
+### What stays shared, and the line that separates the two
+
+**Shared:** `ORDPOOL_FAMILY_HEADING` and `ORDPOOL_FAMILY`. Every site prints
+these about EVERY member, so one copy of them is what keeps four renderings of
+the same four products identical. cubes printing cat21's line is cubes
+describing someone else, and that is exactly what a shared constant is for.
+
+**Local:** a site's own tagline. It describes only itself, only ever renders on
+itself, and naming what a visitor is currently looking at is a judgment its own
+repo is better placed to make. Hosting it centrally bought no consistency and
+put the SDK between a repo and its own voice.
+
+That is the general rule this round produced, and it is sharper than "share
+copy": **share what one surface says about ANOTHER; keep local what a surface
+says about ITSELF.** §8's reasoning survives intact under it, because the member
+lines are the first kind and the tagline is the second.
+
+### The accepted consequence
+
+"Sometimes Bitcoin is hard money." is now written in three repos and can drift.
+That is the maintainer's call, made knowing it, and the schema above is what
+holds it together. It is recorded here so nobody re-centralises it later as a
+tidy-up and undoes a deliberate decision.
+
+### The removal is a breaking change, on purpose
+
+All three sites are live against `ordpoolFamilyLede`. Their next SDK bump will
+fail to compile until they localise the lede, which is the loud failure we want
+rather than a silently stale sentence. A spec now fails if any lede helper is
+re-added to this module, so the rule is enforced rather than merely written
+down.

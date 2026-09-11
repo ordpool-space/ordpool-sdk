@@ -16,32 +16,22 @@
 export const ORDPOOL_FAMILY_HEADING = 'The Ordpool family';
 
 /**
- * Which sites render the family footer. The wallet is absent on purpose: an
- * extension has no page bottom, so it has no lede to render.
- */
-export type FamilyFooterSite = 'ordpool' | 'cat21' | 'cubes';
-
-/**
- * The sentence under the heading, before the members.
+ * There is deliberately NO lede here.
  *
- * Both halves are the maintainer's. The first is the project's mission line
- * and is the same everywhere; the second names what THIS site renders, so a
- * reader meets the family through the thing they are already looking at.
+ * The opening sentence under the heading is each site's OWN copy, written and
+ * formatted in its own repo, because its second half names what THAT site
+ * renders and a tagline for a product belongs with the product. The schema
+ * every site follows is two lines:
  *
- * It deliberately carries no safety claim. A footer introduces the family; the
- * warning about what a coin is carrying belongs at the action, in
- * {@link singleAddressCaveat}, where it reaches someone who can act on it
- * instead of greeting everyone with a caution they did not ask for.
+ *   Sometimes Bitcoin is hard money.
+ *   Sometimes Bitcoin is <this site's own tail>.
+ *
+ * What stays shared is what every site prints about EVERY member: the heading
+ * and {@link ORDPOOL_FAMILY}. Those describe the other three as much as
+ * yourself, so one copy of them is what keeps the family consistent. A site's
+ * own tagline describes only itself, so hosting it here bought nothing and
+ * put the SDK in the way of a repo editing its own voice.
  */
-export function ordpoolFamilyLede(site: FamilyFooterSite): string {
-  return `Sometimes Bitcoin is hard money. Sometimes Bitcoin is ${FAMILY_LEDE_TAIL[site]}.`;
-}
-
-const FAMILY_LEDE_TAIL: Record<FamilyFooterSite, string> = {
-  ordpool: 'a JPEG',
-  cat21: 'a pixelated cat',
-  cubes: 'an artsy rotating cube',
-};
 
 /**
  * What CAT-21 wallet adds to its own copy, having no footer to put a lede in.
