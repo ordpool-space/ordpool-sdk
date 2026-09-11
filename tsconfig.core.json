@@ -32,6 +32,7 @@
     "src/format/mempool-format.ts",
     "src/family/coin-check-promise.ts",
     "src/family/ordpool-family.ts",
+    "src/wallet/connect-ui.ts",
     "src/wallet/wallet-capabilities.ts",
     "src/wallet/wallet-deeplink.ts",
     "src/wallet/xpub/derive-watch-only.ts",
