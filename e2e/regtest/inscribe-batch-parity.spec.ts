@@ -19,10 +19,11 @@
  * Then, per mode, an SDK batch is broadcast and stock ord must index every
  * inscription at the satpoint the SDK reports, with its content.
  *
- * The last test drives a batch with two parents and compares the envelopes:
- * every envelope repeats both parent tags, and the pointers start after the
- * two parent outputs. The SDK's batch builder does not spend parents yet, so
- * that one compares the tapscript, built from the same field synthesiser.
+ * With parents: ord builds a two-parent batch and the SDK builds the same
+ * one against the same parent UTXOs, compared the same way (every envelope
+ * repeats both parent tags; pointers start after the two parent outputs).
+ * Then an SDK batch spending two parents we own is broadcast, and stock ord
+ * must link every child to both parents and show both parents returned.
  */
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
@@ -30,14 +31,14 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { createBatchInscribeTransactions } from '../../src/inscribe/inscription-batch.helper';
-import type { BatchInscribeMode, BatchInscriptionEntry } from '../../src/inscribe/inscription-batch.helper';
-import { buildBatchInscriptionScript } from '../../src/inscribe/inscription-envelope';
-import { synthesizeBatchEntryFields } from '../../src/inscribe/inscription.service.helper';
+import { createBatchChildInscribeTransactions, createBatchInscribeTransactions } from '../../src/inscribe/inscription-batch.helper';
+import type { BatchInscribeMode, BatchInscriptionEntry, BatchParent } from '../../src/inscribe/inscription-batch.helper';
+import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
 import { Network, toScureNetwork } from '../../src/network';
 import {
   fundUninscribed,
   getStockOrdContent,
+  getStockOrdInscription,
   mineBlocks,
   fundOrdStockWallet,
   postTx,
@@ -223,7 +224,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
     240_000,
   );
 
-  it('two parents: every envelope repeats both parent tags, pointers start after the parent outputs', async () => {
+  it('two parents: the SDK batch matches ord in tapscript, reveal outputs, reveal vsize, commit output and locations', async () => {
     const parents: string[] = [];
     for (const n of [1, 2]) {
       writeOrdStockFile(`/tmp/pb-parent-${n}.txt`, enc(`batch parent ${n}`));
@@ -245,21 +246,150 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
     ].join('\n');
     const ord = ordStockWalletBatch(ORD_WALLET, yaml, FEE_RATE);
     await waitForOrdStockSync(mineBlocks(1));
+    const ordReveal = decode(ord.reveal);
+    const ordCommit = decode(ord.commit);
 
-    // ord's reveal spends both parents first, so the commit is input 2, and
-    // returns them at outputs 0 and 1 with their own values.
-    const reveal = decode(ord.reveal);
-    const parentValues = sats(reveal).slice(0, 2);
-    const start = parentValues[0] + parentValues[1];
-
-    const script = buildBatchInscriptionScript({
-      revealPubkeyXonly: new Uint8Array(32).fill(7),
-      envelopes: bodies.map((body, i) => ({
-        body,
-        contentType: 'text/plain;charset=utf-8',
-        fields: synthesizeBatchEntryFields({ parents, pointer: start + postage * i }),
-      })),
+    // The SDK builds the same batch against the same two parent UTXOs (read
+    // from ord's reveal inputs), returning each to where ord returned it.
+    // Built only, never signed, so any x-only key stands in for the owner's.
+    const revealInputs = (JSON.parse(rpc('getrawtransaction', ord.reveal, 'true')) as {
+      vin: { txid: string; vout: number }[];
+    }).vin;
+    const revealOutputs = (JSON.parse(rpc('getrawtransaction', ord.reveal, 'true')) as {
+      vout: { value: number; scriptPubKey: { address: string } }[];
+    }).vout;
+    const batchParents = [0, 1].map(i => {
+      const prev = (JSON.parse(rpc('getrawtransaction', revealInputs[i].txid, 'true')) as {
+        vout: { value: number; scriptPubKey: { hex: string } }[];
+      }).vout[revealInputs[i].vout];
+      return {
+        id: parents[i],
+        utxo: {
+          txid: revealInputs[i].txid,
+          vout: revealInputs[i].vout,
+          value: Math.round(prev.value * 1e8),
+          scriptPubKey: hex.decode(prev.scriptPubKey.hex),
+          tapInternalKey: new Uint8Array(32).fill(i + 1),
+        },
+        returnAddress: revealOutputs[i].scriptPubKey.address,
+      };
     });
-    expect(hex.encode(script).slice(68)).toBe(ordEnvelopes(ord.reveal, 2));
+    const sdk = createBatchChildInscribeTransactions({
+      mode: 'separate-outputs',
+      inscriptions: bodies.map(body => ({ body, contentType: 'text/plain;charset=utf-8' })),
+      parents: batchParents,
+      postageSats: postage,
+      recipientAddress: randomP2tr(),
+      paymentOutput: { ...utxo, status: { confirmed: true } },
+      paymentPublicKey: fundingPubkey,
+      paymentAddress: fundingAddr,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+
+    // ord's reveal spends both parents first, so the commit is input 2.
+    expect(hex.encode(sdk.commit.envelopeScript).slice(68)).toBe(ordEnvelopes(ord.reveal, 2));
+    const sdkReveal = btc.Transaction.fromPSBT(sdk.revealPsbt, { allowUnknownInputs: true });
+    const sdkOutputs = Array.from({ length: sdkReveal.outputsLength }, (_, i) => Number(sdkReveal.getOutput(i).amount));
+    expect(sdkOutputs).toEqual(sats(ordReveal));
+    expect(sdk.fees.revealVsize).toBe(ordReveal.vsize);
+    expect(sdk.fees.commitOutputValueSats).toBe(sats(ordCommit)[0]);
+    expect(sdk.inscriptions.map(l => `${ord.reveal}:${l.vout}:${l.offset}`))
+      .toEqual(ord.inscriptions.map(i => i.location));
   }, 240_000);
+
+  it('an SDK batch spending two parents broadcasts; stock ord links every child to both parents and returns both', async () => {
+    // The parents' owner: a key we control, signing the parent inputs.
+    const ownerKey = schnorr.utils.randomPrivateKey();
+    const ownerXonly = schnorr.getPublicKey(ownerKey);
+    const owner = btc.p2tr(ownerXonly, undefined, scureRegtest, true);
+
+    const parents: BatchParent[] = [];
+    for (const n of [1, 2]) {
+      const f = await fundUninscribed();
+      const parent = createInscribeTransactions({
+        paymentOutput: { ...f.utxo, status: { confirmed: true } },
+        paymentPublicKey: f.fundingPubkey,
+        paymentAddress: f.fundingAddr,
+        recipientAddress: owner.address!,
+        body: enc(`sdk batch parent ${n}`),
+        contentType: 'text/plain;charset=utf-8',
+        postageSats: n === 1 ? 546 : 2000, // two sizes, so the pointer offset is not symmetric
+        feeRatePerVbyte: FEE_RATE,
+        network: Network.Regtest,
+      });
+      await signCommitAndBroadcast(parent.commitPsbt, parent.commitTxid);
+      expect(await postTx(parent.revealHex)).toBe(parent.revealTxid);
+      const tip = mineBlocks(1);
+      await waitForElectrsSync(tip);
+      await waitForOrdStockSync(tip);
+      parents.push({
+        id: `${parent.revealTxid}i0`,
+        utxo: {
+          txid: parent.revealTxid,
+          vout: 0,
+          value: n === 1 ? 546 : 2000,
+          scriptPubKey: owner.script,
+          tapInternalKey: ownerXonly,
+        },
+        returnAddress: owner.address!,
+      });
+    }
+
+    const f = await fundUninscribed();
+    const bodies = [enc('sdk child a'), enc('sdk child b'), enc('sdk child c')];
+    const built = createBatchChildInscribeTransactions({
+      mode: 'shared-output',
+      inscriptions: bodies.map(body => ({ body, contentType: 'text/plain;charset=utf-8' })),
+      parents,
+      postageSats: 1000,
+      recipientAddress: randomP2tr(),
+      paymentOutput: { ...f.utxo, status: { confirmed: true } },
+      paymentPublicKey: f.fundingPubkey,
+      paymentAddress: f.fundingAddr,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+    await signCommitAndBroadcast(built.commitPsbt, built.commitTxid);
+
+    // What the wallet does in signChildRevealParentInputs with parentCount 2:
+    // sign parent inputs 0 and 1 on the bare PSBT, then merge both
+    // signatures into the full reveal and finalize.
+    const walletFacing = btc.Transaction.fromPSBT(built.revealPsbtForWallet);
+    const full = btc.Transaction.fromPSBT(built.revealPsbt, { allowUnknownInputs: true });
+    for (const i of [0, 1]) {
+      walletFacing.signIdx(ownerKey, i);
+      const input = walletFacing.getInput(i);
+      full.updateInput(i, { tapKeySig: input.tapKeySig ?? input.finalScriptWitness![0] }, true);
+    }
+    full.finalize();
+    expect(await postTx(full.hex)).toBe(built.revealTxid);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdStockSync(tip);
+
+    for (const location of built.inscriptions) {
+      const id = `${built.revealTxid}i${location.index}`;
+      const insc = await waitForOrdStockInscription(id);
+      expect(insc.satpoint).toBe(`${built.revealTxid}:${location.vout}:${location.offset}`);
+      expect(insc.parents).toEqual(parents.map(p => p.id));
+      expect((await getStockOrdContent(id)).bytes).toEqual(bodies[location.index]);
+    }
+    for (const [i, parent] of parents.entries()) {
+      const after = await getStockOrdInscription(parent.id);
+      expect(after.satpoint).toBe(`${built.revealTxid}:${i}:0`);
+      expect(after.address).toBe(owner.address!);
+      expect(after.value).toBe(parent.utxo.value);
+    }
+  }, 300_000);
 });
+
+/** Sign an SDK commit with the funder wallet (walletprocesspsbt) and broadcast it. */
+async function signCommitAndBroadcast(commitPsbt: Uint8Array, expectedTxid: string): Promise<void> {
+  const processed = JSON.parse(rpc(
+    '-rpcwallet=' + PSBT_WALLET, '-named', 'walletprocesspsbt',
+    `psbt=${base64.encode(commitPsbt)}`, 'sign=true', 'finalize=true',
+  )) as { complete: boolean; hex: string };
+  expect(processed.complete).toBe(true);
+  expect(await postTx(processed.hex)).toBe(expectedTxid);
+}

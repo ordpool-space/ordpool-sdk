@@ -254,3 +254,77 @@ describe('inscribeBatchAndBroadcast orchestrator', () => {
     expect(parsed.map(p => new TextDecoder().decode(p.getDataRaw()))).toEqual(['first', 'second']);
   });
 });
+
+describe('inscribeBatchAndBroadcast with parents', () => {
+  const OWNER_PRIV = new Uint8Array(32).fill(0xef);
+  const parentAt = (n: number, value: number, ownerKey = OWNER_PRIV) => {
+    const p = btc.p2tr(schnorr.getPublicKey(ownerKey), undefined, scureNetwork, true);
+    return {
+      id: `${String(n).repeat(64)}i0`,
+      utxo: { txid: String(n).repeat(64), vout: 0, value, scriptPubKey: p.script, tapInternalKey: schnorr.getPublicKey(ownerKey) },
+      returnAddress: p.address!,
+    };
+  };
+
+  it('signs the commit, then has the wallet sign every parent input, and broadcasts a reveal spending them all', async () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
+    // The watch-only signer hands each PSBT to the user; this stands in for
+    // the wallet: the commit gets the payment key, the reveal's parent
+    // inputs the owner key.
+    const promptForSignedPsbt = (unsigned: { base64: string; hex: string }) => {
+      const psbt = btc.Transaction.fromPSBT(base64.decode(unsigned.base64));
+      if (psbt.inputsLength === 1) {
+        psbt.signIdx(PAYMENT_PRIV, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+        psbt.finalize();
+      } else {
+        for (let i = 0; i < psbt.inputsLength - 1; i++) psbt.signIdx(OWNER_PRIV, i);
+      }
+      return of(base64.encode(psbt.toPSBT(0)));
+    };
+    const broadcasts: string[] = [];
+    const broadcast = jest.fn((txHex: string) => {
+      broadcasts.push(txHex);
+      return of(btc.Transaction.fromRaw(hex.decode(txHex), { allowUnknownInputs: true }).id);
+    });
+
+    const result = await firstValueFrom(inscribeBatchAndBroadcast({
+      mode: 'shared-output',
+      inscriptions: [{ body: new TextEncoder().encode('a'), contentType: 'text/plain' },
+        { body: new TextEncoder().encode('b'), contentType: 'text/plain' }],
+      parents: [parentAt(1, 546), parentAt(2, 2000)],
+      walletType: KnownOrdinalWalletType.xpub,
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey,
+      paymentAddress,
+      recipientAddress: recipientAddress(),
+      feeRatePerVbyte: 5,
+      network: NETWORK,
+      broadcast,
+      promptForSignedPsbt,
+    }));
+
+    expect(broadcasts.length).toBe(2);
+    const reveal = btc.Transaction.fromRaw(hex.decode(broadcasts[1]), { allowUnknownInputs: true });
+    expect(reveal.id).toBe(result.revealTxId);
+    expect(hex.encode(reveal.getInput(2).txid!)).toBe(result.commitTxId);
+    expect([0, 1, 2].map(i => reveal.getInput(i).finalScriptWitness!.length)).toEqual([1, 1, 3]);
+    expect(result.inscriptions.map(l => [l.vout, l.offset])).toEqual([[2, 0], [2, 546]]);
+  });
+
+  it('refuses parents held by different owners, since the wallet signs them at one address', async () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
+    await expect(firstValueFrom(inscribeBatchAndBroadcast({
+      mode: 'separate-outputs',
+      inscriptions: [{ body: new TextEncoder().encode('a'), contentType: 'text/plain' }],
+      parents: [parentAt(1, 546), parentAt(2, 546, new Uint8Array(32).fill(0x12))],
+      walletType: KnownOrdinalWalletType.xpub,
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey,
+      paymentAddress,
+      recipientAddress: recipientAddress(),
+      feeRatePerVbyte: 5,
+      network: NETWORK,
+      broadcast: () => of('x'),
+    }))).rejects.toThrow('every parent must sit at the same ordinals address');
+  });
+});

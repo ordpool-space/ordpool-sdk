@@ -44,18 +44,18 @@ blesses the SDK's inscriptions.
 
 ## 3. The gaps, worst first
 
-### 3.2 Batch: `satpoints` mode and parents
+### 3.2 Batch: the `satpoints` mode
 
-`createBatchInscribeTransactions` builds ord's `separate-outputs`,
-`shared-output` and `same-sat` batches byte-identically. Still missing: the
-`satpoints` mode, which needs sat targeting (§3.5), and batches with parents,
-whose envelopes already match ord but whose reveal must also spend the
-parents.
+`createBatchInscribeTransactions` and `createBatchChildInscribeTransactions`
+build ord's `separate-outputs`, `shared-output` and `same-sat` batches, with
+or without parents, byte-identically. Still missing: the `satpoints` mode,
+which needs sat targeting (§3.5).
 
-### 3.4 One parent, where ord takes many
+### 3.4 Several parents
 
-`parent?: string`. Tag `0x03` is repeatable and ord's batchfile takes a list.
-The `envelopeFields` escape hatch can emit it, which is not an interface.
+ord takes several parents only in a batchfile (`wallet inscribe --parent`
+takes one). The SDK matches that: `parents` on the batch builders, spent and
+returned by the reveal, one `parent` tag per parent in every envelope.
 
 ### 3.5 No sat / satpoint targeting
 
@@ -98,10 +98,9 @@ number-shaped claim this workspace bans. The honest ordered path:
 
 1. **UI surfacing (§3.6)**: no SDK work, unlocks parent, gallery, title,
    metaprotocol, pointer and postage in the form.
-2. **Multiple parents (§3.4)**: small.
-3. **Sat/satpoint targeting (§3.5)**: medium.
-4. **Batch with parents and `satpoints` (§3.2)**: the last thing standing
-   between us and the word "parity".
+2. **Sat/satpoint targeting (§3.5)**: medium.
+3. **The `satpoints` batch mode (§3.2)**: the last thing standing between us
+   and the word "parity".
 
 Until batch ships, the defensible claim is narrower and still strong: **"Everything
 ord can inscribe, without the command line"** is false; **"Inscribe on Bitcoin

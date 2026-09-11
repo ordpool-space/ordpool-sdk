@@ -2,6 +2,7 @@ import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
+import { getMinimumUtxoSize } from '../cat21-script/address-format';
 import { resolveInscribePostage } from './inscription-commit.helper';
 import { Network, toScureNetwork } from '../network';
 
@@ -95,10 +96,21 @@ export interface ChildInscribeRevealArgs {
   };
   /** 32-byte ephemeral private key (same key embedded in the envelope). */
   ephemeralPrivKey: Uint8Array;
-  /** The parent inscription spent + returned by this reveal. */
-  parent: ChildRevealParent;
-  /** Address the CHILD inscription lands on (P2TR recommended). */
-  recipientAddress: string;
+  /** The parent inscription spent + returned by this reveal. One of `parent` / `parents`. */
+  parent?: ChildRevealParent;
+  /**
+   * Several parents, spent at inputs 0..N-1 in this order and returned at
+   * outputs 0..N-1 with their own values, as ord's batch does. One of
+   * `parent` / `parents`.
+   */
+  parents?: ReadonlyArray<ChildRevealParent>;
+  /** Address the CHILD inscription lands on (P2TR recommended). Required unless `inscriptionOutputs` is given. */
+  recipientAddress?: string;
+  /**
+   * The child outputs after the parent returns, replacing the single
+   * `recipientAddress` output at `postageSats` (a batch of children).
+   */
+  inscriptionOutputs?: ReadonlyArray<{ address: string; value: number }>;
   /** Optional tip output, appended after the child output. */
   tip?: { address: string; value: number };
   network: Network;
@@ -138,7 +150,6 @@ export interface ChildInscribeRevealResult {
  */
 export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): ChildInscribeRevealResult {
   const scureNetwork = toScureNetwork(args.network);
-  const postageSats = resolveInscribePostage(args.postageSats);
   const tipValueSats = args.tip?.value ?? 0;
   if (tipValueSats < 0 || !Number.isInteger(tipValueSats)) {
     throw new Error('tip.value must be a non-negative integer');
@@ -146,20 +157,43 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   if (args.ephemeralPrivKey.length !== 32) {
     throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
   }
-  if (!Number.isInteger(args.parent.utxo.value) || args.parent.utxo.value < postageSats) {
-    throw new Error(
-      `parent.utxo.value must be an integer >= ${postageSats} (its sats are preserved on return); ` +
-      `got ${args.parent.utxo.value}`,
-    );
+  if ((args.parent === undefined) === (args.parents === undefined)) {
+    throw new Error('pass exactly one of parent / parents');
   }
-  if (args.parent.utxo.tapInternalKey.length !== 32) {
-    throw new Error('parent.utxo.tapInternalKey must be a 32-byte x-only key (P2TR parent)');
+  const parents = args.parents ?? [args.parent as ChildRevealParent];
+  if (parents.length === 0) {
+    throw new Error('parents must not be empty');
+  }
+  let outputs: ReadonlyArray<{ address: string; value: number }>;
+  if (args.inscriptionOutputs !== undefined) {
+    if (args.inscriptionOutputs.length === 0) throw new Error('inscriptionOutputs must not be empty');
+    outputs = args.inscriptionOutputs;
+  } else {
+    if (args.recipientAddress === undefined) {
+      throw new Error('recipientAddress is required unless inscriptionOutputs is given');
+    }
+    outputs = [{ address: args.recipientAddress, value: resolveInscribePostage(args.postageSats) }];
+  }
+  const postageSats = outputs.reduce((sum, o) => sum + o.value, 0);
+  for (const parent of parents) {
+    // The parent returns with exactly its value, as its own reveal output,
+    // so it must clear that output's dust limit (ord refuses a dust reveal
+    // output: "commit transaction output would be dust").
+    const dust = getMinimumUtxoSize(parent.returnAddress);
+    if (!Number.isInteger(parent.utxo.value) || parent.utxo.value < dust) {
+      throw new Error(
+        `parent.utxo.value must be an integer >= ${dust}, the dust limit of its return address ` +
+        `(its sats are preserved on return); got ${parent.utxo.value}`,
+      );
+    }
+    if (parent.utxo.tapInternalKey.length !== 32) {
+      throw new Error('parent.utxo.tapInternalKey must be a 32-byte x-only key (P2TR parent)');
+    }
   }
 
-  const parentValue = args.parent.utxo.value;
-  // The reveal miner fee is the leftover after the child + tip are funded
-  // from the commit output. The parent's sats pass straight through
-  // (input 0 -> output 0), so they never enter the fee arithmetic.
+  // The reveal miner fee is the leftover after the children + tip are
+  // funded from the commit output. The parents' sats pass straight through
+  // (input i -> output i), so they never enter the fee arithmetic.
   const revealFeeSats = args.commitOutputValueSats - postageSats - tipValueSats;
   if (revealFeeSats < 0) {
     throw new Error(
@@ -167,61 +201,63 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
     );
   }
 
-  const tx = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
+  // Inputs 0..N-1: the parents, then the commit; outputs 0..N-1: the parent
+  // returns, then the children, then the tip. `bare` leaves the commit input
+  // without its envelope leaf, for the wallet-facing copy.
+  const commitInputIndex = parents.length;
+  const assemble = (bare: boolean): btc.Transaction => {
+    const t = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
+    // Parent inputs (P2TR key-path). Left UNSIGNED: the wallet signs them.
+    // witnessUtxo + tapInternalKey are what a wallet needs to produce the
+    // key-path signature. SIGHASH_DEFAULT (omit sighashType) per the
+    // SDK-wide BIP-341 wire-equivalent rule.
+    for (const parent of parents) {
+      t.addInput({
+        txid: parent.utxo.txid,
+        index: parent.utxo.vout,
+        witnessUtxo: { script: parent.utxo.scriptPubKey, amount: BigInt(parent.utxo.value) },
+        tapInternalKey: parent.utxo.tapInternalKey,
+      });
+    }
+    // Commit P2TR output, spent script-path via the envelope leaf.
+    t.addInput({
+      txid: args.commitTxid,
+      index: args.commitVout,
+      witnessUtxo: { script: args.commitOutputScript, amount: BigInt(args.commitOutputValueSats) },
+      ...(bare ? {} : { tapInternalKey: args.taproot.internalKey, tapLeafScript: args.taproot.tapLeafScript }),
+    });
+    // Parent RETURNS: each parent goes back to its owner with exactly its
+    // incoming value (FIFO: input i -> output i).
+    for (const parent of parents) {
+      t.addOutputAddress(parent.returnAddress, BigInt(parent.utxo.value), scureNetwork);
+    }
+    // Children. FIFO puts the first child at the commit input's first sat,
+    // global offset = sum of parent values = the start of the first child
+    // output; batch children carry pointers to their own outputs.
+    for (const output of outputs) {
+      t.addOutputAddress(output.address, BigInt(output.value), scureNetwork);
+    }
+    // Tip, after the children.
+    if (args.tip !== undefined && tipValueSats > 0) {
+      t.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
+    }
+    return t;
+  };
+  const tx = assemble(false);
 
-  // Input 0: parent UTXO (P2TR key-path). Left UNSIGNED — the wallet
-  // signs it. witnessUtxo + tapInternalKey are what a wallet needs to
-  // produce the key-path signature. SIGHASH_DEFAULT (omit sighashType)
-  // per the SDK-wide BIP-341 wire-equivalent rule.
-  tx.addInput({
-    txid: args.parent.utxo.txid,
-    index: args.parent.utxo.vout,
-    witnessUtxo: {
-      script: args.parent.utxo.scriptPubKey,
-      amount: BigInt(parentValue),
-    },
-    tapInternalKey: args.parent.utxo.tapInternalKey,
-  });
-
-  // Input 1: commit P2TR output, spent script-path via the envelope leaf.
-  tx.addInput({
-    txid: args.commitTxid,
-    index: args.commitVout,
-    witnessUtxo: {
-      script: args.commitOutputScript,
-      amount: BigInt(args.commitOutputValueSats),
-    },
-    tapInternalKey: args.taproot.internalKey,
-    tapLeafScript: args.taproot.tapLeafScript,
-  });
-
-  // Output 0: parent RETURN — the parent inscription goes back to its
-  // owner with exactly its incoming value (FIFO: input 0 → output 0).
-  tx.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
-
-  // Output 1: child recipient (546). FIFO puts the child here (the commit
-  // input's first sat is global `parentValue`, which lands in output 1).
-  tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
-
-  // Output 2 (optional): tip, after the child.
-  if (args.tip !== undefined && tipValueSats > 0) {
-    tx.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
-  }
-
-  // Ephemeral script-path finalization of the COMMIT input (index 1).
-  // SIGHASH_DEFAULT commits to ALL inputs + outputs, so the sighash needs
-  // every prevout script + amount (parent AND commit). Manual finalize
-  // mirrors the single-input reveal helper; see its comment for the
-  // trailing-version-byte handling on the leaf script.
+  // Ephemeral script-path finalization of the COMMIT input. SIGHASH_DEFAULT
+  // commits to ALL inputs + outputs, so the sighash needs every prevout
+  // script + amount (parents AND commit). Manual finalize mirrors the
+  // single-input reveal helper; see its comment for the trailing-version-
+  // byte handling on the leaf script.
   const [cbStruct, leafScriptWithVersion] = args.taproot.tapLeafScript[0];
   const bareLeafScript = leafScriptWithVersion.subarray(0, -1);
   const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
-  const commitInputIndex = 1;
   const sighash = tx.preimageWitnessV1(
     commitInputIndex,
-    [args.parent.utxo.scriptPubKey, args.commitOutputScript],
+    [...parents.map(p => p.utxo.scriptPubKey), args.commitOutputScript],
     btc.SignatureHash.DEFAULT,
-    [BigInt(parentValue), BigInt(args.commitOutputValueSats)],
+    [...parents.map(p => BigInt(p.utxo.value)), BigInt(args.commitOutputValueSats)],
     undefined,
     bareLeafScript,
     leafVersion,
@@ -233,12 +269,12 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   // an already-FINALIZED sibling input is rejected by the address-filter
   // signers (Unisat/Wizz/OKX) — their signPsbt won't produce a signing
   // prompt for such a PSBT. Left partial, every input is unfinalized when
-  // the wallet sees it; the wallet signs input 0, and the shared
-  // extract-wire-tx step finalizes BOTH inputs (input 0 from the wallet's
-  // key-path sig, input 1 from this tapScriptSig via the tapLeafScript
-  // set above). Index-based signers (Leather / cat21-wallet) reach the
-  // same finalized witness. The measurement clone below still finalizes
-  // input 1 directly so revealTxid / revealVsize are exact.
+  // the wallet sees it; the wallet signs the parent inputs, and the shared
+  // extract-wire-tx step finalizes every input (the parents from the
+  // wallet's key-path sigs, the commit from this tapScriptSig via the
+  // tapLeafScript set above). Index-based signers (Leather / cat21-wallet)
+  // reach the same finalized witness. The measurement clone below still
+  // finalizes the commit input directly so revealTxid / revealVsize are exact.
   const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
   tx.updateInput(commitInputIndex, {
     tapScriptSig: [[{ pubKey: args.taproot.internalKey, leafHash }, signature]],
@@ -247,39 +283,25 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   assertCat21LockTime(tx.lockTime);
 
   // Measure vsize + txid on a fully-signed CLONE: set a dummy 64-byte
-  // key-path witness on the parent input (SIGHASH_DEFAULT P2TR witness is
+  // key-path witness on each parent input (a SIGHASH_DEFAULT P2TR witness is
   // exactly a 64-byte Schnorr sig, so the size is exact regardless of the
   // real signature). The txid is witness-independent, so the clone's id
   // equals what the wallet-signed reveal will produce.
   const clone = btc.Transaction.fromPSBT(tx.toPSBT(0), { allowUnknownInputs: true });
-  clone.updateInput(0, { finalScriptWitness: [new Uint8Array(64)] }, true);
+  for (let i = 0; i < parents.length; i++) {
+    clone.updateInput(i, { finalScriptWitness: [new Uint8Array(64)] }, true);
+  }
   clone.updateInput(commitInputIndex, {
     finalScriptWitness: [signature, bareLeafScript, controlBlock],
   }, true);
 
-  // Wallet-facing PSBT: same consensus tx (inputs/outputs/locktime), but
-  // input 1 is a BARE Taproot input — witnessUtxo only, no tapLeafScript /
-  // tapScriptSig. The wallet signs input 0 here without ever parsing the
-  // ord envelope tap-leaf (which hangs / is rejected by some signPsbt
-  // implementations). Rebuilt fresh because scure's updateInput merges
-  // and cannot clear an already-set field.
-  const walletFacing = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
-  walletFacing.addInput({
-    txid: args.parent.utxo.txid,
-    index: args.parent.utxo.vout,
-    witnessUtxo: { script: args.parent.utxo.scriptPubKey, amount: BigInt(parentValue) },
-    tapInternalKey: args.parent.utxo.tapInternalKey,
-  });
-  walletFacing.addInput({
-    txid: args.commitTxid,
-    index: args.commitVout,
-    witnessUtxo: { script: args.commitOutputScript, amount: BigInt(args.commitOutputValueSats) },
-  });
-  walletFacing.addOutputAddress(args.parent.returnAddress, BigInt(parentValue), scureNetwork);
-  walletFacing.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
-  if (args.tip !== undefined && tipValueSats > 0) {
-    walletFacing.addOutputAddress(args.tip.address, BigInt(tipValueSats), scureNetwork);
-  }
+  // Wallet-facing PSBT: same consensus tx (inputs/outputs/locktime), but the
+  // commit input is a BARE Taproot input — witnessUtxo only, no
+  // tapLeafScript / tapScriptSig. The wallet signs the parent inputs here
+  // without ever parsing the ord envelope tap-leaf (which hangs / is
+  // rejected by some signPsbt implementations). Built fresh because scure's
+  // updateInput merges and cannot clear an already-set field.
+  const walletFacing = assemble(true);
 
   return {
     revealPsbt: tx.toPSBT(0),

@@ -6,7 +6,7 @@ import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
-import { buildInscribeCommitPsbt, resolveInscribePostage, type InscribeCommitArgs } from './inscription-commit.helper';
+import { buildInscribeCommitPsbt, resolveInscribePostage, type InscribeCommitArgs, type InscribeCommitResult } from './inscription-commit.helper';
 import { buildInscriptionEnvelope, type OrdEnvelopeField } from './inscription-envelope';
 import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-reveal.helper';
 
@@ -57,6 +57,15 @@ export interface SimulateInscribeFeesArgs {
    * sum. See `InscribeRevealArgs.inscriptionOutputs`.
    */
   inscriptionOutputs?: ReadonlyArray<{ address: string; value: number }>;
+  /**
+   * Measure the reveal's vsize for a commit output, instead of building the
+   * single-input reveal. A reveal that also spends parent inscriptions
+   * passes its own builder's measurement here.
+   */
+  measureRevealVsize?: (commit: {
+    outputScript: Uint8Array;
+    taproot: InscribeCommitResult['taproot'];
+  }) => number;
   /** MIME type encoded into the envelope. */
   contentType?: string;
   /** Optional extra envelope fields (parent, metaprotocol, metadata...). */
@@ -174,29 +183,33 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     network: args.network,
   });
   const tipValueSats = args.tip?.value ?? 0;
-  const reveal = buildInscribeRevealTx({
-    commitTxid: '0'.repeat(64),
-    commitVout: 0,
-    postageSats,
-    // postage + tip; the placeholder commit has revealFeeReserveSats=0
-    // so the commit output is sized exactly to cover the reveal's two
-    // outputs (recipient at postage, tip at tip.value). Setting it
-    // higher would leave change inside the reveal which the helper
-    // doesn't model — instead we measure vsize at zero reveal fee and
-    // compute the fee separately.
-    commitOutputValueSats: postageSats + tipValueSats,
-    commitOutputScript: placeholderCommit.commitOutputScript,
-    taproot: {
-      internalKey: placeholderCommit.taproot.internalKey,
-      tapLeafScript: placeholderCommit.taproot.tapLeafScript,
-    },
-    ephemeralPrivKey: dummyEphemeralPriv,
-    recipientAddress: args.recipientAddress,
-    inscriptionOutputs: args.inscriptionOutputs,
-    tip: args.tip,
-    network: args.network,
-  });
-  const revealVsize = reveal.revealVsize;
+  // The reveal's vsize is deterministic given the envelope and outputs. The
+  // placeholder commit (zero fees) supplies the taptree it spends; the reveal
+  // is measured at zero fee and the fee computed separately.
+  const revealVsize = args.measureRevealVsize !== undefined
+    ? args.measureRevealVsize({ outputScript: placeholderCommit.commitOutputScript, taproot: placeholderCommit.taproot })
+    : buildInscribeRevealTx({
+      commitTxid: '0'.repeat(64),
+      commitVout: 0,
+      postageSats,
+      // postage + tip; the placeholder commit has revealFeeReserveSats=0
+      // so the commit output is sized exactly to cover the reveal's two
+      // outputs (recipient at postage, tip at tip.value). Setting it
+      // higher would leave change inside the reveal which the helper
+      // doesn't model — instead we measure vsize at zero reveal fee and
+      // compute the fee separately.
+      commitOutputValueSats: postageSats + tipValueSats,
+      commitOutputScript: placeholderCommit.commitOutputScript,
+      taproot: {
+        internalKey: placeholderCommit.taproot.internalKey,
+        tapLeafScript: placeholderCommit.taproot.tapLeafScript,
+      },
+      ephemeralPrivKey: dummyEphemeralPriv,
+      recipientAddress: args.recipientAddress,
+      inscriptionOutputs: args.inscriptionOutputs,
+      tip: args.tip,
+      network: args.network,
+    }).revealVsize;
   const revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
 
   // ---- Step 2: commit fee (revealFeeReserve = revealFeeSats). ----

@@ -5,10 +5,14 @@ import { getMinimumUtxoSize } from '../cat21-script/address-format';
 import { buildBatchInscriptionScript } from './inscription-envelope';
 import type { BatchEnvelope } from './inscription-envelope';
 import { resolveInscribePostage } from './inscription-commit.helper';
+import type { InscribeCommitResult } from './inscription-commit.helper';
+import { buildChildInscribeRevealTx } from './inscription-child-reveal.helper';
+import type { ChildRevealParent } from './inscription-child-reveal.helper';
 import type { InscriptionPropertiesInput } from './inscription-properties';
 import { deriveRevealPubkeyXonly } from './inscription-reveal.helper';
 import {
   assembleInscribeTransactions,
+  planInscribeCommit,
   synthesizeBatchEntryFields,
 } from './inscription.service.helper';
 import type {
@@ -86,13 +90,54 @@ export interface CreateBatchInscribeTransactionsResult extends CreateInscribeTra
   inscriptions: BatchInscriptionLocation[];
 }
 
+/** A parent every inscription in a batch gets: its id and the UTXO the reveal spends and returns. */
+export interface BatchParent extends ChildRevealParent {
+  /** The parent's inscription id, written into every envelope's `parent` tag. */
+  id: string;
+}
+
+export interface CreateBatchChildInscribeTransactionsArgs extends CreateBatchInscribeTransactionsArgs {
+  /**
+   * ord's batch-level `parents`, in order. The reveal spends them at inputs
+   * 0..N-1 and returns each at the same output index with its own value;
+   * every envelope carries every parent tag.
+   */
+  parents: ReadonlyArray<BatchParent>;
+}
+
+export interface CreateBatchChildInscribeTransactionsResult
+  extends Omit<CreateInscribeTransactionsResult, 'revealHex'> {
+  /**
+   * The full reveal PSBT. Parent inputs 0..N-1 unsigned; the commit input
+   * carries the ephemeral partial signature. The parent signatures from
+   * `revealPsbtForWallet` are merged here before it finalizes.
+   */
+  revealPsbt: Uint8Array;
+  /** The same reveal with a bare commit input, for the wallet to sign the parents on. */
+  revealPsbtForWallet: Uint8Array;
+  parents: ReadonlyArray<BatchParent>;
+  inscriptions: BatchInscriptionLocation[];
+}
+
+interface BatchLayout {
+  envelope: Uint8Array;
+  ephemeralPrivKey: Uint8Array;
+  ephemeralPubkeyXonly: Uint8Array;
+  inscriptionOutputs: Array<{ address: string; value: number }>;
+  locations: BatchInscriptionLocation[];
+}
+
 /**
- * Build the commit and signed reveal for a batch. Pure function modulo the
- * ephemeral key; see `createInscribeTransactions` for the key's lifecycle.
+ * Validate a batch and lay it out as ord does (cat21-ord File::inscriptions
+ * and Plan): each inscription's pointer starts at the sum of the parent
+ * outputs and advances by one postage per inscription, except in same-sat,
+ * where every inscription points at the same sat. The inscription outputs
+ * follow the parent returns, so their vouts start at the parent count.
  */
-export function createBatchInscribeTransactions(
+function layOutBatch(
   args: CreateBatchInscribeTransactionsArgs,
-): CreateBatchInscribeTransactionsResult {
+  parents: ReadonlyArray<BatchParent>,
+): BatchLayout {
   const { mode, inscriptions } = args;
   if (mode !== 'separate-outputs' && mode !== 'shared-output' && mode !== 'same-sat') {
     throw new Error(`unknown batch mode ${String(mode)}`);
@@ -110,18 +155,15 @@ export function createBatchInscribeTransactions(
     }
   }
   const postage = resolveInscribePostage(args.postageSats);
+  const parentSats = parents.reduce((sum, p) => sum + p.utxo.value, 0);
 
-  // Pointers and outputs, per ord's File::inscriptions and Plan: the pointer
-  // starts at the sum of the parent outputs (none here) and advances by one
-  // postage per inscription, except in same-sat, where every inscription
-  // points at the same sat.
   const locations: BatchInscriptionLocation[] = inscriptions.map((entry, i) => ({
     index: i,
-    vout: mode === 'separate-outputs' ? i : 0,
+    vout: parents.length + (mode === 'separate-outputs' ? i : 0),
     offset: mode === 'shared-output' ? postage * i : 0,
     destination: mode === 'separate-outputs' ? entry.destination ?? args.recipientAddress : args.recipientAddress,
   }));
-  const pointers = inscriptions.map((_, i) => (mode === 'same-sat' ? 0 : postage * i));
+  const pointers = inscriptions.map((_, i) => parentSats + (mode === 'same-sat' ? 0 : postage * i));
   const inscriptionOutputs = mode === 'separate-outputs'
     ? locations.map(l => ({ address: l.destination, value: postage }))
     : [{ address: args.recipientAddress, value: mode === 'shared-output' ? postage * inscriptions.length : postage }];
@@ -133,6 +175,7 @@ export function createBatchInscribeTransactions(
     }
   }
 
+  const parentIds = parents.map(p => p.id);
   const envelopes: BatchEnvelope[] = inscriptions.map((entry, i) => ({
     contentType: entry.contentType,
     body: entry.body,
@@ -144,7 +187,7 @@ export function createBatchInscribeTransactions(
       gallery: entry.gallery,
       title: entry.title,
       compressProperties: entry.compressProperties,
-      parents: [],
+      parents: parentIds,
       pointer: pointers[i],
     }),
   }));
@@ -156,12 +199,89 @@ export function createBatchInscribeTransactions(
     envelopes,
     minimalTagPush: args.minimalTagPush,
   });
+  return { envelope, ephemeralPrivKey, ephemeralPubkeyXonly, inscriptionOutputs, locations };
+}
 
-  const result = assembleInscribeTransactions(args, {
-    envelope,
+/**
+ * Build the commit and signed reveal for a batch. Pure function modulo the
+ * ephemeral key; see `createInscribeTransactions` for the key's lifecycle.
+ */
+export function createBatchInscribeTransactions(
+  args: CreateBatchInscribeTransactionsArgs,
+): CreateBatchInscribeTransactionsResult {
+  const layout = layOutBatch(args, []);
+  const result = assembleInscribeTransactions(args, layout);
+  return { ...result, inscriptions: layout.locations };
+}
+
+/**
+ * Build the commit and reveal for a batch with parents, ord's `parents:` in a
+ * batchfile. The reveal spends every parent, so it needs the parent owner's
+ * signatures: `revealPsbtForWallet` goes to the wallet
+ * (`signChildRevealParentInputs` with `parentCount`), and its signatures are
+ * merged into `revealPsbt`.
+ */
+export function createBatchChildInscribeTransactions(
+  args: CreateBatchChildInscribeTransactionsArgs,
+): CreateBatchChildInscribeTransactionsResult {
+  if (args.parents.length === 0) {
+    throw new Error('parents must not be empty; use createBatchInscribeTransactions for a batch without parents');
+  }
+  const layout = layOutBatch(args, args.parents);
+  const tipValueSats = args.tip?.value ?? 0;
+  const totalPostage = layout.inscriptionOutputs.reduce((sum, o) => sum + o.value, 0);
+  const childReveal = (
+    commit: { txid: string; outputScript: Uint8Array; taproot: InscribeCommitResult['taproot']; outputValueSats: number },
+    ephemeralPrivKey: Uint8Array,
+  ) => buildChildInscribeRevealTx({
+    commitTxid: commit.txid,
+    commitVout: 0,
+    commitOutputValueSats: commit.outputValueSats,
+    commitOutputScript: commit.outputScript,
+    taproot: commit.taproot,
     ephemeralPrivKey,
-    ephemeralPubkeyXonly,
-    inscriptionOutputs,
+    parents: args.parents,
+    inscriptionOutputs: layout.inscriptionOutputs,
+    tip: args.tip,
+    network: args.network,
   });
-  return { ...result, inscriptions: locations };
+
+  const plan = planInscribeCommit(args, {
+    envelope: layout.envelope,
+    ephemeralPubkeyXonly: layout.ephemeralPubkeyXonly,
+    inscriptionOutputs: layout.inscriptionOutputs,
+    // Measured on the real reveal shape, parent inputs included, at zero
+    // fee (the commit output covers only the children and the tip).
+    measureRevealVsize: (commit) => childReveal({
+      txid: '0'.repeat(64),
+      outputScript: commit.outputScript,
+      taproot: commit.taproot,
+      outputValueSats: totalPostage + tipValueSats,
+    }, new Uint8Array(32).fill(0x42)).revealVsize,
+  });
+
+  const reveal = childReveal({
+    txid: plan.commitTxid,
+    outputScript: plan.commit.commitOutputScript,
+    taproot: plan.commit.taproot,
+    outputValueSats: plan.commit.commitOutputValueSats,
+  }, layout.ephemeralPrivKey);
+
+  return {
+    commitPsbt: plan.commit.commitPsbt,
+    commitTxid: plan.commitTxid,
+    revealPsbt: reveal.revealPsbt,
+    revealPsbtForWallet: reveal.revealPsbtForWallet,
+    revealTxid: reveal.revealTxid,
+    commitAddress: plan.commit.commitAddress,
+    fees: plan.fees,
+    ephemeral: { privKey: layout.ephemeralPrivKey, pubkeyXonly: layout.ephemeralPubkeyXonly },
+    commit: {
+      outputScript: plan.commit.commitOutputScript,
+      outputValueSats: plan.commit.commitOutputValueSats,
+      envelopeScript: layout.envelope,
+    },
+    parents: args.parents,
+    inscriptions: layout.locations,
+  };
 }

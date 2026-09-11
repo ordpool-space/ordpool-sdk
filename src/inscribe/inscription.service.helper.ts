@@ -12,6 +12,7 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   resolveInscribePostage,
   buildInscribeCommitPsbt,
+  type InscribeCommitResult,
 } from './inscription-commit.helper';
 import {
   ORD_TAGS,
@@ -32,6 +33,7 @@ import {
 } from './inscription-reveal.helper';
 import {
   simulateInscribeFees,
+  type SimulateInscribeFeesArgs,
   type SimulateInscribeFeesResult,
 } from './inscription-fee.helper';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
@@ -442,16 +444,32 @@ interface InscribeAssembly {
   inscriptionOutputs?: ReadonlyArray<{ address: string; value: number }>;
 }
 
+/** The funding inputs every inscribe builder takes. */
+export type InscribeFundingArgs = Pick<CreateInscribeTransactionsArgs,
+  'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte' | 'tip' | 'walletType' | 'network'>;
+
+/** A commit ready to sign, with its fees and the txid the reveal spends. */
+export interface InscribeCommitPlan {
+  fees: SimulateInscribeFeesResult;
+  commit: InscribeCommitResult;
+  /** The commit's txid, known before the wallet signs (see deriveUnsignedCommitTxid). */
+  commitTxid: string;
+  /** Sum of the inscription outputs the commit funds. */
+  postageSats: number;
+}
+
 /**
- * Fee simulation, commit PSBT, commit txid and signed reveal for a given
- * reveal tapscript and output layout. Shared by the single and the batch
- * builder, which differ only in the script and the outputs.
+ * Fee simulation, commit PSBT and commit txid for a reveal tapscript and
+ * output layout, with the reveal left to the caller: every inscribe builder
+ * shares this, and they differ only in the reveal they build on it.
  */
-export function assembleInscribeTransactions(
-  args: Pick<CreateInscribeTransactionsArgs,
-    'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte' | 'tip' | 'walletType' | 'network'>,
-  assembly: InscribeAssembly,
-): CreateInscribeTransactionsResult {
+export function planInscribeCommit(
+  args: InscribeFundingArgs,
+  assembly: Omit<InscribeAssembly, 'ephemeralPrivKey'> & {
+    /** Measure the reveal for a given commit output; default the single-input reveal. */
+    measureRevealVsize?: SimulateInscribeFeesArgs['measureRevealVsize'];
+  },
+): InscribeCommitPlan {
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
   }
@@ -480,7 +498,7 @@ export function assembleInscribeTransactions(
     }
   }
 
-  const { envelope, ephemeralPrivKey, ephemeralPubkeyXonly } = assembly;
+  const { envelope, ephemeralPubkeyXonly } = assembly;
   // The commit funds the sum of the inscription outputs; for a single
   // inscription that is its postage.
   const postageSats = assembly.inscriptionOutputs !== undefined
@@ -519,6 +537,7 @@ export function assembleInscribeTransactions(
       postageSats: assembly.postageSats,
       envelopeScript: envelope,
       inscriptionOutputs: assembly.inscriptionOutputs,
+      measureRevealVsize: assembly.measureRevealVsize,
       fundingInput: simulationFundingInput,
       senderChangeAddress: args.paymentAddress,
       recipientAddress: assembly.recipientAddress,
@@ -587,6 +606,21 @@ export function assembleInscribeTransactions(
     args.paymentPublicKey,
     args.network,
   );
+
+  return { fees, commit, commitTxid: commitTxidUnsigned, postageSats };
+}
+
+/**
+ * Fee simulation, commit PSBT, commit txid and signed reveal for a given
+ * reveal tapscript and output layout. Shared by the single and the batch
+ * builder, which differ only in the script and the outputs.
+ */
+export function assembleInscribeTransactions(
+  args: InscribeFundingArgs,
+  assembly: InscribeAssembly,
+): CreateInscribeTransactionsResult {
+  const { envelope, ephemeralPrivKey, ephemeralPubkeyXonly } = assembly;
+  const { fees, commit, commitTxid: commitTxidUnsigned, postageSats } = planInscribeCommit(args, assembly);
 
   const reveal = buildInscribeRevealTx({
     commitTxid: commitTxidUnsigned,

@@ -185,7 +185,8 @@ describe('xverseSigner.signChildRevealParentInputs', () => {
 
     // The wallet's input-0 signature is merged into the FULL psbt, not the bare one.
     expect(mergeMock).toHaveBeenCalledTimes(1);
-    expect(mergeMock).toHaveBeenCalledWith(base64.decode('c2lnbmVk'), fullBytes, broadcastCallback);
+    // One parent: the merge lifts the signature of input 0 only.
+    expect(mergeMock).toHaveBeenCalledWith(base64.decode('c2lnbmVk'), fullBytes, broadcastCallback, 1);
 
     expect(result).toEqual({ txId: 'CHILD-REVEAL-TXID' });
   });

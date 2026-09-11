@@ -12,8 +12,10 @@ import {
   createInscribeTransactions,
 } from './inscription.service.helper';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper';
-import { createBatchInscribeTransactions } from './inscription-batch.helper';
+import { createBatchChildInscribeTransactions, createBatchInscribeTransactions } from './inscription-batch.helper';
 import type {
+  BatchParent,
+  CreateBatchChildInscribeTransactionsResult,
   CreateBatchInscribeTransactionsArgs,
   CreateBatchInscribeTransactionsResult,
 } from './inscription-batch.helper';
@@ -270,7 +272,14 @@ function signAndBroadcast(
 
 /** Args for {@link inscribeBatchAndBroadcast}: the batch builder's inputs plus signing and broadcast. */
 export interface InscribeBatchAndBroadcastArgs
-  extends Omit<CreateBatchInscribeTransactionsArgs, 'walletType'>, SignAndBroadcastArgs {}
+  extends Omit<CreateBatchInscribeTransactionsArgs, 'walletType'>, SignAndBroadcastArgs {
+  /**
+   * ord's batch `parents`. The reveal spends them, so the connected wallet
+   * signs them after the commit (`signChildRevealParentInputs`). They must
+   * all sit at one ordinals address, the wallet's, where they return.
+   */
+  parents?: ReadonlyArray<BatchParent>;
+}
 
 export interface InscribeBatchAndBroadcastResult extends InscribeAndBroadcastResult {
   /** Where each inscription lands; inscription i is `<revealTxId>i<i>`. */
@@ -287,6 +296,9 @@ export interface InscribeBatchAndBroadcastResult extends InscribeAndBroadcastRes
 export function inscribeBatchAndBroadcast(
   args: InscribeBatchAndBroadcastArgs,
 ): Observable<InscribeBatchAndBroadcastResult> {
+  if (args.parents !== undefined && args.parents.length > 0) {
+    return inscribeBatchWithParents({ ...args, parents: args.parents });
+  }
   return defer(() => {
     let built: CreateBatchInscribeTransactionsResult;
     try {
@@ -296,6 +308,74 @@ export function inscribeBatchAndBroadcast(
     }
     return signAndBroadcast(built, args).pipe(
       map((result) => ({ ...result, inscriptions: built.inscriptions })),
+    );
+  });
+}
+
+/**
+ * The batch-with-parents path: sign and broadcast the commit, then have the
+ * wallet sign the reveal's parent inputs 0..N-1 on the bare reveal PSBT;
+ * those signatures are merged into the full reveal, which then broadcasts.
+ */
+function inscribeBatchWithParents(
+  args: InscribeBatchAndBroadcastArgs & { parents: ReadonlyArray<BatchParent> },
+): Observable<InscribeBatchAndBroadcastResult> {
+  return defer(() => {
+    const [first] = args.parents;
+    const sameOwner = args.parents.every(p =>
+      p.returnAddress === first.returnAddress
+      && hex.encode(p.utxo.tapInternalKey) === hex.encode(first.utxo.tapInternalKey));
+    if (!sameOwner) {
+      return throwError(() => new Error(
+        'every parent must sit at the same ordinals address (the connected wallet signs them there)',
+      ));
+    }
+    let built: CreateBatchChildInscribeTransactionsResult;
+    try {
+      built = createBatchChildInscribeTransactions(args);
+    } catch (err) {
+      return throwError(() => err);
+    }
+
+    const signer = findSignerOrThrow(args.walletType);
+    const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
+      if (args.onCommitSigned) {
+        try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
+      }
+      return args.broadcast(signedCommitHex);
+    };
+
+    return signer.signSingleFundingInput({
+      psbtBytes: built.commitPsbt,
+      paymentAddress: args.paymentAddress,
+      paymentPublicKey: hex.encode(args.paymentPublicKey),
+      network: args.network,
+      broadcast: captureAndBroadcast,
+      promptForSignedPsbt: args.promptForSignedPsbt,
+    }).pipe(
+      switchMap(({ txId: commitTxId }) =>
+        signer.signChildRevealParentInputs({
+          psbtBytes: built.revealPsbtForWallet,
+          finalizePsbtBytes: built.revealPsbt,
+          ordinalsAddress: first.returnAddress,
+          // Each parent is a Taproot key-path at the ordinals address; its
+          // internal key IS the ordinals x-only pubkey.
+          ordinalsPublicKey: hex.encode(first.utxo.tapInternalKey),
+          parentCount: args.parents.length,
+          network: args.network,
+          broadcast: args.broadcast,
+          promptForSignedPsbt: args.promptForSignedPsbt,
+        }).pipe(
+          map(({ txId: revealTxId }) => ({
+            commitTxId,
+            revealTxId,
+            commitAddress: built.commitAddress,
+            ephemeral: built.ephemeral,
+            fees: built.fees,
+            inscriptions: built.inscriptions,
+          })),
+        ),
+      ),
     );
   });
 }

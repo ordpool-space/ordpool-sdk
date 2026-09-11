@@ -140,7 +140,8 @@ describe('okxSigner.signChildRevealParentInputs', () => {
 
     // The signed bare-PSBT bytes are merged into the FULL reveal PSBT.
     expect(mergeMock).toHaveBeenCalledTimes(1);
-    expect(mergeMock).toHaveBeenCalledWith(hex.decode('70736274ff0a'), full, broadcast);
+    // One parent: the merge lifts the signature of input 0 only.
+    expect(mergeMock).toHaveBeenCalledWith(hex.decode('70736274ff0a'), full, broadcast, 1);
     expect(result).toEqual({ txId: 'CHILD-TXID' });
   });
 });

@@ -297,6 +297,11 @@ export interface SignChildRevealParentInputsArgs {
   /** The parent inscription's address — where it lives + returns to. */
   ordinalsAddress: string;
   /**
+   * How many parent inputs the reveal spends, at indexes 0..parentCount-1,
+   * all at `ordinalsAddress`. Default 1.
+   */
+  parentCount?: number;
+  /**
    * The ordinals address's public key (hex). Address-filter signers
    * (Unisat/Wizz/OKX) need it to compute their wallet-side (mainnet)
    * ordinals address for the `toSignInputs` filter — the parent input

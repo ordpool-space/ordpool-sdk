@@ -22,7 +22,7 @@ bytes; see the spec for exactly what is compared.
 | Batch `separate-outputs` (§6a) | proven: tapscript, reveal outputs, reveal vsize, commit output and every inscription's location, at 546 and 3 000 sats, with per-entry destination, title, gallery items with titles, metaprotocol | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | Batch `shared-output`, `same-sat` (§6b) | proven, same comparison | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | SDK batches on chain | every mode broadcast; stock ord indexes each inscription at the satpoint the SDK reports, with its content | `e2e/regtest/inscribe-batch-parity.spec.ts` |
-| Multiple parents (§4) | envelope encoding proven (every envelope repeats every parent, pointers start after the parent outputs); a reveal that spends several parents is open | `e2e/regtest/inscribe-batch-parity.spec.ts` |
+| Batch with parents, several parents (§4) | proven: a two-parent batch matches ord in tapscript, reveal outputs, reveal vsize, commit output and locations; an SDK batch spending two parents broadcasts, and stock ord links every child to both parents and returns both | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | `--destination` | supported, not yet driven against ord | |
 | Sat / satpoint targeting (§5) | open | |
 | Batch `satpoints` (§6c) | open, needs §5 | |
@@ -67,7 +67,7 @@ what is not typed yet, notably `traits`.
 `postageSats?: number`, defaulting to 546; it sets the reveal output and
 therefore the commit output, both proven equal to ord's at several sizes.
 
-## 4. Multiple parents
+## 4. Multiple parents (done, through batch)
 
 `parent?: string` becomes `parents?: string[]` (keep `parent` as an accepted
 alias so nothing breaks). Tag `0x03` repeats; ord's batchfile takes a list.

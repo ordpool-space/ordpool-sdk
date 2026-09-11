@@ -220,7 +220,7 @@ describe('buildChildInscribeRevealTx — guards', () => {
     };
   };
 
-  it('rejects a parent value below the 546 postage floor (would shrink the parent)', () => {
+  it('rejects a parent value below its return address\'s dust limit (the returned parent would be a dust output)', () => {
     const c = commitStub();
     expect(() => buildChildInscribeRevealTx({
       commitTxid: '0'.repeat(64), commitVout: 0,

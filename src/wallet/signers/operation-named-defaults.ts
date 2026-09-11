@@ -1,6 +1,6 @@
 import { Observable, switchMap } from 'rxjs';
 
-import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
+import { childRevealParentIndexes, mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
 import {
   SignChildRevealParentInputsArgs,
   SignOfferAcceptArgs,
@@ -76,21 +76,22 @@ export function operationNamedDefaults(
     },
 
     signChildRevealParentInputs(input: SignChildRevealParentInputsArgs): Observable<{ txId: string }> {
-      // The wallet signs ONLY input 0 (parent, P2TR key-path) on the
-      // BARE wallet-facing PSBT — input 1 there has no envelope tap-leaf,
+      // The wallet signs ONLY the parent inputs (P2TR key-path) on the
+      // BARE wallet-facing PSBT — the commit input there has no envelope tap-leaf,
       // which some signPsbt implementations hang on / reject. We use
       // signPsbtOnly (not …AndBroadcast) so we can, after the wallet
       // returns, merge input 0's signature into the FULL PSBT (whose input
       // 1 carries the ephemeral tapScriptSig + envelope leaf), finalize
       // BOTH inputs, and broadcast the wire tx ourselves.
+      const parentIndexes = childRevealParentIndexes(input.parentCount);
       return legacy.signPsbtOnly({
         psbtBytes: input.psbtBytes,
-        signingMap: [{ address: input.ordinalsAddress, indexes: [0], publicKey: input.ordinalsPublicKey }],
+        signingMap: [{ address: input.ordinalsAddress, indexes: parentIndexes, publicKey: input.ordinalsPublicKey }],
         network: input.network,
         promptForSignedPsbt: input.promptForSignedPsbt,
       }).pipe(
         switchMap((signedWalletFacing) =>
-          mergeParentSigAndBroadcast(signedWalletFacing, input.finalizePsbtBytes, input.broadcast)),
+          mergeParentSigAndBroadcast(signedWalletFacing, input.finalizePsbtBytes, input.broadcast, parentIndexes.length)),
       );
     },
 
