@@ -123,8 +123,12 @@ export interface CreateInscribeTransactionsArgs {
   paymentAddress: string;
   /** Where the inscription lands (P2TR recommended for ord theory). */
   recipientAddress: string;
-  /** Inscription body bytes. */
-  body: Uint8Array;
+  /**
+   * Inscription body bytes. Omit for a delegate-only inscription (ord's
+   * `--delegate` with no `--file`): the envelope then has no body separator
+   * at all, and ord serves the delegate's content. Needs `delegate` then.
+   */
+  body?: Uint8Array;
   /** MIME type. */
   contentType?: string;
   /** Optional extra ord tags (parent, metaprotocol, metadata...). */
@@ -405,6 +409,9 @@ function deriveUnsignedCommitTxid(
 export function createInscribeTransactions(
   args: CreateInscribeTransactionsArgs,
 ): CreateInscribeTransactionsResult {
+  if (args.body === undefined && args.delegate === undefined) {
+    throw new Error('an inscription needs a body or a delegate (ord: --file or --delegate)');
+  }
   const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
   const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
 
@@ -765,6 +772,9 @@ export function createChildInscribeTransactions(
   }
   if (args.satOffset !== undefined && args.satOffset !== 0) {
     throw new Error('satOffset is not supported for child inscriptions');
+  }
+  if (args.body === undefined && args.delegate === undefined) {
+    throw new Error('an inscription needs a body or a delegate (ord: --file or --delegate)');
   }
   if (typeof args.parentInscriptionId !== 'string' || args.parentInscriptionId.length === 0) {
     throw new Error('parentInscriptionId must be a non-empty string');

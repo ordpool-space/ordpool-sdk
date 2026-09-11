@@ -14,15 +14,20 @@
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
 import { execFileSync } from 'node:child_process';
-import { hex } from '@scure/base';
+import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { buildInscriptionEnvelope, type OrdEnvelopeField } from '../../src/inscribe/inscription-envelope';
 import { encodeJsonMetadata } from '../../src/inscribe/inscription-json-metadata';
-import { synthesizeEnvelopeFields } from '../../src/inscribe/inscription.service.helper';
+import { createInscribeTransactions, synthesizeEnvelopeFields } from '../../src/inscribe/inscription.service.helper';
+import { Network } from '../../src/network';
 import type { CreateInscribeTransactionsArgs } from '../../src/inscribe/inscription.service.helper';
 import {
+  fundUninscribed,
+  getStockOrdContent,
   mineBlocks,
+  postTx,
+  waitForOrdStockInscription,
   fundOrdStockWallet,
   ordStockWalletInscribe,
   rpc,
@@ -118,6 +123,47 @@ describe('inscribe metadata and delegate → byte-parity with stock ord', () => 
 
     expect(sdkEnvelope(undefined, undefined, fields({ delegate: delegateId }))).toBe(ordEnvelope(reveal));
   }, 120_000);
+});
+
+describe('SDK delegate-only inscription on chain', () => {
+  it('broadcasts with no body, and stock ord serves the delegate\'s content for it', async () => {
+    await waitForOrdStockReady(60_000);
+    const wallet = `${ORD_WALLET}-sdk`;
+    await fundOrdStockWallet(wallet);
+    const content = new TextEncoder().encode('content an SDK delegate points at');
+    writeOrdStockFile('/tmp/parity-sdk-delegate-target.txt', content);
+    const target = ordStockWalletInscribe(wallet, '/tmp/parity-sdk-delegate-target.txt', 5);
+    await waitForOrdStockSync(mineBlocks(1));
+    const delegateId = `${target.reveal}i0`;
+
+    const f = await fundUninscribed();
+    const built = createInscribeTransactions({
+      paymentOutput: { ...f.utxo, status: { confirmed: true } },
+      paymentPublicKey: f.fundingPubkey,
+      paymentAddress: f.fundingAddr,
+      recipientAddress: f.fundingAddr,
+      delegate: delegateId,
+      feeRatePerVbyte: 5,
+      network: Network.Regtest,
+    });
+    const processed = JSON.parse(rpc(
+      '-rpcwallet=ordpool-e2e', '-named', 'walletprocesspsbt',
+      `psbt=${base64.encode(built.commitPsbt)}`, 'sign=true', 'finalize=true',
+    )) as { hex: string };
+    expect(await postTx(processed.hex)).toBe(built.commitTxid);
+    expect(await postTx(built.revealHex)).toBe(built.revealTxid);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdStockSync(tip);
+
+    const id = `${built.revealTxid}i0`;
+    const insc = await waitForOrdStockInscription(id) as unknown as {
+      content_type: string | null; effective_content_type: string | null;
+    };
+    expect(insc.content_type).toBeNull();
+    expect(insc.effective_content_type).toBe('text/plain;charset=utf-8');
+    expect((await getStockOrdContent(id)).bytes).toEqual(content);
+  }, 240_000);
 });
 
 /** `ord wallet inscribe --delegate <ID>` with no --file, which the shared helper cannot express. */

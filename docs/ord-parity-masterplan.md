@@ -23,7 +23,8 @@ bytes; see the spec for exactly what is compared.
 | Batch `shared-output`, `same-sat` (§6b) | proven, same comparison | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | SDK batches on chain | every mode broadcast; stock ord indexes each inscription at the satpoint the SDK reports, with its content | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | Batch with parents, several parents (§4) | proven: a two-parent batch matches ord in tapscript, reveal outputs, reveal vsize, commit output and locations; an SDK batch spending two parents broadcasts, and stock ord links every child to both parents and returns both | `e2e/regtest/inscribe-batch-parity.spec.ts` |
-| `--destination` | supported, not yet driven against ord | |
+| `--destination` | proven with a P2WPKH destination: output script, value, reveal vsize and commit output match ord | `e2e/regtest/inscribe-postage-parity.spec.ts` |
+| `--delegate` with no `--file`, as a transaction | an SDK delegate-only inscription broadcasts and stock ord serves the delegate's content for it | `e2e/regtest/inscribe-metadata-delegate-parity.spec.ts` |
 | `--satpoint`, `--sat` (§5) for a sat inside the funding UTXO | proven: padding output and commit output match ord at offsets 1 000 and 50 000, and stock ord's sat index puts the SDK inscription on exactly the requested sat; `findSatOffset` turns a sat number into the offset | `e2e/regtest/inscribe-satpoint-parity.spec.ts` |
 | Sat in a separate UTXO (e.g. a rare sat at the ordinals address), sub-dust padding | open: needs a two-input commit and its signer method; ord tops up sub-dust padding with extra inputs | |
 | Batch `satpoints` (§6c) | open, needs §5 | |

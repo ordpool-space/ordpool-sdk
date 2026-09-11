@@ -123,4 +123,38 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
     },
     180_000,
   );
+
+  it('--destination to a P2WPKH address: same output script, value, reveal vsize and commit output as ord', async () => {
+    // A non-taproot destination changes the reveal's output size, so this
+    // also checks the fee accounting beyond the P2TR case.
+    const destination = bitcoinCliPsbtWallet('getnewaddress', '', 'bech32');
+    const body = new TextEncoder().encode('parity: destination p2wpkh');
+    writeOrdStockFile('/tmp/parity-destination.txt', body);
+    const ord = ordStockWalletInscribe(ORD_WALLET, '/tmp/parity-destination.txt', FEE_RATE, [
+      '--destination', destination, '--postage', '546sat',
+    ]);
+    await waitForOrdStockSync(mineBlocks(1));
+    const ordRevealTx = JSON.parse(rpc('getrawtransaction', ord.reveal, 'true')) as {
+      vout: { value: number; scriptPubKey: { address: string } }[]; vsize: number;
+    };
+
+    const sdk = createInscribeTransactions({
+      paymentOutput: { ...utxo, status: { confirmed: true } },
+      paymentPublicKey: fundingPubkey,
+      paymentAddress: fundingAddr,
+      recipientAddress: destination,
+      body,
+      contentType: TXT,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+    const sdkReveal = btc.Transaction.fromRaw(hex.decode(sdk.revealHex));
+
+    expect(ordRevealTx.vout.map(o => o.scriptPubKey.address)).toEqual([destination]);
+    expect(hex.encode(sdkReveal.getOutput(0).script!))
+      .toBe(hex.encode(btc.OutScript.encode(btc.Address(scureRegtest).decode(destination))));
+    expect(Number(sdkReveal.getOutput(0).amount)).toBe(Math.round(ordRevealTx.vout[0].value * 1e8));
+    expect(sdk.fees.revealVsize).toBe(ordRevealTx.vsize);
+    expect(sdk.fees.commitOutputValueSats).toBe(decode(ord.commit).vout[0]);
+  }, 180_000);
 });

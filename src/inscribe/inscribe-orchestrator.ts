@@ -63,7 +63,8 @@ export interface InscribeAndBroadcastArgs {
   paymentPublicKey: Uint8Array;
   paymentAddress: string;
   recipientAddress: string;
-  body: Uint8Array;
+  /** Body bytes. Omit for a delegate-only inscription (needs `delegate`). */
+  body?: Uint8Array;
   contentType?: string;
   envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
   feeRatePerVbyte: number;

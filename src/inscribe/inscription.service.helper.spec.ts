@@ -763,3 +763,35 @@ describe('commit txid must equal the real signed commit (regression: P2SH-P2WPKH
     expect(result.commitTxid).toBe(realCommitTxid(result.commitPsbt, priv));
   });
 });
+
+describe('createInscribeTransactions without a body', () => {
+  it('builds a delegate-only inscription: the envelope closes with no body separator', () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
+    const delegate = `${'ab'.repeat(32)}i0`;
+    const r = createInscribeTransactions({
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey,
+      paymentAddress,
+      recipientAddress: recipientAddress(),
+      delegate,
+      feeRatePerVbyte: 3,
+      network: NETWORK,
+    });
+    // OP_PUSHBYTES_1 0b, OP_PUSHBYTES_32 <id> (index 0 adds no bytes),
+    // OP_ENDIF: the delegate tag is the last thing in the envelope, with no
+    // OP_0 body separator after it.
+    expect(hex.encode(r.commit.envelopeScript).endsWith('010b' + '20' + hex.encode(encodeInscriptionId(delegate)) + '68')).toBe(true);
+  });
+
+  it('refuses an inscription with neither a body nor a delegate, as ord requires --file or --delegate', () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
+    expect(() => createInscribeTransactions({
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey,
+      paymentAddress,
+      recipientAddress: recipientAddress(),
+      feeRatePerVbyte: 3,
+      network: NETWORK,
+    })).toThrow('an inscription needs a body or a delegate (ord: --file or --delegate)');
+  });
+});
