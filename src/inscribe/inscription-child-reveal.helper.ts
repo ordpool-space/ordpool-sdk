@@ -111,6 +111,14 @@ export interface ChildInscribeRevealArgs {
    * `recipientAddress` output at `postageSats` (a batch of children).
    */
   inscriptionOutputs?: ReadonlyArray<{ address: string; value: number }>;
+  /**
+   * UTXOs the reveal also spends, after the parents and before the commit,
+   * whose value funds the inscription outputs instead of the commit: ord's
+   * `satpoints` batch mode, where each inscription lands on the first sat of
+   * one of these (plan.rs, `reveal_satpoints`). Signed by the wallet like the
+   * parents, and not returned.
+   */
+  satpointInputs?: ReadonlyArray<ChildRevealParent['utxo']>;
   /** Optional tip output, appended after the child output. */
   tip?: { address: string; value: number };
   network: Network;
@@ -157,12 +165,13 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   if (args.ephemeralPrivKey.length !== 32) {
     throw new Error(`ephemeralPrivKey must be 32 bytes; got ${args.ephemeralPrivKey.length}`);
   }
-  if ((args.parent === undefined) === (args.parents === undefined)) {
-    throw new Error('pass exactly one of parent / parents');
+  if (args.parent !== undefined && args.parents !== undefined) {
+    throw new Error('pass one of parent / parents, not both');
   }
-  const parents = args.parents ?? [args.parent as ChildRevealParent];
-  if (parents.length === 0) {
-    throw new Error('parents must not be empty');
+  const parents = args.parents ?? (args.parent !== undefined ? [args.parent] : []);
+  const satpointInputs = args.satpointInputs ?? [];
+  if (parents.length === 0 && satpointInputs.length === 0) {
+    throw new Error('a child reveal spends at least one parent or satpoint input');
   }
   let outputs: ReadonlyArray<{ address: string; value: number }>;
   if (args.inscriptionOutputs !== undefined) {
@@ -191,32 +200,45 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
     }
   }
 
-  // The reveal miner fee is the leftover after the children + tip are
-  // funded from the commit output. The parents' sats pass straight through
+  for (const utxo of satpointInputs) {
+    if (!Number.isInteger(utxo.value) || utxo.value <= 0) {
+      throw new Error(`satpoint input value must be a positive integer; got ${utxo.value}`);
+    }
+    if (utxo.tapInternalKey.length !== 32) {
+      throw new Error('satpoint input tapInternalKey must be a 32-byte x-only key (P2TR)');
+    }
+  }
+
+  // The reveal miner fee is what the commit and the satpoint inputs bring in,
+  // minus the children and the tip. The parents' sats pass straight through
   // (input i -> output i), so they never enter the fee arithmetic.
-  const revealFeeSats = args.commitOutputValueSats - postageSats - tipValueSats;
+  const satpointSats = satpointInputs.reduce((sum, u) => sum + u.value, 0);
+  const revealFeeSats = args.commitOutputValueSats + satpointSats - postageSats - tipValueSats;
   if (revealFeeSats < 0) {
     throw new Error(
-      `commitOutputValueSats (${args.commitOutputValueSats}) < postage (${postageSats}) + tip (${tipValueSats})`,
+      `commitOutputValueSats (${args.commitOutputValueSats}) + satpoint inputs (${satpointSats}) ` +
+      `< postage (${postageSats}) + tip (${tipValueSats})`,
     );
   }
 
   // Inputs 0..N-1: the parents, then the commit; outputs 0..N-1: the parent
   // returns, then the children, then the tip. `bare` leaves the commit input
   // without its envelope leaf, for the wallet-facing copy.
-  const commitInputIndex = parents.length;
+  // Wallet-signed inputs: the parents, then the satpoint inputs.
+  const walletUtxos = [...parents.map(p => p.utxo), ...satpointInputs];
+  const commitInputIndex = walletUtxos.length;
   const assemble = (bare: boolean): btc.Transaction => {
     const t = new btc.Transaction({ disableScriptCheck: true, lockTime: CAT21_LOCK_TIME });
     // Parent inputs (P2TR key-path). Left UNSIGNED: the wallet signs them.
     // witnessUtxo + tapInternalKey are what a wallet needs to produce the
     // key-path signature. SIGHASH_DEFAULT (omit sighashType) per the
     // SDK-wide BIP-341 wire-equivalent rule.
-    for (const parent of parents) {
+    for (const utxo of walletUtxos) {
       t.addInput({
-        txid: parent.utxo.txid,
-        index: parent.utxo.vout,
-        witnessUtxo: { script: parent.utxo.scriptPubKey, amount: BigInt(parent.utxo.value) },
-        tapInternalKey: parent.utxo.tapInternalKey,
+        txid: utxo.txid,
+        index: utxo.vout,
+        witnessUtxo: { script: utxo.scriptPubKey, amount: BigInt(utxo.value) },
+        tapInternalKey: utxo.tapInternalKey,
       });
     }
     // Commit P2TR output, spent script-path via the envelope leaf.
@@ -255,9 +277,9 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   const leafVersion = leafScriptWithVersion[leafScriptWithVersion.length - 1] ?? 0xc0;
   const sighash = tx.preimageWitnessV1(
     commitInputIndex,
-    [...parents.map(p => p.utxo.scriptPubKey), args.commitOutputScript],
+    [...walletUtxos.map(u => u.scriptPubKey), args.commitOutputScript],
     btc.SignatureHash.DEFAULT,
-    [...parents.map(p => BigInt(p.utxo.value)), BigInt(args.commitOutputValueSats)],
+    [...walletUtxos.map(u => BigInt(u.value)), BigInt(args.commitOutputValueSats)],
     undefined,
     bareLeafScript,
     leafVersion,
@@ -288,7 +310,7 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   // real signature). The txid is witness-independent, so the clone's id
   // equals what the wallet-signed reveal will produce.
   const clone = btc.Transaction.fromPSBT(tx.toPSBT(0), { allowUnknownInputs: true });
-  for (let i = 0; i < parents.length; i++) {
+  for (let i = 0; i < walletUtxos.length; i++) {
     clone.updateInput(i, { finalScriptWitness: [new Uint8Array(64)] }, true);
   }
   clone.updateInput(commitInputIndex, {

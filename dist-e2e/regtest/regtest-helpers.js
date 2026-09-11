@@ -39,6 +39,7 @@ exports.waitForOrdStockSync = waitForOrdStockSync;
 exports.getStockOrdInscription = getStockOrdInscription;
 exports.getStockOrdOutputInscriptions = getStockOrdOutputInscriptions;
 exports.getStockOrdOutput = getStockOrdOutput;
+exports.ordStockWalletReceive = ordStockWalletReceive;
 exports.ordStockWalletOutputs = ordStockWalletOutputs;
 exports.fundUninscribed = fundUninscribed;
 exports.getStockOrdContent = getStockOrdContent;
@@ -49,6 +50,7 @@ exports.writeOrdStockFile = writeOrdStockFile;
 exports.ordStockWalletInscribe = ordStockWalletInscribe;
 exports.ordStockWalletBatch = ordStockWalletBatch;
 exports.fundOrdStockWallet = fundOrdStockWallet;
+exports.sendFromCleanFunderCoin = sendFromCleanFunderCoin;
 const node_child_process_1 = require("node:child_process");
 const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
     `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
@@ -605,6 +607,14 @@ async function getStockOrdOutput(outpoint) {
     }
     return res.json();
 }
+/** A fresh receive address of an ord-stock wallet (`ord wallet receive`). */
+function ordStockWalletReceive(walletName) {
+    const parsed = JSON.parse(ordStockWalletCli(walletName, 'receive'));
+    const address = parsed.address ?? parsed.addresses?.[0];
+    if (address === undefined)
+        throw new Error(`unexpected ord wallet receive shape for ${walletName}`);
+    return address;
+}
 /** `ord wallet outputs` in the ord-stock container. */
 function ordStockWalletOutputs(walletName) {
     return JSON.parse(ordStockWalletCli(walletName, 'outputs'));
@@ -758,10 +768,24 @@ function ordStockWalletBatch(walletName, batchYaml, feeRateSatPerVb) {
 async function fundOrdStockWallet(walletName, btc = '2.0') {
     const addr = ordStockCreateWallet(walletName);
     const wantSats = Math.round(Number(btc) * 1e8);
-    // Spend ONE coin that stock ord reports as carrying no inscription. The
-    // funder wallet also receives inscriptions from other specs, and if Core's
-    // coin selection spent one of those into this output, ord would see the
-    // funding as inscribed and refuse it as "no cardinal utxos".
+    await sendFromCleanFunderCoin({ [addr]: btc });
+    const balance = JSON.parse(ordStockWalletCli(walletName, 'balance'));
+    if ((balance.cardinal ?? 0) < wantSats) {
+        throw new Error(`fundOrdStockWallet: sent ${btc} BTC to ${walletName}, but ord reports ${JSON.stringify(balance)}`);
+    }
+    return addr;
+}
+/**
+ * Pay `outputs` (address -> BTC amount string) from ONE `ordpool-e2e` coin
+ * that stock ord reports as carrying no inscription, then mine a block and
+ * wait for electrs and stock ord. The funder wallet also receives
+ * inscriptions from other specs, and if Core's coin selection spent one of
+ * those, the recipients would get an inscribed sat: an ord wallet then sees
+ * its funding as ordinal and refuses it with "no cardinal utxos". Returns
+ * the transaction id; output i pays the i-th entry of `outputs`.
+ */
+async function sendFromCleanFunderCoin(outputs) {
+    const wantSats = Object.values(outputs).reduce((sum, btc) => sum + Math.round(Number(btc) * 1e8), 0);
     await waitForOrdStockSync(Number(rpc('getblockcount')));
     const unspent = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent', '1'));
     const candidates = unspent
@@ -775,16 +799,13 @@ async function fundOrdStockWallet(walletName, btc = '2.0') {
         }
     }
     if (input === undefined) {
-        throw new Error(`fundOrdStockWallet: ordpool-e2e holds no confirmed inscription-free UTXO above ${btc} BTC`);
+        throw new Error(`sendFromCleanFunderCoin: ordpool-e2e holds no confirmed inscription-free UTXO above ${wantSats} sats`);
     }
-    rpc('-rpcwallet=ordpool-e2e', 'send', JSON.stringify([{ [addr]: btc }]), 'null', 'unset', 'null', JSON.stringify({ inputs: [input], add_inputs: false }));
+    // change_position after the payments keeps output i = the i-th payment.
+    const sent = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'send', JSON.stringify(Object.entries(outputs).map(([address, btc]) => ({ [address]: btc }))), 'null', 'unset', 'null', JSON.stringify({ inputs: [input], add_inputs: false, change_position: Object.keys(outputs).length })));
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
     await waitForOrdStockSync(tip);
-    const balance = JSON.parse(ordStockWalletCli(walletName, 'balance'));
-    if ((balance.cardinal ?? 0) < wantSats) {
-        throw new Error(`fundOrdStockWallet: sent ${btc} BTC to ${walletName}, but ord reports ${JSON.stringify(balance)}`);
-    }
-    return addr;
+    return sent.txid;
 }
 //# sourceMappingURL=regtest-helpers.js.map

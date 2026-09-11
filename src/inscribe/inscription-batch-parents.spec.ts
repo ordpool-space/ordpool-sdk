@@ -124,10 +124,10 @@ describe('createBatchChildInscribeTransactions', () => {
 });
 
 describe('child reveal parent signing', () => {
-  it('parent indexes are 0..parentCount-1, one parent by default', () => {
+  it('parent indexes are 0..walletInputCount-1, one parent by default', () => {
     expect(childRevealParentIndexes(undefined)).toEqual([0]);
     expect(childRevealParentIndexes(3)).toEqual([0, 1, 2]);
-    expect(() => childRevealParentIndexes(0)).toThrow('parentCount must be a positive integer');
+    expect(() => childRevealParentIndexes(0)).toThrow('walletInputCount must be a positive integer');
   });
 
   it('the default signer asks the wallet for exactly the parent inputs at the ordinals address', async () => {
@@ -145,7 +145,7 @@ describe('child reveal parent signing', () => {
       finalizePsbtBytes: r.revealPsbt,
       ordinalsAddress: owner.address!,
       ordinalsPublicKey: hex.encode(schnorr.getPublicKey(OWNER_PRIV)),
-      parentCount: 2,
+      walletInputCount: 2,
       network: NETWORK,
       broadcast: (hexTx) => { wire = hexTx; return of('txid'); },
     }));
@@ -155,5 +155,49 @@ describe('child reveal parent signing', () => {
       publicKey: hex.encode(schnorr.getPublicKey(OWNER_PRIV)),
     }]]);
     expect(btc.Transaction.fromRaw(hex.decode(wire), { allowUnknownInputs: true }).id).toBe(r.revealTxid);
+  });
+});
+
+describe('satpoints mode', () => {
+  const utxo = (n: number, value: number) => ({
+    txid: String(n).repeat(64), vout: 0, value, scriptPubKey: owner.script, tapInternalKey: schnorr.getPublicKey(OWNER_PRIV),
+  });
+  const entries = [
+    { body: enc('on sat one'), contentType: 'text/plain', satpoint: utxo(3, 4_000) },
+    { body: enc('on sat two'), contentType: 'text/plain', satpoint: utxo(4, 6_000) },
+  ];
+
+  it('each inscription output carries its own UTXO\'s value; the commit pays only the reveal fee', () => {
+    const r = build({ mode: 'satpoints', parents: [], inscriptions: entries, postageSats: undefined });
+    const reveal = btc.Transaction.fromPSBT(r.revealPsbt, { allowUnknownInputs: true });
+    expect(reveal.inputsLength).toBe(3); // two satpoint UTXOs, then the commit
+    const outputs = Array.from({ length: reveal.outputsLength }, (_, i) => Number(reveal.getOutput(i).amount));
+    expect(outputs).toEqual([4_000, 6_000]);
+    expect(r.fees.commitOutputValueSats).toBe(r.fees.revealFeeSats);
+    expect(r.walletInputCount).toBe(2);
+    const parsed = InscriptionParserService.parse({
+      txid: r.revealTxid, vin: [{ witness: ['00'.repeat(64), hex.encode(r.commit.envelopeScript), '00'] }],
+    });
+    // Each pointer is the first sat of its own output: 0, then after 4000.
+    expect(parsed.map(p => p.getPointer())).toEqual([0, 4_000]);
+  });
+
+  it('with parents, the satpoint UTXOs follow the parents and the pointers start after them', () => {
+    const r = build({ mode: 'satpoints', parents: [parent(1, 546)], inscriptions: entries, postageSats: undefined });
+    const reveal = btc.Transaction.fromPSBT(r.revealPsbt, { allowUnknownInputs: true });
+    expect([0, 1, 2].map(i => hex.encode(reveal.getInput(i).txid!))).toEqual(['1'.repeat(64), '3'.repeat(64), '4'.repeat(64)]);
+    expect(r.inscriptions.map(l => l.vout)).toEqual([1, 2]);
+    expect(r.walletInputCount).toBe(3);
+  });
+
+  it('refuses what ord refuses', () => {
+    expect(() => build({ mode: 'satpoints', parents: [], inscriptions: entries, postageSats: 600 }))
+      .toThrow('`postage` cannot be set in `satpoints` mode');
+    expect(() => build({ mode: 'satpoints', parents: [], inscriptions: [entries[0], { body: enc('x'), contentType: 'text/plain' }], postageSats: undefined }))
+      .toThrow('inscription 1: `satpoints` mode needs a satpoint for every inscription');
+    expect(() => build({ mode: 'satpoints', parents: [], inscriptions: [entries[0], entries[0]], postageSats: undefined }))
+      .toThrow(`duplicate satpoint ${'3'.repeat(64)}:0:0`);
+    expect(() => build({ mode: 'separate-outputs', inscriptions: entries }))
+      .toThrow('specifying `satpoint` in an inscription only works in `satpoints` mode');
   });
 });

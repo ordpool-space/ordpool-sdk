@@ -83,7 +83,7 @@ export function operationNamedDefaults(
       // returns, merge input 0's signature into the FULL PSBT (whose input
       // 1 carries the ephemeral tapScriptSig + envelope leaf), finalize
       // BOTH inputs, and broadcast the wire tx ourselves.
-      const parentIndexes = childRevealParentIndexes(input.parentCount);
+      const parentIndexes = childRevealParentIndexes(input.walletInputCount);
       return legacy.signPsbtOnly({
         psbtBytes: input.psbtBytes,
         signingMap: [{ address: input.ordinalsAddress, indexes: parentIndexes, publicKey: input.ordinalsPublicKey }],

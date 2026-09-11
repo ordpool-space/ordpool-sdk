@@ -27,7 +27,7 @@ bytes; see the spec for exactly what is compared.
 | `--delegate` with no `--file`, as a transaction | an SDK delegate-only inscription broadcasts and stock ord serves the delegate's content for it | `e2e/regtest/inscribe-metadata-delegate-parity.spec.ts` |
 | `--satpoint`, `--sat` (§5) for a sat inside the funding UTXO | proven: padding output and commit output match ord at offsets 1 000 and 50 000, and stock ord's sat index puts the SDK inscription on exactly the requested sat; `findSatOffset` turns a sat number into the offset | `e2e/regtest/inscribe-satpoint-parity.spec.ts` |
 | Sat in a separate UTXO (e.g. a rare sat at the ordinals address), sub-dust padding | open: needs a two-input commit and its signer method; ord tops up sub-dust padding with extra inputs | |
-| Batch `satpoints` (§6c) | open, needs §5 | |
+| Batch `satpoints` (§6c) | proven: ord and the SDK spend the same three UTXOs (5 000, 7 000, 9 000 sats) and match in tapscript, reveal outputs, reveal vsize, commit output (the reveal fee only) and locations; an SDK satpoints batch on UTXOs we own broadcasts, and stock ord puts each inscription on the first sat of its UTXO | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 
 **Default postage stays 546.** It is cheaper, and it is the common
 denominator across tools; ord's 10 000 is an option we offer, not a default
@@ -89,7 +89,7 @@ regtest wallet holding a known rare sat, and the resulting inscription is on
 the sat we asked for, verified through cat21-ord rather than by our own
 arithmetic.
 
-## 6. Batch (6a and 6b done)
+## 6. Batch (done)
 
 The big one, and the last thing between us and the word "parity". ord's four
 modes:
@@ -135,6 +135,8 @@ nothing about size handling.
   metaprotocols", which is a list ord users recognise.
 - **After §6a**: "and whole collections in one go."
 - **After §6c**: "feature parity with ord" becomes defensible, and only then.
+  §6c is proven; what the status table still lists as open is what stands
+  between us and that sentence.
 
 Nobody writes the parity sentence before §6. A claim that a competitor can
 falsify in one command is worse than no claim, and `ord wallet batch

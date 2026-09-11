@@ -6,7 +6,7 @@ import { extractWireTxFromPsbt } from '../psbt-extract';
 /**
  * Shared tail for the child-inscription reveal, wallet-agnostic.
  *
- * The wallet signs ONLY the parent inputs (0..parentCount-1, P2TR key-path
+ * The wallet signs ONLY the parent inputs (0..walletInputCount-1, P2TR key-path
  * spends) on the BARE wallet-facing PSBT — the commit input there has no
  * envelope tap-leaf, which some `signPsbt` implementations reject. This
  * function takes the wallet-signed bare PSBT, lifts each parent input's
@@ -62,11 +62,11 @@ export function mergeParentSigAndBroadcast(
   signedWalletFacing: Uint8Array,
   finalizePsbtBytes: Uint8Array,
   broadcast: (wireTxHex: string) => Observable<string>,
-  parentCount = 1,
+  walletInputCount = 1,
 ): Observable<{ txId: string }> {
   const walletSigned = btc.Transaction.fromPSBT(signedWalletFacing);
   const full = btc.Transaction.fromPSBT(finalizePsbtBytes, { allowUnknownInputs: true });
-  for (let i = 0; i < parentCount; i++) {
+  for (let i = 0; i < walletInputCount; i++) {
     const input = walletSigned.getInput(i);
     const keySig = input.tapKeySig ?? input.finalScriptWitness?.[0];
     if (!keySig) {
@@ -79,13 +79,13 @@ export function mergeParentSigAndBroadcast(
 }
 
 /**
- * The parent input indexes of a child reveal: 0..parentCount-1 (default one
- * parent). The commit input follows them.
+ * The wallet-signed input indexes of a child reveal: 0..walletInputCount-1
+ * (default one parent). The commit input follows them.
  */
-export function childRevealParentIndexes(parentCount: number | undefined): number[] {
-  const n = parentCount ?? 1;
+export function childRevealParentIndexes(walletInputCount: number | undefined): number[] {
+  const n = walletInputCount ?? 1;
   if (!Number.isInteger(n) || n < 1) {
-    throw new Error(`parentCount must be a positive integer; got ${parentCount}`);
+    throw new Error(`walletInputCount must be a positive integer; got ${walletInputCount}`);
   }
   return Array.from({ length: n }, (_, i) => i);
 }

@@ -104,3 +104,10 @@ describe('createBatchInscribeTransactions', () => {
       .toThrow(/reveal output of 100 sats .* is below its 330-sat dust limit/);
   });
 });
+
+describe('createBatchInscribeTransactions and satpoints', () => {
+  it('points satpoints batches at the builder that handles wallet inputs in the reveal', () => {
+    expect(() => createBatchInscribeTransactions(base({ mode: 'satpoints' })))
+      .toThrow('`satpoints` mode spends wallet UTXOs in the reveal; use createBatchChildInscribeTransactions');
+  });
+});

@@ -210,7 +210,7 @@ export const xverseSigner: WalletSigner = {
     // (the foreign ephemeral-commit) is left untouched. Merge input 0's
     // signature onto the FULL reveal PSBT (input 1 there carries the envelope
     // tapLeafScript + tapScriptSig) so both inputs finalize before broadcast.
-    const parentIndexes = childRevealParentIndexes(input.parentCount);
+    const parentIndexes = childRevealParentIndexes(input.walletInputCount);
     return callXverseSignPsbtModern(input.psbtBytes, { [input.ordinalsAddress]: parentIndexes }).pipe(
       switchMap((signedBare) =>
         mergeParentSigAndBroadcast(signedBare, input.finalizePsbtBytes, input.broadcast, parentIndexes.length)),

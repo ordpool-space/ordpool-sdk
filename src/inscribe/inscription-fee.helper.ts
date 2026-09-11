@@ -108,6 +108,8 @@ export interface SimulateInscribeFeesArgs {
   changeDustLimitSats?: number;
   /** See `InscribeCommitArgs.satOffset`: the padding output is part of the commit being measured. */
   satOffset?: number;
+  /** See `InscribeCommitArgs.commitPostageSats`. */
+  commitPostageSats?: number;
   network: Network;
 }
 
@@ -140,9 +142,9 @@ export interface SimulateInscribeFeesResult {
  * material between calls.
  */
 export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateInscribeFeesResult {
-  const postageSats = args.inscriptionOutputs !== undefined
+  const postageSats = args.commitPostageSats ?? (args.inscriptionOutputs !== undefined
     ? args.inscriptionOutputs.reduce((sum, o) => sum + o.value, 0)
-    : resolveInscribePostage(args.postageSats);
+    : resolveInscribePostage(args.postageSats));
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
   }
@@ -183,6 +185,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     walletType: args.walletType,
     changeDustLimitSats: args.changeDustLimitSats,
     satOffset: args.satOffset,
+    commitPostageSats: args.commitPostageSats,
     network: args.network,
   });
   const tipValueSats = args.tip?.value ?? 0;
@@ -238,6 +241,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         walletType: args.walletType,
         changeDustLimitSats: args.changeDustLimitSats,
         satOffset: args.satOffset,
+        commitPostageSats: args.commitPostageSats,
         network: args.network,
       });
       // Dummy-sign the funding input + finalize to read the real vsize. DEFAULT

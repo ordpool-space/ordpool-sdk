@@ -158,6 +158,12 @@ export interface InscribeCommitArgs {
    * Default 0: the funding input's first sat, no padding output.
    */
   satOffset?: number;
+  /**
+   * The sats the commit output carries for the reveal's inscription outputs,
+   * replacing `postageSats`. 0 when the reveal's own inputs fund them (ord's
+   * `satpoints` batch mode, where the commit pays only the reveal fee).
+   */
+  commitPostageSats?: number;
   network: Network;
 }
 
@@ -203,7 +209,10 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   }
 
   const scureNetwork = toScureNetwork(args.network);
-  const postageSats = resolveInscribePostage(args.postageSats);
+  if (args.commitPostageSats !== undefined && (!Number.isInteger(args.commitPostageSats) || args.commitPostageSats < 0)) {
+    throw new Error(`commitPostageSats must be a non-negative integer; got ${args.commitPostageSats}`);
+  }
+  const postageSats = args.commitPostageSats ?? resolveInscribePostage(args.postageSats);
   const tipValueSats = args.tipValueSats ?? 0;
   const commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
 

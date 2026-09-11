@@ -44,12 +44,12 @@ blesses the SDK's inscriptions.
 
 ## 3. The gaps, worst first
 
-### 3.2 Batch: the `satpoints` mode
+### 3.2 Batch
 
-`createBatchInscribeTransactions` and `createBatchChildInscribeTransactions`
-build ord's `separate-outputs`, `shared-output` and `same-sat` batches, with
-or without parents, byte-identically. Still missing: the `satpoints` mode,
-which needs sat targeting (§3.5).
+All four of ord's batch modes are built byte-identically, with or without
+parents: `createBatchInscribeTransactions` when the reveal is ours alone,
+`createBatchChildInscribeTransactions` when it also spends wallet UTXOs
+(parents, satpoint UTXOs). Nothing is open here.
 
 ### 3.4 Several parents
 
@@ -100,12 +100,10 @@ cheapest progress available and it should be done first.
 number-shaped claim this workspace bans. The honest ordered path:
 
 1. **UI surfacing (§3.6)**: no SDK work, unlocks parent, gallery, title,
-   metaprotocol, pointer and postage in the form.
-2. **Sat targeting from a separate UTXO (§3.5)**: medium.
-3. **The `satpoints` batch mode (§3.2)**: the last thing standing between us
-   and the word "parity".
+   metaprotocol, pointer, postage and batch in the form.
+2. **Sat targeting from a separate UTXO (§3.5)**: medium, the last SDK gap.
 
-Until batch ships, the defensible claim is narrower and still strong: **"Everything
-ord can inscribe, without the command line"** is false; **"Inscribe on Bitcoin
-from your browser, free, with fees you see before you sign"** is true and needs
-no caveat.
+Until both ship, the defensible claim is narrower and still strong:
+**"Everything ord can inscribe, without the command line"** is false;
+**"Inscribe on Bitcoin from your browser, free, with fees you see before you
+sign"** is true and needs no caveat.

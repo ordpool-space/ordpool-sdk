@@ -33,13 +33,14 @@ import type {
  * | `separate-outputs` | one per inscription, each `postage` | the first sat of output i |
  * | `shared-output` | one, `postage` × N | sat `postage × i` of that output |
  * | `same-sat` | one, `postage` | the first sat of that output, all of them |
+ * | `satpoints` | one per inscription, each the value of that inscription's own UTXO, which the reveal spends | the first sat of its own UTXO, carried to output i |
  *
  * ord writes the pointer for every batch inscription, including 0 (as an
  * empty value), so the envelopes match ord's byte for byte.
  */
 
-/** ord's batch modes, minus `satpoints`, which needs sat targeting. */
-export type BatchInscribeMode = 'separate-outputs' | 'shared-output' | 'same-sat';
+/** ord's batch modes. */
+export type BatchInscribeMode = 'separate-outputs' | 'shared-output' | 'same-sat' | 'satpoints';
 
 /** One inscription in a batch: ord's batchfile entry. */
 export interface BatchInscriptionEntry {
@@ -55,8 +56,14 @@ export interface BatchInscriptionEntry {
   title?: string;
   /** Compress `gallery`/`title` as `--compress` does. Needs the brotli wasm loaded. */
   compressProperties?: boolean;
-  /** Where this inscription goes. `separate-outputs` only; defaults to `recipientAddress`. */
+  /** Where this inscription goes. `separate-outputs` and `satpoints`; defaults to `recipientAddress`. */
   destination?: string;
+  /**
+   * `satpoints` mode only: the wallet UTXO whose first sat this inscription
+   * goes on (ord's per-entry `satpoint`, offset 0 only). The reveal spends
+   * it, and the inscription output carries exactly its value.
+   */
+  satpoint?: ChildRevealParent['utxo'];
 }
 
 export interface CreateBatchInscribeTransactionsArgs
@@ -100,7 +107,8 @@ export interface CreateBatchChildInscribeTransactionsArgs extends CreateBatchIns
   /**
    * ord's batch-level `parents`, in order. The reveal spends them at inputs
    * 0..N-1 and returns each at the same output index with its own value;
-   * every envelope carries every parent tag.
+   * every envelope carries every parent tag. May be empty in `satpoints`
+   * mode, where the satpoint UTXOs are the wallet inputs.
    */
   parents: ReadonlyArray<BatchParent>;
 }
@@ -117,6 +125,12 @@ export interface CreateBatchChildInscribeTransactionsResult
   revealPsbtForWallet: Uint8Array;
   parents: ReadonlyArray<BatchParent>;
   inscriptions: BatchInscriptionLocation[];
+  /**
+   * How many wallet-owned inputs precede the commit input in the reveal:
+   * the parents, then the satpoint UTXOs. The wallet signs exactly these
+   * (`signChildRevealParentInputs` with this `walletInputCount`).
+   */
+  walletInputCount: number;
 }
 
 interface BatchLayout {
@@ -139,7 +153,7 @@ function layOutBatch(
   parents: ReadonlyArray<BatchParent>,
 ): BatchLayout {
   const { mode, inscriptions } = args;
-  if (mode !== 'separate-outputs' && mode !== 'shared-output' && mode !== 'same-sat') {
+  if (mode !== 'separate-outputs' && mode !== 'shared-output' && mode !== 'same-sat' && mode !== 'satpoints') {
     throw new Error(`unknown batch mode ${String(mode)}`);
   }
   if (inscriptions.length === 0) {
@@ -148,8 +162,25 @@ function layOutBatch(
   if ((args.satOffset ?? 0) !== 0 && mode !== 'same-sat') {
     throw new Error('`satOffset` can only be set in `same-sat` mode, as ord allows `sat` / `satpoint` only there');
   }
-  if (mode !== 'separate-outputs' && inscriptions.some(entry => entry.destination !== undefined)) {
+  if ((mode === 'shared-output' || mode === 'same-sat') && inscriptions.some(entry => entry.destination !== undefined)) {
     throw new Error(`individual inscription destinations cannot be set in \`${mode}\` mode`);
+  }
+  // ord's File::load rules for per-entry satpoints.
+  if (mode === 'satpoints') {
+    if (args.postageSats !== undefined) {
+      throw new Error('`postage` cannot be set in `satpoints` mode: each inscription\'s own UTXO is its postage');
+    }
+    const seen = new Set<string>();
+    for (const [i, entry] of inscriptions.entries()) {
+      if (entry.satpoint === undefined) {
+        throw new Error(`inscription ${i}: \`satpoints\` mode needs a satpoint for every inscription`);
+      }
+      const key = `${entry.satpoint.txid}:${entry.satpoint.vout}`;
+      if (seen.has(key)) throw new Error(`duplicate satpoint ${key}:0`);
+      seen.add(key);
+    }
+  } else if (inscriptions.some(entry => entry.satpoint !== undefined)) {
+    throw new Error('specifying `satpoint` in an inscription only works in `satpoints` mode');
   }
   for (const [i, entry] of inscriptions.entries()) {
     const ids = (entry.gallery ?? []).map(item => (typeof item === 'string' ? item : item.id));
@@ -157,19 +188,23 @@ function layOutBatch(
       throw new Error(`inscription ${i}: duplicate gallery item`);
     }
   }
-  const postage = resolveInscribePostage(args.postageSats);
   const parentSats = parents.reduce((sum, p) => sum + p.utxo.value, 0);
+  // Per inscription: the batch postage, or in satpoints mode its UTXO's value.
+  const postages = inscriptions.map(entry =>
+    mode === 'satpoints' ? (entry.satpoint as ChildRevealParent['utxo']).value : resolveInscribePostage(args.postageSats));
+  const before = (i: number) => postages.slice(0, i).reduce((sum, v) => sum + v, 0);
+  const ownOutputs = mode === 'separate-outputs' || mode === 'satpoints';
 
   const locations: BatchInscriptionLocation[] = inscriptions.map((entry, i) => ({
     index: i,
-    vout: parents.length + (mode === 'separate-outputs' ? i : 0),
-    offset: mode === 'shared-output' ? postage * i : 0,
-    destination: mode === 'separate-outputs' ? entry.destination ?? args.recipientAddress : args.recipientAddress,
+    vout: parents.length + (ownOutputs ? i : 0),
+    offset: mode === 'shared-output' ? before(i) : 0,
+    destination: ownOutputs ? entry.destination ?? args.recipientAddress : args.recipientAddress,
   }));
-  const pointers = inscriptions.map((_, i) => parentSats + (mode === 'same-sat' ? 0 : postage * i));
-  const inscriptionOutputs = mode === 'separate-outputs'
-    ? locations.map(l => ({ address: l.destination, value: postage }))
-    : [{ address: args.recipientAddress, value: mode === 'shared-output' ? postage * inscriptions.length : postage }];
+  const pointers = inscriptions.map((_, i) => parentSats + (mode === 'same-sat' ? 0 : before(i)));
+  const inscriptionOutputs = ownOutputs
+    ? locations.map((l, i) => ({ address: l.destination, value: postages[i] }))
+    : [{ address: args.recipientAddress, value: mode === 'shared-output' ? before(inscriptions.length) : postages[0] }];
 
   for (const output of inscriptionOutputs) {
     const dust = getMinimumUtxoSize(output.address);
@@ -212,27 +247,37 @@ function layOutBatch(
 export function createBatchInscribeTransactions(
   args: CreateBatchInscribeTransactionsArgs,
 ): CreateBatchInscribeTransactionsResult {
+  if (args.mode === 'satpoints') {
+    throw new Error('`satpoints` mode spends wallet UTXOs in the reveal; use createBatchChildInscribeTransactions');
+  }
   const layout = layOutBatch(args, []);
   const result = assembleInscribeTransactions(args, layout);
   return { ...result, inscriptions: layout.locations };
 }
 
 /**
- * Build the commit and reveal for a batch with parents, ord's `parents:` in a
- * batchfile. The reveal spends every parent, so it needs the parent owner's
- * signatures: `revealPsbtForWallet` goes to the wallet
- * (`signChildRevealParentInputs` with `parentCount`), and its signatures are
- * merged into `revealPsbt`.
+ * Build the commit and reveal for a batch whose reveal also spends wallet
+ * UTXOs: ord's `parents:` in a batchfile, the `satpoints` mode, or both. The
+ * reveal then needs the wallet's signatures, like a child inscription's:
+ * `revealPsbtForWallet` goes to the wallet (`signChildRevealParentInputs`
+ * with `walletInputCount`), and its signatures are merged into `revealPsbt`.
  */
 export function createBatchChildInscribeTransactions(
   args: CreateBatchChildInscribeTransactionsArgs,
 ): CreateBatchChildInscribeTransactionsResult {
-  if (args.parents.length === 0) {
+  if (args.parents.length === 0 && args.mode !== 'satpoints') {
     throw new Error('parents must not be empty; use createBatchInscribeTransactions for a batch without parents');
   }
   const layout = layOutBatch(args, args.parents);
   const tipValueSats = args.tip?.value ?? 0;
-  const totalPostage = layout.inscriptionOutputs.reduce((sum, o) => sum + o.value, 0);
+  // In satpoints mode the satpoint UTXOs fund the inscription outputs, so the
+  // commit carries only the reveal fee (ord: target_value = reveal_fee).
+  const satpointInputs = args.mode === 'satpoints'
+    ? args.inscriptions.map(entry => entry.satpoint as ChildRevealParent['utxo'])
+    : [];
+  const commitPostageSats = args.mode === 'satpoints'
+    ? 0
+    : layout.inscriptionOutputs.reduce((sum, o) => sum + o.value, 0);
   const childReveal = (
     commit: { txid: string; vout: number; outputScript: Uint8Array; taproot: InscribeCommitResult['taproot']; outputValueSats: number },
     ephemeralPrivKey: Uint8Array,
@@ -244,6 +289,7 @@ export function createBatchChildInscribeTransactions(
     taproot: commit.taproot,
     ephemeralPrivKey,
     parents: args.parents,
+    satpointInputs,
     inscriptionOutputs: layout.inscriptionOutputs,
     tip: args.tip,
     network: args.network,
@@ -253,16 +299,24 @@ export function createBatchChildInscribeTransactions(
     envelope: layout.envelope,
     ephemeralPubkeyXonly: layout.ephemeralPubkeyXonly,
     inscriptionOutputs: layout.inscriptionOutputs,
-    // Measured on the real reveal shape, parent inputs included, at zero
-    // fee (the commit output covers only the children and the tip).
+    commitPostageSats,
+    // Measured on the real reveal shape, wallet inputs included, at zero fee
+    // (the commit output covers only what it funds and the tip).
     measureRevealVsize: (commit) => childReveal({
       txid: '0'.repeat(64),
       vout: 0,
       outputScript: commit.outputScript,
       taproot: commit.taproot,
-      outputValueSats: totalPostage + tipValueSats,
+      outputValueSats: commitPostageSats + tipValueSats,
     }, new Uint8Array(32).fill(0x42)).revealVsize,
   });
+  const commitDust = getMinimumUtxoSize(plan.commit.commitAddress);
+  if (plan.commit.commitOutputValueSats < commitDust) {
+    throw new Error(
+      `the commit output of ${plan.commit.commitOutputValueSats} sats is below its ${commitDust}-sat dust limit; ` +
+      'raise the fee rate or add a tip',
+    );
+  }
 
   const reveal = childReveal({
     txid: plan.commitTxid,
@@ -288,5 +342,6 @@ export function createBatchChildInscribeTransactions(
     },
     parents: args.parents,
     inscriptions: layout.locations,
+    walletInputCount: args.parents.length + satpointInputs.length,
   };
 }

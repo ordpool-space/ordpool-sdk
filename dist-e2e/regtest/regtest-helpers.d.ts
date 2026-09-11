@@ -341,6 +341,8 @@ export interface StockOrdOutput {
     sat_ranges: Array<[number, number]>;
 }
 export declare function getStockOrdOutput(outpoint: string): Promise<StockOrdOutput>;
+/** A fresh receive address of an ord-stock wallet (`ord wallet receive`). */
+export declare function ordStockWalletReceive(walletName: string): string;
 /** `ord wallet outputs` in the ord-stock container. */
 export declare function ordStockWalletOutputs(walletName: string): Array<{
     output: string;
@@ -420,4 +422,14 @@ export declare function ordStockWalletBatch(walletName: string, batchYaml: strin
  * change is confirmed before the next inscribe needs it.
  */
 export declare function fundOrdStockWallet(walletName: string, btc?: string): Promise<string>;
+/**
+ * Pay `outputs` (address -> BTC amount string) from ONE `ordpool-e2e` coin
+ * that stock ord reports as carrying no inscription, then mine a block and
+ * wait for electrs and stock ord. The funder wallet also receives
+ * inscriptions from other specs, and if Core's coin selection spent one of
+ * those, the recipients would get an inscribed sat: an ord wallet then sees
+ * its funding as ordinal and refuses it with "no cardinal utxos". Returns
+ * the transaction id; output i pays the i-th entry of `outputs`.
+ */
+export declare function sendFromCleanFunderCoin(outputs: Record<string, string>): Promise<string>;
 //# sourceMappingURL=regtest-helpers.d.ts.map

@@ -39,6 +39,9 @@ import {
   fundUninscribed,
   getStockOrdContent,
   getStockOrdInscription,
+  getStockOrdOutput,
+  sendFromCleanFunderCoin,
+  ordStockWalletReceive,
   mineBlocks,
   fundOrdStockWallet,
   postTx,
@@ -269,7 +272,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
           vout: revealInputs[i].vout,
           value: Math.round(prev.value * 1e8),
           scriptPubKey: hex.decode(prev.scriptPubKey.hex),
-          tapInternalKey: new Uint8Array(32).fill(i + 1),
+          tapInternalKey: schnorr.getPublicKey(schnorr.utils.randomPrivateKey()),
         },
         returnAddress: revealOutputs[i].scriptPubKey.address,
       };
@@ -380,6 +383,116 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
       expect(after.satpoint).toBe(`${built.revealTxid}:${i}:0`);
       expect(after.address).toBe(owner.address!);
       expect(after.value).toBe(parent.utxo.value);
+    }
+  }, 300_000);
+
+  it('satpoints: ord and the SDK spend the same three UTXOs; tapscript, reveal outputs, reveal vsize, commit output and locations match', async () => {
+    // Three cardinal UTXOs of three sizes in ord's wallet, one per inscription.
+    const values = ['0.00005000', '0.00007000', '0.00009000'];
+    const addresses = values.map(() => ordStockWalletReceive(ORD_WALLET));
+    const fundTxid = await sendFromCleanFunderCoin(Object.fromEntries(addresses.map((a, i) => [a, values[i]])));
+    const satpointOutpoints = values.map((_, i) => `${fundTxid}:${i}`);
+
+    const bodies = [enc('satpoint a'), enc('satpoint b'), enc('satpoint c')];
+    bodies.forEach((b, i) => writeOrdStockFile(`/tmp/pb-satpoint-${i}.txt`, b));
+    const yaml = [
+      'mode: satpoints',
+      'inscriptions:',
+      ...bodies.flatMap((_, i) => [`  - file: /tmp/pb-satpoint-${i}.txt`, `    satpoint: ${satpointOutpoints[i]}:0`]),
+    ].join('\n');
+    const ord = ordStockWalletBatch(ORD_WALLET, yaml, FEE_RATE);
+    await waitForOrdStockSync(mineBlocks(1));
+    const ordReveal = decode(ord.reveal);
+    const ordCommit = decode(ord.commit);
+
+    // The same UTXOs, built only, so any x-only key stands in for ord's.
+    const fundTx = JSON.parse(rpc('getrawtransaction', fundTxid, 'true')) as {
+      vout: { value: number; scriptPubKey: { hex: string } }[];
+    };
+    const sdk = createBatchChildInscribeTransactions({
+      mode: 'satpoints',
+      parents: [],
+      inscriptions: bodies.map((body, i) => ({
+        body,
+        contentType: 'text/plain;charset=utf-8',
+        satpoint: {
+          txid: fundTxid,
+          vout: i,
+          value: Math.round(fundTx.vout[i].value * 1e8),
+          scriptPubKey: hex.decode(fundTx.vout[i].scriptPubKey.hex),
+          tapInternalKey: schnorr.getPublicKey(schnorr.utils.randomPrivateKey()),
+        },
+      })),
+      recipientAddress: randomP2tr(),
+      paymentOutput: { ...utxo, status: { confirmed: true } },
+      paymentPublicKey: fundingPubkey,
+      paymentAddress: fundingAddr,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+
+    // ord's reveal spends the three satpoint UTXOs first; the commit is input 3.
+    expect(hex.encode(sdk.commit.envelopeScript).slice(68)).toBe(ordEnvelopes(ord.reveal, 3));
+    const sdkReveal = btc.Transaction.fromPSBT(sdk.revealPsbt, { allowUnknownInputs: true });
+    const sdkOutputs = Array.from({ length: sdkReveal.outputsLength }, (_, i) => Number(sdkReveal.getOutput(i).amount));
+    expect(sdkOutputs).toEqual(sats(ordReveal));
+    expect(sdkOutputs).toEqual([5000, 7000, 9000]);
+    expect(sdk.fees.revealVsize).toBe(ordReveal.vsize);
+    // The commit pays only the reveal fee.
+    expect(sdk.fees.commitOutputValueSats).toBe(sats(ordCommit)[0]);
+    expect(sdk.fees.commitOutputValueSats).toBe(sdk.fees.revealFeeSats);
+    expect(sdk.inscriptions.map(l => `${ord.reveal}:${l.vout}:${l.offset}`))
+      .toEqual(ord.inscriptions.map(i => i.location));
+    expect(sdk.walletInputCount).toBe(3);
+  }, 240_000);
+
+  it('satpoints: an SDK batch on UTXOs we own broadcasts, and stock ord puts each inscription on the first sat of its UTXO', async () => {
+    const ownerKey = schnorr.utils.randomPrivateKey();
+    const ownerXonly = schnorr.getPublicKey(ownerKey);
+    const owner = btc.p2tr(ownerXonly, undefined, scureRegtest, true);
+    // Two UTXOs at one ordinals address, as a wallet holds them; one
+    // transaction each, since a transaction cannot pay one address twice.
+    const values = [4000, 6000];
+    const satpoints: Array<{ txid: string; vout: number; value: number; scriptPubKey: Uint8Array; tapInternalKey: Uint8Array }> = [];
+    for (const v of values) {
+      const txid = await sendFromCleanFunderCoin({ [owner.address!]: (v / 1e8).toFixed(8) });
+      satpoints.push({ txid, vout: 0, value: v, scriptPubKey: owner.script, tapInternalKey: ownerXonly });
+    }
+    const firstSats = await Promise.all(satpoints.map(async u =>
+      (await getStockOrdOutput(`${u.txid}:${u.vout}`)).sat_ranges[0][0]));
+
+    const f = await fundUninscribed();
+    const bodies = [enc('on my first sat'), enc('on my second sat')];
+    const built = createBatchChildInscribeTransactions({
+      mode: 'satpoints',
+      parents: [],
+      inscriptions: bodies.map((body, i) => ({ body, contentType: 'text/plain;charset=utf-8', satpoint: satpoints[i] })),
+      recipientAddress: randomP2tr(),
+      paymentOutput: { ...f.utxo, status: { confirmed: true } },
+      paymentPublicKey: f.fundingPubkey,
+      paymentAddress: f.fundingAddr,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+    await signCommitAndBroadcast(built.commitPsbt, built.commitTxid);
+    const walletFacing = btc.Transaction.fromPSBT(built.revealPsbtForWallet);
+    const full = btc.Transaction.fromPSBT(built.revealPsbt, { allowUnknownInputs: true });
+    for (let i = 0; i < built.walletInputCount; i++) {
+      walletFacing.signIdx(ownerKey, i);
+      const input = walletFacing.getInput(i);
+      full.updateInput(i, { tapKeySig: input.tapKeySig ?? input.finalScriptWitness![0] }, true);
+    }
+    full.finalize();
+    expect(await postTx(full.hex)).toBe(built.revealTxid);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdStockSync(tip);
+
+    for (const location of built.inscriptions) {
+      const insc = await waitForOrdStockInscription(`${built.revealTxid}i${location.index}`);
+      expect(insc.satpoint).toBe(`${built.revealTxid}:${location.vout}:0`);
+      expect(insc.sat).toBe(firstSats[location.index]);
+      expect(insc.value).toBe(values[location.index]);
     }
   }, 300_000);
 });

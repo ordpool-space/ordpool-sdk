@@ -1,10 +1,11 @@
 import { Observable, defer, from, map, of, switchMap, throwError } from 'rxjs';
 import type { InscriptionPropertiesInput } from './inscription-properties';
 import { hex } from '@scure/base';
+import * as btc from '@scure/btc-signer';
 
 import { findSignerOrThrow } from '../wallet/signers';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { Network } from '../network';
+import { Network, toScureNetwork } from '../network';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 
 import {
@@ -303,8 +304,8 @@ export interface InscribeBatchAndBroadcastResult extends InscribeAndBroadcastRes
 export function inscribeBatchAndBroadcast(
   args: InscribeBatchAndBroadcastArgs,
 ): Observable<InscribeBatchAndBroadcastResult> {
-  if (args.parents !== undefined && args.parents.length > 0) {
-    return inscribeBatchWithParents({ ...args, parents: args.parents });
+  if ((args.parents !== undefined && args.parents.length > 0) || args.mode === 'satpoints') {
+    return inscribeBatchWithWalletInputs({ ...args, parents: args.parents ?? [] });
   }
   return defer(() => {
     let built: CreateBatchInscribeTransactionsResult;
@@ -320,23 +321,33 @@ export function inscribeBatchAndBroadcast(
 }
 
 /**
- * The batch-with-parents path: sign and broadcast the commit, then have the
- * wallet sign the reveal's parent inputs 0..N-1 on the bare reveal PSBT;
- * those signatures are merged into the full reveal, which then broadcasts.
+ * The path for a batch whose reveal spends wallet UTXOs (parents, satpoint
+ * UTXOs): sign and broadcast the commit, then have the wallet sign those
+ * reveal inputs 0..N-1 on the bare reveal PSBT; the signatures are merged
+ * into the full reveal, which then broadcasts.
  */
-function inscribeBatchWithParents(
+function inscribeBatchWithWalletInputs(
   args: InscribeBatchAndBroadcastArgs & { parents: ReadonlyArray<BatchParent> },
 ): Observable<InscribeBatchAndBroadcastResult> {
   return defer(() => {
-    const [first] = args.parents;
-    const sameOwner = args.parents.every(p =>
-      p.returnAddress === first.returnAddress
-      && hex.encode(p.utxo.tapInternalKey) === hex.encode(first.utxo.tapInternalKey));
+    // The wallet signs every one of these inputs at one ordinals address.
+    const walletUtxos = [
+      ...args.parents.map(p => p.utxo),
+      ...(args.mode === 'satpoints' ? args.inscriptions.flatMap(e => (e.satpoint ? [e.satpoint] : [])) : []),
+    ];
+    if (walletUtxos.length === 0) {
+      return throwError(() => new Error('a satpoints batch needs a satpoint for every inscription'));
+    }
+    const [first] = walletUtxos;
+    const sameOwner = walletUtxos.every(u =>
+      hex.encode(u.scriptPubKey) === hex.encode(first.scriptPubKey)
+      && hex.encode(u.tapInternalKey) === hex.encode(first.tapInternalKey));
     if (!sameOwner) {
       return throwError(() => new Error(
-        'every parent must sit at the same ordinals address (the connected wallet signs them there)',
+        'every parent and satpoint UTXO must sit at the same ordinals address (the connected wallet signs them there)',
       ));
     }
+    const ordinalsAddress = btc.Address(toScureNetwork(args.network)).encode(btc.OutScript.decode(first.scriptPubKey));
     let built: CreateBatchChildInscribeTransactionsResult;
     try {
       built = createBatchChildInscribeTransactions(args);
@@ -364,11 +375,11 @@ function inscribeBatchWithParents(
         signer.signChildRevealParentInputs({
           psbtBytes: built.revealPsbtForWallet,
           finalizePsbtBytes: built.revealPsbt,
-          ordinalsAddress: first.returnAddress,
-          // Each parent is a Taproot key-path at the ordinals address; its
-          // internal key IS the ordinals x-only pubkey.
-          ordinalsPublicKey: hex.encode(first.utxo.tapInternalKey),
-          parentCount: args.parents.length,
+          ordinalsAddress,
+          // Each wallet input is a Taproot key-path at the ordinals address;
+          // its internal key IS the ordinals x-only pubkey.
+          ordinalsPublicKey: hex.encode(first.tapInternalKey),
+          walletInputCount: built.walletInputCount,
           network: args.network,
           broadcast: args.broadcast,
           promptForSignedPsbt: args.promptForSignedPsbt,

@@ -799,6 +799,14 @@ export async function getStockOrdOutput(outpoint: string): Promise<StockOrdOutpu
   return res.json() as Promise<StockOrdOutput>;
 }
 
+/** A fresh receive address of an ord-stock wallet (`ord wallet receive`). */
+export function ordStockWalletReceive(walletName: string): string {
+  const parsed = JSON.parse(ordStockWalletCli(walletName, 'receive')) as { addresses?: string[]; address?: string };
+  const address = parsed.address ?? parsed.addresses?.[0];
+  if (address === undefined) throw new Error(`unexpected ord wallet receive shape for ${walletName}`);
+  return address;
+}
+
 /** `ord wallet outputs` in the ord-stock container. */
 export function ordStockWalletOutputs(walletName: string): Array<{ output: string; amount: number; inscriptions?: string[] }> {
   return JSON.parse(ordStockWalletCli(walletName, 'outputs')) as Array<{ output: string; amount: number; inscriptions?: string[] }>;
@@ -1006,11 +1014,28 @@ export function ordStockWalletBatch(
 export async function fundOrdStockWallet(walletName: string, btc = '2.0'): Promise<string> {
   const addr = ordStockCreateWallet(walletName);
   const wantSats = Math.round(Number(btc) * 1e8);
+  await sendFromCleanFunderCoin({ [addr]: btc });
 
-  // Spend ONE coin that stock ord reports as carrying no inscription. The
-  // funder wallet also receives inscriptions from other specs, and if Core's
-  // coin selection spent one of those into this output, ord would see the
-  // funding as inscribed and refuse it as "no cardinal utxos".
+  const balance = JSON.parse(ordStockWalletCli(walletName, 'balance')) as { cardinal?: number };
+  if ((balance.cardinal ?? 0) < wantSats) {
+    throw new Error(
+      `fundOrdStockWallet: sent ${btc} BTC to ${walletName}, but ord reports ${JSON.stringify(balance)}`,
+    );
+  }
+  return addr;
+}
+
+/**
+ * Pay `outputs` (address -> BTC amount string) from ONE `ordpool-e2e` coin
+ * that stock ord reports as carrying no inscription, then mine a block and
+ * wait for electrs and stock ord. The funder wallet also receives
+ * inscriptions from other specs, and if Core's coin selection spent one of
+ * those, the recipients would get an inscribed sat: an ord wallet then sees
+ * its funding as ordinal and refuses it with "no cardinal utxos". Returns
+ * the transaction id; output i pays the i-th entry of `outputs`.
+ */
+export async function sendFromCleanFunderCoin(outputs: Record<string, string>): Promise<string> {
+  const wantSats = Object.values(outputs).reduce((sum, btc) => sum + Math.round(Number(btc) * 1e8), 0);
   await waitForOrdStockSync(Number(rpc('getblockcount')));
   const unspent = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent', '1')) as Array<{
     txid: string; vout: number; amount: number; spendable: boolean;
@@ -1026,23 +1051,17 @@ export async function fundOrdStockWallet(walletName: string, btc = '2.0'): Promi
     }
   }
   if (input === undefined) {
-    throw new Error(`fundOrdStockWallet: ordpool-e2e holds no confirmed inscription-free UTXO above ${btc} BTC`);
+    throw new Error(`sendFromCleanFunderCoin: ordpool-e2e holds no confirmed inscription-free UTXO above ${wantSats} sats`);
   }
-  rpc(
+  // change_position after the payments keeps output i = the i-th payment.
+  const sent = JSON.parse(rpc(
     '-rpcwallet=ordpool-e2e', 'send',
-    JSON.stringify([{ [addr]: btc }]), 'null', 'unset', 'null',
-    JSON.stringify({ inputs: [input], add_inputs: false }),
-  );
+    JSON.stringify(Object.entries(outputs).map(([address, btc]) => ({ [address]: btc }))), 'null', 'unset', 'null',
+    JSON.stringify({ inputs: [input], add_inputs: false, change_position: Object.keys(outputs).length }),
+  )) as { txid: string };
 
   const tip = mineBlocks(1);
   await waitForElectrsSync(tip);
   await waitForOrdStockSync(tip);
-
-  const balance = JSON.parse(ordStockWalletCli(walletName, 'balance')) as { cardinal?: number };
-  if ((balance.cardinal ?? 0) < wantSats) {
-    throw new Error(
-      `fundOrdStockWallet: sent ${btc} BTC to ${walletName}, but ord reports ${JSON.stringify(balance)}`,
-    );
-  }
-  return addr;
+  return sent.txid;
 }

@@ -456,6 +456,8 @@ interface InscribeAssembly {
   postageSats?: number;
   /** Batch reveal: the inscription outputs, replacing the recipient output. */
   inscriptionOutputs?: ReadonlyArray<{ address: string; value: number }>;
+  /** See `InscribeCommitArgs.commitPostageSats`. Default: the inscription outputs' sum. */
+  commitPostageSats?: number;
 }
 
 /** The funding inputs every inscribe builder takes. */
@@ -516,9 +518,9 @@ export function planInscribeCommit(
   const { envelope, ephemeralPubkeyXonly } = assembly;
   // The commit funds the sum of the inscription outputs; for a single
   // inscription that is its postage.
-  const postageSats = assembly.inscriptionOutputs !== undefined
+  const postageSats = assembly.commitPostageSats ?? (assembly.inscriptionOutputs !== undefined
     ? assembly.inscriptionOutputs.reduce((sum, o) => sum + o.value, 0)
-    : resolveInscribePostage(assembly.postageSats);
+    : resolveInscribePostage(assembly.postageSats));
 
   // Layer-2: convert raw UTXO into the funding-input shape the
   // commit helper expects. Real-mode (not simulation) so the
@@ -559,6 +561,7 @@ export function planInscribeCommit(
       ephemeralPubkeyXonly,
       changeDustLimitSats,
       satOffset: args.satOffset,
+      commitPostageSats: assembly.commitPostageSats,
       tip: args.tip,
       walletType: args.walletType,
       network: args.network,
@@ -596,6 +599,7 @@ export function planInscribeCommit(
     walletType: args.walletType,
     changeDustLimitSats,
     satOffset: args.satOffset,
+    commitPostageSats: assembly.commitPostageSats,
     network: args.network,
   });
 
@@ -616,6 +620,7 @@ export function planInscribeCommit(
     walletType: args.walletType,
     changeDustLimitSats,
     satOffset: args.satOffset,
+    commitPostageSats: assembly.commitPostageSats,
     network: args.network,
   });
   const commitTxidUnsigned = deriveUnsignedCommitTxid(
