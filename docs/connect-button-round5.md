@@ -106,3 +106,36 @@ compose:
 | round 4 §9 | is variation the POINT? | tagline varies by design, so local |
 | round 5 §2 | is variation the point? | connect strings must match, so shared |
 | round 5 §6 | is it the SAME ACT? | a wallet being connected TO is not a visitor connecting one, so separate words |
+
+## 7. Colours and weight MAY vary; the shape and the wiring may not
+
+The maintainer, asked whether cat21.space's filled white button should be
+quietened to match cubes' and ord.net's:
+
+> Die Farben dürfen variieren. Die eine Seite ist orange, der Rest dark. Da
+> darf es variieren.
+
+So the A/B is released. One site sits on orange and the rest on dark, and a
+treatment that works on one ground does not transfer: a grey ghost button is
+ord.net's look on near-black and is the 2.14:1 trap on `#FF9900`. Each site
+adapts to its own ground, as in round 4 §7, where "similar" meant structure
+rather than hex.
+
+**Do not re-coordinate this dimension.** cat21.space's filled block and cubes'
+quiet button are both correct, for the same reason their footers differ in
+colour while matching in structure.
+
+### What still does NOT vary
+
+- Wallet icon, then the bare verb `Connect`. Nothing else on the button.
+- Panel heading `Connect a wallet`.
+- All three strings from the SDK constants, never retyped.
+- `aria-label` = `CONNECT_BUTTON_ACCESSIBLE_NAME`, DISTINCT from the visible
+  label, with the icon `aria-hidden`.
+- Measured against its own ground. Text owes 4.5:1, the icon owes 3:1 as a
+  non-text element, and "quiet like ord.net" is a look rather than a licence
+  to go under the floor.
+
+The lesson worth keeping from the round-4 footer applies unchanged: share the
+structure, adapt the surface. What made the footer read as one family was the
+same shape in three palettes, not the same palette in three places.
