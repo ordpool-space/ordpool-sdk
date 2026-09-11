@@ -9,8 +9,12 @@ import { Network } from '../network';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper';
+import { loadBrotliWasm, type BrotliWasmSource } from './brotli-wasm-encoder';
+import type { InscribeSatSource } from './inscription-commit.helper';
 import { OrdEnvelopeField } from './inscription-envelope';
-import { SimulateInscribeFeesResult, simulateInscribeFees } from './inscription-fee.helper';
+import { SimulateInscribeFeesArgs, SimulateInscribeFeesResult, simulateInscribeFees } from './inscription-fee.helper';
+import type { InscriptionPropertiesInput } from './inscription-properties';
+import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from './inscription.service.helper';
 import { prepareInscribeFundingInput } from './inscription-input-adapter';
 import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orchestrator';
 
@@ -41,7 +45,8 @@ import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orc
  * connected wallet's ordinals address when unset.
  */
 export interface InscribeContent {
-  body: Uint8Array;
+  /** Body bytes. Omit for a delegate-only inscription (then `delegate` is required). */
+  body?: Uint8Array;
   contentType?: string;
   envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
   /** Optional reveal vout[1] tip. */
@@ -71,6 +76,28 @@ export interface InscribeContent {
   minimalTagPush?: boolean;
   /** Override for the inscription's recipient. Defaults to wallet.ordinalsAddress. */
   recipient?: string;
+  /** The inscription's title, ord's `--title`. */
+  title?: string;
+  /** Traits in order, a batchfile's `traits:`. */
+  traits?: InscriptionPropertiesInput['traits'];
+  /** Inscriptions this one is a gallery of, ord's `--gallery`. */
+  gallery?: InscriptionPropertiesInput['gallery'];
+  /** Compress title/traits/gallery as `--compress` does. Needs `deps.brotliWasm`. */
+  compressProperties?: boolean;
+  /** The inscription output's value, ord's `--postage`. Default 546. */
+  postageSats?: number;
+  /**
+   * Inscribe onto the sat at this offset in the funding UTXO (`--satpoint`).
+   * The UTXO holding the sat must be chosen with `setSelectedUtxo`; the
+   * automatic pick would put the inscription on another sat.
+   */
+  satOffset?: number;
+  /** Inscribe onto a sat in another UTXO, e.g. a rare sat at the ordinals address. */
+  satSource?: InscribeSatSource;
+  /** A second payment UTXO, for a chosen sat less than a dust limit into its UTXO. */
+  paddingUtxo?: TxnOutput;
+  /** The commit's own fee rate, ord's `--commit-fee-rate`. Default: the fee rate. */
+  commitFeeRatePerVbyte?: number;
 }
 
 /**
@@ -107,6 +134,11 @@ export interface InscribeOrchestratorDeps {
   /** Broadcast a signed tx hex; resolves to the txid. Called for commit AND reveal. */
   broadcast(signedTxHex: string): Promise<string>;
   network: Network;
+  /**
+   * The hosted `wasm/brotli_wasm_bg.wasm` (URL) or its bytes. Needed for
+   * `compressProperties`, which compresses inside the synchronous builder.
+   */
+  brotliWasm?: BrotliWasmSource;
 }
 
 /** Everything a consumer template needs, emitted on every state change. */
@@ -224,6 +256,10 @@ export class InscribeMintOrchestrator {
 
     if (!wallet) throw new Error('No wallet connected');
     if (!feeRate) throw new Error('No fee rate set');
+    if ((content?.satOffset ?? 0) !== 0 && this.snap.selectedUtxo === null) {
+      // The automatic pick would put the inscription on a sat of another coin.
+      throw new Error('Select the UTXO that holds the sat to inscribe onto (satOffset counts within it)');
+    }
     if (!selected) {
       throw new Error(
         rec.status === 'expert-required'
@@ -232,6 +268,7 @@ export class InscribeMintOrchestrator {
       );
     }
     if (!content) throw new Error('No inscription content set');
+    await this.ensureBrotli(content);
 
     this.patch({ state: 'minting', errorMessage: null, successResult: null });
     try {
@@ -258,6 +295,15 @@ export class InscribeMintOrchestrator {
           properties: content.properties,
           propertyEncoding: content.propertyEncoding,
           minimalTagPush: content.minimalTagPush,
+          title: content.title,
+          traits: content.traits,
+          gallery: content.gallery,
+          compressProperties: content.compressProperties,
+          postageSats: content.postageSats,
+          satOffset: content.satOffset,
+          satSource: content.satSource,
+          paddingUtxo: content.paddingUtxo,
+          commitFeeRatePerVbyte: content.commitFeeRatePerVbyte,
           network: this.deps.network,
           broadcast: (txHex: string) => from(this.deps.broadcast(txHex)),
           promptForSignedPsbt: promptForSignedPsbt
@@ -300,6 +346,19 @@ export class InscribeMintOrchestrator {
     }
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
     const recipient = content.recipient ?? wallet.ordinalsAddress;
+    // Content that cannot be inscribed (a malformed gallery id, a missing
+    // wasm for compressProperties, ...) is reported once, instead of every
+    // funding row turning up "insufficient" without a reason.
+    try {
+      await this.ensureBrotli(content);
+      synthesizeEnvelopeFields(content as unknown as CreateInscribeTransactionsArgs);
+    } catch (err) {
+      if (seq !== this.recomputeSeq) return;
+      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err) });
+      return;
+    }
+    if (seq !== this.recomputeSeq) return;
+    if (this.snap.errorMessage !== null && this.snap.state !== 'error') this.patch({ errorMessage: null });
 
     const simulations = this.utxos.map<InscribeUtxoSimulation>((utxo) => {
       try {
@@ -310,20 +369,7 @@ export class InscribeMintOrchestrator {
           isSimulation: true,
           network: this.deps.network,
         });
-        const simulation = simulateInscribeFees({
-          feeRatePerVbyte: feeRate,
-          body: content.body,
-          contentType: content.contentType,
-          envelopeFields: content.envelopeFields,
-          minimalTagPush: content.minimalTagPush,
-          fundingInput,
-          senderChangeAddress: wallet.paymentAddress,
-          recipientAddress: recipient,
-          ephemeralPubkeyXonly: DUMMY_PUBKEY_XONLY,
-          tip: content.tip,
-          walletType: wallet.type,
-          network: this.deps.network,
-        });
+        const simulation = simulateInscribeFees(this.simulationArgs(content, wallet, recipient, feeRate, fundingInput));
         // The UTXO must fund the whole commit (commitOutputValueSats +
         // commitFeeSats); simulateInscribeFees reports the requirement but
         // doesn't reject. Flag unusable rows so the picker greys them out.
@@ -345,20 +391,7 @@ export class InscribeMintOrchestrator {
         isSimulation: true,
         network: this.deps.network,
       });
-      target = simulateInscribeFees({
-        feeRatePerVbyte: feeRate,
-        body: content.body,
-        contentType: content.contentType,
-        envelopeFields: content.envelopeFields,
-        minimalTagPush: content.minimalTagPush,
-        fundingInput,
-        senderChangeAddress: wallet.paymentAddress,
-        recipientAddress: recipient,
-        ephemeralPubkeyXonly: DUMMY_PUBKEY_XONLY,
-        tip: content.tip,
-        walletType: wallet.type,
-        network: this.deps.network,
-      }).fundingRequirementSats;
+      target = simulateInscribeFees(this.simulationArgs(content, wallet, recipient, feeRate, fundingInput)).fundingRequirementSats;
     } catch {
       target = null;
     }
@@ -391,6 +424,59 @@ export class InscribeMintOrchestrator {
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
     this.patch({ simulations, fundingRecommendation });
+  }
+
+  /**
+   * The fee simulation for `content` funded by `fundingInput`: the same
+   * envelope fields and options the build will use (title, traits, gallery,
+   * parent, metadata, delegate, pointer, postage, sat targeting, commit fee
+   * rate), so the preview and the signed transaction agree.
+   */
+  private simulationArgs(
+    content: InscribeContent,
+    wallet: InscribeWalletContext,
+    recipient: string,
+    feeRate: number,
+    fundingInput: SimulateInscribeFeesArgs['fundingInput'],
+  ): SimulateInscribeFeesArgs {
+    const fields = [
+      ...synthesizeEnvelopeFields(content as unknown as CreateInscribeTransactionsArgs),
+      ...(content.envelopeFields ?? []),
+    ];
+    return {
+      feeRatePerVbyte: feeRate,
+      commitFeeRatePerVbyte: content.commitFeeRatePerVbyte,
+      postageSats: content.postageSats,
+      body: content.body,
+      contentType: content.contentType,
+      envelopeFields: fields,
+      minimalTagPush: content.minimalTagPush,
+      fundingInput,
+      senderChangeAddress: wallet.paymentAddress,
+      recipientAddress: recipient,
+      ephemeralPubkeyXonly: DUMMY_PUBKEY_XONLY,
+      tip: content.tip,
+      walletType: wallet.type,
+      satOffset: content.satOffset,
+      satSource: content.satSource,
+      paddingInput: content.paddingUtxo === undefined ? undefined : prepareInscribeFundingInput({
+        utxo: content.paddingUtxo,
+        paymentPublicKey: hex.decode(wallet.paymentPublicKey),
+        paymentAddress: wallet.paymentAddress,
+        isSimulation: true,
+        network: this.deps.network,
+      }),
+      network: this.deps.network,
+    };
+  }
+
+  /** Load the brotli wasm when the content compresses its properties. */
+  private async ensureBrotli(content: InscribeContent): Promise<void> {
+    if (!content.compressProperties) return;
+    if (this.deps.brotliWasm === undefined) {
+      throw new Error('compressProperties needs the brotli wasm: pass brotliWasm in the orchestrator deps');
+    }
+    await loadBrotliWasm(this.deps.brotliWasm);
   }
 
   private patch(next: Partial<InscribeSnapshot>): void {

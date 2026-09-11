@@ -15,9 +15,13 @@ it, and what a UI has to know about it.
 | Several inscriptions in one go (ord's batch) | `inscribeBatchAndBroadcast` | `createBatchInscribeTransactions`, `createBatchChildInscribeTransactions` |
 | The stateful UI flow (fee preview, UTXO picker, mint) | `InscribeMintOrchestrator` | |
 
-`InscribeMintOrchestrator` is what ordpool.space uses today. It does not yet
-carry the options below; extending it is the next piece of SDK work, shaped
-by what the inscribe screen needs.
+`InscribeMintOrchestrator` is what ordpool.space uses. Its `InscribeContent`
+carries the single-inscription options below (title, traits, gallery,
+compressProperties, postage, satOffset, satSource, paddingUtxo,
+commitFeeRatePerVbyte, and the existing parent, metadata, metaprotocol,
+delegate, pointer), and its fee preview prices exactly what the build signs.
+`compressProperties` needs `brotliWasm` in its deps. Batch and parents in
+the orchestrator follow, shaped by what the inscribe screen needs.
 
 ## Options on a single inscription
 

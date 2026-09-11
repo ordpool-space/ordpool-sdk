@@ -86,6 +86,33 @@ describe('InscribeMintOrchestrator — sign + broadcast (inscribeAndBroadcast mo
     expect(arg.body).toEqual(content.body);
   });
 
+  it('mint() hands every new option to the builder', async () => {
+    mockInscribeAndBroadcast.mockReturnValue(of(result));
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    const rich: InscribeContent = {
+      ...content,
+      title: 'My Piece',
+      traits: [['rank', 3]],
+      gallery: [`${'ab'.repeat(32)}i0`],
+      postageSats: 10_000,
+      commitFeeRatePerVbyte: 2,
+    };
+    o.setContent(rich);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
+    await o.mint();
+    const arg = mockInscribeAndBroadcast.mock.calls[0][0] as Record<string, unknown>;
+    expect(arg).toMatchObject({
+      title: 'My Piece',
+      traits: [['rank', 3]],
+      gallery: [`${'ab'.repeat(32)}i0`],
+      postageSats: 10_000,
+      commitFeeRatePerVbyte: 2,
+      feeRatePerVbyte: 10,
+    });
+  });
+
   it('mint() failure: inscribeAndBroadcast rejects -> state error', async () => {
     mockInscribeAndBroadcast.mockReturnValue(throwError(() => new Error('reveal broadcast failed')));
     const o = new InscribeMintOrchestrator(deps());

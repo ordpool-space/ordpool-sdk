@@ -172,3 +172,103 @@ describe('InscribeMintOrchestrator (framework-agnostic)', () => {
     expect(o.getSnapshot().state).toBe('error');
   });
 });
+
+describe('InscribeMintOrchestrator: the preview prices what the build signs', () => {
+  const previewFee = async (c: InscribeContent): Promise<number> => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent(c);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.simulations.length > 0 && x.simulations[0].simulation !== null);
+    return s.simulations[0].simulation!.revealFeeSats;
+  };
+
+  it('counts metadata, title and gallery in the reveal fee (the envelope fields the build writes)', async () => {
+    const plain = await previewFee(content);
+    const withMetadata = await previewFee({ ...content, metadata: new Uint8Array(200).fill(0xa0) });
+    const withTitle = await previewFee({ ...content, title: 'a long enough title to cost a few vbytes' });
+    const withGallery = await previewFee({ ...content, gallery: [`${'ab'.repeat(32)}i0`] });
+    expect(withMetadata).toBeGreaterThan(plain);
+    expect(withTitle).toBeGreaterThan(plain);
+    expect(withGallery).toBeGreaterThan(plain);
+  });
+
+  it('postage raises the funding requirement by exactly the extra postage', async () => {
+    const at = async (postageSats: number) => {
+      const o = new InscribeMintOrchestrator(deps());
+      await o.setWallet(wallet);
+      o.setContent({ ...content, postageSats });
+      o.setFeeRate(10);
+      const s = await waitFor(o, (x) => x.simulations.length > 0 && x.simulations[0].simulation !== null);
+      return s.simulations[0].simulation!;
+    };
+    const a = await at(546);
+    const b = await at(10_000);
+    expect(b.commitOutputValueSats - a.commitOutputValueSats).toBe(10_000 - 546);
+  });
+
+  it('reports content that cannot be inscribed once, instead of empty funding rows', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    o.setContent({ ...content, gallery: ['not-an-id'] });
+    const s = await waitFor(o, (x) => x.errorMessage !== null);
+    expect(s.errorMessage).toMatch(/Invalid inscription id "not-an-id"/);
+    expect(s.simulations).toEqual([]);
+  });
+
+  it('compressProperties without the brotli wasm says what is missing', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    o.setContent({ ...content, title: 't', compressProperties: true });
+    const s = await waitFor(o, (x) => x.errorMessage !== null);
+    expect(s.errorMessage).toBe('compressProperties needs the brotli wasm: pass brotliWasm in the orchestrator deps');
+  });
+
+  it('satOffset needs the UTXO holding the sat to be chosen explicitly', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent({ ...content, satOffset: 1_000 });
+    o.setFeeRate(10);
+    await expect(o.mint()).rejects.toThrow('Select the UTXO that holds the sat to inscribe onto');
+  });
+});
+
+describe('InscribeMintOrchestrator: preview equals the build', () => {
+  it('for rich content, the preview row\'s fees and commit output equal createInscribeTransactions for the same coin', async () => {
+    const { createInscribeTransactions } = await import('./inscription.service.helper');
+    const rich: InscribeContent = {
+      ...content,
+      title: 'My Piece',
+      traits: [['rank', 3], ['alpha', true]],
+      gallery: [`${'ab'.repeat(32)}i0`],
+      metadata: new Uint8Array(40).fill(0xa0),
+      metaprotocol: 'parity',
+      postageSats: 3_000,
+      commitFeeRatePerVbyte: 2,
+    };
+    const utxo = coin('c', 100_000);
+    const o = new InscribeMintOrchestrator(deps({ getUtxos: async () => [utxo] }));
+    await o.setWallet(wallet);
+    o.setContent(rich);
+    o.setFeeRate(7);
+    const s = await waitFor(o, (x) => x.simulations.length > 0 && x.simulations[0].simulation !== null);
+    const preview = s.simulations[0].simulation!;
+
+    const built = createInscribeTransactions({
+      ...rich,
+      body: rich.body!,
+      paymentOutput: utxo,
+      paymentPublicKey: hex.decode(PAYMENT_PUB),
+      paymentAddress: PAYMENT_ADDR,
+      recipientAddress: ORDINALS_ADDR,
+      feeRatePerVbyte: 7,
+      walletType: wallet.type,
+      network: Network.Mainnet,
+    });
+    expect(preview.revealVsize).toBe(built.fees.revealVsize);
+    expect(preview.revealFeeSats).toBe(built.fees.revealFeeSats);
+    expect(preview.commitOutputValueSats).toBe(built.fees.commitOutputValueSats);
+  });
+});
