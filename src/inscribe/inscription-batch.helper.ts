@@ -62,7 +62,7 @@ export interface BatchInscriptionEntry {
 export interface CreateBatchInscribeTransactionsArgs
   extends Pick<CreateInscribeTransactionsArgs,
     'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte'
-    | 'tip' | 'walletType' | 'minimalTagPush' | 'network'> {
+    | 'tip' | 'walletType' | 'minimalTagPush' | 'network' | 'satOffset'> {
   mode: BatchInscribeMode;
   /** The inscriptions, in order. At least one. */
   inscriptions: ReadonlyArray<BatchInscriptionEntry>;
@@ -144,6 +144,9 @@ function layOutBatch(
   }
   if (inscriptions.length === 0) {
     throw new Error('a batch must contain at least one inscription');
+  }
+  if ((args.satOffset ?? 0) !== 0 && mode !== 'same-sat') {
+    throw new Error('`satOffset` can only be set in `same-sat` mode, as ord allows `sat` / `satpoint` only there');
   }
   if (mode !== 'separate-outputs' && inscriptions.some(entry => entry.destination !== undefined)) {
     throw new Error(`individual inscription destinations cannot be set in \`${mode}\` mode`);
@@ -231,11 +234,11 @@ export function createBatchChildInscribeTransactions(
   const tipValueSats = args.tip?.value ?? 0;
   const totalPostage = layout.inscriptionOutputs.reduce((sum, o) => sum + o.value, 0);
   const childReveal = (
-    commit: { txid: string; outputScript: Uint8Array; taproot: InscribeCommitResult['taproot']; outputValueSats: number },
+    commit: { txid: string; vout: number; outputScript: Uint8Array; taproot: InscribeCommitResult['taproot']; outputValueSats: number },
     ephemeralPrivKey: Uint8Array,
   ) => buildChildInscribeRevealTx({
     commitTxid: commit.txid,
-    commitVout: 0,
+    commitVout: commit.vout,
     commitOutputValueSats: commit.outputValueSats,
     commitOutputScript: commit.outputScript,
     taproot: commit.taproot,
@@ -254,6 +257,7 @@ export function createBatchChildInscribeTransactions(
     // fee (the commit output covers only the children and the tip).
     measureRevealVsize: (commit) => childReveal({
       txid: '0'.repeat(64),
+      vout: 0,
       outputScript: commit.outputScript,
       taproot: commit.taproot,
       outputValueSats: totalPostage + tipValueSats,
@@ -262,6 +266,7 @@ export function createBatchChildInscribeTransactions(
 
   const reveal = childReveal({
     txid: plan.commitTxid,
+    vout: plan.commit.commitVout,
     outputScript: plan.commit.commitOutputScript,
     taproot: plan.commit.taproot,
     outputValueSats: plan.commit.commitOutputValueSats,

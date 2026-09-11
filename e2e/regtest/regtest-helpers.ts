@@ -742,6 +742,8 @@ export interface StockOrdInscription {
   charms?: string[];
   /** Current satpoint `<txid>:<vout>:<offset>`. */
   satpoint?: string;
+  /** The sat the inscription is on (ord runs with `--index-sats`). */
+  sat?: number | null;
 }
 
 /**
@@ -777,6 +779,29 @@ export async function getStockOrdOutputInscriptions(outpoint: string): Promise<s
   }
   const body = (await res.json()) as { inscriptions?: string[] };
   return body.inscriptions ?? [];
+}
+
+/** Stock ord's `/output/<outpoint>` JSON, the fields the specs read. */
+export interface StockOrdOutput {
+  value: number;
+  inscriptions: string[];
+  /** `[start, end)` sat ranges in output order (ord runs with `--index-sats`). */
+  sat_ranges: Array<[number, number]>;
+}
+
+export async function getStockOrdOutput(outpoint: string): Promise<StockOrdOutput> {
+  const res = await fetch(`${ORD_STOCK_URL}/output/${outpoint}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`stock ord /output/${outpoint} returned ${res.status}: ${await res.text()}`);
+  }
+  return res.json() as Promise<StockOrdOutput>;
+}
+
+/** `ord wallet outputs` in the ord-stock container. */
+export function ordStockWalletOutputs(walletName: string): Array<{ output: string; amount: number; inscriptions?: string[] }> {
+  return JSON.parse(ordStockWalletCli(walletName, 'outputs')) as Array<{ output: string; amount: number; inscriptions?: string[] }>;
 }
 
 /**

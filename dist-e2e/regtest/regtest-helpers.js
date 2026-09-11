@@ -38,6 +38,8 @@ exports.waitForOrdStockReady = waitForOrdStockReady;
 exports.waitForOrdStockSync = waitForOrdStockSync;
 exports.getStockOrdInscription = getStockOrdInscription;
 exports.getStockOrdOutputInscriptions = getStockOrdOutputInscriptions;
+exports.getStockOrdOutput = getStockOrdOutput;
+exports.ordStockWalletOutputs = ordStockWalletOutputs;
 exports.fundUninscribed = fundUninscribed;
 exports.getStockOrdContent = getStockOrdContent;
 exports.waitForOrdStockInscription = waitForOrdStockInscription;
@@ -593,6 +595,19 @@ async function getStockOrdOutputInscriptions(outpoint) {
     }
     const body = (await res.json());
     return body.inscriptions ?? [];
+}
+async function getStockOrdOutput(outpoint) {
+    const res = await fetch(`${ORD_STOCK_URL}/output/${outpoint}`, {
+        headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+        throw new Error(`stock ord /output/${outpoint} returned ${res.status}: ${await res.text()}`);
+    }
+    return res.json();
+}
+/** `ord wallet outputs` in the ord-stock container. */
+function ordStockWalletOutputs(walletName) {
+    return JSON.parse(ordStockWalletCli(walletName, 'outputs'));
 }
 /**
  * A fresh 1 BTC P2WPKH UTXO in the `ordpool-e2e` wallet whose first sat

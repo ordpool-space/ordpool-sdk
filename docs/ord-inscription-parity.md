@@ -57,11 +57,14 @@ ord takes several parents only in a batchfile (`wallet inscribe --parent`
 takes one). The SDK matches that: `parents` on the batch builders, spent and
 returned by the reveal, one `parent` tag per parent in every envelope.
 
-### 3.5 No sat / satpoint targeting
+### 3.5 Sat targeting from a UTXO other than the funding one
 
-Cannot say "inscribe onto this specific sat". ord can, and this is the rare-sat
-inscribing path, which is exactly the audience that cares about ordinals
-theory rather than JPEGs.
+`satOffset` inscribes onto any sat inside the funding UTXO (`--satpoint`,
+and `--sat` via `findSatOffset`), byte-compatible with ord's commit and
+confirmed by ord's sat index. Still missing: a sat that sits in a different
+UTXO than the funding, which is the usual rare-sat case (the sat is kept at
+the ordinals address). That needs a two-input commit and a signer method for
+it, and ord's top-up of a sub-dust padding output with extra inputs.
 
 ### 3.6 The UI exposes a subset of the SDK
 
@@ -98,7 +101,7 @@ number-shaped claim this workspace bans. The honest ordered path:
 
 1. **UI surfacing (§3.6)**: no SDK work, unlocks parent, gallery, title,
    metaprotocol, pointer and postage in the form.
-2. **Sat/satpoint targeting (§3.5)**: medium.
+2. **Sat targeting from a separate UTXO (§3.5)**: medium.
 3. **The `satpoints` batch mode (§3.2)**: the last thing standing between us
    and the word "parity".
 

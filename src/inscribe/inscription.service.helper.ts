@@ -276,6 +276,13 @@ export interface CreateInscribeTransactionsArgs {
    */
   title?: string;
   /**
+   * Inscribe onto the sat at this offset within `paymentOutput`, ord's
+   * `--satpoint <paymentOutput>:<offset>` (and `--sat`, once the sat's
+   * satpoint is looked up). The commit gets a padding output of `satOffset`
+   * sats in front; see `InscribeCommitArgs.satOffset`. Default 0.
+   */
+  satOffset?: number;
+  /**
    * Compress `gallery`/`title` the way ord's `--compress` does: the
    * brotli-compressed forms join the candidates and the smallest wins, with
    * tag 0x13 set to `br` when a compressed one does. Needs the brotli wasm
@@ -446,7 +453,8 @@ interface InscribeAssembly {
 
 /** The funding inputs every inscribe builder takes. */
 export type InscribeFundingArgs = Pick<CreateInscribeTransactionsArgs,
-  'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte' | 'tip' | 'walletType' | 'network'>;
+  'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte' | 'tip' | 'walletType' | 'network'
+  | 'satOffset'>;
 
 /** A commit ready to sign, with its fees and the txid the reveal spends. */
 export interface InscribeCommitPlan {
@@ -543,6 +551,7 @@ export function planInscribeCommit(
       recipientAddress: assembly.recipientAddress,
       ephemeralPubkeyXonly,
       changeDustLimitSats,
+      satOffset: args.satOffset,
       tip: args.tip,
       walletType: args.walletType,
       network: args.network,
@@ -579,6 +588,7 @@ export function planInscribeCommit(
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats,
+    satOffset: args.satOffset,
     network: args.network,
   });
 
@@ -598,6 +608,7 @@ export function planInscribeCommit(
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats,
+    satOffset: args.satOffset,
     network: args.network,
   });
   const commitTxidUnsigned = deriveUnsignedCommitTxid(
@@ -624,7 +635,7 @@ export function assembleInscribeTransactions(
 
   const reveal = buildInscribeRevealTx({
     commitTxid: commitTxidUnsigned,
-    commitVout: 0,
+    commitVout: commit.commitVout,
     postageSats,
     commitOutputValueSats: commit.commitOutputValueSats,
     commitOutputScript: commit.commitOutputScript,
@@ -751,6 +762,9 @@ export function createChildInscribeTransactions(
     if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
       throw new Error('tip.address must be a non-empty string');
     }
+  }
+  if (args.satOffset !== undefined && args.satOffset !== 0) {
+    throw new Error('satOffset is not supported for child inscriptions');
   }
   if (typeof args.parentInscriptionId !== 'string' || args.parentInscriptionId.length === 0) {
     throw new Error('parentInscriptionId must be a non-empty string');

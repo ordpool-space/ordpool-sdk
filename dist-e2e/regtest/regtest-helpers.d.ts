@@ -314,6 +314,8 @@ export interface StockOrdInscription {
     charms?: string[];
     /** Current satpoint `<txid>:<vout>:<offset>`. */
     satpoint?: string;
+    /** The sat the inscription is on (ord runs with `--index-sats`). */
+    sat?: number | null;
 }
 /**
  * Fetch an inscription record from stock ord. Throws on any non-2xx;
@@ -331,6 +333,20 @@ export declare function getStockOrdInscription(id: string): Promise<StockOrdInsc
  * must re-fund until this returns empty.
  */
 export declare function getStockOrdOutputInscriptions(outpoint: string): Promise<string[]>;
+/** Stock ord's `/output/<outpoint>` JSON, the fields the specs read. */
+export interface StockOrdOutput {
+    value: number;
+    inscriptions: string[];
+    /** `[start, end)` sat ranges in output order (ord runs with `--index-sats`). */
+    sat_ranges: Array<[number, number]>;
+}
+export declare function getStockOrdOutput(outpoint: string): Promise<StockOrdOutput>;
+/** `ord wallet outputs` in the ord-stock container. */
+export declare function ordStockWalletOutputs(walletName: string): Array<{
+    output: string;
+    amount: number;
+    inscriptions?: string[];
+}>;
 /**
  * A fresh 1 BTC P2WPKH UTXO in the `ordpool-e2e` wallet whose first sat
  * carries no inscription, for building SDK inscriptions that stock ord must

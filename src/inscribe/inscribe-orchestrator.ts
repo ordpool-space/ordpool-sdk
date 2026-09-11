@@ -128,6 +128,11 @@ export interface InscribeAndBroadcastArgs {
   /** Title, ord's `--title`. Mutually exclusive with raw `properties`. */
   title?: string;
   /**
+   * Inscribe onto the sat at this offset within `paymentOutput`, ord's
+   * `--satpoint` (see `CreateInscribeTransactionsArgs.satOffset`).
+   */
+  satOffset?: number;
+  /**
    * Compress `gallery`/`title` as ord's `--compress` does (see
    * `CreateInscribeTransactionsArgs.compressProperties`). Load the brotli
    * wasm first; `compressLikeOrd` on the body does that.
@@ -201,6 +206,7 @@ export function inscribeAndBroadcast(
         rune: args.rune,
         properties: args.properties,
         postageSats: args.postageSats,
+        satOffset: args.satOffset,
         gallery: args.gallery,
         title: args.title,
         compressProperties: args.compressProperties,

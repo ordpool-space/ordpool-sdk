@@ -24,7 +24,8 @@ bytes; see the spec for exactly what is compared.
 | SDK batches on chain | every mode broadcast; stock ord indexes each inscription at the satpoint the SDK reports, with its content | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | Batch with parents, several parents (§4) | proven: a two-parent batch matches ord in tapscript, reveal outputs, reveal vsize, commit output and locations; an SDK batch spending two parents broadcasts, and stock ord links every child to both parents and returns both | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | `--destination` | supported, not yet driven against ord | |
-| Sat / satpoint targeting (§5) | open | |
+| `--satpoint`, `--sat` (§5) for a sat inside the funding UTXO | proven: padding output and commit output match ord at offsets 1 000 and 50 000, and stock ord's sat index puts the SDK inscription on exactly the requested sat; `findSatOffset` turns a sat number into the offset | `e2e/regtest/inscribe-satpoint-parity.spec.ts` |
+| Sat in a separate UTXO (e.g. a rare sat at the ordinals address), sub-dust padding | open: needs a two-input commit and its signer method; ord tops up sub-dust padding with extra inputs | |
 | Batch `satpoints` (§6c) | open, needs §5 | |
 
 **Default postage stays 546.** It is cheaper, and it is the common
@@ -75,7 +76,7 @@ alias so nothing breaks). Tag `0x03` repeats; ord's batchfile takes a list.
 Done when: a two-parent inscription is byte-identical to ord's, proven on
 regtest, and cat21.space's child-mint flow still passes.
 
-## 5. Sat and satpoint targeting
+## 5. Sat and satpoint targeting (done for a sat in the funding UTXO)
 
 Inscribe onto a chosen sat or satpoint rather than wherever coin selection
 lands. This is the rare-sat audience, the people who care about ordinal theory

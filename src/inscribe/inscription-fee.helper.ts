@@ -106,6 +106,8 @@ export interface SimulateInscribeFeesArgs {
   walletType?: KnownOrdinalWalletType;
   /** Per-address-type dust limit for the commit change. */
   changeDustLimitSats?: number;
+  /** See `InscribeCommitArgs.satOffset`: the padding output is part of the commit being measured. */
+  satOffset?: number;
   network: Network;
 }
 
@@ -180,6 +182,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats: args.changeDustLimitSats,
+    satOffset: args.satOffset,
     network: args.network,
   });
   const tipValueSats = args.tip?.value ?? 0;
@@ -218,7 +221,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   // forms (with-change / no-change) from real builds — no vB seed — and a coin
   // that only fits the no-change/absorb form is not falsely rejected.
   const commitOutputValueSats = postageSats + revealFeeSats + tipValueSats;
-  const commitFeeBudget = args.fundingInput.value - commitOutputValueSats;
+  const commitFeeBudget = args.fundingInput.value - (args.satOffset ?? 0) - commitOutputValueSats;
   const resolvedCommit = resolveCatTxFee({
     feeRatePerVbyte: args.feeRatePerVbyte,
     feeBudgetSats: commitFeeBudget,
@@ -234,6 +237,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         tipValueSats: args.tip?.value,
         walletType: args.walletType,
         changeDustLimitSats: args.changeDustLimitSats,
+        satOffset: args.satOffset,
         network: args.network,
       });
       // Dummy-sign the funding input + finalize to read the real vsize. DEFAULT
@@ -261,7 +265,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     revealVsize,
     combinedVsize: commitVsize + revealVsize,
     commitOutputValueSats,
-    fundingRequirementSats: commitOutputValueSats + commitFeeSats,
+    fundingRequirementSats: (args.satOffset ?? 0) + commitOutputValueSats + commitFeeSats,
   };
 }
 

@@ -1,5 +1,7 @@
 import * as btc from '@scure/btc-signer';
 
+import { getMinimumUtxoSize } from '../cat21-script/address-format';
+
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
@@ -145,6 +147,17 @@ export interface InscribeCommitArgs {
   walletType?: KnownOrdinalWalletType;
   /** Per-address-type change dust limit; below this the change is absorbed into the fee. */
   changeDustLimitSats?: number;
+  /**
+   * Inscribe onto the sat at this offset within the funding input, ord's
+   * `--satpoint <funding outpoint>:<offset>`. As ord does
+   * (transaction_builder.rs, `align_outgoing`), a padding output of exactly
+   * `satOffset` sats goes first, to `senderChangeAddress`, so the chosen
+   * sat is the first sat of the commit output, which then sits at vout 1.
+   * The padding must clear that address's dust limit; ord would top it up
+   * with further inputs, which this one-input commit does not take.
+   * Default 0: the funding input's first sat, no padding output.
+   */
+  satOffset?: number;
   network: Network;
 }
 
@@ -162,6 +175,8 @@ export interface InscribeCommitResult {
    * miner fee in a single P2TR commit.
    */
   commitOutputValueSats: number;
+  /** Index of the commit output: 0, or 1 behind a `satOffset` padding output. */
+  commitVout: number;
   /** Taptree metadata the reveal builder needs to construct its spending witness. */
   taproot: {
     /** Taproot internal key actually written to the output (the ephemeral pubkey). */
@@ -173,7 +188,7 @@ export interface InscribeCommitResult {
      */
     tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
   };
-  /** Change amount on output 1; 0 when sub-dust (absorbed into the fee). */
+  /** Change amount, after the commit output; 0 when sub-dust (absorbed into the fee). */
   changeSats: number;
 }
 
@@ -266,19 +281,40 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   }
   tx.addInput(inputBase);
 
-  // Output 0: commit P2TR. The reveal will spend this.
+  // Padding output: the sats in front of the chosen sat, so it becomes the
+  // first sat of the commit output (ord's align_outgoing).
+  const satOffset = args.satOffset ?? 0;
+  if (!Number.isInteger(satOffset) || satOffset < 0) {
+    throw new Error(`satOffset must be a non-negative integer; got ${satOffset}`);
+  }
+  if (satOffset >= args.fundingInput.value) {
+    throw new Error(`satOffset ${satOffset} is outside the ${args.fundingInput.value}-sat funding input`);
+  }
+  if (satOffset > 0) {
+    const paddingDust = getMinimumUtxoSize(args.senderChangeAddress);
+    if (satOffset < paddingDust) {
+      throw new Error(
+        `satOffset ${satOffset} would make a padding output below the ${paddingDust}-sat dust limit ` +
+        `of ${args.senderChangeAddress}; ord pads it with another input, which this commit does not take`,
+      );
+    }
+    tx.addOutputAddress(args.senderChangeAddress, BigInt(satOffset), scureNetwork);
+  }
+  const commitVout = satOffset > 0 ? 1 : 0;
+
+  // The commit P2TR output. The reveal will spend this.
   tx.addOutput({
     script: commitP2tr.script,
     amount: BigInt(commitOutputValueSats),
   });
 
-  // Output 1: change to the user, when above dust.
+  // Change to the user, after the commit output, when above dust.
   const changeDustLimit = args.changeDustLimitSats ?? postageSats;
   const calculatedChange =
-    args.fundingInput.value - commitOutputValueSats - args.commitFeeSats;
+    args.fundingInput.value - satOffset - commitOutputValueSats - args.commitFeeSats;
   if (calculatedChange < 0) {
     throw new Error(
-      `Funding insufficient: input=${args.fundingInput.value}, ` +
+      `Funding insufficient: input=${args.fundingInput.value}, padding=${satOffset}, ` +
       `commitOutput=${commitOutputValueSats}, commitFee=${args.commitFeeSats}`
     );
   }
@@ -293,8 +329,8 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   if (tx.outputsLength === 0) {
     throw new Error('Internal error: commit must have at least one output');
   }
-  if (tx.getOutput(0).amount !== BigInt(commitOutputValueSats)) {
-    throw new Error('Internal error: commit output 0 amount drifted');
+  if (tx.getOutput(commitVout).amount !== BigInt(commitOutputValueSats)) {
+    throw new Error(`Internal error: commit output ${commitVout} amount drifted`);
   }
   assertCat21LockTime(tx.lockTime);
   if (tx.getInput(0).sequence !== sequence) {
@@ -308,6 +344,7 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
     commitAddress,
     commitOutputScript: commitP2tr.script,
     commitOutputValueSats,
+    commitVout,
     taproot: {
       internalKey: args.ephemeralPubkeyXonly,
       tapLeafScript: commitP2tr.tapLeafScript,
