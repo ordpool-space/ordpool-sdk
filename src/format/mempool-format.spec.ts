@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   formatBitcoinAmount,
   formatSats,
+  formatSatsWithUsd,
   groupAddressForVerification,
   addressVerificationChunks,
   shortenId,
@@ -77,6 +78,39 @@ describe('formatSats', () => {
   it('handles bigint and negatives', () => {
     expect(formatSats(1234567n)).toBe('1 234 567');
     expect(formatSats(-1234567)).toBe('-1 234 567');
+  });
+});
+
+describe('formatSatsWithUsd', () => {
+  it('appends the current-USD equivalent for a real amount', () => {
+    // 3000 sat = 0.00003 BTC; at $65 000/BTC that is exactly $1.95.
+    expect(formatSatsWithUsd(3000, 65000)).toBe('3 000 sat (~$1.95)');
+  });
+
+  it('drops the USD suffix entirely when there is no live price', () => {
+    // null = regtest / failed fetch / cold-start sentinel. The sat count is
+    // still honest, so it stands alone rather than showing a fake $0.
+    expect(formatSatsWithUsd(3000, null)).toBe('3 000 sat');
+  });
+
+  it('shows a real $0.00 for zero sats, not the sub-cent bucket', () => {
+    expect(formatSatsWithUsd(0, 65000)).toBe('0 sat ($0.00)');
+  });
+
+  it('uses the <$0.01 bucket only for a positive value under a cent', () => {
+    // 10 sat = 1e-7 BTC; at $65 000 that is $0.0065, under a cent.
+    expect(formatSatsWithUsd(10, 65000)).toBe('10 sat (<$0.01)');
+    // 16 sat = $0.0104 — over a cent, so it rounds into the ~$ bucket.
+    expect(formatSatsWithUsd(16, 65000)).toBe('16 sat (~$0.01)');
+  });
+
+  it('groups the dollar figure in thousands', () => {
+    // 1 BTC at $100 000 -> $100,000.00, comma-grouped (en-US), sat still space-grouped.
+    expect(formatSatsWithUsd(100_000_000, 100_000)).toBe('100 000 000 sat (~$100,000.00)');
+  });
+
+  it('accepts bigint sats identically to number', () => {
+    expect(formatSatsWithUsd(3000n, 65000)).toBe(formatSatsWithUsd(3000, 65000));
   });
 });
 

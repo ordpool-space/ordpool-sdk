@@ -64,6 +64,45 @@ export function formatSats(sats: number | bigint): string {
 }
 
 /**
+ * A sat amount with an optional CURRENT-USD equivalent appended: the readout
+ * the ordpool family shows wherever a sat value is a real amount someone is
+ * deciding on (a mint cost, an ask, a bid). The sat count is the stable
+ * anchor; the USD figure floats with the live BTC price, exactly as
+ * mempool/ordpool present fiat.
+ *
+ *   formatSatsWithUsd(3000, 65000)  ->  "3 000 sat (~$1.95)"
+ *   formatSatsWithUsd(0, 65000)     ->  "0 sat ($0.00)"
+ *   formatSatsWithUsd(10, 65000)    ->  "10 sat (<$0.01)"
+ *   formatSatsWithUsd(3000, null)   ->  "3 000 sat"
+ *
+ * `usdPerBtc == null` (no live price: regtest, a failed fetch, or the
+ * backend's cold-start sentinel) drops the USD suffix entirely rather than
+ * show a stale or zero dollar figure. The sat count alone is always honest,
+ * so the caller passes `null` and the number stands on its own.
+ *
+ * The sat count is grouped by {@link formatSats} so it matches every other
+ * sat readout in the family; the ` sat` unit and the USD suffix are display
+ * concerns and live here. Zero renders as a real `$0.00`; only `0 < value <
+ * 0.01` becomes `<$0.01`, the "less than a cent" bucket that would otherwise
+ * round to `$0.00` and mislead.
+ */
+export function formatSatsWithUsd(sats: number | bigint, usdPerBtc: number | null): string {
+  const satStr = `${formatSats(sats)} sat`;
+  if (usdPerBtc == null) return satStr;
+
+  const dollarValue = (Number(sats) / 1e8) * usdPerBtc;
+  let dollarStr: string;
+  if (dollarValue === 0) {
+    dollarStr = '$0.00';
+  } else if (dollarValue > 0 && dollarValue < 0.01) {
+    dollarStr = '<$0.01';
+  } else {
+    dollarStr = `~$${dollarValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+  return `${satStr} (${dollarStr})`;
+}
+
+/**
  * Shorten a txid, address or inscription id for display, matching mempool's
  * `shortenString` pipe: half the budget from each end, an ellipsis between.
  *
