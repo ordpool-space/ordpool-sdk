@@ -6,28 +6,47 @@ import {
   CAT21_WALLET_POSITIONING,
   ORDPOOL_FAMILY,
   ORDPOOL_FAMILY_HEADING,
-  ORDPOOL_FAMILY_LEDE,
+  ordpoolFamilyLede,
+  CAT21_LORE_POINTER,
   ordpoolFamilyMember,
 } from './ordpool-family';
 
-describe('ORDPOOL_FAMILY_LEDE', () => {
-  it('opens with the mission line, which is what makes it bold', () => {
-    expect(ORDPOOL_FAMILY_LEDE).toContain(
+describe('ordpoolFamilyLede', () => {
+  it(`names what THIS site renders, in the maintainer's words`, () => {
+    expect(ordpoolFamilyLede('ordpool')).toBe(
       'Sometimes Bitcoin is hard money. Sometimes Bitcoin is a JPEG.',
+    );
+    expect(ordpoolFamilyLede('cat21')).toBe(
+      'Sometimes Bitcoin is hard money. Sometimes Bitcoin is a pixelated cat.',
+    );
+    expect(ordpoolFamilyLede('cubes')).toBe(
+      'Sometimes Bitcoin is hard money. Sometimes Bitcoin is an artsy rotating cube.',
     );
   });
 
-  it('makes the SAME promise as the single-address note, word for word', () => {
-    // The footer and the note are two places a reader meets the same claim.
-    // If these drift, the family advertises a property its own warning
-    // describes differently, which reads worse than either saying nothing.
-    //
-    // Asserted through the shared constant rather than two hand-typed
-    // strings: a version of this test with the wording written out twice
-    // passed while the two sentences actually differed.
-    expect(ORDPOOL_FAMILY_LEDE).toContain(COIN_CHECK_PROMISE);
+  it('keeps the mission half identical everywhere, varying only the tail', () => {
+    const MISSION = 'Sometimes Bitcoin is hard money. ';
+    const tails = (['ordpool', 'cat21', 'cubes'] as const).map(
+      s => ordpoolFamilyLede(s).slice(MISSION.length),
+    );
+    for (const s of ['ordpool', 'cat21', 'cubes'] as const) {
+      expect(ordpoolFamilyLede(s).startsWith(MISSION)).toBe(true);
+    }
+    expect(new Set(tails).size).toBe(3);
+  });
+
+  it('carries NO safety claim, because a footer is not the place for one', () => {
+    // Removed deliberately: it frightened every reader to warn the few who
+    // needed it. The claim lives in singleAddressCaveat, at the action.
+    for (const s of ['ordpool', 'cat21', 'cubes'] as const) {
+      expect(ordpoolFamilyLede(s)).not.toContain(COIN_CHECK_PROMISE);
+      // NOT a bare 'coin' check: 'Bitcoin' contains it, which is how the
+      // first version of this assertion failed on correct copy.
+      expect(ordpoolFamilyLede(s).toLowerCase()).not.toContain('spends it');
+      expect(ordpoolFamilyLede(s).toLowerCase()).not.toContain('carrying');
+    }
+    // ...and it is still there, where it belongs.
     expect(singleAddressCaveat()).toContain(COIN_CHECK_PROMISE);
-    expect(singleAddressCaveat('cubes')).toContain(COIN_CHECK_PROMISE);
   });
 
   it('capitalises the project as a proper noun in the heading', () => {
@@ -35,8 +54,8 @@ describe('ORDPOOL_FAMILY_LEDE', () => {
     expect(ORDPOOL_FAMILY_HEADING).not.toContain('ordpool');
   });
 
-  it('names no count, so a fifth member does not falsify it', () => {
-    expect(ORDPOOL_FAMILY_LEDE).not.toMatch(/\b(two|three|four|five|\d+)\b/i);
+  it('points the wallet at the lore, since it has no footer to carry a lede', () => {
+    expect(CAT21_LORE_POINTER).toBe('See cat21.space for the whole cat lore.');
   });
 });
 

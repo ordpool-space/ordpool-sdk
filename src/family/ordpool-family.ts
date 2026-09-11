@@ -12,22 +12,43 @@
  * a title.
  */
 
-import { COIN_CHECK_PROMISE } from './coin-check-promise';
-
 /** What the family block calls itself. */
 export const ORDPOOL_FAMILY_HEADING = 'The Ordpool family';
 
 /**
+ * Which sites render the family footer. The wallet is absent on purpose: an
+ * extension has no page bottom, so it has no lede to render.
+ */
+export type FamilyFooterSite = 'ordpool' | 'cat21' | 'cubes';
+
+/**
  * The sentence under the heading, before the members.
  *
- * The first half is the project's own mission line. The second half is the
- * reason to stay inside the family rather than a list of places to go, and it
- * is deliberately the same promise {@link singleAddressCaveat} makes, so a
- * reader who meets both hears one story instead of two.
+ * Both halves are the maintainer's. The first is the project's mission line
+ * and is the same everywhere; the second names what THIS site renders, so a
+ * reader meets the family through the thing they are already looking at.
+ *
+ * It deliberately carries no safety claim. A footer introduces the family; the
+ * warning about what a coin is carrying belongs at the action, in
+ * {@link singleAddressCaveat}, where it reaches someone who can act on it
+ * instead of greeting everyone with a caution they did not ask for.
  */
-export const ORDPOOL_FAMILY_LEDE =
-  'Sometimes Bitcoin is hard money. Sometimes Bitcoin is a JPEG. We render both, '
-  + `and everything here ${COIN_CHECK_PROMISE}.`;
+export function ordpoolFamilyLede(site: FamilyFooterSite): string {
+  return `Sometimes Bitcoin is hard money. Sometimes Bitcoin is ${FAMILY_LEDE_TAIL[site]}.`;
+}
+
+const FAMILY_LEDE_TAIL: Record<FamilyFooterSite, string> = {
+  ordpool: 'a JPEG',
+  cat21: 'a pixelated cat',
+  cubes: 'an artsy rotating cube',
+};
+
+/**
+ * What Cat21 Wallet adds to its own copy, having no footer to put a lede in.
+ *
+ * The wallet says what it is; this says where the rest of the story lives.
+ */
+export const CAT21_LORE_POINTER = 'See cat21.space for the whole cat lore.';
 
 /** One member of the family, as a footer or a link list renders it. */
 export interface OrdpoolFamilyMember {

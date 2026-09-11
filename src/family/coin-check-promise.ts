@@ -2,14 +2,13 @@
  * The one clause that says what the ordpool family does for a coin before
  * spending it.
  *
- * It appears in two places a reader can meet in one session: the family
- * footer's opening line, and the single-address note beside a mint. Those are
- * the same promise, so they are the same string. Two hand-written versions
- * would let the footer advertise a property the warning describes
- * differently, which reads worse than either saying nothing.
+ * Used by {@link singleAddressCaveat} only. The family footer's lede used to
+ * carry it too, which is why this is a standalone constant, and no longer
+ * does: a footer introduces the family, and opening it with a caution about
+ * coins being spent frightens everyone to warn the few who need it. The
+ * warning belongs at the action, where the person can act on it.
  *
- * Deliberately a fragment, not a sentence: each caller supplies its own
- * subject ("everything here", "everything in the ordpool family"), because
- * the sentence around it differs while the claim does not.
+ * Deliberately a fragment, not a sentence, so a caller supplies its own
+ * subject ("everything in the ordpool family").
  */
 export const COIN_CHECK_PROMISE = 'checks what a coin is carrying before it spends it';
