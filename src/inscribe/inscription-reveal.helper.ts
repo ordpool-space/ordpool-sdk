@@ -5,6 +5,7 @@ import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lo
 import { Network, toScureNetwork } from '../network';
 
 import { resolveInscribePostage } from './inscription-commit.helper';
+import { failInscribe } from './inscribe-errors';
 
 /**
  * Layer-1 builder for the **reveal** transaction.
@@ -272,8 +273,11 @@ export const MAX_STANDARD_TX_WEIGHT = 400_000;
 /** ord's refusal of a non-standard reveal, with its message. */
 export function assertRevealWithinStandardWeight(revealWeight: number, noLimit: boolean | undefined): void {
   if (!noLimit && revealWeight > MAX_STANDARD_TX_WEIGHT) {
-    throw new Error(
+    failInscribe(
+      'reveal-too-heavy',
       `reveal transaction weight greater than ${MAX_STANDARD_TX_WEIGHT} (MAX_STANDARD_TX_WEIGHT): ${revealWeight}`,
+      'This inscription is too large for Bitcoin nodes to pass on (over 400,000 weight units). Use a smaller file, or compress it.',
+      { revealWeight, limit: MAX_STANDARD_TX_WEIGHT },
     );
   }
 }

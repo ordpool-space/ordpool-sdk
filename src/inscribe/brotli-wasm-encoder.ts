@@ -23,6 +23,8 @@
  * Where the brotli wasm is loaded from: a URL string (browser, hosted by the
  * consumer app) or the raw bytes / a `Response` (Node, tests).
  */
+import { failInscribe } from './inscribe-errors';
+
 export type BrotliWasmSource = string | BufferSource | Response;
 
 /** brotli's encoder modes, which ord picks per content type. */
@@ -169,7 +171,9 @@ export function compressBrotliSync(bytes: Uint8Array, mode: BrotliMode = 'generi
   }
   const wasm = exportsReady;
   if (wasm === undefined) {
-    throw new Error('compressBrotli: the brotli wasm is not loaded; await loadBrotliWasm(source) first');
+    failInscribe('brotli-wasm-missing',
+      'compressBrotli: the brotli wasm is not loaded; await loadBrotliWasm(source) first',
+      'Compression is not ready yet; try again in a moment.');
   }
   const ptr = wasm.alloc(bytes.length);
   try {

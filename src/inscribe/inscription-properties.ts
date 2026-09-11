@@ -1,6 +1,7 @@
 import { compressBrotliSync } from './brotli-wasm-encoder';
 import { CborOrderedMap, encodeCborDeterministic } from './inscription-cbor';
 import { encodeInscriptionId } from './inscription-envelope';
+import { failInscribe } from './inscribe-errors';
 
 /**
  * Typed inputs for ord's `properties` field (envelope tag `0x11`): the
@@ -60,14 +61,31 @@ function traitEntries(traits: TraitsInput | undefined): Array<[string, TraitValu
     : (traits as ReadonlyArray<readonly [string, TraitValue]>).map(([k, v]) => [k, v]);
   const names = new Set<string>();
   for (const [name, value] of entries) {
-    if (names.has(name)) throw new Error(`duplicate trait: ${name}`);
+    if (names.has(name)) {
+      failInscribe(
+        'duplicate-trait',
+        `duplicate trait: ${name}`,
+        `The trait "${name}" is listed twice. ord keeps only one value per trait name, and refuses the whole properties field when a name repeats.`,
+        { name },
+      );
+    }
     names.add(name);
     const integer = typeof value === 'bigint' ? value : typeof value === 'number' ? value : undefined;
     if (typeof value === 'number' && !Number.isSafeInteger(value)) {
-      throw new Error(`trait ${name}: ${value} is not an integer; ord's traits take bools, integers, null and strings`);
+      failInscribe(
+        'invalid-trait-value',
+        `trait ${name}: ${value} is not an integer; ord's traits take bools, integers, null and strings`,
+        `The trait "${name}" has the value ${value}. A trait can be a whole number, true or false, a text, or empty.`,
+        { name, value },
+      );
     }
     if (integer !== undefined && (BigInt(integer) < I64_MIN || BigInt(integer) > I64_MAX)) {
-      throw new Error(`trait ${name}: ${integer} is outside i64`);
+      failInscribe(
+        'invalid-trait-value',
+        `trait ${name}: ${integer} is outside i64`,
+        `The number in the trait "${name}" is too large; whole numbers go up to about 9.2 quintillion.`,
+        { name, value: integer },
+      );
     }
   }
   return entries;
@@ -171,12 +189,22 @@ export interface EncodedInscriptionProperties {
 function compressProperties(cbor: Uint8Array): Uint8Array | undefined {
   const len = cbor.length;
   if (len > MAX_COMPRESSED_PROPERTIES_SIZE) {
-    throw new Error(`properties size of ${len} bytes exceeds ${MAX_COMPRESSED_PROPERTIES_SIZE} byte limit`);
+    failInscribe(
+      'properties-too-large',
+      `properties size of ${len} bytes exceeds ${MAX_COMPRESSED_PROPERTIES_SIZE} byte limit`,
+      `The gallery, title and traits are too large to compress (${len} bytes; the limit is ${MAX_COMPRESSED_PROPERTIES_SIZE}).`,
+      { sizeBytes: len, limitBytes: MAX_COMPRESSED_PROPERTIES_SIZE },
+    );
   }
   const compressed = compressBrotliSync(cbor, 'generic');
   if (compressed.length >= len) return undefined;
   if (Math.floor(len / compressed.length) > MAX_PROPERTIES_COMPRESSION_RATIO) {
-    throw new Error(`property compression over ${MAX_PROPERTIES_COMPRESSION_RATIO}:1`);
+    failInscribe(
+      'property-compression-ratio',
+      `property compression over ${MAX_PROPERTIES_COMPRESSION_RATIO}:1`,
+      `These properties compress more than ${MAX_PROPERTIES_COMPRESSION_RATIO} times, which ord refuses. Turn compression off for them, or use fewer repeated values.`,
+      { maxRatio: MAX_PROPERTIES_COMPRESSION_RATIO },
+    );
   }
   return compressed;
 }

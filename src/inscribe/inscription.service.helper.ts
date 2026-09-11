@@ -46,6 +46,7 @@ import {
   type ChildRevealParent,
 } from './inscription-child-reveal.helper';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper';
+import { failInscribe } from './inscribe-errors';
 
 /**
  * Layer-4 orchestration entry: ties the envelope encoder + per-
@@ -462,7 +463,9 @@ export function createInscribeTransactions(
   args: CreateInscribeTransactionsArgs,
 ): CreateInscribeTransactionsResult {
   if (args.body === undefined && args.delegate === undefined) {
-    throw new Error('an inscription needs a body or a delegate (ord: --file or --delegate)');
+    failInscribe('body-or-delegate-required',
+      'an inscription needs a body or a delegate (ord: --file or --delegate)',
+      'Choose a file to inscribe, or an inscription to delegate to.');
   }
   const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
   const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
@@ -552,11 +555,12 @@ export function planInscribeCommit(
   // txid, locking the postage. Consumers should gate the UI with
   // `isInscribeSupportedPaymentAddress` so this throw is unreachable.
   if (!isInscribeSupportedPaymentAddress(args.paymentAddress)) {
-    throw new Error(
+    failInscribe('unsupported-payment-address',
       `Legacy P2PKH payment addresses are not supported for inscribing ` +
       `(would lock the postage; see isInscribeSupportedPaymentAddress). ` +
       `Switch the wallet to Native SegWit or Taproot and retry.`,
-    );
+      'This wallet pays from a legacy address, which cannot be used to inscribe. Switch it to Native SegWit or Taproot.',
+      { paymentAddress: args.paymentAddress });
   }
   if (args.tip !== undefined) {
     if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
@@ -634,7 +638,9 @@ export function planInscribeCommit(
     // the orchestrator's typed message so consumers can branch on it
     // (same translation pattern cat21's createTransaction uses).
     if (err instanceof Error && /Funding insufficient/.test(err.message)) {
-      throw new Error('Insufficient funds for inscribe');
+      failInscribe('insufficient-funds', 'Insufficient funds for inscribe',
+        `This coin (${args.paymentOutput.value} sats) does not cover the inscription and its fees.`,
+        { availableSats: args.paymentOutput.value });
     }
     throw err;
   }
@@ -654,11 +660,13 @@ export function planInscribeCommit(
   }
 
   if (args.paymentOutput.value < fees.fundingRequirementSats) {
-    throw new Error(
+    failInscribe('insufficient-funds',
       `Insufficient funds for inscribe: funding UTXO has ${args.paymentOutput.value} ` +
       `sats, need ${fees.fundingRequirementSats} ` +
       `(commit fee ${fees.commitFeeSats} + commit output value ` +
-      `${fees.commitOutputValueSats})`
+      `${fees.commitOutputValueSats})`,
+      `This coin holds ${args.paymentOutput.value} sats; this inscription needs ${fees.fundingRequirementSats} at the chosen fee rate.`,
+      { availableSats: args.paymentOutput.value, requiredSats: fees.fundingRequirementSats },
     );
   }
 
@@ -1174,10 +1182,10 @@ function synthesizeFields(args: FieldArgs, singleOutputPointerGate: boolean): Or
 
   const typedProperties = args.gallery !== undefined || args.title !== undefined || args.traits !== undefined;
   if (typedProperties && args.properties !== undefined) {
-    throw new Error(
+    failInscribe('properties-conflict',
       'Pass either gallery/title/traits OR raw properties bytes, not both. ' +
       'gallery/title/traits are encoded into the same tag 0x11 the raw bytes would fill.',
-    );
+      'Use either the gallery, title and traits fields or your own properties data, not both: they occupy the same field.');
   }
   if (args.compressProperties && args.properties !== undefined) {
     throw new Error(

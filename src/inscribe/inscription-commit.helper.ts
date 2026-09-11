@@ -7,6 +7,7 @@ import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
 import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { failInscribe } from './inscribe-errors';
 
 /**
  * Layer-1 builder for the inscribe **commit** transaction.
@@ -375,7 +376,11 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
       throw new Error('pass satOffset (a sat in the funding UTXO) or satSource, not both');
     }
     if (source.tapInternalKey.length !== 32) {
-      throw new Error('satSource must be a P2TR UTXO with its 32-byte x-only internal key');
+      failInscribe(
+      'sat-utxo-must-be-taproot',
+      'satSource must be a P2TR UTXO with its 32-byte x-only internal key',
+      'The coin holding that sat must be a taproot coin (an ordinals address).',
+    );
     }
     tx.addInput({
       txid: source.txid,
@@ -396,23 +401,35 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
     throw new Error(`satOffset must be a non-negative integer; got ${satOffset}`);
   }
   if (satOffset >= satInputValue) {
-    throw new Error(`satOffset ${satOffset} is outside the ${satInputValue}-sat ${source ? 'sat source' : 'funding input'}`);
+    failInscribe(
+      'sat-offset-outside-utxo',
+      `satOffset ${satOffset} is outside the ${satInputValue}-sat ${source ? 'sat source' : 'funding input'}`,
+      `That sat is not in this coin: the coin holds ${satInputValue} sats, and the sat asked for sits ${satOffset} sats in.`,
+      { satOffset, utxoValue: satInputValue },
+    );
   }
   const paddingDust = getMinimumUtxoSize(paddingAddress);
   const paddingInputValue = args.paddingInput?.value ?? 0;
   if (args.paddingInput !== undefined && (satOffset === 0 || satOffset >= paddingDust)) {
-    throw new Error(
+    failInscribe(
+      'padding-not-needed',
       'paddingInput is only for a chosen sat less than a dust limit into its UTXO; ' +
       'ord pads only a padding output that would otherwise be below dust',
+      'This sat does not need a padding coin: it sits far enough into its own coin.',
+      { satOffset, dustLimit: paddingDust },
     );
   }
   const paddingValue = paddingInputValue + satOffset;
   if (satOffset > 0) {
     if (paddingValue < paddingDust) {
-      throw new Error(
+      failInscribe(
+        'sat-offset-needs-padding',
         `satOffset ${satOffset} would make a padding output below the ${paddingDust}-sat dust limit ` +
         `of ${paddingAddress}; pass a paddingInput of at least ${paddingDust - satOffset} sats, ` +
         'as ord pads it with a further wallet input',
+        `This sat sits only ${satOffset} sats into its coin, below the ${paddingDust}-sat minimum for an output. ` +
+        `Add a second coin of at least ${paddingDust - satOffset} sats to pad it.`,
+        { satOffset, dustLimit: paddingDust, neededPaddingSats: paddingDust - satOffset },
       );
     }
     tx.addOutputAddress(paddingAddress, BigInt(paddingValue), scureNetwork);

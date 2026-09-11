@@ -95,6 +95,19 @@ bytes to `compressLikeOrd` / `loadBrotliWasm`).
 The reveal of a plain inscription is signed by the SDK's own one-time key;
 the wallet never sees it.
 
+## Errors a screen shows
+
+Anything a person's input can cause throws an `InscribeInputError`: a stable
+`code` (`invalid-inscription-id`, `insufficient-funds`,
+`sat-offset-needs-padding`, `duplicate-trait`, `reveal-too-heavy`,
+`body-or-delegate-required`, `output-below-dust`, …), a `userMessage`
+written for a person, and the numbers in `details` (e.g.
+`{ satOffset, dustLimit, neededPaddingSats }`), so a UI can show the
+message as it is or word it itself by code. `inscribeUserMessage(err)`
+returns the user message for our errors and the plain message otherwise.
+`message` keeps the developer wording, so logging is unchanged. Internal
+asserts and type checks stay plain `Error`s.
+
 ## What a consumer must provide
 
 - The funding UTXO (and a second one for `paddingUtxo`), from the wallet.

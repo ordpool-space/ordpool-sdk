@@ -15,6 +15,7 @@ import {
   planInscribeCommit,
   synthesizeBatchEntryFields,
 } from './inscription.service.helper';
+import { failInscribe } from './inscribe-errors';
 import type {
   CreateInscribeTransactionsArgs,
   CreateInscribeTransactionsResult,
@@ -159,35 +160,52 @@ function layOutBatch(
     throw new Error(`unknown batch mode ${String(mode)}`);
   }
   if (inscriptions.length === 0) {
-    throw new Error('a batch must contain at least one inscription');
+    failInscribe('batch-empty', 'a batch must contain at least one inscription',
+      'Add at least one inscription to the batch.');
   }
   if ((args.satOffset ?? 0) !== 0 && mode !== 'same-sat') {
-    throw new Error('`satOffset` can only be set in `same-sat` mode, as ord allows `sat` / `satpoint` only there');
+    failInscribe('batch-sat-offset-not-allowed',
+      '`satOffset` can only be set in `same-sat` mode, as ord allows `sat` / `satpoint` only there',
+      'Inscribing onto a chosen sat in a batch only works when every inscription goes on the same sat.');
   }
   if ((mode === 'shared-output' || mode === 'same-sat') && inscriptions.some(entry => entry.destination !== undefined)) {
-    throw new Error(`individual inscription destinations cannot be set in \`${mode}\` mode`);
+    failInscribe('batch-destination-not-allowed',
+      `individual inscription destinations cannot be set in \`${mode}\` mode`,
+      'In this batch mode every inscription lands on one output, so they share one destination.',
+      { mode });
   }
   // ord's File::load rules for per-entry satpoints.
   if (mode === 'satpoints') {
     if (args.postageSats !== undefined) {
-      throw new Error('`postage` cannot be set in `satpoints` mode: each inscription\'s own UTXO is its postage');
+      failInscribe('batch-postage-not-allowed',
+        '`postage` cannot be set in `satpoints` mode: each inscription\'s own UTXO is its postage',
+        'When each inscription goes on its own chosen sat, its coin decides the size; remove the postage.');
     }
     const seen = new Set<string>();
     for (const [i, entry] of inscriptions.entries()) {
       if (entry.satpoint === undefined) {
-        throw new Error(`inscription ${i}: \`satpoints\` mode needs a satpoint for every inscription`);
+        failInscribe('batch-satpoint-required',
+          `inscription ${i}: \`satpoints\` mode needs a satpoint for every inscription`,
+          `Inscription ${i + 1} has no sat chosen. In this mode every inscription needs its own.`,
+          { index: i });
       }
       const key = `${entry.satpoint.txid}:${entry.satpoint.vout}`;
-      if (seen.has(key)) throw new Error(`duplicate satpoint ${key}:0`);
+      if (seen.has(key)) {
+        failInscribe('batch-duplicate-satpoint', `duplicate satpoint ${key}:0`,
+          'Two inscriptions were given the same sat; each needs its own.', { satpoint: `${key}:0` });
+      }
       seen.add(key);
     }
   } else if (inscriptions.some(entry => entry.satpoint !== undefined)) {
-    throw new Error('specifying `satpoint` in an inscription only works in `satpoints` mode');
+    failInscribe('batch-satpoint-not-allowed',
+      'specifying `satpoint` in an inscription only works in `satpoints` mode',
+      'Per-inscription sats only work in the mode where each inscription goes on its own chosen sat.');
   }
   for (const [i, entry] of inscriptions.entries()) {
     const ids = (entry.gallery ?? []).map(item => (typeof item === 'string' ? item : item.id));
     if (new Set(ids).size !== ids.length) {
-      throw new Error(`inscription ${i}: duplicate gallery item`);
+      failInscribe('duplicate-gallery-item', `inscription ${i}: duplicate gallery item`,
+        `Inscription ${i + 1} lists the same gallery item twice.`, { index: i });
     }
   }
   const parentSats = parents.reduce((sum, p) => sum + p.utxo.value, 0);
@@ -211,7 +229,10 @@ function layOutBatch(
   for (const output of inscriptionOutputs) {
     const dust = getMinimumUtxoSize(output.address);
     if (output.value < dust) {
-      throw new Error(`reveal output of ${output.value} sats to ${output.address} is below its ${dust}-sat dust limit`);
+      failInscribe('output-below-dust',
+        `reveal output of ${output.value} sats to ${output.address} is below its ${dust}-sat dust limit`,
+        `A postage of ${output.value} sats is below the ${dust}-sat minimum an output needs at this address.`,
+        { value: output.value, dustLimit: dust });
     }
   }
 

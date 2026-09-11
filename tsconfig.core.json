@@ -111,6 +111,7 @@
     "src/inscribe/inscription-batch.helper.ts",
     "src/inscribe/sat-offset.ts",
     "src/inscribe/inscription-existence.ts",
+    "src/inscribe/inscribe-errors.ts",
     "src/inscribe/inscribe-broadcast.helper.ts",
     "src/inscribe/inscribe-orchestrator.ts",
     "src/inscribe/inscribe-mint-orchestrator.ts",

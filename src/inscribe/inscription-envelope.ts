@@ -1,4 +1,5 @@
 import { OP, Script } from '@scure/btc-signer';
+import { failInscribe } from './inscribe-errors';
 
 // scure-btc-signer 1.2.x's ScriptOP union is internal: a string
 // opcode name like `'CHECKSIG'`, a Uint8Array data push, or a
@@ -325,8 +326,11 @@ function pushEnvelope(items: ScureScriptItem[], args: BatchEnvelope, minimalTagP
 export function encodeInscriptionId(inscriptionId: string): Uint8Array {
   const m = inscriptionId.match(/^([0-9a-f]{64})i(\d+)$/);
   if (!m) {
-    throw new Error(
+    failInscribe(
+      'invalid-inscription-id',
       `Invalid inscription id "${inscriptionId}"; expected 64 lowercase hex + "i" + non-negative integer.`,
+      `"${inscriptionId}" is not an inscription id. An id looks like a 64-character transaction id, then "i", then a number, e.g. abc…123i0.`,
+      { inscriptionId },
     );
   }
   const txidHex = m[1];

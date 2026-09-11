@@ -44,6 +44,8 @@ import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orc
  * vout[1]; the rest are optional ord envelope tags. `recipient` defaults to the
  * connected wallet's ordinals address when unset.
  */
+import { failInscribe } from './inscribe-errors';
+
 export interface InscribeContent {
   /** Body bytes. Omit for a delegate-only inscription (then `delegate` is required). */
   body?: Uint8Array;
@@ -258,7 +260,9 @@ export class InscribeMintOrchestrator {
     if (!feeRate) throw new Error('No fee rate set');
     if ((content?.satOffset ?? 0) !== 0 && this.snap.selectedUtxo === null) {
       // The automatic pick would put the inscription on a sat of another coin.
-      throw new Error('Select the UTXO that holds the sat to inscribe onto (satOffset counts within it)');
+      failInscribe('sat-utxo-must-be-selected',
+        'Select the UTXO that holds the sat to inscribe onto (satOffset counts within it)',
+        'Choose the coin that holds the sat you want to inscribe on; the automatic choice would use a different coin.');
     }
     if (!selected) {
       throw new Error(
@@ -474,7 +478,9 @@ export class InscribeMintOrchestrator {
   private async ensureBrotli(content: InscribeContent): Promise<void> {
     if (!content.compressProperties) return;
     if (this.deps.brotliWasm === undefined) {
-      throw new Error('compressProperties needs the brotli wasm: pass brotliWasm in the orchestrator deps');
+      failInscribe('brotli-wasm-missing',
+        'compressProperties needs the brotli wasm: pass brotliWasm in the orchestrator deps',
+        'Compressing the title, traits and gallery is not available here.');
     }
     await loadBrotliWasm(this.deps.brotliWasm);
   }
