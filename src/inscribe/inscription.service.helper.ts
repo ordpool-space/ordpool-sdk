@@ -1,5 +1,5 @@
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { packInscriptionProperties } from './inscription-properties';
+import { encodeInscriptionProperties } from './inscription-properties';
 import type { InscriptionPropertiesInput } from './inscription-properties';
 import * as btc from '@scure/btc-signer';
 
@@ -273,6 +273,15 @@ export interface CreateInscribeTransactionsArgs {
    * into tag 0x11. Mutually exclusive with the raw `properties` bytes.
    */
   title?: string;
+  /**
+   * Compress `gallery`/`title` the way ord's `--compress` does: the
+   * brotli-compressed forms join the candidates and the smallest wins, with
+   * tag 0x13 set to `br` when a compressed one does. Needs the brotli wasm
+   * loaded first (`await loadBrotliWasm(url)`), since the builder is
+   * synchronous. Not valid with raw `properties` bytes; compress those
+   * yourself and set `propertyEncoding`.
+   */
+  compressProperties?: boolean;
   /**
    * Optional properties-encoding hint (tag 0x13). When `'br'`, signals
    * that the `properties` bytes are brotli-compressed. Only emitted
@@ -956,9 +965,22 @@ export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): 
       'gallery/title are encoded into the same tag 0x11 the raw bytes would fill.',
     );
   }
+  if (args.compressProperties && args.properties !== undefined) {
+    throw new Error(
+      'compressProperties applies to gallery/title only. Compress raw properties bytes yourself and set propertyEncoding.',
+    );
+  }
   if (typedProperties) {
-    const packed = packInscriptionProperties({ gallery: args.gallery, title: args.title });
-    if (packed !== undefined) fields.push(...chunkFieldValue(ORD_TAGS.properties, packed));
+    const encoded = encodeInscriptionProperties(
+      { gallery: args.gallery, title: args.title },
+      { compress: args.compressProperties },
+    );
+    if (encoded !== undefined) {
+      fields.push(...chunkFieldValue(ORD_TAGS.properties, encoded.properties));
+      if (encoded.propertyEncoding === 'br') {
+        fields.push({ tag: ORD_TAGS.property_encoding, value: new TextEncoder().encode('br') });
+      }
+    }
   }
 
   if (args.properties !== undefined) {

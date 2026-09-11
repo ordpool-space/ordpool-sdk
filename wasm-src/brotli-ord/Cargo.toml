@@ -1,0 +1,21 @@
+[package]
+name = "brotli-ord"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+# The exact crate and version cat21-ord's Cargo.lock resolves for
+# `brotli = "8.0.1"`, so the encoder is ord's encoder.
+brotli = "=8.0.2"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

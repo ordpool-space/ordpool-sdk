@@ -321,11 +321,11 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
   }, 240_000);
 
   it('brotli body via the WASM encoder round-trips on chain (content_encoding: br tag)', async () => {
-    // The Chrome/Edge path: compress with the vendored wasm brotli encoder
-    // (loaded here from the package's own .wasm bytes), proving its output
-    // is on-chain-valid brotli that ord serves and the parser recovers.
+    // ord's encoder compiled to wasm (loaded here from the package's own
+    // .wasm bytes), proving its output is on-chain-valid brotli that ord
+    // serves and the parser recovers.
     const wasm = readFileSync(join(__dirname, '../../wasm/brotli_wasm_bg.wasm'));
-    const compressed = await compressBrotliWasm(COMPRESSIBLE_HTML, 11, wasm);
+    const compressed = await compressBrotliWasm(COMPRESSIBLE_HTML, wasm, 'text');
     expect(compressed.length).toBeLessThan(COMPRESSIBLE_HTML.length);
     // content_encoding tag 0x09 data-pushed as `01 09`, then
     // OP_PUSHBYTES_2 (0x02) + 'br' (62 72).

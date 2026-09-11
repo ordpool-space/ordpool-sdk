@@ -882,12 +882,16 @@ export function ordStockCreateWallet(name: string): string {
   throw new Error(`unexpected ord wallet receive shape: ${stdout}`);
 }
 
+/**
+ * Write `content` to `containerPath` inside the ord-stock container. The
+ * bytes go over stdin, so any size works (an argv string is capped by the
+ * OS's argument-length limit).
+ */
 export function writeOrdStockFile(containerPath: string, content: Uint8Array): void {
-  const b64 = Buffer.from(content).toString('base64');
   execFileSync(
     'docker',
-    ['exec', ORD_STOCK_CONTAINER, 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`],
-    { encoding: 'utf8' },
+    ['exec', '-i', ORD_STOCK_CONTAINER, 'sh', '-c', `cat > '${containerPath}'`],
+    { input: content },
   );
 }
 

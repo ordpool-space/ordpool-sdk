@@ -53,3 +53,12 @@ jobs:
         npm run build:e2e
         node -e "require('./dist-e2e/index.js')"
         git diff --exit-code dist-e2e/
+
+    # wasm/brotli_wasm_bg.wasm is the one binary this package ships. Rebuild
+    # it from wasm-src/brotli-ord (pinned image, locked crates) and fail if
+    # it differs from the committed file, so the shipped bytes are provably
+    # built from the source in this repo.
+    - name: Verify committed brotli wasm matches a fresh build
+      run: |
+        npm run build:brotli-wasm
+        git diff --exit-code wasm/ wasm-src/

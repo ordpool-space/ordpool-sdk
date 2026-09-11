@@ -1,3 +1,4 @@
+import { compressBrotliSync } from './brotli-wasm-encoder';
 import { encodeCborDeterministic } from './inscription-cbor';
 import { encodeInscriptionId } from './inscription-envelope';
 
@@ -92,30 +93,92 @@ function packedCbor(gallery: GalleryItem[], title: string | undefined): Uint8Arr
 }
 
 /**
+ * ord refuses to compress properties larger than this
+ * (cat21-ord src/inscriptions/inscription.rs, MAX_COMPRESSED_PROPERTIES_SIZE).
+ */
+const MAX_COMPRESSED_PROPERTIES_SIZE = 4_000_000;
+
+/**
+ * ord refuses compressed properties that shrink by more than 30:1, checked
+ * with integer division (MAX_PROPERTIES_COMPRESSION_RATIO, same file).
+ */
+const MAX_PROPERTIES_COMPRESSION_RATIO = 30;
+
+/** Properties bytes for tag 0x11, and `'br'` for tag 0x13 when compressed. */
+export interface EncodedInscriptionProperties {
+  properties: Uint8Array;
+  propertyEncoding?: 'br';
+}
+
+/**
+ * ord's `compress_properties`: brotli (generic mode), used only when strictly
+ * smaller, with ord's size and ratio limits. Returns `undefined` when the
+ * compressed form is not smaller.
+ */
+function compressProperties(cbor: Uint8Array): Uint8Array | undefined {
+  const len = cbor.length;
+  if (len > MAX_COMPRESSED_PROPERTIES_SIZE) {
+    throw new Error(`properties size of ${len} bytes exceeds ${MAX_COMPRESSED_PROPERTIES_SIZE} byte limit`);
+  }
+  const compressed = compressBrotliSync(cbor, 'generic');
+  if (compressed.length >= len) return undefined;
+  if (Math.floor(len / compressed.length) > MAX_PROPERTIES_COMPRESSION_RATIO) {
+    throw new Error(`property compression over ${MAX_PROPERTIES_COMPRESSION_RATIO}:1`);
+  }
+  return compressed;
+}
+
+/**
  * Encode properties exactly as ord writes them on-chain.
  *
  * ord builds BOTH forms and keeps the SMALLER one
  * (`Inscription::encode_properties`, `min_by_key(len)`), and on a tie keeps
- * the INLINE one, because `min_by_key` returns the first minimum and inline
- * is the first candidate. That rule is the whole difficulty: a one-item
- * gallery ties at the same length and ships inline, while a two-item gallery
- * ships packed because the shared txid table beats two per-item ids. Neither
- * form alone matches ord across gallery sizes.
+ * the EARLIER candidate, because `min_by_key` returns the first minimum. That
+ * rule is the whole difficulty: a one-item gallery ties at the same length
+ * and ships inline, while a two-item gallery ships packed because the shared
+ * txid table beats two per-item ids. Neither form alone matches ord across
+ * gallery sizes.
+ *
+ * With `compress` (ord's `--compress`), the brotli-compressed inline and
+ * packed forms join the candidates, in that order, after the two plain ones;
+ * a compressed winner also sets tag 0x13 to `br`. Compressing needs the
+ * brotli wasm loaded first (`loadBrotliWasm`), because this runs inside the
+ * synchronous transaction builder.
  *
  * Returns `undefined` when there is nothing to encode, matching ord, which
  * omits the tag entirely rather than writing an empty map.
- *
- * Uncompressed only. ord's `--compress` adds brotli-compressed variants of
- * both forms to the candidate set; that is not handled here.
  */
-export function packInscriptionProperties(
+export function encodeInscriptionProperties(
   input: InscriptionPropertiesInput,
-): Uint8Array | undefined {
+  options: { compress?: boolean } = {},
+): EncodedInscriptionProperties | undefined {
   const gallery = (input.gallery ?? []).map(normalise);
   const title = input.title;
   if (gallery.length === 0 && attributes(title) === undefined) return undefined;
 
   const inline = inlineCbor(gallery, title);
   const packed = packedCbor(gallery, title);
-  return packed.length < inline.length ? packed : inline;
+  const candidates: EncodedInscriptionProperties[] = [{ properties: inline }, { properties: packed }];
+  if (options.compress) {
+    for (const cbor of [inline, packed]) {
+      const compressed = compressProperties(cbor);
+      if (compressed !== undefined) candidates.push({ properties: compressed, propertyEncoding: 'br' });
+    }
+  }
+
+  let best = candidates[0];
+  for (const candidate of candidates) {
+    if (candidate.properties.length < best.properties.length) best = candidate;
+  }
+  return best;
+}
+
+/**
+ * The uncompressed properties bytes ord writes, or `undefined` when there is
+ * nothing to encode. See {@link encodeInscriptionProperties}.
+ */
+export function packInscriptionProperties(
+  input: InscriptionPropertiesInput,
+): Uint8Array | undefined {
+  return encodeInscriptionProperties(input)?.properties;
 }

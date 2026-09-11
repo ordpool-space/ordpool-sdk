@@ -11,22 +11,21 @@
  * ordinals do; brotli typically lands ~15-20% smaller than gzip on
  * text/SVG/JSON.
  *
- * # Codecs: native first, wasm brotli only where forced
+ * # Codecs
  *
- * - **gzip** — native `CompressionStream('gzip')` everywhere (Node 18+,
+ * - **gzip**: native `CompressionStream('gzip')` everywhere (Node 18+,
  *   all modern browsers). The universal baseline.
- * - **brotli, native** — `CompressionStream('brotli')` where the runtime
- *   has it: Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+ (brotli was
- *   added to the WHATWG Compression Standard in 2026). Zero dependency,
- *   no fetch.
- * - **brotli, wasm fallback** — Chrome/Edge (Blink) deliberately don't
- *   ship the brotli compression dictionary, so there is no native encoder
- *   there. For those runtimes {@link assessCompression} uses the reference
- *   Rust brotli compiled to wasm (see {@link ./brotli-wasm-encoder}), but
- *   ONLY when the caller passes `brotliWasmUrl`. The `.wasm` is a hosted
- *   PACKAGE ASSET the consumer serves from its own origin and is fetched
- *   on demand — it never bloats the JS bundle. Omit the URL and Chrome
- *   simply falls back to gzip.
+ * - **brotli, ord's encoder**: the Rust `brotli` crate ord uses, compiled
+ *   to wasm with ord's parameters (see {@link ./brotli-wasm-encoder}), used
+ *   whenever the caller passes a wasm URL. Its bytes are the bytes
+ *   `ord wallet inscribe --compress` writes, on every runtime. The `.wasm`
+ *   is a hosted PACKAGE ASSET the consumer serves from its own origin and
+ *   is fetched on demand; it never bloats the JS bundle.
+ * - **brotli, native**: `CompressionStream('brotli')` where the runtime has
+ *   it (Safari 18.4+, Firefox 147+, Node 24.7+, Deno 2.7+), used only when
+ *   no wasm URL is given. Valid brotli with the runtime's own window and
+ *   block settings, so not ord's bytes. Chrome/Edge (Blink) ship no brotli
+ *   encoder, so without a wasm URL they fall back to gzip.
  *
  * Immutable-data safety: every encoder here is the platform's zlib or the
  * reference Rust brotli — never hand-rolled — so an encoder bug can't
@@ -49,7 +48,8 @@
  * import it from `ordpool-sdk/core`.
  */
 
-import { compressBrotliWasm } from './brotli-wasm-encoder';
+import { brotliModeForContentType, compressBrotliWasm } from './brotli-wasm-encoder';
+import type { BrotliWasmSource } from './brotli-wasm-encoder';
 
 /**
  * Body encodings the inscribe builder can tag on-chain (`content_encoding`,
@@ -183,9 +183,6 @@ export async function decompressGzip(body: Uint8Array): Promise<Uint8Array> {
   return result;
 }
 
-/** brotli quality on the wasm path (max; matches ord's encoders). */
-const BROTLI_WASM_QUALITY = 11;
-
 interface Codec {
   encoding: Exclude<InscriptionContentEncoding, never>;
   compress: (bytes: Uint8Array) => Promise<Uint8Array>;
@@ -194,22 +191,55 @@ interface Codec {
 /**
  * The compressors {@link assessCompression} tries, chosen per call:
  *   - `gzip` always (native Compression Streams; universal).
- *   - `br` via native `CompressionStream('brotli')` when the runtime has it
- *     (Safari / Firefox / Node) — zero dependency, no fetch.
- *   - else `br` via the wasm encoder IF the caller passed `brotliWasmUrl`
- *     (Chrome / Edge path: fetch + instantiate the hosted wasm on demand).
+ *   - `br` via ord's encoder (the wasm) when the caller passed
+ *     `brotliWasmUrl`, on every runtime, so the bytes are the ones
+ *     `ord wallet inscribe --compress` writes.
+ *   - else `br` via native `CompressionStream('brotli')` where the runtime
+ *     has it (Safari / Firefox / Node): valid brotli, not ord's bytes.
  * assessCompression runs them all and keeps the smallest output; ties go to
  * the earlier entry (gzip), so it stays first.
  */
-function buildCodecs(options: AssessCompressionOptions): Codec[] {
+function buildCodecs(options: AssessCompressionOptions, contentType: string | undefined): Codec[] {
   const codecs: Codec[] = [{ encoding: 'gzip', compress: compressGzip }];
-  if (nativeBrotliAvailable()) {
-    codecs.push({ encoding: 'br', compress: (b) => compressViaCompressionStream(b, 'brotli') });
-  } else if (options.brotliWasmUrl) {
+  if (options.brotliWasmUrl) {
     const url = options.brotliWasmUrl;
-    codecs.push({ encoding: 'br', compress: (b) => compressBrotliWasm(b, BROTLI_WASM_QUALITY, url) });
+    const mode = brotliModeForContentType(contentType);
+    codecs.push({ encoding: 'br', compress: (b) => compressBrotliWasm(b, url, mode) });
+  } else if (nativeBrotliAvailable()) {
+    codecs.push({ encoding: 'br', compress: (b) => compressViaCompressionStream(b, 'brotli') });
   }
   return codecs;
+}
+
+/** An inscription body as ord's `--compress` leaves it. */
+export interface OrdCompressedBody {
+  /** The bytes to inscribe: compressed, or the original when that was not smaller. */
+  body: Uint8Array;
+  /** `'br'` when `body` is compressed (tag 0x09), otherwise absent. */
+  contentEncoding?: 'br';
+}
+
+/**
+ * Compress an inscription body exactly as `ord wallet inscribe --compress`
+ * does (cat21-ord src/inscriptions/inscription.rs, `Inscription::compress`):
+ * ord's brotli with the mode ord uses for `contentType`, kept only when the
+ * result is strictly smaller than the input. No minimum-saving threshold and
+ * no gzip; for the "is it worth it" decision in a UI, use
+ * {@link assessCompression}.
+ *
+ * `brotliWasm` is the hosted `wasm/brotli_wasm_bg.wasm` URL (browser) or its
+ * bytes (Node). Loading it also enables `compressProperties` on the builder.
+ */
+export async function compressLikeOrd(
+  body: Uint8Array,
+  contentType: string | undefined,
+  brotliWasm: BrotliWasmSource,
+): Promise<OrdCompressedBody> {
+  if (!ArrayBuffer.isView(body)) {
+    throw new Error('compressLikeOrd: body must be a Uint8Array');
+  }
+  const compressed = await compressBrotliWasm(body, brotliWasm, brotliModeForContentType(contentType));
+  return compressed.length < body.length ? { body: compressed, contentEncoding: 'br' } : { body };
 }
 
 /**
@@ -270,8 +300,8 @@ export interface CompressionAssessment {
    * The winning codec's `content_encoding` tag value when `worthIt`, else
    * `'none'` (inscribe `compressed` — the original bytes — uncompressed,
    * no `content_encoding` tag). `'br'` is produced where a brotli encoder
-   * is available: native `CompressionStream('brotli')`, or the wasm encoder
-   * when the caller passes `brotliWasmUrl`.
+   * is available: ord's wasm encoder when the caller passes `brotliWasmUrl`,
+   * else native `CompressionStream('brotli')`.
    */
   bestEncoding: 'none' | InscriptionContentEncoding;
   /** Byte length of the original body. */
@@ -303,10 +333,11 @@ export interface AssessCompressionOptions {
   /**
    * URL of a hosted `brotli_wasm_bg.wasm` (shipped in this package under
    * `wasm/`; the consumer app copies it to its own origin and passes that
-   * URL). ONLY used on runtimes WITHOUT native `CompressionStream('brotli')`
-   * — i.e. Chrome/Edge — to fetch + instantiate the wasm brotli encoder on
-   * demand (once, cached). Omit it and Chrome/Edge simply fall back to gzip;
-   * Safari/Firefox/Node use native brotli and never touch this.
+   * URL). When given, brotli runs through ord's encoder on every runtime,
+   * fetched and instantiated on demand (once, cached), so a `'br'` result
+   * is byte-identical to `ord wallet inscribe --compress`. Omit it and
+   * brotli uses the runtime's native encoder where one exists (Chrome/Edge
+   * have none and fall back to gzip).
    */
   brotliWasmUrl?: string;
 }
@@ -360,7 +391,7 @@ export async function assessCompression(
   // failed ones and keep the rest, so a bad wasm URL degrades to gzip
   // (native, always present) instead of failing the whole assessment.
   const settled = await Promise.allSettled(
-    buildCodecs(options).map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })),
+    buildCodecs(options, contentType).map(async (codec) => ({ encoding: codec.encoding, out: await codec.compress(bytes) })),
   );
   const candidates = settled.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
   if (candidates.length === 0) {

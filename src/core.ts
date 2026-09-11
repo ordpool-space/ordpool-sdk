@@ -187,6 +187,7 @@ export * from './inscribe/inscribe-orchestrator';
 export * from './inscribe/inscribe-mint-orchestrator';
 export * from './inscribe/inscribe-child-orchestrator';
 export * from './inscribe/inscribe-compression.helper';
+export * from './inscribe/brotli-wasm-encoder';
 
 // --- Agent-mode policy gate ---
 export * from './agent-mode/agent-policy.helper';

@@ -1,7 +1,7 @@
 {
   "name": "ordpool-sdk",
   "version": "0.1.0",
-  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool \u2014 REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Framework-agnostic; runs in the browser and in plain Node.",
+  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool — REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Framework-agnostic; runs in the browser and in plain Node.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ordpool-space/ordpool-sdk.git"
@@ -55,7 +55,7 @@
     "test:e2e:playwright": "playwright test --config=e2e/playwright/playwright.config.ts",
     "e2e:harness:build": "node e2e/playwright/build-harness.js",
     "e2e:harness:serve": "node e2e/playwright/fixtures-server.js",
-    "gen:brotli-wasm": "node scripts/gen-brotli-wasm.mjs",
+    "build:brotli-wasm": "bash scripts/build-brotli-wasm.sh",
     "create-link": "npm run build && cd dist && npm link"
   },
   "keywords": [
@@ -98,7 +98,6 @@
     "@types/jest": "^30.0.0",
     "@types/node": "^20.14.9",
     "babel-jest": "^30.4.1",
-    "brotli-wasm": "3.0.1",
     "esbuild": "^0.24.0",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",

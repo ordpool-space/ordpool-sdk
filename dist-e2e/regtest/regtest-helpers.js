@@ -676,9 +676,13 @@ function ordStockCreateWallet(name) {
         return parsed.addresses[0];
     throw new Error(`unexpected ord wallet receive shape: ${stdout}`);
 }
+/**
+ * Write `content` to `containerPath` inside the ord-stock container. The
+ * bytes go over stdin, so any size works (an argv string is capped by the
+ * OS's argument-length limit).
+ */
 function writeOrdStockFile(containerPath, content) {
-    const b64 = Buffer.from(content).toString('base64');
-    (0, node_child_process_1.execFileSync)('docker', ['exec', ORD_STOCK_CONTAINER, 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`], { encoding: 'utf8' });
+    (0, node_child_process_1.execFileSync)('docker', ['exec', '-i', ORD_STOCK_CONTAINER, 'sh', '-c', `cat > '${containerPath}'`], { input: content });
 }
 function ordStockWalletInscribe(walletName, containerFilePath, feeRateSatPerVb, extraArgs = []) {
     const stdout = ordStockWalletCli(walletName, 'inscribe', '--no-backup', '--fee-rate', String(feeRateSatPerVb), '--file', containerFilePath, ...extraArgs);

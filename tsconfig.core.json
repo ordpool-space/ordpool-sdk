@@ -113,7 +113,6 @@
     "src/inscribe/inscribe-mint-orchestrator.ts",
     "src/inscribe/inscribe-child-orchestrator.ts",
     "src/inscribe/inscribe-compression.helper.ts",
-    "src/inscribe/brotli-wasm-glue.generated.ts",
     "src/inscribe/brotli-wasm-encoder.ts",
     "src/wallet/signers/operation-named-defaults.ts",
     "src/wallet/psbt-extract.ts",

@@ -17,11 +17,16 @@
 
 import { describe, expect, it } from '@jest/globals';
 import { brotliDecompressSync, gunzipSync, gzipSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { hex } from '@scure/base';
 import { gzipDecode } from 'ordpool-parser';
 
+import { compressBrotliWasm } from './brotli-wasm-encoder';
 import {
   assessCompression,
   compressGzip,
+  compressLikeOrd,
   decompressGzip,
   nativeBrotliAvailable,
 } from './inscribe-compression.helper';
@@ -201,5 +206,34 @@ describe('assessCompression', () => {
 
   it('rejects non-Uint8Array bytes with a clear error', async () => {
     await expect(assessCompression('nope' as unknown as Uint8Array)).rejects.toThrow(/Uint8Array/);
+  });
+});
+
+describe('ord brotli: compressLikeOrd and assessCompression with a wasm URL', () => {
+  // The wasm as a data: URL, so assessCompression's URL path (fetch +
+  // instantiateStreaming) runs without a server.
+  const WASM_BYTES = readFileSync(join(__dirname, '../../wasm/brotli_wasm_bg.wasm'));
+  const WASM_URL = `data:application/wasm;base64,${WASM_BYTES.toString('base64')}`;
+
+  it('compressLikeOrd compresses with the mode for the content type and tags br', async () => {
+    const body = enc('the quick brown fox jumps over the lazy dog. '.repeat(40));
+    const out = await compressLikeOrd(body, 'text/plain;charset=utf-8', WASM_BYTES);
+    expect(out.contentEncoding).toBe('br');
+    expect(hex.encode(out.body)).toBe(hex.encode(await compressBrotliWasm(body, WASM_BYTES, 'text')));
+    expect(new Uint8Array(brotliDecompressSync(Buffer.from(out.body)))).toEqual(body);
+  });
+
+  it('compressLikeOrd keeps the original, untagged, when brotli does not shrink it (ord: strictly smaller)', async () => {
+    const body = enc('hi');
+    const out = await compressLikeOrd(body, 'text/plain;charset=utf-8', WASM_BYTES);
+    expect(out.contentEncoding).toBeUndefined();
+    expect(out.body).toBe(body);
+  });
+
+  it('assessCompression uses ord\'s encoder when given the wasm URL, even though Node has native brotli', async () => {
+    const body = enc('tip the maintainer '.repeat(300));
+    const a = await assessCompression(body, 'text/html', { brotliWasmUrl: WASM_URL });
+    expect(a.bestEncoding).toBe('br');
+    expect(hex.encode(a.compressed)).toBe(hex.encode(await compressBrotliWasm(body, WASM_BYTES, 'text')));
   });
 });

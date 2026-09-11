@@ -6,17 +6,36 @@ and an interface that doesn't suck."** Runes excluded by instruction.
 The gap analysis is in `ord-inscription-parity.md`. This is the order of work,
 what each step actually costs, and what "done" means for each.
 
-## 0. Correction to the analysis: postage is NOT a bug
+## Status
 
-The parity doc called the hard-coded 546 "arguably a bug" because its comment
-cited an HQ rule that said the opposite. The maintainer's answer: **546 is
-simply cheaper**, it is the common denominator across tools, and the stale
-rule text was the only thing wrong. That is fixed (`5602cb9`).
+Each "proven" row is a regtest spec that drives live stock ord and compares
+bytes; see the spec for exactly what is compared.
 
-**So 546 STAYS as our default**, and ord's 10 000 is not a target to copy. The
-work in §3 is adding the option, not changing the default. Padding an
-inscription to 10 000 costs the user 9 454 sats for nothing unless they asked
-for it.
+| Item | Status | Proof |
+|---|---|---|
+| Plain + metaprotocol envelope | proven byte-identical | `e2e/regtest/inscribe-ord-parity-roundtrip.spec.ts` |
+| `--gallery` / `--title` as typed inputs (§2) | proven byte-identical, inline and packed forms | `e2e/regtest/inscribe-properties-parity.spec.ts` |
+| `--postage` as an option (§3) | proven at 546, 3 000, 10 000 and 30 000 sats | `e2e/regtest/inscribe-postage-parity.spec.ts` |
+| `--parent` (one parent) | envelope byte-identical, reveal topology pinned | `e2e/regtest/inscribe-parent-parity.spec.ts` |
+| `--cbor-metadata`, `--json-metadata`, `--delegate` | proven byte-identical | `e2e/regtest/inscribe-metadata-delegate-parity.spec.ts` |
+| `--compress` (body and properties) | proven byte-identical across ord's text, generic and font modes, large bodies, and the 30:1 refusal | `e2e/regtest/inscribe-compress-parity.spec.ts` |
+| Multiple parents (§4) | open, lands with batch | |
+| `--destination` | supported, not yet driven against ord | |
+| Sat / satpoint targeting (§5) | open | |
+| Batch (§6a, §6b, §6c) | open | |
+
+**Default postage stays 546.** It is cheaper, and it is the common
+denominator across tools; ord's 10 000 is an option we offer, not a default
+we copy. Padding an inscription to 10 000 costs the user 9 454 sats for
+nothing unless they asked for it.
+
+**`--compress` needs ord's encoder, not just brotli.** ord compresses with
+the Rust `brotli` crate at lgwin 24 and a per-content-type mode, and that
+crate's cost model calls the host's `log2f`, so ord's bytes are glibc's
+bytes. The SDK ships the same crate compiled to wasm (`wasm-src/brotli-ord`)
+with glibc's `log2f` ported in; `compressLikeOrd` and `compressProperties`
+use it. Native `CompressionStream('brotli')` produces valid but different
+bytes.
 
 ## 1. Surface what the SDK already does (UI only, no SDK work)
 
@@ -33,38 +52,17 @@ quarter, and the form still fits on a phone.
 
 Owner: ordpool session. Blocked by nothing.
 
-## 2. Gallery and title as typed inputs
+## 2. Gallery and title as typed inputs (done)
 
-Today: hand-build an integer-keyed CBOR `Map`, with a silent failure if you
-use a plain object (text keys, which ord drops).
+`gallery` (bare ids or `{ id, title }` items) and `title`, encoded into tag
+`0x11` exactly as ord does: both the inline and packed forms are built and the
+smaller wins, inline on a tie. Raw `properties` stays as the escape hatch for
+what is not typed yet, notably `traits`.
 
-Wanted:
+## 3. Postage as an option (done)
 
-```ts
-gallery?: string[];    // inscription ids
-title?: string;
-traits?: …;            // ord's Attributes.traits, shape TBD from properties.rs
-```
-
-encoded internally into tag `0x11`, with the existing raw `properties` kept as
-the escape hatch for anything we have not typed yet.
-
-This is the single highest embarrassment-per-line item on the list: it is the
-gap between "capability parity" and "an interface that doesn't suck", and it is
-maybe a day.
-
-Done when: a consumer can put three inscriptions in a gallery and a title on
-an inscription without touching CBOR, a byte-parity regtest proves the
-envelope matches `ord wallet inscribe --gallery … --gallery … --title …`, and
-the existing raw path still works.
-
-## 3. Postage as an option
-
-`postageSats?: number`, defaulting to 546. Validate against the destination
-address's dust floor and reject below it with a real message.
-
-Done when: an inscription can be given a chosen postage, the default is
-unchanged at 546, and a spec pins that omitting it still produces 546.
+`postageSats?: number`, defaulting to 546; it sets the reveal output and
+therefore the commit output, both proven equal to ord's at several sizes.
 
 ## 4. Multiple parents
 

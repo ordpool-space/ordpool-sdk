@@ -120,6 +120,12 @@ export interface InscribeAndBroadcastArgs {
   gallery?: InscriptionPropertiesInput['gallery'];
   /** Title, ord's `--title`. Mutually exclusive with raw `properties`. */
   title?: string;
+  /**
+   * Compress `gallery`/`title` as ord's `--compress` does (see
+   * `CreateInscribeTransactionsArgs.compressProperties`). Load the brotli
+   * wasm first; `compressLikeOrd` on the body does that.
+   */
+  compressProperties?: boolean;
   /** Optional properties-encoding hint (tag 0x13); only with `properties`. */
   propertyEncoding?: 'br';
   /**
@@ -190,6 +196,7 @@ export function inscribeAndBroadcast(
         postageSats: args.postageSats,
         gallery: args.gallery,
         title: args.title,
+        compressProperties: args.compressProperties,
         propertyEncoding: args.propertyEncoding,
         minimalTagPush: args.minimalTagPush,
         network: args.network,

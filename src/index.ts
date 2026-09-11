@@ -122,6 +122,7 @@ export * from './inscribe/inscribe-orchestrator';
 export * from './inscribe/inscribe-child-orchestrator';
 export * from './inscribe/inscribe-mint-orchestrator';
 export * from './inscribe/inscribe-compression.helper';
+export * from './inscribe/brotli-wasm-encoder';
 
 // --- inscribe validation gate (pure helpers, same set that /core exposes) ---
 export * from './inscribe-validation';

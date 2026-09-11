@@ -349,6 +349,11 @@ export declare function getStockOrdContent(id: string): Promise<{
 export declare function waitForOrdStockInscription(id: string, timeoutMs?: number): Promise<StockOrdInscription>;
 export declare function ordStockCli(...args: string[]): string;
 export declare function ordStockCreateWallet(name: string): string;
+/**
+ * Write `content` to `containerPath` inside the ord-stock container. The
+ * bytes go over stdin, so any size works (an argv string is capped by the
+ * OS's argument-length limit).
+ */
 export declare function writeOrdStockFile(containerPath: string, content: Uint8Array): void;
 export declare function ordStockWalletInscribe(walletName: string, containerFilePath: string, feeRateSatPerVb: number, extraArgs?: string[]): {
     commit: string;
