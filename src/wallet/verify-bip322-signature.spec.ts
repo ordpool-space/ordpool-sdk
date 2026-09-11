@@ -13,7 +13,7 @@ import { verifyBip322Signature } from './verify-bip322-signature';
  * such a bug: the to_spend txid was passed to `@scure/btc-signer` in internal
  * byte order, but @scure reverses it when serializing, so the to_sign sighash
  * referenced a byte-reversed prevout and EVERY real taproot BIP-322 signature
- * failed. This vector is a genuine signature produced by the real Cat21 Wallet
+ * failed. This vector is a genuine signature produced by the real CAT-21 wallet
  * extension (a Leather fork, signing via bitcoinjs-lib) in CI.
  */
 describe('verifyBip322Signature — real cat21wallet (Leather-fork) P2TR vector', () => {

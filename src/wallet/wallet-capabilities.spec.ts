@@ -314,7 +314,7 @@ describe('walletActionNotice', () => {
     expect(notice?.kind).toBe('blocked');
     expect(notice?.message).toBe(
       "Alby can't sell a cat: it signs all or nothing, and a trade needs each side to sign only its own part."
-      + ' Connect Cat21 Wallet, Xverse, Leather, UniSat, Wizz, OKX or Watch-only (xpub) to sell a cat.',
+      + ' Connect CAT-21 wallet, Xverse, Leather, UniSat, Wizz, OKX or Watch-only (xpub) to sell a cat.',
     );
   });
 
@@ -352,7 +352,7 @@ describe('walletActionNotice', () => {
       "Alby can't sell a cat: it signs all or nothing, and a trade needs each side to sign only its own part.",
     );
     expect(notice?.alternatives).toEqual([
-      'Cat21 Wallet', 'Xverse', 'Leather', 'UniSat', 'Wizz', 'OKX', 'Watch-only (xpub)',
+      'CAT-21 wallet', 'Xverse', 'Leather', 'UniSat', 'Wizz', 'OKX', 'Watch-only (xpub)',
     ]);
     expect(notice?.actionPhrase).toBe('sell a cat');
     // The prose form stays available and stays consistent with the parts.
@@ -491,7 +491,7 @@ describe('walletCustodyCaveat / single-address wallets', () => {
   });
 
   it('lists every ordpool-family tool that checks a coin', () => {
-    for (const tool of ['cat21.space', 'ordpool.space', 'cubes.haushoppe.art', 'Cat21 Wallet']) {
+    for (const tool of ['cat21.space', 'ordpool.space', 'cubes.haushoppe.art', 'CAT-21 wallet']) {
       expect(SINGLE_ADDRESS_CAVEAT).toContain(tool);
     }
   });

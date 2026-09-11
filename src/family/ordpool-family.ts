@@ -3,7 +3,7 @@
  * of them gets.
  *
  * Hosted here because four surfaces render these lines (the family footer on
- * ordpool.space, cat21.space and cubes, plus Cat21 Wallet's own positioning
+ * ordpool.space, cat21.space and cubes, plus CAT-21 wallet's own positioning
  * slot) and a sentence copied into four repos is a sentence that says four
  * slightly different things a month later. Read them; do not retype them.
  *
@@ -44,7 +44,7 @@ const FAMILY_LEDE_TAIL: Record<FamilyFooterSite, string> = {
 };
 
 /**
- * What Cat21 Wallet adds to its own copy, having no footer to put a lede in.
+ * What CAT-21 wallet adds to its own copy, having no footer to put a lede in.
  *
  * The wallet says what it is; this says where the rest of the story lives.
  */
@@ -90,14 +90,14 @@ export const ORDPOOL_FAMILY: readonly OrdpoolFamilyMember[] = [
   },
   {
     key: 'wallet',
-    name: 'Cat21 Wallet',
+    name: 'CAT-21 wallet',
     url: 'https://github.com/ordpool-space/cat21-wallet',
     line: 'A hot wallet for high frequency trading of CAT-21, made for AI agents and their humans.',
   },
 ] as const;
 
 /**
- * Cat21 Wallet's own positioning line, which is its family line and not a
+ * CAT-21 wallet's own positioning line, which is its family line and not a
  * second sentence written to sit beside it.
  *
  * The wallet needs a line that says what it is FOR, distinct from the safety
