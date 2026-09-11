@@ -19,7 +19,7 @@ import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 import { encodeCborDeterministic } from './inscription-cbor';
-import { inscribeAndBroadcast } from './inscribe-orchestrator';
+import { inscribeAndBroadcast, inscribeBatchAndBroadcast } from './inscribe-orchestrator';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);
@@ -206,5 +206,51 @@ describe('inscribeAndBroadcast orchestrator', () => {
       network: NETWORK,
       broadcast: () => of('0'.repeat(64)),
     }))).rejects.toThrow(/No signer registered/);
+  });
+});
+
+describe('inscribeBatchAndBroadcast orchestrator', () => {
+  it('signs the one commit input, broadcasts commit then a reveal that spends it and carries every inscription', async () => {
+    const { paymentPublicKey, paymentAddress } = paymentContext();
+    const promptForSignedPsbt = (unsigned: { base64: string; hex: string }) => {
+      const psbt = btc.Transaction.fromPSBT(base64.decode(unsigned.base64));
+      psbt.signIdx(PAYMENT_PRIV, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+      psbt.finalize();
+      return of(base64.encode(psbt.toPSBT(0)));
+    };
+    const broadcasts: string[] = [];
+    const broadcast = jest.fn((txHex: string) => {
+      broadcasts.push(txHex);
+      return of(btc.Transaction.fromRaw(hex.decode(txHex)).id);
+    });
+    const bodies = ['first', 'second'].map(s => new TextEncoder().encode(s));
+
+    const result = await firstValueFrom(inscribeBatchAndBroadcast({
+      mode: 'separate-outputs',
+      inscriptions: bodies.map(body => ({ body, contentType: 'text/plain' })),
+      walletType: KnownOrdinalWalletType.xpub,
+      paymentOutput: paymentOutputAt(100_000),
+      paymentPublicKey,
+      paymentAddress,
+      recipientAddress: recipientAddress(),
+      feeRatePerVbyte: 5,
+      network: NETWORK,
+      broadcast,
+      promptForSignedPsbt,
+    }));
+
+    expect(broadcasts.length).toBe(2);
+    const commitTx = btc.Transaction.fromRaw(hex.decode(broadcasts[0]));
+    const revealTx = btc.Transaction.fromRaw(hex.decode(broadcasts[1]));
+    expect(commitTx.id).toBe(result.commitTxId);
+    expect(revealTx.id).toBe(result.revealTxId);
+    // The pre-built reveal spends the commit the wallet actually signed.
+    expect(hex.encode(revealTx.getInput(0).txid!)).toBe(result.commitTxId);
+    expect(revealTx.getInput(0).index).toBe(0);
+
+    expect(result.inscriptions.map(l => l.vout)).toEqual([0, 1]);
+    const witness = revealTx.getInput(0).finalScriptWitness!.map(w => hex.encode(w));
+    const parsed = InscriptionParserService.parse({ txid: revealTx.id, vin: [{ witness }] });
+    expect(parsed.map(p => new TextDecoder().decode(p.getDataRaw()))).toEqual(['first', 'second']);
   });
 });

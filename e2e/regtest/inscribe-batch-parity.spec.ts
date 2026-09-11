@@ -16,6 +16,9 @@
  * each side funds from its own wallet, and our reveal carries `nLockTime=21`
  * plus a non-RBF sequence for the free cats.
  *
+ * Then, per mode, an SDK batch is broadcast and stock ord must index every
+ * inscription at the satpoint the SDK reports, with its content.
+ *
  * The last test drives a batch with two parents and compares the envelopes:
  * every envelope repeats both parent tags, and the pointers start after the
  * two parent outputs. The SDK's batch builder does not spend parents yet, so
@@ -24,7 +27,7 @@
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
 import { schnorr } from '@noble/curves/secp256k1';
-import { hex } from '@scure/base';
+import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { createBatchInscribeTransactions } from '../../src/inscribe/inscription-batch.helper';
@@ -33,8 +36,12 @@ import { buildBatchInscriptionScript } from '../../src/inscribe/inscription-enve
 import { synthesizeBatchEntryFields } from '../../src/inscribe/inscription.service.helper';
 import { Network, toScureNetwork } from '../../src/network';
 import {
+  fundUninscribed,
+  getStockOrdContent,
   mineBlocks,
   fundOrdStockWallet,
+  postTx,
+  waitForOrdStockInscription,
   ordStockWalletBatch,
   ordStockWalletInscribe,
   rpc,
@@ -177,6 +184,44 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
     expect(sdk.inscriptions.map(l => `${ord.reveal}:${l.vout}:${l.offset}`))
       .toEqual(ord.inscriptions.map(i => i.location));
   }, 180_000);
+
+  it.each<BatchInscribeMode>(['separate-outputs', 'shared-output', 'same-sat'])(
+    '%s: an SDK batch broadcasts, and stock ord indexes every inscription where the SDK says it lands',
+    async (mode) => {
+      const { fundingAddr: addr, fundingPubkey: pubkey, utxo: clean } = await fundUninscribed();
+      const bodies = [enc(`sdk ${mode}: a`), enc(`sdk ${mode}: b`), enc(`sdk ${mode}: c`)];
+      const built = createBatchInscribeTransactions({
+        mode,
+        inscriptions: bodies.map(body => ({ body, contentType: 'text/plain;charset=utf-8' })),
+        postageSats: 1000,
+        recipientAddress: randomP2tr(),
+        paymentOutput: { ...clean, status: { confirmed: true } },
+        paymentPublicKey: pubkey,
+        paymentAddress: addr,
+        feeRatePerVbyte: FEE_RATE,
+        network: Network.Regtest,
+      });
+
+      const processed = JSON.parse(rpc(
+        '-rpcwallet=' + PSBT_WALLET, '-named', 'walletprocesspsbt',
+        `psbt=${base64.encode(built.commitPsbt)}`, 'sign=true', 'finalize=true',
+      )) as { complete: boolean; hex: string };
+      expect(processed.complete).toBe(true);
+      expect(await postTx(processed.hex)).toBe(built.commitTxid);
+      expect(await postTx(built.revealHex)).toBe(built.revealTxid);
+      const tip = mineBlocks(1);
+      await waitForElectrsSync(tip);
+      await waitForOrdStockSync(tip);
+
+      for (const location of built.inscriptions) {
+        const id = `${built.revealTxid}i${location.index}`;
+        const insc = await waitForOrdStockInscription(id);
+        expect(insc.satpoint).toBe(`${built.revealTxid}:${location.vout}:${location.offset}`);
+        expect((await getStockOrdContent(id)).bytes).toEqual(bodies[location.index]);
+      }
+    },
+    240_000,
+  );
 
   it('two parents: every envelope repeats both parent tags, pointers start after the parent outputs', async () => {
     const parents: string[] = [];

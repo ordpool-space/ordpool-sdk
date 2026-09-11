@@ -332,6 +332,23 @@ export declare function getStockOrdInscription(id: string): Promise<StockOrdInsc
  */
 export declare function getStockOrdOutputInscriptions(outpoint: string): Promise<string[]>;
 /**
+ * A fresh 1 BTC P2WPKH UTXO in the `ordpool-e2e` wallet whose first sat
+ * carries no inscription, for building SDK inscriptions that stock ord must
+ * index as blessed. Inscribing onto an already-inscribed sat is a
+ * reinscription, and the pool can hand one out (see
+ * {@link getStockOrdOutputInscriptions}), so this re-funds until it gets a
+ * clean one. Sign the SDK commit with `walletprocesspsbt` on `ordpool-e2e`.
+ */
+export declare function fundUninscribed(): Promise<{
+    fundingAddr: string;
+    fundingPubkey: Uint8Array;
+    utxo: {
+        txid: string;
+        vout: number;
+        value: number;
+    };
+}>;
+/**
  * Fetch the raw body bytes of an inscription from stock ord's
  * `/content/<id>` endpoint. ord returns the bytes verbatim with the
  * envelope's content-type as the response Content-Type header — same

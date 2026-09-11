@@ -21,6 +21,7 @@ bytes; see the spec for exactly what is compared.
 | `--compress` (body and properties) | proven byte-identical across ord's text, generic and font modes, large bodies, and the 30:1 refusal | `e2e/regtest/inscribe-compress-parity.spec.ts` |
 | Batch `separate-outputs` (§6a) | proven: tapscript, reveal outputs, reveal vsize, commit output and every inscription's location, at 546 and 3 000 sats, with per-entry destination, title, gallery items with titles, metaprotocol | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | Batch `shared-output`, `same-sat` (§6b) | proven, same comparison | `e2e/regtest/inscribe-batch-parity.spec.ts` |
+| SDK batches on chain | every mode broadcast; stock ord indexes each inscription at the satpoint the SDK reports, with its content | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | Multiple parents (§4) | envelope encoding proven (every envelope repeats every parent, pointers start after the parent outputs); a reveal that spends several parents is open | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | `--destination` | supported, not yet driven against ord | |
 | Sat / satpoint targeting (§5) | open | |

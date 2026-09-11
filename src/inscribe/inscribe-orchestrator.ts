@@ -12,6 +12,11 @@ import {
   createInscribeTransactions,
 } from './inscription.service.helper';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper';
+import { createBatchInscribeTransactions } from './inscription-batch.helper';
+import type {
+  CreateBatchInscribeTransactionsArgs,
+  CreateBatchInscribeTransactionsResult,
+} from './inscription-batch.helper';
 import { OrdEnvelopeField } from './inscription-envelope';
 
 /**
@@ -205,43 +210,92 @@ export function inscribeAndBroadcast(
       return throwError(() => err);
     }
 
-    const signer = findSignerOrThrow(args.walletType);
+    return signAndBroadcast(built, args);
+  });
+}
 
-    // The signer's broadcast callback is invoked with the signed
-    // commit wire-tx hex. We intercept to (a) fire the consumer's
-    // onCommitSigned hook, (b) actually broadcast via the consumer's
-    // broadcast callback.
-    const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
-      if (args.onCommitSigned) {
-        try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
-      }
-      return args.broadcast(signedCommitHex);
-    };
+/** The funding, signing and broadcast inputs every inscribe orchestrator shares. */
+type SignAndBroadcastArgs = Pick<InscribeAndBroadcastArgs,
+  'walletType' | 'paymentPublicKey' | 'paymentAddress' | 'network' | 'broadcast'
+  | 'onCommitSigned' | 'promptForSignedPsbt'>;
 
-    return signer.signSingleFundingInput({
-      psbtBytes: built.commitPsbt,
-      paymentAddress: args.paymentAddress,
-      // Pubkey enables the SDK's wallet-side-address shim so
-      // Unisat/Wizz/OKX see their MAINNET address in `toSignInputs`
-      // even when the app carries a bcrt address on regtest. Native-
-      // regtest wallets (Xverse/Cat21/Alby) get the app address
-      // unchanged. See src/wallet/network-address-shim.ts.
-      paymentPublicKey: hex.encode(args.paymentPublicKey),
-      network: args.network,
-      broadcast: captureAndBroadcast,
-      promptForSignedPsbt: args.promptForSignedPsbt,
-    }).pipe(
-      switchMap(({ txId: commitTxId }) =>
-        args.broadcast(built.revealHex).pipe(
-          map((revealTxId) => ({
-            commitTxId,
-            revealTxId,
-            commitAddress: built.commitAddress,
-            ephemeral: built.ephemeral,
-            fees: built.fees,
-          })),
-        ),
+/**
+ * Sign the commit's single funding input, broadcast it, then broadcast the
+ * already-signed reveal. The same for one inscription and for a batch: both
+ * have one commit input at `paymentAddress`.
+ */
+function signAndBroadcast(
+  built: CreateInscribeTransactionsResult,
+  args: SignAndBroadcastArgs,
+): Observable<InscribeAndBroadcastResult> {
+  const signer = findSignerOrThrow(args.walletType);
+
+  // The signer's broadcast callback is invoked with the signed
+  // commit wire-tx hex. We intercept to (a) fire the consumer's
+  // onCommitSigned hook, (b) actually broadcast via the consumer's
+  // broadcast callback.
+  const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
+    if (args.onCommitSigned) {
+      try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
+    }
+    return args.broadcast(signedCommitHex);
+  };
+
+  return signer.signSingleFundingInput({
+    psbtBytes: built.commitPsbt,
+    paymentAddress: args.paymentAddress,
+    // Pubkey enables the SDK's wallet-side-address shim so
+    // Unisat/Wizz/OKX see their MAINNET address in `toSignInputs`
+    // even when the app carries a bcrt address on regtest. Native-
+    // regtest wallets (Xverse/Cat21/Alby) get the app address
+    // unchanged. See src/wallet/network-address-shim.ts.
+    paymentPublicKey: hex.encode(args.paymentPublicKey),
+    network: args.network,
+    broadcast: captureAndBroadcast,
+    promptForSignedPsbt: args.promptForSignedPsbt,
+  }).pipe(
+    switchMap(({ txId: commitTxId }) =>
+      args.broadcast(built.revealHex).pipe(
+        map((revealTxId) => ({
+          commitTxId,
+          revealTxId,
+          commitAddress: built.commitAddress,
+          ephemeral: built.ephemeral,
+          fees: built.fees,
+        })),
       ),
+    ),
+  );
+}
+
+/** Args for {@link inscribeBatchAndBroadcast}: the batch builder's inputs plus signing and broadcast. */
+export interface InscribeBatchAndBroadcastArgs
+  extends Omit<CreateBatchInscribeTransactionsArgs, 'walletType'>, SignAndBroadcastArgs {}
+
+export interface InscribeBatchAndBroadcastResult extends InscribeAndBroadcastResult {
+  /** Where each inscription lands; inscription i is `<revealTxId>i<i>`. */
+  inscriptions: CreateBatchInscribeTransactionsResult['inscriptions'];
+}
+
+/**
+ * Public orchestrator for a batch inscribe (`ord wallet batch`): build the
+ * batch commit and reveal, have the wallet sign the commit's single funding
+ * input via `signSingleFundingInput`, broadcast commit then reveal. Same
+ * signing topology, bearer-key semantics and broadcast model as
+ * {@link inscribeAndBroadcast}.
+ */
+export function inscribeBatchAndBroadcast(
+  args: InscribeBatchAndBroadcastArgs,
+): Observable<InscribeBatchAndBroadcastResult> {
+  return defer(() => {
+    let built: CreateBatchInscribeTransactionsResult;
+    try {
+      built = createBatchInscribeTransactions(args);
+    } catch (err) {
+      return throwError(() => err);
+    }
+    return signAndBroadcast(built, args).pipe(
+      map((result) => ({ ...result, inscriptions: built.inscriptions })),
     );
   });
 }

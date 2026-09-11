@@ -38,6 +38,7 @@ exports.waitForOrdStockReady = waitForOrdStockReady;
 exports.waitForOrdStockSync = waitForOrdStockSync;
 exports.getStockOrdInscription = getStockOrdInscription;
 exports.getStockOrdOutputInscriptions = getStockOrdOutputInscriptions;
+exports.fundUninscribed = fundUninscribed;
 exports.getStockOrdContent = getStockOrdContent;
 exports.waitForOrdStockInscription = waitForOrdStockInscription;
 exports.ordStockCli = ordStockCli;
@@ -594,6 +595,30 @@ async function getStockOrdOutputInscriptions(outpoint) {
     return body.inscriptions ?? [];
 }
 /**
+ * A fresh 1 BTC P2WPKH UTXO in the `ordpool-e2e` wallet whose first sat
+ * carries no inscription, for building SDK inscriptions that stock ord must
+ * index as blessed. Inscribing onto an already-inscribed sat is a
+ * reinscription, and the pool can hand one out (see
+ * {@link getStockOrdOutputInscriptions}), so this re-funds until it gets a
+ * clean one. Sign the SDK commit with `walletprocesspsbt` on `ordpool-e2e`.
+ */
+async function fundUninscribed() {
+    for (let attempt = 0; attempt < 8; attempt++) {
+        const fundingAddr = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'bech32');
+        const fundingPubkey = new Uint8Array(Buffer.from(JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'getaddressinfo', fundingAddr)).pubkey, 'hex'));
+        rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', fundingAddr, '1.0');
+        const tip = mineBlocks(1);
+        await waitForElectrsSync(tip);
+        await waitForOrdStockSync(tip);
+        const utxo = await waitForUtxoAt(fundingAddr, 100_000_000);
+        if ((await getStockOrdOutputInscriptions(`${utxo.txid}:${utxo.vout}`)).length === 0) {
+            return { fundingAddr, fundingPubkey, utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value } };
+        }
+        // The pool handed us a previously-inscribed sat; discard and try again.
+    }
+    throw new Error('no un-inscribed 1 BTC funding UTXO after 8 attempts');
+}
+/**
  * Fetch the raw body bytes of an inscription from stock ord's
  * `/content/<id>` endpoint. ord returns the bytes verbatim with the
  * envelope's content-type as the response Content-Type header — same
@@ -729,10 +754,7 @@ async function fundOrdStockWallet(walletName, btc = '2.0') {
         .sort((a, b) => b.amount - a.amount);
     let input;
     for (const u of candidates) {
-        const info = await fetch(`${ORD_STOCK_URL}/output/${u.txid}:${u.vout}`, {
-            headers: { Accept: 'application/json' },
-        }).then(r => (r.ok ? r.json() : null)).catch(() => null);
-        if (info && Array.isArray(info.inscriptions) && info.inscriptions.length === 0) {
+        if ((await getStockOrdOutputInscriptions(`${u.txid}:${u.vout}`)).length === 0) {
             input = { txid: u.txid, vout: u.vout };
             break;
         }
