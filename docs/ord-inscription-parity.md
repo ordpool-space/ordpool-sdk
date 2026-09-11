@@ -51,16 +51,15 @@ ord defaults to **10 000** and exposes `--postage`. So we differ from ord's
 default by ~18x on every inscription, and a user who wants more padding
 cannot ask for it.
 
-**The doc comment justifies it by citing the HQ "cat UTXO is always 546" rule,
-and that rule says the opposite.** HQ: *"546 is ONLY the mint's fresh-cat
-postage. Never a constraint on an incoming cat UTXO, never a detection
-heuristic."* An inscription is not a minted cat. This is our own rule being
-misapplied, which makes it the one gap here that is arguably a bug rather than
-a missing feature.
+**CORRECTED (2026-09-11).** This section first called the 546 a bug, because
+its comment cited an HQ rule that said the opposite. The maintainer: 546 is
+simply CHEAPER, and it is the common denominator across tools. Only the stale
+rule citation was wrong, and it is fixed in `5602cb9` along with seven
+siblings.
 
-Fix: an optional `postageSats`, defaulting to ord's 10 000 for a plain
-inscribe and staying 546 where we deliberately mint a cat. Cheap, and it moves
-a hard-coded constant into a decision.
+So the gap is narrower than written: the DEFAULT is right and stays 546.
+Copying ord's 10 000 would cost a user 9 454 sats of padding they did not ask
+for. What is missing is only the OPTION, for someone who wants more padding.
 
 ### 3.2 No batch, at all
 
