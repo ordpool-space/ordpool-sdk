@@ -74,3 +74,35 @@ one control a person must not fail to find. Measure the label and the icon
 against their ground, per round 3 §9, and remember that quiet is a register
 rather than a contrast budget: ord.net's reference renders grey on near-black,
 which is a look, not a licence to go below the floor.
+
+## 6. The wallet skips this round, and the reason sharpens the rule
+
+cat21-wallet has no connect-a-wallet button and should not grow one, for the
+same structural reason it has no footer: it IS the wallet. Asked to check
+rather than assume, they found their only two connect-shaped strings and
+showed both are the INVERSE act:
+
+- `open.ts`: "Permission denied, user must first connect to the wallet", the
+  error when a dapp calls before approval. The dapp is the one connecting.
+- The dapp-permission screen ("CONNECT APP, Requested by <origin>"): a site
+  asking to connect to the wallet, the wallet approving.
+
+Their conclusion, which is better than the question that prompted it:
+
+> Adopting the family connect strings there would mislabel the act. It would
+> read as if the wallet is offering to connect to something, when it's the one
+> being connected to.
+
+**The general rule, worth more than the instance: a shared string names an
+ACT, and the inverse act must not borrow it.** Two surfaces can both be about
+"connecting" and still need different words, because the subject differs. The
+sameness that justifies hosting is sameness of the act, not of the topic.
+
+That is the third cut through the same question this fortnight, and the three
+compose:
+
+| | test | example |
+|---|---|---|
+| round 4 §9 | is variation the POINT? | tagline varies by design, so local |
+| round 5 §2 | is variation the point? | connect strings must match, so shared |
+| round 5 §6 | is it the SAME ACT? | a wallet being connected TO is not a visitor connecting one, so separate words |
