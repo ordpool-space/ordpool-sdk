@@ -92,3 +92,77 @@ describe('satOffset', () => {
     expect(outputs(r.commitPsbt)[0][1]).toBe(5_000);
   });
 });
+
+describe('satSource', () => {
+  const OWNER_PRIV = new Uint8Array(32).fill(0xef);
+  const owner = btc.p2tr(schnorr.getPublicKey(OWNER_PRIV), undefined, scureNetwork, true);
+  const source = (value: number, offset: number) => ({
+    txid: 'e'.repeat(64), vout: 0, value, scriptPubKey: owner.script,
+    tapInternalKey: schnorr.getPublicKey(OWNER_PRIV), address: owner.address!, offset,
+  });
+
+  it('spends the sat\'s UTXO first; padding and remainder return to its address, the funding pays only the fee', () => {
+    const r = build({ satSource: source(20_000, 5_000) });
+    const commit = btc.Transaction.fromPSBT(r.commitPsbt);
+    expect(hex.encode(commit.getInput(0).txid!)).toBe('e'.repeat(64));
+    expect(hex.encode(commit.getInput(1).txid!)).toBe('d'.repeat(64));
+    const outs = outputs(r.commitPsbt);
+    const ownerScript = hex.encode(owner.script);
+    expect(outs[0]).toEqual([ownerScript, 5_000]);
+    expect(outs[1]).toEqual([hex.encode(r.commit.outputScript), r.commit.outputValueSats]);
+    expect(outs[2]).toEqual([ownerScript, 20_000 - 5_000 - r.commit.outputValueSats]);
+    expect(r.fees.fundingRequirementSats).toBe(r.fees.commitFeeSats);
+  });
+
+  it('a remainder below the owner address\'s dust limit becomes postage: no remainder output, a bigger inscription output', () => {
+    // Size the UTXO so 100 sats (below P2TR's 330) would remain.
+    const probe = build({ satSource: source(1_000_000, 0) });
+    const r = build({ satSource: source(probe.commit.outputValueSats + 100, 0) });
+    const outs = outputs(r.commitPsbt);
+    expect(outs[0][1]).toBe(probe.commit.outputValueSats + 100); // the commit output takes it all
+    expect(outs.some(([script]) => script === hex.encode(owner.script))).toBe(false);
+    const reveal = btc.Transaction.fromRaw(hex.decode(r.revealHex));
+    expect(Number(reveal.getOutput(0).amount)).toBe(546 + 100);
+  });
+
+  it('refuses satOffset and satSource together', () => {
+    expect(() => build({ satOffset: 1_000, satSource: source(20_000, 0) }))
+      .toThrow('pass satOffset (a sat in the funding UTXO) or satSource, not both');
+  });
+
+  it('the orchestrator has the wallet sign the commit as a transfer: the sat\'s UTXO at 0, the funding at 1', async () => {
+    const { inscribeAndBroadcast } = await import('./inscribe-orchestrator');
+    const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');
+    const { base64 } = await import('@scure/base');
+    const { firstValueFrom, of } = await import('rxjs');
+    const handed: string[][] = [];
+    const broadcasts: string[] = [];
+    const result = await firstValueFrom(inscribeAndBroadcast({
+      walletType: KnownOrdinalWalletType.xpub,
+      paymentOutput: { txid: 'd'.repeat(64), vout: 0, value: 100_000, status: { confirmed: true } },
+      paymentPublicKey: secp256k1.getPublicKey(PAYMENT_PRIV, true),
+      paymentAddress,
+      recipientAddress: owner.address!,
+      body: new TextEncoder().encode('rare'),
+      contentType: 'text/plain',
+      satSource: source(20_000, 5_000),
+      feeRatePerVbyte: 3,
+      network: NETWORK,
+      broadcast: (txHex: string) => { broadcasts.push(txHex); return of(btc.Transaction.fromRaw(hex.decode(txHex)).id); },
+      promptForSignedPsbt: (unsigned: { base64: string }) => {
+        const psbt = btc.Transaction.fromPSBT(base64.decode(unsigned.base64));
+        // What the wallet is handed: the sat's UTXO at 0, the funding at 1.
+        handed.push([0, 1].map(i => hex.encode(psbt.getInput(i).txid!)));
+        psbt.signIdx(OWNER_PRIV, 0);
+        psbt.signIdx(PAYMENT_PRIV, 1);
+        psbt.finalize();
+        return of(base64.encode(psbt.toPSBT(0)));
+      },
+    }));
+    expect(handed).toEqual([['e'.repeat(64), 'd'.repeat(64)]]);
+    const commit = btc.Transaction.fromRaw(hex.decode(broadcasts[0]));
+    expect(commit.id).toBe(result.commitTxId);
+    expect(commit.inputsLength).toBe(2);
+    expect(btc.Transaction.fromRaw(hex.decode(broadcasts[1])).id).toBe(result.revealTxId);
+  });
+});

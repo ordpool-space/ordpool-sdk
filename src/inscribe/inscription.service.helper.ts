@@ -12,7 +12,9 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import {
   resolveInscribePostage,
   buildInscribeCommitPsbt,
+  satSourceRemainder,
   type InscribeCommitResult,
+  type InscribeSatSource,
 } from './inscription-commit.helper';
 import {
   ORD_TAGS,
@@ -287,6 +289,15 @@ export interface CreateInscribeTransactionsArgs {
    */
   satOffset?: number;
   /**
+   * Inscribe onto a sat in a UTXO other than `paymentOutput`, e.g. a rare sat
+   * kept at the ordinals address (ord's `--satpoint` on that UTXO). The
+   * commit spends it as input 0, ahead of the funding input, and its sats
+   * go back to its own address except the ones the commit output takes; see
+   * `InscribeSatSource`. The wallet signs the commit as a transfer (input 0
+   * at the ordinals address, the funding at 1).
+   */
+  satSource?: InscribeSatSource;
+  /**
    * Compress `gallery`/`title` the way ord's `--compress` does: the
    * brotli-compressed forms join the candidates and the smallest wins, with
    * tag 0x13 set to `br` when a compressed one does. Needs the brotli wasm
@@ -385,15 +396,21 @@ function deriveUnsignedCommitTxid(
   paymentAddress: string,
   paymentPublicKey: Uint8Array,
   network: Network,
+  fundingInputIndex = 0,
 ): string {
   const scureNetwork = toScureNetwork(network);
   const simTx = btc.Transaction.fromPSBT(simCommitPsbt);
   const { dummyPrivateKey } = getDummyKeypair(scureNetwork);
-  simTx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+  simTx.signIdx(dummyPrivateKey, fundingInputIndex, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+  // A satSource ahead of the funding input is a P2TR key-path spend with an
+  // empty scriptSig; any witness gives the same txid.
+  if (fundingInputIndex > 0) {
+    simTx.updateInput(0, { tapKeySig: new Uint8Array(64) }, true);
+  }
   simTx.finalize();
   if (getAddressFormat(paymentAddress) === 'P2SH???') {
     const redeemScript = btc.p2wpkh(paymentPublicKey, scureNetwork).script;
-    simTx.updateInput(0, { finalScriptSig: btc.Script.encode([redeemScript]) }, true);
+    simTx.updateInput(fundingInputIndex, { finalScriptSig: btc.Script.encode([redeemScript]) }, true);
   }
   return simTx.id;
 }
@@ -463,7 +480,7 @@ interface InscribeAssembly {
 /** The funding inputs every inscribe builder takes. */
 export type InscribeFundingArgs = Pick<CreateInscribeTransactionsArgs,
   'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte' | 'tip' | 'walletType' | 'network'
-  | 'satOffset'>;
+  | 'satOffset' | 'satSource'>;
 
 /** A commit ready to sign, with its fees and the txid the reveal spends. */
 export interface InscribeCommitPlan {
@@ -561,6 +578,7 @@ export function planInscribeCommit(
       ephemeralPubkeyXonly,
       changeDustLimitSats,
       satOffset: args.satOffset,
+      satSource: args.satSource,
       commitPostageSats: assembly.commitPostageSats,
       tip: args.tip,
       walletType: args.walletType,
@@ -575,6 +593,20 @@ export function planInscribeCommit(
       throw new Error('Insufficient funds for inscribe');
     }
     throw err;
+  }
+
+  // A satSource's sats after the commit output's share return to its
+  // address; below that address's dust limit they cannot, so they go to the
+  // inscription instead: its postage grows by them, the commit output then
+  // takes the whole rest of the satSource, and nothing is paid to the miner.
+  if (args.satSource !== undefined) {
+    if (assembly.inscriptionOutputs !== undefined) {
+      throw new Error('satSource is supported for a single inscription, not a batch');
+    }
+    const remainder = satSourceRemainder(args.satSource, fees.commitOutputValueSats);
+    if (remainder > 0 && remainder < getMinimumUtxoSize(args.satSource.address)) {
+      return planInscribeCommit(args, { ...assembly, postageSats: postageSats + remainder });
+    }
   }
 
   if (args.paymentOutput.value < fees.fundingRequirementSats) {
@@ -599,6 +631,7 @@ export function planInscribeCommit(
     walletType: args.walletType,
     changeDustLimitSats,
     satOffset: args.satOffset,
+    satSource: args.satSource,
     commitPostageSats: assembly.commitPostageSats,
     network: args.network,
   });
@@ -620,6 +653,7 @@ export function planInscribeCommit(
     walletType: args.walletType,
     changeDustLimitSats,
     satOffset: args.satOffset,
+    satSource: args.satSource,
     commitPostageSats: assembly.commitPostageSats,
     network: args.network,
   });
@@ -628,6 +662,7 @@ export function planInscribeCommit(
     args.paymentAddress,
     args.paymentPublicKey,
     args.network,
+    commit.fundingInputIndex,
   );
 
   return { fees, commit, commitTxid: commitTxidUnsigned, postageSats };
@@ -775,8 +810,8 @@ export function createChildInscribeTransactions(
       throw new Error('tip.address must be a non-empty string');
     }
   }
-  if (args.satOffset !== undefined && args.satOffset !== 0) {
-    throw new Error('satOffset is not supported for child inscriptions');
+  if ((args.satOffset !== undefined && args.satOffset !== 0) || args.satSource !== undefined) {
+    throw new Error('satOffset / satSource are not supported for child inscriptions');
   }
   if (args.body === undefined && args.delegate === undefined) {
     throw new Error('an inscription needs a body or a delegate (ord: --file or --delegate)');

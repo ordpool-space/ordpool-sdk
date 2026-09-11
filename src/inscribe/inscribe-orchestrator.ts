@@ -13,6 +13,7 @@ import {
   createInscribeTransactions,
 } from './inscription.service.helper';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper';
+import type { InscribeSatSource } from './inscription-commit.helper';
 import { createBatchChildInscribeTransactions, createBatchInscribeTransactions } from './inscription-batch.helper';
 import type {
   BatchParent,
@@ -135,6 +136,13 @@ export interface InscribeAndBroadcastArgs {
    */
   satOffset?: number;
   /**
+   * Inscribe onto a sat in a UTXO other than `paymentOutput`, e.g. a rare
+   * sat at the ordinals address (see `CreateInscribeTransactionsArgs.satSource`).
+   * The wallet then signs the commit with the transfer topology: input 0 at
+   * the ordinals address, the funding at input 1.
+   */
+  satSource?: InscribeSatSource;
+  /**
    * Compress `gallery`/`title` as ord's `--compress` does (see
    * `CreateInscribeTransactionsArgs.compressProperties`). Load the brotli
    * wasm first; `compressLikeOrd` on the body does that.
@@ -209,6 +217,7 @@ export function inscribeAndBroadcast(
         properties: args.properties,
         postageSats: args.postageSats,
         satOffset: args.satOffset,
+        satSource: args.satSource,
         gallery: args.gallery,
         title: args.title,
         compressProperties: args.compressProperties,
@@ -220,8 +229,51 @@ export function inscribeAndBroadcast(
       return throwError(() => err);
     }
 
+    if (args.satSource !== undefined) {
+      return signSatSourceCommitAndBroadcast(built, { ...args, satSource: args.satSource });
+    }
     return signAndBroadcast(built, args);
   });
+}
+
+/**
+ * A commit that spends a satSource ahead of the funding input: input 0 at
+ * the ordinals address, the funding at input 1. That is the transfer
+ * topology, so the wallet signs it through `signTransfer`, which derives
+ * those indexes itself; then the pre-signed reveal broadcasts.
+ */
+function signSatSourceCommitAndBroadcast(
+  built: CreateInscribeTransactionsResult,
+  args: SignAndBroadcastArgs & { satSource: InscribeSatSource },
+): Observable<InscribeAndBroadcastResult> {
+  const signer = findSignerOrThrow(args.walletType);
+  const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
+    if (args.onCommitSigned) {
+      try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
+    }
+    return args.broadcast(signedCommitHex);
+  };
+  return signer.signTransfer({
+    psbtBytes: built.commitPsbt,
+    ordinalsAddress: args.satSource.address,
+    paymentAddress: args.paymentAddress,
+    fundingInputCount: 1,
+    network: args.network,
+    broadcast: captureAndBroadcast,
+    promptForSignedPsbt: args.promptForSignedPsbt,
+  }).pipe(
+    switchMap(({ txId: commitTxId }) =>
+      args.broadcast(built.revealHex).pipe(
+        map((revealTxId) => ({
+          commitTxId,
+          revealTxId,
+          commitAddress: built.commitAddress,
+          ephemeral: built.ephemeral,
+          fees: built.fees,
+        })),
+      ),
+    ),
+  );
 }
 
 /** The funding, signing and broadcast inputs every inscribe orchestrator shares. */

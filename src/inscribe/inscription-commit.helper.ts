@@ -85,6 +85,40 @@ export function resolveInscribePostage(postageSats: number | undefined): number 
   return postageSats;
 }
 
+/**
+ * The UTXO holding the sat an inscription goes on, spent as the commit's
+ * input 0 ahead of the funding input. Its sats never pay a fee and never go
+ * to the payment change: the ones in front of the chosen sat return to
+ * `address` as a padding output (ord's `align_outgoing`), and the ones after
+ * the commit output's share return to `address` as a remainder output. The
+ * funding input pays the fee and whatever the commit output still needs.
+ *
+ * P2TR key-path only (an ordinals address), so its witness is exactly one
+ * 64-byte Schnorr signature and the fee is exact before the wallet signs.
+ */
+export interface InscribeSatSource {
+  txid: string;
+  vout: number;
+  value: number;
+  scriptPubKey: Uint8Array;
+  /** x-only internal key of the P2TR output (the ordinals address's key). */
+  tapInternalKey: Uint8Array;
+  /** The address the UTXO sits at; padding and remainder return here. */
+  address: string;
+  /** Offset of the chosen sat within the UTXO. */
+  offset: number;
+}
+
+/**
+ * The sats of a `satSource` UTXO after the chosen sat that the commit output
+ * does not take, which return to its address. Below that address's dust
+ * limit they cannot be their own output: the commit output takes them and
+ * the inscription's postage grows by them (see `createInscribeTransactions`).
+ */
+export function satSourceRemainder(satSource: InscribeSatSource, commitOutputValueSats: number): number {
+  return Math.max(0, satSource.value - satSource.offset - commitOutputValueSats);
+}
+
 export interface InscribeCommitArgs {
   /** Postage for the inscription output; see `resolveInscribePostage`. Default 546. */
   postageSats?: number;
@@ -159,6 +193,14 @@ export interface InscribeCommitArgs {
    */
   satOffset?: number;
   /**
+   * The UTXO holding the sat to inscribe onto, when it is not the funding
+   * UTXO: ord's `--satpoint` on a UTXO other than the one paying (the usual
+   * rare-sat case, the sat kept at the ordinals address). See
+   * {@link InscribeSatSource}. Excludes `satOffset`, which is the same thing
+   * inside the funding UTXO.
+   */
+  satSource?: InscribeSatSource;
+  /**
    * The sats the commit output carries for the reveal's inscription outputs,
    * replacing `postageSats`. 0 when the reveal's own inputs fund them (ord's
    * `satpoints` batch mode, where the commit pays only the reveal fee).
@@ -181,8 +223,12 @@ export interface InscribeCommitResult {
    * miner fee in a single P2TR commit.
    */
   commitOutputValueSats: number;
-  /** Index of the commit output: 0, or 1 behind a `satOffset` padding output. */
+  /** Index of the commit output: 0, or 1 behind a padding output. */
   commitVout: number;
+  /** Index of the funding input the payment wallet signs: 0, or 1 behind a `satSource`. */
+  fundingInputIndex: number;
+  /** Sats returned to the `satSource` address after the commit output; 0 without one. */
+  remainderSats: number;
   /** Taptree metadata the reveal builder needs to construct its spending witness. */
   taproot: {
     /** Taproot internal key actually written to the output (the ephemeral pubkey). */
@@ -214,7 +260,16 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   }
   const postageSats = args.commitPostageSats ?? resolveInscribePostage(args.postageSats);
   const tipValueSats = args.tipValueSats ?? 0;
-  const commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
+  let commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
+  // A satSource remainder below its address's dust limit cannot be its own
+  // output; the commit output takes it (createInscribeTransactions then
+  // raises the postage by it, so the reveal hands it to the inscription).
+  if (args.satSource !== undefined) {
+    const remainder = satSourceRemainder(args.satSource, commitOutputValueSats);
+    if (remainder > 0 && remainder < getMinimumUtxoSize(args.satSource.address)) {
+      commitOutputValueSats += remainder;
+    }
+  }
 
   // Single envelope leaf; ephemeral key as the taproot internal key.
   // Matches ord's `TaprootBuilder::new().add_leaf(0, reveal_script)
@@ -288,26 +343,46 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   if (args.fundingInput.nonWitnessUtxo) {
     inputBase.nonWitnessUtxo = args.fundingInput.nonWitnessUtxo;
   }
+  // The input holding the chosen sat comes first: the satSource when given,
+  // otherwise the funding input itself.
+  const source = args.satSource;
+  if (source !== undefined) {
+    if ((args.satOffset ?? 0) !== 0) {
+      throw new Error('pass satOffset (a sat in the funding UTXO) or satSource, not both');
+    }
+    if (source.tapInternalKey.length !== 32) {
+      throw new Error('satSource must be a P2TR UTXO with its 32-byte x-only internal key');
+    }
+    tx.addInput({
+      txid: source.txid,
+      index: source.vout,
+      sequence,
+      witnessUtxo: { script: source.scriptPubKey, amount: BigInt(source.value) },
+      tapInternalKey: source.tapInternalKey,
+    });
+  }
   tx.addInput(inputBase);
 
   // Padding output: the sats in front of the chosen sat, so it becomes the
   // first sat of the commit output (ord's align_outgoing).
-  const satOffset = args.satOffset ?? 0;
+  const satOffset = source?.offset ?? args.satOffset ?? 0;
+  const satInputValue = source?.value ?? args.fundingInput.value;
+  const paddingAddress = source?.address ?? args.senderChangeAddress;
   if (!Number.isInteger(satOffset) || satOffset < 0) {
     throw new Error(`satOffset must be a non-negative integer; got ${satOffset}`);
   }
-  if (satOffset >= args.fundingInput.value) {
-    throw new Error(`satOffset ${satOffset} is outside the ${args.fundingInput.value}-sat funding input`);
+  if (satOffset >= satInputValue) {
+    throw new Error(`satOffset ${satOffset} is outside the ${satInputValue}-sat ${source ? 'sat source' : 'funding input'}`);
   }
   if (satOffset > 0) {
-    const paddingDust = getMinimumUtxoSize(args.senderChangeAddress);
+    const paddingDust = getMinimumUtxoSize(paddingAddress);
     if (satOffset < paddingDust) {
       throw new Error(
         `satOffset ${satOffset} would make a padding output below the ${paddingDust}-sat dust limit ` +
-        `of ${args.senderChangeAddress}; ord pads it with another input, which this commit does not take`,
+        `of ${paddingAddress}; ord pads it with another input, which this commit does not take`,
       );
     }
-    tx.addOutputAddress(args.senderChangeAddress, BigInt(satOffset), scureNetwork);
+    tx.addOutputAddress(paddingAddress, BigInt(satOffset), scureNetwork);
   }
   const commitVout = satOffset > 0 ? 1 : 0;
 
@@ -317,10 +392,25 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
     amount: BigInt(commitOutputValueSats),
   });
 
-  // Change to the user, after the commit output, when above dust.
+  // The satSource's sats after the commit output's share go back to its own
+  // address, never to the payment change.
+  // (A sub-dust remainder was already taken by the commit output above.)
+  let remainderSats = 0;
+  if (source !== undefined) {
+    remainderSats = satSourceRemainder(source, commitOutputValueSats);
+    if (remainderSats > 0) {
+      tx.addOutputAddress(source.address, BigInt(remainderSats), scureNetwork);
+    }
+  }
+
+  // Change to the user, after the commit output, when above dust. The
+  // funding input covers the fee and whatever part of the commit output the
+  // chosen sat's input does not.
   const changeDustLimit = args.changeDustLimitSats ?? postageSats;
-  const calculatedChange =
-    args.fundingInput.value - satOffset - commitOutputValueSats - args.commitFeeSats;
+  const fromFunding = source !== undefined
+    ? Math.max(0, commitOutputValueSats - (source.value - satOffset))
+    : satOffset + commitOutputValueSats;
+  const calculatedChange = args.fundingInput.value - fromFunding - args.commitFeeSats;
   if (calculatedChange < 0) {
     throw new Error(
       `Funding insufficient: input=${args.fundingInput.value}, padding=${satOffset}, ` +
@@ -342,10 +432,10 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
     throw new Error(`Internal error: commit output ${commitVout} amount drifted`);
   }
   assertCat21LockTime(tx.lockTime);
-  if (tx.getInput(0).sequence !== sequence) {
-    throw new Error(
-      `Internal error: input 0 sequence=${tx.getInput(0).sequence}, expected ${sequence}`
-    );
+  for (let i = 0; i < tx.inputsLength; i++) {
+    if (tx.getInput(i).sequence !== sequence) {
+      throw new Error(`Internal error: input ${i} sequence=${tx.getInput(i).sequence}, expected ${sequence}`);
+    }
   }
 
   return {
@@ -354,6 +444,8 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
     commitOutputScript: commitP2tr.script,
     commitOutputValueSats,
     commitVout,
+    fundingInputIndex: source !== undefined ? 1 : 0,
+    remainderSats,
     taproot: {
       internalKey: args.ephemeralPubkeyXonly,
       tapLeafScript: commitP2tr.tapLeafScript,

@@ -15,13 +15,15 @@
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
 import { schnorr } from '@noble/curves/secp256k1';
-import { base64 } from '@scure/base';
+import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { findSatOffset } from '../../src/inscribe/sat-offset';
 import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
 import { Network, toScureNetwork } from '../../src/network';
 import {
+  sendFromCleanFunderCoin,
+  ordStockWalletReceive,
   fundOrdStockWallet,
   fundUninscribed,
   getStockOrdOutput,
@@ -166,4 +168,117 @@ describe('inscribe onto a chosen sat → parity with `ord wallet inscribe --satp
     await waitForOrdStockSync(tip);
     expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wanted);
   }, 240_000);
+});
+
+describe('inscribe onto a sat in a separate UTXO (satSource)', () => {
+  const ownerKey = schnorr.utils.randomPrivateKey();
+  const ownerXonly = schnorr.getPublicKey(ownerKey);
+  const owner = btc.p2tr(ownerXonly, undefined, scureRegtest, true);
+
+  /** A UTXO of `sats` at the owner's P2TR address, standing in for a rare-sat UTXO. */
+  async function ownerUtxo(sats: number) {
+    const txid = await sendFromCleanFunderCoin({ [owner.address!]: (sats / 1e8).toFixed(8) });
+    return { txid, vout: 0, value: sats, scriptPubKey: owner.script, tapInternalKey: ownerXonly, address: owner.address! };
+  }
+
+  /** The funder wallet signs the funding input (1); the owner key signs the satSource (0). */
+  async function signAndBroadcast(built: ReturnType<typeof createInscribeTransactions>): Promise<void> {
+    const processed = JSON.parse(rpc(
+      '-rpcwallet=ordpool-e2e', '-named', 'walletprocesspsbt',
+      `psbt=${base64.encode(built.commitPsbt)}`, 'sign=true', 'finalize=false',
+    )) as { psbt: string };
+    const commit = btc.Transaction.fromPSBT(base64.decode(processed.psbt));
+    commit.signIdx(ownerKey, 0);
+    commit.finalize();
+    expect(await postTx(commit.hex)).toBe(built.commitTxid);
+    expect(await postTx(built.revealHex)).toBe(built.revealTxid);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdStockSync(tip);
+  }
+
+  function build(satSource: Parameters<typeof createInscribeTransactions>[0]['satSource'], f: Awaited<ReturnType<typeof fundUninscribed>>, body: Uint8Array) {
+    return createInscribeTransactions({
+      paymentOutput: { ...f.utxo, status: { confirmed: true } },
+      paymentPublicKey: f.fundingPubkey,
+      paymentAddress: f.fundingAddr,
+      recipientAddress: btc.p2tr(schnorr.getPublicKey(schnorr.utils.randomPrivateKey()), undefined, scureRegtest, true).address!,
+      body,
+      contentType: TXT,
+      satSource,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+  }
+
+  const SOURCE_WALLET = `${ORD_WALLET}-source`;
+
+  beforeAll(async () => {
+    await waitForOrdStockReady(60_000);
+    await fundOrdStockWallet(SOURCE_WALLET);
+  }, 240_000);
+
+  it('offset 5000 in a 20000-sat UTXO: same commit output as ord, padding and remainder back to the owner, inscription on that sat', async () => {
+    // ---- ord: a 20000-sat UTXO in its wallet, inscribed at offset 5000 ----
+    const ordAddr = ordStockWalletReceive(SOURCE_WALLET);
+    const ordSourceTxid = await sendFromCleanFunderCoin({ [ordAddr]: '0.00020000' });
+    const body = enc('onto a sat kept in its own UTXO');
+    writeOrdStockFile('/tmp/pst-source.txt', body);
+    const ord = ordStockWalletInscribe(SOURCE_WALLET, '/tmp/pst-source.txt', FEE_RATE, [
+      '--satpoint', `${ordSourceTxid}:0:5000`, '--postage', '546sat',
+    ]);
+    await waitForOrdStockSync(mineBlocks(1));
+    const ordCommit = sats(ord.commit);
+    expect(ordCommit[0]).toBe(5_000);
+
+    // ---- SDK ----
+    const source = await ownerUtxo(20_000);
+    const wantedSat = await satAt(`${source.txid}:0`, 5_000);
+    const f = await fundUninscribed();
+    const built = build({ ...source, offset: 5_000 }, f, body);
+    const commitTx = btc.Transaction.fromPSBT(built.commitPsbt);
+    const outs = Array.from({ length: commitTx.outputsLength }, (_, i) => ({
+      value: Number(commitTx.getOutput(i).amount), script: hex.encode(commitTx.getOutput(i).script!),
+    }));
+    expect(outs[0]).toEqual({ value: 5_000, script: hex.encode(owner.script) });
+    expect(outs[1].value).toBe(ordCommit[1]);
+    // The rest of the 20000 sats go back to the owner, not to the payment change.
+    expect(outs[2]).toEqual({ value: 20_000 - 5_000 - ordCommit[1], script: hex.encode(owner.script) });
+    // The funding pays only the fee.
+    expect(built.fees.fundingRequirementSats).toBe(built.fees.commitFeeSats);
+
+    await signAndBroadcast(built);
+    expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
+  }, 300_000);
+
+  it('a remainder below dust goes into the inscription\'s postage instead of the miner', async () => {
+    const f = await fundUninscribed();
+    const body = enc('remainder folded into postage');
+    // Measure the commit output this inscription needs, then make a UTXO
+    // that leaves exactly 100 sats (below P2TR's 330) after it.
+    const probe = build({ txid: 'a'.repeat(64), vout: 0, value: 1_000_000, scriptPubKey: owner.script, tapInternalKey: ownerXonly, address: owner.address!, offset: 1_000 }, f, body);
+    const source = await ownerUtxo(1_000 + probe.fees.commitOutputValueSats + 100);
+    const wantedSat = await satAt(`${source.txid}:0`, 1_000);
+    const built = build({ ...source, offset: 1_000 }, f, body);
+
+    const commitTx = btc.Transaction.fromPSBT(built.commitPsbt);
+    // Padding, commit output, change: no remainder output.
+    expect(Number(commitTx.getOutput(0).amount)).toBe(1_000);
+    expect(Number(commitTx.getOutput(1).amount)).toBe(source.value - 1_000);
+    await signAndBroadcast(built);
+    const insc = await waitForOrdStockInscription(`${built.revealTxid}i0`);
+    expect(insc.sat).toBe(wantedSat);
+    expect(insc.value).toBe(546 + 100);
+  }, 300_000);
+
+  it('a satSource smaller than the commit output: the funding tops it up, and the inscription still lands on its first sat', async () => {
+    const source = await ownerUtxo(600);
+    const wantedSat = await satAt(`${source.txid}:0`, 0);
+    const f = await fundUninscribed();
+    const built = build({ ...source, offset: 0 }, f, enc('on the first sat of a small UTXO'));
+    expect(built.fees.fundingRequirementSats)
+      .toBe(built.fees.commitOutputValueSats - 600 + built.fees.commitFeeSats);
+    await signAndBroadcast(built);
+    expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
+  }, 300_000);
 });

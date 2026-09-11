@@ -110,6 +110,8 @@ export interface SimulateInscribeFeesArgs {
   satOffset?: number;
   /** See `InscribeCommitArgs.commitPostageSats`. */
   commitPostageSats?: number;
+  /** See `InscribeCommitArgs.satSource`: the UTXO holding the chosen sat, the commit's input 0. */
+  satSource?: InscribeCommitArgs['satSource'];
   network: Network;
 }
 
@@ -186,6 +188,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     changeDustLimitSats: args.changeDustLimitSats,
     satOffset: args.satOffset,
     commitPostageSats: args.commitPostageSats,
+    satSource: args.satSource,
     network: args.network,
   });
   const tipValueSats = args.tip?.value ?? 0;
@@ -224,7 +227,13 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   // forms (with-change / no-change) from real builds — no vB seed — and a coin
   // that only fits the no-change/absorb form is not falsely rejected.
   const commitOutputValueSats = postageSats + revealFeeSats + tipValueSats;
-  const commitFeeBudget = args.fundingInput.value - (args.satOffset ?? 0) - commitOutputValueSats;
+  // What the funding input must put into the commit before the fee: all of
+  // the commit output (and the padding) when it holds the chosen sat, or the
+  // part of the commit output the satSource does not cover.
+  const fromFunding = args.satSource !== undefined
+    ? Math.max(0, commitOutputValueSats - (args.satSource.value - args.satSource.offset))
+    : (args.satOffset ?? 0) + commitOutputValueSats;
+  const commitFeeBudget = args.fundingInput.value - fromFunding;
   const resolvedCommit = resolveCatTxFee({
     feeRatePerVbyte: args.feeRatePerVbyte,
     feeBudgetSats: commitFeeBudget,
@@ -242,13 +251,19 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         changeDustLimitSats: args.changeDustLimitSats,
         satOffset: args.satOffset,
         commitPostageSats: args.commitPostageSats,
+        satSource: args.satSource,
         network: args.network,
       });
       // Dummy-sign the funding input + finalize to read the real vsize. DEFAULT
       // and ALL are both accepted (taproot funding via the Layer-2 sim adapter).
       const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
       const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
-      tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+      tx.signIdx(dummyPrivateKey, commit.fundingInputIndex, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+      // The satSource is a P2TR key-path spend: its witness is exactly one
+      // 64-byte Schnorr signature, so a placeholder of that size is exact.
+      if (args.satSource !== undefined) {
+        tx.updateInput(0, { tapKeySig: new Uint8Array(64) }, true);
+      }
       tx.finalize();
       return { vsize: tx.vsize, finalFeeSats: commitFeeBudget - commit.changeSats };
     },
@@ -269,7 +284,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     revealVsize,
     combinedVsize: commitVsize + revealVsize,
     commitOutputValueSats,
-    fundingRequirementSats: (args.satOffset ?? 0) + commitOutputValueSats + commitFeeSats,
+    fundingRequirementSats: fromFunding + commitFeeSats,
   };
 }
 
