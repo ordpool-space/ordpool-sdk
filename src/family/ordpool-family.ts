@@ -64,7 +64,7 @@ export const ORDPOOL_FAMILY: readonly OrdpoolFamilyMember[] = [
     key: 'ordpool',
     name: 'ordpool.space',
     url: 'https://ordpool.space',
-    line: 'See inside every Bitcoin block.',
+    line: "A Bitcoin MEMEpool explorer. If it's on Bitcoin, we display it. No judgements!",
   },
   {
     key: 'cat21',
