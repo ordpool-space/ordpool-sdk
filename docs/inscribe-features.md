@@ -16,11 +16,23 @@ it, and what a UI has to know about it.
 | The stateful UI flow (fee preview, UTXO picker, mint) | `InscribeMintOrchestrator` | |
 
 `InscribeMintOrchestrator` is what ordpool.space uses. Its `InscribeContent`
-carries the single-inscription options below (title, traits, gallery,
-compressProperties, postage, satOffset, satSource, paddingUtxo,
-commitFeeRatePerVbyte, and the existing parent, metadata, metaprotocol,
-delegate, pointer), and its fee preview prices exactly what the build signs.
-`compressProperties` needs `brotliWasm` in its deps. Batch and parents in
+takes:
+
+- `source`: `{ kind: 'file', body, contentType }` or
+  `{ kind: 'delegate', delegate }`, so a screen asks once and hides the rest.
+- `satTarget`: `{ kind: 'in-funding', offset }` or
+  `{ kind: 'in-utxo', utxo, offset }`, plus `paddingUtxo` when the sat sits
+  less than a dust limit into its coin. With `in-funding` the coin holding
+  the sat must be chosen via `setSelectedUtxo`.
+- the rest as plain fields: title, traits, gallery, compressProperties
+  (needs `brotliWasm` in the deps), postageSats, commitFeeRatePerVbyte,
+  parent, metadata, metaprotocol, pointer, tip, note.
+
+Each funding coin in the snapshot carries a `preview`: commit and reveal
+vsize and fee, total fee, postage, funding requirement, total spent, and
+how many wallet prompts the shape needs (`null` when the coin cannot fund
+it). `snapshot.signing` is non-null while the wallet is being asked to
+sign, so a screen can say which signature is coming. Batch and parents in
 the orchestrator follow, shaped by what the inscribe screen needs.
 
 ## Options on a single inscription

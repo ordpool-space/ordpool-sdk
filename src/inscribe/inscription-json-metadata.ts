@@ -25,6 +25,8 @@
  * value wins, which is what serde_json's map insert does with preserve_order.
  */
 
+import { failInscribe } from './inscribe-errors';
+
 type JsonNode =
   | { k: 'null' }
   | { k: 'bool'; v: boolean }
@@ -51,7 +53,12 @@ class Parser {
   }
 
   private fail(msg: string): never {
-    throw new Error(`Invalid JSON metadata at ${this.i}: ${msg}`);
+    failInscribe(
+      'invalid-json-metadata',
+      `Invalid JSON metadata at ${this.i}: ${msg}`,
+      `This is not valid JSON: ${msg}, at character ${this.i}.`,
+      { position: this.i, reason: msg },
+    );
   }
 
   private ws(): void {

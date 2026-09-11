@@ -15,6 +15,7 @@ export type InscribeErrorCode =
   | 'duplicate-gallery-item'
   | 'duplicate-trait'
   | 'invalid-trait-value'
+  | 'invalid-json-metadata'
   | 'properties-conflict'
   | 'body-or-delegate-required'
   | 'output-below-dust'

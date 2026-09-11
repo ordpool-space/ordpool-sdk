@@ -46,10 +46,31 @@ import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orc
  */
 import { failInscribe } from './inscribe-errors';
 
+/**
+ * What is being inscribed: a file, or a delegate that points at another
+ * inscription's content (ord's `--delegate` with no `--file`). One or the
+ * other, so a screen can ask the question once and hide what does not apply.
+ */
+export type InscribeSource =
+  | { kind: 'file'; body: Uint8Array; contentType?: string }
+  | { kind: 'delegate'; delegate: string };
+
+/**
+ * The sat to inscribe onto, ord's `--satpoint` / `--sat`: either a sat inside
+ * the funding coin, or a sat in another taproot coin (a rare sat at the
+ * ordinals address). Omitted, the inscription lands on the funding coin's
+ * first sat, which is what an ordinary inscribe does.
+ *
+ * Either kind may need `paddingUtxo` when the sat sits less than a dust limit
+ * into its coin; the error then says how many sats that coin needs.
+ */
+export type InscribeSatTarget =
+  | { kind: 'in-funding'; offset: number }
+  | { kind: 'in-utxo'; utxo: InscribeSatSource; offset: number };
+
 export interface InscribeContent {
-  /** Body bytes. Omit for a delegate-only inscription (then `delegate` is required). */
-  body?: Uint8Array;
-  contentType?: string;
+  /** File or delegate. */
+  source: InscribeSource;
   envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
   /** Optional reveal vout[1] tip. */
   tip?: { address: string; value: number };
@@ -62,8 +83,6 @@ export interface InscribeContent {
   metadata?: Uint8Array;
   /** Metaprotocol identifier (tag 0x07), UTF-8. */
   metaprotocol?: string;
-  /** Delegate inscription id (tag 0x0b); ord serves the delegate's content. */
-  delegate?: string;
   /** Rune-name commitment (tag 0x0d) as the rune's u128 value. */
   rune?: bigint;
   /** CBOR properties (tag 0x11), pre-encoded; chunked over 520. */
@@ -89,14 +108,12 @@ export interface InscribeContent {
   /** The inscription output's value, ord's `--postage`. Default 546. */
   postageSats?: number;
   /**
-   * Inscribe onto the sat at this offset in the funding UTXO (`--satpoint`).
-   * The UTXO holding the sat must be chosen with `setSelectedUtxo`; the
-   * automatic pick would put the inscription on another sat.
+   * The sat to inscribe onto. With `kind: 'in-funding'` the coin holding it
+   * must be chosen via `setSelectedUtxo`; the automatic pick would use
+   * another coin, and so another sat.
    */
-  satOffset?: number;
-  /** Inscribe onto a sat in another UTXO, e.g. a rare sat at the ordinals address. */
-  satSource?: InscribeSatSource;
-  /** A second payment UTXO, for a chosen sat less than a dust limit into its UTXO. */
+  satTarget?: InscribeSatTarget;
+  /** A second payment UTXO, when the chosen sat needs padding (see `InscribeSatTarget`). */
   paddingUtxo?: TxnOutput;
   /** The commit's own fee rate, ord's `--commit-fee-rate`. Default: the fee rate. */
   commitFeeRatePerVbyte?: number;
@@ -112,6 +129,39 @@ export interface InscribeUtxoSimulation {
   utxo: TxnOutput;
   simulation: SimulateInscribeFeesResult | null;
   insufficient: boolean;
+  /** What this coin would cost and produce; `null` when it cannot fund the inscription. */
+  preview: InscribePreview | null;
+}
+
+/**
+ * One computed result per funding coin, everything a screen shows about the
+ * cost, taken from the same planning the build runs.
+ */
+export interface InscribePreview {
+  commitVsize: number;
+  commitFeeSats: number;
+  revealVsize: number;
+  revealFeeSats: number;
+  /** Commit plus reveal miner fees. */
+  totalFeeSats: number;
+  /** Sats the inscription itself carries. */
+  postageSats: number;
+  /** What the funding coin must hold: the commit output plus the commit fee. */
+  fundingRequirementSats: number;
+  /** Fees plus postage plus any tip: what leaves the wallet. */
+  totalSpentSats: number;
+  /** How often the wallet asks to sign for this shape. */
+  walletPrompts: number;
+}
+
+/**
+ * What the wallet is being asked to sign right now, emitted before each
+ * prompt so a screen can say which signature is coming.
+ */
+export interface InscribeSigningStep {
+  step: number;
+  of: number;
+  what: 'commit' | 'parent-inputs' | 'satpoint-inputs' | 'parent-and-satpoint-inputs';
 }
 
 /** State machine the consumer's template branches on. Sibling of the cat21 mint. */
@@ -153,6 +203,8 @@ export interface InscribeSnapshot {
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
   errorMessage: string | null;
   successResult: InscribeAndBroadcastResult | null;
+  /** Non-null while the wallet is being asked to sign; see `InscribeSigningStep`. */
+  signing: InscribeSigningStep | null;
 }
 
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
@@ -160,6 +212,23 @@ const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUt
   recommended: null,
   candidates: [],
 };
+
+/** The builder inputs for a content's source and sat target. */
+function contentInputs(content: InscribeContent): {
+  body?: Uint8Array; contentType?: string; delegate?: string;
+  satOffset?: number; satSource?: InscribeSatSource;
+} {
+  const source = content.source.kind === 'file'
+    ? { body: content.source.body, contentType: content.source.contentType }
+    : { delegate: content.source.delegate };
+  const target = content.satTarget;
+  const sat = target === undefined
+    ? {}
+    : target.kind === 'in-funding'
+      ? { satOffset: target.offset }
+      : { satSource: { ...target.utxo, offset: target.offset } };
+  return { ...source, ...sat };
+}
 
 /** Deterministic dummy x-only pubkey — only sizes the envelope (all 32-byte keys equal). */
 const DUMMY_PUBKEY_XONLY = new Uint8Array(32).fill(0x02);
@@ -180,6 +249,7 @@ export class InscribeMintOrchestrator {
     fundingRecommendation: EMPTY_RECOMMENDATION,
     errorMessage: null,
     successResult: null,
+    signing: null,
   };
   private readonly listeners = new Set<(s: InscribeSnapshot) => void>();
 
@@ -258,7 +328,7 @@ export class InscribeMintOrchestrator {
 
     if (!wallet) throw new Error('No wallet connected');
     if (!feeRate) throw new Error('No fee rate set');
-    if ((content?.satOffset ?? 0) !== 0 && this.snap.selectedUtxo === null) {
+    if (content?.satTarget?.kind === 'in-funding' && this.snap.selectedUtxo === null) {
       // The automatic pick would put the inscription on a sat of another coin.
       failInscribe('sat-utxo-must-be-selected',
         'Select the UTXO that holds the sat to inscribe onto (satOffset counts within it)',
@@ -274,7 +344,12 @@ export class InscribeMintOrchestrator {
     if (!content) throw new Error('No inscription content set');
     await this.ensureBrotli(content);
 
-    this.patch({ state: 'minting', errorMessage: null, successResult: null });
+    this.patch({
+      state: 'minting',
+      errorMessage: null,
+      successResult: null,
+      signing: { step: 1, of: walletPromptsFor(content), what: 'commit' },
+    });
     try {
       const result = await firstValueFrom(
         inscribeAndBroadcast({
@@ -283,8 +358,7 @@ export class InscribeMintOrchestrator {
           paymentPublicKey: hex.decode(wallet.paymentPublicKey),
           paymentAddress: wallet.paymentAddress,
           recipientAddress: content.recipient ?? wallet.ordinalsAddress,
-          body: content.body,
-          contentType: content.contentType,
+          ...contentInputs(content),
           envelopeFields: content.envelopeFields,
           feeRatePerVbyte: feeRate,
           tip: content.tip,
@@ -294,7 +368,6 @@ export class InscribeMintOrchestrator {
           pointer: content.pointer,
           metadata: content.metadata,
           metaprotocol: content.metaprotocol,
-          delegate: content.delegate,
           rune: content.rune,
           properties: content.properties,
           propertyEncoding: content.propertyEncoding,
@@ -304,8 +377,6 @@ export class InscribeMintOrchestrator {
           gallery: content.gallery,
           compressProperties: content.compressProperties,
           postageSats: content.postageSats,
-          satOffset: content.satOffset,
-          satSource: content.satSource,
           paddingUtxo: content.paddingUtxo,
           commitFeeRatePerVbyte: content.commitFeeRatePerVbyte,
           network: this.deps.network,
@@ -315,10 +386,10 @@ export class InscribeMintOrchestrator {
             : undefined,
         }),
       );
-      this.patch({ state: 'success', successResult: result });
+      this.patch({ state: 'success', successResult: result, signing: null });
       return result;
     } catch (err) {
-      this.patch({ state: 'error', errorMessage: errMsg(err) });
+      this.patch({ state: 'error', errorMessage: errMsg(err), signing: null });
       throw err;
     }
   }
@@ -333,6 +404,7 @@ export class InscribeMintOrchestrator {
       fundingRecommendation: EMPTY_RECOMMENDATION,
       errorMessage: null,
       successResult: null,
+      signing: null,
       state: this.wallet ? 'ready' : 'idle',
     });
   }
@@ -355,7 +427,7 @@ export class InscribeMintOrchestrator {
     // funding row turning up "insufficient" without a reason.
     try {
       await this.ensureBrotli(content);
-      synthesizeEnvelopeFields(content as unknown as CreateInscribeTransactionsArgs);
+      synthesizeEnvelopeFields({ ...content, ...contentInputs(content) } as unknown as CreateInscribeTransactionsArgs);
     } catch (err) {
       if (seq !== this.recomputeSeq) return;
       this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err) });
@@ -377,9 +449,15 @@ export class InscribeMintOrchestrator {
         // The UTXO must fund the whole commit (commitOutputValueSats +
         // commitFeeSats); simulateInscribeFees reports the requirement but
         // doesn't reject. Flag unusable rows so the picker greys them out.
-        return { utxo, simulation, insufficient: utxo.value < simulation.fundingRequirementSats };
+        const insufficient = utxo.value < simulation.fundingRequirementSats;
+        return {
+          utxo,
+          simulation,
+          insufficient,
+          preview: insufficient ? null : previewOf(simulation, content),
+        };
       } catch {
-        return { utxo, simulation: null, insufficient: true };
+        return { utxo, simulation: null, insufficient: true, preview: null };
       }
     });
 
@@ -444,15 +522,14 @@ export class InscribeMintOrchestrator {
     fundingInput: SimulateInscribeFeesArgs['fundingInput'],
   ): SimulateInscribeFeesArgs {
     const fields = [
-      ...synthesizeEnvelopeFields(content as unknown as CreateInscribeTransactionsArgs),
+      ...synthesizeEnvelopeFields({ ...content, ...contentInputs(content) } as unknown as CreateInscribeTransactionsArgs),
       ...(content.envelopeFields ?? []),
     ];
     return {
       feeRatePerVbyte: feeRate,
       commitFeeRatePerVbyte: content.commitFeeRatePerVbyte,
       postageSats: content.postageSats,
-      body: content.body,
-      contentType: content.contentType,
+      ...contentInputs(content),
       envelopeFields: fields,
       minimalTagPush: content.minimalTagPush,
       fundingInput,
@@ -461,8 +538,6 @@ export class InscribeMintOrchestrator {
       ephemeralPubkeyXonly: DUMMY_PUBKEY_XONLY,
       tip: content.tip,
       walletType: wallet.type,
-      satOffset: content.satOffset,
-      satSource: content.satSource,
       paddingInput: content.paddingUtxo === undefined ? undefined : prepareInscribeFundingInput({
         utxo: content.paddingUtxo,
         paymentPublicKey: hex.decode(wallet.paymentPublicKey),
@@ -489,6 +564,31 @@ export class InscribeMintOrchestrator {
     this.snap = { ...this.snap, ...next };
     for (const l of this.listeners) l(this.snap);
   }
+}
+
+/**
+ * How many wallet prompts this content needs. One for the commit today; a
+ * reveal that spends parents or chosen-sat coins adds a second, and that
+ * shape reaches the orchestrator with batch support.
+ */
+function walletPromptsFor(_content: InscribeContent): number {
+  return 1;
+}
+
+/** The screen-facing figures of one simulated funding coin. */
+function previewOf(sim: SimulateInscribeFeesResult, content: InscribeContent): InscribePreview {
+  const postageSats = sim.commitOutputValueSats - sim.revealFeeSats - (content.tip?.value ?? 0);
+  return {
+    commitVsize: sim.commitVsize,
+    commitFeeSats: sim.commitFeeSats,
+    revealVsize: sim.revealVsize,
+    revealFeeSats: sim.revealFeeSats,
+    totalFeeSats: sim.totalFeeSats,
+    postageSats,
+    fundingRequirementSats: sim.fundingRequirementSats,
+    totalSpentSats: sim.totalFeeSats + postageSats + (content.tip?.value ?? 0),
+    walletPrompts: walletPromptsFor(content),
+  };
 }
 
 function errMsg(err: unknown): string {

@@ -31,8 +31,7 @@ const wallet: InscribeWalletContext = {
 };
 
 const content: InscribeContent = {
-  body: new TextEncoder().encode('hello cat'),
-  contentType: 'text/plain',
+  source: { kind: 'file', body: new TextEncoder().encode('hello cat'), contentType: 'text/plain' },
 };
 
 const coin = (id: string, value: number): TxnOutput => ({
@@ -229,7 +228,7 @@ describe('InscribeMintOrchestrator: the preview prices what the build signs', ()
   it('satOffset needs the UTXO holding the sat to be chosen explicitly', async () => {
     const o = new InscribeMintOrchestrator(deps());
     await o.setWallet(wallet);
-    o.setContent({ ...content, satOffset: 1_000 });
+    o.setContent({ ...content, satTarget: { kind: 'in-funding', offset: 1_000 } });
     o.setFeeRate(10);
     await expect(o.mint()).rejects.toThrow('Select the UTXO that holds the sat to inscribe onto');
   });
@@ -258,7 +257,8 @@ describe('InscribeMintOrchestrator: preview equals the build', () => {
 
     const built = createInscribeTransactions({
       ...rich,
-      body: rich.body!,
+      body: (rich.source as { body: Uint8Array }).body,
+      contentType: (rich.source as { contentType?: string }).contentType,
       paymentOutput: utxo,
       paymentPublicKey: hex.decode(PAYMENT_PUB),
       paymentAddress: PAYMENT_ADDR,
@@ -270,5 +270,62 @@ describe('InscribeMintOrchestrator: preview equals the build', () => {
     expect(preview.revealVsize).toBe(built.fees.revealVsize);
     expect(preview.revealFeeSats).toBe(built.fees.revealFeeSats);
     expect(preview.commitOutputValueSats).toBe(built.fees.commitOutputValueSats);
+  });
+});
+
+describe('InscribeMintOrchestrator: the reshaped inputs and what a screen renders', () => {
+  const delegateId = `${'ab'.repeat(32)}i0`;
+
+  it('a delegate source inscribes without a file', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent({ source: { kind: 'delegate', delegate: delegateId } });
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.simulations.length > 0 && x.simulations[0].preview !== null);
+    // A delegate carries no body, so it stays small next to a real file
+    // (the 36-byte delegate id is all it costs).
+    const withFile = await (async () => {
+      const p = new InscribeMintOrchestrator(deps());
+      await p.setWallet(wallet);
+      p.setContent({ source: { kind: 'file', body: new Uint8Array(1_000).fill(7), contentType: 'image/png' } });
+      p.setFeeRate(10);
+      const t = await waitFor(p, (x) => x.simulations.length > 0 && x.simulations[0].preview !== null);
+      return t.simulations[0].preview!.revealVsize;
+    })();
+    expect(s.simulations[0].preview!.revealVsize).toBeLessThan(withFile);
+    expect(s.errorMessage).toBeNull();
+  });
+
+  it('the preview carries what the screen shows, and postage follows the chosen postage', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent({ ...content, postageSats: 3_000, tip: { address: PAYMENT_ADDR, value: 1_000 } });
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.simulations.length > 0 && x.simulations[0].preview !== null);
+    const p = s.simulations[0].preview!;
+    const sim = s.simulations[0].simulation!;
+    expect(p.postageSats).toBe(3_000);
+    expect(p.totalFeeSats).toBe(sim.commitFeeSats + sim.revealFeeSats);
+    expect(p.totalSpentSats).toBe(p.totalFeeSats + 3_000 + 1_000);
+    expect(p.fundingRequirementSats).toBe(sim.fundingRequirementSats);
+    expect(p.walletPrompts).toBe(1);
+  });
+
+  it('a coin that cannot fund the inscription has no preview', async () => {
+    const o = new InscribeMintOrchestrator(deps({ getUtxos: async () => [coin('c', 700)] }));
+    await o.setWallet(wallet);
+    o.setContent(content);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.simulations.length > 0);
+    expect(s.simulations[0].insufficient).toBe(true);
+    expect(s.simulations[0].preview).toBeNull();
+  });
+
+  it('the sat target union: in-utxo needs no explicit coin choice, in-funding does', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent({ ...content, satTarget: { kind: 'in-funding', offset: 1_000 } });
+    o.setFeeRate(10);
+    await expect(o.mint()).rejects.toThrow('Select the UTXO that holds the sat');
   });
 });

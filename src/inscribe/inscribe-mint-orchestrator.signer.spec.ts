@@ -32,7 +32,9 @@ const wallet: InscribeWalletContext = {
   paymentAddress: PAYMENT_ADDR,
   paymentPublicKey: PAYMENT_PUB,
 };
-const content: InscribeContent = { body: new TextEncoder().encode('hello cat'), contentType: 'text/plain' };
+const content: InscribeContent = {
+  source: { kind: 'file', body: new TextEncoder().encode('hello cat'), contentType: 'text/plain' },
+};
 const coin = (value: number): TxnOutput => ({ txid: 'c'.repeat(64), vout: 0, status: { confirmed: true }, value });
 
 const deps = (over: Partial<InscribeOrchestratorDeps> = {}): InscribeOrchestratorDeps => ({
@@ -83,7 +85,7 @@ describe('InscribeMintOrchestrator — sign + broadcast (inscribeAndBroadcast mo
     // The orchestrator fed inscribeAndBroadcast the auto-picked coin + content.
     const arg = mockInscribeAndBroadcast.mock.calls[0][0] as { recipientAddress: string; body: Uint8Array };
     expect(arg.recipientAddress).toBe(ORDINALS_ADDR);
-    expect(arg.body).toEqual(content.body);
+    expect(arg.body).toEqual((content.source as { body: Uint8Array }).body);
   });
 
   it('mint() hands every new option to the builder', async () => {
