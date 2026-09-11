@@ -111,3 +111,50 @@ dangerous when wrong is that it does not merely permit the defect, it
 MANUFACTURES a defence for it. cat21.space described having "rationalised it
 as site convention". The convention rationalised them, because it was written
 down as a rule and read as an instruction.
+
+## 7. SUPERSEDED: ordpool.space leads, the others match
+
+The maintainer, through the ordpool.space session:
+
+> it should look similar on all sites. You [ordpool] already have a footer, so
+> you can lead and let it look nice. Wording is more or less ok, but every
+> session can add their spice to the texts for their own product.
+
+**The competition in §2-§5 is off.** It is not three proposals and a pick. It
+is: ordpool.space designs the footer, shares its frames, and the other sites
+match that look in their own palettes.
+
+cat21.space's and cubes' proposals are not wasted. Their MEASUREMENTS carry
+forward regardless of whose design wins, and two of them are binding on
+anyone matching the lead:
+
+- cat21.space's ground punishes both directions. White is 2.14:1 and muted
+  grey is 2.19:1; only dark ink at 6.89:1 works there. A lead design that
+  leans on a light heading cannot be copied literally onto that site.
+- cubes has ONE theme (`data-bs-theme="dark"` hardcoded, no toggle, no
+  `prefers-color-scheme`), so "match it in both themes" is not a thing anyone
+  has to do there. The SDK asserted otherwise in §3 and was wrong, having
+  repeated an unverified claim back as an instruction.
+
+"Similar" means the same structure, hierarchy and rhythm. It cannot mean the
+same hex values, because the three grounds are black, orange and dark grey.
+
+## 8. "Spice" goes INTO the shared constant, never into a local override
+
+Each session may refine ITS OWN product's line. That refinement belongs in
+`ORDPOOL_FAMILY`, not in the consumer.
+
+**The reason is structural and easy to miss: your line is not only rendered on
+your own site.** Every site renders all four members, so cubes' line appears
+on ordpool.space and cat21.space too. A session that "spices" its own line
+locally changes it on one of the four surfaces that show it, and the other
+three keep printing the old sentence. That is not a small drift; it is the
+same product described two ways on two sites at the same time, which is
+exactly what the maintainer's "it should look similar on all sites" rules out.
+
+So the loop is: propose the wording, it lands in the SDK, every site picks it
+up on its next bump. One sentence, one place, four renderers.
+
+The same applies to the wallet's line with one extra consequence:
+`CAT21_WALLET_POSITIONING` IS that line, so spicing it also changes the
+wallet's own positioning copy. A spec pins the two identical on purpose.
