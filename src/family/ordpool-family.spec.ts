@@ -73,7 +73,7 @@ describe('ORDPOOL_FAMILY', () => {
   });
 
   it('keeps the maintainer wording exactly, signature capital included', () => {
-    expect(ordpoolFamilyMember('ordpool').line).toBe('The best MEMEpool explorer on Bitcoin.');
+    expect(ordpoolFamilyMember('ordpool').line).toBe('See inside every Bitcoin block.');
     expect(ordpoolFamilyMember('cat21').line).toBe(
       'Everything CAT-21, a meme protocol from the Creator of Ordpool.',
     );
