@@ -103,3 +103,7 @@ the wallet never sees it.
 - For parents and `satpoints`: the UTXOs with their script and x-only
   internal key; they must sit at the connected wallet's ordinals address.
 - The hosted brotli wasm, if compression is offered.
+- For gallery items and delegates: that the ids exist. ord refuses ids its
+  index does not have; `checkInscriptionsExist(ids, { ordBaseUrl })` looks
+  each up (`GET /inscription/<id>`) and reports `exists`, `missing`,
+  `invalid` or `unknown` (a failed lookup, never taken as missing).

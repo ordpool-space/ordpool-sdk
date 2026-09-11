@@ -31,6 +31,7 @@ export * from './wallet/connect-ui';
 export * from './inscribe/inscription-properties';
 export * from './inscribe/inscription-batch.helper';
 export * from './inscribe/sat-offset';
+export * from './inscribe/inscription-existence';
 export * from './inscribe/inscription-json-metadata';
 export * from './family/coin-check-promise';
 export * from './family/ordpool-family';
