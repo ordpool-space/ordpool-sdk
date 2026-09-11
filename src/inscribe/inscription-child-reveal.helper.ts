@@ -2,7 +2,7 @@ import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
-import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
+import { resolveInscribePostage } from './inscription-commit.helper';
 import { Network, toScureNetwork } from '../network';
 
 /**
@@ -78,6 +78,8 @@ export interface ChildRevealParent {
 }
 
 export interface ChildInscribeRevealArgs {
+  /** Postage for the CHILD inscription output. MUST equal the commit's. Default 546. */
+  postageSats?: number;
   /** Commit txid (the child's commit; same commit builder as a normal inscribe). */
   commitTxid: string;
   /** Commit output index — always 0. */
@@ -136,7 +138,7 @@ export interface ChildInscribeRevealResult {
  */
 export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): ChildInscribeRevealResult {
   const scureNetwork = toScureNetwork(args.network);
-  const postageSats = INSCRIBE_POSTAGE_SATS;
+  const postageSats = resolveInscribePostage(args.postageSats);
   const tipValueSats = args.tip?.value ?? 0;
   if (tipValueSats < 0 || !Number.isInteger(tipValueSats)) {
     throw new Error('tip.value must be a non-negative integer');

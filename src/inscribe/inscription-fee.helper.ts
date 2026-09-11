@@ -6,7 +6,7 @@ import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
-import { INSCRIBE_POSTAGE_SATS, buildInscribeCommitPsbt, type InscribeCommitArgs } from './inscription-commit.helper';
+import { buildInscribeCommitPsbt, resolveInscribePostage, type InscribeCommitArgs } from './inscription-commit.helper';
 import { buildInscriptionEnvelope, type OrdEnvelopeField } from './inscription-envelope';
 import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-reveal.helper';
 
@@ -39,6 +39,8 @@ import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-re
  */
 
 export interface SimulateInscribeFeesArgs {
+  /** Postage for the inscription output. Default 546; see `resolveInscribePostage`. */
+  postageSats?: number;
   /** sat/vB target fee rate. Same rate applies to both commit + reveal. */
   feeRatePerVbyte: number;
   /** Inscription body bytes. Shape-determines reveal vsize. */
@@ -115,6 +117,7 @@ export interface SimulateInscribeFeesResult {
  * material between calls.
  */
 export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateInscribeFeesResult {
+  const postageSats = resolveInscribePostage(args.postageSats);
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
   }
@@ -150,6 +153,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
     commitFeeSats: 0,
     revealFeeReserveSats: 0,
+    postageSats,
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats: args.changeDustLimitSats,
@@ -159,13 +163,14 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   const reveal = buildInscribeRevealTx({
     commitTxid: '0'.repeat(64),
     commitVout: 0,
+    postageSats,
     // postage + tip; the placeholder commit has revealFeeReserveSats=0
     // so the commit output is sized exactly to cover the reveal's two
     // outputs (recipient at postage, tip at tip.value). Setting it
     // higher would leave change inside the reveal which the helper
     // doesn't model — instead we measure vsize at zero reveal fee and
     // compute the fee separately.
-    commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
+    commitOutputValueSats: postageSats + tipValueSats,
     commitOutputScript: placeholderCommit.commitOutputScript,
     taproot: {
       internalKey: placeholderCommit.taproot.internalKey,
@@ -184,7 +189,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   // + tip) + the commit miner fee + change. `resolveCatTxFee` measures both tx
   // forms (with-change / no-change) from real builds — no vB seed — and a coin
   // that only fits the no-change/absorb form is not falsely rejected.
-  const commitOutputValueSats = INSCRIBE_POSTAGE_SATS + revealFeeSats + tipValueSats;
+  const commitOutputValueSats = postageSats + revealFeeSats + tipValueSats;
   const commitFeeBudget = args.fundingInput.value - commitOutputValueSats;
   const resolvedCommit = resolveCatTxFee({
     feeRatePerVbyte: args.feeRatePerVbyte,
@@ -197,6 +202,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
         commitFeeSats: feeSats,
         revealFeeReserveSats: revealFeeSats,
+        postageSats,
         tipValueSats: args.tip?.value,
         walletType: args.walletType,
         changeDustLimitSats: args.changeDustLimitSats,

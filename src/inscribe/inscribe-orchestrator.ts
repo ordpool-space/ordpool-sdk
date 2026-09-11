@@ -66,6 +66,8 @@ export interface InscribeAndBroadcastArgs {
    * `createInscribeTransactions` for the full semantic.
    */
   tip?: { address: string; value: number };
+  /** Postage for the inscription output, ord's `--postage`. Default 546. */
+  postageSats?: number;
   /** Optional Tag::Note (0x0f) watermark string. */
   note?: string;
   /**
@@ -185,6 +187,7 @@ export function inscribeAndBroadcast(
         delegate: args.delegate,
         rune: args.rune,
         properties: args.properties,
+        postageSats: args.postageSats,
         gallery: args.gallery,
         title: args.title,
         propertyEncoding: args.propertyEncoding,

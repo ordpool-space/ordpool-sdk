@@ -62,7 +62,30 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
  */
 export const INSCRIBE_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
+/**
+ * The postage an inscription actually gets: the caller's choice, or 546.
+ *
+ * ord's equivalent is `--postage <AMOUNT>`, default 10000. Ours defaults to
+ * 546 on purpose, because it is cheaper and is the common denominator most
+ * tools use; ord's 10000 would cost every user 9454 sats of padding they did
+ * not ask for. The OPTION exists so someone who wants more padding can have
+ * it, and so a batch can match ord byte for byte at any size.
+ *
+ * Resolved ONCE per inscribe and passed to every builder. The reveal derives
+ * its fee as `commitOutput - postage - tip`, so a commit and a reveal that
+ * disagreed on postage would silently mis-state the fee rather than fail.
+ */
+export function resolveInscribePostage(postageSats: number | undefined): number {
+  if (postageSats === undefined) return INSCRIBE_POSTAGE_SATS;
+  if (!Number.isInteger(postageSats) || postageSats <= 0) {
+    throw new Error(`postageSats must be a positive integer; got ${postageSats}`);
+  }
+  return postageSats;
+}
+
 export interface InscribeCommitArgs {
+  /** Postage for the inscription output; see `resolveInscribePostage`. Default 546. */
+  postageSats?: number;
   /** Funding UTXO the user's wallet will sign. */
   fundingInput: {
     txid: string;
@@ -165,7 +188,7 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   }
 
   const scureNetwork = toScureNetwork(args.network);
-  const postageSats = INSCRIBE_POSTAGE_SATS;
+  const postageSats = resolveInscribePostage(args.postageSats);
   const tipValueSats = args.tipValueSats ?? 0;
   const commitOutputValueSats = postageSats + args.revealFeeReserveSats + tipValueSats;
 

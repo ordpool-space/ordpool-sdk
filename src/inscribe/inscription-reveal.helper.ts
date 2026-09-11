@@ -4,7 +4,7 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
 import { Network, toScureNetwork } from '../network';
 
-import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
+import { resolveInscribePostage } from './inscription-commit.helper';
 
 /**
  * Layer-1 builder for the **reveal** transaction.
@@ -42,6 +42,8 @@ export interface InscribeRevealResult {
 }
 
 export interface InscribeRevealArgs {
+  /** Postage for the inscription output. MUST equal the commit's. Default 546. */
+  postageSats?: number;
   /** Commit txid (caller broadcasts commit later; we just reference it). */
   commitTxid: string;
   /** Commit output index — always 0 for the inscriber. */
@@ -95,7 +97,7 @@ export interface InscribeRevealArgs {
  */
 export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealResult {
   const scureNetwork = toScureNetwork(args.network);
-  const postageSats = INSCRIBE_POSTAGE_SATS;
+  const postageSats = resolveInscribePostage(args.postageSats);
   const tipValueSats = args.tip?.value ?? 0;
   if (tipValueSats < 0) throw new Error('tip.value must be non-negative');
   if (!Number.isInteger(tipValueSats)) throw new Error('tip.value must be an integer');

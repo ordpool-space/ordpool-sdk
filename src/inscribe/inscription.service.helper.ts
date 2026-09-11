@@ -10,7 +10,7 @@ import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 import {
-  INSCRIBE_POSTAGE_SATS,
+  resolveInscribePostage,
   buildInscribeCommitPsbt,
 } from './inscription-commit.helper';
 import {
@@ -153,6 +153,13 @@ export interface CreateInscribeTransactionsArgs {
    * one recipient and a fixed sats amount.
    */
   tip?: { address: string; value: number };
+  /**
+   * Postage for the inscription output, ord's `--postage`. Default 546 because
+   * it is cheaper and is the common denominator across tools; ord defaults to
+   * 10000. Resolved once and applied to the fee simulation, the commit and the
+   * reveal together, so they cannot disagree.
+   */
+  postageSats?: number;
   /**
    * Optional Tag::Note (0x0f) string. Emitted as a UTF-8 envelope
    * field; ordpool-parser surfaces it on the inscription record.
@@ -461,6 +468,7 @@ export function createInscribeTransactions(
   try {
     fees = simulateInscribeFees({
       feeRatePerVbyte: args.feeRatePerVbyte,
+      postageSats: args.postageSats,
       body: args.body,
       contentType: args.contentType,
       envelopeFields: mergedFields,
@@ -502,6 +510,7 @@ export function createInscribeTransactions(
     ephemeralPubkeyXonly,
     commitFeeSats: fees.commitFeeSats,
     revealFeeReserveSats: fees.revealFeeSats,
+    postageSats: args.postageSats,
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats,
@@ -520,6 +529,7 @@ export function createInscribeTransactions(
     ephemeralPubkeyXonly,
     commitFeeSats: fees.commitFeeSats,
     revealFeeReserveSats: fees.revealFeeSats,
+    postageSats: args.postageSats,
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats,
@@ -535,6 +545,7 @@ export function createInscribeTransactions(
   const reveal = buildInscribeRevealTx({
     commitTxid: commitTxidUnsigned,
     commitVout: 0,
+    postageSats: args.postageSats,
     commitOutputValueSats: commit.commitOutputValueSats,
     commitOutputScript: commit.commitOutputScript,
     taproot: {
@@ -641,6 +652,7 @@ export interface CreateChildInscribeTransactionsResult {
 export function createChildInscribeTransactions(
   args: CreateChildInscribeTransactionsArgs,
 ): CreateChildInscribeTransactionsResult {
+  const postageSats = resolveInscribePostage(args.postageSats);
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
   }
@@ -724,6 +736,7 @@ export function createChildInscribeTransactions(
       ephemeralPubkeyXonly,
       commitFeeSats: 0,
       revealFeeReserveSats: 0,
+      postageSats,
       tipValueSats: args.tip?.value,
       walletType: args.walletType,
       changeDustLimitSats,
@@ -732,7 +745,8 @@ export function createChildInscribeTransactions(
     const simChildReveal = buildChildInscribeRevealTx({
       commitTxid: '0'.repeat(64),
       commitVout: 0,
-      commitOutputValueSats: INSCRIBE_POSTAGE_SATS + tipValueSats,
+      postageSats,
+      commitOutputValueSats: postageSats + tipValueSats,
       commitOutputScript: placeholderCommit.commitOutputScript,
       taproot: placeholderCommit.taproot,
       ephemeralPrivKey: dummyEphemeralPriv,
@@ -747,7 +761,7 @@ export function createChildInscribeTransactions(
     // Commit fee via the guess-free two-topology resolver (revealFeeReserve =
     // the CHILD reveal fee). No vB seed; no-change/absorb fallback so a coin
     // that only fits the no-change form isn't falsely rejected.
-    commitOutputValueSats = INSCRIBE_POSTAGE_SATS + revealFeeSats + tipValueSats;
+    commitOutputValueSats = postageSats + revealFeeSats + tipValueSats;
     const commitFeeBudget = simFundingInput.value - commitOutputValueSats;
     const resolvedCommit = resolveCatTxFee({
       feeRatePerVbyte: args.feeRatePerVbyte,
@@ -760,6 +774,7 @@ export function createChildInscribeTransactions(
           ephemeralPubkeyXonly,
           commitFeeSats: feeSats,
           revealFeeReserveSats: revealFeeSats,
+          postageSats,
           tipValueSats: args.tip?.value,
           walletType: args.walletType,
           changeDustLimitSats,
@@ -811,6 +826,7 @@ export function createChildInscribeTransactions(
     ephemeralPubkeyXonly,
     commitFeeSats,
     revealFeeReserveSats: revealFeeSats,
+    postageSats,
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats,
@@ -828,6 +844,7 @@ export function createChildInscribeTransactions(
   const reveal = buildChildInscribeRevealTx({
     commitTxid,
     commitVout: 0,
+    postageSats,
     commitOutputValueSats: commit.commitOutputValueSats,
     commitOutputScript: commit.commitOutputScript,
     taproot: commit.taproot,
@@ -883,10 +900,11 @@ export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): 
     // output to land on the inscription's own UTXO. Reject an
     // unreachable offset rather than emit a pointer that silently
     // moves the inscription off its cat-bearing UTXO.
-    if (args.pointer >= INSCRIBE_POSTAGE_SATS) {
+    const postage = resolveInscribePostage(args.postageSats);
+    if (args.pointer >= postage) {
       throw new Error(
         `pointer ${args.pointer} is unreachable: this builder's reveal has a single ` +
-        `${INSCRIBE_POSTAGE_SATS}-sat inscription output at vout[0], so pointer must be < ${INSCRIBE_POSTAGE_SATS}.`,
+        `${postage}-sat inscription output at vout[0], so pointer must be < ${postage}.`,
       );
     }
   }
