@@ -44,14 +44,13 @@ blesses the SDK's inscriptions.
 
 ## 3. The gaps, worst first
 
-### 3.2 No batch, at all
+### 3.2 Batch: `satpoints` mode and parents
 
-ord's four batch modes are its most powerful inscription feature. The SDK does
-exactly one inscription per commit+reveal. Nothing about collections, no
-shared-output, no same-sat, no per-entry destinations.
-
-This is the biggest functional gap and the most work. It is also the one a
-collection launcher notices in the first minute.
+`createBatchInscribeTransactions` builds ord's `separate-outputs`,
+`shared-output` and `same-sat` batches byte-identically. Still missing: the
+`satpoints` mode, which needs sat targeting (§3.5), and batches with parents,
+whose envelopes already match ord but whose reveal must also spend the
+parents.
 
 ### 3.4 One parent, where ord takes many
 
@@ -101,8 +100,8 @@ number-shaped claim this workspace bans. The honest ordered path:
    metaprotocol, pointer and postage in the form.
 2. **Multiple parents (§3.4)**: small.
 3. **Sat/satpoint targeting (§3.5)**: medium.
-4. **Batch (§3.2)**: large, and the last thing standing between us and the
-   word "parity".
+4. **Batch with parents and `satpoints` (§3.2)**: the last thing standing
+   between us and the word "parity".
 
 Until batch ships, the defensible claim is narrower and still strong: **"Everything
 ord can inscribe, without the command line"** is false; **"Inscribe on Bitcoin

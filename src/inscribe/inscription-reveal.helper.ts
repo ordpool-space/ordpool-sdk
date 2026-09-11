@@ -70,8 +70,18 @@ export interface InscribeRevealArgs {
    * AND here, then zeros it. Mismatched key → scure rejects finalize.
    */
   ephemeralPrivKey: Uint8Array;
-  /** Address the inscription lands on (P2TR recommended). */
-  recipientAddress: string;
+  /**
+   * Address the inscription lands on (P2TR recommended), at `postageSats`.
+   * Required unless `inscriptionOutputs` is given.
+   */
+  recipientAddress?: string;
+  /**
+   * The reveal's inscription outputs, in order, replacing the single
+   * `recipientAddress` output. A batch uses this: one output per inscription
+   * (separate outputs) or one output holding every inscription (shared
+   * output, same sat). `postageSats` is ignored when this is set.
+   */
+  inscriptionOutputs?: ReadonlyArray<{ address: string; value: number }>;
   /**
    * Optional tip output appended at vout[1] of the reveal. The
    * inscription MUST stay at vout[0] (ord's "first sat of first
@@ -88,6 +98,24 @@ export interface InscribeRevealArgs {
   network: Network;
 }
 
+function resolveInscriptionOutputs(args: InscribeRevealArgs): ReadonlyArray<{ address: string; value: number }> {
+  if (args.inscriptionOutputs !== undefined) {
+    if (args.inscriptionOutputs.length === 0) {
+      throw new Error('inscriptionOutputs must not be empty');
+    }
+    for (const output of args.inscriptionOutputs) {
+      if (!Number.isInteger(output.value) || output.value <= 0) {
+        throw new Error(`inscription output value must be a positive integer; got ${output.value}`);
+      }
+    }
+    return args.inscriptionOutputs;
+  }
+  if (args.recipientAddress === undefined) {
+    throw new Error('recipientAddress is required unless inscriptionOutputs is given');
+  }
+  return [{ address: args.recipientAddress, value: resolveInscribePostage(args.postageSats) }];
+}
+
 /**
  * Signs the reveal via the envelope tapscript leaf, returns the
  * finalized reveal hex. The caller-supplied ephemeral private key
@@ -97,7 +125,8 @@ export interface InscribeRevealArgs {
  */
 export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealResult {
   const scureNetwork = toScureNetwork(args.network);
-  const postageSats = resolveInscribePostage(args.postageSats);
+  const outputs = resolveInscriptionOutputs(args);
+  const postageSats = outputs.reduce((sum, o) => sum + o.value, 0);
   const tipValueSats = args.tip?.value ?? 0;
   if (tipValueSats < 0) throw new Error('tip.value must be non-negative');
   if (!Number.isInteger(tipValueSats)) throw new Error('tip.value must be an integer');
@@ -148,9 +177,12 @@ export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealR
     tapLeafScript: args.taproot.tapLeafScript,
   });
 
-  // Output 0: recipient address, postage sats. The inscription
-  // lands on the first sat of this output (ord-theory FIFO).
-  tx.addOutputAddress(args.recipientAddress, BigInt(postageSats), scureNetwork);
+  // The inscription outputs, first. With one output the inscription lands
+  // on its first sat (ord-theory FIFO); a batch's envelopes carry pointers
+  // to their own outputs.
+  for (const output of outputs) {
+    tx.addOutputAddress(output.address, BigInt(output.value), scureNetwork);
+  }
 
   // Output 1 (optional): tip output. ord's first-sat-of-first-output
   // rule pins the inscription to vout[0]; the tip lives at vout[1].

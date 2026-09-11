@@ -360,6 +360,19 @@ export declare function ordStockWalletInscribe(walletName: string, containerFile
     reveal: string;
 };
 /**
+ * `ord wallet batch --fee-rate <R> --batch <FILE>` in the ord-stock
+ * container. `batchYaml` is the batchfile's text; file paths inside it are
+ * container paths (write them with {@link writeOrdStockFile} first).
+ */
+export declare function ordStockWalletBatch(walletName: string, batchYaml: string, feeRateSatPerVb: number): {
+    commit: string;
+    reveal: string;
+    inscriptions: Array<{
+        id: string;
+        location: string;
+    }>;
+};
+/**
  * Create a stock-ord wallet and fund it by TRANSFER, mining one block.
  *
  * Mining coinbases straight to an ord wallet looks simpler and is wrong

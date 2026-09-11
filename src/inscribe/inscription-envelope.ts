@@ -211,8 +211,39 @@ function assertPushWithinCap(tag: number, length: number): void {
 }
 
 export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Uint8Array {
+  return buildBatchInscriptionScript({
+    revealPubkeyXonly: args.revealPubkeyXonly,
+    envelopes: [args],
+    minimalTagPush: args.minimalTagPush,
+  });
+}
+
+/** One envelope inside a batch tapscript: the per-inscription part of {@link BuildInscriptionEnvelopeArgs}. */
+export type BatchEnvelope = Omit<BuildInscriptionEnvelopeArgs, 'revealPubkeyXonly' | 'minimalTagPush'>;
+
+export interface BuildBatchInscriptionScriptArgs {
+  /** x-only Schnorr pubkey (32 bytes) that signs the reveal. */
+  revealPubkeyXonly: Uint8Array;
+  /** The inscriptions, in order. Inscription i gets id `<revealTxid>i<i>`. */
+  envelopes: ReadonlyArray<BatchEnvelope>;
+  /** See {@link BuildInscriptionEnvelopeArgs.minimalTagPush}. */
+  minimalTagPush?: boolean;
+}
+
+/**
+ * The reveal tapscript for one or more inscriptions: `<pubkey> OP_CHECKSIG`
+ * followed by one envelope per inscription, back to back. This is ord's
+ * `append_batch_reveal_script`, which appends each inscription's envelope to
+ * the same script; ord numbers them by position, so envelope i becomes
+ * inscription `<revealTxid>i<i>`. A single inscription is the one-envelope
+ * case of the same script.
+ */
+export function buildBatchInscriptionScript(args: BuildBatchInscriptionScriptArgs): Uint8Array {
   if (args.revealPubkeyXonly.length !== 32) {
     throw new Error(`revealPubkeyXonly must be 32 bytes; got ${args.revealPubkeyXonly.length}`);
+  }
+  if (args.envelopes.length === 0) {
+    throw new Error('at least one envelope is required');
   }
 
   const items: ScureScriptItem[] = [];
@@ -223,15 +254,21 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
   items.push(args.revealPubkeyXonly);
   items.push('CHECKSIG');
 
+  for (const envelope of args.envelopes) {
+    pushEnvelope(items, envelope, minimalTagPush);
+  }
+
+  return Script.encode(items as ScureScriptItem[] as never);
+}
+
+/** Append one `OP_FALSE OP_IF "ord" … OP_ENDIF` envelope to `items`. */
+function pushEnvelope(items: ScureScriptItem[], args: BatchEnvelope, minimalTagPush: boolean): void {
   // Envelope opening: OP_FALSE OP_IF "ord".
   items.push('OP_0');
   items.push('IF');
   items.push(ORD_MARKER);
 
-  // content_type comes first by convention (matches every inscriber
-  // we've seen on-chain). ord doesn't require any tag order, but
-  // keeping content_type first makes hex-grepping the envelope
-  // boundary easier.
+  // content_type comes first, as in ord's append_reveal_script.
   if (args.contentType !== undefined) {
     const contentTypeBytes = new TextEncoder().encode(args.contentType);
     // Same 520-byte standardness cap as every other push (below). A
@@ -267,8 +304,6 @@ export function buildInscriptionEnvelope(args: BuildInscriptionEnvelopeArgs): Ui
 
   // Envelope close.
   items.push('ENDIF');
-
-  return Script.encode(items as ScureScriptItem[] as never);
 }
 
 /**

@@ -19,10 +19,12 @@ bytes; see the spec for exactly what is compared.
 | `--parent` (one parent) | envelope byte-identical, reveal topology pinned | `e2e/regtest/inscribe-parent-parity.spec.ts` |
 | `--cbor-metadata`, `--json-metadata`, `--delegate` | proven byte-identical | `e2e/regtest/inscribe-metadata-delegate-parity.spec.ts` |
 | `--compress` (body and properties) | proven byte-identical across ord's text, generic and font modes, large bodies, and the 30:1 refusal | `e2e/regtest/inscribe-compress-parity.spec.ts` |
-| Multiple parents (§4) | open, lands with batch | |
+| Batch `separate-outputs` (§6a) | proven: tapscript, reveal outputs, reveal vsize, commit output and every inscription's location, at 546 and 3 000 sats, with per-entry destination, title, gallery items with titles, metaprotocol | `e2e/regtest/inscribe-batch-parity.spec.ts` |
+| Batch `shared-output`, `same-sat` (§6b) | proven, same comparison | `e2e/regtest/inscribe-batch-parity.spec.ts` |
+| Multiple parents (§4) | envelope encoding proven (every envelope repeats every parent, pointers start after the parent outputs); a reveal that spends several parents is open | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | `--destination` | supported, not yet driven against ord | |
 | Sat / satpoint targeting (§5) | open | |
-| Batch (§6a, §6b, §6c) | open | |
+| Batch `satpoints` (§6c) | open, needs §5 | |
 
 **Default postage stays 546.** It is cheaper, and it is the common
 denominator across tools; ord's 10 000 is an option we offer, not a default
@@ -84,7 +86,7 @@ regtest wallet holding a known rare sat, and the resulting inscription is on
 the sat we asked for, verified through cat21-ord rather than by our own
 arithmetic.
 
-## 6. Batch
+## 6. Batch (6a and 6b done)
 
 The big one, and the last thing between us and the word "parity". ord's four
 modes:

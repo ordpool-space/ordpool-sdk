@@ -914,6 +914,28 @@ export function ordStockWalletInscribe(
 }
 
 /**
+ * `ord wallet batch --fee-rate <R> --batch <FILE>` in the ord-stock
+ * container. `batchYaml` is the batchfile's text; file paths inside it are
+ * container paths (write them with {@link writeOrdStockFile} first).
+ */
+export function ordStockWalletBatch(
+  walletName: string,
+  batchYaml: string,
+  feeRateSatPerVb: number,
+): { commit: string; reveal: string; inscriptions: Array<{ id: string; location: string }> } {
+  const path = `/tmp/batch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}.yaml`;
+  writeOrdStockFile(path, new TextEncoder().encode(batchYaml));
+  const stdout = ordStockWalletCli(
+    walletName,
+    'batch',
+    '--no-backup',
+    '--fee-rate', String(feeRateSatPerVb),
+    '--batch', path,
+  );
+  return JSON.parse(stdout) as { commit: string; reveal: string; inscriptions: Array<{ id: string; location: string }> };
+}
+
+/**
  * Create a stock-ord wallet and fund it by TRANSFER, mining one block.
  *
  * Mining coinbases straight to an ord wallet looks simpler and is wrong
@@ -929,9 +951,47 @@ export function ordStockWalletInscribe(
  */
 export async function fundOrdStockWallet(walletName: string, btc = '2.0'): Promise<string> {
   const addr = ordStockCreateWallet(walletName);
-  rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', addr, btc);
+  const wantSats = Math.round(Number(btc) * 1e8);
+
+  // Spend ONE coin that stock ord reports as carrying no inscription. The
+  // funder wallet also receives inscriptions from other specs, and if Core's
+  // coin selection spent one of those into this output, ord would see the
+  // funding as inscribed and refuse it as "no cardinal utxos".
+  await waitForOrdStockSync(Number(rpc('getblockcount')));
+  const unspent = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent', '1')) as Array<{
+    txid: string; vout: number; amount: number; spendable: boolean;
+  }>;
+  const candidates = unspent
+    .filter(u => u.spendable && Math.round(u.amount * 1e8) > wantSats)
+    .sort((a, b) => b.amount - a.amount);
+  let input: { txid: string; vout: number } | undefined;
+  for (const u of candidates) {
+    const info = await fetch(`${ORD_STOCK_URL}/output/${u.txid}:${u.vout}`, {
+      headers: { Accept: 'application/json' },
+    }).then(r => (r.ok ? r.json() : null)).catch(() => null) as { inscriptions?: string[] } | null;
+    if (info && Array.isArray(info.inscriptions) && info.inscriptions.length === 0) {
+      input = { txid: u.txid, vout: u.vout };
+      break;
+    }
+  }
+  if (input === undefined) {
+    throw new Error(`fundOrdStockWallet: ordpool-e2e holds no confirmed inscription-free UTXO above ${btc} BTC`);
+  }
+  rpc(
+    '-rpcwallet=ordpool-e2e', 'send',
+    JSON.stringify([{ [addr]: btc }]), 'null', 'unset', 'null',
+    JSON.stringify({ inputs: [input], add_inputs: false }),
+  );
+
   const tip = mineBlocks(1);
   await waitForElectrsSync(tip);
   await waitForOrdStockSync(tip);
+
+  const balance = JSON.parse(ordStockWalletCli(walletName, 'balance')) as { cardinal?: number };
+  if ((balance.cardinal ?? 0) < wantSats) {
+    throw new Error(
+      `fundOrdStockWallet: sent ${btc} BTC to ${walletName}, but ord reports ${JSON.stringify(balance)}`,
+    );
+  }
   return addr;
 }

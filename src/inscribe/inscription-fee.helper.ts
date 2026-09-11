@@ -44,7 +44,19 @@ export interface SimulateInscribeFeesArgs {
   /** sat/vB target fee rate. Same rate applies to both commit + reveal. */
   feeRatePerVbyte: number;
   /** Inscription body bytes. Shape-determines reveal vsize. */
-  body: Uint8Array;
+  body?: Uint8Array;
+  /**
+   * A prebuilt reveal tapscript (e.g. a batch's, from
+   * `buildBatchInscriptionScript`), used instead of building one envelope
+   * from `body` / `contentType` / `envelopeFields`.
+   */
+  envelopeScript?: Uint8Array;
+  /**
+   * The reveal's inscription outputs, replacing the single
+   * `recipientAddress` output at `postageSats`; the commit then funds their
+   * sum. See `InscribeRevealArgs.inscriptionOutputs`.
+   */
+  inscriptionOutputs?: ReadonlyArray<{ address: string; value: number }>;
   /** MIME type encoded into the envelope. */
   contentType?: string;
   /** Optional extra envelope fields (parent, metaprotocol, metadata...). */
@@ -62,8 +74,8 @@ export interface SimulateInscribeFeesArgs {
   fundingInput: InscribeCommitArgs['fundingInput'];
   /** Where the user's change returns to. */
   senderChangeAddress: string;
-  /** Where the inscription lands. */
-  recipientAddress: string;
+  /** Where the inscription lands. Required unless `inscriptionOutputs` is given. */
+  recipientAddress?: string;
   /**
    * 32-byte x-only ephemeral pubkey used as the taproot internal key
    * AND embedded in the envelope's `<pubkey> CHECKSIG` prefix. Real
@@ -117,7 +129,9 @@ export interface SimulateInscribeFeesResult {
  * material between calls.
  */
 export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateInscribeFeesResult {
-  const postageSats = resolveInscribePostage(args.postageSats);
+  const postageSats = args.inscriptionOutputs !== undefined
+    ? args.inscriptionOutputs.reduce((sum, o) => sum + o.value, 0)
+    : resolveInscribePostage(args.postageSats);
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
   }
@@ -134,7 +148,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   // fixed dummy).
   const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);
 
-  const envelope = buildInscriptionEnvelope({
+  const envelope = args.envelopeScript ?? buildInscriptionEnvelope({
     revealPubkeyXonly: args.ephemeralPubkeyXonly,
     contentType: args.contentType,
     body: args.body,
@@ -178,6 +192,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     },
     ephemeralPrivKey: dummyEphemeralPriv,
     recipientAddress: args.recipientAddress,
+    inscriptionOutputs: args.inscriptionOutputs,
     tip: args.tip,
     network: args.network,
   });

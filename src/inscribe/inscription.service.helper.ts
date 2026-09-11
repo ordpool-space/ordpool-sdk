@@ -396,6 +396,62 @@ function deriveUnsignedCommitTxid(
 export function createInscribeTransactions(
   args: CreateInscribeTransactionsArgs,
 ): CreateInscribeTransactionsResult {
+  const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
+  const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
+
+  // Synthesise envelope fields from the convenience args and prepend
+  // to the caller-supplied envelopeFields. On duplicate tags (e.g.
+  // caller also supplies a parent entry) BOTH entries are emitted in
+  // order; ord's decoder handles multiple instances per tag according
+  // to that tag's semantics: `parent` / `delegate` accumulate,
+  // `content_type` / `content_encoding` first-wins (so caller-supplied
+  // values behind an auto-field are ignored by downstream indexers).
+  // Caller-side dedup is the consumer's responsibility.
+  const autoFields = synthesizeEnvelopeFields(args);
+  const mergedFields: ReadonlyArray<OrdEnvelopeField> = autoFields.length === 0
+    ? (args.envelopeFields ?? [])
+    : [...autoFields, ...(args.envelopeFields ?? [])];
+
+  const envelope = buildInscriptionEnvelope({
+    revealPubkeyXonly: ephemeralPubkeyXonly,
+    contentType: args.contentType,
+    body: args.body,
+    fields: mergedFields,
+    minimalTagPush: args.minimalTagPush,
+  });
+
+  return assembleInscribeTransactions(args, {
+    envelope,
+    ephemeralPrivKey,
+    ephemeralPubkeyXonly,
+    recipientAddress: args.recipientAddress,
+    postageSats: args.postageSats,
+  });
+}
+
+/** What {@link assembleInscribeTransactions} needs besides the funding args. */
+interface InscribeAssembly {
+  /** The reveal tapscript, one envelope or a batch. */
+  envelope: Uint8Array;
+  ephemeralPrivKey: Uint8Array;
+  ephemeralPubkeyXonly: Uint8Array;
+  /** Single-output reveal: the recipient, at `postageSats`. */
+  recipientAddress?: string;
+  postageSats?: number;
+  /** Batch reveal: the inscription outputs, replacing the recipient output. */
+  inscriptionOutputs?: ReadonlyArray<{ address: string; value: number }>;
+}
+
+/**
+ * Fee simulation, commit PSBT, commit txid and signed reveal for a given
+ * reveal tapscript and output layout. Shared by the single and the batch
+ * builder, which differ only in the script and the outputs.
+ */
+export function assembleInscribeTransactions(
+  args: Pick<CreateInscribeTransactionsArgs,
+    'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte' | 'tip' | 'walletType' | 'network'>,
+  assembly: InscribeAssembly,
+): CreateInscribeTransactionsResult {
   if (args.feeRatePerVbyte <= 0) {
     throw new Error('feeRatePerVbyte must be positive');
   }
@@ -424,29 +480,12 @@ export function createInscribeTransactions(
     }
   }
 
-  const ephemeralPrivKey = secp256k1.utils.randomPrivateKey();
-  const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
-
-  // Synthesise envelope fields from the convenience args and prepend
-  // to the caller-supplied envelopeFields. On duplicate tags (e.g.
-  // caller also supplies a parent entry) BOTH entries are emitted in
-  // order; ord's decoder handles multiple instances per tag according
-  // to that tag's semantics: `parent` / `delegate` accumulate,
-  // `content_type` / `content_encoding` first-wins (so caller-supplied
-  // values behind an auto-field are ignored by downstream indexers).
-  // Caller-side dedup is the consumer's responsibility.
-  const autoFields = synthesizeEnvelopeFields(args);
-  const mergedFields: ReadonlyArray<OrdEnvelopeField> = autoFields.length === 0
-    ? (args.envelopeFields ?? [])
-    : [...autoFields, ...(args.envelopeFields ?? [])];
-
-  const envelope = buildInscriptionEnvelope({
-    revealPubkeyXonly: ephemeralPubkeyXonly,
-    contentType: args.contentType,
-    body: args.body,
-    fields: mergedFields,
-    minimalTagPush: args.minimalTagPush,
-  });
+  const { envelope, ephemeralPrivKey, ephemeralPubkeyXonly } = assembly;
+  // The commit funds the sum of the inscription outputs; for a single
+  // inscription that is its postage.
+  const postageSats = assembly.inscriptionOutputs !== undefined
+    ? assembly.inscriptionOutputs.reduce((sum, o) => sum + o.value, 0)
+    : resolveInscribePostage(assembly.postageSats);
 
   // Layer-2: convert raw UTXO into the funding-input shape the
   // commit helper expects. Real-mode (not simulation) so the
@@ -477,14 +516,12 @@ export function createInscribeTransactions(
   try {
     fees = simulateInscribeFees({
       feeRatePerVbyte: args.feeRatePerVbyte,
-      postageSats: args.postageSats,
-      body: args.body,
-      contentType: args.contentType,
-      envelopeFields: mergedFields,
-      minimalTagPush: args.minimalTagPush,
+      postageSats: assembly.postageSats,
+      envelopeScript: envelope,
+      inscriptionOutputs: assembly.inscriptionOutputs,
       fundingInput: simulationFundingInput,
       senderChangeAddress: args.paymentAddress,
-      recipientAddress: args.recipientAddress,
+      recipientAddress: assembly.recipientAddress,
       ephemeralPubkeyXonly,
       changeDustLimitSats,
       tip: args.tip,
@@ -519,7 +556,7 @@ export function createInscribeTransactions(
     ephemeralPubkeyXonly,
     commitFeeSats: fees.commitFeeSats,
     revealFeeReserveSats: fees.revealFeeSats,
-    postageSats: args.postageSats,
+    postageSats,
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats,
@@ -538,7 +575,7 @@ export function createInscribeTransactions(
     ephemeralPubkeyXonly,
     commitFeeSats: fees.commitFeeSats,
     revealFeeReserveSats: fees.revealFeeSats,
-    postageSats: args.postageSats,
+    postageSats,
     tipValueSats: args.tip?.value,
     walletType: args.walletType,
     changeDustLimitSats,
@@ -554,7 +591,7 @@ export function createInscribeTransactions(
   const reveal = buildInscribeRevealTx({
     commitTxid: commitTxidUnsigned,
     commitVout: 0,
-    postageSats: args.postageSats,
+    postageSats,
     commitOutputValueSats: commit.commitOutputValueSats,
     commitOutputScript: commit.commitOutputScript,
     taproot: {
@@ -562,7 +599,8 @@ export function createInscribeTransactions(
       tapLeafScript: commit.taproot.tapLeafScript,
     },
     ephemeralPrivKey,
-    recipientAddress: args.recipientAddress,
+    recipientAddress: assembly.recipientAddress,
+    inscriptionOutputs: assembly.inscriptionOutputs,
     tip: args.tip,
     network: args.network,
   });
@@ -901,9 +939,34 @@ export function createChildInscribeTransactions(
  * ours alone, since ord never emits it, and goes last.
  */
 export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnvelopeField[] {
+  return synthesizeFields(args, true);
+}
+
+/**
+ * The envelope fields of one batch entry. Same encoding and order as
+ * {@link synthesizeEnvelopeFields}, with the batch's parent list (repeated in
+ * every envelope, as ord's batch does) and without the single-output pointer
+ * gate: a batch entry's pointer addresses the whole reveal, so it is
+ * normally beyond the first output.
+ */
+export function synthesizeBatchEntryFields(args: BatchEntryFieldArgs): OrdEnvelopeField[] {
+  return synthesizeFields(args as FieldArgs, false);
+}
+
+/** The per-inscription envelope inputs of a batch entry. */
+export type BatchEntryFieldArgs = Partial<Pick<CreateInscribeTransactionsArgs,
+  'contentEncoding' | 'metadata' | 'metaprotocol' | 'delegate' | 'gallery' | 'title'
+  | 'compressProperties'>> & {
+  parents: ReadonlyArray<string>;
+  pointer: number;
+};
+
+type FieldArgs = CreateInscribeTransactionsArgs & { parents?: ReadonlyArray<string> };
+
+function synthesizeFields(args: FieldArgs, singleOutputPointerGate: boolean): OrdEnvelopeField[] {
   const fields: OrdEnvelopeField[] = [];
 
-  if (args.pointer !== undefined) {
+  if (args.pointer !== undefined && singleOutputPointerGate) {
     // Topology gate: this builder places the inscription's 546-sat
     // recipient output at vout[0]. A pointer must point inside that
     // output to land on the inscription's own UTXO. Reject an
@@ -928,6 +991,9 @@ export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): 
 
   if (args.parent !== undefined) {
     fields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(args.parent) });
+  }
+  for (const parent of args.parents ?? []) {
+    fields.push({ tag: ORD_TAGS.parent, value: encodeParentInscriptionId(parent) });
   }
 
   if (args.delegate !== undefined) {
