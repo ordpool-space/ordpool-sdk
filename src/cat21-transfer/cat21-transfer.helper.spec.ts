@@ -100,7 +100,8 @@ describe('buildCat21TransferPsbt', () => {
   });
 
   it('supports zero funding inputs when the caller covers fee with no surplus (fee=0 edge case)', () => {
-    // catUtxo always 546 (HARD RULE). Self-funded transfers are only viable
+    // This fixture's catUtxo happens to be 546; transfers PRESERVE whatever
+    // size the cat sits on. Self-funded transfers are only viable
     // when feeSats=0 (which a real broadcast wouldn't accept, but the
     // builder doesn't reject — fee policy is the broadcaster's concern).
     const result = buildCat21TransferPsbt(

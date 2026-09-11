@@ -75,7 +75,7 @@ export function createTransaction(
 
   return {
     tx: built.tx,
-    amountToRecipient: BigInt(CAT21_POSTAGE_SATS), // always 546
+    amountToRecipient: BigInt(CAT21_POSTAGE_SATS), // a mint creates this output
     singleInputAmount: BigInt(paymentOutput.value),
     changeAmount: BigInt(built.changeSats),
     finalTransactionFee: BigInt(built.finalFeeSats),

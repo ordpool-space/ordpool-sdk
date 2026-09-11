@@ -70,7 +70,7 @@ export interface DummyKeypairResult {
 
 export interface CreateTransactionResult {
   tx: btc.Transaction,
-  amountToRecipient: bigint, // always 546
+  amountToRecipient: bigint, // 546: a mint creates this output
   singleInputAmount: bigint,
   changeAmount: bigint,
   finalTransactionFee: bigint

@@ -67,9 +67,9 @@ export interface BuildCat21MintArgs {
    * (P2TR 330, P2WPKH 294, P2SH 540) for marginally tighter dust
    * absorption when the change goes to a Taproot address.
    *
-   * NOTE: this does NOT change the cat OUTPUT postage — that's
-   * always 546 (HARD RULE). Only the threshold below which the
-   * change output gets absorbed into the miner fee.
+   * NOTE: this does NOT change the cat OUTPUT postage, which the mint
+   * sets to 546. Only the threshold below which the change output
+   * gets absorbed into the miner fee.
    */
   changeDustLimitSats?: number;
 }
@@ -117,7 +117,8 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   // HARD RULE: cat output is always exactly 546 sats. The cat is born
   // at the first sat of output 0; uniform postage across mint /
   // transfer / offer means a cat UTXO is fungible across address types.
-  // See SDK CLAUDE.md "cat UTXO is always 546 sats".
+  // The mint CREATES this output, so it picks the postage: 546, the
+  // cheapest value that relays everywhere. Not an invariant about cats.
   const postageSats = CAT21_POSTAGE_SATS;
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
   const tipValueSats = args.destinations.tip?.valueSats ?? 0;

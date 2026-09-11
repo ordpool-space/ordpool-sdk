@@ -57,7 +57,8 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
  * Canonical postage for inscriptions. Same 546-sat dust floor as
  * cat21 — keeps inscription UTXOs fungible across address types
  * AND matches the floor every inscriber in the OSS catalog uses.
- * See HQ rule "cat UTXO is always 546 sats, FIFO".
+ * Chosen because it is the cheapest value that relays everywhere, not
+ * because of any rule that cats are 546. Nothing here asserts a size.
  */
 export const INSCRIBE_POSTAGE_SATS = CAT21_POSTAGE_SATS;
 
