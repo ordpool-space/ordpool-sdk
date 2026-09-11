@@ -57,13 +57,12 @@ ord takes several parents only in a batchfile (`wallet inscribe --parent`
 takes one). The SDK matches that: `parents` on the batch builders, spent and
 returned by the reveal, one `parent` tag per parent in every envelope.
 
-### 3.5 Sat targeting: a sat less than a dust limit into its UTXO
+### 3.5 Sat targeting
 
 `satOffset` (a sat in the funding UTXO), `satSource` (a sat in any other P2TR
-UTXO, the rare-sat case) and `findSatOffset` (`--sat`) are proven against
-ord's sat index. One edge stays open: a chosen sat fewer sats into its UTXO
-than the padding address's dust limit. ord tops that padding output up with
-further wallet inputs; the SDK refuses it with a clear message.
+UTXO, the rare-sat case), `paddingUtxo` (a sat less than a dust limit into
+its UTXO, padded as ord pads it) and `findSatOffset` (`--sat`) are proven
+against ord's sat index. Nothing is open here.
 
 ### 3.6 The UI exposes a subset of the SDK
 
@@ -95,14 +94,17 @@ cheapest progress available and it should be done first.
 
 **"An interface that doesn't suck"** is true today and is our strongest half.
 
-**"Feature parity"** is NOT true today, and saying it now would be the kind of
-number-shaped claim this workspace bans. The honest ordered path:
+**"Feature parity"** holds for the SDK: every capability of `ord wallet
+inscribe` and `ord wallet batch` except runes (out of scope) is built and
+proven against live ord on regtest, run by CI: the envelopes and every
+value ord decides are byte-identical, and where each side funds from its
+own wallet, ord's own index confirms where the SDK's inscriptions land. The
+status table in `ord-parity-masterplan.md` lists each with its spec. What
+ord has and the SDK deliberately does not copy is listed there too (§7).
 
-1. **UI surfacing (§3.6)**: no SDK work, unlocks parent, gallery, title,
-   metaprotocol, pointer, postage and batch in the form.
-2. **Sub-dust padding (§3.5)**: a narrow edge, the last SDK gap.
-
-Until both ship, the defensible claim is narrower and still strong:
-**"Everything ord can inscribe, without the command line"** is false;
-**"Inscribe on Bitcoin from your browser, free, with fees you see before you
-sign"** is true and needs no caveat.
+What is still missing is the interface: **UI surfacing (§3.6)**, no SDK
+work, which puts parent, gallery, title, traits, metaprotocol, pointer,
+postage, sat targeting and batch into the form. Until it ships, the
+defensible sentence for ordpool.space is **"Inscribe on Bitcoin from your
+browser, free, with fees you see before you sign"**; the SDK's own claim
+can say feature parity with ord.

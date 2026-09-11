@@ -282,3 +282,120 @@ describe('inscribe onto a sat in a separate UTXO (satSource)', () => {
     expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
   }, 300_000);
 });
+
+describe('inscribe onto a sat less than a dust limit into its UTXO (paddingUtxo)', () => {
+  const PAD_WALLET = `${ORD_WALLET}-pad`;
+  const ownerKey = schnorr.utils.randomPrivateKey();
+  const ownerXonly = schnorr.getPublicKey(ownerKey);
+  const owner = btc.p2tr(ownerXonly, undefined, scureRegtest, true);
+
+  beforeAll(async () => {
+    await waitForOrdStockReady(60_000);
+    await fundOrdStockWallet(PAD_WALLET);
+    // A small second cardinal UTXO, which ord pads with.
+    await sendFromCleanFunderCoin({ [ordStockWalletReceive(PAD_WALLET)]: '0.00001000' });
+  }, 240_000);
+
+  /** A second payment UTXO at the funding address, for the SDK to pad with. */
+  async function paddingUtxoAt(address: string, sats: number) {
+    const txid = await sendFromCleanFunderCoin({ [address]: (sats / 1e8).toFixed(8) });
+    return { txid, vout: 0, value: sats, status: { confirmed: true } };
+  }
+
+  it('offset 100 in the funding UTXO: ord and the SDK both pad with a further input; same commit output, inscription on that sat', async () => {
+    // ---- ord ----
+    const ordSource = ordStockWalletOutputs(PAD_WALLET)
+      .filter(o => (o.inscriptions ?? []).length === 0)
+      .sort((a, b) => b.amount - a.amount)[0].output;
+    const ordSat = await satAt(ordSource, 100);
+    const body = enc('a sat 100 into its UTXO');
+    writeOrdStockFile('/tmp/pst-pad.txt', body);
+    const ord = ordStockWalletInscribe(PAD_WALLET, '/tmp/pst-pad.txt', FEE_RATE, [
+      '--satpoint', `${ordSource}:100`, '--postage', '546sat',
+    ]);
+    await waitForOrdStockSync(mineBlocks(1));
+    const ordCommitTx = JSON.parse(rpc('getrawtransaction', ord.commit, 'true')) as {
+      vin: { txid: string; vout: number }[]; vout: { value: number }[];
+    };
+    const ordPadIn = JSON.parse(rpc('getrawtransaction', ordCommitTx.vin[0].txid, 'true')) as { vout: { value: number }[] };
+    // ord put a further input in front and made the padding its value + 100.
+    expect(`${ordCommitTx.vin[1].txid}:${ordCommitTx.vin[1].vout}`).toBe(ordSource);
+    expect(Math.round(ordCommitTx.vout[0].value * 1e8))
+      .toBe(Math.round(ordPadIn.vout[ordCommitTx.vin[0].vout].value * 1e8) + 100);
+    expect((await waitForOrdStockInscription(`${ord.reveal}i0`)).sat).toBe(ordSat);
+
+    // ---- SDK ----
+    const f = await fundUninscribed();
+    const wantedSat = await satAt(`${f.utxo.txid}:${f.utxo.vout}`, 100);
+    const pad = await paddingUtxoAt(f.fundingAddr, 1_000);
+    const built = createInscribeTransactions({
+      paymentOutput: { ...f.utxo, status: { confirmed: true } },
+      paymentPublicKey: f.fundingPubkey,
+      paymentAddress: f.fundingAddr,
+      recipientAddress: btc.p2tr(schnorr.getPublicKey(schnorr.utils.randomPrivateKey()), undefined, scureRegtest, true).address!,
+      body,
+      contentType: TXT,
+      satOffset: 100,
+      paddingUtxo: pad,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+    const commit = btc.Transaction.fromPSBT(built.commitPsbt);
+    expect(hex.encode(commit.getInput(0).txid!)).toBe(pad.txid);
+    expect(Number(commit.getOutput(0).amount)).toBe(1_000 + 100);
+    expect(Number(commit.getOutput(1).amount)).toBe(Math.round(ordCommitTx.vout[1].value * 1e8));
+
+    const processed = JSON.parse(rpc(
+      '-rpcwallet=ordpool-e2e', '-named', 'walletprocesspsbt',
+      `psbt=${base64.encode(built.commitPsbt)}`, 'sign=true', 'finalize=true',
+    )) as { complete: boolean; hex: string };
+    expect(processed.complete).toBe(true);
+    expect(await postTx(processed.hex)).toBe(built.commitTxid);
+    expect(await postTx(built.revealHex)).toBe(built.revealTxid);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdStockSync(tip);
+    expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
+  }, 300_000);
+
+  it('offset 100 in a satSource: padding input first, the padding back to the sat\'s owner, inscription on that sat', async () => {
+    const sourceTxid = await sendFromCleanFunderCoin({ [owner.address!]: '0.00020000' });
+    const wantedSat = await satAt(`${sourceTxid}:0`, 100);
+    const f = await fundUninscribed();
+    const pad = await paddingUtxoAt(f.fundingAddr, 1_000);
+    const built = createInscribeTransactions({
+      paymentOutput: { ...f.utxo, status: { confirmed: true } },
+      paymentPublicKey: f.fundingPubkey,
+      paymentAddress: f.fundingAddr,
+      recipientAddress: btc.p2tr(schnorr.getPublicKey(schnorr.utils.randomPrivateKey()), undefined, scureRegtest, true).address!,
+      body: enc('a rare sat 100 into its UTXO'),
+      contentType: TXT,
+      satSource: {
+        txid: sourceTxid, vout: 0, value: 20_000, scriptPubKey: owner.script,
+        tapInternalKey: ownerXonly, address: owner.address!, offset: 100,
+      },
+      paddingUtxo: pad,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+    const commit = btc.Transaction.fromPSBT(built.commitPsbt);
+    expect([0, 1, 2].map(i => hex.encode(commit.getInput(i).txid!))).toEqual([pad.txid, sourceTxid, f.utxo.txid]);
+    expect(Number(commit.getOutput(0).amount)).toBe(1_000 + 100);
+    expect(hex.encode(commit.getOutput(0).script!)).toBe(hex.encode(owner.script));
+
+    // The funder signs the payment inputs (0, 2); the owner key the satSource (1).
+    const processed = JSON.parse(rpc(
+      '-rpcwallet=ordpool-e2e', '-named', 'walletprocesspsbt',
+      `psbt=${base64.encode(built.commitPsbt)}`, 'sign=true', 'finalize=false',
+    )) as { psbt: string };
+    const signed = btc.Transaction.fromPSBT(base64.decode(processed.psbt));
+    signed.signIdx(ownerKey, 1);
+    signed.finalize();
+    expect(await postTx(signed.hex)).toBe(built.commitTxid);
+    expect(await postTx(built.revealHex)).toBe(built.revealTxid);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForOrdStockSync(tip);
+    expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
+  }, 300_000);
+});

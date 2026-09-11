@@ -113,8 +113,10 @@ export interface SimulateInscribeFeesArgs {
   satOffset?: number;
   /** See `InscribeCommitArgs.commitPostageSats`. */
   commitPostageSats?: number;
-  /** See `InscribeCommitArgs.satSource`: the UTXO holding the chosen sat, the commit's input 0. */
+  /** See `InscribeCommitArgs.satSource`: the UTXO holding the chosen sat. */
   satSource?: InscribeCommitArgs['satSource'];
+  /** See `InscribeCommitArgs.paddingInput`, in its simulation (dummy-keyed) form. */
+  paddingInput?: InscribeCommitArgs['paddingInput'];
   network: Network;
 }
 
@@ -192,6 +194,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     satOffset: args.satOffset,
     commitPostageSats: args.commitPostageSats,
     satSource: args.satSource,
+    paddingInput: args.paddingInput,
     network: args.network,
   });
   const tipValueSats = args.tip?.value ?? 0;
@@ -261,6 +264,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         satOffset: args.satOffset,
         commitPostageSats: args.commitPostageSats,
         satSource: args.satSource,
+    paddingInput: args.paddingInput,
         network: args.network,
       });
       // Dummy-sign the funding input + finalize to read the real vsize. DEFAULT
@@ -268,10 +272,13 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
       const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
       const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
       tx.signIdx(dummyPrivateKey, commit.fundingInputIndex, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+      if (commit.paddingInputIndex !== undefined) {
+        tx.signIdx(dummyPrivateKey, commit.paddingInputIndex, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+      }
       // The satSource is a P2TR key-path spend: its witness is exactly one
       // 64-byte Schnorr signature, so a placeholder of that size is exact.
-      if (args.satSource !== undefined) {
-        tx.updateInput(0, { tapKeySig: new Uint8Array(64) }, true);
+      if (commit.satSourceInputIndex !== undefined) {
+        tx.updateInput(commit.satSourceInputIndex, { tapKeySig: new Uint8Array(64) }, true);
       }
       tx.finalize();
       return { vsize: tx.vsize, finalFeeSats: commitFeeBudget - commit.changeSats };

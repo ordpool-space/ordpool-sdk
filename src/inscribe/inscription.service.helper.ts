@@ -317,6 +317,16 @@ export interface CreateInscribeTransactionsArgs {
    */
   satSource?: InscribeSatSource;
   /**
+   * A second payment UTXO (at `paymentAddress`) for a chosen sat less than a
+   * dust limit into its UTXO (`satOffset` or `satSource.offset` from 1 up
+   * to the padding address's dust limit): ord pads that padding output with
+   * a further wallet input, and so does the SDK, spending this one first.
+   * The padding output then carries its whole value plus the offset (to the
+   * payment address, or with a `satSource` to that address). The wallet signs
+   * it with the padded-commit topology (`signPaddedSatCommit`).
+   */
+  paddingUtxo?: TxnOutput;
+  /**
    * Compress `gallery`/`title` the way ord's `--compress` does: the
    * brotli-compressed forms join the candidates and the smallest wins, with
    * tag 0x13 set to `br` when a compressed one does. Needs the brotli wasm
@@ -415,21 +425,27 @@ function deriveUnsignedCommitTxid(
   paymentAddress: string,
   paymentPublicKey: Uint8Array,
   network: Network,
-  fundingInputIndex = 0,
+  inputs: Pick<InscribeCommitResult, 'fundingInputIndex' | 'paddingInputIndex' | 'satSourceInputIndex'> =
+    { fundingInputIndex: 0 },
 ): string {
   const scureNetwork = toScureNetwork(network);
   const simTx = btc.Transaction.fromPSBT(simCommitPsbt);
   const { dummyPrivateKey } = getDummyKeypair(scureNetwork);
-  simTx.signIdx(dummyPrivateKey, fundingInputIndex, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
-  // A satSource ahead of the funding input is a P2TR key-path spend with an
-  // empty scriptSig; any witness gives the same txid.
-  if (fundingInputIndex > 0) {
-    simTx.updateInput(0, { tapKeySig: new Uint8Array(64) }, true);
+  const paymentInputs = [inputs.fundingInputIndex, ...(inputs.paddingInputIndex !== undefined ? [inputs.paddingInputIndex] : [])];
+  for (const i of paymentInputs) {
+    simTx.signIdx(dummyPrivateKey, i, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
+  }
+  // A satSource is a P2TR key-path spend with an empty scriptSig; any
+  // witness gives the same txid.
+  if (inputs.satSourceInputIndex !== undefined) {
+    simTx.updateInput(inputs.satSourceInputIndex, { tapKeySig: new Uint8Array(64) }, true);
   }
   simTx.finalize();
   if (getAddressFormat(paymentAddress) === 'P2SH???') {
     const redeemScript = btc.p2wpkh(paymentPublicKey, scureNetwork).script;
-    simTx.updateInput(fundingInputIndex, { finalScriptSig: btc.Script.encode([redeemScript]) }, true);
+    for (const i of paymentInputs) {
+      simTx.updateInput(i, { finalScriptSig: btc.Script.encode([redeemScript]) }, true);
+    }
   }
   return simTx.id;
 }
@@ -499,7 +515,7 @@ interface InscribeAssembly {
 /** The funding inputs every inscribe builder takes. */
 export type InscribeFundingArgs = Pick<CreateInscribeTransactionsArgs,
   'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte' | 'tip' | 'walletType' | 'network'
-  | 'satOffset' | 'satSource' | 'commitFeeRatePerVbyte' | 'noLimit'>;
+  | 'satOffset' | 'satSource' | 'commitFeeRatePerVbyte' | 'noLimit' | 'paddingUtxo'>;
 
 /** A commit ready to sign, with its fees and the txid the reveal spends. */
 export interface InscribeCommitPlan {
@@ -578,6 +594,13 @@ export function planInscribeCommit(
     isSimulation: true,
     network: args.network,
   });
+  const paddingInput = (isSimulation: boolean) => args.paddingUtxo === undefined ? undefined : prepareInscribeFundingInput({
+    utxo: args.paddingUtxo,
+    paymentPublicKey: args.paymentPublicKey,
+    paymentAddress: args.paymentAddress,
+    isSimulation,
+    network: args.network,
+  });
   // The change-output dust floor must match the real commit build below,
   // or the fee simulation quotes a different commit topology (absorb-vs-
   // emit change) than the tx the wallet actually signs. Thread the real
@@ -599,6 +622,7 @@ export function planInscribeCommit(
       changeDustLimitSats,
       satOffset: args.satOffset,
       satSource: args.satSource,
+      paddingInput: paddingInput(true),
       commitPostageSats: assembly.commitPostageSats,
       tip: args.tip,
       walletType: args.walletType,
@@ -652,6 +676,7 @@ export function planInscribeCommit(
     changeDustLimitSats,
     satOffset: args.satOffset,
     satSource: args.satSource,
+    paddingInput: paddingInput(false),
     commitPostageSats: assembly.commitPostageSats,
     network: args.network,
   });
@@ -674,6 +699,7 @@ export function planInscribeCommit(
     changeDustLimitSats,
     satOffset: args.satOffset,
     satSource: args.satSource,
+    paddingInput: paddingInput(true),
     commitPostageSats: assembly.commitPostageSats,
     network: args.network,
   });
@@ -682,7 +708,7 @@ export function planInscribeCommit(
     args.paymentAddress,
     args.paymentPublicKey,
     args.network,
-    commit.fundingInputIndex,
+    commit,
   );
 
   return { fees, commit, commitTxid: commitTxidUnsigned, postageSats };
@@ -832,8 +858,8 @@ export function createChildInscribeTransactions(
       throw new Error('tip.address must be a non-empty string');
     }
   }
-  if ((args.satOffset !== undefined && args.satOffset !== 0) || args.satSource !== undefined) {
-    throw new Error('satOffset / satSource are not supported for child inscriptions');
+  if ((args.satOffset !== undefined && args.satOffset !== 0) || args.satSource !== undefined || args.paddingUtxo !== undefined) {
+    throw new Error('satOffset / satSource / paddingUtxo are not supported for child inscriptions');
   }
   if (args.body === undefined && args.delegate === undefined) {
     throw new Error('an inscription needs a body or a delegate (ord: --file or --delegate)');

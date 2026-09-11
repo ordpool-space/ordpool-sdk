@@ -223,6 +223,33 @@ describe('xverseSigner.signTransfer', () => {
   });
 });
 
+describe('xverseSigner.signPaddedSatCommit', () => {
+  const requestMock = request as unknown as jest.Mock;
+
+  beforeEach(() => { requestMock.mockReset(); });
+
+  it('routes the padded commit onto modern signPsbt: payment inputs 0 and 2, the ordinals input 1, then broadcasts', async () => {
+    requestMock.mockResolvedValue({ status: 'success', result: { psbt: 'c2lnbmVk' } } as never);
+    const bytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x30]);
+    const broadcast = jest.fn((_hex: string) => of('PADDED-TXID'));
+
+    const result = await firstValueFrom(xverseSigner.signPaddedSatCommit({
+      psbtBytes: bytes,
+      paymentAddress: 'bcrt1qpay',
+      ordinalsAddress: 'bcrt1pord',
+      network: Network.Regtest,
+      broadcast: broadcast as never,
+    }));
+
+    expect(requestMock.mock.calls[0][0]).toBe('signPsbt');
+    const payload = requestMock.mock.calls[0][1] as { signInputs: Record<string, number[]>; broadcast: boolean };
+    expect(payload.signInputs).toEqual({ 'bcrt1qpay': [0, 2], 'bcrt1pord': [1] });
+    expect(payload.broadcast).toBe(false);
+    expect(broadcast).toHaveBeenCalledWith('00');
+    expect(result).toEqual({ txId: 'PADDED-TXID' });
+  });
+});
+
 describe('xverseSigner.signOfferCreatePsbt', () => {
   const requestMock = request as unknown as jest.Mock;
 

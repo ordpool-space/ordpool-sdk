@@ -87,6 +87,26 @@ describe('unisatSigner.signSingleFundingInput', () => {
     });
   });
 
+  it('signPaddedSatCommit with a satSource: payment inputs 0 and 2, the ordinals input 1', async () => {
+    const unsignedBytes = new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01]);
+    signPsbtMock.mockResolvedValue('70736274ff01' as never);
+    await firstValueFrom(unisatSigner.signPaddedSatCommit({
+      psbtBytes: unsignedBytes,
+      paymentAddress: 'bc1qpayment',
+      ordinalsAddress: 'bc1pordinals',
+      network: Network.Mainnet,
+      broadcast: ((_rawTxHex: string) => of('UNUSED')) as never,
+    }));
+    expect(signPsbtMock).toHaveBeenCalledWith(hex.encode(unsignedBytes), {
+      autoFinalized: false,
+      toSignInputs: [
+        { index: 0, address: 'bc1qpayment', sighashTypes: [btc.SigHash.ALL] },
+        { index: 2, address: 'bc1qpayment', sighashTypes: [btc.SigHash.ALL] },
+        { index: 1, address: 'bc1pordinals', sighashTypes: [btc.SigHash.DEFAULT, btc.SigHash.ALL] },
+      ],
+    });
+  });
+
   it('when signPsbt rejects, propagates the error and never reaches the broadcast helper', async () => {
     signPsbtMock.mockRejectedValue(new Error('user rejected') as never);
 

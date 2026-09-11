@@ -149,6 +149,12 @@ export interface InscribeAndBroadcastArgs {
    */
   satSource?: InscribeSatSource;
   /**
+   * A second payment UTXO for a chosen sat less than a dust limit into its
+   * UTXO (see `CreateInscribeTransactionsArgs.paddingUtxo`). The wallet then
+   * signs the commit through `signPaddedSatCommit`.
+   */
+  paddingUtxo?: TxnOutput;
+  /**
    * Compress `gallery`/`title` as ord's `--compress` does (see
    * `CreateInscribeTransactionsArgs.compressProperties`). Load the brotli
    * wasm first; `compressLikeOrd` on the body does that.
@@ -226,6 +232,7 @@ export function inscribeAndBroadcast(
         postageSats: args.postageSats,
         satOffset: args.satOffset,
         satSource: args.satSource,
+        paddingUtxo: args.paddingUtxo,
         gallery: args.gallery,
         title: args.title,
         traits: args.traits,
@@ -238,22 +245,24 @@ export function inscribeAndBroadcast(
       return throwError(() => err);
     }
 
-    if (args.satSource !== undefined) {
-      return signSatSourceCommitAndBroadcast(built, { ...args, satSource: args.satSource });
+    if (args.satSource !== undefined || args.paddingUtxo !== undefined) {
+      return signMultiInputCommitAndBroadcast(built, args);
     }
     return signAndBroadcast(built, args);
   });
 }
 
 /**
- * A commit that spends a satSource ahead of the funding input: input 0 at
- * the ordinals address, the funding at input 1. That is the transfer
- * topology, so the wallet signs it through `signTransfer`, which derives
- * those indexes itself; then the pre-signed reveal broadcasts.
+ * The commits that carry more than the one funding input: a satSource ahead
+ * of the funding input (the transfer topology: input 0 at the ordinals
+ * address, the funding at 1, signed through `signTransfer`), and a padding
+ * input in front of a sub-dust padding output (`signPaddedSatCommit`). The
+ * signer derives the indexes from the method; then the pre-signed reveal
+ * broadcasts.
  */
-function signSatSourceCommitAndBroadcast(
+function signMultiInputCommitAndBroadcast(
   built: CreateInscribeTransactionsResult,
-  args: SignAndBroadcastArgs & { satSource: InscribeSatSource },
+  args: SignAndBroadcastArgs & { satSource?: InscribeSatSource; paddingUtxo?: TxnOutput },
 ): Observable<InscribeAndBroadcastResult> {
   const signer = findSignerOrThrow(args.walletType);
   const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
@@ -262,15 +271,25 @@ function signSatSourceCommitAndBroadcast(
     }
     return args.broadcast(signedCommitHex);
   };
-  return signer.signTransfer({
-    psbtBytes: built.commitPsbt,
-    ordinalsAddress: args.satSource.address,
-    paymentAddress: args.paymentAddress,
-    fundingInputCount: 1,
-    network: args.network,
-    broadcast: captureAndBroadcast,
-    promptForSignedPsbt: args.promptForSignedPsbt,
-  }).pipe(
+  const signedCommit = args.paddingUtxo !== undefined
+    ? signer.signPaddedSatCommit({
+      psbtBytes: built.commitPsbt,
+      paymentAddress: args.paymentAddress,
+      ordinalsAddress: args.satSource?.address,
+      network: args.network,
+      broadcast: captureAndBroadcast,
+      promptForSignedPsbt: args.promptForSignedPsbt,
+    })
+    : signer.signTransfer({
+      psbtBytes: built.commitPsbt,
+      ordinalsAddress: (args.satSource as InscribeSatSource).address,
+      paymentAddress: args.paymentAddress,
+      fundingInputCount: 1,
+      network: args.network,
+      broadcast: captureAndBroadcast,
+      promptForSignedPsbt: args.promptForSignedPsbt,
+    });
+  return signedCommit.pipe(
     switchMap(({ txId: commitTxId }) =>
       args.broadcast(built.revealHex).pipe(
         map((revealTxId) => ({

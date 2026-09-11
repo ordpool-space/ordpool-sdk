@@ -15,8 +15,10 @@ import {
   SignOfferAcceptArgs,
   SignOfferCreatePsbtArgs,
   SignPsbtOnlyInput,
+  SignPaddedSatCommitArgs,
   SignTransferArgs,
   WalletSigner,
+  paddedSatCommitSigningPositions,
 } from '../wallet.service.types';
 import { childRevealParentIndexes, mergeParentSigAndBroadcast, prepareOfferAcceptWalletFacing } from './child-reveal-finalize.helper';
 import { operationNamedDefaults } from './operation-named-defaults';
@@ -228,6 +230,19 @@ export const xverseSigner: WalletSigner = {
    * are the wallet's active-network (regtest in the e2e seed) addresses,
    * matching the child-reveal override.
    */
+  signPaddedSatCommit: (input: SignPaddedSatCommitArgs): Observable<{ txId: string }> => {
+    // Modern signPsbt, for the same reason as signTransfer: the legacy
+    // signTransaction stalls on a multi-input PSBT.
+    const signInputs = Object.fromEntries(
+      paddedSatCommitSigningPositions(input).map(({ address, indexes }) => [address, indexes]),
+    );
+    return callXverseSignPsbtModern(input.psbtBytes, signInputs).pipe(
+      switchMap((signedPsbt) => input.broadcast(extractWireTxFromPsbt(signedPsbt)).pipe(
+        map((txId) => ({ txId })),
+      )),
+    );
+  },
+
   signTransfer: (input: SignTransferArgs): Observable<{ txId: string }> => {
     const paymentIndexes = Array.from({ length: input.fundingInputCount }, (_, i) => i + 1);
     return callXverseSignPsbtModern(input.psbtBytes, {

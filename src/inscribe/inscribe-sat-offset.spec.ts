@@ -166,3 +166,69 @@ describe('satSource', () => {
     expect(btc.Transaction.fromRaw(hex.decode(broadcasts[1])).id).toBe(result.revealTxId);
   });
 });
+
+describe('paddingUtxo', () => {
+  const pad = { txid: 'f'.repeat(64), vout: 0, value: 1_000, status: { confirmed: true } };
+
+  it('spends the padding input first; the padding output is its value plus the offset', () => {
+    const r = build({ satOffset: 100, paddingUtxo: pad });
+    const commit = btc.Transaction.fromPSBT(r.commitPsbt);
+    expect([0, 1].map(i => hex.encode(commit.getInput(i).txid!))).toEqual(['f'.repeat(64), 'd'.repeat(64)]);
+    const outs = outputs(r.commitPsbt);
+    expect(outs[0][1]).toBe(1_100);
+    expect(outs[1]).toEqual([hex.encode(r.commit.outputScript), r.commit.outputValueSats]);
+    expect(btc.Transaction.fromRaw(hex.decode(r.revealHex)).getInput(0).index).toBe(1);
+  });
+
+  it('is refused when the padding would clear dust anyway, since ord pads only a sub-dust padding output', () => {
+    expect(() => build({ satOffset: 5_000, paddingUtxo: pad }))
+      .toThrow('paddingInput is only for a chosen sat less than a dust limit into its UTXO');
+    expect(() => build({ satOffset: 0, paddingUtxo: pad }))
+      .toThrow('paddingInput is only for a chosen sat less than a dust limit into its UTXO');
+  });
+
+  it('without one, a sub-dust offset names how much padding it needs', () => {
+    expect(() => build({ satOffset: 100 })).toThrow('pass a paddingInput of at least 230 sats');
+  });
+
+  it('the signing positions: payment 0 and 1; with a satSource, payment 0 and 2 and ordinals 1', async () => {
+    const { paddedSatCommitSigningPositions } = await import('../wallet/wallet.service.types');
+    expect(paddedSatCommitSigningPositions({ paymentAddress: 'pay' })).toEqual([{ address: 'pay', indexes: [0, 1] }]);
+    expect(paddedSatCommitSigningPositions({ paymentAddress: 'pay', ordinalsAddress: 'ord' }))
+      .toEqual([{ address: 'pay', indexes: [0, 2] }, { address: 'ord', indexes: [1] }]);
+  });
+
+  it('the orchestrator hands the wallet the padded commit: padding at 0, the funding holding the sat at 1', async () => {
+    const { inscribeAndBroadcast } = await import('./inscribe-orchestrator');
+    const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');
+    const { base64 } = await import('@scure/base');
+    const { firstValueFrom, of } = await import('rxjs');
+    const handed: string[][] = [];
+    const broadcasts: string[] = [];
+    const result = await firstValueFrom(inscribeAndBroadcast({
+      walletType: KnownOrdinalWalletType.xpub,
+      paymentOutput: { txid: 'd'.repeat(64), vout: 0, value: 100_000, status: { confirmed: true } },
+      paymentPublicKey: secp256k1.getPublicKey(PAYMENT_PRIV, true),
+      paymentAddress,
+      recipientAddress: paymentAddress,
+      body: new TextEncoder().encode('padded'),
+      contentType: 'text/plain',
+      satOffset: 100,
+      paddingUtxo: pad,
+      feeRatePerVbyte: 3,
+      network: NETWORK,
+      broadcast: (txHex: string) => { broadcasts.push(txHex); return of(btc.Transaction.fromRaw(hex.decode(txHex)).id); },
+      promptForSignedPsbt: (unsigned: { base64: string }) => {
+        const psbt = btc.Transaction.fromPSBT(base64.decode(unsigned.base64));
+        handed.push([0, 1].map(i => hex.encode(psbt.getInput(i).txid!)));
+        psbt.signIdx(PAYMENT_PRIV, 0);
+        psbt.signIdx(PAYMENT_PRIV, 1);
+        psbt.finalize();
+        return of(base64.encode(psbt.toPSBT(0)));
+      },
+    }));
+    expect(handed).toEqual([['f'.repeat(64), 'd'.repeat(64)]]);
+    expect(btc.Transaction.fromRaw(hex.decode(broadcasts[0])).id).toBe(result.commitTxId);
+    expect(btc.Transaction.fromRaw(hex.decode(broadcasts[1])).id).toBe(result.revealTxId);
+  });
+});

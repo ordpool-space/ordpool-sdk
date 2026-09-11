@@ -31,7 +31,7 @@ bytes; see the spec for exactly what is compared.
 | `--delegate` with no `--file`, as a transaction | an SDK delegate-only inscription broadcasts and stock ord serves the delegate's content for it | `e2e/regtest/inscribe-metadata-delegate-parity.spec.ts` |
 | `--satpoint`, `--sat` (§5) for a sat inside the funding UTXO | proven: padding output and commit output match ord at offsets 1 000 and 50 000, and stock ord's sat index puts the SDK inscription on exactly the requested sat; `findSatOffset` turns a sat number into the offset | `e2e/regtest/inscribe-satpoint-parity.spec.ts` |
 | Sat in a separate UTXO (`satSource`, e.g. a rare sat at the ordinals address) | proven: same commit output as ord; padding and the rest of that UTXO return to its address, the funding pays only the fee; a sub-dust remainder becomes postage; a UTXO smaller than the commit output is topped up; stock ord's sat index puts each inscription on the requested sat | `e2e/regtest/inscribe-satpoint-parity.spec.ts` |
-| A sat less than a dust limit into its UTXO (offset 1 to 329 on P2TR) | open: ord tops the sub-dust padding output up with further wallet inputs; the SDK refuses with a clear message | |
+| A sat less than a dust limit into its UTXO (`paddingUtxo`) | proven at offset 100: ord and the SDK both put a further input in front and make the padding its value + 100; same commit output; stock ord's sat index has the inscription on the requested sat, in the funding UTXO and in a satSource; signed through `signPaddedSatCommit` | `e2e/regtest/inscribe-satpoint-parity.spec.ts` |
 | Batch `satpoints` (§6c) | proven: ord and the SDK spend the same three UTXOs (5 000, 7 000, 9 000 sats) and match in tapscript, reveal outputs, reveal vsize, commit output (the reveal fee only) and locations; an SDK satpoints batch on UTXOs we own broadcasts, and stock ord puts each inscription on the first sat of its UTXO | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 
 **Default postage stays 546.** It is cheaper, and it is the common
@@ -82,7 +82,7 @@ alias so nothing breaks). Tag `0x03` repeats; ord's batchfile takes a list.
 Done when: a two-parent inscription is byte-identical to ord's, proven on
 regtest, and cat21.space's child-mint flow still passes.
 
-## 5. Sat and satpoint targeting (done, except sub-dust padding)
+## 5. Sat and satpoint targeting (done)
 
 Inscribe onto a chosen sat or satpoint rather than wherever coin selection
 lands. This is the rare-sat audience, the people who care about ordinal theory
@@ -140,8 +140,8 @@ nothing about size handling.
   metaprotocols", which is a list ord users recognise.
 - **After §6a**: "and whole collections in one go."
 - **After §6c**: "feature parity with ord" becomes defensible, and only then.
-  §6c is proven; what the status table still lists as open is what stands
-  between us and that sentence.
+  Every row of the status table is proven, so for the SDK it is. For
+  ordpool.space it waits on §1, the form that exposes it.
 
 Nobody writes the parity sentence before §6. A claim that a competitor can
 falsify in one command is worse than no claim, and `ord wallet batch

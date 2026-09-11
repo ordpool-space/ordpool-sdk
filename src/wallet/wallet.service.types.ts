@@ -250,6 +250,34 @@ export interface SignTransferArgs {
 }
 
 /**
+ * The inscribe commit for a chosen sat less than a dust limit into its UTXO
+ * (ord's `pad_alignment_output`): a padding payment input goes first.
+ *
+ *   without `ordinalsAddress`  [padding, funding holding the sat]  both at paymentAddress
+ *   with `ordinalsAddress`     [padding, satSource, funding]        0 and 2 at paymentAddress, 1 at ordinalsAddress
+ *
+ * SIGHASH_ALL (DEFAULT on taproot) on each; broadcast after signing.
+ */
+export interface SignPaddedSatCommitArgs {
+  psbtBytes: Uint8Array;
+  paymentAddress: string;
+  /** Set when the chosen sat is in a satSource UTXO at this address (input 1). */
+  ordinalsAddress?: string;
+  network: Network;
+  broadcast(txHex: string): Observable<string>;
+  promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
+}
+
+/** The input indexes each address signs in a padded-sat commit; see {@link SignPaddedSatCommitArgs}. */
+export function paddedSatCommitSigningPositions(
+  input: Pick<SignPaddedSatCommitArgs, 'paymentAddress' | 'ordinalsAddress'>,
+): Array<{ address: string; indexes: number[] }> {
+  return input.ordinalsAddress !== undefined
+    ? [{ address: input.paymentAddress, indexes: [0, 2] }, { address: input.ordinalsAddress, indexes: [1] }]
+    : [{ address: input.paymentAddress, indexes: [0, 1] }];
+}
+
+/**
  * Offer-accept (seller) shape — input 0 = the seller's cat UTXO at
  * `ordinalsAddress`, SIGHASH_ALL. All other inputs are buyer-signed
  * and MUST NOT be touched. The signer must restrict its own call to
@@ -382,6 +410,8 @@ export interface SignMessageResult {
  *   - `signTransfer`: input 0 = ordinalsAddress, inputs 1..N = paymentAddress.
  *   - `signOfferAccept`: input 0 = ordinalsAddress; nothing else.
  *   - `signOfferCreatePsbt`: inputs 1..N = paymentAddress; input 0 untouched.
+ *   - `signPaddedSatCommit`: inputs 0 and 1 = paymentAddress; or, with an
+ *     `ordinalsAddress`, inputs 0 and 2 = paymentAddress and 1 = ordinalsAddress.
  *
  * No caller can ask for a non-topology shape. No "signingMap"
  * primitive exists anymore.
@@ -406,6 +436,7 @@ export interface WalletSigner {
   signOfferAccept(input: SignOfferAcceptArgs): Observable<{ txId: string }>;
   signOfferCreatePsbt(input: SignOfferCreatePsbtArgs): Observable<Uint8Array>;
   signChildRevealParentInputs(input: SignChildRevealParentInputsArgs): Observable<{ txId: string }>;
+  signPaddedSatCommit(input: SignPaddedSatCommitArgs): Observable<{ txId: string }>;
   /**
    * Sign a UTF-8 message under an ordinals key via BIP-322.
    * Wallets without a BIP-322 RPC surface return an error observable.

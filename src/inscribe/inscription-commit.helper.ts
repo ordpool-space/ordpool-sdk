@@ -201,6 +201,15 @@ export interface InscribeCommitArgs {
    */
   satSource?: InscribeSatSource;
   /**
+   * A second payment UTXO, spent FIRST, for a chosen sat less than a dust
+   * limit into its UTXO: the padding output in front of it would be below
+   * dust, so, as ord does (transaction_builder.rs, `pad_alignment_output`),
+   * a further wallet input goes in front and the padding output becomes its
+   * value plus the offset. Same address and key as the funding input. Only
+   * accepted when the padding would otherwise be below dust.
+   */
+  paddingInput?: InscribeCommitArgs['fundingInput'];
+  /**
    * The sats the commit output carries for the reveal's inscription outputs,
    * replacing `postageSats`. 0 when the reveal's own inputs fund them (ord's
    * `satpoints` batch mode, where the commit pays only the reveal fee).
@@ -225,8 +234,12 @@ export interface InscribeCommitResult {
   commitOutputValueSats: number;
   /** Index of the commit output: 0, or 1 behind a padding output. */
   commitVout: number;
-  /** Index of the funding input the payment wallet signs: 0, or 1 behind a `satSource`. */
+  /** Index of the funding input: after the padding input and the satSource, when present. */
   fundingInputIndex: number;
+  /** Index of the satSource input, when there is one. */
+  satSourceInputIndex?: number;
+  /** Index of the padding input (always 0), when there is one. */
+  paddingInputIndex?: number;
   /** Sats returned to the `satSource` address after the commit output; 0 without one. */
   remainderSats: number;
   /** Taptree metadata the reveal builder needs to construct its spending witness. */
@@ -321,30 +334,41 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   // Funding input shape mirrors the cat21 mint adapter: witnessUtxo
   // for SegWit, nonWitnessUtxo for P2PKH legacy, plus per-address-
   // type optional fields.
-  const inputBase: btc.TransactionInputUpdate = {
-    txid: args.fundingInput.txid,
-    index: args.fundingInput.vout,
-    sequence,
-    witnessUtxo: {
-      script: args.fundingInput.scriptPubKey,
-      amount: BigInt(args.fundingInput.value),
-    },
+  // Funding and padding inputs are payment inputs of the same shape as the
+  // cat21 mint adapter's: witnessUtxo for SegWit, nonWitnessUtxo for P2PKH
+  // legacy, plus per-address-type optional fields.
+  const paymentInput = (fi: InscribeCommitArgs['fundingInput']): btc.TransactionInputUpdate => {
+    const input: btc.TransactionInputUpdate = {
+      txid: fi.txid,
+      index: fi.vout,
+      sequence,
+      witnessUtxo: {
+        script: fi.scriptPubKey,
+        amount: BigInt(fi.value),
+      },
+    };
+    if (fi.tapInternalKey) {
+      // Taproot key-path: SIGHASH_DEFAULT (omit), per the SDK-wide
+      // BIP-341 wire-equivalent rule.
+      input.tapInternalKey = fi.tapInternalKey;
+    } else {
+      input.sighashType = btc.SigHash.ALL;
+    }
+    if (fi.redeemScript) {
+      input.redeemScript = fi.redeemScript;
+    }
+    if (fi.nonWitnessUtxo) {
+      input.nonWitnessUtxo = fi.nonWitnessUtxo;
+    }
+    return input;
   };
-  if (args.fundingInput.tapInternalKey) {
-    // Taproot key-path: SIGHASH_DEFAULT (omit), per the SDK-wide
-    // BIP-341 wire-equivalent rule.
-    inputBase.tapInternalKey = args.fundingInput.tapInternalKey;
-  } else {
-    inputBase.sighashType = btc.SigHash.ALL;
+  const inputBase = paymentInput(args.fundingInput);
+
+  // A padding input goes in front of everything; then the input holding the
+  // chosen sat: the satSource when given, otherwise the funding input itself.
+  if (args.paddingInput !== undefined) {
+    tx.addInput(paymentInput(args.paddingInput));
   }
-  if (args.fundingInput.redeemScript) {
-    inputBase.redeemScript = args.fundingInput.redeemScript;
-  }
-  if (args.fundingInput.nonWitnessUtxo) {
-    inputBase.nonWitnessUtxo = args.fundingInput.nonWitnessUtxo;
-  }
-  // The input holding the chosen sat comes first: the satSource when given,
-  // otherwise the funding input itself.
   const source = args.satSource;
   if (source !== undefined) {
     if ((args.satOffset ?? 0) !== 0) {
@@ -374,15 +398,24 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   if (satOffset >= satInputValue) {
     throw new Error(`satOffset ${satOffset} is outside the ${satInputValue}-sat ${source ? 'sat source' : 'funding input'}`);
   }
+  const paddingDust = getMinimumUtxoSize(paddingAddress);
+  const paddingInputValue = args.paddingInput?.value ?? 0;
+  if (args.paddingInput !== undefined && (satOffset === 0 || satOffset >= paddingDust)) {
+    throw new Error(
+      'paddingInput is only for a chosen sat less than a dust limit into its UTXO; ' +
+      'ord pads only a padding output that would otherwise be below dust',
+    );
+  }
+  const paddingValue = paddingInputValue + satOffset;
   if (satOffset > 0) {
-    const paddingDust = getMinimumUtxoSize(paddingAddress);
-    if (satOffset < paddingDust) {
+    if (paddingValue < paddingDust) {
       throw new Error(
         `satOffset ${satOffset} would make a padding output below the ${paddingDust}-sat dust limit ` +
-        `of ${paddingAddress}; ord pads it with another input, which this commit does not take`,
+        `of ${paddingAddress}; pass a paddingInput of at least ${paddingDust - satOffset} sats, ` +
+        'as ord pads it with a further wallet input',
       );
     }
-    tx.addOutputAddress(paddingAddress, BigInt(satOffset), scureNetwork);
+    tx.addOutputAddress(paddingAddress, BigInt(paddingValue), scureNetwork);
   }
   const commitVout = satOffset > 0 ? 1 : 0;
 
@@ -444,7 +477,9 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
     commitOutputScript: commitP2tr.script,
     commitOutputValueSats,
     commitVout,
-    fundingInputIndex: source !== undefined ? 1 : 0,
+    fundingInputIndex: (args.paddingInput !== undefined ? 1 : 0) + (source !== undefined ? 1 : 0),
+    satSourceInputIndex: source !== undefined ? (args.paddingInput !== undefined ? 1 : 0) : undefined,
+    paddingInputIndex: args.paddingInput !== undefined ? 0 : undefined,
     remainderSats,
     taproot: {
       internalKey: args.ephemeralPubkeyXonly,

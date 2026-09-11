@@ -5,10 +5,12 @@ import {
   SignChildRevealParentInputsArgs,
   SignOfferAcceptArgs,
   SignOfferCreatePsbtArgs,
+  SignPaddedSatCommitArgs,
   SignSingleFundingInputArgs,
   SignTransferArgs,
   WalletSigner,
   WalletSignerInternalImpls,
+  paddedSatCommitSigningPositions,
 } from '../wallet.service.types';
 
 /**
@@ -35,6 +37,7 @@ export function operationNamedDefaults(
   | 'signOfferAccept'
   | 'signOfferCreatePsbt'
   | 'signChildRevealParentInputs'
+  | 'signPaddedSatCommit'
 > {
   return {
     signSingleFundingInput(input: SignSingleFundingInputArgs): Observable<{ txId: string }> {
@@ -93,6 +96,16 @@ export function operationNamedDefaults(
         switchMap((signedWalletFacing) =>
           mergeParentSigAndBroadcast(signedWalletFacing, input.finalizePsbtBytes, input.broadcast, parentIndexes.length)),
       );
+    },
+
+    signPaddedSatCommit(input: SignPaddedSatCommitArgs): Observable<{ txId: string }> {
+      return legacy.signMultiInputAndBroadcast({
+        psbtBytes: input.psbtBytes,
+        signingMap: paddedSatCommitSigningPositions(input),
+        network: input.network,
+        broadcast: input.broadcast,
+        promptForSignedPsbt: input.promptForSignedPsbt,
+      });
     },
 
     signOfferCreatePsbt(input: SignOfferCreatePsbtArgs): Observable<Uint8Array> {
