@@ -70,6 +70,10 @@ export interface InscribeAndBroadcastArgs {
   contentType?: string;
   envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
   feeRatePerVbyte: number;
+  /** sat/vB fee rate of the commit, ord's `--commit-fee-rate`. Default `feeRatePerVbyte`. */
+  commitFeeRatePerVbyte?: number;
+  /** Allow a reveal above `MAX_STANDARD_TX_WEIGHT`, ord's `--no-limit`. */
+  noLimit?: boolean;
   /**
    * Optional tip output appended at vout[1] of the reveal. SDK
    * ships no default address — consumers wire their own. See
@@ -130,6 +134,8 @@ export interface InscribeAndBroadcastArgs {
   gallery?: InscriptionPropertiesInput['gallery'];
   /** Title, ord's `--title`. Mutually exclusive with raw `properties`. */
   title?: string;
+  /** Traits, in order (a batchfile's `traits:`). Mutually exclusive with raw `properties`. */
+  traits?: InscriptionPropertiesInput['traits'];
   /**
    * Inscribe onto the sat at this offset within `paymentOutput`, ord's
    * `--satpoint` (see `CreateInscribeTransactionsArgs.satOffset`).
@@ -204,6 +210,8 @@ export function inscribeAndBroadcast(
         contentType: args.contentType,
         envelopeFields: args.envelopeFields,
         feeRatePerVbyte: args.feeRatePerVbyte,
+        commitFeeRatePerVbyte: args.commitFeeRatePerVbyte,
+        noLimit: args.noLimit,
         walletType: args.walletType,
         tip: args.tip,
         note: args.note,
@@ -220,6 +228,7 @@ export function inscribeAndBroadcast(
         satSource: args.satSource,
         gallery: args.gallery,
         title: args.title,
+        traits: args.traits,
         compressProperties: args.compressProperties,
         propertyEncoding: args.propertyEncoding,
         minimalTagPush: args.minimalTagPush,

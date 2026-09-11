@@ -189,6 +189,64 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
       .toEqual(ord.inscriptions.map(i => i.location));
   }, 180_000);
 
+  it('traits: in file order, every value type, on the inscription and on a gallery item, byte-identical to ord', async () => {
+    const bodies = [enc('traits one'), enc('traits two')];
+    writeOrdStockFile('/tmp/pb-traits-a.txt', bodies[0]);
+    writeOrdStockFile('/tmp/pb-traits-b.txt', bodies[1]);
+    // Unsorted on purpose, with a numeric-looking name, a negative, an
+    // integer beyond 2^53, a bool, null and a string.
+    const yaml = [
+      'mode: separate-outputs',
+      'postage: 546',
+      'inscriptions:',
+      '  - file: /tmp/pb-traits-a.txt',
+      '    title: with traits',
+      '    traits:',
+      '      zeta: 1',
+      '      alpha: -42',
+      '      "10": true',
+      '      big: 9007199254740993',
+      '      none: null',
+      '      name: cube',
+      '  - file: /tmp/pb-traits-b.txt',
+      '    traits:',
+      '      b: 2',
+      '      a: 1',
+      '    gallery:',
+      `      - id: ${galleryItem}`,
+      '        traits:',
+      '          rank: 3',
+    ].join('\n');
+    const ord = ordStockWalletBatch(ORD_WALLET, yaml, FEE_RATE);
+    await waitForOrdStockSync(mineBlocks(1));
+
+    const sdk = createBatchInscribeTransactions({
+      mode: 'separate-outputs',
+      postageSats: 546,
+      inscriptions: [
+        {
+          body: bodies[0],
+          contentType: 'text/plain;charset=utf-8',
+          title: 'with traits',
+          traits: [['zeta', 1], ['alpha', -42], ['10', true], ['big', 9007199254740993n], ['none', null], ['name', 'cube']],
+        },
+        {
+          body: bodies[1],
+          contentType: 'text/plain;charset=utf-8',
+          traits: [['b', 2], ['a', 1]],
+          gallery: [{ id: galleryItem, traits: [['rank', 3]] }],
+        },
+      ],
+      recipientAddress: randomP2tr(),
+      paymentOutput: { ...utxo, status: { confirmed: true } },
+      paymentPublicKey: fundingPubkey,
+      paymentAddress: fundingAddr,
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+    expect(hex.encode(sdk.commit.envelopeScript).slice(68)).toBe(ordEnvelopes(ord.reveal, 0));
+  }, 180_000);
+
   it.each<BatchInscribeMode>(['separate-outputs', 'shared-output', 'same-sat'])(
     '%s: an SDK batch broadcasts, and stock ord indexes every inscription where the SDK says it lands',
     async (mode) => {

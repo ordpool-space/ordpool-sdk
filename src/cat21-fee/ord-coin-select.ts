@@ -136,16 +136,28 @@ export function estimateTaprootVbytes(
 }
 
 /**
- * ord's fee for a taproot-input transaction: `feeRatePerVb × vsize`, rounded
- * up to the next sat (`estimate_fee` → `FeeRate::fee`, which is
- * ceil(vsize × fee_rate)).
+ * ord's fee for `vsize` vbytes at `feeRatePerVb`: the product rounded to the
+ * nearest sat, halves away from zero (cat21-ord src/fee_rate.rs,
+ * `FeeRate::fee`: `(self.0 * vsize as f64).round()`). At a fractional fee rate
+ * this can be a sat below the rounded-up value, and ord's reveal and commit
+ * output amounts follow it.
+ */
+export function ordFeeSats(vsize: number, feeRatePerVb: number): number {
+  // Math.round rounds halves up, which for a positive product is Rust's
+  // round-half-away-from-zero; the f64 multiplication is the same in both.
+  return Math.round(feeRatePerVb * vsize);
+}
+
+/**
+ * ord's fee for a taproot-input transaction (`estimate_fee` →
+ * `FeeRate::fee` over its all-taproot vsize estimate).
  */
 export function estimateFeeSats(
   numInputs: number,
   outputScriptLengths: ReadonlyArray<number>,
   feeRatePerVb: number,
 ): number {
-  return Math.ceil(estimateTaprootVbytes(numInputs, outputScriptLengths) * feeRatePerVb);
+  return ordFeeSats(estimateTaprootVbytes(numInputs, outputScriptLengths), feeRatePerVb);
 }
 
 /** Result of ord-parity coin selection for a single-outgoing (cat) send. */
@@ -192,8 +204,8 @@ export function selectOrdParityFunding(args: {
     estimateFeeSats(inputs, outLens, feeRatePerVb);
   // ord's `fee_rate.fee(ADDITIONAL_INPUT_VBYTES)` — the incremental fee ord
   // budgets per extra input while covering a deficit.
-  const additionalInputFee = Math.ceil(ORD_ADDITIONAL_INPUT_VBYTES * feeRatePerVb);
-  const additionalOutputFee = Math.ceil(ORD_ADDITIONAL_OUTPUT_VBYTES * feeRatePerVb);
+  const additionalInputFee = ordFeeSats(ORD_ADDITIONAL_INPUT_VBYTES, feeRatePerVb);
+  const additionalOutputFee = ordFeeSats(ORD_ADDITIONAL_OUTPUT_VBYTES, feeRatePerVb);
 
   let pool = [...args.cardinalUtxos];
   const selected: CardinalUtxoCandidate[] = [];

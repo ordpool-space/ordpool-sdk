@@ -84,6 +84,17 @@ const NEG_MIN = -(1n << 64n);
 const TEXT_ENCODER = new TextEncoder();
 
 /**
+ * A CBOR map whose entries are written in the given order instead of the
+ * canonical sorted order. For structures that are ordered by definition:
+ * ord's `Traits` keep the order they were given in (properties.rs, a
+ * `Vec<(String, Trait)>` written as a map), so sorting them would change
+ * the bytes ord writes.
+ */
+export class CborOrderedMap {
+  constructor(readonly entries: ReadonlyArray<readonly [unknown, unknown]>) {}
+}
+
+/**
  * Encode a value as canonical (deterministic) CBOR.
  * Throws on unsupported inputs rather than emitting lossy bytes.
  */
@@ -196,6 +207,11 @@ function encodeItem(value: unknown, out: number[]): void {
         return;
       }
 
+      if (value instanceof CborOrderedMap) {
+        encodeMapEntries(value.entries.map(([k, v]) => [k, v]), out, false);
+        return;
+      }
+
       // Plain object → string-keyed map.
       const entries = Object.entries(value as Record<string, unknown>);
       encodeMapEntries(entries, out);
@@ -213,7 +229,7 @@ function encodeItem(value: unknown, out: number[]): void {
  * each key is deterministically encoded, then entries are sorted by
  * the bytewise lexicographic order of those key-encodings.
  */
-function encodeMapEntries(entries: Array<[unknown, unknown]>, out: number[]): void {
+function encodeMapEntries(entries: Array<[unknown, unknown]>, out: number[], sorted = true): void {
   const encoded = entries.map(([k, v]) => {
     const keyBytes: number[] = [];
     encodeKey(k, keyBytes);
@@ -222,15 +238,15 @@ function encodeMapEntries(entries: Array<[unknown, unknown]>, out: number[]): vo
     return { keyBytes, valBytes };
   });
 
-  encoded.sort((a, b) => compareBytes(a.keyBytes, b.keyBytes));
-
   // Duplicate keys violate RFC 8949 §4.2 deterministic encoding and get
   // rejected (or last-wins) by strict decoders like ord's serde_cbor,
-  // which would silently drop the whole field. Sorted, so any duplicate
-  // is adjacent. This also catches keys that collide only after
-  // encoding, e.g. number 1 and bigint 1n both encoding to 0x01.
-  for (let i = 1; i < encoded.length; i++) {
-    if (compareBytes(encoded[i - 1].keyBytes, encoded[i].keyBytes) === 0) {
+  // which would silently drop the whole field. Checked on a sorted copy,
+  // so any duplicate is adjacent. This also catches keys that collide only
+  // after encoding, e.g. number 1 and bigint 1n both encoding to 0x01.
+  const byKey = [...encoded].sort((a, b) => compareBytes(a.keyBytes, b.keyBytes));
+  if (sorted) encoded.sort((a, b) => compareBytes(a.keyBytes, b.keyBytes));
+  for (let i = 1; i < byKey.length; i++) {
+    if (compareBytes(byKey[i - 1].keyBytes, byKey[i].keyBytes) === 0) {
       throw new Error('CBOR map has duplicate keys after canonical encoding');
     }
   }

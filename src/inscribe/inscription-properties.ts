@@ -1,20 +1,32 @@
 import { compressBrotliSync } from './brotli-wasm-encoder';
-import { encodeCborDeterministic } from './inscription-cbor';
+import { CborOrderedMap, encodeCborDeterministic } from './inscription-cbor';
 import { encodeInscriptionId } from './inscription-envelope';
 
 /**
  * Typed inputs for ord's `properties` field (envelope tag `0x11`): the
- * gallery an inscription belongs to, and its title.
+ * gallery an inscription belongs to, its title and its traits.
  *
- * ord takes these as `--gallery <ID> --gallery <ID> --title "..."`. Without
- * this module a consumer had to hand-build an integer-keyed CBOR map, with a
- * silent failure if they used a plain object (text keys, which ord drops).
- * That is the gap between "we can emit the bytes" and "an interface that
- * doesn't suck".
+ * ord takes these as `--gallery <ID> --gallery <ID> --title "..."`, and in a
+ * batchfile as `gallery:`, `title:` and `traits:`. Built by hand they are an
+ * integer-keyed CBOR map, with a silent failure for a plain object (text
+ * keys, which ord drops); these types encode them exactly as ord does.
  *
  * The raw `properties` input on the inscribe helpers stays as the escape
- * hatch for anything not typed here yet, notably `traits`.
+ * hatch for pre-encoded bytes.
  */
+
+/**
+ * A trait value, ord's `Trait`: a bool, an integer (i64), null or a string.
+ * Integers beyond the safe-integer range go in as `bigint`.
+ */
+export type TraitValue = boolean | number | bigint | null | string;
+
+/**
+ * Traits in their order, ord's `Traits` (properties.rs): a list of
+ * name/value pairs written as a CBOR map in exactly that order. Pass a `Map`
+ * or an array of pairs; a plain object would reorder integer-like names.
+ */
+export type TraitsInput = ReadonlyMap<string, TraitValue> | ReadonlyArray<readonly [string, TraitValue]>;
 
 /** One entry in a gallery. A bare string is the common case. */
 export interface GalleryItem {
@@ -22,17 +34,56 @@ export interface GalleryItem {
   id: string;
   /** Per-item title, ord's `Item.attributes.title`. */
   title?: string;
+  /** Per-item traits, ord's `Item.attributes.traits`. */
+  traits?: TraitsInput;
 }
 
 export interface InscriptionPropertiesInput {
   /** Inscriptions this one is a gallery of. Bare ids or items with titles. */
   gallery?: ReadonlyArray<string | GalleryItem>;
-  /** The inscription's own title, ord's top-level `Attributes.title`. */
+  /**
+   * The inscription's own title, ord's top-level `Attributes.title`. An
+   * empty string is still a title, and ord writes it.
+   */
   title?: string;
+  /** The inscription's traits, ord's top-level `Attributes.traits` (batchfile `traits:`). */
+  traits?: TraitsInput;
 }
 
-function attributes(title: string | undefined): Map<number, unknown> | undefined {
-  return title !== undefined && title !== '' ? new Map<number, unknown>([[0, title]]) : undefined;
+const I64_MIN = -(1n << 63n);
+const I64_MAX = (1n << 63n) - 1n;
+
+function traitEntries(traits: TraitsInput | undefined): Array<[string, TraitValue]> {
+  if (traits === undefined) return [];
+  const entries: Array<[string, TraitValue]> = traits instanceof Map
+    ? [...traits.entries()]
+    : (traits as ReadonlyArray<readonly [string, TraitValue]>).map(([k, v]) => [k, v]);
+  const names = new Set<string>();
+  for (const [name, value] of entries) {
+    if (names.has(name)) throw new Error(`duplicate trait: ${name}`);
+    names.add(name);
+    const integer = typeof value === 'bigint' ? value : typeof value === 'number' ? value : undefined;
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) {
+      throw new Error(`trait ${name}: ${value} is not an integer; ord's traits take bools, integers, null and strings`);
+    }
+    if (integer !== undefined && (BigInt(integer) < I64_MIN || BigInt(integer) > I64_MAX)) {
+      throw new Error(`trait ${name}: ${integer} is outside i64`);
+    }
+  }
+  return entries;
+}
+
+/**
+ * ord's `Attributes`: `{ 0: title, 1: traits }`, each only when present
+ * (traits are skipped when empty). `undefined` when there is neither.
+ */
+function attributes(title: string | undefined, traits: TraitsInput | undefined): Map<number, unknown> | undefined {
+  const entries = traitEntries(traits);
+  if (title === undefined && entries.length === 0) return undefined;
+  const m = new Map<number, unknown>();
+  if (title !== undefined) m.set(0, title);
+  if (entries.length > 0) m.set(1, new CborOrderedMap(entries));
+  return m;
 }
 
 function normalise(entry: string | GalleryItem): GalleryItem {
@@ -42,19 +93,21 @@ function normalise(entry: string | GalleryItem): GalleryItem {
 /**
  * ord's INLINE form: each gallery item carries its own id.
  *
- *   { 0: [ { 0: <id bytes>, 1?: { 0: title } } … ], 1?: { 0: title } }
+ *   { 0: [ { 0: <id bytes>, 1?: attributes } … ], 1?: attributes }
+ *
+ * where attributes is `{ 0?: title, 1?: traits }`.
  */
-function inlineCbor(gallery: GalleryItem[], title: string | undefined): Uint8Array {
+function inlineCbor(gallery: GalleryItem[], attrs: InscriptionPropertiesInput): Uint8Array {
   const top = new Map<number, unknown>();
   if (gallery.length > 0) {
     top.set(0, gallery.map(item => {
       const m = new Map<number, unknown>([[0, encodeInscriptionId(item.id)]]);
-      const a = attributes(item.title);
+      const a = attributes(item.title, item.traits);
       if (a) m.set(1, a);
       return m;
     }));
   }
-  const a = attributes(title);
+  const a = attributes(attrs.title, attrs.traits);
   if (a) top.set(1, a);
   return encodeCborDeterministic(top);
 }
@@ -64,12 +117,12 @@ function inlineCbor(gallery: GalleryItem[], title: string | undefined): Uint8Arr
  * txids are concatenated into one byte string under key 2. An item keeps only
  * its title and, when non-zero, its inscription index.
  *
- *   { 0: [ { 1?: { 0: title }, 2?: index } … ], 1?: { 0: title }, 2: <txids> }
+ *   { 0: [ { 1?: attributes, 2?: index } … ], 1?: attributes, 2: <txids> }
  *
  * The txid is the first 32 bytes of the id encoding, already reversed into
  * ord's internal byte order.
  */
-function packedCbor(gallery: GalleryItem[], title: string | undefined): Uint8Array {
+function packedCbor(gallery: GalleryItem[], attrs: InscriptionPropertiesInput): Uint8Array {
   const top = new Map<number, unknown>();
   if (gallery.length > 0) {
     const txids = new Uint8Array(gallery.length * 32);
@@ -77,7 +130,7 @@ function packedCbor(gallery: GalleryItem[], title: string | undefined): Uint8Arr
       const idBytes = encodeInscriptionId(item.id);
       txids.set(idBytes.subarray(0, 32), i * 32);
       const m = new Map<number, unknown>();
-      const a = attributes(item.title);
+      const a = attributes(item.title, item.traits);
       if (a) m.set(1, a);
       const index = Number(item.id.slice(item.id.lastIndexOf('i') + 1));
       // Index 0 is the common case and ord omits it, so an ordinary gallery
@@ -87,7 +140,7 @@ function packedCbor(gallery: GalleryItem[], title: string | undefined): Uint8Arr
     }));
     top.set(2, txids);
   }
-  const a = attributes(title);
+  const a = attributes(attrs.title, attrs.traits);
   if (a) top.set(1, a);
   return encodeCborDeterministic(top);
 }
@@ -153,11 +206,10 @@ export function encodeInscriptionProperties(
   options: { compress?: boolean } = {},
 ): EncodedInscriptionProperties | undefined {
   const gallery = (input.gallery ?? []).map(normalise);
-  const title = input.title;
-  if (gallery.length === 0 && attributes(title) === undefined) return undefined;
+  if (gallery.length === 0 && attributes(input.title, input.traits) === undefined) return undefined;
 
-  const inline = inlineCbor(gallery, title);
-  const packed = packedCbor(gallery, title);
+  const inline = inlineCbor(gallery, input);
+  const packed = packedCbor(gallery, input);
   const candidates: EncodedInscriptionProperties[] = [{ properties: inline }, { properties: packed }];
   if (options.compress) {
     for (const cbor of [inline, packed]) {

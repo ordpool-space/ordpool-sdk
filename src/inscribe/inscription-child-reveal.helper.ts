@@ -150,6 +150,8 @@ export interface ChildInscribeRevealResult {
   revealTxid: string;
   /** Reveal vsize (fully-signed) for fee math. */
   revealVsize: number;
+  /** Reveal weight (fully-signed), for the standardness limit. */
+  revealWeight: number;
 }
 
 /**
@@ -330,5 +332,6 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
     revealPsbtForWallet: walletFacing.toPSBT(0),
     revealTxid: clone.id,
     revealVsize: clone.vsize,
+    revealWeight: clone.weight,
   };
 }

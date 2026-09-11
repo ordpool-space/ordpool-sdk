@@ -30,6 +30,7 @@ import {
   prepareInscribeFundingInput,
 } from './inscription-input-adapter';
 import {
+  assertRevealWithinStandardWeight,
   buildInscribeRevealTx,
   deriveRevealPubkeyXonly,
 } from './inscription-reveal.helper';
@@ -38,6 +39,7 @@ import {
   type SimulateInscribeFeesArgs,
   type SimulateInscribeFeesResult,
 } from './inscription-fee.helper';
+import { ordFeeSats } from '../cat21-fee/ord-coin-select';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import {
   buildChildInscribeRevealTx,
@@ -282,12 +284,29 @@ export interface CreateInscribeTransactionsArgs {
    */
   title?: string;
   /**
+   * Traits, ord's `Attributes.traits` (a batchfile's `traits:`), in order.
+   * Encoded with `gallery`/`title` into tag 0x11. Mutually exclusive with
+   * the raw `properties` bytes.
+   */
+  traits?: InscriptionPropertiesInput['traits'];
+  /**
    * Inscribe onto the sat at this offset within `paymentOutput`, ord's
    * `--satpoint <paymentOutput>:<offset>` (and `--sat`, once the sat's
    * satpoint is looked up). The commit gets a padding output of `satOffset`
    * sats in front; see `InscribeCommitArgs.satOffset`. Default 0.
    */
   satOffset?: number;
+  /**
+   * sat/vB fee rate of the commit, ord's `--commit-fee-rate`; the reveal
+   * stays at `feeRatePerVbyte`. Default `feeRatePerVbyte`.
+   */
+  commitFeeRatePerVbyte?: number;
+  /**
+   * Allow a reveal heavier than `MAX_STANDARD_TX_WEIGHT`, ord's `--no-limit`.
+   * Nodes will not relay such a reveal; it has to go to a miner directly.
+   * Default false: refused, as ord does.
+   */
+  noLimit?: boolean;
   /**
    * Inscribe onto a sat in a UTXO other than `paymentOutput`, e.g. a rare sat
    * kept at the ordinals address (ord's `--satpoint` on that UTXO). The
@@ -480,7 +499,7 @@ interface InscribeAssembly {
 /** The funding inputs every inscribe builder takes. */
 export type InscribeFundingArgs = Pick<CreateInscribeTransactionsArgs,
   'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte' | 'tip' | 'walletType' | 'network'
-  | 'satOffset' | 'satSource'>;
+  | 'satOffset' | 'satSource' | 'commitFeeRatePerVbyte' | 'noLimit'>;
 
 /** A commit ready to sign, with its fees and the txid the reveal spends. */
 export interface InscribeCommitPlan {
@@ -568,6 +587,7 @@ export function planInscribeCommit(
   try {
     fees = simulateInscribeFees({
       feeRatePerVbyte: args.feeRatePerVbyte,
+      commitFeeRatePerVbyte: args.commitFeeRatePerVbyte,
       postageSats: assembly.postageSats,
       envelopeScript: envelope,
       inscriptionOutputs: assembly.inscriptionOutputs,
@@ -696,6 +716,8 @@ export function assembleInscribeTransactions(
     tip: args.tip,
     network: args.network,
   });
+
+  assertRevealWithinStandardWeight(reveal.revealWeight, args.noLimit);
 
   return {
     commitPsbt: commit.commitPsbt,
@@ -901,7 +923,7 @@ export function createChildInscribeTransactions(
       network: args.network,
     });
     revealVsize = simChildReveal.revealVsize;
-    revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
+    revealFeeSats = ordFeeSats(revealVsize, args.feeRatePerVbyte);
 
     // Commit fee via the guess-free two-topology resolver (revealFeeReserve =
     // the CHILD reveal fee). No vB seed; no-change/absorb fallback so a coin
@@ -909,7 +931,7 @@ export function createChildInscribeTransactions(
     commitOutputValueSats = postageSats + revealFeeSats + tipValueSats;
     const commitFeeBudget = simFundingInput.value - commitOutputValueSats;
     const resolvedCommit = resolveCatTxFee({
-      feeRatePerVbyte: args.feeRatePerVbyte,
+      feeRatePerVbyte: args.commitFeeRatePerVbyte ?? args.feeRatePerVbyte,
       feeBudgetSats: commitFeeBudget,
       simulate: (feeSats: number) => {
         const commit = buildInscribeCommitPsbt({
@@ -1000,6 +1022,8 @@ export function createChildInscribeTransactions(
     network: args.network,
   });
 
+  assertRevealWithinStandardWeight(reveal.revealWeight, args.noLimit);
+
   return {
     commitPsbt: commit.commitPsbt,
     commitTxid,
@@ -1053,7 +1077,7 @@ export function synthesizeBatchEntryFields(args: BatchEntryFieldArgs): OrdEnvelo
 
 /** The per-inscription envelope inputs of a batch entry. */
 export type BatchEntryFieldArgs = Partial<Pick<CreateInscribeTransactionsArgs,
-  'contentEncoding' | 'metadata' | 'metaprotocol' | 'delegate' | 'gallery' | 'title'
+  'contentEncoding' | 'metadata' | 'metaprotocol' | 'delegate' | 'gallery' | 'title' | 'traits'
   | 'compressProperties'>> & {
   parents: ReadonlyArray<string>;
   pointer: number;
@@ -1122,11 +1146,11 @@ function synthesizeFields(args: FieldArgs, singleOutputPointerGate: boolean): Or
     fields.push({ tag: ORD_TAGS.rune, value: encodeRuneCommitment(args.rune) });
   }
 
-  const typedProperties = args.gallery !== undefined || args.title !== undefined;
+  const typedProperties = args.gallery !== undefined || args.title !== undefined || args.traits !== undefined;
   if (typedProperties && args.properties !== undefined) {
     throw new Error(
-      'Pass either gallery/title OR raw properties bytes, not both. ' +
-      'gallery/title are encoded into the same tag 0x11 the raw bytes would fill.',
+      'Pass either gallery/title/traits OR raw properties bytes, not both. ' +
+      'gallery/title/traits are encoded into the same tag 0x11 the raw bytes would fill.',
     );
   }
   if (args.compressProperties && args.properties !== undefined) {
@@ -1136,7 +1160,7 @@ function synthesizeFields(args: FieldArgs, singleOutputPointerGate: boolean): Or
   }
   if (typedProperties) {
     const encoded = encodeInscriptionProperties(
-      { gallery: args.gallery, title: args.title },
+      { gallery: args.gallery, title: args.title, traits: args.traits },
       { compress: args.compressProperties },
     );
     if (encoded !== undefined) {

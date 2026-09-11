@@ -9,7 +9,7 @@ import type { InscribeCommitResult } from './inscription-commit.helper';
 import { buildChildInscribeRevealTx } from './inscription-child-reveal.helper';
 import type { ChildRevealParent } from './inscription-child-reveal.helper';
 import type { InscriptionPropertiesInput } from './inscription-properties';
-import { deriveRevealPubkeyXonly } from './inscription-reveal.helper';
+import { assertRevealWithinStandardWeight, deriveRevealPubkeyXonly } from './inscription-reveal.helper';
 import {
   assembleInscribeTransactions,
   planInscribeCommit,
@@ -54,7 +54,9 @@ export interface BatchInscriptionEntry {
   delegate?: string;
   gallery?: InscriptionPropertiesInput['gallery'];
   title?: string;
-  /** Compress `gallery`/`title` as `--compress` does. Needs the brotli wasm loaded. */
+  /** Traits, a batchfile entry's `traits:`, in order. */
+  traits?: InscriptionPropertiesInput['traits'];
+  /** Compress `gallery`/`title`/`traits` as `--compress` does. Needs the brotli wasm loaded. */
   compressProperties?: boolean;
   /** Where this inscription goes. `separate-outputs` and `satpoints`; defaults to `recipientAddress`. */
   destination?: string;
@@ -69,7 +71,7 @@ export interface BatchInscriptionEntry {
 export interface CreateBatchInscribeTransactionsArgs
   extends Pick<CreateInscribeTransactionsArgs,
     'paymentOutput' | 'paymentPublicKey' | 'paymentAddress' | 'feeRatePerVbyte'
-    | 'tip' | 'walletType' | 'minimalTagPush' | 'network' | 'satOffset'> {
+    | 'tip' | 'walletType' | 'minimalTagPush' | 'network' | 'satOffset' | 'commitFeeRatePerVbyte' | 'noLimit'> {
   mode: BatchInscribeMode;
   /** The inscriptions, in order. At least one. */
   inscriptions: ReadonlyArray<BatchInscriptionEntry>;
@@ -224,6 +226,7 @@ function layOutBatch(
       delegate: entry.delegate,
       gallery: entry.gallery,
       title: entry.title,
+      traits: entry.traits,
       compressProperties: entry.compressProperties,
       parents: parentIds,
       pointer: pointers[i],
@@ -325,6 +328,7 @@ export function createBatchChildInscribeTransactions(
     taproot: plan.commit.taproot,
     outputValueSats: plan.commit.commitOutputValueSats,
   }, layout.ephemeralPrivKey);
+  assertRevealWithinStandardWeight(reveal.revealWeight, args.noLimit);
 
   return {
     commitPsbt: plan.commit.commitPsbt,

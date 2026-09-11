@@ -23,6 +23,10 @@ bytes; see the spec for exactly what is compared.
 | Batch `shared-output`, `same-sat` (§6b) | proven, same comparison | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | SDK batches on chain | every mode broadcast; stock ord indexes each inscription at the satpoint the SDK reports, with its content | `e2e/regtest/inscribe-batch-parity.spec.ts` |
 | Batch with parents, several parents (§4) | proven: a two-parent batch matches ord in tapscript, reveal outputs, reveal vsize, commit output and locations; an SDK batch spending two parents broadcasts, and stock ord links every child to both parents and returns both | `e2e/regtest/inscribe-batch-parity.spec.ts` |
+| `--commit-fee-rate` | proven: the commit pays its own rate (ord's commit checked at round(2 x vsize)), the reveal keeps `--fee-rate`, the commit output matches ord | `e2e/regtest/inscribe-postage-parity.spec.ts` |
+| Fractional fee rates | proven at 1.1, 1.3, 2.7 and 0.6 sat/vB: the SDK rounds fees as ord's `FeeRate::fee` does (round, not round-up), so the commit output matches ord | `e2e/regtest/inscribe-postage-parity.spec.ts` |
+| `--no-limit` and ord's `MAX_STANDARD_TX_WEIGHT` refusal | proven: a 401 000-byte body is refused by ord and the SDK with the same message and the same weight; `noLimit` builds it | `e2e/regtest/inscribe-postage-parity.spec.ts` |
+| Batch `traits`, an empty `--title ""` | proven byte-identical: traits in file order with every value type, on the inscription and on gallery items; ord writes an empty title and so does the SDK | `e2e/regtest/inscribe-batch-parity.spec.ts`, `e2e/regtest/inscribe-properties-parity.spec.ts` |
 | `--destination` | proven with a P2WPKH destination: output script, value, reveal vsize and commit output match ord | `e2e/regtest/inscribe-postage-parity.spec.ts` |
 | `--delegate` with no `--file`, as a transaction | an SDK delegate-only inscription broadcasts and stock ord serves the delegate's content for it | `e2e/regtest/inscribe-metadata-delegate-parity.spec.ts` |
 | `--satpoint`, `--sat` (§5) for a sat inside the funding UTXO | proven: padding output and commit output match ord at offsets 1 000 and 50 000, and stock ord's sat index puts the SDK inscription on exactly the requested sat; `findSatOffset` turns a sat number into the offset | `e2e/regtest/inscribe-satpoint-parity.spec.ts` |
@@ -60,10 +64,10 @@ Owner: ordpool session. Blocked by nothing.
 
 ## 2. Gallery and title as typed inputs (done)
 
-`gallery` (bare ids or `{ id, title }` items) and `title`, encoded into tag
-`0x11` exactly as ord does: both the inline and packed forms are built and the
-smaller wins, inline on a tie. Raw `properties` stays as the escape hatch for
-what is not typed yet, notably `traits`.
+`gallery` (bare ids or `{ id, title, traits }` items), `title` and `traits`,
+encoded into tag `0x11` exactly as ord does: both the inline and packed forms
+are built and the smaller wins, inline on a tie; traits keep their order. Raw
+`properties` stays as the escape hatch for pre-encoded bytes.
 
 ## 3. Postage as an option (done)
 

@@ -124,6 +124,107 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
     180_000,
   );
 
+  it('fractional fee rates: reveal fee and commit output match ord, which rounds rather than rounds up', async () => {
+    // ord's fee is round(rate x vsize) (FeeRate::fee). At these rates the
+    // product lands on both sides of .5, so at least one case below is one
+    // where rounding up would give a different fee; the test checks that too.
+    const rates = [1.1, 1.3, 2.7, 0.6];
+    let discriminating = 0;
+    for (const rate of rates) {
+      const body = new TextEncoder().encode(`parity: fee rate ${rate}`);
+      writeOrdStockFile(`/tmp/parity-rate-${rate}.txt`, body);
+      const ord = ordStockWalletInscribe(ORD_WALLET, `/tmp/parity-rate-${rate}.txt`, rate, ['--postage', '546sat']);
+      await waitForOrdStockSync(mineBlocks(1));
+      const ordReveal = decode(ord.reveal);
+      const ordCommit = decode(ord.commit);
+
+      const sdk = createInscribeTransactions({
+        paymentOutput: { ...utxo, status: { confirmed: true } },
+        paymentPublicKey: fundingPubkey,
+        paymentAddress: fundingAddr,
+        recipientAddress: btc.p2tr(schnorr.getPublicKey(schnorr.utils.randomPrivateKey()), undefined, scureRegtest, true).address!,
+        body,
+        contentType: TXT,
+        feeRatePerVbyte: rate,
+        network: Network.Regtest,
+      });
+      expect(sdk.fees.revealVsize).toBe(ordReveal.vsize);
+      expect(sdk.fees.commitOutputValueSats).toBe(ordCommit.vout[0]);
+      if (Math.ceil(ordReveal.vsize * rate) !== Math.round(ordReveal.vsize * rate)) discriminating++;
+    }
+    expect(discriminating).toBeGreaterThan(0);
+  }, 300_000);
+
+  it('--commit-fee-rate: the commit pays its own rate, the reveal keeps --fee-rate, and the commit output matches ord', async () => {
+    const body = new TextEncoder().encode('parity: commit fee rate');
+    writeOrdStockFile('/tmp/parity-commit-rate.txt', body);
+    const ord = ordStockWalletInscribe(ORD_WALLET, '/tmp/parity-commit-rate.txt', 5, [
+      '--commit-fee-rate', '2', '--postage', '546sat',
+    ]);
+    await waitForOrdStockSync(mineBlocks(1));
+    const ordCommitTx = JSON.parse(rpc('getrawtransaction', ord.commit, 'true')) as {
+      vin: { txid: string; vout: number }[]; vout: { value: number }[]; vsize: number;
+    };
+    const inputSats = ordCommitTx.vin.reduce((sum, i) => {
+      const prev = JSON.parse(rpc('getrawtransaction', i.txid, 'true')) as { vout: { value: number }[] };
+      return sum + Math.round(prev.vout[i.vout].value * 1e8);
+    }, 0);
+    const outputSats = ordCommitTx.vout.reduce((sum, o) => sum + Math.round(o.value * 1e8), 0);
+    // ord's commit is at 2 sat/vB: round(2 x vsize), ord's FeeRate::fee.
+    expect(inputSats - outputSats).toBe(Math.round(2 * ordCommitTx.vsize));
+
+    const sdk = createInscribeTransactions({
+      paymentOutput: { ...utxo, status: { confirmed: true } },
+      paymentPublicKey: fundingPubkey,
+      paymentAddress: fundingAddr,
+      recipientAddress: btc.p2tr(schnorr.getPublicKey(schnorr.utils.randomPrivateKey()), undefined, scureRegtest, true).address!,
+      body,
+      contentType: TXT,
+      feeRatePerVbyte: 5,
+      commitFeeRatePerVbyte: 2,
+      network: Network.Regtest,
+    });
+    // The reveal at 5 sat/vB decides the commit output, same as ord's.
+    expect(sdk.fees.commitOutputValueSats).toBe(Math.round(ordCommitTx.vout[0].value * 1e8));
+    // The SDK's commit is at 2 sat/vB (its funding input differs from ord's,
+    // so the vsize and the fee are its own). Its P2WPKH signature is a DER
+    // signature of 71 to 73 bytes, and the fee is settled on one simulated
+    // signature while the reported vsize comes from another, so the two can
+    // differ by one vbyte: the fee is within 2 sats of 2 x vsize.
+    expect(Math.abs(sdk.fees.commitFeeSats - 2 * sdk.fees.commitVsize)).toBeLessThanOrEqual(2);
+  }, 180_000);
+
+  it('a reveal over MAX_STANDARD_TX_WEIGHT is refused like ord refuses it, and built with noLimit (--no-limit)', async () => {
+    // Roughly one weight unit per witness byte, so 401 000 body bytes put the
+    // reveal just over 400 000.
+    const body = new Uint8Array(401_000).map((_, i) => (i * 31 + 7) & 0xff);
+    writeOrdStockFile('/tmp/parity-heavy.bin', body);
+    let ordError = '';
+    try {
+      ordStockWalletInscribe(ORD_WALLET, '/tmp/parity-heavy.bin', FEE_RATE, ['--postage', '546sat']);
+    } catch (err) {
+      ordError = String((err as { stderr?: string }).stderr ?? err);
+    }
+    expect(ordError).toMatch(/reveal transaction weight greater than 400000 \(MAX_STANDARD_TX_WEIGHT\): \d+/);
+    const ordWeight = Number(/MAX_STANDARD_TX_WEIGHT\): (\d+)/.exec(ordError)![1]);
+
+    const args = {
+      paymentOutput: { ...utxo, status: { confirmed: true } },
+      paymentPublicKey: fundingPubkey,
+      paymentAddress: fundingAddr,
+      recipientAddress: btc.p2tr(schnorr.getPublicKey(schnorr.utils.randomPrivateKey()), undefined, scureRegtest, true).address!,
+      body,
+      contentType: 'application/octet-stream',
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    };
+    // Same refusal, same message, same weight as ord computed.
+    expect(() => createInscribeTransactions(args))
+      .toThrow(`reveal transaction weight greater than 400000 (MAX_STANDARD_TX_WEIGHT): ${ordWeight}`);
+    const built = createInscribeTransactions({ ...args, noLimit: true });
+    expect(btc.Transaction.fromRaw(hex.decode(built.revealHex)).weight).toBe(ordWeight);
+  }, 300_000);
+
   it('--destination to a P2WPKH address: same output script, value, reveal vsize and commit output as ord', async () => {
     // A non-taproot destination changes the reveal's output size, so this
     // also checks the fee accounting beyond the P2TR case.

@@ -71,10 +71,11 @@ describe('estimateTaprootVbytes / estimateFeeSats — ord taproot fee model', ()
     expect(delta).toBeLessThanOrEqual(58);
   });
 
-  it('estimateFeeSats = ceil(vsize x feeRate)', () => {
+  it('estimateFeeSats = round(vsize x feeRate), ord\'s FeeRate::fee', () => {
     expect(estimateFeeSats(1, [34, 34], 10)).toBe(1_540); // 154 * 10
     expect(estimateFeeSats(1, [34], 1)).toBe(111);
-    expect(estimateFeeSats(1, [34], 1.5)).toBe(Math.ceil(111 * 1.5)); // rounds up
+    expect(estimateFeeSats(1, [34], 1.5)).toBe(167); // 166.5 rounds half up
+    expect(estimateFeeSats(1, [34], 1.1)).toBe(122); // 122.1 rounds down, where ceil would say 123
   });
 });
 
@@ -83,7 +84,8 @@ describe('selectOrdParityFunding — ord build_transaction (ExactPostage) parity
 
   it('self-funded (1M cat, target 66k, rate 17.3) matches ord build_transaction_with_custom_postage', () => {
     // ord's own vector: 1 input of 1_000_000, ExactPostage(66_000), fee_rate 17.3
-    // -> outputs [66_000, 1_000_000 - 66_000 - fee]. fee = ceil(154 vB * 17.3).
+    // -> outputs [66_000, 1_000_000 - 66_000 - fee], where ord's test computes
+    // fee = fee_rate.fee(154 vB) = round(2664.2) = 2664 (FeeRate::fee rounds).
     const r = selectOrdParityFunding({
       outgoingValueSats: 1_000_000,
       targetPostageSats: 66_000,
@@ -96,8 +98,8 @@ describe('selectOrdParityFunding — ord build_transaction (ExactPostage) parity
     if ('error' in r) throw new Error(r.error);
     expect(r.fundingInputs).toEqual([]); // the cat self-funds; no cardinal added
     expect(r.outputSats).toBe(66_000);
-    expect(r.feeSats).toBe(2_665); // ceil(154 * 17.3)
-    expect(r.changeSats).toBe(1_000_000 - 66_000 - 2_665);
+    expect(r.feeSats).toBe(2_664); // round(154 * 17.3)
+    expect(r.changeSats).toBe(1_000_000 - 66_000 - 2_664);
   });
 
   it('preserve-transfer (546 cat + one 50k cardinal, rate 1) picks the cardinal + ord fee', () => {

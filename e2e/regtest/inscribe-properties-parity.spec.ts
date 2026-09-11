@@ -90,6 +90,16 @@ describe('inscribe properties → byte-parity with stock ord', () => {
     expect(sdk).toBe(ordEnvelopePostPubkey(reveal));
   }, 120_000);
 
+  it('an EMPTY title is still written, as `ord wallet inscribe --title ""` does', async () => {
+    const body = new TextEncoder().encode('parity: empty title');
+    writeOrdStockFile('/tmp/parity-empty-title.txt', body);
+    const { reveal } = ordStockWalletInscribe(ORD_WALLET, '/tmp/parity-empty-title.txt', 5, ['--title', '']);
+    await waitForOrdStockSync(mineBlocks(1));
+
+    const sdk = sdkEnvelopePostPubkey(body, packInscriptionProperties({ title: '' }));
+    expect(sdk).toBe(ordEnvelopePostPubkey(reveal));
+  }, 120_000);
+
   it('a ONE-ITEM gallery is byte-identical to `ord wallet inscribe --gallery`', async () => {
     const body = new TextEncoder().encode('parity: one gallery item');
     writeOrdStockFile('/tmp/parity-g1.txt', body);

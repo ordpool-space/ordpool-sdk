@@ -2,6 +2,7 @@ import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
+import { ordFeeSats } from '../cat21-fee/ord-coin-select';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import { Network, toScureNetwork } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -41,8 +42,10 @@ import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-re
 export interface SimulateInscribeFeesArgs {
   /** Postage for the inscription output. Default 546; see `resolveInscribePostage`. */
   postageSats?: number;
-  /** sat/vB target fee rate. Same rate applies to both commit + reveal. */
+  /** sat/vB fee rate of the reveal, and of the commit unless `commitFeeRatePerVbyte` is set. */
   feeRatePerVbyte: number;
+  /** sat/vB fee rate of the commit, ord's `--commit-fee-rate`. Default `feeRatePerVbyte`. */
+  commitFeeRatePerVbyte?: number;
   /** Inscription body bytes. Shape-determines reveal vsize. */
   body?: Uint8Array;
   /**
@@ -219,7 +222,9 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
       tip: args.tip,
       network: args.network,
     }).revealVsize;
-  const revealFeeSats = Math.ceil(revealVsize * args.feeRatePerVbyte);
+  // ord's rounding (FeeRate::fee), so the commit output matches ord's at
+  // fractional fee rates too.
+  const revealFeeSats = ordFeeSats(revealVsize, args.feeRatePerVbyte);
 
   // ---- Step 2: commit fee (revealFeeReserve = revealFeeSats). ----
   // The funding coin covers the commit output (cat postage + reveal-fee reserve
@@ -234,8 +239,12 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     ? Math.max(0, commitOutputValueSats - (args.satSource.value - args.satSource.offset))
     : (args.satOffset ?? 0) + commitOutputValueSats;
   const commitFeeBudget = args.fundingInput.value - fromFunding;
+  const commitFeeRate = args.commitFeeRatePerVbyte ?? args.feeRatePerVbyte;
+  if (!(commitFeeRate > 0)) {
+    throw new Error('commitFeeRatePerVbyte must be positive');
+  }
   const resolvedCommit = resolveCatTxFee({
-    feeRatePerVbyte: args.feeRatePerVbyte,
+    feeRatePerVbyte: commitFeeRate,
     feeBudgetSats: commitFeeBudget,
     simulate: (feeSats: number) => {
       const commit = buildInscribeCommitPsbt({

@@ -39,6 +39,8 @@ export interface InscribeRevealResult {
   revealTxid: string;
   /** vsize of the finalized reveal (used by the fee helper). */
   revealVsize: number;
+  /** Weight of the finalized reveal, for the standardness limit. */
+  revealWeight: number;
 }
 
 export interface InscribeRevealArgs {
@@ -241,6 +243,7 @@ export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealR
     revealHex: tx.hex,
     revealTxid: tx.id,
     revealVsize: tx.vsize,
+    revealWeight: tx.weight,
   };
 }
 
@@ -256,4 +259,21 @@ export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealR
  */
 export function deriveRevealPubkeyXonly(privKey: Uint8Array): Uint8Array {
   return schnorr.getPublicKey(privKey);
+}
+
+/**
+ * Bitcoin Core's standardness limit on transaction weight
+ * (`MAX_STANDARD_TX_WEIGHT`, src/policy/policy.h). ord refuses a reveal above
+ * it unless `--no-limit` (cat21-ord src/wallet/batch/plan.rs), since nodes
+ * will not relay it and it has to go to a miner directly.
+ */
+export const MAX_STANDARD_TX_WEIGHT = 400_000;
+
+/** ord's refusal of a non-standard reveal, with its message. */
+export function assertRevealWithinStandardWeight(revealWeight: number, noLimit: boolean | undefined): void {
+  if (!noLimit && revealWeight > MAX_STANDARD_TX_WEIGHT) {
+    throw new Error(
+      `reveal transaction weight greater than ${MAX_STANDARD_TX_WEIGHT} (MAX_STANDARD_TX_WEIGHT): ${revealWeight}`,
+    );
+  }
 }

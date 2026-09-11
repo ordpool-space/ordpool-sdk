@@ -18,7 +18,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { CBOR } from 'ordpool-parser';
 
-import { encodeCborDeterministic } from './inscription-cbor';
+import { CborOrderedMap, encodeCborDeterministic } from './inscription-cbor';
 
 const decode = (bytes: Uint8Array): unknown => CBOR.decode(bytes);
 
@@ -194,5 +194,19 @@ describe('encodeCborDeterministic: rejects unsupported inputs', () => {
     // RFC 8949 canonical form and would be dropped by strict decoders.
     const m = new Map<unknown, unknown>([[1, 'a'], [1n, 'b']]);
     expect(() => encodeCborDeterministic(m)).toThrow(/duplicate keys/);
+  });
+});
+
+describe('CborOrderedMap', () => {
+  const toHex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+
+  it('writes entries in the given order, where a Map would sort them', () => {
+    expect(toHex(encodeCborDeterministic(new CborOrderedMap([['b', 1], ['a', 2]])))).toBe('a2616201616102');
+    expect(toHex(encodeCborDeterministic(new Map([['b', 1], ['a', 2]])))).toBe('a2616102616201');
+  });
+
+  it('still refuses duplicate keys', () => {
+    expect(() => encodeCborDeterministic(new CborOrderedMap([['a', 1], ['a', 2]])))
+      .toThrow('CBOR map has duplicate keys after canonical encoding');
   });
 });

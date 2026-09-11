@@ -21,3 +21,14 @@ describe('resolveInscribePostage', () => {
     expect(() => resolveInscribePostage(bad)).toThrow(/positive integer/);
   });
 });
+
+describe('MAX_STANDARD_TX_WEIGHT', () => {
+  it('is the Core relay limit of 400000, allowed exactly, refused one over, unless noLimit', async () => {
+    const { MAX_STANDARD_TX_WEIGHT, assertRevealWithinStandardWeight } = await import('./inscription-reveal.helper');
+    expect(MAX_STANDARD_TX_WEIGHT).toBe(400_000);
+    expect(() => assertRevealWithinStandardWeight(400_000, false)).not.toThrow();
+    expect(() => assertRevealWithinStandardWeight(400_001, false))
+      .toThrow('reveal transaction weight greater than 400000 (MAX_STANDARD_TX_WEIGHT): 400001');
+    expect(() => assertRevealWithinStandardWeight(400_001, true)).not.toThrow();
+  });
+});
