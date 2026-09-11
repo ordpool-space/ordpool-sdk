@@ -1,4 +1,5 @@
 import { Observable, defer, from, map, of, switchMap, throwError } from 'rxjs';
+import type { InscriptionPropertiesInput } from './inscription-properties';
 import { hex } from '@scure/base';
 
 import { findSignerOrThrow } from '../wallet/signers';
@@ -109,6 +110,14 @@ export interface InscribeAndBroadcastArgs {
    * pre-encoded bytes (`encodeCborDeterministic`); chunked over 520.
    */
   properties?: Uint8Array;
+  /**
+   * Gallery, typed: inscription ids or `{ id, title }` items. ord's
+   * `--gallery`. Encoded into tag 0x11 exactly as ord does. Mutually
+   * exclusive with raw `properties`.
+   */
+  gallery?: InscriptionPropertiesInput['gallery'];
+  /** Title, ord's `--title`. Mutually exclusive with raw `properties`. */
+  title?: string;
   /** Optional properties-encoding hint (tag 0x13); only with `properties`. */
   propertyEncoding?: 'br';
   /**
@@ -176,6 +185,8 @@ export function inscribeAndBroadcast(
         delegate: args.delegate,
         rune: args.rune,
         properties: args.properties,
+        gallery: args.gallery,
+        title: args.title,
         propertyEncoding: args.propertyEncoding,
         minimalTagPush: args.minimalTagPush,
         network: args.network,

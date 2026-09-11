@@ -1,4 +1,6 @@
 import { secp256k1 } from '@noble/curves/secp256k1';
+import { packInscriptionProperties } from './inscription-properties';
+import type { InscriptionPropertiesInput } from './inscription-properties';
 import * as btc from '@scure/btc-signer';
 
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
@@ -250,6 +252,20 @@ export interface CreateInscribeTransactionsArgs {
    * `encodeCborDeterministic`'s doc for the full caveat.
    */
   properties?: Uint8Array;
+  /**
+   * Gallery this inscription belongs to, as inscription ids or items with a
+   * per-item title. The typed form of ord's `--gallery <ID>` (repeatable).
+   * Encoded into tag 0x11 exactly as ord does, including its choice between
+   * the inline and packed CBOR forms; see `packInscriptionProperties`.
+   *
+   * Mutually exclusive with the raw `properties` bytes.
+   */
+  gallery?: InscriptionPropertiesInput['gallery'];
+  /**
+   * The inscription's title, ord's `--title`. Encoded alongside `gallery`
+   * into tag 0x11. Mutually exclusive with the raw `properties` bytes.
+   */
+  title?: string;
   /**
    * Optional properties-encoding hint (tag 0x13). When `'br'`, signals
    * that the `properties` bytes are brotli-compressed. Only emitted
@@ -850,9 +866,13 @@ export function createChildInscribeTransactions(
  * into ord envelope fields in the exact byte form ord expects. Each
  * value is validated here; large CBOR payloads (metadata / properties)
  * are chunked across repeated same-tag fields so no single push
- * exceeds the 520-byte cap. Field ORDER doesn't affect the resolved
- * inscription (ord indexes by tag), but a stable order keeps the
- * encoded envelope diff-friendly.
+ * exceeds the 520-byte cap.
+ *
+ * Field ORDER does not affect the resolved inscription (ord indexes by tag),
+ * but it does decide byte-parity with ord, so it follows ord's
+ * `append_reveal_script` exactly: content_encoding, metaprotocol, parent,
+ * delegate, pointer, metadata, rune, properties, property_encoding. `note` is
+ * ours alone, since ord never emits it, and goes last.
  */
 export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): OrdEnvelopeField[] {
   const fields: OrdEnvelopeField[] = [];
@@ -869,7 +889,6 @@ export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): 
         `${INSCRIBE_POSTAGE_SATS}-sat inscription output at vout[0], so pointer must be < ${INSCRIBE_POSTAGE_SATS}.`,
       );
     }
-    fields.push({ tag: ORD_TAGS.pointer, value: encodePointerValue(args.pointer) });
   }
 
   if (args.contentEncoding !== undefined) {
@@ -888,6 +907,16 @@ export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): 
     fields.push({ tag: ORD_TAGS.delegate, value: encodeInscriptionId(args.delegate) });
   }
 
+  // Pointer goes AFTER delegate, not first: ord's append_reveal_script emits
+  // content_type, content_encoding, metaprotocol, parent, delegate, POINTER,
+  // metadata, rune, properties, property_encoding. The resolved inscription
+  // does not care about order (ord indexes by tag), but byte-parity with ord
+  // does, and pointer placed first diverges the moment it is combined with
+  // any of the four tags ord emits before it. Validated above, pushed here.
+  if (args.pointer !== undefined) {
+    fields.push({ tag: ORD_TAGS.pointer, value: encodePointerValue(args.pointer) });
+  }
+
   if (args.metadata !== undefined) {
     if (!ArrayBuffer.isView(args.metadata)) {
       throw new Error('metadata must be a Uint8Array of pre-encoded CBOR (use encodeCborDeterministic)');
@@ -900,6 +929,18 @@ export function synthesizeEnvelopeFields(args: CreateInscribeTransactionsArgs): 
 
   if (args.rune !== undefined) {
     fields.push({ tag: ORD_TAGS.rune, value: encodeRuneCommitment(args.rune) });
+  }
+
+  const typedProperties = args.gallery !== undefined || args.title !== undefined;
+  if (typedProperties && args.properties !== undefined) {
+    throw new Error(
+      'Pass either gallery/title OR raw properties bytes, not both. ' +
+      'gallery/title are encoded into the same tag 0x11 the raw bytes would fill.',
+    );
+  }
+  if (typedProperties) {
+    const packed = packInscriptionProperties({ gallery: args.gallery, title: args.title });
+    if (packed !== undefined) fields.push(...chunkFieldValue(ORD_TAGS.properties, packed));
   }
 
   if (args.properties !== undefined) {

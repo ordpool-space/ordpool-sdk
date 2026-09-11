@@ -40,6 +40,10 @@ exports.getStockOrdInscription = getStockOrdInscription;
 exports.getStockOrdOutputInscriptions = getStockOrdOutputInscriptions;
 exports.getStockOrdContent = getStockOrdContent;
 exports.waitForOrdStockInscription = waitForOrdStockInscription;
+exports.ordStockCli = ordStockCli;
+exports.ordStockCreateWallet = ordStockCreateWallet;
+exports.writeOrdStockFile = writeOrdStockFile;
+exports.ordStockWalletInscribe = ordStockWalletInscribe;
 const node_child_process_1 = require("node:child_process");
 const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
     `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
@@ -620,5 +624,64 @@ async function waitForOrdStockInscription(id, timeoutMs = 30_000) {
     }
     throw new Error(`stock ord did not surface inscription ${id} within ${timeoutMs}ms; ` +
         `last error: ${lastError instanceof Error ? lastError.message : String(lastError)}`);
+}
+// ---------------------------------------------------------------------------
+// Stock ord: the reference implementation for byte-parity.
+//
+// `ordCli` above execs into the cat21-ord container, which runs with
+// `--index-cat21` and therefore indexes ONLY cats, never regular
+// inscriptions. That is fine for building an envelope from nothing, and it is
+// fatal the moment an inscription REFERENCES another: ord's `wallet
+// inscribe` checks every `--gallery`, `--parent` and `--delegate` id against
+// its server's index and refuses with "referenced inscriptions do not exist"
+// when the server has never indexed them.
+//
+// So anything that references another inscription has to be built by the
+// stock-ord container, which indexes everything. These mirror the cat21-ord
+// helpers exactly, minus `--index-cat21`.
+// ---------------------------------------------------------------------------
+const ORD_STOCK_CONTAINER = 'ordpool-e2e-ord-stock';
+function ordStockCli(...args) {
+    return (0, node_child_process_1.execFileSync)('docker', [
+        'exec', ORD_STOCK_CONTAINER,
+        'ord',
+        '--regtest',
+        '--index-sats',
+        '--index-addresses',
+        '--bitcoin-rpc-url=bitcoind:18443',
+        '--bitcoin-rpc-username=ordpool',
+        '--bitcoin-rpc-password=ordpool',
+        '--data-dir=/data',
+        ...args,
+    ], { encoding: 'utf8' }).trim();
+}
+function ordStockWalletCli(walletName, ...subcommandArgs) {
+    return ordStockCli('wallet', '--no-sync', '--name', walletName, '--server-url', 'http://localhost:8080', ...subcommandArgs);
+}
+function ordStockCreateWallet(name) {
+    try {
+        ordStockWalletCli(name, 'create');
+    }
+    catch (e) {
+        const msg = e.message ?? '';
+        if (!msg.includes('already exists') && !msg.includes('already loaded'))
+            throw e;
+    }
+    const stdout = ordStockWalletCli(name, 'receive');
+    const parsed = JSON.parse(stdout);
+    if (parsed.address)
+        return parsed.address;
+    if (parsed.addresses && parsed.addresses.length > 0)
+        return parsed.addresses[0];
+    throw new Error(`unexpected ord wallet receive shape: ${stdout}`);
+}
+function writeOrdStockFile(containerPath, content) {
+    const b64 = Buffer.from(content).toString('base64');
+    (0, node_child_process_1.execFileSync)('docker', ['exec', ORD_STOCK_CONTAINER, 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`], { encoding: 'utf8' });
+}
+function ordStockWalletInscribe(walletName, containerFilePath, feeRateSatPerVb, extraArgs = []) {
+    const stdout = ordStockWalletCli(walletName, 'inscribe', '--no-backup', '--fee-rate', String(feeRateSatPerVb), '--file', containerFilePath, ...extraArgs);
+    const parsed = JSON.parse(stdout);
+    return { commit: parsed.commit, reveal: parsed.reveal };
 }
 //# sourceMappingURL=regtest-helpers.js.map

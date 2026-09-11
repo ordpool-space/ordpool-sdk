@@ -347,4 +347,11 @@ export declare function getStockOrdContent(id: string): Promise<{
  * polling boilerplate.
  */
 export declare function waitForOrdStockInscription(id: string, timeoutMs?: number): Promise<StockOrdInscription>;
+export declare function ordStockCli(...args: string[]): string;
+export declare function ordStockCreateWallet(name: string): string;
+export declare function writeOrdStockFile(containerPath: string, content: Uint8Array): void;
+export declare function ordStockWalletInscribe(walletName: string, containerFilePath: string, feeRateSatPerVb: number, extraArgs?: string[]): {
+    commit: string;
+    reveal: string;
+};
 //# sourceMappingURL=regtest-helpers.d.ts.map
