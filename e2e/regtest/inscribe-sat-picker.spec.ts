@@ -11,8 +11,13 @@
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
 
-import { findRareSatsInOutputs } from '../../src/inscribe/sat-picker';
+import { hex } from '@scure/base';
+import * as btc from '@scure/btc-signer';
+import { schnorr } from '@noble/curves/secp256k1';
+
+import { findRareSatsInOutputs, inscribeSatSourceFromRow } from '../../src/inscribe/sat-picker';
 import { satPaddingRequirement } from '../../src/inscribe/sat-offset';
+import { Network, toScureNetwork } from '../../src/network';
 import {
   ORD_STOCK_URL,
   getStockOrdOutput,
@@ -27,6 +32,10 @@ import {
 /** A coinbase-funded tx: vout 0 takes the block-first sat, vout 1 the rest. */
 let boundaryCoin: { txid: string; vout: number };
 let commonCoin: { txid: string; vout: number };
+/** A taproot coin at a key we hold, carrying a block-first sat. */
+let ourTaprootCoin: { txid: string; vout: number; value: number };
+const ownPriv = schnorr.utils.randomPrivateKey();
+const ownXonly = schnorr.getPublicKey(ownPriv);
 
 beforeAll(async () => {
   await waitForOrdStockReady();
@@ -59,6 +68,33 @@ beforeAll(async () => {
 
   boundaryCoin = { txid, vout: 0 };
   commonCoin = { txid, vout: 1 };
+
+  // A second split, this time paying the input's FIRST sats to a taproot
+  // address we hold the key for, so the rare sat sits on a coin we can build
+  // a sat source from.
+  const ours = btc.p2tr(ownXonly, undefined, toScureNetwork(Network.Regtest), true);
+  const unspent2 = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent', '100')) as Array<{
+    txid: string; vout: number; amount: number;
+  }>;
+  const coin2 = [...unspent2].sort((a, b) => b.amount - a.amount)[0];
+  const raw2 = rpc(
+    'createrawtransaction',
+    JSON.stringify([{ txid: coin2.txid, vout: coin2.vout }]),
+    JSON.stringify([{ [ours.address!]: 0.5 }]),
+  );
+  // changePosition 1 keeps OUR output at vout 0, so it inherits the input's
+  // first sats, the coinbase's block-first sat among them.
+  const funded2 = JSON.parse(
+    rpc('-rpcwallet=ordpool-e2e', 'fundrawtransaction', raw2, JSON.stringify({ changePosition: 1 })),
+  ) as { hex: string };
+  const signed2 = JSON.parse(
+    rpc('-rpcwallet=ordpool-e2e', 'signrawtransactionwithwallet', funded2.hex),
+  ) as { hex: string };
+  const txid2 = rpc('sendrawtransaction', signed2.hex).trim();
+  const tip2 = mineBlocks(1);
+  await waitForElectrsSync(tip2);
+  await waitForOrdStockSync(tip2);
+  ourTaprootCoin = { txid: txid2, vout: 0, value: 50_000_000 };
 }, 240_000);
 
 describe('findRareSatsInOutputs → live ord with a sat index', () => {
@@ -103,6 +139,30 @@ describe('findRareSatsInOutputs → live ord with a sat index', () => {
     const at1 = satPaddingRequirement(1, address!);
     expect(at1.needsPadding).toBe(true);
     expect(at1.shortfallSats).toBe(at1.dustLimitSats - 1);
+  }, 120_000);
+
+  it('the sat source it builds carries the script the chain itself holds for that coin', async () => {
+    const rows = await findRareSatsInOutputs([ourTaprootCoin], { ordBaseUrl: ORD_STOCK_URL });
+    expect(rows[0].status).toBe('scanned');
+    expect(rows[0].rareSat).not.toBeNull();
+
+    const source = inscribeSatSourceFromRow(rows[0], {
+      ordinalsPublicKey: ownXonly,
+      network: Network.Regtest,
+    });
+    expect(source).not.toBeNull();
+
+    // ord reports the output's own scriptPubKey. Deriving it from the wallet
+    // key must reproduce it exactly; swapping the tweaked output key for the
+    // untweaked internal key would not.
+    const onChain = await getStockOrdOutput(`${ourTaprootCoin.txid}:${ourTaprootCoin.vout}`);
+    expect(hex.encode(source!.scriptPubKey)).toBe(onChain.script_pubkey);
+    expect(source!.address).toBe(onChain.address);
+    expect(source!.value).toBe(ourTaprootCoin.value);
+    // The internal key stays untweaked, and is therefore NOT what the script holds.
+    expect(Array.from(source!.tapInternalKey)).toEqual(Array.from(ownXonly));
+    expect(hex.encode(source!.scriptPubKey.slice(2))).not.toBe(hex.encode(ownXonly));
+    expect(source!.offset).toBe(rows[0].rareSat!.offset);
   }, 120_000);
 
   it('an unreachable ord leaves every coin unknown, never "holds nothing"', async () => {

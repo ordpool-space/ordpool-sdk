@@ -1,5 +1,12 @@
+import { hex } from '@scure/base';
+
 import { findRareSatInRanges, type SatRarity } from '../cat21-mint/sat-rarity.helper';
 import type { OrdOutputResponse } from '../cat21-mint/utxo-content.types';
+import { getAddressFormat } from '../cat21-script/address-format';
+import { buildInputScript } from '../cat21-script/build-input-script';
+import { Network, toScureNetwork } from '../network';
+import { failInscribe } from './inscribe-errors';
+import type { InscribeSatSource } from './inscription-commit.helper';
 import { findSatOffset } from './sat-offset';
 
 /**
@@ -114,4 +121,66 @@ function rareSatOf(
   const offset = findSatOffset(satRanges, sat);
   if (offset === undefined) return null;
   return { sat, offset, rarity: hit.rarity };
+}
+
+/**
+ * Turn a picked row into the {@link InscribeSatSource} that `satTarget` kind
+ * `in-utxo` takes, deriving the two byte-level fields from the wallet's
+ * ordinals public key rather than leaving each consumer to do it:
+ *
+ *   - `scriptPubKey` is the coin's P2TR OUTPUT script, built from the TWEAKED
+ *     output key.
+ *   - `tapInternalKey` is the UNTWEAKED x-only internal key, which is what a
+ *     key-path signer signs with.
+ *
+ * Getting those two the wrong way round builds a commit that looks right and
+ * cannot be spent, so the derivation runs through the same
+ * `buildInputScript` the rest of the SDK signs with, and the result is checked
+ * against the address ord reported for the coin: a key that does not produce
+ * that address is the wrong key, and throws rather than building silently.
+ *
+ * Returns `null` when there is nothing to target, which is a row holding no
+ * rare sat and a row whose lookup failed (`status: 'unknown'`), so a picker
+ * can map its rows without filtering first.
+ */
+export function inscribeSatSourceFromRow<T extends { txid: string; vout: number; value: number }>(
+  row: SatPickerRow<T>,
+  args: { ordinalsPublicKey: string | Uint8Array; network: Network },
+): InscribeSatSource | null {
+  if (row.status !== 'scanned' || row.rareSat === null || row.address === null) return null;
+  const address = row.address;
+
+  if (getAddressFormat(address) !== 'P2TR') {
+    failInscribe('sat-utxo-must-be-taproot',
+      `a sat source must be a P2TR output; ${address} is not`,
+      'That coin cannot be inscribed onto: inscribing on a chosen sat needs a Taproot coin.',
+      { address });
+  }
+  const ordinalsPublicKey = typeof args.ordinalsPublicKey === 'string'
+    ? hex.decode(args.ordinalsPublicKey)
+    : args.ordinalsPublicKey;
+  const { scriptData, tapInternalKey } = buildInputScript({
+    paymentAddress: address,
+    paymentPublicKey: ordinalsPublicKey,
+    isSimulation: false,
+    network: toScureNetwork(args.network),
+  });
+  if (tapInternalKey === undefined) {
+    throw new Error('buildInputScript returned no tapInternalKey for a P2TR address');
+  }
+  if (scriptData.address !== address) {
+    failInscribe('sat-utxo-key-mismatch',
+      `the ordinals public key derives ${scriptData.address}, not ${address}, so it does not own this coin`,
+      'That coin is not at your wallet\'s ordinals address, so your wallet cannot sign for it.',
+      { address, derivedAddress: scriptData.address });
+  }
+  return {
+    txid: row.utxo.txid,
+    vout: row.utxo.vout,
+    value: row.utxo.value,
+    scriptPubKey: scriptData.script,
+    tapInternalKey,
+    address,
+    offset: row.rareSat.offset,
+  };
 }

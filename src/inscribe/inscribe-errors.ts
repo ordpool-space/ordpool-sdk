@@ -23,6 +23,7 @@ export type InscribeErrorCode =
   | 'sat-offset-needs-padding'
   | 'padding-not-needed'
   | 'sat-utxo-must-be-taproot'
+  | 'sat-utxo-key-mismatch'
   | 'reveal-too-heavy'
   | 'properties-too-large'
   | 'property-compression-ratio'

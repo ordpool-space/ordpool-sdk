@@ -12,8 +12,14 @@
 
 import { describe, expect, it } from '@jest/globals';
 
+import * as btc from '@scure/btc-signer';
+import { hex } from '@scure/base';
+import { schnorr, secp256k1 } from '@noble/curves/secp256k1';
+
 import { getMinimumUtxoSize } from '../cat21-script/address-format';
-import { findRareSatsInOutputs } from './sat-picker';
+import { Network } from '../network';
+import { InscribeInputError } from './inscribe-errors';
+import { findRareSatsInOutputs, inscribeSatSourceFromRow, type SatPickerRow } from './sat-picker';
 import { satPaddingRequirement } from './sat-offset';
 
 const GENESIS_TXID = '98316dcb21daaa221865208fe0323616ee6dd84e6020b78bc6908e914ac03892';
@@ -192,5 +198,79 @@ describe('satPaddingRequirement', () => {
   it('refuses a negative or fractional offset', () => {
     expect(() => satPaddingRequirement(-1, GENESIS_ADDR)).toThrow('non-negative integer');
     expect(() => satPaddingRequirement(1.5, GENESIS_ADDR)).toThrow('non-negative integer');
+  });
+});
+
+describe('inscribeSatSourceFromRow', () => {
+  const priv = schnorr.utils.randomPrivateKey();
+  const xonly = schnorr.getPublicKey(priv);
+  const tr = btc.p2tr(xonly, undefined, btc.NETWORK, true);
+  const ADDR = tr.address!;
+
+  const row = (over: Partial<SatPickerRow<{ txid: string; vout: number; value: number }>> = {}) => ({
+    utxo: { txid: 'a'.repeat(64), vout: 1, value: 9_000 },
+    address: ADDR,
+    rareSat: { sat: BLOCK_119392_FIRST_SAT, offset: 1_234, rarity: 'uncommon' as const },
+    status: 'scanned' as const,
+    ...over,
+  });
+
+  it('derives the tweaked output script and the UNtweaked internal key, which are different', () => {
+    const source = inscribeSatSourceFromRow(row(), { ordinalsPublicKey: xonly, network: Network.Mainnet });
+    expect(source).not.toBeNull();
+
+    // The internal key is the wallet's own x-only key, untouched.
+    expect(Array.from(source!.tapInternalKey)).toEqual(Array.from(xonly));
+    // The script is the P2TR output script: OP_1 <32-byte tweaked output key>.
+    expect(Array.from(source!.scriptPubKey)).toEqual(Array.from(tr.script));
+    expect(source!.scriptPubKey[0]).toBe(0x51);
+    expect(source!.scriptPubKey[1]).toBe(0x20);
+    // The tweak is the point of the exercise: the output key in the script is
+    // NOT the internal key, so swapping the two would build an unspendable commit.
+    expect(Array.from(source!.scriptPubKey.slice(2))).not.toEqual(Array.from(xonly));
+  });
+
+  it('carries the coin and the sat\'s offset through', () => {
+    const source = inscribeSatSourceFromRow(row(), { ordinalsPublicKey: xonly, network: Network.Mainnet });
+    expect(source).toMatchObject({
+      txid: 'a'.repeat(64), vout: 1, value: 9_000, address: ADDR, offset: 1_234,
+    });
+  });
+
+  it('takes the key as hex or bytes, x-only or compressed', () => {
+    const asHex = inscribeSatSourceFromRow(row(), { ordinalsPublicKey: hex.encode(xonly), network: Network.Mainnet });
+    const compressed = secp256k1.getPublicKey(priv, true);
+    const asCompressed = inscribeSatSourceFromRow(row(), { ordinalsPublicKey: compressed, network: Network.Mainnet });
+    expect(Array.from(asHex!.tapInternalKey)).toEqual(Array.from(xonly));
+    expect(Array.from(asCompressed!.tapInternalKey)).toEqual(Array.from(xonly));
+  });
+
+  it('refuses a key that does not own the coin, instead of building silently', () => {
+    const someoneElse = schnorr.getPublicKey(schnorr.utils.randomPrivateKey());
+    expect(() => inscribeSatSourceFromRow(row(), { ordinalsPublicKey: someoneElse, network: Network.Mainnet }))
+      .toThrow(InscribeInputError);
+    try {
+      inscribeSatSourceFromRow(row(), { ordinalsPublicKey: someoneElse, network: Network.Mainnet });
+    } catch (err) {
+      expect((err as InscribeInputError).code).toBe('sat-utxo-key-mismatch');
+      expect((err as InscribeInputError).details.address).toBe(ADDR);
+    }
+  });
+
+  it('refuses a coin that is not Taproot', () => {
+    const wpkh = btc.p2wpkh(secp256k1.getPublicKey(priv, true), btc.NETWORK).address!;
+    try {
+      inscribeSatSourceFromRow(row({ address: wpkh }), { ordinalsPublicKey: xonly, network: Network.Mainnet });
+      throw new Error('expected a throw');
+    } catch (err) {
+      expect((err as InscribeInputError).code).toBe('sat-utxo-must-be-taproot');
+    }
+  });
+
+  it('is null when there is nothing to target', () => {
+    const args = { ordinalsPublicKey: xonly, network: Network.Mainnet };
+    expect(inscribeSatSourceFromRow(row({ rareSat: null }), args)).toBeNull();
+    expect(inscribeSatSourceFromRow(row({ status: 'unknown', rareSat: null, address: null }), args)).toBeNull();
+    expect(inscribeSatSourceFromRow(row({ address: null }), args)).toBeNull();
   });
 });

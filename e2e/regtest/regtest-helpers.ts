@@ -787,6 +787,9 @@ export interface StockOrdOutput {
   inscriptions: string[];
   /** `[start, end)` sat ranges in output order (ord runs with `--index-sats`). */
   sat_ranges: Array<[number, number]>;
+  /** The output's scriptPubKey, hex, as the chain itself holds it. */
+  script_pubkey: string;
+  address: string;
 }
 
 /** ord's own verdict on a sat: `GET /sat/<sat>`, which carries its rarity. */
