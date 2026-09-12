@@ -120,6 +120,7 @@ export * from './cat21-fee/funding-safety';
 //     of truth all three CAT-21 paths compose) ---
 export * from './cat21-core/ports';
 export * from './cat21-core/select-funding';
+export * from './cat21-core/dedupe-utxos';
 export * from './cat21-core/transfer.core';
 export * from './cat21-core/mint.core';
 export * from './cat21-core/create-offer.core';

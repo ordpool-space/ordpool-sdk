@@ -75,6 +75,7 @@ export * from './cat21-fee/funding-recommendation.service';
 // --- Framework-agnostic orchestration core (ports + async flows) ---
 export * from './cat21-core/ports';
 export * from './cat21-core/select-funding';
+export * from './cat21-core/dedupe-utxos';
 export * from './cat21-core/transfer.core';
 export * from './cat21-core/mint.core';
 export * from './cat21-core/create-offer.core';

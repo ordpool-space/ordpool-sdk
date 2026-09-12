@@ -1,4 +1,5 @@
 import { hex } from '@scure/base';
+import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos';
 import * as btc from '@scure/btc-signer';
 import {
   catchError,
@@ -107,7 +108,8 @@ export class Cat21Service {
       return throwError(() => new Error('No wallet connected'));
     }
 
-    const $utxos = fetchJson<TxnOutput[]>(`${this.mempoolApiUrl}/api/address/${address}/utxo`);
+    const $utxos = fetchJson<TxnOutput[]>(`${this.mempoolApiUrl}/api/address/${address}/utxo`)
+      .pipe(map(dedupeUtxosByOutpoint));
 
     if (isSegWit(address)) {
       return $utxos;

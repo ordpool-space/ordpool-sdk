@@ -21,6 +21,7 @@
  *                 spendable.
  */
 
+import { dedupeUtxosByOutpoint } from '../../cat21-core/dedupe-utxos';
 import { catsAtAddress } from './cats-at-address';
 import { classifyOutpoint } from './classify-outpoint';
 import { AddressProbe } from './scan-watch-only';
@@ -91,27 +92,6 @@ async function fetchUtxos(esploraApiUrl: string, address: string, signal?: Abort
   if (!response.ok) {
     throw new Error(`makeWatchOnlyProbe: ${url} returned ${response.status}`);
   }
-  return dedupeOutpoints((await response.json()) as EsploraUtxo[]);
+  return dedupeUtxosByOutpoint((await response.json()) as EsploraUtxo[]);
 }
 
-/**
- * One entry per outpoint.
- *
- * Around the moment a transaction confirms, electrs can list the SAME outpoint
- * twice on `/address/<a>/utxo`: once with `status.confirmed: true` and once
- * still unconfirmed. Summing that list without de-duplicating counts those sats
- * twice, which reports a balance the address does not hold. Observed live on
- * regtest 2026-09-12: two identical `<txid>:0` entries worth 500 000 sats each,
- * summing to 1 000 000, for an address that had received 500 000 once.
- *
- * Both copies describe the same output and therefore carry the same value, so
- * which one is kept does not matter; only that one is.
- */
-function dedupeOutpoints(utxos: ReadonlyArray<EsploraUtxo>): EsploraUtxo[] {
-  const byOutpoint = new Map<string, EsploraUtxo>();
-  for (const u of utxos) {
-    const key = `${u.txid}:${u.vout}`;
-    if (!byOutpoint.has(key)) byOutpoint.set(key, u);
-  }
-  return [...byOutpoint.values()];
-}
