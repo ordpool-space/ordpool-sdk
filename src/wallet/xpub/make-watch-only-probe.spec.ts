@@ -108,3 +108,71 @@ describe('makeWatchOnlyProbe', () => {
     expect(result).toEqual({ funded: false, fundedSats: 0, hasCat: false });
   });
 });
+
+describe('makeWatchOnlyProbe: an outpoint electrs lists twice', () => {
+  /**
+   * Captured live from regtest electrs on 2026-09-12, moments after the
+   * funding transaction confirmed: the SAME outpoint appears twice, once
+   * confirmed and once not. Summing it naively reports 1 000 000 sats for an
+   * address that received 500 000.
+   */
+  const DOUBLE_LISTED = [
+    {
+      txid: 'a8e8467c132d2198513552b56c4768f989c4af739a9d83b5df7cc60c6c2e708d',
+      vout: 0,
+      status: { confirmed: true, block_height: 552 },
+      value: 500_000,
+    },
+    {
+      txid: 'a8e8467c132d2198513552b56c4768f989c4af739a9d83b5df7cc60c6c2e708d',
+      vout: 0,
+      status: { confirmed: false },
+      value: 500_000,
+    },
+  ];
+
+  it('counts it once, so the balance is what the address actually holds', async () => {
+    const spy = mockFetch((url) => {
+      if (url.includes('/utxo')) return { body: DOUBLE_LISTED };
+      if (url.startsWith(CAT21ORD)) return { body: NO_CATS };
+      return { body: CLEAN_OUTPUT };
+    });
+    const probe = makeWatchOnlyProbe(CONFIG);
+    const result = await probe('bcrt1qexample');
+
+    expect(result.fundedSats).toBe(500_000);
+    expect(result.funded).toBe(true);
+
+    // And exactly one outpoint is classified. (Each one is looked up at both
+    // ord instances, so count distinct outpoints, not requests.)
+    const classified = new Set(
+      spy.mock.calls
+        .map(([url]) => String(url))
+        .filter((url) => url.includes('/output/'))
+        .map((url) => url.slice(url.lastIndexOf('/output/') + '/output/'.length)),
+    );
+    expect([...classified]).toEqual(['a8e8467c132d2198513552b56c4768f989c4af739a9d83b5df7cc60c6c2e708d:0']);
+  });
+
+  it('counts it once whichever order the two copies arrive in', async () => {
+    mockFetch((url) => {
+      if (url.includes('/utxo')) return { body: [DOUBLE_LISTED[1], DOUBLE_LISTED[0]] };
+      if (url.startsWith(CAT21ORD)) return { body: NO_CATS };
+      return { body: CLEAN_OUTPUT };
+    });
+    const probe = makeWatchOnlyProbe(CONFIG);
+    expect((await probe('bcrt1qexample')).fundedSats).toBe(500_000);
+  });
+
+  it('two genuinely different outpoints still both count', async () => {
+    mockFetch((url) => {
+      if (url.includes('/utxo')) {
+        return { body: [DOUBLE_LISTED[0], { ...DOUBLE_LISTED[0], vout: 1, value: 100_000 }] };
+      }
+      if (url.startsWith(CAT21ORD)) return { body: NO_CATS };
+      return { body: CLEAN_OUTPUT };
+    });
+    const probe = makeWatchOnlyProbe(CONFIG);
+    expect((await probe('bcrt1qexample')).fundedSats).toBe(600_000);
+  });
+});

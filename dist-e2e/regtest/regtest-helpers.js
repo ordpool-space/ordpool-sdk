@@ -159,7 +159,20 @@ async function getUtxos(address) {
     const res = await fetch(`${ELECTRS_URL}/address/${address}/utxo`);
     if (!res.ok)
         throw new Error(`utxo fetch failed: ${res.status} ${await res.text()}`);
-    return res.json();
+    const utxos = (await res.json());
+    // One entry per outpoint. Around the moment a transaction confirms, electrs
+    // can list the SAME outpoint twice, once confirmed and once not, so a spec
+    // that sums this list sees double. Observed on regtest 2026-09-12: two
+    // identical `<txid>:0` entries of 500 000 sats for an address that had
+    // received 500 000 once. Both copies describe the same output, so keeping
+    // either is correct; counting both is not.
+    const byOutpoint = new Map();
+    for (const u of utxos) {
+        const key = `${u.txid}:${u.vout}`;
+        if (!byOutpoint.has(key))
+            byOutpoint.set(key, u);
+    }
+    return [...byOutpoint.values()];
 }
 async function getTxHex(txid) {
     const res = await fetch(`${ELECTRS_URL}/tx/${txid}/hex`);
