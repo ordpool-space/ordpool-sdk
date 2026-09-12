@@ -26,8 +26,11 @@ import {
 } from '../../src/inscribe/inscribe-mint-orchestrator';
 import { Network, toScureNetwork } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
+import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
 import {
   fundUninscribed,
+  getStockOrdInscription,
+  waitForTxConfirmed,
   getStockOrdContent,
   mineBlocks,
   postTx,
@@ -47,19 +50,41 @@ function randomP2tr(): string {
   return btc.p2tr(schnorr.getPublicKey(schnorr.utils.randomPrivateKey()), undefined, scureRegtest, true).address!;
 }
 
-/** Bitcoin Core signs and finalizes, exactly as an external wallet would. */
+/**
+ * Bitcoin Core signs, exactly as an external wallet would. `finalize=false`
+ * because a batch reveal's wallet-facing PSBT also carries the foreign
+ * ephemeral commit input, which Core cannot complete; the SDK's signer
+ * finalizes. The commit's PSBT completes either way.
+ */
 function walletSign(unsigned: { base64: string; hex: string }): Promise<string> {
   const processed = JSON.parse(rpc(
     '-rpcwallet=ordpool-e2e', '-named', 'walletprocesspsbt',
-    `psbt=${unsigned.base64}`, 'sign=true', 'finalize=true',
-  )) as { psbt: string; complete: boolean };
-  if (!processed.complete) throw new Error('walletprocesspsbt did not complete');
+    `psbt=${unsigned.base64}`, 'sign=true', 'sighashtype=ALL', 'finalize=false',
+  )) as { psbt: string };
   return Promise.resolve(processed.psbt);
+}
+
+/** The Core wallet's own taproot address plus the internal key from its descriptor. */
+function newWalletTaproot(): { address: string; script: Uint8Array; internalKey: Uint8Array } {
+  const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'bech32m').trim();
+  const info = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'getaddressinfo', address)) as {
+    desc: string; scriptPubKey: string;
+  };
+  const m = /tr\((?:\[[^\]]+\])?([0-9a-f]{64})\)/i.exec(info.desc);
+  if (!m) throw new Error(`cannot parse tr() internal key from descriptor: ${info.desc}`);
+  return { address, script: hex.decode(info.scriptPubKey), internalKey: hex.decode(m[1]) };
 }
 
 /** Run a batch through the orchestrator and return the snapshots it emitted. */
 async function runBatch(batch: Parameters<InscribeMintOrchestrator['setBatch']>[0]) {
   const f = await fundUninscribed();
+  return runBatchWith(batch, f);
+}
+
+async function runBatchWith(
+  batch: Parameters<InscribeMintOrchestrator['setBatch']>[0],
+  f: { fundingAddr: string; fundingPubkey: Uint8Array; utxo: { txid: string; vout: number; value: number } },
+) {
   const deps: InscribeOrchestratorDeps = {
     getUtxos: async () => [{ ...f.utxo, status: { confirmed: true } }],
     // The funding-safety scan is the consumer's own IO; this spec is about the
@@ -161,6 +186,76 @@ describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
     const first = await waitForOrdStockInscription(`${result.revealTxId}i0`);
     expect(first.value).toBe(postageSats * bodies.length);
   }, 300_000);
+
+  it('with a parent, the wallet signs twice and ord links every child to it', async () => {
+    // The parent's home is the Core wallet's own taproot address, so the same
+    // wallet that signs the commit can sign the reveal's parent input.
+    const home = newWalletTaproot();
+    const pf = await fundUninscribed();
+    const parent = createInscribeTransactions({
+      paymentOutput: { ...pf.utxo, status: { confirmed: true } },
+      paymentPublicKey: pf.fundingPubkey,
+      paymentAddress: pf.fundingAddr,
+      recipientAddress: home.address,
+      body: enc('batch parent'),
+      contentType: 'text/plain',
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+    const signedCommit = JSON.parse(rpc(
+      '-rpcwallet=ordpool-e2e', '-named', 'walletprocesspsbt',
+      `psbt=${Buffer.from(parent.commitPsbt).toString('base64')}`, 'sign=true', 'finalize=true',
+    )) as { hex: string; complete: boolean };
+    expect(signedCommit.complete).toBe(true);
+    expect(await postTx(signedCommit.hex)).toBe(parent.commitTxid);
+    mineBlocks(1);
+    await waitForTxConfirmed(parent.commitTxid);
+    const parentRevealTxid = await postTx(parent.revealHex);
+    const parentTip = mineBlocks(1);
+    await waitForElectrsSync(parentTip);
+    await waitForOrdStockSync(parentTip);
+    const parentId = `${parentRevealTxid}i0`;
+    const parentBefore = await waitForOrdStockInscription(parentId);
+    expect(parentBefore.address).toBe(home.address);
+
+    const bodies = ['child one', 'child two'].map(enc);
+    const f = await fundUninscribed();
+    const { o, result, preview, signingSteps } = await runBatchWith({
+      mode: 'separate-outputs',
+      parents: [{
+        id: parentId,
+        utxo: {
+          txid: parentRevealTxid, vout: 0, value: parentBefore.value,
+          scriptPubKey: home.script, tapInternalKey: home.internalKey,
+        },
+        returnAddress: home.address,
+      }],
+      inscriptions: bodies.map((body) => ({
+        source: { kind: 'file', body, contentType: 'text/plain' },
+      })),
+    }, f);
+
+    expect(o.getSnapshot().state).toBe('success');
+    // A parent makes the reveal spend a wallet UTXO, so a second signature.
+    expect(preview.walletPrompts).toBe(2);
+    expect(signingSteps).toEqual([
+      null,
+      { step: 1, of: 2, what: 'commit' },
+      { step: 2, of: 2, what: 'parent-inputs' },
+      null,
+    ]);
+
+    // ord's provenance, and the parent back home with its own sats intact.
+    for (let i = 0; i < bodies.length; i++) {
+      const child = await waitForOrdStockInscription(`${result.revealTxId}i${i}`);
+      expect(child.parents).toEqual([parentId]);
+    }
+    const parentAfter = await getStockOrdInscription(parentId);
+    expect(parentAfter.address).toBe(home.address);
+    expect(parentAfter.value).toBe(parentBefore.value);
+    // The reveal returns each parent at the same index it was spent from.
+    expect(parentAfter.satpoint).toBe(`${result.revealTxId}:0:0`);
+  }, 420_000);
 
   it('the preview priced what the wallet actually spent', async () => {
     const { result, preview } = await runBatch({
