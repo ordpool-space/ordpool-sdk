@@ -13,7 +13,7 @@ const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 // Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
 // service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`
 // spec to verify a real upstream-ord recognises the SDK's inscriptions.
-const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
+export const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
 // The bitcoind container name. Defaults to the SDK's own stack
 // (`ordpool-e2e-bitcoind`); consumer repos (cubes-frontend, ordpool)
 // stand up their own compose with a different name (e.g.
@@ -787,6 +787,17 @@ export interface StockOrdOutput {
   inscriptions: string[];
   /** `[start, end)` sat ranges in output order (ord runs with `--index-sats`). */
   sat_ranges: Array<[number, number]>;
+}
+
+/** ord's own verdict on a sat: `GET /sat/<sat>`, which carries its rarity. */
+export async function getStockOrdSat(sat: number): Promise<{ rarity: string; number: number }> {
+  const res = await fetch(`${ORD_STOCK_URL}/sat/${sat}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    throw new Error(`stock ord /sat/${sat} returned ${res.status}: ${await res.text()}`);
+  }
+  return (await res.json()) as { rarity: string; number: number };
 }
 
 export async function getStockOrdOutput(outpoint: string): Promise<StockOrdOutput> {

@@ -68,6 +68,8 @@ naming which reveal inputs the wallet is about to sign.
 | `compressProperties` | `--compress` | Also compresses gallery/title/traits when that is smaller. | The wasm must be loaded first. |
 | `satOffset` | `--satpoint <funding>:<offset>` | Inscribe onto a sat inside the funding UTXO. | |
 | `findSatOffset(satRanges, sat)` | `--sat` | A sat number to its offset, from ord's `/output` `sat_ranges`. | Needs an ord with a sat index. |
+| `findRareSatsInOutputs(utxos, { ordBaseUrl })` | (ord's `wallet sats`) | Per coin: the rarest sat it holds, that sat's offset, the coin's address. Rows come back in order, one per coin; a failed lookup is `status: 'unknown'`, never "holds nothing". | Feeds a rare-sat picker; hand a picked row to `satTarget`. |
+| `satPaddingRequirement(satOffset, paddingAddress)` | (ord pads automatically) | `{ needsPadding, shortfallSats, dustLimitSats }`, so the second coin is asked for up front instead of discovered from a failed build. | The address is the sat's OWN coin address for `in-utxo`, the payment address for `in-funding`. |
 | `satSource` | `--satpoint <other utxo>:<offset>` | Inscribe onto a sat in a UTXO other than the funding one, e.g. a rare sat at the ordinals address. Its other sats go back to its address; the funding pays the fee. | The wallet signs the commit as a transfer (ordinals input 0, funding 1). |
 | `paddingUtxo` | (ord pads automatically) | For a chosen sat less than a dust limit into its UTXO: a second payment UTXO pads the padding output, as ord does. | Only accepted when needed; a clear error says how much. |
 | `commitFeeRatePerVbyte` | `--commit-fee-rate` | The commit at its own fee rate; the reveal stays at `feeRatePerVbyte`. | An advanced setting. |
@@ -141,8 +143,10 @@ asserts and type checks stay plain `Error`s.
 ## What a consumer must provide
 
 - The funding UTXO (and a second one for `paddingUtxo`), from the wallet.
-- For sat targeting: the sat's UTXO and its `sat_ranges`, from an ord with a
-  sat index (`GET /output/<outpoint>` with `Accept: application/json`).
+- For sat targeting: an ord with a sat index. `findRareSatsInOutputs` does the
+  `GET /output/<outpoint>` walk and the rarity ladder for you; pass its base
+  URL. Inscribing on a chosen sat still needs that coin's script and x-only
+  internal key from the wallet.
 - For parents and `satpoints`: the UTXOs with their script and x-only
   internal key; they must sit at the connected wallet's ordinals address.
 - The hosted brotli wasm, if compression is offered.

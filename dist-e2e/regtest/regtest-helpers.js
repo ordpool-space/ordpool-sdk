@@ -5,6 +5,7 @@
 // Expects the regtest stack to be up via `e2e/regtest-bootstrap.sh`
 // and `REGTEST_FUNDED_ADDR` / `REGTEST_FUNDED_WIF` set in env.
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ORD_STOCK_URL = void 0;
 exports.getFundedAccount = getFundedAccount;
 exports.rpc = rpc;
 exports.mineBlocks = mineBlocks;
@@ -38,6 +39,7 @@ exports.waitForOrdStockReady = waitForOrdStockReady;
 exports.waitForOrdStockSync = waitForOrdStockSync;
 exports.getStockOrdInscription = getStockOrdInscription;
 exports.getStockOrdOutputInscriptions = getStockOrdOutputInscriptions;
+exports.getStockOrdSat = getStockOrdSat;
 exports.getStockOrdOutput = getStockOrdOutput;
 exports.ordStockWalletReceive = ordStockWalletReceive;
 exports.ordStockWalletOutputs = ordStockWalletOutputs;
@@ -58,7 +60,7 @@ const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 // Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
 // service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`
 // spec to verify a real upstream-ord recognises the SDK's inscriptions.
-const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
+exports.ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
 // The bitcoind container name. Defaults to the SDK's own stack
 // (`ordpool-e2e-bitcoind`); consumer repos (cubes-frontend, ordpool)
 // stand up their own compose with a different name (e.g.
@@ -541,7 +543,7 @@ function inscriptionId(txid, index = 0) {
 async function waitForOrdStockReady(timeoutMs = 60_000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const ok = await fetch(`${ORD_STOCK_URL}/status`).then(r => r.ok).catch(() => false);
+        const ok = await fetch(`${exports.ORD_STOCK_URL}/status`).then(r => r.ok).catch(() => false);
         if (ok)
             return;
         await new Promise(r => setTimeout(r, 500));
@@ -556,7 +558,7 @@ async function waitForOrdStockReady(timeoutMs = 60_000) {
 async function waitForOrdStockSync(targetHeight, timeoutMs = 30_000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const status = await fetch(`${ORD_STOCK_URL}/status`, {
+        const status = await fetch(`${exports.ORD_STOCK_URL}/status`, {
             headers: { Accept: 'application/json' },
         }).then(r => r.ok ? r.json() : null).catch(() => null);
         if (status && typeof status.height === 'number' && status.height >= targetHeight)
@@ -570,7 +572,7 @@ async function waitForOrdStockSync(targetHeight, timeoutMs = 30_000) {
  * callers wrap in `waitForOrdStockInscription` if they need to poll.
  */
 async function getStockOrdInscription(id) {
-    const res = await fetch(`${ORD_STOCK_URL}/inscription/${id}`, {
+    const res = await fetch(`${exports.ORD_STOCK_URL}/inscription/${id}`, {
         headers: { Accept: 'application/json' },
     });
     if (!res.ok) {
@@ -589,7 +591,7 @@ async function getStockOrdInscription(id) {
  * must re-fund until this returns empty.
  */
 async function getStockOrdOutputInscriptions(outpoint) {
-    const res = await fetch(`${ORD_STOCK_URL}/output/${outpoint}`, {
+    const res = await fetch(`${exports.ORD_STOCK_URL}/output/${outpoint}`, {
         headers: { Accept: 'application/json' },
     });
     if (!res.ok) {
@@ -598,8 +600,18 @@ async function getStockOrdOutputInscriptions(outpoint) {
     const body = (await res.json());
     return body.inscriptions ?? [];
 }
+/** ord's own verdict on a sat: `GET /sat/<sat>`, which carries its rarity. */
+async function getStockOrdSat(sat) {
+    const res = await fetch(`${exports.ORD_STOCK_URL}/sat/${sat}`, {
+        headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) {
+        throw new Error(`stock ord /sat/${sat} returned ${res.status}: ${await res.text()}`);
+    }
+    return (await res.json());
+}
 async function getStockOrdOutput(outpoint) {
-    const res = await fetch(`${ORD_STOCK_URL}/output/${outpoint}`, {
+    const res = await fetch(`${exports.ORD_STOCK_URL}/output/${outpoint}`, {
         headers: { Accept: 'application/json' },
     });
     if (!res.ok) {
@@ -650,7 +662,7 @@ async function fundUninscribed() {
  * shape every recursive-inscription consumer sees.
  */
 async function getStockOrdContent(id) {
-    const res = await fetch(`${ORD_STOCK_URL}/content/${id}`);
+    const res = await fetch(`${exports.ORD_STOCK_URL}/content/${id}`);
     if (!res.ok) {
         throw new Error(`stock ord /content/${id} returned ${res.status}: ${await res.text()}`);
     }

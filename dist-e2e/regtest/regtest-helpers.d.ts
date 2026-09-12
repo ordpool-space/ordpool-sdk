@@ -1,3 +1,4 @@
+export declare const ORD_STOCK_URL: string;
 export interface FundedAccount {
     address: string;
     wif: string;
@@ -340,6 +341,11 @@ export interface StockOrdOutput {
     /** `[start, end)` sat ranges in output order (ord runs with `--index-sats`). */
     sat_ranges: Array<[number, number]>;
 }
+/** ord's own verdict on a sat: `GET /sat/<sat>`, which carries its rarity. */
+export declare function getStockOrdSat(sat: number): Promise<{
+    rarity: string;
+    number: number;
+}>;
 export declare function getStockOrdOutput(outpoint: string): Promise<StockOrdOutput>;
 /** A fresh receive address of an ord-stock wallet (`ord wallet receive`). */
 export declare function ordStockWalletReceive(walletName: string): string;

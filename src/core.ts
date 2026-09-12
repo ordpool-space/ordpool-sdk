@@ -64,6 +64,7 @@ export * from './inscribe/inscription-properties';
 export * from './inscribe/inscription-batch.helper';
 export * from './inscribe/sat-offset';
 export * from './inscribe/inscription-existence';
+export * from './inscribe/sat-picker';
 export * from './inscribe/inscribe-errors';
 export * from './inscribe/inscription-json-metadata';
 export * from './family/coin-check-promise';

@@ -26,6 +26,8 @@ import type { SatRarity } from './sat-rarity.helper';
  *   "fetch everything, scan all ranges" cost doesn't dominate.
  */
 export interface OrdOutputResponse {
+  /** The address the output sits at. */
+  address?: string;
   inscriptions?: string[];
   runes?: { [runeName: string]: unknown } | null;
   sat_ranges?: ReadonlyArray<readonly [number, number]>;
