@@ -8,7 +8,11 @@ import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/fundin
 import { Network } from '../network';
 import { TxnOutput } from '../cat21-mint/cat21.service.types';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import type { InscriptionContentEncoding } from './inscribe-compression.helper';
+import {
+  compressLikeOrd,
+  type InscriptionContentEncoding,
+  type OrdCompressedBody,
+} from './inscribe-compression.helper';
 import { loadBrotliWasm, type BrotliWasmSource } from './brotli-wasm-encoder';
 import type { InscribeSatSource } from './inscription-commit.helper';
 import type { ChildRevealParent } from './inscription-child-reveal.helper';
@@ -116,6 +120,14 @@ export interface InscribeContent {
   gallery?: InscriptionPropertiesInput['gallery'];
   /** Compress title/traits/gallery as `--compress` does. Needs `deps.brotliWasm`. */
   compressProperties?: boolean;
+  /**
+   * Compress the body as ord's `--compress` does: brotli, kept only when the
+   * result is strictly smaller. The orchestrator compresses during recompute,
+   * prices the compressed body in the preview and sets `contentEncoding`
+   * itself; `snapshot.compression` carries what it saved. Needs
+   * `deps.brotliWasm`. A file source only.
+   */
+  compressBody?: boolean;
   /** The inscription output's value, ord's `--postage`. Default 546. */
   postageSats?: number;
   /**
@@ -175,6 +187,24 @@ export interface InscribeSigningStep {
   what: 'commit' | 'parent-inputs' | 'satpoint-inputs' | 'parent-and-satpoint-inputs';
 }
 
+/**
+ * What `compressBody` saved, ord's `--compress` rule applied: the compressed
+ * body is inscribed only when it is strictly smaller than the original.
+ * `contentEncoding: null` means compressing did not help and the original
+ * bytes are what gets inscribed, so a screen can say so instead of showing a
+ * saving of zero.
+ */
+export interface InscribeCompression {
+  /** Bytes before compressing. */
+  originalSize: number;
+  /** Bytes being inscribed; equals `originalSize` when compressing did not help. */
+  compressedSize: number;
+  /** `originalSize - compressedSize`; 0 when compressing did not help. */
+  savedBytes: number;
+  /** The `content_encoding` being written, or `null` when the original is inscribed. */
+  contentEncoding: 'br' | null;
+}
+
 /** State machine the consumer's template branches on. Sibling of the cat21 mint. */
 export type InscribeMintState =
   | 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
@@ -218,6 +248,11 @@ export interface InscribeSnapshot {
   successResult: InscribeAndBroadcastResult | null;
   /** Non-null while the wallet is being asked to sign; see `InscribeSigningStep`. */
   signing: InscribeSigningStep | null;
+  /**
+   * What `compressBody` saved, `null` when nothing is being compressed. For a
+   * batch it is the total over every entry that compresses.
+   */
+  compression: InscribeCompression | null;
 }
 
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
@@ -243,6 +278,8 @@ export interface InscribeBatchContent {
     traits?: InscriptionPropertiesInput['traits'];
     gallery?: InscriptionPropertiesInput['gallery'];
     compressProperties?: boolean;
+    /** Compress this entry's body, as on a single inscription. */
+    compressBody?: boolean;
     /** Where this inscription goes; `separate-outputs` and `satpoints` only. */
     destination?: string;
     /** The wallet UTXO this inscription's sat sits on; `satpoints` mode only. */
@@ -315,6 +352,10 @@ export class InscribeMintOrchestrator {
   // recompute whose captured seq is stale drops its result instead of
   // overwriting a newer snapshot (the plain-class replacement for switchMap).
   private recomputeSeq = 0;
+  // Compressing is the expensive step, so each body's result is kept until the
+  // body itself goes away: recompute runs on every fee-rate change and mint
+  // needs the exact bytes the preview priced.
+  private readonly compressedBodies = new WeakMap<Uint8Array, Map<string, OrdCompressedBody>>();
   private snap: InscribeSnapshot = {
     state: 'idle',
     feeRate: null,
@@ -326,6 +367,7 @@ export class InscribeMintOrchestrator {
     errorMessage: null,
     successResult: null,
     signing: null,
+    compression: null,
   };
   private readonly listeners = new Set<(s: InscribeSnapshot) => void>();
 
@@ -351,7 +393,7 @@ export class InscribeMintOrchestrator {
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     if (changed) {
-      this.patch({ feeRate: null, selectedUtxo: null, content: null, batch: null, errorMessage: null, successResult: null });
+      this.patch({ feeRate: null, selectedUtxo: null, content: null, batch: null, errorMessage: null, successResult: null, compression: null });
     }
     if (!wallet) {
       this.utxos = [];
@@ -432,12 +474,15 @@ export class InscribeMintOrchestrator {
     if (batch) return this.mintBatch(wallet, feeRate, batch, selected, promptForSignedPsbt);
     if (!content) throw new Error('No inscription content set');
     await this.ensureBrotli(content);
+    // Compressing is cached per body, so this is the same bytes the preview
+    // priced rather than a second run of the encoder.
+    const ready = await this.resolveCompression(content);
 
     this.patch({
       state: 'minting',
       errorMessage: null,
       successResult: null,
-      signing: { step: 1, of: walletPromptsFor(content), what: 'commit' },
+      signing: { step: 1, of: walletPromptsFor(ready), what: 'commit' },
     });
     try {
       const result = await firstValueFrom(
@@ -446,28 +491,28 @@ export class InscribeMintOrchestrator {
           paymentOutput: selected,
           paymentPublicKey: hex.decode(wallet.paymentPublicKey),
           paymentAddress: wallet.paymentAddress,
-          recipientAddress: content.recipient ?? wallet.ordinalsAddress,
-          ...contentInputs(content),
-          envelopeFields: content.envelopeFields,
+          recipientAddress: ready.recipient ?? wallet.ordinalsAddress,
+          ...contentInputs(ready),
+          envelopeFields: ready.envelopeFields,
           feeRatePerVbyte: feeRate,
-          tip: content.tip,
-          note: content.note,
-          parent: content.parent,
-          contentEncoding: content.contentEncoding,
-          pointer: content.pointer,
-          metadata: content.metadata,
-          metaprotocol: content.metaprotocol,
-          rune: content.rune,
-          properties: content.properties,
-          propertyEncoding: content.propertyEncoding,
-          minimalTagPush: content.minimalTagPush,
-          title: content.title,
-          traits: content.traits,
-          gallery: content.gallery,
-          compressProperties: content.compressProperties,
-          postageSats: content.postageSats,
-          paddingUtxo: content.paddingUtxo,
-          commitFeeRatePerVbyte: content.commitFeeRatePerVbyte,
+          tip: ready.tip,
+          note: ready.note,
+          parent: ready.parent,
+          contentEncoding: ready.contentEncoding,
+          pointer: ready.pointer,
+          metadata: ready.metadata,
+          metaprotocol: ready.metaprotocol,
+          rune: ready.rune,
+          properties: ready.properties,
+          propertyEncoding: ready.propertyEncoding,
+          minimalTagPush: ready.minimalTagPush,
+          title: ready.title,
+          traits: ready.traits,
+          gallery: ready.gallery,
+          compressProperties: ready.compressProperties,
+          postageSats: ready.postageSats,
+          paddingUtxo: ready.paddingUtxo,
+          commitFeeRatePerVbyte: ready.commitFeeRatePerVbyte,
           network: this.deps.network,
           broadcast: (txHex: string) => from(this.deps.broadcast(txHex)),
           promptForSignedPsbt: promptForSignedPsbt
@@ -504,7 +549,8 @@ export class InscribeMintOrchestrator {
     });
     try {
       await this.ensureBatchBrotli(batch);
-      const args = batchArgs(batch, wallet, feeRate, this.deps.network, selected);
+      const ready = await this.resolveBatchCompression(batch);
+      const args = batchArgs(ready, wallet, feeRate, this.deps.network, selected);
       // The commit is broadcast first; once it is out, the wallet is asked
       // for the reveal's own inputs. Marking the step there works for every
       // wallet, including those that sign without a prompt callback.
@@ -545,6 +591,7 @@ export class InscribeMintOrchestrator {
       errorMessage: null,
       successResult: null,
       signing: null,
+      compression: null,
       state: this.wallet ? 'ready' : 'idle',
     });
   }
@@ -561,24 +608,31 @@ export class InscribeMintOrchestrator {
       await this.recomputeBatch(seq, wallet, feeRate, batch);
       return;
     }
-    if (!wallet || !feeRate || !content || this.utxos.length === 0) {
+    // Content that cannot be inscribed (a malformed gallery id, a missing
+    // wasm for compressProperties, ...) is reported once, instead of every
+    // funding row turning up "insufficient" without a reason. Compressing
+    // happens here too, so the rows price the body that will be inscribed.
+    let ready = content;
+    if (content) {
+      try {
+        await this.ensureBrotli(content);
+        ready = await this.resolveCompression(content);
+        synthesizeEnvelopeFields({ ...ready, ...contentInputs(ready) } as unknown as CreateInscribeTransactionsArgs);
+      } catch (err) {
+        if (seq !== this.recomputeSeq) return;
+        this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err) });
+        return;
+      }
+      if (seq !== this.recomputeSeq) return;
+    } else if (!batch && this.snap.compression !== null) {
+      this.patch({ compression: null });
+    }
+    if (!wallet || !feeRate || !ready || this.utxos.length === 0) {
       this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
       return;
     }
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
-    const recipient = content.recipient ?? wallet.ordinalsAddress;
-    // Content that cannot be inscribed (a malformed gallery id, a missing
-    // wasm for compressProperties, ...) is reported once, instead of every
-    // funding row turning up "insufficient" without a reason.
-    try {
-      await this.ensureBrotli(content);
-      synthesizeEnvelopeFields({ ...content, ...contentInputs(content) } as unknown as CreateInscribeTransactionsArgs);
-    } catch (err) {
-      if (seq !== this.recomputeSeq) return;
-      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err) });
-      return;
-    }
-    if (seq !== this.recomputeSeq) return;
+    const recipient = ready.recipient ?? wallet.ordinalsAddress;
     if (this.snap.errorMessage !== null && this.snap.state !== 'error') this.patch({ errorMessage: null });
 
     const simulations = this.utxos.map<InscribeUtxoSimulation>((utxo) => {
@@ -590,7 +644,7 @@ export class InscribeMintOrchestrator {
           isSimulation: true,
           network: this.deps.network,
         });
-        const simulation = simulateInscribeFees(this.simulationArgs(content, wallet, recipient, feeRate, fundingInput));
+        const simulation = simulateInscribeFees(this.simulationArgs(ready, wallet, recipient, feeRate, fundingInput));
         // The UTXO must fund the whole commit (commitOutputValueSats +
         // commitFeeSats); simulateInscribeFees reports the requirement but
         // doesn't reject. Flag unusable rows so the picker greys them out.
@@ -599,7 +653,7 @@ export class InscribeMintOrchestrator {
           utxo,
           simulation,
           insufficient,
-          preview: insufficient ? null : previewOf(simulation, content, walletPromptsFor(content)),
+          preview: insufficient ? null : previewOf(simulation, ready, walletPromptsFor(ready)),
         };
       } catch {
         return { utxo, simulation: null, insufficient: true, preview: null };
@@ -618,7 +672,7 @@ export class InscribeMintOrchestrator {
         isSimulation: true,
         network: this.deps.network,
       });
-      target = simulateInscribeFees(this.simulationArgs(content, wallet, recipient, feeRate, fundingInput)).fundingRequirementSats;
+      target = simulateInscribeFees(this.simulationArgs(ready, wallet, recipient, feeRate, fundingInput)).fundingRequirementSats;
     } catch {
       target = null;
     }
@@ -662,8 +716,9 @@ export class InscribeMintOrchestrator {
   ): Promise<void> {
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
     const prompts = batch.parents?.length || batch.mode === 'satpoints' ? 2 : 1;
+    let ready = batch;
     const simulateFor = (utxo: TxnOutput): SimulateInscribeFeesResult =>
-      simulateBatchInscribeFees(batchArgs(batch, wallet, feeRate, this.deps.network, utxo), {
+      simulateBatchInscribeFees(batchArgs(ready, wallet, feeRate, this.deps.network, utxo), {
         fundingInput: prepareInscribeFundingInput({
           utxo, paymentPublicKey, paymentAddress: wallet.paymentAddress,
           isSimulation: true, network: this.deps.network,
@@ -675,12 +730,14 @@ export class InscribeMintOrchestrator {
 
     try {
       await this.ensureBatchBrotli(batch);
+      ready = await this.resolveBatchCompression(batch);
       simulateFor({ txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } });
     } catch (err) {
       if (seq !== this.recomputeSeq) return;
       this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err) });
       return;
     }
+    if (seq !== this.recomputeSeq) return;
     if (this.snap.errorMessage !== null && this.snap.state !== 'error') this.patch({ errorMessage: null });
 
     const simulations = this.utxos.map<InscribeUtxoSimulation>((utxo) => {
@@ -691,7 +748,7 @@ export class InscribeMintOrchestrator {
           utxo,
           simulation,
           insufficient,
-          preview: insufficient ? null : previewOf(simulation, { tip: batch.tip } as InscribeContent, prompts),
+          preview: insufficient ? null : previewOf(simulation, { tip: ready.tip } as InscribeContent, prompts),
         };
       } catch {
         return { utxo, simulation: null, insufficient: true, preview: null };
@@ -761,6 +818,76 @@ export class InscribeMintOrchestrator {
     };
   }
 
+  /**
+   * Compress a body exactly as `ord wallet inscribe --compress` does, once per
+   * body and content type. The result is the original bytes when compressing
+   * did not shrink them, which is ord's own rule.
+   */
+  private async compressOne(body: Uint8Array, contentType: string | undefined): Promise<OrdCompressedBody> {
+    const key = contentType ?? '';
+    let byType = this.compressedBodies.get(body);
+    const hit = byType?.get(key);
+    if (hit !== undefined) return hit;
+    if (this.deps.brotliWasm === undefined) {
+      failInscribe('brotli-wasm-missing',
+        'compressBody needs the brotli wasm: pass brotliWasm in the orchestrator deps',
+        'Compressing the file is not available here.');
+    }
+    const out = await compressLikeOrd(body, contentType, this.deps.brotliWasm);
+    if (byType === undefined) {
+      byType = new Map();
+      this.compressedBodies.set(body, byType);
+    }
+    byType.set(key, out);
+    return out;
+  }
+
+  /**
+   * The content as it will actually be inscribed: with `compressBody` the
+   * compressed bytes and the `content_encoding` that goes with them, so the
+   * preview prices the same body the build writes. Also publishes the saving
+   * on the snapshot.
+   */
+  private async resolveCompression(content: InscribeContent): Promise<InscribeContent> {
+    if (content.compressBody !== true || content.source.kind !== 'file') {
+      if (this.snap.compression !== null) this.patch({ compression: null });
+      return content;
+    }
+    const { body, contentType } = content.source;
+    const out = await this.compressOne(body, contentType);
+    this.patch({ compression: compressionOf([{ original: body.length, out }]) });
+    return {
+      ...content,
+      source: { ...content.source, body: out.body },
+      contentEncoding: out.contentEncoding ?? content.contentEncoding,
+    };
+  }
+
+  /** {@link resolveCompression} per entry; the snapshot carries the totals. */
+  private async resolveBatchCompression(batch: InscribeBatchContent): Promise<InscribeBatchContent> {
+    if (!batch.inscriptions.some(e => e.compressBody === true && e.source.kind === 'file')) {
+      if (this.snap.compression !== null) this.patch({ compression: null });
+      return batch;
+    }
+    const saved: Array<{ original: number; out: OrdCompressedBody }> = [];
+    const inscriptions = [];
+    for (const entry of batch.inscriptions) {
+      if (entry.compressBody !== true || entry.source.kind !== 'file') {
+        inscriptions.push(entry);
+        continue;
+      }
+      const out = await this.compressOne(entry.source.body, entry.source.contentType);
+      saved.push({ original: entry.source.body.length, out });
+      inscriptions.push({
+        ...entry,
+        source: { ...entry.source, body: out.body },
+        contentEncoding: out.contentEncoding ?? entry.contentEncoding,
+      });
+    }
+    this.patch({ compression: compressionOf(saved) });
+    return { ...batch, inscriptions };
+  }
+
   /** Load the brotli wasm when the content compresses its properties. */
   private async ensureBrotli(content: InscribeContent): Promise<void> {
     if (!content.compressProperties) return;
@@ -793,6 +920,24 @@ function revealSignatureKind(batch: InscribeBatchContent): InscribeSigningStep['
   const hasSatpoints = batch.mode === 'satpoints';
   if (hasParents && hasSatpoints) return 'parent-and-satpoint-inputs';
   return hasParents ? 'parent-inputs' : 'satpoint-inputs';
+}
+
+/** The saving over every body that was compressed. */
+function compressionOf(bodies: ReadonlyArray<{ original: number; out: OrdCompressedBody }>): InscribeCompression {
+  let originalSize = 0;
+  let compressedSize = 0;
+  let anyCompressed = false;
+  for (const { original, out } of bodies) {
+    originalSize += original;
+    compressedSize += out.body.length;
+    if (out.contentEncoding !== undefined) anyCompressed = true;
+  }
+  return {
+    originalSize,
+    compressedSize,
+    savedBytes: originalSize - compressedSize,
+    contentEncoding: anyCompressed ? 'br' : null,
+  };
 }
 
 /** The screen-facing figures of one simulated funding coin. */

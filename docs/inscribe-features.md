@@ -24,9 +24,18 @@ takes:
   `{ kind: 'in-utxo', utxo, offset }`, plus `paddingUtxo` when the sat sits
   less than a dust limit into its coin. With `in-funding` the coin holding
   the sat must be chosen via `setSelectedUtxo`.
-- the rest as plain fields: title, traits, gallery, compressProperties
-  (needs `brotliWasm` in the deps), postageSats, commitFeeRatePerVbyte,
-  parent, metadata, metaprotocol, pointer, tip, note.
+- the rest as plain fields: title, traits, gallery, compressBody and
+  compressProperties (both need `brotliWasm` in the deps), postageSats,
+  commitFeeRatePerVbyte, parent, metadata, metaprotocol, pointer, tip, note.
+
+`compressBody: true` hands the file to ord's encoder during recompute: the
+preview prices the compressed body, `content_encoding` is set for you, and
+`snapshot.compression` reports `originalSize`, `compressedSize`, `savedBytes`
+and the `contentEncoding` being written, or `contentEncoding: null` when
+compressing did not shrink the file and the original is what gets inscribed
+(ord's own rule). Each body is compressed once, so the bytes the preview
+priced are the bytes `mint()` inscribes. Batch entries take the same flag and
+`snapshot.compression` then carries the totals.
 
 Each funding coin in the snapshot carries a `preview`: commit and reveal
 vsize and fee, total fee, postage, funding requirement, total spent, and
@@ -54,7 +63,8 @@ naming which reveal inputs the wallet is about to sign.
 | `encodeJsonMetadata(text)` | `--json-metadata` | Turns JSON text into the CBOR ord writes (key order, number types, float widths all as ord). | Pass the file's text, not a parsed object. |
 | `metaprotocol` | `--metaprotocol` | A metaprotocol string. | |
 | `postageSats` | `--postage` | The inscription output's value. Default 546 (ord's default is 10 000; 546 is cheaper). | |
-| `compressLikeOrd(body, contentType, wasm)` | `--compress` | brotli exactly as ord: returns the body to inscribe and `contentEncoding: 'br'` when it is smaller. | Loads the wasm; see Compression. |
+| `compressBody` | `--compress` | The orchestrator compresses the body with ord's encoder and tags it, keeping it only when smaller. | A toggle; `snapshot.compression` has the saving. |
+| `compressLikeOrd(body, contentType, wasm)` | `--compress` | The same rule as a plain function, for a consumer that compresses itself. | Loads the wasm; see Compression. |
 | `compressProperties` | `--compress` | Also compresses gallery/title/traits when that is smaller. | The wasm must be loaded first. |
 | `satOffset` | `--satpoint <funding>:<offset>` | Inscribe onto a sat inside the funding UTXO. | |
 | `findSatOffset(satRanges, sat)` | `--sat` | A sat number to its offset, from ord's `/output` `sat_ranges`. | Needs an ord with a sat index. |
@@ -94,7 +104,10 @@ bytes `ord wallet inscribe --compress` writes. The consumer hosts the file
 and passes its URL (`brotliWasmUrl` to `assessCompression`, or the URL or
 bytes to `compressLikeOrd` / `loadBrotliWasm`).
 
-- `compressLikeOrd` is ord's rule exactly: brotli, kept only when smaller.
+- `InscribeContent.compressBody` is the orchestrator doing it for you, and
+  is what a screen with a "compress" toggle wants.
+- `compressLikeOrd` is the same rule as a plain function: brotli, kept only
+  when smaller.
 - `assessCompression` is the "is it worth it" helper for a UI: it also tries
   gzip and applies a minimum saving. When given the wasm URL it uses ord's
   encoder on every browser; without one it falls back to the browser's
