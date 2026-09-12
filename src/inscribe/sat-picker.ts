@@ -1,13 +1,9 @@
-import { hex } from '@scure/base';
-
 import { findRareSatInRanges, type SatRarity } from '../cat21-mint/sat-rarity.helper';
 import type { OrdOutputResponse } from '../cat21-mint/utxo-content.types';
-import { getAddressFormat } from '../cat21-script/address-format';
-import { buildInputScript } from '../cat21-script/build-input-script';
-import { Network, toScureNetwork } from '../network';
-import { failInscribe } from './inscribe-errors';
+import type { Network } from '../network';
 import type { InscribeSatSource } from './inscription-commit.helper';
 import { findSatOffset } from './sat-offset';
+import { deriveOwnedTaprootInput } from './taproot-owned-input';
 
 /**
  * Rare-sat discovery for an inscribe screen: which of a wallet's coins hold a
@@ -150,35 +146,16 @@ export function inscribeSatSourceFromRow<T extends { txid: string; vout: number;
   if (row.status !== 'scanned' || row.rareSat === null || row.address === null) return null;
   const address = row.address;
 
-  if (getAddressFormat(address) !== 'P2TR') {
-    failInscribe('sat-utxo-must-be-taproot',
-      `a sat source must be a P2TR output; ${address} is not`,
-      'That coin cannot be inscribed onto: inscribing on a chosen sat needs a Taproot coin.',
-      { address });
-  }
-  const ordinalsPublicKey = typeof args.ordinalsPublicKey === 'string'
-    ? hex.decode(args.ordinalsPublicKey)
-    : args.ordinalsPublicKey;
-  const { scriptData, tapInternalKey } = buildInputScript({
-    paymentAddress: address,
-    paymentPublicKey: ordinalsPublicKey,
-    isSimulation: false,
-    network: toScureNetwork(args.network),
-  });
-  if (tapInternalKey === undefined) {
-    throw new Error('buildInputScript returned no tapInternalKey for a P2TR address');
-  }
-  if (scriptData.address !== address) {
-    failInscribe('sat-utxo-key-mismatch',
-      `the ordinals public key derives ${scriptData.address}, not ${address}, so it does not own this coin`,
-      'That coin is not at your wallet\'s ordinals address, so your wallet cannot sign for it.',
-      { address, derivedAddress: scriptData.address });
-  }
+  const { scriptPubKey, tapInternalKey } = deriveOwnedTaprootInput(
+    address, args.ordinalsPublicKey, args.network,
+    { notTaproot: 'sat-utxo-must-be-taproot', notOwned: 'sat-utxo-key-mismatch' },
+    'That coin is not at your wallet\'s ordinals address, so your wallet cannot sign for it.',
+  );
   return {
     txid: row.utxo.txid,
     vout: row.utxo.vout,
     value: row.utxo.value,
-    scriptPubKey: scriptData.script,
+    scriptPubKey,
     tapInternalKey,
     address,
     offset: row.rareSat.offset,

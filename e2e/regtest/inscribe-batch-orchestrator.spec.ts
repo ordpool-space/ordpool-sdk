@@ -24,6 +24,7 @@ import {
   type InscribeSigningStep,
   type InscribeSnapshot,
 } from '../../src/inscribe/inscribe-mint-orchestrator';
+import { ORD_STOCK_URL } from './regtest-helpers';
 import { Network, toScureNetwork } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
@@ -84,6 +85,7 @@ async function runBatch(batch: Parameters<InscribeMintOrchestrator['setBatch']>[
 async function runBatchWith(
   batch: Parameters<InscribeMintOrchestrator['setBatch']>[0],
   f: { fundingAddr: string; fundingPubkey: Uint8Array; utxo: { txid: string; vout: number; value: number } },
+  extra: { ordBaseUrl?: string; ordinalsPublicKey?: string; ordinalsAddress?: string } = {},
 ) {
   const deps: InscribeOrchestratorDeps = {
     getUtxos: async () => [{ ...f.utxo, status: { confirmed: true } }],
@@ -92,6 +94,7 @@ async function runBatchWith(
     scan: { classify: async () => 'clean' },
     broadcast: (txHex: string) => postTx(txHex),
     network: Network.Regtest,
+    ordBaseUrl: extra.ordBaseUrl,
   };
   const o = new InscribeMintOrchestrator(deps);
   const signingSteps: Array<InscribeSigningStep | null> = [];
@@ -108,9 +111,10 @@ async function runBatchWith(
 
   await o.setWallet({
     type: KnownOrdinalWalletType.xpub,
-    ordinalsAddress: randomP2tr(),
+    ordinalsAddress: extra.ordinalsAddress ?? randomP2tr(),
     paymentAddress: f.fundingAddr,
     paymentPublicKey: hex.encode(f.fundingPubkey),
+    ordinalsPublicKey: extra.ordinalsPublicKey,
   });
   o.setFeeRate(FEE_RATE);
   o.setBatch(batch);
@@ -254,6 +258,69 @@ describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
     expect(parentAfter.address).toBe(home.address);
     expect(parentAfter.value).toBe(parentBefore.value);
     // The reveal returns each parent at the same index it was spent from.
+    expect(parentAfter.satpoint).toBe(`${result.revealTxId}:0:0`);
+  }, 420_000);
+
+  it('parentIds: the orchestrator finds the parent itself and the batch still links', async () => {
+    const home = newWalletTaproot();
+    const pf = await fundUninscribed();
+    const parent = createInscribeTransactions({
+      paymentOutput: { ...pf.utxo, status: { confirmed: true } },
+      paymentPublicKey: pf.fundingPubkey,
+      paymentAddress: pf.fundingAddr,
+      recipientAddress: home.address,
+      body: enc('resolved parent'),
+      contentType: 'text/plain',
+      feeRatePerVbyte: FEE_RATE,
+      network: Network.Regtest,
+    });
+    const signedCommit = JSON.parse(rpc(
+      '-rpcwallet=ordpool-e2e', '-named', 'walletprocesspsbt',
+      `psbt=${Buffer.from(parent.commitPsbt).toString('base64')}`, 'sign=true', 'finalize=true',
+    )) as { hex: string };
+    expect(await postTx(signedCommit.hex)).toBe(parent.commitTxid);
+    mineBlocks(1);
+    await waitForTxConfirmed(parent.commitTxid);
+    const parentRevealTxid = await postTx(parent.revealHex);
+    const parentTip = mineBlocks(1);
+    await waitForElectrsSync(parentTip);
+    await waitForOrdStockSync(parentTip);
+    const parentId = `${parentRevealTxid}i0`;
+    const parentBefore = await waitForOrdStockInscription(parentId);
+
+    // Only the id is passed. The orchestrator asks ord where it sits and
+    // derives the keys the reveal signs with.
+    const f = await fundUninscribed();
+    const { o, result, preview, signingSteps } = await runBatchWith({
+      mode: 'separate-outputs',
+      parentIds: [parentId],
+      inscriptions: [{ source: { kind: 'file', body: enc('resolved child'), contentType: 'text/plain' } }],
+    }, f, {
+      ordBaseUrl: ORD_STOCK_URL,
+      ordinalsPublicKey: hex.encode(home.internalKey),
+      ordinalsAddress: home.address,
+    });
+
+    expect(o.getSnapshot().state).toBe('success');
+    // What it found, as a screen would show it.
+    expect(o.getSnapshot().parents).toEqual([{
+      id: parentId,
+      address: home.address,
+      value: parentBefore.value,
+      outpoint: `${parentRevealTxid}:0`,
+    }]);
+    expect(preview.walletPrompts).toBe(2);
+    expect(signingSteps).toEqual([
+      null,
+      { step: 1, of: 2, what: 'commit' },
+      { step: 2, of: 2, what: 'parent-inputs' },
+      null,
+    ]);
+
+    const child = await waitForOrdStockInscription(`${result.revealTxId}i0`);
+    expect(child.parents).toEqual([parentId]);
+    const parentAfter = await getStockOrdInscription(parentId);
+    expect(parentAfter.address).toBe(home.address);
     expect(parentAfter.satpoint).toBe(`${result.revealTxId}:0:0`);
   }, 420_000);
 

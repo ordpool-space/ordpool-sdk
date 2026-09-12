@@ -49,6 +49,21 @@ if [ "$TIP" -lt 101 ]; then
   $RPC -rpcwallet=ordpool-e2e generatetoaddress "$NEEDED" "$MINING_ADDR" >/dev/null
 fi
 
+# --- and keep mining until the wallet actually has something to spend ---
+# 101 blocks matures the first coinbase only if this chain started empty. A
+# chain that has been run against before can sit above 101 with every mature
+# coin already spent, and then every spec fails on "Insufficient funds" with
+# nothing pointing at the wallet. Mine until there is a spendable balance, and
+# say so loudly rather than handing the suite an empty wallet.
+for _ in $(seq 1 20); do
+  if [ "$($RPC -rpcwallet=ordpool-e2e getbalance | tr -d '.0')" != "" ]; then break; fi
+  $RPC -rpcwallet=ordpool-e2e generatetoaddress 20 "$MINING_ADDR" >/dev/null
+done
+if [ "$($RPC -rpcwallet=ordpool-e2e getbalance | tr -d '.0')" = "" ]; then
+  echo "regtest-bootstrap: wallet ordpool-e2e has no spendable balance after mining; aborting" >&2
+  exit 1
+fi
+
 # --- wait for electrs to catch up to bitcoind's tip ---
 TIP=$($RPC getblockcount)
 for _ in $(seq 1 30); do

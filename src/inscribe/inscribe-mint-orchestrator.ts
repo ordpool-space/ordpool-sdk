@@ -59,7 +59,9 @@ import {
  * vout[1]; the rest are optional ord envelope tags. `recipient` defaults to the
  * connected wallet's ordinals address when unset.
  */
-import { failInscribe } from './inscribe-errors';
+import { failInscribe, inscribeUserMessage } from './inscribe-errors';
+import { selectPaddingUtxo } from './padding-utxo';
+import { batchParentFromInscriptionId } from './parent-resolve';
 
 /**
  * What is being inscribed: a file, or a delegate that points at another
@@ -205,6 +207,32 @@ export interface InscribeCompression {
   contentEncoding: 'br' | null;
 }
 
+/**
+ * The second coin spent to pad a chosen sat's alignment output. A sat sitting
+ * less than a dust limit into its coin leaves the sats before it as an output
+ * too small to relay; this coin covers the difference, and every sat of it
+ * returns in that output.
+ */
+export interface InscribePadding {
+  /** The coin being spent as padding. */
+  utxo: TxnOutput;
+  /** Sats the padding output was short of its dust floor. */
+  shortfallSats: number;
+  /** `true` when the orchestrator sourced the coin, `false` when `paddingUtxo` was set. */
+  automatic: boolean;
+}
+
+/** A parent the orchestrator located, as a screen shows it. */
+export interface InscribeResolvedParent {
+  id: string;
+  /** The address it sits at, and returns to. */
+  address: string;
+  /** Sats in the coin holding it; it returns with exactly this value. */
+  value: number;
+  /** `<txid>:<vout>` of the coin the reveal spends and hands back. */
+  outpoint: string;
+}
+
 /** State machine the consumer's template branches on. Sibling of the cat21 mint. */
 export type InscribeMintState =
   | 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
@@ -216,6 +244,12 @@ export interface InscribeWalletContext {
   paymentAddress: string;
   /** hex-encoded payment public key. */
   paymentPublicKey: string;
+  /**
+   * hex-encoded ordinals public key, x-only or compressed. Needed to spend
+   * anything sitting at the ordinals address, which today means a batch naming
+   * its parents by id (`parentIds`).
+   */
+  ordinalsPublicKey?: string;
 }
 
 /** I/O the orchestrator delegates to the consumer's infra — all plain async. */
@@ -232,6 +266,11 @@ export interface InscribeOrchestratorDeps {
    * `compressProperties`, which compresses inside the synchronous builder.
    */
   brotliWasm?: BrotliWasmSource;
+  /**
+   * Base URL of an ord server with the JSON API, e.g.
+   * `https://ord.ordpool.space`. Needed to resolve a batch's `parentIds`.
+   */
+  ordBaseUrl?: string;
 }
 
 /** Everything a consumer template needs, emitted on every state change. */
@@ -244,7 +283,15 @@ export interface InscribeSnapshot {
   batch: InscribeBatchContent | null;
   simulations: InscribeUtxoSimulation[];
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
+  /** The developer-facing failure text, for logs and existing error handling. */
   errorMessage: string | null;
+  /**
+   * The same failure written for the person inscribing, when the SDK has one
+   * (every `InscribeInputError` carries one). `null` whenever `errorMessage`
+   * is, and equal to it for a failure with no person-facing wording, so a
+   * screen can show this and never need a fallback.
+   */
+  userMessage: string | null;
   successResult: InscribeAndBroadcastResult | null;
   /** Non-null while the wallet is being asked to sign; see `InscribeSigningStep`. */
   signing: InscribeSigningStep | null;
@@ -253,6 +300,16 @@ export interface InscribeSnapshot {
    * batch it is the total over every entry that compresses.
    */
   compression: InscribeCompression | null;
+  /**
+   * The coin padding a chosen sat's alignment output, `null` when the sat needs
+   * no padding. Sourced by the orchestrator unless `paddingUtxo` was set.
+   */
+  padding: InscribePadding | null;
+  /**
+   * The parents a batch's `parentIds` resolved to, `null` when none were named.
+   * The reveal spends each and hands it straight back.
+   */
+  parents: ReadonlyArray<InscribeResolvedParent> | null;
 }
 
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
@@ -287,6 +344,13 @@ export interface InscribeBatchContent {
   }>;
   /** Parents spent and returned by the reveal, named in every envelope. */
   parents?: ReadonlyArray<BatchParent>;
+  /**
+   * Parents named by inscription id; the orchestrator asks ord where each one
+   * sits and builds the input itself, putting what it found on
+   * `snapshot.parents`. Needs `deps.ordBaseUrl` and the wallet's
+   * `ordinalsPublicKey`. Ignored when `parents` is given.
+   */
+  parentIds?: ReadonlyArray<string>;
   /** Postage per inscription. Default 546; not allowed in `satpoints` mode. */
   postageSats?: number;
   /** Where inscriptions without their own destination go. Defaults to the wallet's ordinals address. */
@@ -356,6 +420,10 @@ export class InscribeMintOrchestrator {
   // body itself goes away: recompute runs on every fee-rate change and mint
   // needs the exact bytes the preview priced.
   private readonly compressedBodies = new WeakMap<Uint8Array, Map<string, OrdCompressedBody>>();
+  // Classifying a coin is a network round trip, and recompute runs on every
+  // fee-rate change, so each verdict is kept for the session.
+  private readonly scanVerdicts = new Map<string, boolean>();
+  private readonly resolvedParents = new Map<string, BatchParent>();
   private snap: InscribeSnapshot = {
     state: 'idle',
     feeRate: null,
@@ -365,9 +433,12 @@ export class InscribeMintOrchestrator {
     simulations: [],
     fundingRecommendation: EMPTY_RECOMMENDATION,
     errorMessage: null,
+    userMessage: null,
     successResult: null,
     signing: null,
     compression: null,
+    padding: null,
+    parents: null,
   };
   private readonly listeners = new Set<(s: InscribeSnapshot) => void>();
 
@@ -393,7 +464,7 @@ export class InscribeMintOrchestrator {
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     if (changed) {
-      this.patch({ feeRate: null, selectedUtxo: null, content: null, batch: null, errorMessage: null, successResult: null, compression: null });
+      this.patch({ feeRate: null, selectedUtxo: null, content: null, batch: null, errorMessage: null, userMessage: null, successResult: null, compression: null, padding: null, parents: null });
     }
     if (!wallet) {
       this.utxos = [];
@@ -406,7 +477,8 @@ export class InscribeMintOrchestrator {
       this.patch({ state: 'ready' });
     } catch (err) {
       this.utxos = [];
-      this.patch({ state: 'error', errorMessage: `Failed to load UTXOs: ${errMsg(err)}` });
+      const message = `Failed to load UTXOs: ${errMsg(err)}`;
+      this.patch({ state: 'error', errorMessage: message, userMessage: message });
       return;
     }
     await this.recompute();
@@ -476,7 +548,8 @@ export class InscribeMintOrchestrator {
     await this.ensureBrotli(content);
     // Compressing is cached per body, so this is the same bytes the preview
     // priced rather than a second run of the encoder.
-    const ready = await this.resolveCompression(content);
+    let ready = await this.resolveCompression(content, this.recomputeSeq);
+    ready = await this.resolvePadding(ready, wallet, this.recomputeSeq);
 
     this.patch({
       state: 'minting',
@@ -523,7 +596,7 @@ export class InscribeMintOrchestrator {
       this.patch({ state: 'success', successResult: result, signing: null });
       return result;
     } catch (err) {
-      this.patch({ state: 'error', errorMessage: errMsg(err), signing: null });
+      this.patch({ state: 'error', errorMessage: errMsg(err), userMessage: inscribeUserMessage(err), signing: null });
       throw err;
     }
   }
@@ -540,7 +613,7 @@ export class InscribeMintOrchestrator {
     selected: TxnOutput,
     promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Promise<string>,
   ): Promise<InscribeAndBroadcastResult> {
-    const prompts = batch.parents?.length || batch.mode === 'satpoints' ? 2 : 1;
+    const prompts = (batch.parents?.length ?? batch.parentIds?.length ?? 0) > 0 || batch.mode === 'satpoints' ? 2 : 1;
     this.patch({
       state: 'minting',
       errorMessage: null,
@@ -549,7 +622,8 @@ export class InscribeMintOrchestrator {
     });
     try {
       await this.ensureBatchBrotli(batch);
-      const ready = await this.resolveBatchCompression(batch);
+      let ready = await this.resolveBatchCompression(batch, this.recomputeSeq);
+      ready = await this.resolveBatchParents(ready, wallet, this.recomputeSeq);
       const args = batchArgs(ready, wallet, feeRate, this.deps.network, selected);
       // The commit is broadcast first; once it is out, the wallet is asked
       // for the reveal's own inputs. Marking the step there works for every
@@ -574,7 +648,7 @@ export class InscribeMintOrchestrator {
       this.patch({ state: 'success', successResult: result, signing: null });
       return result;
     } catch (err) {
-      this.patch({ state: 'error', errorMessage: errMsg(err), signing: null });
+      this.patch({ state: 'error', errorMessage: errMsg(err), userMessage: inscribeUserMessage(err), signing: null });
       throw err;
     }
   }
@@ -589,9 +663,12 @@ export class InscribeMintOrchestrator {
       simulations: [],
       fundingRecommendation: EMPTY_RECOMMENDATION,
       errorMessage: null,
+      userMessage: null,
       successResult: null,
       signing: null,
       compression: null,
+      padding: null,
+      parents: null,
       state: this.wallet ? 'ready' : 'idle',
     });
   }
@@ -616,11 +693,11 @@ export class InscribeMintOrchestrator {
     if (content) {
       try {
         await this.ensureBrotli(content);
-        ready = await this.resolveCompression(content);
+        ready = await this.resolveCompression(content, seq);
         synthesizeEnvelopeFields({ ...ready, ...contentInputs(ready) } as unknown as CreateInscribeTransactionsArgs);
       } catch (err) {
         if (seq !== this.recomputeSeq) return;
-        this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err) });
+        this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err), userMessage: inscribeUserMessage(err) });
         return;
       }
       if (seq !== this.recomputeSeq) return;
@@ -632,10 +709,24 @@ export class InscribeMintOrchestrator {
       return;
     }
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
+    // A chosen sat may need a second coin; sourcing it changes the commit's
+    // shape, so it happens before anything is priced.
+    try {
+      ready = await this.resolvePadding(ready, wallet, seq);
+    } catch (err) {
+      if (seq !== this.recomputeSeq) return;
+      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err), userMessage: inscribeUserMessage(err) });
+      return;
+    }
+    if (seq !== this.recomputeSeq) return;
     const recipient = ready.recipient ?? wallet.ordinalsAddress;
-    if (this.snap.errorMessage !== null && this.snap.state !== 'error') this.patch({ errorMessage: null });
+    // The padding coin is spent by this transaction, so it cannot fund it too.
+    const fundingCandidates = ready.paddingUtxo === undefined
+      ? this.utxos
+      : this.utxos.filter((u) => !(u.txid === ready.paddingUtxo?.txid && u.vout === ready.paddingUtxo?.vout));
+    if (this.snap.errorMessage !== null && this.snap.state !== 'error') this.patch({ errorMessage: null, userMessage: null });
 
-    const simulations = this.utxos.map<InscribeUtxoSimulation>((utxo) => {
+    const simulations = fundingCandidates.map<InscribeUtxoSimulation>((utxo) => {
       try {
         const fundingInput = prepareInscribeFundingInput({
           utxo,
@@ -694,7 +785,7 @@ export class InscribeMintOrchestrator {
         // falls back to a tight coin when none has headroom.
         const preferredTarget = target + changeDustFloor(wallet.paymentAddress);
         fundingRecommendation = await selectFunding<TxnOutput>(
-          this.utxos,
+          fundingCandidates,
           target,
           this.deps.scan,
           preferredTarget,
@@ -715,8 +806,12 @@ export class InscribeMintOrchestrator {
     batch: InscribeBatchContent,
   ): Promise<void> {
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
-    const prompts = batch.parents?.length || batch.mode === 'satpoints' ? 2 : 1;
     let ready = batch;
+    // Parents named by id still make the reveal spend a wallet coin, so the
+    // prompt count follows what resolution produced, not what was passed in.
+    const promptsFor = (b: InscribeBatchContent): number =>
+      (b.parents?.length ?? b.parentIds?.length ?? 0) > 0 || b.mode === 'satpoints' ? 2 : 1;
+    const prompts = promptsFor(batch);
     const simulateFor = (utxo: TxnOutput): SimulateInscribeFeesResult =>
       simulateBatchInscribeFees(batchArgs(ready, wallet, feeRate, this.deps.network, utxo), {
         fundingInput: prepareInscribeFundingInput({
@@ -730,15 +825,16 @@ export class InscribeMintOrchestrator {
 
     try {
       await this.ensureBatchBrotli(batch);
-      ready = await this.resolveBatchCompression(batch);
+      ready = await this.resolveBatchCompression(batch, seq);
+      ready = await this.resolveBatchParents(ready, wallet, seq);
       simulateFor({ txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } });
     } catch (err) {
       if (seq !== this.recomputeSeq) return;
-      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err) });
+      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err), userMessage: inscribeUserMessage(err) });
       return;
     }
     if (seq !== this.recomputeSeq) return;
-    if (this.snap.errorMessage !== null && this.snap.state !== 'error') this.patch({ errorMessage: null });
+    if (this.snap.errorMessage !== null && this.snap.state !== 'error') this.patch({ errorMessage: null, userMessage: null });
 
     const simulations = this.utxos.map<InscribeUtxoSimulation>((utxo) => {
       try {
@@ -769,6 +865,55 @@ export class InscribeMintOrchestrator {
       ).catch(() => EMPTY_RECOMMENDATION);
     if (seq !== this.recomputeSeq) return;
     this.patch({ simulations, fundingRecommendation });
+  }
+
+  /**
+   * The batch with its `parentIds` resolved to real inputs. Each id is looked
+   * up once: a parent does not move while a batch is being priced, and
+   * recompute runs on every fee-rate change.
+   */
+  private async resolveBatchParents(
+    batch: InscribeBatchContent,
+    wallet: InscribeWalletContext,
+    seq: number,
+  ): Promise<InscribeBatchContent> {
+    const ids = batch.parents === undefined ? batch.parentIds ?? [] : [];
+    if (ids.length === 0) {
+      if (this.snap.parents !== null) this.patchIfCurrent(seq, { parents: null });
+      return batch;
+    }
+    if (this.deps.ordBaseUrl === undefined) {
+      failInscribe('parent-not-found',
+        'resolving parentIds needs ordBaseUrl in the orchestrator deps',
+        'Parent inscriptions cannot be looked up here.');
+    }
+    if (wallet.ordinalsPublicKey === undefined) {
+      failInscribe('parent-not-owned',
+        'resolving parentIds needs the wallet\'s ordinalsPublicKey',
+        'Your wallet did not provide the key needed to spend the parent inscription.');
+    }
+    const parents: BatchParent[] = [];
+    for (const id of ids) {
+      let resolved = this.resolvedParents.get(id);
+      if (resolved === undefined) {
+        resolved = await batchParentFromInscriptionId(id, {
+          ordBaseUrl: this.deps.ordBaseUrl,
+          ordinalsPublicKey: wallet.ordinalsPublicKey,
+          network: this.deps.network,
+        });
+        this.resolvedParents.set(id, resolved);
+      }
+      parents.push(resolved);
+    }
+    this.patchIfCurrent(seq, {
+      parents: parents.map((p) => ({
+        id: p.id,
+        address: p.returnAddress,
+        value: p.utxo.value,
+        outpoint: `${p.utxo.txid}:${p.utxo.vout}`,
+      })),
+    });
+    return { ...batch, parents };
   }
 
   /** Load the brotli wasm when any entry compresses its properties. */
@@ -848,14 +993,14 @@ export class InscribeMintOrchestrator {
    * preview prices the same body the build writes. Also publishes the saving
    * on the snapshot.
    */
-  private async resolveCompression(content: InscribeContent): Promise<InscribeContent> {
+  private async resolveCompression(content: InscribeContent, seq: number): Promise<InscribeContent> {
     if (content.compressBody !== true || content.source.kind !== 'file') {
-      if (this.snap.compression !== null) this.patch({ compression: null });
+      if (this.snap.compression !== null) this.patchIfCurrent(seq, { compression: null });
       return content;
     }
     const { body, contentType } = content.source;
     const out = await this.compressOne(body, contentType);
-    this.patch({ compression: compressionOf([{ original: body.length, out }]) });
+    this.patchIfCurrent(seq, { compression: compressionOf([{ original: body.length, out }]) });
     return {
       ...content,
       source: { ...content.source, body: out.body },
@@ -864,9 +1009,9 @@ export class InscribeMintOrchestrator {
   }
 
   /** {@link resolveCompression} per entry; the snapshot carries the totals. */
-  private async resolveBatchCompression(batch: InscribeBatchContent): Promise<InscribeBatchContent> {
+  private async resolveBatchCompression(batch: InscribeBatchContent, seq: number): Promise<InscribeBatchContent> {
     if (!batch.inscriptions.some(e => e.compressBody === true && e.source.kind === 'file')) {
-      if (this.snap.compression !== null) this.patch({ compression: null });
+      if (this.snap.compression !== null) this.patchIfCurrent(seq, { compression: null });
       return batch;
     }
     const saved: Array<{ original: number; out: OrdCompressedBody }> = [];
@@ -884,8 +1029,85 @@ export class InscribeMintOrchestrator {
         contentEncoding: out.contentEncoding ?? entry.contentEncoding,
       });
     }
-    this.patch({ compression: compressionOf(saved) });
+    this.patchIfCurrent(seq, { compression: compressionOf(saved) });
     return { ...batch, inscriptions };
+  }
+
+  /**
+   * The content as it will be inscribed, with a padding coin when the chosen
+   * sat needs one and none was supplied. The coin is spent, so only coins the
+   * content scan calls clean are eligible, exactly as the funding pick demands;
+   * a coin the scan cannot reach is left alone rather than risked.
+   *
+   * Throws when the sat needs padding and nothing covers it, so the reason
+   * reaches the screen instead of every funding row reading "insufficient".
+   */
+  private async resolvePadding(content: InscribeContent, wallet: InscribeWalletContext, seq: number): Promise<InscribeContent> {
+    const target = content.satTarget;
+    if (target === undefined) {
+      if (this.snap.padding !== null) this.patchIfCurrent(seq, { padding: null });
+      return content;
+    }
+    const paddingAddress = target.kind === 'in-utxo' ? target.utxo.address : wallet.paymentAddress;
+
+    if (content.paddingUtxo !== undefined) {
+      const chosen = selectPaddingUtxo([content.paddingUtxo], { satOffset: target.offset, paddingAddress });
+      if (chosen.kind === 'not-needed') {
+        this.patch({ padding: null });
+        failInscribe('padding-not-needed',
+          `a padding coin was given for a sat at offset ${target.offset}, which needs none`,
+          'This sat does not need a second coin: it sits far enough into its own coin.',
+          { satOffset: target.offset });
+      }
+      if (chosen.kind === 'none-covers') {
+        this.patch({ padding: null });
+        failInscribe('sat-offset-needs-padding',
+          `the given padding coin holds ${content.paddingUtxo.value} sats, short of the ${chosen.shortfallSats} needed`,
+          `The coin you chose to pad with is too small: it needs to hold at least ${chosen.shortfallSats} sats.`,
+          { shortfallSats: chosen.shortfallSats, satOffset: target.offset });
+      }
+      this.patchIfCurrent(seq, { padding: { utxo: content.paddingUtxo, shortfallSats: chosen.shortfallSats, automatic: false } });
+      return content;
+    }
+
+    // Coins this transaction already spends cannot pad it as well.
+    const excludeOutpoints = [
+      ...(target.kind === 'in-utxo' ? [`${target.utxo.txid}:${target.utxo.vout}`] : []),
+      ...(this.snap.selectedUtxo ? [`${this.snap.selectedUtxo.txid}:${this.snap.selectedUtxo.vout}`] : []),
+    ];
+    const needed = selectPaddingUtxo(this.utxos, { satOffset: target.offset, paddingAddress, excludeOutpoints });
+    if (needed.kind === 'not-needed') {
+      if (this.snap.padding !== null) this.patchIfCurrent(seq, { padding: null });
+      return content;
+    }
+
+    const clean = await this.cleanCoins(this.utxos, excludeOutpoints);
+    const picked = selectPaddingUtxo(clean, { satOffset: target.offset, paddingAddress, excludeOutpoints });
+    if (picked.kind !== 'selected') {
+      this.patch({ padding: null });
+      failInscribe('no-padding-coin-available',
+        `the chosen sat needs a padding input of at least ${needed.shortfallSats} sats and no spendable coin covers it`,
+        `This sat sits ${target.offset} sats into its coin, so it needs a second coin of at least ${needed.shortfallSats} sats to go with it, and none of your coins can be used for that.`,
+        { shortfallSats: needed.shortfallSats, satOffset: target.offset });
+    }
+    this.patchIfCurrent(seq, { padding: { utxo: picked.utxo, shortfallSats: picked.shortfallSats, automatic: true } });
+    return { ...content, paddingUtxo: picked.utxo };
+  }
+
+  /** The coins the content scan calls clean; a coin it cannot reach is not one. */
+  private async cleanCoins(utxos: ReadonlyArray<TxnOutput>, exclude: ReadonlyArray<string>): Promise<TxnOutput[]> {
+    const excluded = new Set(exclude);
+    const eligible = utxos.filter((u) => !excluded.has(`${u.txid}:${u.vout}`));
+    await Promise.all(eligible.map(async (u) => {
+      const outpoint = `${u.txid}:${u.vout}`;
+      if (this.scanVerdicts.has(outpoint)) return;
+      try {
+        this.scanVerdicts.set(outpoint, (await this.deps.scan.classify(outpoint)) === 'clean');
+      } catch {
+        this.scanVerdicts.set(outpoint, false);
+      }
+    }));
+    return eligible.filter((u) => this.scanVerdicts.get(`${u.txid}:${u.vout}`) === true);
   }
 
   /** Load the brotli wasm when the content compresses its properties. */
@@ -897,6 +1119,16 @@ export class InscribeMintOrchestrator {
         'Compressing the title, traits and gallery is not available here.');
     }
     await loadBrotliWasm(this.deps.brotliWasm);
+  }
+
+  /**
+   * Patch only while this recompute is still the current one. An older run
+   * finishing after a newer one would otherwise publish a result for inputs
+   * the user has already changed.
+   */
+  private patchIfCurrent(seq: number, next: Partial<InscribeSnapshot>): void {
+    if (seq !== this.recomputeSeq) return;
+    this.patch(next);
   }
 
   private patch(next: Partial<InscribeSnapshot>): void {
@@ -916,7 +1148,7 @@ function walletPromptsFor(_content: InscribeContent): number {
 
 /** Which reveal inputs the wallet signs in the second prompt of a batch. */
 function revealSignatureKind(batch: InscribeBatchContent): InscribeSigningStep['what'] {
-  const hasParents = (batch.parents?.length ?? 0) > 0;
+  const hasParents = (batch.parents?.length ?? batch.parentIds?.length ?? 0) > 0;
   const hasSatpoints = batch.mode === 'satpoints';
   if (hasParents && hasSatpoints) return 'parent-and-satpoint-inputs';
   return hasParents ? 'parent-inputs' : 'satpoint-inputs';

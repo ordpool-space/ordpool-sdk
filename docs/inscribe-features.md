@@ -37,6 +37,22 @@ compressing did not shrink the file and the original is what gets inscribed
 priced are the bytes `mint()` inscribes. Batch entries take the same flag and
 `snapshot.compression` then carries the totals.
 
+A chosen sat that sits less than a dust limit into its coin needs a second coin
+to pad the output in front of it. The orchestrator sources that coin itself
+when `paddingUtxo` is not set: the smallest clean coin covering the shortfall,
+through the same content scan the funding pick uses, and removed from the
+funding candidates so it cannot be spent twice. `snapshot.padding` reports
+`{ utxo, shortfallSats, automatic }`, or `null` when no padding is needed.
+(ord pads with several inputs if it must; the SDK's commit takes one, so a
+wallet whose every spare coin is smaller than the shortfall reports an error
+rather than combining. The shortfall is always under one dust limit.)
+
+A batch can name its parents by id: set `parentIds` plus `deps.ordBaseUrl` and
+the wallet's `ordinalsPublicKey`, and the orchestrator asks ord where each
+parent sits, derives the keys the reveal signs with, and reports what it found
+on `snapshot.parents` as `{ id, address, value, outpoint }`. A parent the
+wallet cannot sign for is refused before anything is built.
+
 Each funding coin in the snapshot carries a `preview`: commit and reveal
 vsize and fee, total fee, postage, funding requirement, total spent, and
 how many wallet prompts the shape needs (`null` when the coin cannot fund
@@ -72,7 +88,9 @@ naming which reveal inputs the wallet is about to sign.
 | `inscribeSatSourceFromRow(row, { ordinalsPublicKey, network })` | | A picker row to the `InscribeSatSource` that `satTarget` kind `in-utxo` takes, deriving the tweaked output script and the untweaked internal key. `null` when the row holds no rare sat or its lookup failed. | Throws `sat-utxo-key-mismatch` when the key does not own the coin, rather than building an unspendable commit. |
 | `satPaddingRequirement(satOffset, paddingAddress)` | (ord pads automatically) | `{ needsPadding, shortfallSats, dustLimitSats }`, so the second coin is asked for up front instead of discovered from a failed build. | The address is the sat's OWN coin address for `in-utxo`, the payment address for `in-funding`. |
 | `satSource` | `--satpoint <other utxo>:<offset>` | Inscribe onto a sat in a UTXO other than the funding one, e.g. a rare sat at the ordinals address. Its other sats go back to its address; the funding pays the fee. | The wallet signs the commit as a transfer (ordinals input 0, funding 1). |
-| `paddingUtxo` | (ord pads automatically) | For a chosen sat less than a dust limit into its UTXO: a second payment UTXO pads the padding output, as ord does. | Only accepted when needed; a clear error says how much. |
+| `paddingUtxo` | (ord pads automatically) | For a chosen sat less than a dust limit into its UTXO: a second payment UTXO pads the padding output, as ord does. Leave it out and the orchestrator sources one. | Only accepted when needed; a clear error says how much. |
+| `selectPaddingUtxo(utxos, { satOffset, paddingAddress })` | (ord's `pad_alignment_output`) | The padding coin, or why none fits: `not-needed`, `selected`, or `none-covers` with the shortfall. | Only pass coins that are safe to spend; the orchestrator does this for you. |
+| `batchParentFromInscriptionId(id, { ordBaseUrl, ordinalsPublicKey, network })` | | A parent inscription id to the `BatchParent` a batch takes, via ord's `/inscription` and `/output`. | Throws `parent-not-owned` when the wallet cannot sign for it. |
 | `commitFeeRatePerVbyte` | `--commit-fee-rate` | The commit at its own fee rate; the reveal stays at `feeRatePerVbyte`. | An advanced setting. |
 | `noLimit` | `--no-limit` | Allow a reveal above the 400 000 weight-unit relay limit. Nodes will not relay it. | Not for normal users. |
 | `recipientAddress` | `--destination` | Where the inscription goes. | |
