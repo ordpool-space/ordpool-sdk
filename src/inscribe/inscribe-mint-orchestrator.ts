@@ -11,12 +11,23 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper';
 import { loadBrotliWasm, type BrotliWasmSource } from './brotli-wasm-encoder';
 import type { InscribeSatSource } from './inscription-commit.helper';
+import type { ChildRevealParent } from './inscription-child-reveal.helper';
+import {
+  simulateBatchInscribeFees,
+  type BatchInscribeMode,
+  type BatchParent,
+  type CreateBatchInscribeTransactionsArgs,
+} from './inscription-batch.helper';
 import { OrdEnvelopeField } from './inscription-envelope';
 import { SimulateInscribeFeesArgs, SimulateInscribeFeesResult, simulateInscribeFees } from './inscription-fee.helper';
 import type { InscriptionPropertiesInput } from './inscription-properties';
 import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from './inscription.service.helper';
 import { prepareInscribeFundingInput } from './inscription-input-adapter';
-import { InscribeAndBroadcastResult, inscribeAndBroadcast } from './inscribe-orchestrator';
+import {
+  InscribeAndBroadcastResult,
+  inscribeAndBroadcast,
+  inscribeBatchAndBroadcast,
+} from './inscribe-orchestrator';
 
 /**
  * High-level inscribe API. Plain class, no signals. Sibling of
@@ -199,6 +210,8 @@ export interface InscribeSnapshot {
   feeRate: number | null;
   selectedUtxo: TxnOutput | null;
   content: InscribeContent | null;
+  /** The batch being inscribed, when `setBatch` was used instead of `setContent`. */
+  batch: InscribeBatchContent | null;
   simulations: InscribeUtxoSimulation[];
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
   errorMessage: string | null;
@@ -212,6 +225,39 @@ const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUt
   recommended: null,
   candidates: [],
 };
+
+/**
+ * Several inscriptions in one commit and reveal, ord's batch. Entries use the
+ * same `source` union as a single inscription; the mode decides where each
+ * lands (see `BatchInscribeMode`). With `parents`, or in `satpoints` mode, the
+ * reveal spends wallet UTXOs, so the wallet signs twice.
+ */
+export interface InscribeBatchContent {
+  mode: BatchInscribeMode;
+  inscriptions: ReadonlyArray<{
+    source: InscribeSource;
+    contentEncoding?: InscriptionContentEncoding;
+    metadata?: Uint8Array;
+    metaprotocol?: string;
+    title?: string;
+    traits?: InscriptionPropertiesInput['traits'];
+    gallery?: InscriptionPropertiesInput['gallery'];
+    compressProperties?: boolean;
+    /** Where this inscription goes; `separate-outputs` and `satpoints` only. */
+    destination?: string;
+    /** The wallet UTXO this inscription's sat sits on; `satpoints` mode only. */
+    satpoint?: ChildRevealParent['utxo'];
+  }>;
+  /** Parents spent and returned by the reveal, named in every envelope. */
+  parents?: ReadonlyArray<BatchParent>;
+  /** Postage per inscription. Default 546; not allowed in `satpoints` mode. */
+  postageSats?: number;
+  /** Where inscriptions without their own destination go. Defaults to the wallet's ordinals address. */
+  recipient?: string;
+  tip?: { address: string; value: number };
+  commitFeeRatePerVbyte?: number;
+  minimalTagPush?: boolean;
+}
 
 /** The builder inputs for a content's source and sat target. */
 function contentInputs(content: InscribeContent): {
@@ -230,6 +276,35 @@ function contentInputs(content: InscribeContent): {
   return { ...source, ...sat };
 }
 
+/** The batch builder's args for a wallet + fee rate. */
+function batchArgs(
+  batch: InscribeBatchContent,
+  wallet: InscribeWalletContext,
+  feeRate: number,
+  network: Network,
+  paymentOutput: TxnOutput,
+): CreateBatchInscribeTransactionsArgs & { parents: ReadonlyArray<BatchParent> } {
+  return {
+    mode: batch.mode,
+    inscriptions: batch.inscriptions.map(entry => ({
+      ...entry,
+      ...contentInputs({ source: entry.source } as InscribeContent),
+    })),
+    parents: batch.parents ?? [],
+    postageSats: batch.postageSats,
+    recipientAddress: batch.recipient ?? wallet.ordinalsAddress,
+    paymentOutput,
+    paymentPublicKey: hex.decode(wallet.paymentPublicKey),
+    paymentAddress: wallet.paymentAddress,
+    feeRatePerVbyte: feeRate,
+    commitFeeRatePerVbyte: batch.commitFeeRatePerVbyte,
+    tip: batch.tip,
+    minimalTagPush: batch.minimalTagPush,
+    walletType: wallet.type,
+    network,
+  };
+}
+
 /** Deterministic dummy x-only pubkey — only sizes the envelope (all 32-byte keys equal). */
 const DUMMY_PUBKEY_XONLY = new Uint8Array(32).fill(0x02);
 
@@ -245,6 +320,7 @@ export class InscribeMintOrchestrator {
     feeRate: null,
     selectedUtxo: null,
     content: null,
+    batch: null,
     simulations: [],
     fundingRecommendation: EMPTY_RECOMMENDATION,
     errorMessage: null,
@@ -275,7 +351,7 @@ export class InscribeMintOrchestrator {
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     if (changed) {
-      this.patch({ feeRate: null, selectedUtxo: null, content: null, errorMessage: null, successResult: null });
+      this.patch({ feeRate: null, selectedUtxo: null, content: null, batch: null, errorMessage: null, successResult: null });
     }
     if (!wallet) {
       this.utxos = [];
@@ -305,7 +381,17 @@ export class InscribeMintOrchestrator {
   }
 
   setContent(content: InscribeContent | null): void {
-    this.patch({ content });
+    this.patch({ content, batch: null });
+    void this.recompute();
+  }
+
+  /**
+   * Inscribe several at once (ord's batch) instead of one. Clears any single
+   * content; `mint()` then builds the batch. With parents, or in `satpoints`
+   * mode, the wallet signs twice and the snapshot's `signing` says so.
+   */
+  setBatch(batch: InscribeBatchContent | null): void {
+    this.patch({ batch, content: null });
     void this.recompute();
   }
 
@@ -322,6 +408,7 @@ export class InscribeMintOrchestrator {
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
     const content = this.snap.content;
+    const batch = this.snap.batch;
     const rec = this.snap.fundingRecommendation;
     const selected: TxnOutput | null =
       this.snap.selectedUtxo ?? (rec.status === 'auto' ? rec.recommended : null);
@@ -341,6 +428,8 @@ export class InscribeMintOrchestrator {
           : 'No UTXO selected',
       );
     }
+    if (!content && !batch) throw new Error('No inscription content set');
+    if (batch) return this.mintBatch(wallet, feeRate, batch, selected, promptForSignedPsbt);
     if (!content) throw new Error('No inscription content set');
     await this.ensureBrotli(content);
 
@@ -394,12 +483,63 @@ export class InscribeMintOrchestrator {
     }
   }
 
+  /**
+   * Build, sign and broadcast a batch. With parents, or in `satpoints` mode,
+   * the wallet signs twice: the commit, then the reveal's wallet inputs; the
+   * snapshot's `signing` announces each before it happens.
+   */
+  private async mintBatch(
+    wallet: InscribeWalletContext,
+    feeRate: number,
+    batch: InscribeBatchContent,
+    selected: TxnOutput,
+    promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Promise<string>,
+  ): Promise<InscribeAndBroadcastResult> {
+    const prompts = batch.parents?.length || batch.mode === 'satpoints' ? 2 : 1;
+    this.patch({
+      state: 'minting',
+      errorMessage: null,
+      successResult: null,
+      signing: { step: 1, of: prompts, what: 'commit' },
+    });
+    try {
+      await this.ensureBatchBrotli(batch);
+      const args = batchArgs(batch, wallet, feeRate, this.deps.network, selected);
+      // The commit is broadcast first; once it is out, the wallet is asked
+      // for the reveal's own inputs. Marking the step there works for every
+      // wallet, including those that sign without a prompt callback.
+      let broadcasts = 0;
+      const result = await firstValueFrom(
+        inscribeBatchAndBroadcast({
+          ...args,
+          walletType: wallet.type,
+          parents: args.parents.length > 0 ? args.parents : undefined,
+          broadcast: (txHex: string) => from(this.deps.broadcast(txHex).then((txId) => {
+            if (++broadcasts === 1 && prompts === 2) {
+              this.patch({ signing: { step: 2, of: 2, what: revealSignatureKind(batch) } });
+            }
+            return txId;
+          })),
+          promptForSignedPsbt: promptForSignedPsbt
+            ? (unsigned) => from(promptForSignedPsbt(unsigned))
+            : undefined,
+        }),
+      );
+      this.patch({ state: 'success', successResult: result, signing: null });
+      return result;
+    } catch (err) {
+      this.patch({ state: 'error', errorMessage: errMsg(err), signing: null });
+      throw err;
+    }
+  }
+
   /** "Inscribe another" — wipe form state, keep the wallet. */
   reset(): void {
     this.patch({
       feeRate: null,
       selectedUtxo: null,
       content: null,
+      batch: null,
       simulations: [],
       fundingRecommendation: EMPTY_RECOMMENDATION,
       errorMessage: null,
@@ -416,6 +556,11 @@ export class InscribeMintOrchestrator {
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
     const content = this.snap.content;
+    const batch = this.snap.batch;
+    if (wallet && feeRate && batch && this.utxos.length > 0) {
+      await this.recomputeBatch(seq, wallet, feeRate, batch);
+      return;
+    }
     if (!wallet || !feeRate || !content || this.utxos.length === 0) {
       this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
       return;
@@ -454,7 +599,7 @@ export class InscribeMintOrchestrator {
           utxo,
           simulation,
           insufficient,
-          preview: insufficient ? null : previewOf(simulation, content),
+          preview: insufficient ? null : previewOf(simulation, content, walletPromptsFor(content)),
         };
       } catch {
         return { utxo, simulation: null, insufficient: true, preview: null };
@@ -506,6 +651,73 @@ export class InscribeMintOrchestrator {
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
     this.patch({ simulations, fundingRecommendation });
+  }
+
+  /** The same grid and funding pick as a single inscription, for a batch. */
+  private async recomputeBatch(
+    seq: number,
+    wallet: InscribeWalletContext,
+    feeRate: number,
+    batch: InscribeBatchContent,
+  ): Promise<void> {
+    const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
+    const prompts = batch.parents?.length || batch.mode === 'satpoints' ? 2 : 1;
+    const simulateFor = (utxo: TxnOutput): SimulateInscribeFeesResult =>
+      simulateBatchInscribeFees(batchArgs(batch, wallet, feeRate, this.deps.network, utxo), {
+        fundingInput: prepareInscribeFundingInput({
+          utxo, paymentPublicKey, paymentAddress: wallet.paymentAddress,
+          isSimulation: true, network: this.deps.network,
+        }),
+        senderChangeAddress: wallet.paymentAddress,
+        ephemeralPubkeyXonly: DUMMY_PUBKEY_XONLY,
+        changeDustLimitSats: changeDustFloor(wallet.paymentAddress),
+      });
+
+    try {
+      await this.ensureBatchBrotli(batch);
+      simulateFor({ txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } });
+    } catch (err) {
+      if (seq !== this.recomputeSeq) return;
+      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err) });
+      return;
+    }
+    if (this.snap.errorMessage !== null && this.snap.state !== 'error') this.patch({ errorMessage: null });
+
+    const simulations = this.utxos.map<InscribeUtxoSimulation>((utxo) => {
+      try {
+        const simulation = simulateFor(utxo);
+        const insufficient = utxo.value < simulation.fundingRequirementSats;
+        return {
+          utxo,
+          simulation,
+          insufficient,
+          preview: insufficient ? null : previewOf(simulation, { tip: batch.tip } as InscribeContent, prompts),
+        };
+      } catch {
+        return { utxo, simulation: null, insufficient: true, preview: null };
+      }
+    });
+
+    let target: number | null = null;
+    try {
+      target = simulateFor({ txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } })
+        .fundingRequirementSats;
+    } catch {
+      target = null;
+    }
+    const fundingRecommendation = target === null
+      ? EMPTY_RECOMMENDATION
+      : await selectFunding<TxnOutput>(
+        this.utxos, target, this.deps.scan, target + changeDustFloor(wallet.paymentAddress),
+      ).catch(() => EMPTY_RECOMMENDATION);
+    if (seq !== this.recomputeSeq) return;
+    this.patch({ simulations, fundingRecommendation });
+  }
+
+  /** Load the brotli wasm when any entry compresses its properties. */
+  private async ensureBatchBrotli(batch: InscribeBatchContent): Promise<void> {
+    if (!batch.inscriptions.some(e => e.compressProperties)) return;
+    await this.ensureBrotli({ compressProperties: true } as InscribeContent);
   }
 
   /**
@@ -575,8 +787,16 @@ function walletPromptsFor(_content: InscribeContent): number {
   return 1;
 }
 
+/** Which reveal inputs the wallet signs in the second prompt of a batch. */
+function revealSignatureKind(batch: InscribeBatchContent): InscribeSigningStep['what'] {
+  const hasParents = (batch.parents?.length ?? 0) > 0;
+  const hasSatpoints = batch.mode === 'satpoints';
+  if (hasParents && hasSatpoints) return 'parent-and-satpoint-inputs';
+  return hasParents ? 'parent-inputs' : 'satpoint-inputs';
+}
+
 /** The screen-facing figures of one simulated funding coin. */
-function previewOf(sim: SimulateInscribeFeesResult, content: InscribeContent): InscribePreview {
+function previewOf(sim: SimulateInscribeFeesResult, content: InscribeContent, walletPrompts = 1): InscribePreview {
   const postageSats = sim.commitOutputValueSats - sim.revealFeeSats - (content.tip?.value ?? 0);
   return {
     commitVsize: sim.commitVsize,
@@ -587,7 +807,7 @@ function previewOf(sim: SimulateInscribeFeesResult, content: InscribeContent): I
     postageSats,
     fundingRequirementSats: sim.fundingRequirementSats,
     totalSpentSats: sim.totalFeeSats + postageSats + (content.tip?.value ?? 0),
-    walletPrompts: walletPromptsFor(content),
+    walletPrompts,
   };
 }
 

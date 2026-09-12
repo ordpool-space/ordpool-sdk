@@ -1,5 +1,6 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
+import { schnorr } from '@noble/curves/secp256k1';
 
 import { Network } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -327,5 +328,73 @@ describe('InscribeMintOrchestrator: the reshaped inputs and what a screen render
     o.setContent({ ...content, satTarget: { kind: 'in-funding', offset: 1_000 } });
     o.setFeeRate(10);
     await expect(o.mint()).rejects.toThrow('Select the UTXO that holds the sat');
+  });
+});
+
+describe('InscribeMintOrchestrator: batches', () => {
+  const entry = (text: string) => ({ source: { kind: 'file' as const, body: new TextEncoder().encode(text), contentType: 'text/plain' } });
+
+  it('previews a batch per funding coin, with the batch\'s postage and one prompt', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setBatch({ mode: 'separate-outputs', inscriptions: [entry('a'), entry('b')], postageSats: 700 });
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.simulations.length > 0 && x.simulations[0].preview !== null);
+    const p = s.simulations[0].preview!;
+    expect(p.postageSats).toBe(1_400); // two inscriptions at 700
+    expect(p.walletPrompts).toBe(1);
+    expect(s.content).toBeNull();
+  });
+
+  it('a batch costs more reveal than a single inscription of the same content', async () => {
+    const single = new InscribeMintOrchestrator(deps());
+    await single.setWallet(wallet);
+    single.setContent(content);
+    single.setFeeRate(10);
+    const one = await waitFor(single, (x) => x.simulations[0]?.preview != null);
+
+    const many = new InscribeMintOrchestrator(deps());
+    await many.setWallet(wallet);
+    many.setBatch({ mode: 'separate-outputs', inscriptions: [entry('hello cat'), entry('hello cat')] });
+    many.setFeeRate(10);
+    const two = await waitFor(many, (x) => x.simulations[0]?.preview != null);
+    expect(two.simulations[0].preview!.revealVsize).toBeGreaterThan(one.simulations[0].preview!.revealVsize);
+  });
+
+  it('a batch with parents needs two wallet prompts', async () => {
+    const parentKey = new Uint8Array(32).fill(0xef);
+    const p2tr = btc.p2tr(schnorr.getPublicKey(parentKey), undefined, btc.NETWORK, true);
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setBatch({
+      mode: 'separate-outputs',
+      inscriptions: [entry('child')],
+      parents: [{
+        id: `${'ab'.repeat(32)}i0`,
+        utxo: { txid: 'ab'.repeat(32), vout: 0, value: 10_000, scriptPubKey: p2tr.script, tapInternalKey: schnorr.getPublicKey(parentKey) },
+        returnAddress: p2tr.address!,
+      }],
+    });
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.simulations[0]?.preview != null);
+    expect(s.simulations[0].preview!.walletPrompts).toBe(2);
+  });
+
+  it('setBatch and setContent replace each other', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setBatch({ mode: 'separate-outputs', inscriptions: [entry('a')] });
+    expect(o.getSnapshot().content).toBeNull();
+    o.setContent(content);
+    expect(o.getSnapshot().batch).toBeNull();
+  });
+
+  it('reports a batch ord would refuse, naming the rule', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    o.setBatch({ mode: 'shared-output', inscriptions: [{ ...entry('a'), destination: ORDINALS_ADDR }] });
+    const s = await waitFor(o, (x) => x.errorMessage !== null);
+    expect(s.errorMessage).toContain('destinations cannot be set');
   });
 });

@@ -32,8 +32,13 @@ Each funding coin in the snapshot carries a `preview`: commit and reveal
 vsize and fee, total fee, postage, funding requirement, total spent, and
 how many wallet prompts the shape needs (`null` when the coin cannot fund
 it). `snapshot.signing` is non-null while the wallet is being asked to
-sign, so a screen can say which signature is coming. Batch and parents in
-the orchestrator follow, shaped by what the inscribe screen needs.
+sign, so a screen can say which signature is coming. `setBatch(batch)` inscribes several at once instead of one (the two replace
+each other): ord's modes, entries with the same `source` union plus title,
+traits, gallery, metadata, metaprotocol and a per-entry `destination` or
+`satpoint`, optional `parents`. Its preview comes from the same planning the
+batch build runs, and with parents or in `satpoints` mode it reports two
+wallet prompts; `snapshot.signing` moves to step 2 once the commit is out,
+naming which reveal inputs the wallet is about to sign.
 
 ## Options on a single inscription
 

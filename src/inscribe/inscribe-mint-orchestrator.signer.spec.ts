@@ -1,6 +1,7 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { of, throwError } from 'rxjs';
+import { schnorr } from '@noble/curves/secp256k1';
+import { defer, firstValueFrom, of, throwError } from 'rxjs';
 
 // Restores the inscribe success/error coverage. The inscribe happy path runs
 // through inscribeAndBroadcast (build commit+reveal, wallet-sign commit, sign
@@ -8,7 +9,11 @@ import { of, throwError } from 'rxjs';
 // error state machine is unit-covered; the real signing chain is the
 // inscribe-ord-parity + wallet-matrix e2e.
 const mockInscribeAndBroadcast = jest.fn();
-jest.mock('./inscribe-orchestrator', () => ({ inscribeAndBroadcast: mockInscribeAndBroadcast }));
+const mockInscribeBatchAndBroadcast = jest.fn();
+jest.mock('./inscribe-orchestrator', () => ({
+  inscribeAndBroadcast: mockInscribeAndBroadcast,
+  inscribeBatchAndBroadcast: mockInscribeBatchAndBroadcast,
+}));
 
 import { Network } from '../network';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
@@ -122,5 +127,43 @@ describe('InscribeMintOrchestrator — sign + broadcast (inscribeAndBroadcast mo
     await expect(o.mint()).rejects.toThrow('reveal broadcast failed');
     expect(o.getSnapshot().state).toBe('error');
     expect(o.getSnapshot().errorMessage).toBe('reveal broadcast failed');
+  });
+});
+
+describe('InscribeMintOrchestrator — a batch with parents announces both signatures', () => {
+  beforeEach(() => mockInscribeBatchAndBroadcast.mockReset());
+
+  it('says "commit" first, then the reveal\'s parent inputs once the commit is out', async () => {
+    const parentKey = new Uint8Array(32).fill(0xef);
+    const p2tr = btc.p2tr(schnorr.getPublicKey(parentKey), undefined, btc.NETWORK, true);
+    // The real orchestrator broadcasts the commit, then the reveal; mimic that.
+    mockInscribeBatchAndBroadcast.mockImplementation((args: {
+      broadcast: (hex: string) => { toPromise?: unknown };
+    }) => defer(async () => {
+      await firstValueFrom(args.broadcast('commit-hex') as never);
+      await firstValueFrom(args.broadcast('reveal-hex') as never);
+      return result;
+    }));
+
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setBatch({
+      mode: 'separate-outputs',
+      inscriptions: [{ source: { kind: 'file', body: new TextEncoder().encode('child'), contentType: 'text/plain' } }],
+      parents: [{
+        id: `${'ab'.repeat(32)}i0`,
+        utxo: { txid: 'ab'.repeat(32), vout: 0, value: 10_000, scriptPubKey: p2tr.script, tapInternalKey: schnorr.getPublicKey(parentKey) },
+        returnAddress: p2tr.address!,
+      }],
+    });
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
+
+    const steps: string[] = [];
+    o.subscribe((s) => { if (s.signing) steps.push(`${s.signing.step}/${s.signing.of} ${s.signing.what}`); });
+    await o.mint();
+    expect(steps).toEqual(['1/2 commit', '2/2 parent-inputs']);
+    expect(o.getSnapshot().signing).toBeNull();
+    expect(o.getSnapshot().state).toBe('success');
   });
 });

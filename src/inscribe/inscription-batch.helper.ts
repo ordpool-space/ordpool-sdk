@@ -10,6 +10,7 @@ import { buildChildInscribeRevealTx } from './inscription-child-reveal.helper';
 import type { ChildRevealParent } from './inscription-child-reveal.helper';
 import type { InscriptionPropertiesInput } from './inscription-properties';
 import { assertRevealWithinStandardWeight, deriveRevealPubkeyXonly } from './inscription-reveal.helper';
+import { simulateInscribeFees, type SimulateInscribeFeesArgs, type SimulateInscribeFeesResult } from './inscription-fee.helper';
 import {
   assembleInscribeTransactions,
   planInscribeCommit,
@@ -286,9 +287,12 @@ export function createBatchInscribeTransactions(
  * `revealPsbtForWallet` goes to the wallet (`signChildRevealParentInputs`
  * with `walletInputCount`), and its signatures are merged into `revealPsbt`.
  */
-export function createBatchChildInscribeTransactions(
-  args: CreateBatchChildInscribeTransactionsArgs,
-): CreateBatchChildInscribeTransactionsResult {
+/**
+ * The pieces a batch whose reveal spends wallet UTXOs needs, shared by the
+ * builder and the fee preview: the layout, the wallet inputs, what the commit
+ * funds, and the reveal builder over them.
+ */
+function batchWithWalletInputsPlan(args: CreateBatchChildInscribeTransactionsArgs) {
   if (args.parents.length === 0 && args.mode !== 'satpoints') {
     throw new Error('parents must not be empty; use createBatchInscribeTransactions for a batch without parents');
   }
@@ -318,21 +322,73 @@ export function createBatchChildInscribeTransactions(
     tip: args.tip,
     network: args.network,
   });
+  /** The reveal vsize for a commit output, wallet inputs included, at zero fee. */
+  const measureRevealVsize: NonNullable<SimulateInscribeFeesArgs['measureRevealVsize']> = (commit) => childReveal({
+    txid: '0'.repeat(64),
+    vout: 0,
+    outputScript: commit.outputScript,
+    taproot: commit.taproot,
+    outputValueSats: commitPostageSats + tipValueSats,
+  }, new Uint8Array(32).fill(0x42)).revealVsize;
 
+  return { layout, satpointInputs, commitPostageSats, childReveal, measureRevealVsize };
+}
+
+/**
+ * What a batch would cost from a given funding coin, without building it: the
+ * same layout, envelope and reveal shape the build uses, so a preview and the
+ * signed transactions agree. Works for a batch with or without wallet inputs.
+ */
+export function simulateBatchInscribeFees(
+  args: CreateBatchInscribeTransactionsArgs & { parents?: ReadonlyArray<BatchParent> },
+  sim: Pick<SimulateInscribeFeesArgs,
+    'fundingInput' | 'senderChangeAddress' | 'ephemeralPubkeyXonly' | 'changeDustLimitSats'>,
+): SimulateInscribeFeesResult & { inscriptions: BatchInscriptionLocation[]; walletInputCount: number } {
+  const parents = args.parents ?? [];
+  const withWalletInputs = parents.length > 0 || args.mode === 'satpoints';
+  const plan = withWalletInputs
+    ? batchWithWalletInputsPlan({ ...args, parents })
+    : (() => {
+      const layout = layOutBatch(args, []);
+      return {
+        layout,
+        satpointInputs: [] as ReadonlyArray<ChildRevealParent['utxo']>,
+        commitPostageSats: undefined as number | undefined,
+        measureRevealVsize: undefined as SimulateInscribeFeesArgs['measureRevealVsize'],
+      };
+    })();
+  const fees = simulateInscribeFees({
+    ...sim,
+    feeRatePerVbyte: args.feeRatePerVbyte,
+    commitFeeRatePerVbyte: args.commitFeeRatePerVbyte,
+    envelopeScript: plan.layout.envelope,
+    inscriptionOutputs: plan.layout.inscriptionOutputs,
+    commitPostageSats: plan.commitPostageSats,
+    measureRevealVsize: plan.measureRevealVsize,
+    recipientAddress: args.recipientAddress,
+    satOffset: args.satOffset,
+    tip: args.tip,
+    walletType: args.walletType,
+    network: args.network,
+  });
+  return {
+    ...fees,
+    inscriptions: plan.layout.locations,
+    walletInputCount: parents.length + plan.satpointInputs.length,
+  };
+}
+
+export function createBatchChildInscribeTransactions(
+  args: CreateBatchChildInscribeTransactionsArgs,
+): CreateBatchChildInscribeTransactionsResult {
+  const { layout, satpointInputs, commitPostageSats, childReveal, measureRevealVsize } =
+    batchWithWalletInputsPlan(args);
   const plan = planInscribeCommit(args, {
     envelope: layout.envelope,
     ephemeralPubkeyXonly: layout.ephemeralPubkeyXonly,
     inscriptionOutputs: layout.inscriptionOutputs,
     commitPostageSats,
-    // Measured on the real reveal shape, wallet inputs included, at zero fee
-    // (the commit output covers only what it funds and the tip).
-    measureRevealVsize: (commit) => childReveal({
-      txid: '0'.repeat(64),
-      vout: 0,
-      outputScript: commit.outputScript,
-      taproot: commit.taproot,
-      outputValueSats: commitPostageSats + tipValueSats,
-    }, new Uint8Array(32).fill(0x42)).revealVsize,
+    measureRevealVsize,
   });
   const commitDust = getMinimumUtxoSize(plan.commit.commitAddress);
   if (plan.commit.commitOutputValueSats < commitDust) {

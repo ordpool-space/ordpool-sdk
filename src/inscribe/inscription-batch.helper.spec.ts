@@ -13,7 +13,8 @@ import { InscriptionParserService } from 'ordpool-parser';
 
 import { Network, toScureNetwork } from '../network';
 
-import { createBatchInscribeTransactions } from './inscription-batch.helper';
+import { createBatchInscribeTransactions, simulateBatchInscribeFees } from './inscription-batch.helper';
+import { prepareInscribeFundingInput } from './inscription-input-adapter';
 import type { CreateBatchInscribeTransactionsArgs } from './inscription-batch.helper';
 
 const NETWORK = Network.Mainnet;
@@ -109,5 +110,39 @@ describe('createBatchInscribeTransactions and satpoints', () => {
   it('points satpoints batches at the builder that handles wallet inputs in the reveal', () => {
     expect(() => createBatchInscribeTransactions(base({ mode: 'satpoints' })))
       .toThrow('`satpoints` mode spends wallet UTXOs in the reveal; use createBatchChildInscribeTransactions');
+  });
+});
+
+describe('simulateBatchInscribeFees', () => {
+  const previewOf = (over: Parameters<typeof base>[0] & { parents?: never } = {}) => {
+    const args = base(over);
+    const fundingInput = prepareInscribeFundingInput({
+      utxo: args.paymentOutput,
+      paymentPublicKey: args.paymentPublicKey,
+      paymentAddress: args.paymentAddress,
+      isSimulation: true,
+      network: NETWORK,
+    });
+    return simulateBatchInscribeFees(args, {
+      fundingInput,
+      senderChangeAddress: args.paymentAddress,
+      ephemeralPubkeyXonly: new Uint8Array(32).fill(0x02),
+    });
+  };
+
+  it('prices exactly what createBatchInscribeTransactions builds', () => {
+    const built = createBatchInscribeTransactions(base({ mode: 'shared-output', postageSats: 700 }));
+    const preview = previewOf({ mode: 'shared-output', postageSats: 700 });
+    expect(preview.revealVsize).toBe(built.fees.revealVsize);
+    expect(preview.revealFeeSats).toBe(built.fees.revealFeeSats);
+    expect(preview.commitOutputValueSats).toBe(built.fees.commitOutputValueSats);
+    expect(preview.inscriptions).toEqual(built.inscriptions);
+    expect(preview.walletInputCount).toBe(0);
+  });
+
+  it('more inscriptions cost more reveal', () => {
+    const one = previewOf({ inscriptions: [{ body: enc('one'), contentType: 'text/plain' }] });
+    const three = previewOf({});
+    expect(three.revealVsize).toBeGreaterThan(one.revealVsize);
   });
 });
