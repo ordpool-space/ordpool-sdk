@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { resolveRuneEtchingTxid } from './rune-etching';
+import { lookupRuneEtching, resolveRuneEtchingTxid } from './rune-etching';
 
 const ORD = 'https://ord.example';
 const DOG = 'DOG•GO•TO•THE•MOON';
@@ -32,6 +32,9 @@ function ord(byName: Record<string, unknown | number>, seen: string[] = []): typ
 
 const dogBody = { entry: { block: 840000, divisibility: 5, etching: DOG_ETCHING, spaced_rune: DOG }, id: '840000:3' };
 const uncommonBody = { entry: { block: 1, divisibility: 0, etching: '0'.repeat(64), spaced_rune: UNCOMMON }, id: '1:0' };
+
+/** The common option shape; each test supplies its own ord. */
+const opts = (fetchFn: typeof fetch) => ({ ordBaseUrl: ORD, fetchFn });
 
 describe('resolveRuneEtchingTxid', () => {
   it('resolves an etched rune to the transaction that etched it', async () => {
@@ -86,5 +89,51 @@ describe('resolveRuneEtchingTxid', () => {
     const seen: string[] = [];
     await resolveRuneEtchingTxid(DOG, { ordBaseUrl: `${ORD}/`, fetchFn: ord({ [DOG]: dogBody }, seen) });
     expect(seen[0].startsWith(`${ORD}/rune/`)).toBe(true);
+  });
+});
+
+describe('lookupRuneEtching: the cases kept apart', () => {
+  it('an etched rune reports the transaction', async () => {
+    expect(await lookupRuneEtching(DOG, opts(ord({ [DOG]: dogBody }))))
+      .toEqual({ kind: 'etched', txid: DOG_ETCHING });
+  });
+
+  it('a reserved rune reports not-etched, which is permanent and cacheable', async () => {
+    expect(await lookupRuneEtching(UNCOMMON, opts(ord({ [UNCOMMON]: uncommonBody }))))
+      .toEqual({ kind: 'not-etched' });
+  });
+
+  it('a name ord has no entry for reports unknown, which may change later', async () => {
+    expect(await lookupRuneEtching('NO•SUCH•RUNE', opts(ord({}))))
+      .toEqual({ kind: 'unknown' });
+  });
+
+  it('a failed lookup reports unavailable, which must not be remembered', async () => {
+    const down = (async () => { throw new TypeError('fetch failed'); }) as typeof fetch;
+    expect(await lookupRuneEtching(DOG, opts(down))).toEqual({ kind: 'unavailable' });
+    expect(await lookupRuneEtching(DOG, opts(ord({ [DOG]: 500 })))).toEqual({ kind: 'unavailable' });
+  });
+
+  it('tells the permanent cases apart from the transient one, which null could not', async () => {
+    const reserved = await lookupRuneEtching(UNCOMMON, opts(ord({ [UNCOMMON]: uncommonBody })));
+    const outage = await lookupRuneEtching(UNCOMMON, opts((async () => { throw new Error('x'); }) as typeof fetch));
+
+    // Both collapse to null through the narrow function; that is the problem
+    // this one exists to solve.
+    expect(await resolveRuneEtchingTxid(UNCOMMON, opts(ord({ [UNCOMMON]: uncommonBody })))).toBeNull();
+    expect(reserved).not.toEqual(outage);
+    expect(reserved.kind).toBe('not-etched');
+    expect(outage.kind).toBe('unavailable');
+  });
+
+  it('a malformed body is unavailable rather than a wrong answer', async () => {
+    expect(await lookupRuneEtching(DOG, opts(ord({ [DOG]: { entry: {} } })))).toEqual({ kind: 'unavailable' });
+    expect(await lookupRuneEtching(DOG, opts(ord({ [DOG]: {} })))).toEqual({ kind: 'unavailable' });
+  });
+
+  it('the narrow function still answers exactly as before', async () => {
+    expect(await resolveRuneEtchingTxid(DOG, opts(ord({ [DOG]: dogBody })))).toBe(DOG_ETCHING);
+    expect(await resolveRuneEtchingTxid(UNCOMMON, opts(ord({ [UNCOMMON]: uncommonBody })))).toBeNull();
+    expect(await resolveRuneEtchingTxid('NO•SUCH•RUNE', opts(ord({})))).toBeNull();
   });
 });

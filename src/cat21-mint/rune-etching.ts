@@ -17,6 +17,71 @@ export interface ResolveRuneEtchingOptions {
 }
 
 /**
+ * What ord knows about a rune's etching. The four cases differ in whether the
+ * answer can ever change, which is what a caller needs in order to cache
+ * correctly:
+ *
+ *   - `etched` and `not-etched` are PERMANENT. A rune is etched once, and a
+ *     rune the protocol reserves is never etched at all. Both are safe to keep
+ *     forever.
+ *   - `unknown` means ord has no entry for the name. That can change: the rune
+ *     may be etched in a later block. Safe to keep briefly, not forever.
+ *   - `unavailable` is not an answer. Never keep it, or one outage becomes a
+ *     permanently dead row.
+ */
+export type RuneEtching =
+  /** Etched by this transaction. */
+  | { kind: 'etched'; txid: string }
+  /**
+   * The rune exists but was never etched by a transaction, so there is nothing
+   * to link to. ord reports an all-zero etching for these. UNCOMMON•GOODS is
+   * the one that matters: the runes protocol reserves it, and it is the rune
+   * most likely to be sitting on a coin.
+   */
+  | { kind: 'not-etched' }
+  /** ord has no entry for this name. */
+  | { kind: 'unknown' }
+  /** The lookup did not complete. Retry; do not remember this. */
+  | { kind: 'unavailable' };
+
+/**
+ * Ask ord about a rune's etching, keeping the cases apart.
+ *
+ * {@link resolveRuneEtchingTxid} answers the narrower question and collapses
+ * everything that is not a txid into `null`. That is enough to render a row,
+ * but it hides which answers are permanent, so a caller obeying the
+ * never-cache-a-miss rule re-asks forever for a rune that will never have an
+ * etching. Use this one wherever the answer is cached.
+ */
+export async function lookupRuneEtching(
+  runeName: string,
+  options: ResolveRuneEtchingOptions,
+): Promise<RuneEtching> {
+  const base = options.ordBaseUrl.replace(/\/+$/, '');
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
+  try {
+    const res = await (options.fetchFn ?? fetch)(`${base}/rune/${encodeURIComponent(runeName)}`, {
+      // ord.ordpool.space answers JSON but refuses HTML with 406, so this is
+      // load-bearing rather than decorative.
+      headers: { Accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (res.status === 404) return { kind: 'unknown' };
+    if (!res.ok) return { kind: 'unavailable' };
+
+    const body = (await res.json()) as { entry?: { etching?: unknown } };
+    const etching = body.entry?.etching;
+    if (typeof etching !== 'string') return { kind: 'unavailable' };
+    return isNullTxid(etching) ? { kind: 'not-etched' } : { kind: 'etched', txid: etching };
+  } catch {
+    return { kind: 'unavailable' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * The txid of the transaction that etched `runeName`, or `null` when there is
  * no transaction to link to.
  *
@@ -33,36 +98,21 @@ export interface ResolveRuneEtchingOptions {
  * Takes the name as ord spells it, including the `•` separators that
  * `runeNamesFromContent` returns; the name is URL-encoded here.
  *
- * Does no caching of its own. A name resolves to the same etching forever, so
- * caching is worth doing, but each consumer already has a layer to do it in
+ * Does no caching of its own. Each consumer already has a layer to do it in,
  * and a library-level cache would be global state with the wrong lifetime.
- * Cache a POSITIVE answer freely; do not cache a `null`, because a transient
- * outage would then become a permanently dead link.
+ *
+ * Cache a txid freely. Do NOT cache this function's `null`: it covers a
+ * permanent answer and a transient failure alike, so keeping it would freeze
+ * an outage into a dead row, and discarding it re-asks forever about a rune
+ * that will never have an etching. When the answer is cached, call
+ * {@link lookupRuneEtching} instead, which says which case it is.
  */
 export async function resolveRuneEtchingTxid(
   runeName: string,
   options: ResolveRuneEtchingOptions,
 ): Promise<string | null> {
-  const base = options.ordBaseUrl.replace(/\/+$/, '');
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 10_000);
-  try {
-    const res = await (options.fetchFn ?? fetch)(`${base}/rune/${encodeURIComponent(runeName)}`, {
-      // ord.ordpool.space answers JSON but refuses HTML with 406, so this is
-      // load-bearing rather than decorative.
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-    });
-    if (!res.ok) return null; // unknown rune (404) or a failed lookup
-
-    const body = (await res.json()) as { entry?: { etching?: unknown } };
-    const etching = body.entry?.etching;
-    return typeof etching === 'string' && !isNullTxid(etching) ? etching : null;
-  } catch {
-    return null; // network error or timeout
-  } finally {
-    clearTimeout(timer);
-  }
+  const result = await lookupRuneEtching(runeName, options);
+  return result.kind === 'etched' ? result.txid : null;
 }
 
 /** The all-zero txid ord reports for a rune that was never etched. */
