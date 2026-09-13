@@ -52,6 +52,14 @@ export type RuneEtching =
  * but it hides which answers are permanent, so a caller obeying the
  * never-cache-a-miss rule re-asks forever for a rune that will never have an
  * etching. Use this one wherever the answer is cached.
+ *
+ * A response whose shape is not understood reads as `unavailable`, not as a
+ * confident answer, because a wrong txid on a money-path row is worse than a
+ * retry. Know the shape that choice makes, though: if an upstream ever starts
+ * emitting a subtly different body, EVERY rune row goes unlinked and is
+ * retried on every scan, indefinitely, and nothing fails while it happens.
+ * Rune links going quiet everywhere at once, with no errors, is what that
+ * looks like from the outside.
  */
 export async function lookupRuneEtching(
   runeName: string,
