@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { MAX_RUNE_DIVISIBILITY, formatRuneAmount } from './rune-amount';
+import { MAX_RUNE_DIVISIBILITY, formatRuneAmount, formatRunePile } from './rune-amount';
 
 const U128_MAX = '340282366920938463463374607431768211455';
 
@@ -78,5 +78,40 @@ describe('formatRuneAmount: refusals', () => {
     expect(() => formatRuneAmount('1', -1)).toThrow('0..38');
     expect(() => formatRuneAmount('1', 39)).toThrow('0..38');
     expect(() => formatRuneAmount('1', 1.5)).toThrow('0..38');
+  });
+});
+
+describe('formatRunePile: ord\'s complete rendering', () => {
+  // Also ord's own vectors: the symbol write is unconditional in the same
+  // Display, so these are the same tests with the tail restored.
+  const NBSP = '\u00A0'; // written as an escape on purpose: invisible in source is the hazard
+
+  it.each([
+    ['0', 0, '¤', `0${NBSP}¤`],
+    ['0', 0, '$', `0${NBSP}$`],
+    ['1100', 3, '🐕', `1.1${NBSP}🐕`],
+    ['100', 2, '⧉', `1${NBSP}⧉`],
+  ])('%s at divisibility %i with %s renders %s', (amount, divisibility, symbol, expected) => {
+    expect(formatRunePile({ amount: amount as string, divisibility: divisibility as number, symbol: symbol as string }))
+      .toBe(expected);
+  });
+
+  it('a rune with no symbol falls back to the currency sign, as ord does', () => {
+    expect(formatRunePile({ amount: '25', divisibility: 0 })).toBe(`25${NBSP}¤`);
+    expect(formatRunePile({ amount: '25', divisibility: 0, symbol: null })).toBe(`25${NBSP}¤`);
+    expect(formatRunePile({ amount: '25', divisibility: 0, symbol: '' })).toBe(`25${NBSP}¤`);
+  });
+
+  it('separates with U+00A0 and not an ordinary space, which looks the same in review', () => {
+    const rendered = formatRunePile({ amount: '1', divisibility: 0, symbol: '$' });
+    expect(rendered).toBe('1\u00A0$');   // non-breaking
+    expect(rendered).not.toBe('1\u0020$'); // an ordinary space, which looks identical here
+    expect(rendered.charCodeAt(1)).toBe(0x00A0);
+  });
+
+  it('carries the amount rules through unchanged', () => {
+    expect(formatRunePile({ amount: '340282366920938463463374607431768211455', divisibility: 38, symbol: '¤' }))
+      .toBe(`3.40282366920938463463374607431768211455${NBSP}¤`);
+    expect(() => formatRunePile({ amount: '0x10', divisibility: 0 })).toThrow('decimal base units');
   });
 });

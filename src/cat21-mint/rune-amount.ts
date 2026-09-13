@@ -68,3 +68,44 @@ function toBaseUnits(amount: string | bigint): bigint {
   }
   return BigInt(text);
 }
+
+/** A rune balance as ord's `/output/` reports it. */
+export interface RunePile {
+  /** Base units. A string (as ord's JSON carries it) or a bigint. */
+  amount: string | bigint;
+  /** Decimal places, 0 to {@link MAX_RUNE_DIVISIBILITY}. */
+  divisibility: number;
+  /** The rune's symbol. Absent for a rune that has none. */
+  symbol?: string | null;
+}
+
+/**
+ * ord separates the figure from the symbol with U+00A0, a NON-BREAKING space,
+ * so a rune amount never wraps away from its symbol.
+ */
+export const RUNE_SYMBOL_SEPARATOR = '\u00A0';
+
+/** What ord shows for a rune with no symbol: the generic currency sign. */
+export const RUNE_SYMBOL_FALLBACK = '\u00A4';
+
+/**
+ * Render a rune balance complete with its symbol, exactly as ord's `Pile`
+ * display does: the figure, a NON-BREAKING space, then the symbol, or `¤`
+ * when the rune has none.
+ *
+ * This is ord's whole rendering. `Pile`'s `Display` writes the symbol
+ * unconditionally in the same function, so ord never shows the figure on its
+ * own; {@link formatRuneAmount} is the unusual case and this is the normal
+ * one. Prefer this wherever a row sits next to an explorer that renders the
+ * same balance.
+ *
+ * The separator being invisible is the reason it lives here: a caller typing
+ * an ordinary space looks identical in review and behaves differently at a
+ * line break.
+ */
+export function formatRunePile(pile: RunePile): string {
+  const symbol = pile.symbol === undefined || pile.symbol === null || pile.symbol === ''
+    ? RUNE_SYMBOL_FALLBACK
+    : pile.symbol;
+  return `${formatRuneAmount(pile.amount, pile.divisibility)}${RUNE_SYMBOL_SEPARATOR}${symbol}`;
+}
