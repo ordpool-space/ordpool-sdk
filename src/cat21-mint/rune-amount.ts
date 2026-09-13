@@ -39,9 +39,20 @@ export const MAX_RUNE_DIVISIBILITY = 38;
  *
  *               A number above `Number.MAX_SAFE_INTEGER` may ALREADY be
  *               approximate, because ord emits a u128 as a JSON number and the
- *               rounding happens in `JSON.parse` before any of this runs.
- *               Nothing here can recover those digits; read such a balance
- *               from a string source (`/address/`) when it matters.
+ *               rounding happens inside `JSON.parse`, before any of this runs.
+ *               Nothing here can recover those digits. What to do about it
+ *               depends on which endpoint the caller reads, so:
+ *
+ *               - reading `/address/`, the amounts arrive as strings and are
+ *                 already exact; pass them through as strings and there is
+ *                 nothing to think about;
+ *               - reading `/output/`, which is per-outpoint and has no string
+ *                 form to switch to, the only way to keep every digit is to
+ *                 stop `JSON.parse` seeing the number at all: take the
+ *                 response as text and parse it with something bigint-aware.
+ *                 Short of that the approximation is already in the value, and
+ *                 for a figure that is only being displayed it is usually
+ *                 fine to accept it.
  * @param divisibility Decimal places, 0 to {@link MAX_RUNE_DIVISIBILITY}.
  */
 export function formatRuneAmount(amount: string | number | bigint, divisibility: number): string {
