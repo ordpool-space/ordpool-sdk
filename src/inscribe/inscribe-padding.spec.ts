@@ -341,3 +341,42 @@ describe('InscribeMintOrchestrator: a superseded recompute', () => {
     expect(o.getSnapshot().padding).toBeNull();
   });
 });
+
+describe('InscribeMintOrchestrator: a defect is not a message for the person', () => {
+  const deps: InscribeOrchestratorDeps = {
+    getUtxos: async () => [coin('a', 100_000)],
+    scan: { classify: async () => 'clean' },
+    broadcast: async () => 'txid',
+    network: Network.Mainnet,
+  };
+
+  /** The pre-reshape flat content: no `source`, so reading `source.kind` throws. */
+  const malformed = { body: new TextEncoder().encode('x'), contentType: 'text/plain' } as unknown as InscribeContent;
+
+  it('an unexpected throw goes to the error state, so a consumer stops waiting', async () => {
+    const o = new InscribeMintOrchestrator(deps);
+    await o.setWallet(wallet);
+    o.setContent(malformed);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.errorMessage !== null);
+
+    expect(s.state).toBe('error');
+    // The developer text survives for logs and bug reports.
+    expect(s.errorMessage).toContain("Cannot read properties of undefined");
+    // The person is not shown it.
+    expect(s.userMessage).not.toContain('undefined');
+    expect(s.userMessage).toContain('Nothing has been sent');
+  });
+
+  it('something the person can change still leaves the flow ready for them to change it', async () => {
+    const o = new InscribeMintOrchestrator({ ...deps, getUtxos: async () => [coin('d', 150), coin('e', 20)] });
+    await o.setWallet(wallet);
+    o.setContent(content());        // a sat needing padding no coin can cover
+    o.setFeeRate(10);
+    const s = await waitFor(o, (x) => x.errorMessage !== null);
+
+    expect(s.state).toBe('ready');
+    expect(s.userMessage).toContain('second coin of at least 230 sats');
+    expect(s.userMessage).not.toContain('Nothing has been sent');
+  });
+});

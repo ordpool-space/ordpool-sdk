@@ -115,3 +115,38 @@ describe('formatRunePile: ord\'s complete rendering', () => {
     expect(() => formatRunePile({ amount: '0x10', divisibility: 0 })).toThrow('decimal base units');
   });
 });
+
+describe('formatRuneAmount: the shapes ord actually emits', () => {
+  /**
+   * Both captured live from ord.ordpool.space on 2026-09-13 for the same
+   * holding, which is the point: ord is not consistent between endpoints.
+   *
+   *   /output/<outpoint>  "runes":{"ANARCHY":{"amount":12600000,...}}   NUMBER
+   *   /address/<addr>     "runes_balances":[["ANARCHY","12600000","⬛"]] STRING
+   */
+  it('takes the number /output/ emits and the string /address/ emits alike', () => {
+    expect(formatRuneAmount(12600000, 0)).toBe('12600000');
+    expect(formatRuneAmount('12600000', 0)).toBe('12600000');
+    expect(formatRunePile({ amount: 12600000, divisibility: 0, symbol: '⬛' })).toBe('12600000 ⬛');
+  });
+
+  it('applies the divisibility rules to a number the same way', () => {
+    expect(formatRuneAmount(1100, 3)).toBe('1.1');
+    expect(formatRuneAmount(100, 2)).toBe('1');
+    expect(formatRuneAmount(6, 3)).toBe('0.006');
+  });
+
+  it('refuses a fractional number rather than rounding it into a plausible balance', () => {
+    expect(() => formatRuneAmount(1.5, 0)).toThrow('non-negative integer');
+    expect(() => formatRuneAmount(-1, 0)).toThrow('non-negative integer');
+    expect(() => formatRuneAmount(Number.NaN, 0)).toThrow('non-negative integer');
+    expect(() => formatRuneAmount(Number.POSITIVE_INFINITY, 0)).toThrow('non-negative integer');
+  });
+
+  it('String(n) is the wrong way to convert a big number, BigInt(n) is the right one', () => {
+    // The trap a caller falls into when it coerces before calling.
+    expect(String(1e21)).toBe('1e+21');
+    expect(() => formatRuneAmount(String(1e21), 0)).toThrow('decimal base units');
+    expect(formatRuneAmount(BigInt(1e21), 0)).toBe('1000000000000000000000');
+  });
+});

@@ -59,7 +59,7 @@ import {
  * vout[1]; the rest are optional ord envelope tags. `recipient` defaults to the
  * connected wallet's ordinals address when unset.
  */
-import { failInscribe, inscribeUserMessage } from './inscribe-errors';
+import { InscribeInputError, failInscribe, inscribeUserMessage } from './inscribe-errors';
 import { selectPaddingUtxo } from './padding-utxo';
 import { batchParentFromInscriptionId } from './parent-resolve';
 
@@ -311,6 +311,10 @@ export interface InscribeSnapshot {
    */
   parents: ReadonlyArray<InscribeResolvedParent> | null;
 }
+
+/** Shown when the failure is a defect rather than something the person entered. */
+const UNEXPECTED_FAILURE_MESSAGE =
+  'Something went wrong while preparing this inscription. Nothing has been sent. Please try again, and report it if it keeps happening.';
 
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'insufficient',
@@ -696,8 +700,7 @@ export class InscribeMintOrchestrator {
         ready = await this.resolveCompression(content, seq);
         synthesizeEnvelopeFields({ ...ready, ...contentInputs(ready) } as unknown as CreateInscribeTransactionsArgs);
       } catch (err) {
-        if (seq !== this.recomputeSeq) return;
-        this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err), userMessage: inscribeUserMessage(err) });
+        this.reportRecomputeFailure(seq, err);
         return;
       }
       if (seq !== this.recomputeSeq) return;
@@ -714,8 +717,7 @@ export class InscribeMintOrchestrator {
     try {
       ready = await this.resolvePadding(ready, wallet, seq);
     } catch (err) {
-      if (seq !== this.recomputeSeq) return;
-      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err), userMessage: inscribeUserMessage(err) });
+      this.reportRecomputeFailure(seq, err);
       return;
     }
     if (seq !== this.recomputeSeq) return;
@@ -829,8 +831,7 @@ export class InscribeMintOrchestrator {
       ready = await this.resolveBatchParents(ready, wallet, seq);
       simulateFor({ txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } });
     } catch (err) {
-      if (seq !== this.recomputeSeq) return;
-      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, errorMessage: errMsg(err), userMessage: inscribeUserMessage(err) });
+      this.reportRecomputeFailure(seq, err);
       return;
     }
     if (seq !== this.recomputeSeq) return;
@@ -1126,6 +1127,29 @@ export class InscribeMintOrchestrator {
    * finishing after a newer one would otherwise publish a result for inputs
    * the user has already changed.
    */
+  /**
+   * Report a recompute that did not finish.
+   *
+   * Two kinds of failure reach here and they are not the same thing. An
+   * `InscribeInputError` describes something the person can change, so it is
+   * shown to them and the flow stays `ready` for them to change it. Anything
+   * else is a defect: its text means nothing to a person, and a consumer
+   * waiting for `state === 'error'` would otherwise wait forever while the
+   * funding panel sat silently empty. So the state goes to `error`, the
+   * developer text stays on `errorMessage` for logs and bug reports, and the
+   * person gets a sentence they can act on.
+   */
+  private reportRecomputeFailure(seq: number, err: unknown): void {
+    const fromInput = err instanceof InscribeInputError;
+    this.patchIfCurrent(seq, {
+      simulations: [],
+      fundingRecommendation: EMPTY_RECOMMENDATION,
+      errorMessage: errMsg(err),
+      userMessage: fromInput ? inscribeUserMessage(err) : UNEXPECTED_FAILURE_MESSAGE,
+      ...(fromInput ? {} : { state: 'error' as const }),
+    });
+  }
+
   private patchIfCurrent(seq: number, next: Partial<InscribeSnapshot>): void {
     if (seq !== this.recomputeSeq) return;
     this.patch(next);

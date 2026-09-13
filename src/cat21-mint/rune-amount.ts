@@ -30,12 +30,21 @@ export const MAX_RUNE_DIVISIBILITY = 38;
  * by a NON-BREAKING space (U+00A0), falling back to the currency sign `¤` when
  * a rune has no symbol, if a caller wants ord's complete rendering.
  *
- * @param amount Base units. A string (as ord's JSON carries it) or a bigint.
- *               Never pass a `number` that came from `JSON.parse`: by then the
- *               value may already have been rounded.
+ * @param amount Base units, in any of the shapes ord's JSON uses. `/output/`
+ *               emits the amount as a JSON NUMBER, `/address/` as a STRING, so
+ *               both are accepted along with a bigint. A caller converting a
+ *               number itself must use `BigInt(n)`, never `String(n)`:
+ *               `String(1e21)` is `"1e+21"`, which is refused, and the amount
+ *               would vanish from the row.
+ *
+ *               A number above `Number.MAX_SAFE_INTEGER` may ALREADY be
+ *               approximate, because ord emits a u128 as a JSON number and the
+ *               rounding happens in `JSON.parse` before any of this runs.
+ *               Nothing here can recover those digits; read such a balance
+ *               from a string source (`/address/`) when it matters.
  * @param divisibility Decimal places, 0 to {@link MAX_RUNE_DIVISIBILITY}.
  */
-export function formatRuneAmount(amount: string | bigint, divisibility: number): string {
+export function formatRuneAmount(amount: string | number | bigint, divisibility: number): string {
   if (!Number.isInteger(divisibility) || divisibility < 0 || divisibility > MAX_RUNE_DIVISIBILITY) {
     throw new Error(`divisibility must be an integer 0..${MAX_RUNE_DIVISIBILITY}; got ${divisibility}`);
   }
@@ -54,11 +63,19 @@ export function formatRuneAmount(amount: string | bigint, divisibility: number):
   return `${whole}.${padded}`;
 }
 
-/** Parse base units without ever going through a JS number. */
-function toBaseUnits(amount: string | bigint): bigint {
+/** Parse base units without ever introducing a JS number of our own. */
+function toBaseUnits(amount: string | number | bigint): bigint {
   if (typeof amount === 'bigint') {
     if (amount < 0n) throw new Error(`a rune amount cannot be negative; got ${amount}`);
     return amount;
+  }
+  if (typeof amount === 'number') {
+    // A fraction here means something upstream already corrupted the value, so
+    // it is refused rather than rounded into a plausible-looking balance.
+    if (!Number.isInteger(amount) || amount < 0) {
+      throw new Error(`a rune amount must be a non-negative integer; got ${amount}`);
+    }
+    return BigInt(amount);
   }
   const text = amount.trim();
   // BigInt() accepts "0x…" and "" and would quietly turn them into something
@@ -71,8 +88,8 @@ function toBaseUnits(amount: string | bigint): bigint {
 
 /** A rune balance as ord's `/output/` reports it. */
 export interface RunePile {
-  /** Base units. A string (as ord's JSON carries it) or a bigint. */
-  amount: string | bigint;
+  /** Base units, as ord emits them: a number on `/output/`, a string on `/address/`. */
+  amount: string | number | bigint;
   /** Decimal places, 0 to {@link MAX_RUNE_DIVISIBILITY}. */
   divisibility: number;
   /** The rune's symbol. Absent for a rune that has none. */
