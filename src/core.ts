@@ -106,6 +106,7 @@ export * from './cat21-mint/cat21-api.fetch';
 //     covering candidates), not a raw bucket helper.
 export * from './cat21-mint/utxo-content.types';
 export * from './cat21-mint/rune-etching';
+export * from './cat21-mint/rune-amount';
 export * from './cat21-mint/recommended-funding.helper';
 export * from './cat21-mint/sat-rarity.helper';
 

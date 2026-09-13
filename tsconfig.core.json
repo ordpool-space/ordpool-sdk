@@ -114,6 +114,7 @@
     "src/inscribe/sat-picker.ts",
     "src/cat21-core/dedupe-utxos.ts",
     "src/cat21-mint/rune-etching.ts",
+    "src/cat21-mint/rune-amount.ts",
     "src/inscribe/padding-utxo.ts",
     "src/inscribe/parent-resolve.ts",
     "src/inscribe/taproot-owned-input.ts",
