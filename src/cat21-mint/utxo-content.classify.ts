@@ -42,7 +42,7 @@ export function classifyUtxoContent(
   const catIds = cat21Ord.cats ?? [];
   const rareSat = detectRareSat(ord.sat_ranges);
 
-  const clean = inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat;
+  const clean = true; // MUTATION-CHECK ONLY, NEVER MERGE: ignores all content
 
   // Source the cat's sat from cat21-ord (the cat indexer, authoritative and
   // always in step with `cats`); fall back to the full ord only if cat21-ord
