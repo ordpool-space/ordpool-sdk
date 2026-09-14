@@ -82,15 +82,53 @@ describe('funding-safety classification vs real ord (regtest)', () => {
   }
 
   it('a plain coin is clean, and clean means every content field is empty', async () => {
-    const utxo = await fundOwn('0.02', 2_000_000);
-    const c = await classify(utxo.txid, utxo.vout);
+    // Getting a content-free coin on regtest takes deliberate construction.
+    // Every coin here descends from a coinbase, and a coinbase output OPENS on
+    // its block's first sat, which ordinal theory calls `uncommon`. So funding
+    // an address and calling the result plain is wrong: seedRareSatCoin mints
+    // its notable coin from exactly that property.
+    //
+    // Sats travel first-in-first-out, so output 0 of a spend takes the opening
+    // sats of the input and output 1 begins after them. Spending a funded coin
+    // and testing output 1 therefore yields a coin whose range starts INSIDE a
+    // coinbase range rather than at its head: no notable sat, nothing else
+    // either.
+    const funding = await fundOwn('0.5', 50_000_000);
+    const split = new btc.Transaction();
+    split.addInput({
+      txid: funding.txid,
+      index: funding.vout,
+      witnessUtxo: { script, amount: BigInt(funding.value) },
+    });
+    split.addOutputAddress(address, BigInt(10_000), regtestNetwork); // absorbs the head
+    split.addOutputAddress(address, BigInt(funding.value - 10_000 - FEE_SATS), regtestNetwork);
+    split.signIdx(priv, 0, [btc.SigHash.ALL]);
+    split.finalize();
 
-    expect(c.clean).toBe(true);
-    // The verdict must rest on real emptiness, not on a field ord never sent.
-    expect(c.inscriptionIds).toEqual([]);
-    expect(c.runes).toBeNull();
-    expect(c.catIds).toEqual([]);
-    expect(c.rareSat).toBeNull();
+    const txid = await postTx(split.hex);
+    const tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForTxConfirmed(txid);
+    await waitForOrdSync(tip);
+    await waitForOrdStockSync(tip);
+
+    const c = await classify(txid, 1);
+
+    // Report ord's own account of the coin when this disagrees, so a failure
+    // says WHICH content was found instead of only "expected true".
+    expect({
+      clean: c.clean,
+      inscriptionIds: c.inscriptionIds,
+      runes: c.runes,
+      catIds: c.catIds,
+      rareSat: c.rareSat,
+    }).toEqual({
+      clean: true,
+      inscriptionIds: [],
+      runes: null,
+      catIds: [],
+      rareSat: null,
+    });
   }, 300_000);
 
   it('a coin really carrying an inscription is refused, by inscription id', async () => {
