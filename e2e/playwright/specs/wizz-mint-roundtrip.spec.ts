@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages, approveWizzSignPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
@@ -48,49 +48,15 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  // URL-anchor on Wizz's standard approval path (#/approval/SignPsbt)
-  // — same URL pattern as the connect approval that wizz-sdk-handshake
-  // matches. Sourced from background.js APPROVAL annotations:
-  // signPsbt → "SignPsbt" approval route.
-  const approval = await waitForApprovalPopup({
+  // Shared with any consumer driving a Wizz sign popup, via `ordpool-sdk/e2e`.
+  // The loose Sign-text predicate and the click-inside-evaluate live there.
+  await approveWizzSignPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 120_000,
-    isApproval: async (p) => {
-      await p.waitForURL(/notification\.html#\/approval/, { timeout: 120_000 });
-      return true;
-    },
+    onScreenshot: (page, name) => shot(page, `03-${name}`),
   });
-  await shot(approval, '03a-sign-approval');
-  // Sign button is initially disabled (Wizz analyses the PSBT first).
-  // The disabled state covers it with a spinner overlay; textContent
-  // can include whitespace + spinner chars so we can't pin on
-  // exact-text. Wait for the button's pointer-events to enable AND
-  // for the click to actually land — do both inside page.evaluate to
-  // avoid the textContent-matching race in the outer Playwright
-  // locator.
-  const clicked = await approval.waitForFunction(() => {
-    const isSignButton = (el: Element) => {
-      const text = (el.textContent || '').trim();
-      // Loose match — accept "Sign" optionally surrounded by spinner
-      // chars or whitespace, but reject elsewhere texts like "Signed".
-      return /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test(text);
-    };
-    const els = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], div'));
-    const candidate = els.find(isSignButton);
-    if (!candidate) return null;
-    const style = getComputedStyle(candidate);
-    if (style.pointerEvents === 'none') return null;
-    if (parseFloat(style.opacity) < 0.7) return null;
-    candidate.click();
-    return { text: candidate.textContent };
-  }, undefined, { timeout: 60_000, polling: 250 });
-  // The popup auto-closes after Wizz processes the click; jsonValue
-  // would race against the page-closed condition. Wrap defensively.
   // eslint-disable-next-line no-console
   console.log('[wizz-mint] clicked sign-button (popup may have closed)');
-  void clicked;
-  await shot(approval, '03b-after-sign-click').catch(() => undefined);
 }
 
 test.beforeAll(async () => {

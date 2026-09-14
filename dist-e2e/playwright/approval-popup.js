@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.waitForApprovalPopup = waitForApprovalPopup;
 exports.closeLeftoverExtensionPages = closeLeftoverExtensionPages;
+exports.approveWizzSignPopup = approveWizzSignPopup;
 /**
  * Wait for a wallet-extension approval popup to open in the given
  * browser context, identified by a caller-supplied predicate.
@@ -117,5 +118,59 @@ async function closeLeftoverExtensionPages(context, keep) {
         }
         await p.close().catch(() => undefined);
     }
+}
+/**
+ * Click Sign in a Wizz/Unisat-family approval popup, once the button is really
+ * enabled.
+ *
+ * The predicate is deliberately LOOSE about the button's text. While the wallet
+ * analyses the PSBT the button is disabled and covered by a spinner overlay, so
+ * its `textContent` can be a spinner glyph plus whitespace around the word, and
+ * a matcher pinned to exactly "Sign" never fires even after the button becomes
+ * clickable. That failure is indistinguishable from a button that never enables:
+ * both are a timeout. The regex therefore accepts an optional spinner character,
+ * while still rejecting neighbouring text like "Signed".
+ *
+ * Enabledness is read from computed style (`pointerEvents`, `opacity`) rather
+ * than a disabled attribute, and the click happens INSIDE the same
+ * `page.evaluate` as the check, so the button cannot change state between the
+ * two.
+ *
+ * Pass `onScreenshot` to capture the popup before the wait and after the click;
+ * the post-click call is best-effort because the popup auto-closes.
+ */
+async function approveWizzSignPopup(opts) {
+    const popupTimeoutMs = opts.popupTimeoutMs ?? 120_000;
+    const approval = await waitForApprovalPopup({
+        context: opts.context,
+        knownPages: opts.knownPages,
+        timeoutMs: popupTimeoutMs,
+        isApproval: async (p) => {
+            await p.waitForURL(/notification\.html#\/approval/, { timeout: popupTimeoutMs });
+            return true;
+        },
+    });
+    await opts.onScreenshot?.(approval, 'sign-approval');
+    await approval.waitForFunction(() => {
+        const isSignButton = (el) => {
+            const text = (el.textContent || '').trim();
+            // Optional leading spinner glyph; rejects "Signed" and similar.
+            return /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test(text);
+        };
+        const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
+        const candidate = els.find(isSignButton);
+        if (!candidate)
+            return null;
+        const style = getComputedStyle(candidate);
+        if (style.pointerEvents === 'none')
+            return null;
+        if (parseFloat(style.opacity) < 0.7)
+            return null;
+        candidate.click();
+        return { text: candidate.textContent };
+    }, undefined, { timeout: opts.signTimeoutMs ?? 60_000, polling: 250 });
+    // The popup auto-closes once the wallet processes the click, so this is
+    // best-effort by design.
+    await opts.onScreenshot?.(approval, 'after-sign-click').catch(() => undefined);
 }
 //# sourceMappingURL=approval-popup.js.map
