@@ -1,3 +1,21 @@
+# COMPOSE PROJECT: derived from E2E_PREFIX, not from this file's directory.
+#
+# Without this, every session using this file shares ONE project, whatever it
+# sets E2E_PREFIX to. E2E_PREFIX only renames containers; compose still matches
+# services by project, so `up` from one session RECREATES another session's
+# containers under the new names, and a `down` or a `rm` then takes them away.
+# bitcoind keeps its chain in the container's writable layer, so that costs the
+# other session its whole regtest chain, silently, while both look isolated.
+#
+# Observed on 2026-09-14: a stack brought up as E2E_PREFIX=runeprobe on
+# alternate host ports destroyed a concurrently running cubes-e2e stack's chain.
+# Alternate ports do NOT isolate; only the project does.
+#
+# Tying the project to the prefix makes two differently-prefixed stacks genuinely
+# separate, volumes included. Same default, so nothing changes for a single
+# session.
+name: ${E2E_PREFIX:-ordpool-e2e}-regtest
+
 # Regtest backend for ordpool-sdk E2E tests.
 #
 # bitcoind serves the actual Bitcoin protocol in regtest mode — a
@@ -30,9 +48,16 @@ services:
       - -listen=1
       - -zmqpubrawblock=tcp://0.0.0.0:28332
       - -zmqpubrawtx=tcp://0.0.0.0:28333
+    volumes:
+      # A NAMED volume. Without one bitcoind uses the image's anonymous volume,
+      # so a recreated container silently comes up at height 0 on fresh storage
+      # while electrs and ord still hold an index for the chain that was there
+      # a moment ago. Losing a regtest chain is cheap; losing it silently, and
+      # having everything else disagree with it, is not.
+      - bitcoind-data:/home/bitcoin/.bitcoin
     ports:
-      - "18443:18443"   # RPC (regtest)
-      - "18444:18444"   # P2P (regtest)
+      - "${E2E_BITCOIND_RPC_HOST_PORT:-18443}:18443"   # RPC (regtest)
+      - "${E2E_BITCOIND_P2P_HOST_PORT:-18444}:18444"   # P2P (regtest)
     healthcheck:
       test: ["CMD", "bitcoin-cli", "-regtest", "-rpcuser=ordpool", "-rpcpassword=ordpool", "getblockchaininfo"]
       interval: 2s
@@ -74,7 +99,7 @@ services:
       # developer's port 3000 (the NestJS default). Container side stays
       # 3000 — that is the Esplora default every consumer config expects.
       - "${E2E_ELECTRS_HOST_PORT:-3010}:3000"   # Esplora HTTP API (host 3010: 3000 stays free for local dev servers)
-      - "50001:50001"   # Electrum protocol
+      - "${E2E_ELECTRUM_HOST_PORT:-50001}:50001"   # Electrum protocol
     healthcheck:
       # debian-slim runtime has no wget/curl; bash /dev/tcp probes the port.
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/3000"]
@@ -152,7 +177,7 @@ services:
       - --http-port=8080
       - --address=0.0.0.0
     ports:
-      - "8080:8080"     # ord HTTP API + UI
+      - "${E2E_ORD_HOST_PORT:-8080}:8080"     # ord HTTP API + UI
     volumes:
       - ord-data:/data
     # No healthcheck. The runtime image is debian:bookworm-slim with only
@@ -197,6 +222,7 @@ services:
       - ord
       - --regtest
       - --index-sats
+      - --index-runes
       - --index-addresses
       - --bitcoin-rpc-url=bitcoind:18443
       - --bitcoin-rpc-username=ordpool
@@ -207,7 +233,7 @@ services:
       - --http-port=8080
       - --address=0.0.0.0
     ports:
-      - "8081:8080"     # host :8081 → container :8080 to coexist with cat21-ord
+      - "${E2E_ORD_STOCK_HOST_PORT:-8081}:8080"     # host :8081 → container :8080 to coexist with cat21-ord
     volumes:
       - ord-stock-data:/data
 
@@ -268,6 +294,7 @@ services:
       start_period: 40s
 
 volumes:
+  bitcoind-data:
   electrs-data:
   ord-data:
   ord-stock-data:

@@ -340,10 +340,56 @@ export interface StockOrdOutput {
     inscriptions: string[];
     /** `[start, end)` sat ranges in output order (ord runs with `--index-sats`). */
     sat_ranges: Array<[number, number]>;
+    /** Rune balances, keyed by spaced name. `null` when ord has no rune index. */
+    runes?: Record<string, {
+        amount: number;
+        divisibility: number;
+        symbol: string;
+    }> | null;
     /** The output's scriptPubKey, hex, as the chain itself holds it. */
     script_pubkey: string;
     address: string;
 }
+/** A regtest coin seeded so that it really carries a rune balance. */
+export interface SeededRuneCoin {
+    txid: string;
+    vout: number;
+    /** The coin's value in sats. */
+    value: number;
+    /** The rune's spaced name, as ord spells it. */
+    runeName: string;
+    /** Base units held on this coin, as ord's `/output` reports them (a NUMBER). */
+    amount: number;
+    divisibility: number;
+    symbol: string;
+    /** The transaction that etched it, for an etching-link assertion. */
+    etchingTxid: string;
+    address: string;
+}
+/**
+ * Etch a rune on regtest and seed a coin carrying its premine.
+ *
+ * This is the half of the funding-safety guard that was previously impossible
+ * to prove: cat21-ord never indexes runes, and the stock ord only does so with
+ * `--index-runes`, which both composes now pass. Without it `/output.runes` is
+ * always `null` and a rune row or rune refusal cannot be exercised at all.
+ *
+ * Etching is not a single call. ord commits the rune name, waits
+ * `COMMIT_CONFIRMATIONS` (6) for that commitment to mature, then reveals, and
+ * it blocks for the whole wait. So blocks have to be mined CONCURRENTLY, and
+ * not too fast: ord refuses to act while its index is behind bitcoind, so an
+ * aggressive miner makes the etch fail with "N blocks behind". `--no-backup`
+ * is required too, because ord otherwise imports a recovery descriptor into
+ * bitcoind and that import fails here.
+ *
+ * Every one of those was found by doing it rather than by reading about it.
+ */
+export declare function seedRuneCoin(options?: {
+    address?: string;
+    runeName?: string;
+    walletName?: string;
+    feeRate?: number;
+}): Promise<SeededRuneCoin>;
 /** A regtest coin seeded so that it really carries an inscription. */
 export interface SeededInscribedCoin {
     txid: string;

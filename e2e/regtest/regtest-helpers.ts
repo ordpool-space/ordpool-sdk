@@ -800,9 +800,154 @@ export interface StockOrdOutput {
   inscriptions: string[];
   /** `[start, end)` sat ranges in output order (ord runs with `--index-sats`). */
   sat_ranges: Array<[number, number]>;
+  /** Rune balances, keyed by spaced name. `null` when ord has no rune index. */
+  runes?: Record<string, { amount: number; divisibility: number; symbol: string }> | null;
   /** The output's scriptPubKey, hex, as the chain itself holds it. */
   script_pubkey: string;
   address: string;
+}
+
+/** A regtest coin seeded so that it really carries a rune balance. */
+export interface SeededRuneCoin {
+  txid: string;
+  vout: number;
+  /** The coin's value in sats. */
+  value: number;
+  /** The rune's spaced name, as ord spells it. */
+  runeName: string;
+  /** Base units held on this coin, as ord's `/output` reports them (a NUMBER). */
+  amount: number;
+  divisibility: number;
+  symbol: string;
+  /** The transaction that etched it, for an etching-link assertion. */
+  etchingTxid: string;
+  address: string;
+}
+
+/**
+ * Etch a rune on regtest and seed a coin carrying its premine.
+ *
+ * This is the half of the funding-safety guard that was previously impossible
+ * to prove: cat21-ord never indexes runes, and the stock ord only does so with
+ * `--index-runes`, which both composes now pass. Without it `/output.runes` is
+ * always `null` and a rune row or rune refusal cannot be exercised at all.
+ *
+ * Etching is not a single call. ord commits the rune name, waits
+ * `COMMIT_CONFIRMATIONS` (6) for that commitment to mature, then reveals, and
+ * it blocks for the whole wait. So blocks have to be mined CONCURRENTLY, and
+ * not too fast: ord refuses to act while its index is behind bitcoind, so an
+ * aggressive miner makes the etch fail with "N blocks behind". `--no-backup`
+ * is required too, because ord otherwise imports a recovery descriptor into
+ * bitcoind and that import fails here.
+ *
+ * Every one of those was found by doing it rather than by reading about it.
+ */
+export async function seedRuneCoin(
+  options: { address?: string; runeName?: string; walletName?: string; feeRate?: number } = {},
+): Promise<SeededRuneCoin> {
+  const runeName = options.runeName ?? uniqueRuneName();
+  const walletName = options.walletName ?? 'rune-etcher';
+  const feeRate = options.feeRate ?? 2;
+
+  ordStockCreateWallet(walletName);
+  const ordAddress = JSON.parse(ordStockWalletCli(walletName, 'receive')) as
+    { address?: string; addresses?: string[] };
+  const fundTo = ordAddress.address ?? ordAddress.addresses?.[0];
+  if (!fundTo) throw new Error('seedRuneCoin: ord wallet gave no receive address');
+  await sendFromCleanFunderCoin({ [fundTo]: '5.0' });
+
+  writeOrdStockFile('/tmp/rune-payload.txt', new TextEncoder().encode(`rune etch ${runeName}`));
+  const batch = [
+    'mode: separate-outputs',
+    'postage: 10000',
+    'inscriptions:',
+    '  - file: /tmp/rune-payload.txt',
+    'etching:',
+    `  rune: ${runeName}`,
+    '  divisibility: 2',
+    '  premine: 1000.00',
+    '  supply: 1000.00',
+    '  symbol: "@"',
+    '  turbo: true',
+    '',
+  ].join('\n');
+  writeOrdStockFile('/tmp/rune-batch.yaml', new TextEncoder().encode(batch));
+
+  // Mine through the commitment's maturity while ord blocks, slowly enough
+  // that ord's indexer keeps pace.
+  let mining = true;
+  const miner = (async () => {
+    await new Promise((r) => setTimeout(r, 8_000));
+    while (mining) {
+      try { mineBlocks(1); } catch { /* the etch may already be done */ }
+      await new Promise((r) => setTimeout(r, 6_000));
+    }
+  })();
+
+  let result: { reveal: string; rune?: { location?: string; rune?: string } };
+  try {
+    result = JSON.parse(ordStockWalletCli(
+      walletName, 'batch', '--fee-rate', String(feeRate), '--no-backup', '--batch', '/tmp/rune-batch.yaml',
+    )) as typeof result;
+  } finally {
+    mining = false;
+    await miner;
+  }
+
+  const location = result.rune?.location;
+  if (!location) throw new Error(`seedRuneCoin: ord reported no rune location: ${JSON.stringify(result)}`);
+  const [txid, voutText] = location.split(':');
+  const vout = Number(voutText);
+
+  const tip = mineBlocks(2);
+  await waitForElectrsSync(tip);
+  await waitForOrdStockSync(tip);
+
+  const output = await getStockOrdOutput(`${txid}:${vout}`);
+  const entry = output.runes?.[runeName];
+  if (!entry) {
+    throw new Error(
+      `seedRuneCoin: stock ord reports no rune on ${txid}:${vout} (${JSON.stringify(output.runes)}). ` +
+      'Is --index-runes on? Without it /output.runes is always null and no rune spec can prove anything.',
+    );
+  }
+
+  const etching = await fetch(`${ORD_STOCK_URL}/rune/${encodeURIComponent(runeName)}`, {
+    headers: { Accept: 'application/json' },
+  }).then((r) => r.json()) as { entry?: { etching?: string } };
+
+  let seeded = { txid, vout, value: output.value, address: output.address };
+  if (options.address !== undefined) {
+    // The funding scan reads the PAYMENT address, so a rune left at ord's own
+    // address is a coin the scan never sees.
+    const sent = ordStockWalletCli(
+      walletName, 'send', '--fee-rate', String(feeRate), options.address, `1000:${runeName}`,
+    );
+    const sentTxid = (JSON.parse(sent) as { txid: string }).txid;
+    const sentTip = mineBlocks(1);
+    await waitForElectrsSync(sentTip);
+    await waitForOrdStockSync(sentTip);
+    const moved = await getStockOrdOutput(`${sentTxid}:1`);
+    seeded = { txid: sentTxid, vout: 1, value: moved.value, address: moved.address };
+  }
+
+  return {
+    ...seeded,
+    runeName,
+    amount: entry.amount,
+    divisibility: entry.divisibility,
+    symbol: entry.symbol,
+    etchingTxid: etching.entry?.etching ?? '',
+  };
+}
+
+/** A fresh spaced rune name; ord refuses a name already etched on this chain. */
+function uniqueRuneName(): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let n = Date.now();
+  let suffix = '';
+  while (suffix.length < 8) { suffix = alphabet[n % 26] + suffix; n = Math.floor(n / 26); }
+  return `ORDPOOL\u2022${suffix}`;
 }
 
 /** A regtest coin seeded so that it really carries an inscription. */

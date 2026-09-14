@@ -1,3 +1,21 @@
+# COMPOSE PROJECT: derived from E2E_PREFIX, not from this file's directory.
+#
+# Without this, every session using this file shares ONE project, whatever it
+# sets E2E_PREFIX to. E2E_PREFIX only renames containers; compose still matches
+# services by project, so `up` from one session RECREATES another session's
+# containers under the new names, and a `down` or a `rm` then takes them away.
+# bitcoind keeps its chain in the container's writable layer, so that costs the
+# other session its whole regtest chain, silently, while both look isolated.
+#
+# Observed on 2026-09-14: a stack brought up as E2E_PREFIX=runeprobe on
+# alternate host ports destroyed a concurrently running cubes-e2e stack's chain.
+# Alternate ports do NOT isolate; only the project does.
+#
+# Tying the project to the prefix makes two differently-prefixed stacks genuinely
+# separate, volumes included. Same default, so nothing changes for a single
+# session.
+name: ${E2E_PREFIX:-ordpool-e2e}-consumer
+
 # Shared infrastructure for consumer E2E workflows (ordpool + cat21).
 #
 # The SDK owns the *base layer* — bitcoind, electrs, mariadb, optional
@@ -50,6 +68,8 @@ services:
       - -listen=1
       - -zmqpubrawblock=tcp://0.0.0.0:28332
       - -zmqpubrawtx=tcp://0.0.0.0:28333
+    volumes:
+      - bitcoind-data:/home/bitcoin/.bitcoin
     ports:
       - "18443:18443"
       - "18444:18444"
@@ -237,6 +257,7 @@ services:
       - ord
       - --regtest
       - --index-sats
+      - --index-runes
       - --index-addresses
       - --bitcoin-rpc-url=bitcoind:18443
       - --bitcoin-rpc-username=ordpool
@@ -244,16 +265,23 @@ services:
       - --data-dir=/data
       - server
       - --http
-      - --http-port=8081
+      # INTERNAL 8080, published on host 8081. Symmetric with cat21-ord and
+      # with the regtest stack, and load-bearing: the docker-exec wallet
+      # helpers pass --server-url http://localhost:8080, which is evaluated
+      # INSIDE the container. Serving 8081 internally left nothing answering
+      # on 8080 there, so every ord wallet command through this service failed
+      # while the host-side URL looked correct.
+      - --http-port=8080
       - --address=0.0.0.0
     ports:
-      - "8081:8081"     # full-ord HTTP API
+      - "${E2E_ORD_STOCK_HOST_PORT:-8081}:8080"     # full-ord HTTP API
     volumes:
       - ord-stock-data:/data
     # No healthcheck: the slim runtime image has no wget/curl. Consumers
     # poll the host-exposed :8081/status before running specs.
 
 volumes:
+  bitcoind-data:
   electrs-data:
   cat21-ord-data:
   ord-stock-data:
