@@ -73,6 +73,26 @@ function ordCardinal(): string {
   return cardinal.output;
 }
 
+/**
+ * An offset that really exists inside a coin's FIRST sat range.
+ *
+ * Prefers 7777, which is far enough in to be a meaningful offset, but a funding
+ * coin's opening range is whatever the chain produced: one assembled from
+ * several inputs can open with a range shorter than that, and then a hardcoded
+ * 7777 addresses a sat the coin does not contain. findSatOffset correctly
+ * returns undefined and the spec fails for a reason that has nothing to do with
+ * the code under test. Observed on 2026-09-14, intermittently, depending on how
+ * earlier specs had left the wallet's coins.
+ */
+function offsetInsideFirstRange(ranges: ReadonlyArray<readonly [number, number]>): number {
+  const first = ranges[0];
+  if (first === undefined) throw new Error('offsetInsideFirstRange: ord reported no sat ranges');
+  const [start, end] = first;
+  const length = end - start;
+  if (length < 1) throw new Error(`offsetInsideFirstRange: empty first range ${start}..${end}`);
+  return Math.min(7_777, length - 1);
+}
+
 describe('inscribe onto a chosen sat → parity with `ord wallet inscribe --satpoint` / `--sat`', () => {
   beforeAll(async () => {
     await waitForOrdStockReady(60_000);
@@ -131,21 +151,27 @@ describe('inscribe onto a chosen sat → parity with `ord wallet inscribe --satp
   it('--sat <n>: findSatOffset turns the sat into the offset ord uses, and both land on it', async () => {
     const ordSource = ordCardinal();
     const { sat_ranges } = await getStockOrdOutput(ordSource);
-    const sat = sat_ranges[0][0] + 7_777;
-    expect(findSatOffset(sat_ranges, sat)).toBe(7_777);
+    // A coin's FIRST range is whatever the chain hands us, and a coin assembled
+    // from several inputs can open with a range shorter than the offset we want.
+    // Pick an offset genuinely inside that range, so this asserts findSatOffset
+    // rather than the chain's coin composition.
+    const ordOffset = offsetInsideFirstRange(sat_ranges);
+    const sat = sat_ranges[0][0] + ordOffset;
+    expect(findSatOffset(sat_ranges, sat)).toBe(ordOffset);
 
     writeOrdStockFile('/tmp/pst-sat.txt', enc('inscribed onto a sat by number'));
     const ord = ordStockWalletInscribe(ORD_WALLET, '/tmp/pst-sat.txt', FEE_RATE, ['--sat', String(sat)]);
     await waitForOrdStockSync(mineBlocks(1));
-    expect(sats(ord.commit)[0]).toBe(7_777);
+    expect(sats(ord.commit)[0]).toBe(ordOffset);
     expect((await waitForOrdStockInscription(`${ord.reveal}i0`)).sat).toBe(sat);
 
     // The SDK, given only a sat number in its own funding UTXO.
     const f = await fundUninscribed();
     const ranges = (await getStockOrdOutput(`${f.utxo.txid}:${f.utxo.vout}`)).sat_ranges;
-    const wanted = ranges[0][0] + 7_777;
+    const wantedOffset = offsetInsideFirstRange(ranges);
+    const wanted = ranges[0][0] + wantedOffset;
     const satOffset = findSatOffset(ranges, wanted);
-    expect(satOffset).toBe(7_777);
+    expect(satOffset).toBe(wantedOffset);
     const built = createInscribeTransactions({
       paymentOutput: { ...f.utxo, status: { confirmed: true } },
       paymentPublicKey: f.fundingPubkey,
