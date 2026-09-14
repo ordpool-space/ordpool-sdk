@@ -50,6 +50,7 @@ exports.fundUninscribed = fundUninscribed;
 exports.getStockOrdContent = getStockOrdContent;
 exports.waitForOrdStockInscription = waitForOrdStockInscription;
 exports.ordStockCli = ordStockCli;
+exports.ordStockCliAsync = ordStockCliAsync;
 exports.ordStockCreateWallet = ordStockCreateWallet;
 exports.writeOrdStockFile = writeOrdStockFile;
 exports.ordStockWalletInscribe = ordStockWalletInscribe;
@@ -57,6 +58,8 @@ exports.ordStockWalletBatch = ordStockWalletBatch;
 exports.fundOrdStockWallet = fundOrdStockWallet;
 exports.sendFromCleanFunderCoin = sendFromCleanFunderCoin;
 const node_child_process_1 = require("node:child_process");
+const node_util_1 = require("node:util");
+const execFileAsync = (0, node_util_1.promisify)(node_child_process_1.execFile);
 const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
     `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
 const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
@@ -660,8 +663,15 @@ async function seedRuneCoin(options = {}) {
         '',
     ].join('\n');
     writeOrdStockFile('/tmp/rune-batch.yaml', new TextEncoder().encode(batch));
-    // Mine through the commitment's maturity while ord blocks, slowly enough
-    // that ord's indexer keeps pace.
+    // Mine through the commitment's maturity while ord runs, slowly enough that
+    // ord's indexer keeps pace.
+    //
+    // The etch MUST be the async CLI. `ord wallet batch` does not return until
+    // the commitment has six confirmations, and on regtest nothing produces
+    // those blocks unless this loop does. Against the SYNCHRONOUS call the two
+    // deadlock outright: execFileSync owns the event loop, so this timer never
+    // fires, the blocks are never mined, the commitment never matures, and the
+    // call waits forever.
     let mining = true;
     const miner = (async () => {
         await new Promise((r) => setTimeout(r, 8_000));
@@ -675,7 +685,7 @@ async function seedRuneCoin(options = {}) {
     })();
     let result;
     try {
-        result = JSON.parse(ordStockWalletCli(walletName, 'batch', '--fee-rate', String(feeRate), '--no-backup', '--batch', '/tmp/rune-batch.yaml'));
+        result = JSON.parse(await ordStockWalletCliAsync(walletName, 'batch', '--fee-rate', String(feeRate), '--no-backup', '--batch', '/tmp/rune-batch.yaml'));
     }
     finally {
         mining = false;
@@ -956,8 +966,9 @@ async function waitForOrdStockInscription(id, timeoutMs = 30_000) {
 // helpers exactly, minus `--index-cat21`.
 // ---------------------------------------------------------------------------
 const ORD_STOCK_CONTAINER = process.env.REGTEST_ORD_STOCK_CONTAINER ?? 'ordpool-e2e-ord-stock';
-function ordStockCli(...args) {
-    return (0, node_child_process_1.execFileSync)('docker', [
+/** The `docker exec` argv for one stock-ord CLI invocation. */
+function ordStockCliArgs(args) {
+    return [
         'exec', ORD_STOCK_CONTAINER,
         'ord',
         '--regtest',
@@ -968,10 +979,45 @@ function ordStockCli(...args) {
         '--bitcoin-rpc-password=ordpool',
         '--data-dir=/data',
         ...args,
-    ], { encoding: 'utf8' }).trim();
+    ];
+}
+function ordStockCli(...args) {
+    return (0, node_child_process_1.execFileSync)('docker', ordStockCliArgs(args), { encoding: 'utf8' }).trim();
+}
+/**
+ * Same invocation, without blocking the event loop.
+ *
+ * `execFileSync` holds the loop for the whole command, so any caller that has
+ * to keep doing something WHILE ord runs must use this one. The etching path
+ * is the case that forces it: `ord wallet batch` does not return until the
+ * commitment has six confirmations, and on regtest those blocks only exist if
+ * something mines them meanwhile. Mine from a timer against the sync call and
+ * the two deadlock: the call owns the loop, the timer never fires, the blocks
+ * are never mined, the call waits forever.
+ */
+async function ordStockCliAsync(...args) {
+    const { stdout } = await execFileAsync('docker', ordStockCliArgs(args), {
+        encoding: 'utf8',
+        maxBuffer: 16 * 1024 * 1024,
+    });
+    return stdout.trim();
+}
+/** The wallet-subcommand argv shared by the sync and async forms. */
+function ordStockWalletArgs(walletName, subcommandArgs) {
+    return [
+        'wallet',
+        '--no-sync',
+        '--name', walletName,
+        '--server-url', 'http://localhost:8080',
+        ...subcommandArgs,
+    ];
 }
 function ordStockWalletCli(walletName, ...subcommandArgs) {
-    return ordStockCli('wallet', '--no-sync', '--name', walletName, '--server-url', 'http://localhost:8080', ...subcommandArgs);
+    return ordStockCli(...ordStockWalletArgs(walletName, subcommandArgs));
+}
+/** Non-blocking `ord wallet …`, for commands that need blocks mined while they run. */
+function ordStockWalletCliAsync(walletName, ...subcommandArgs) {
+    return ordStockCliAsync(...ordStockWalletArgs(walletName, subcommandArgs));
 }
 function ordStockCreateWallet(name) {
     try {

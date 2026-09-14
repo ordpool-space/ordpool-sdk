@@ -4,7 +4,10 @@
 // Expects the regtest stack to be up via `e2e/regtest-bootstrap.sh`
 // and `REGTEST_FUNDED_ADDR` / `REGTEST_FUNDED_WIF` set in env.
 
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 const ELECTRS_URL =
   process.env.REGTEST_ELECTRS_URL ??
@@ -873,8 +876,15 @@ export async function seedRuneCoin(
   ].join('\n');
   writeOrdStockFile('/tmp/rune-batch.yaml', new TextEncoder().encode(batch));
 
-  // Mine through the commitment's maturity while ord blocks, slowly enough
-  // that ord's indexer keeps pace.
+  // Mine through the commitment's maturity while ord runs, slowly enough that
+  // ord's indexer keeps pace.
+  //
+  // The etch MUST be the async CLI. `ord wallet batch` does not return until
+  // the commitment has six confirmations, and on regtest nothing produces
+  // those blocks unless this loop does. Against the SYNCHRONOUS call the two
+  // deadlock outright: execFileSync owns the event loop, so this timer never
+  // fires, the blocks are never mined, the commitment never matures, and the
+  // call waits forever.
   let mining = true;
   const miner = (async () => {
     await new Promise((r) => setTimeout(r, 8_000));
@@ -886,7 +896,7 @@ export async function seedRuneCoin(
 
   let result: { reveal: string; rune?: { location?: string; rune?: string } };
   try {
-    result = JSON.parse(ordStockWalletCli(
+    result = JSON.parse(await ordStockWalletCliAsync(
       walletName, 'batch', '--fee-rate', String(feeRate), '--no-backup', '--batch', '/tmp/rune-batch.yaml',
     )) as typeof result;
   } finally {
@@ -1253,33 +1263,63 @@ export async function waitForOrdStockInscription(
 
 const ORD_STOCK_CONTAINER = process.env.REGTEST_ORD_STOCK_CONTAINER ?? 'ordpool-e2e-ord-stock';
 
-export function ordStockCli(...args: string[]): string {
-  return execFileSync(
-    'docker',
-    [
-      'exec', ORD_STOCK_CONTAINER,
-      'ord',
-      '--regtest',
-      '--index-sats',
-      '--index-addresses',
-      '--bitcoin-rpc-url=bitcoind:18443',
-      '--bitcoin-rpc-username=ordpool',
-      '--bitcoin-rpc-password=ordpool',
-      '--data-dir=/data',
-      ...args,
-    ],
-    { encoding: 'utf8' },
-  ).trim();
+/** The `docker exec` argv for one stock-ord CLI invocation. */
+function ordStockCliArgs(args: string[]): string[] {
+  return [
+    'exec', ORD_STOCK_CONTAINER,
+    'ord',
+    '--regtest',
+    '--index-sats',
+    '--index-addresses',
+    '--bitcoin-rpc-url=bitcoind:18443',
+    '--bitcoin-rpc-username=ordpool',
+    '--bitcoin-rpc-password=ordpool',
+    '--data-dir=/data',
+    ...args,
+  ];
 }
 
-function ordStockWalletCli(walletName: string, ...subcommandArgs: string[]): string {
-  return ordStockCli(
+export function ordStockCli(...args: string[]): string {
+  return execFileSync('docker', ordStockCliArgs(args), { encoding: 'utf8' }).trim();
+}
+
+/**
+ * Same invocation, without blocking the event loop.
+ *
+ * `execFileSync` holds the loop for the whole command, so any caller that has
+ * to keep doing something WHILE ord runs must use this one. The etching path
+ * is the case that forces it: `ord wallet batch` does not return until the
+ * commitment has six confirmations, and on regtest those blocks only exist if
+ * something mines them meanwhile. Mine from a timer against the sync call and
+ * the two deadlock: the call owns the loop, the timer never fires, the blocks
+ * are never mined, the call waits forever.
+ */
+export async function ordStockCliAsync(...args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('docker', ordStockCliArgs(args), {
+    encoding: 'utf8',
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return stdout.trim();
+}
+
+/** The wallet-subcommand argv shared by the sync and async forms. */
+function ordStockWalletArgs(walletName: string, subcommandArgs: string[]): string[] {
+  return [
     'wallet',
     '--no-sync',
     '--name', walletName,
     '--server-url', 'http://localhost:8080',
     ...subcommandArgs,
-  );
+  ];
+}
+
+function ordStockWalletCli(walletName: string, ...subcommandArgs: string[]): string {
+  return ordStockCli(...ordStockWalletArgs(walletName, subcommandArgs));
+}
+
+/** Non-blocking `ord wallet …`, for commands that need blocks mined while they run. */
+function ordStockWalletCliAsync(walletName: string, ...subcommandArgs: string[]): Promise<string> {
+  return ordStockCliAsync(...ordStockWalletArgs(walletName, subcommandArgs));
 }
 
 export function ordStockCreateWallet(name: string): string {

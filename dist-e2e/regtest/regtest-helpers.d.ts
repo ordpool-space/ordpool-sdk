@@ -516,6 +516,18 @@ export declare function getStockOrdContent(id: string): Promise<{
  */
 export declare function waitForOrdStockInscription(id: string, timeoutMs?: number): Promise<StockOrdInscription>;
 export declare function ordStockCli(...args: string[]): string;
+/**
+ * Same invocation, without blocking the event loop.
+ *
+ * `execFileSync` holds the loop for the whole command, so any caller that has
+ * to keep doing something WHILE ord runs must use this one. The etching path
+ * is the case that forces it: `ord wallet batch` does not return until the
+ * commitment has six confirmations, and on regtest those blocks only exist if
+ * something mines them meanwhile. Mine from a timer against the sync call and
+ * the two deadlock: the call owns the loop, the timer never fires, the blocks
+ * are never mined, the call waits forever.
+ */
+export declare function ordStockCliAsync(...args: string[]): Promise<string>;
 export declare function ordStockCreateWallet(name: string): string;
 /**
  * Write `content` to `containerPath` inside the ord-stock container. The
