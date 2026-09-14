@@ -63,9 +63,21 @@ DI-token layer; the config interfaces (`Cat21SdkConfig`, `StorageLike`,
 ### What goes in `core.ts`
 
 `src/core.ts` is the manifest for the `/core` subpath (`dist-core`,
-CommonJS). Its build (`tsconfig.core.json`) is INCLUDE-ONLY, not
-graph-following, so every file reachable from `core.ts` must ALSO be
-listed in that tsconfig's `include`.
+CommonJS). Both entry points compile the SAME source set
+(`src/**/*.ts`); `tsconfig.core.json` differs from `tsconfig.lib.json`
+only in module format and outDir. `core.ts` alone decides what `/core`
+exposes, so a file compiled but not re-exported there is simply
+unreachable through that entry.
+
+**Why the second format exists**: not Angular, and not anything the SDK
+imports. `cat21-indexer`'s backend is a CommonJS NestJS app that imports
+`validateCat21BuyOfferPsbt` and `MAX_ASK_SATS` from this entry on the
+offer path, and a CommonJS app cannot `require()` an ESM package. The
+ESM `dist/` additionally uses directory imports, which a bundler
+resolves and Node rejects (`ERR_UNSUPPORTED_DIR_IMPORT`). Collapsing to
+one format means choosing CommonJS for everyone, which costs the three
+Angular frontends their ESM tree-shaking. That is a trade to make
+deliberately, not a cleanup.
 
 Re-export the pure helpers, types, constants and the subscribe-based
 orchestrators. Keep the four stateful service classes (`WalletService`,
@@ -83,8 +95,7 @@ When adding a new pure helper:
 1. Create the file under `src/`.
 2. Export from its own file.
 3. Re-export from `src/core.ts`.
-4. Add the source file to the `include` list in `tsconfig.core.json`.
-5. `npm run build` (or just `npm run build:core` if you only
+4. `npm run build` (or just `npm run build:core` if you only
    changed pure code) — regenerates the dist outputs.
 
 ### Build commands
