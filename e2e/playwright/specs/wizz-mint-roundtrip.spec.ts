@@ -17,21 +17,21 @@ import { installWizzOfflineRoutes } from '../wizz-offline-routes';
  * applies: we sign a regtest-encoded PSBT against the wallet's
  * mainnet address (the P2WPKH script hash is HRP-independent).
  *
- * SCOPE, because the title claims more than the spec proves: the
- * postage recipient here is NOT the wallet's ordinals identity. Both
- * addresses come from `deriveRegtestAddresses(wallet.paymentPublicKey)`,
- * so `regtest.ordinalsAddress` is a taproot address over the PAYMENT
- * key, while Wizz derives its real ordinals address from a different
- * path. A user minting through a consumer app pays postage to their
- * OWN ordinals address, which this spec never exercises.
+ * SCOPE of the postage recipient: Wizz is a SINGLE-ADDRESS wallet, one
+ * address for both payments and ordinals (see wizz.connector.ts). This
+ * spec does not use it for the postage output. Both addresses here come
+ * from `deriveRegtestAddresses(wallet.paymentPublicKey)`, so the
+ * recipient is a taproot address over the payment key, while a consumer
+ * app pays postage to the wallet's own single address, a P2WPKH.
  *
- * That difference is under investigation: a consumer driving Wizz with
- * postage to the wallet's real ordinals address sees the popup's Sign
- * button never become clickable, while this spec signs and confirms.
- * Whether the recipient key is the CAUSE is not established, so do not
- * read a green run here as "Wizz can mint a cat for a user". It proves
- * Wizz signs a lockTime=21 transaction whose postage goes to a taproot
- * address the wallet does not treat as its ordinals identity.
+ * Observed in a consumer's passing run: output 0 is 546 sats to a
+ * P2WPKH `0014...`, the same address as the funding input and the
+ * change. So a user-shaped Wizz mint is all-segwit and self-addressed,
+ * and this spec's taproot recipient is a divergence from it.
+ *
+ * No known problem follows from that divergence; the consumer's mint
+ * signs and confirms. It is recorded so nobody reading this spec
+ * assumes the postage output matches what a user's wallet receives.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
