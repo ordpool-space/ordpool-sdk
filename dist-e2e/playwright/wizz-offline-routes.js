@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.installWizzOfflineRoutes = installWizzOfflineRoutes;
+exports.recordWalletBackendRequests = recordWalletBackendRequests;
 /**
  * Make every Wizz popup hermetic: intercept the wallet's fleet of LIVE
  * third-party backends and answer each with the truthful "empty" result.
@@ -122,5 +123,58 @@ async function installWizzOfflineRoutes(context) {
     await context.route('**/mempool.space/api/v1/historical-price**', route => route.fulfill(okJson({ prices: [], exchangeRates: {} })));
     // Wizz marketplace aggregator — not needed for signing, 503s in CI.
     await context.route('**/mkt.wizz.cash/**', route => route.abort());
+}
+/**
+ * Record every off-box request a wallet popup makes, so two flows can be
+ * diffed instead of guessed at.
+ *
+ * This is the tool for "operation A signs fine and operation B leaves the Sign
+ * button disabled". Both flows are recorded and the difference names the call
+ * the stub does not answer, which beats varying a protocol constant to infer
+ * it: a diagnostic that changes the thing under test tells you less, and a
+ * postage size is not ours to vary even temporarily.
+ *
+ * Pure observation. It attaches listeners rather than routes, so it cannot
+ * change which handler wins or perturb the behaviour being measured. Localhost
+ * is filtered out, leaving only the wallet's own backends.
+ */
+function recordWalletBackendRequests(context) {
+    const requests = [];
+    const offBox = (url) => !url.includes('localhost') && !url.includes('127.0.0.1') && !url.startsWith('chrome-extension:');
+    context.on('response', (response) => {
+        const url = response.url();
+        if (!offBox(url))
+            return;
+        requests.push({
+            method: response.request().method(),
+            url,
+            status: response.status(),
+            postData: response.request().postData()?.slice(0, 400),
+        });
+    });
+    context.on('requestfailed', (request) => {
+        const url = request.url();
+        if (!offBox(url))
+            return;
+        requests.push({
+            method: request.method(),
+            url,
+            status: null,
+            postData: request.postData()?.slice(0, 400),
+        });
+    });
+    return {
+        requests,
+        hosts() {
+            return [...new Set(requests.map((r) => {
+                    try {
+                        return new URL(r.url).host;
+                    }
+                    catch {
+                        return r.url;
+                    }
+                }))].sort();
+        },
+    };
 }
 //# sourceMappingURL=wizz-offline-routes.js.map

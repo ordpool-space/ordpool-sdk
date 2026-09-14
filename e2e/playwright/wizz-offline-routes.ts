@@ -131,3 +131,65 @@ export async function installWizzOfflineRoutes(context: BrowserContext): Promise
   // Wizz marketplace aggregator — not needed for signing, 503s in CI.
   await context.route('**/mkt.wizz.cash/**', route => route.abort());
 }
+
+/** One request a wallet popup made, as recorded by {@link recordWalletBackendRequests}. */
+export interface RecordedBackendRequest {
+  method: string;
+  url: string;
+  /** Response status, or null when the request failed outright. */
+  status: number | null;
+  /** POST body, truncated. The decode endpoints carry the PSBT here. */
+  postData?: string;
+}
+
+/**
+ * Record every off-box request a wallet popup makes, so two flows can be
+ * diffed instead of guessed at.
+ *
+ * This is the tool for "operation A signs fine and operation B leaves the Sign
+ * button disabled". Both flows are recorded and the difference names the call
+ * the stub does not answer, which beats varying a protocol constant to infer
+ * it: a diagnostic that changes the thing under test tells you less, and a
+ * postage size is not ours to vary even temporarily.
+ *
+ * Pure observation. It attaches listeners rather than routes, so it cannot
+ * change which handler wins or perturb the behaviour being measured. Localhost
+ * is filtered out, leaving only the wallet's own backends.
+ */
+export function recordWalletBackendRequests(
+  context: BrowserContext,
+): { requests: RecordedBackendRequest[]; hosts(): string[] } {
+  const requests: RecordedBackendRequest[] = [];
+  const offBox = (url: string): boolean =>
+    !url.includes('localhost') && !url.includes('127.0.0.1') && !url.startsWith('chrome-extension:');
+
+  context.on('response', (response) => {
+    const url = response.url();
+    if (!offBox(url)) return;
+    requests.push({
+      method: response.request().method(),
+      url,
+      status: response.status(),
+      postData: response.request().postData()?.slice(0, 400),
+    });
+  });
+  context.on('requestfailed', (request) => {
+    const url = request.url();
+    if (!offBox(url)) return;
+    requests.push({
+      method: request.method(),
+      url,
+      status: null,
+      postData: request.postData()?.slice(0, 400),
+    });
+  });
+
+  return {
+    requests,
+    hosts(): string[] {
+      return [...new Set(requests.map((r) => {
+        try { return new URL(r.url).host; } catch { return r.url; }
+      }))].sort();
+    },
+  };
+}

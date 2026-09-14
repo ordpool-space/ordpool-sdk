@@ -21,4 +21,31 @@ import { BrowserContext } from '@playwright/test';
  * from `ordpool-sdk/e2e` instead of keeping their own.
  */
 export declare function installWizzOfflineRoutes(context: BrowserContext): Promise<void>;
+/** One request a wallet popup made, as recorded by {@link recordWalletBackendRequests}. */
+export interface RecordedBackendRequest {
+    method: string;
+    url: string;
+    /** Response status, or null when the request failed outright. */
+    status: number | null;
+    /** POST body, truncated. The decode endpoints carry the PSBT here. */
+    postData?: string;
+}
+/**
+ * Record every off-box request a wallet popup makes, so two flows can be
+ * diffed instead of guessed at.
+ *
+ * This is the tool for "operation A signs fine and operation B leaves the Sign
+ * button disabled". Both flows are recorded and the difference names the call
+ * the stub does not answer, which beats varying a protocol constant to infer
+ * it: a diagnostic that changes the thing under test tells you less, and a
+ * postage size is not ours to vary even temporarily.
+ *
+ * Pure observation. It attaches listeners rather than routes, so it cannot
+ * change which handler wins or perturb the behaviour being measured. Localhost
+ * is filtered out, leaving only the wallet's own backends.
+ */
+export declare function recordWalletBackendRequests(context: BrowserContext): {
+    requests: RecordedBackendRequest[];
+    hosts(): string[];
+};
 //# sourceMappingURL=wizz-offline-routes.d.ts.map
