@@ -752,6 +752,15 @@ async function findRuneOutput(txid, runeName, address) {
     throw new Error(`findRuneOutput: no output of ${txid} carries ${runeName} at ${address}. ` +
         `Outputs holding the rune: ${seen.length ? seen.join(', ') : 'none'}.`);
 }
+/**
+ * The rune coin carries a notable sat too, for the same reason the inscribed
+ * one does, so assert the RUNE specifically and never a generic "has content"
+ * signal. When asserting rendered text, note that a rune pile's symbol is
+ * preceded by a NON-BREAKING space (U+00A0), because ord's `Display for Pile`
+ * emits one and `formatRunePile` matches it. `toContain('1000 @')` written with
+ * an ordinary space does not match, and the failure prints as
+ * Expected "1000 @" / Received "1000 @" with nothing visibly different.
+ */
 /** A fresh spaced rune name; ord refuses a name already etched on this chain. */
 function uniqueRuneName() {
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -788,6 +797,20 @@ function uniqueRuneName() {
  *
  * Mines and waits for electrs and stock ord, so the coin is scannable on
  * return.
+ *
+ * **The coin usually carries a notable sat too, so never assert on a generic
+ * "has content" signal.** Every coin on regtest descends from a coinbase, and
+ * a coinbase output opens on its block's first sat, which ordinal theory calls
+ * `uncommon`; both ords run with `--index-sats`, so both report it. A spec that
+ * checks only "an asset was found" therefore passes whether the inscription was
+ * detected or not, which is the shape that cannot fail and proves nothing.
+ * Assert the INSCRIPTION ID specifically: it comes from the stock ord's
+ * `inscriptions` field, the one cat21-ord does not have, so it is the only
+ * assertion the mutation can move.
+ *
+ * Observed 2026-09-14: a consumer's guard spec went green against cat21-ord
+ * because the generic asset badge fired on that rare sat; re-asserting on the
+ * rendered inscription id made the same mutation go red.
  */
 async function seedInscribedCoin(options) {
     const postageSats = options.postageSats ?? 2_000_000;
