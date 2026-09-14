@@ -8,7 +8,7 @@
  * only thing that proves the padded commit was built right.
  */
 
-import { describe, expect, it, beforeAll } from '@jest/globals';
+import { describe, expect, it, beforeAll, afterAll } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
@@ -101,6 +101,18 @@ beforeAll(async () => {
 
   // The payment side: one coin to fund the fee, one small one to pad with.
   payment = await fundUninscribed();
+
+  // LOCK the payment coin before minting the padding one. fundUninscribed takes
+  // its address from `getnewaddress` on the ordpool-e2e wallet, so the coin it
+  // returns is wallet-owned, and the `sendtoaddress` below is funded by Core's
+  // automatic coin selection over that same wallet. Core is free to pick this
+  // very coin as the input, which spends it, and the commit later fails to
+  // broadcast with `bad-txns-inputs-missingorspent`. It only happens when
+  // selection lands on this coin, so it fails intermittently and for a reason
+  // that points nowhere near the code under test.
+  rpc('-rpcwallet=ordpool-e2e', 'lockunspent', 'false',
+    JSON.stringify([{ txid: payment.utxo.txid, vout: payment.utxo.vout }]));
+
   rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', payment.fundingAddr, (PADDING_COIN_SATS / 1e8).toFixed(8));
   tip = mineBlocks(1);
   await waitForElectrsSync(tip);
@@ -108,6 +120,15 @@ beforeAll(async () => {
   const small = await waitForUtxoAt(payment.fundingAddr, PADDING_COIN_SATS);
   paddingCoin = { txid: small.txid, vout: small.vout, value: small.value };
 }, 300_000);
+
+afterAll(() => {
+  // Release the lock, so a locked coin cannot starve a later spec's selection.
+  if (payment === undefined) return;
+  try {
+    rpc('-rpcwallet=ordpool-e2e', 'lockunspent', 'true',
+      JSON.stringify([{ txid: payment.utxo.txid, vout: payment.utxo.vout }]));
+  } catch { /* the coin may already be spent by the test itself */ }
+});
 
 describe('a sat below the dust floor of its coin, padded by a coin the SDK sources', () => {
   it('sources the padding coin, builds the padded commit, and ord finds the inscription on that exact sat', async () => {
