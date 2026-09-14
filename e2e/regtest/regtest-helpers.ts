@@ -805,6 +805,100 @@ export interface StockOrdOutput {
   address: string;
 }
 
+/** A regtest coin seeded so that it carries a notable sat. */
+export interface SeededRareSatCoin {
+  txid: string;
+  vout: number;
+  /** The coin's value in sats. */
+  value: number;
+  /** The notable sat it carries, at offset 0. */
+  sat: number;
+  /** ord's own rarity for that sat: `uncommon` on an ordinary regtest block. */
+  rarity: string;
+  /** Where the coin sits. */
+  address: string;
+}
+
+/**
+ * Seed a coin that really carries a notable sat, for a spec that needs a
+ * rare-sat row to render against a scanned coin rather than against fabricated
+ * state.
+ *
+ * A regtest coinbase's FIRST sat is a block-first sat, which ord's rarity model
+ * reads as `uncommon`. So the coin is funded from one explicit coinbase input
+ * with change forced AFTER the payment, which leaves the payment output holding
+ * the input's earliest sats, the boundary sat among them, at offset 0.
+ *
+ * The rarity is read back from ord rather than asserted here, so a caller
+ * checks a rendered row against ord's own verdict. Blocks are mined and both
+ * electrs and stock ord are waited on, so the coin is scannable when this
+ * returns.
+ *
+ * @param address Where to seed it. Defaults to a fresh address of the regtest
+ *                wallet; pass the wallet address under test to have the coin
+ *                appear in that wallet's scan.
+ */
+export async function seedRareSatCoin(
+  options: { address?: string } = {},
+): Promise<SeededRareSatCoin> {
+  const address = options.address ?? rpc('-rpcwallet=ordpool-e2e', 'getnewaddress').trim();
+  // It has to be a real COINBASE output, not merely the biggest coin. Only a
+  // coinbase begins at a block's first sat; a change output from an earlier
+  // seed begins mid-block, and funding from one yields a common sat. Repeated
+  // seeding exhausts the pristine coinbases, so the type is checked rather
+  // than assumed from the size.
+  const unspent = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent', '100')) as Array<{
+    txid: string; vout: number; amount: number;
+  }>;
+  const byValue = [...unspent].sort((a, b) => b.amount - a.amount);
+  let coinbase: { txid: string; vout: number } | undefined;
+  for (const candidate of byValue) {
+    if (candidate.vout !== 0) continue; // a coinbase pays its subsidy to vout 0
+    const tx = JSON.parse(rpc('getrawtransaction', candidate.txid, '1')) as {
+      vin: Array<{ coinbase?: string }>;
+    };
+    if (tx.vin[0]?.coinbase !== undefined) { coinbase = candidate; break; }
+  }
+  if (!coinbase) {
+    throw new Error(
+      'seedRareSatCoin: no unspent mature COINBASE output to seed from. ' +
+      'Mine more blocks, or the chain has had its block-first sats spent.',
+    );
+  }
+
+  const AMOUNT_BTC = 0.5;
+  const raw = rpc(
+    'createrawtransaction',
+    JSON.stringify([{ txid: coinbase.txid, vout: coinbase.vout }]),
+    JSON.stringify([{ [address]: AMOUNT_BTC }]),
+  );
+  // changePosition 1 keeps the payment at vout 0, so it inherits the input's
+  // first sats. Change after it takes the rest.
+  const funded = JSON.parse(
+    rpc('-rpcwallet=ordpool-e2e', 'fundrawtransaction', raw, JSON.stringify({ changePosition: 1 })),
+  ) as { hex: string };
+  const signed = JSON.parse(
+    rpc('-rpcwallet=ordpool-e2e', 'signrawtransactionwithwallet', funded.hex),
+  ) as { hex: string };
+  const txid = rpc('sendrawtransaction', signed.hex).trim();
+
+  const tip = mineBlocks(1);
+  await waitForElectrsSync(tip);
+  await waitForOrdStockSync(tip);
+
+  const output = await getStockOrdOutput(`${txid}:0`);
+  const sat = output.sat_ranges[0][0];
+  const { rarity } = await getStockOrdSat(sat);
+  if (rarity === 'common') {
+    throw new Error(
+      `seedRareSatCoin: the seeded coin's first sat ${sat} is common, not notable. ` +
+      'The chosen input was not a coinbase, or its first sats were already spent.',
+    );
+  }
+
+  return { txid, vout: 0, value: Math.round(AMOUNT_BTC * 1e8), sat, rarity, address: output.address };
+}
+
 /** ord's own verdict on a sat: `GET /sat/<sat>`, which carries its rarity. */
 export async function getStockOrdSat(sat: number): Promise<{ rarity: string; number: number }> {
   const res = await fetch(`${ORD_STOCK_URL}/sat/${sat}`, {

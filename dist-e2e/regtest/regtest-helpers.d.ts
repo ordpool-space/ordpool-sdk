@@ -344,6 +344,41 @@ export interface StockOrdOutput {
     script_pubkey: string;
     address: string;
 }
+/** A regtest coin seeded so that it carries a notable sat. */
+export interface SeededRareSatCoin {
+    txid: string;
+    vout: number;
+    /** The coin's value in sats. */
+    value: number;
+    /** The notable sat it carries, at offset 0. */
+    sat: number;
+    /** ord's own rarity for that sat: `uncommon` on an ordinary regtest block. */
+    rarity: string;
+    /** Where the coin sits. */
+    address: string;
+}
+/**
+ * Seed a coin that really carries a notable sat, for a spec that needs a
+ * rare-sat row to render against a scanned coin rather than against fabricated
+ * state.
+ *
+ * A regtest coinbase's FIRST sat is a block-first sat, which ord's rarity model
+ * reads as `uncommon`. So the coin is funded from one explicit coinbase input
+ * with change forced AFTER the payment, which leaves the payment output holding
+ * the input's earliest sats, the boundary sat among them, at offset 0.
+ *
+ * The rarity is read back from ord rather than asserted here, so a caller
+ * checks a rendered row against ord's own verdict. Blocks are mined and both
+ * electrs and stock ord are waited on, so the coin is scannable when this
+ * returns.
+ *
+ * @param address Where to seed it. Defaults to a fresh address of the regtest
+ *                wallet; pass the wallet address under test to have the coin
+ *                appear in that wallet's scan.
+ */
+export declare function seedRareSatCoin(options?: {
+    address?: string;
+}): Promise<SeededRareSatCoin>;
 /** ord's own verdict on a sat: `GET /sat/<sat>`, which carries its rarity. */
 export declare function getStockOrdSat(sat: number): Promise<{
     rarity: string;
