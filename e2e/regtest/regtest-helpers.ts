@@ -1542,6 +1542,17 @@ export interface WatchOnlyTestAccount {
   /** Receive address at `m/<account>/0/<index>`, p2tr. Fund and assert on these. */
   addressAt(index: number): string;
   /**
+   * The full p2tr payment at that index, for building an input by hand.
+   *
+   * Use `script` as the witnessUtxo script and `tapInternalKey` as the input's
+   * tapInternalKey. Do NOT take the key by decoding the address: an address
+   * decodes to the TWEAKED output key, and an input carrying that as its
+   * tapInternalKey cannot be signed (`@scure/btc-signer` reports
+   * "No taproot scripts signed"). The SDK's own builders already set this
+   * correctly, so a PSBT exported by a consumer needs none of this.
+   */
+  p2trAt(index: number): ReturnType<typeof btc.p2tr>;
+  /**
    * Sign an exported unsigned PSBT the way an offline wallet would, and return
    * base64 for the paste field.
    *
@@ -1573,6 +1584,17 @@ export function makeWatchOnlyTestAccount(
   const accountPath = options.accountPath ?? "m/86'/1'/7'";
   const account = HDKey.fromMasterSeed(seed, WATCH_ONLY_TESTNET_VERSIONS).derive(accountPath);
 
+  const p2trAt = (index: number): ReturnType<typeof btc.p2tr> => {
+    const child = account.deriveChild(0).deriveChild(index);
+    if (child.publicKey === null) {
+      throw new Error(`makeWatchOnlyTestAccount: no public key at receive index ${index}`);
+    }
+    // x-only key: drop the compressed-form parity byte. This is the UNTWEAKED
+    // internal key, which is what a taproot input must carry; the address
+    // encodes the tweaked output key instead.
+    return btc.p2tr(child.publicKey.slice(1, 33), undefined, REGTEST_SCURE_NETWORK, true);
+  };
+
   const privateKeyAt = (index: number): Uint8Array => {
     const child = account.deriveChild(0).deriveChild(index);
     if (child.privateKey === null) {
@@ -1585,20 +1607,14 @@ export function makeWatchOnlyTestAccount(
     accountExtendedPublicKey: account.publicExtendedKey,
 
     addressAt(index: number): string {
-      const child = account.deriveChild(0).deriveChild(index);
-      if (child.publicKey === null) {
-        throw new Error(`makeWatchOnlyTestAccount: no public key at receive index ${index}`);
-      }
-      // x-only key: drop the compressed-form parity byte. Keypath-only p2tr,
-      // matching the SDK's own watch-only derivation, which
-      // watch-only-test-account.spec.ts asserts address-for-address.
-      const xOnly = child.publicKey.slice(1, 33);
-      const address = btc.p2tr(xOnly, undefined, REGTEST_SCURE_NETWORK, true).address;
+      const address = p2trAt(index).address;
       if (address === undefined) {
         throw new Error(`makeWatchOnlyTestAccount: p2tr gave no address at index ${index}`);
       }
       return address;
     },
+
+    p2trAt,
 
     signExportedPsbt(unsignedPsbtBase64: string, receiveIndexPerInput?: number[]): string {
       const tx = btc.Transaction.fromPSBT(base64.decode(unsignedPsbtBase64));

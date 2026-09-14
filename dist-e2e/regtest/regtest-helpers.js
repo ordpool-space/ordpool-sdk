@@ -1228,6 +1228,16 @@ function makeWatchOnlyTestAccount(options = {}) {
     const seed = options.seed ?? new Uint8Array(32).fill(0x2a);
     const accountPath = options.accountPath ?? "m/86'/1'/7'";
     const account = bip32_1.HDKey.fromMasterSeed(seed, WATCH_ONLY_TESTNET_VERSIONS).derive(accountPath);
+    const p2trAt = (index) => {
+        const child = account.deriveChild(0).deriveChild(index);
+        if (child.publicKey === null) {
+            throw new Error(`makeWatchOnlyTestAccount: no public key at receive index ${index}`);
+        }
+        // x-only key: drop the compressed-form parity byte. This is the UNTWEAKED
+        // internal key, which is what a taproot input must carry; the address
+        // encodes the tweaked output key instead.
+        return btc.p2tr(child.publicKey.slice(1, 33), undefined, REGTEST_SCURE_NETWORK, true);
+    };
     const privateKeyAt = (index) => {
         const child = account.deriveChild(0).deriveChild(index);
         if (child.privateKey === null) {
@@ -1238,20 +1248,13 @@ function makeWatchOnlyTestAccount(options = {}) {
     return {
         accountExtendedPublicKey: account.publicExtendedKey,
         addressAt(index) {
-            const child = account.deriveChild(0).deriveChild(index);
-            if (child.publicKey === null) {
-                throw new Error(`makeWatchOnlyTestAccount: no public key at receive index ${index}`);
-            }
-            // x-only key: drop the compressed-form parity byte. Keypath-only p2tr,
-            // matching the SDK's own watch-only derivation, which
-            // watch-only-test-account.spec.ts asserts address-for-address.
-            const xOnly = child.publicKey.slice(1, 33);
-            const address = btc.p2tr(xOnly, undefined, REGTEST_SCURE_NETWORK, true).address;
+            const address = p2trAt(index).address;
             if (address === undefined) {
                 throw new Error(`makeWatchOnlyTestAccount: p2tr gave no address at index ${index}`);
             }
             return address;
         },
+        p2trAt,
         signExportedPsbt(unsignedPsbtBase64, receiveIndexPerInput) {
             const tx = btc.Transaction.fromPSBT(base_1.base64.decode(unsignedPsbtBase64));
             for (let i = 0; i < tx.inputsLength; i++) {

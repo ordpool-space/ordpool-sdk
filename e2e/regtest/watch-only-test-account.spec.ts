@@ -72,18 +72,18 @@ describe('makeWatchOnlyTestAccount', () => {
 
     it('produces a signature bitcoind accepts for the key that owns the coin', async () => {
       const scureNetwork = toScureNetwork(Network.Regtest);
-      const script = btc.Address(scureNetwork).decode(account.addressAt(0));
-      expect(script.type).toBe('tr');
+      const payment = account.p2trAt(0);
 
+      // tapInternalKey is the UNTWEAKED internal key. Taking it by decoding the
+      // address yields the TWEAKED output key instead, and signing then fails
+      // with "No taproot scripts signed". The SDK's builders set this field
+      // themselves, so a consumer exporting a PSBT never hand-rolls it.
       const tx = new btc.Transaction();
       tx.addInput({
         txid: funded.txid,
         index: funded.vout,
-        witnessUtxo: {
-          script: btc.OutScript.encode(script),
-          amount: BigInt(funded.value),
-        },
-        tapInternalKey: script.type === 'tr' ? script.pubkey : undefined,
+        witnessUtxo: { script: payment.script, amount: BigInt(funded.value) },
+        tapInternalKey: payment.tapInternalKey,
       });
       tx.addOutputAddress(account.addressAt(1), BigInt(funded.value - FEE_SATS), scureNetwork);
 

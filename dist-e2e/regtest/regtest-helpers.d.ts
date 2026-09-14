@@ -1,3 +1,4 @@
+import * as btc from '@scure/btc-signer';
 export declare const ORD_STOCK_URL: string;
 export interface FundedAccount {
     address: string;
@@ -605,6 +606,17 @@ export interface WatchOnlyTestAccount {
     accountExtendedPublicKey: string;
     /** Receive address at `m/<account>/0/<index>`, p2tr. Fund and assert on these. */
     addressAt(index: number): string;
+    /**
+     * The full p2tr payment at that index, for building an input by hand.
+     *
+     * Use `script` as the witnessUtxo script and `tapInternalKey` as the input's
+     * tapInternalKey. Do NOT take the key by decoding the address: an address
+     * decodes to the TWEAKED output key, and an input carrying that as its
+     * tapInternalKey cannot be signed (`@scure/btc-signer` reports
+     * "No taproot scripts signed"). The SDK's own builders already set this
+     * correctly, so a PSBT exported by a consumer needs none of this.
+     */
+    p2trAt(index: number): ReturnType<typeof btc.p2tr>;
     /**
      * Sign an exported unsigned PSBT the way an offline wallet would, and return
      * base64 for the paste field.
