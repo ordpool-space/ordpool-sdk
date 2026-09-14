@@ -55,7 +55,12 @@ describe('seedRuneCoin', () => {
     const rendered = formatRunePile({
       amount: coin.amount, divisibility: coin.divisibility, symbol: coin.symbol,
     });
-    expect(rendered).toBe(`1000 ${coin.symbol}`); // 100000 base units at divisibility 2
+    // 100000 base units at divisibility 2, and the separator before the symbol
+    // is a NON-BREAKING space (U+00A0), because ord's `Display for Pile` emits
+    // one. Written as an escape on purpose: with a literal the two are
+    // indistinguishable on screen and in a CI log, which is exactly how a
+    // mismatch here reads as "Expected: 1000 @ / Received: 1000 @".
+    expect(rendered).toBe(`1000\u00A0${coin.symbol}`);
   });
 
   it('seeds to the address asked for, where the funding scan reads', () => {

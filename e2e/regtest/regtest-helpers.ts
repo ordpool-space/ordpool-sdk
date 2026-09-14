@@ -937,8 +937,8 @@ export async function seedRuneCoin(
     const sentTip = mineBlocks(1);
     await waitForElectrsSync(sentTip);
     await waitForOrdStockSync(sentTip);
-    const moved = await getStockOrdOutput(`${sentTxid}:1`);
-    seeded = { txid: sentTxid, vout: 1, value: moved.value, address: moved.address };
+    const moved = await findRuneOutput(sentTxid, runeName, options.address);
+    seeded = { txid: sentTxid, vout: moved.vout, value: moved.value, address: moved.address };
   }
 
   return {
@@ -949,6 +949,34 @@ export async function seedRuneCoin(
     symbol: entry.symbol,
     etchingTxid: etching.entry?.etching ?? '',
   };
+}
+
+/**
+ * The output of `txid` that actually carries `runeName`, at `address`.
+ *
+ * A rune send is not a plain payment: ord emits an OP_RETURN runestone plus
+ * recipient and change outputs, and the edict inside the runestone decides
+ * which output receives the rune. The index is ord's to choose, so assuming
+ * one silently hands back a coin carrying no rune, which then reads as a
+ * perfectly clean coin to anything that inspects it. Ask ord instead.
+ */
+async function findRuneOutput(
+  txid: string,
+  runeName: string,
+  address: string,
+): Promise<{ vout: number; value: number; address: string }> {
+  const raw = JSON.parse(rpc('getrawtransaction', txid, 'true')) as { vout: Array<unknown> };
+  const seen: string[] = [];
+  for (let vout = 0; vout < raw.vout.length; vout++) {
+    const output = await getStockOrdOutput(`${txid}:${vout}`);
+    if (!output.runes?.[runeName]) continue;
+    seen.push(`${vout}@${output.address}`);
+    if (output.address === address) return { vout, value: output.value, address: output.address };
+  }
+  throw new Error(
+    `findRuneOutput: no output of ${txid} carries ${runeName} at ${address}. ` +
+    `Outputs holding the rune: ${seen.length ? seen.join(', ') : 'none'}.`,
+  );
 }
 
 /** A fresh spaced rune name; ord refuses a name already etched on this chain. */
