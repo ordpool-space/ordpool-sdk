@@ -7,6 +7,10 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { HDKey } from '@scure/bip32';
+import { base64 } from '@scure/base';
+import * as btc from '@scure/btc-signer';
+
 const execFileAsync = promisify(execFile);
 
 const ELECTRS_URL =
@@ -1507,4 +1511,101 @@ export async function sendFromCleanFunderCoin(outputs: Record<string, string>): 
   await waitForElectrsSync(tip);
   await waitForOrdStockSync(tip);
   return sent.txid;
+}
+
+// ---------------------------------------------------------------------------
+// Watch-only (xpub) test account
+// ---------------------------------------------------------------------------
+
+/**
+ * Regtest address parameters. Spelled out here because this file compiles into
+ * `dist-e2e` under `rootDir: e2e` and so cannot import the SDK's own
+ * `toScureNetwork`; the spec asserts the two agree address for address.
+ */
+const REGTEST_SCURE_NETWORK = { bech32: 'bcrt', pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
+
+/** BIP-32 version bytes for testnet/regtest extended keys (tpub / tprv). */
+const WATCH_ONLY_TESTNET_VERSIONS = { private: 0x04358394, public: 0x043587cf };
+
+/**
+ * A taproot account whose PUBLIC half is pasted into a watch-only connect
+ * field and whose PRIVATE half stands in for the offline signer.
+ *
+ * This is the one wallet in the matrix with no extension and no popup: the
+ * consumer exports an UNSIGNED PSBT to a textarea, something off-device signs
+ * it, and the signed PSBT is pasted back. A spec therefore needs both halves
+ * of the same account, which is what this hands out.
+ */
+export interface WatchOnlyTestAccount {
+  /** Paste this into the connect field. A `tpub` on regtest/testnet. */
+  accountExtendedPublicKey: string;
+  /** Receive address at `m/<account>/0/<index>`, p2tr. Fund and assert on these. */
+  addressAt(index: number): string;
+  /**
+   * Sign an exported unsigned PSBT the way an offline wallet would, and return
+   * base64 for the paste field.
+   *
+   * `receiveIndexPerInput[i]` is the receive index whose key owns input `i`;
+   * it defaults to index 0 for every input, which is the common single-input
+   * mint / commit shape. Signing only, never finalising: the consumer's export
+   * signer finalises and broadcasts, and that is the step under test.
+   */
+  signExportedPsbt(unsignedPsbtBase64: string, receiveIndexPerInput?: number[]): string;
+}
+
+/**
+ * Build a deterministic watch-only account for a spec.
+ *
+ * Deterministic by a fixed seed rather than by a BIP-39 mnemonic: deriving
+ * from words needs `@scure/bip39`, which the SDK does not depend on, and a
+ * test helper is not worth a new dependency in a signing library. Nothing
+ * here needs to match any particular wallet's onboarding seed. Pass `seed`
+ * for an isolated account when a spec must not share addresses with another.
+ *
+ * The default account path is `m/86'/1'/7'`, deliberately NOT the `…/0'` that
+ * wallet onboarding uses, so a funded address here cannot collide with one a
+ * wallet spec funds from the same fixed seed.
+ */
+export function makeWatchOnlyTestAccount(
+  options: { seed?: Uint8Array; accountPath?: string } = {},
+): WatchOnlyTestAccount {
+  const seed = options.seed ?? new Uint8Array(32).fill(0x2a);
+  const accountPath = options.accountPath ?? "m/86'/1'/7'";
+  const account = HDKey.fromMasterSeed(seed, WATCH_ONLY_TESTNET_VERSIONS).derive(accountPath);
+
+  const privateKeyAt = (index: number): Uint8Array => {
+    const child = account.deriveChild(0).deriveChild(index);
+    if (child.privateKey === null) {
+      throw new Error(`makeWatchOnlyTestAccount: no private key at receive index ${index}`);
+    }
+    return child.privateKey;
+  };
+
+  return {
+    accountExtendedPublicKey: account.publicExtendedKey,
+
+    addressAt(index: number): string {
+      const child = account.deriveChild(0).deriveChild(index);
+      if (child.publicKey === null) {
+        throw new Error(`makeWatchOnlyTestAccount: no public key at receive index ${index}`);
+      }
+      // x-only key: drop the compressed-form parity byte. Keypath-only p2tr,
+      // matching the SDK's own watch-only derivation, which
+      // watch-only-test-account.spec.ts asserts address-for-address.
+      const xOnly = child.publicKey.slice(1, 33);
+      const address = btc.p2tr(xOnly, undefined, REGTEST_SCURE_NETWORK, true).address;
+      if (address === undefined) {
+        throw new Error(`makeWatchOnlyTestAccount: p2tr gave no address at index ${index}`);
+      }
+      return address;
+    },
+
+    signExportedPsbt(unsignedPsbtBase64: string, receiveIndexPerInput?: number[]): string {
+      const tx = btc.Transaction.fromPSBT(base64.decode(unsignedPsbtBase64));
+      for (let i = 0; i < tx.inputsLength; i++) {
+        tx.signIdx(privateKeyAt(receiveIndexPerInput?.[i] ?? 0), i);
+      }
+      return base64.encode(tx.toPSBT());
+    },
+  };
 }

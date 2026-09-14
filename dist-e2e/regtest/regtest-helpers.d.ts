@@ -591,4 +591,46 @@ export declare function fundOrdStockWallet(walletName: string, btc?: string): Pr
  * the transaction id; output i pays the i-th entry of `outputs`.
  */
 export declare function sendFromCleanFunderCoin(outputs: Record<string, string>): Promise<string>;
+/**
+ * A taproot account whose PUBLIC half is pasted into a watch-only connect
+ * field and whose PRIVATE half stands in for the offline signer.
+ *
+ * This is the one wallet in the matrix with no extension and no popup: the
+ * consumer exports an UNSIGNED PSBT to a textarea, something off-device signs
+ * it, and the signed PSBT is pasted back. A spec therefore needs both halves
+ * of the same account, which is what this hands out.
+ */
+export interface WatchOnlyTestAccount {
+    /** Paste this into the connect field. A `tpub` on regtest/testnet. */
+    accountExtendedPublicKey: string;
+    /** Receive address at `m/<account>/0/<index>`, p2tr. Fund and assert on these. */
+    addressAt(index: number): string;
+    /**
+     * Sign an exported unsigned PSBT the way an offline wallet would, and return
+     * base64 for the paste field.
+     *
+     * `receiveIndexPerInput[i]` is the receive index whose key owns input `i`;
+     * it defaults to index 0 for every input, which is the common single-input
+     * mint / commit shape. Signing only, never finalising: the consumer's export
+     * signer finalises and broadcasts, and that is the step under test.
+     */
+    signExportedPsbt(unsignedPsbtBase64: string, receiveIndexPerInput?: number[]): string;
+}
+/**
+ * Build a deterministic watch-only account for a spec.
+ *
+ * Deterministic by a fixed seed rather than by a BIP-39 mnemonic: deriving
+ * from words needs `@scure/bip39`, which the SDK does not depend on, and a
+ * test helper is not worth a new dependency in a signing library. Nothing
+ * here needs to match any particular wallet's onboarding seed. Pass `seed`
+ * for an isolated account when a spec must not share addresses with another.
+ *
+ * The default account path is `m/86'/1'/7'`, deliberately NOT the `…/0'` that
+ * wallet onboarding uses, so a funded address here cannot collide with one a
+ * wallet spec funds from the same fixed seed.
+ */
+export declare function makeWatchOnlyTestAccount(options?: {
+    seed?: Uint8Array;
+    accountPath?: string;
+}): WatchOnlyTestAccount;
 //# sourceMappingURL=regtest-helpers.d.ts.map

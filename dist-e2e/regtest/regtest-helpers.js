@@ -4,6 +4,39 @@
 //
 // Expects the regtest stack to be up via `e2e/regtest-bootstrap.sh`
 // and `REGTEST_FUNDED_ADDR` / `REGTEST_FUNDED_WIF` set in env.
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ORD_STOCK_URL = void 0;
 exports.getFundedAccount = getFundedAccount;
@@ -57,8 +90,12 @@ exports.ordStockWalletInscribe = ordStockWalletInscribe;
 exports.ordStockWalletBatch = ordStockWalletBatch;
 exports.fundOrdStockWallet = fundOrdStockWallet;
 exports.sendFromCleanFunderCoin = sendFromCleanFunderCoin;
+exports.makeWatchOnlyTestAccount = makeWatchOnlyTestAccount;
 const node_child_process_1 = require("node:child_process");
 const node_util_1 = require("node:util");
+const bip32_1 = require("@scure/bip32");
+const base_1 = require("@scure/base");
+const btc = __importStar(require("@scure/btc-signer"));
 const execFileAsync = (0, node_util_1.promisify)(node_child_process_1.execFile);
 const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
     `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
@@ -1162,5 +1199,66 @@ async function sendFromCleanFunderCoin(outputs) {
     await waitForElectrsSync(tip);
     await waitForOrdStockSync(tip);
     return sent.txid;
+}
+// ---------------------------------------------------------------------------
+// Watch-only (xpub) test account
+// ---------------------------------------------------------------------------
+/**
+ * Regtest address parameters. Spelled out here because this file compiles into
+ * `dist-e2e` under `rootDir: e2e` and so cannot import the SDK's own
+ * `toScureNetwork`; the spec asserts the two agree address for address.
+ */
+const REGTEST_SCURE_NETWORK = { bech32: 'bcrt', pubKeyHash: 0x6f, scriptHash: 0xc4, wif: 0xef };
+/** BIP-32 version bytes for testnet/regtest extended keys (tpub / tprv). */
+const WATCH_ONLY_TESTNET_VERSIONS = { private: 0x04358394, public: 0x043587cf };
+/**
+ * Build a deterministic watch-only account for a spec.
+ *
+ * Deterministic by a fixed seed rather than by a BIP-39 mnemonic: deriving
+ * from words needs `@scure/bip39`, which the SDK does not depend on, and a
+ * test helper is not worth a new dependency in a signing library. Nothing
+ * here needs to match any particular wallet's onboarding seed. Pass `seed`
+ * for an isolated account when a spec must not share addresses with another.
+ *
+ * The default account path is `m/86'/1'/7'`, deliberately NOT the `…/0'` that
+ * wallet onboarding uses, so a funded address here cannot collide with one a
+ * wallet spec funds from the same fixed seed.
+ */
+function makeWatchOnlyTestAccount(options = {}) {
+    const seed = options.seed ?? new Uint8Array(32).fill(0x2a);
+    const accountPath = options.accountPath ?? "m/86'/1'/7'";
+    const account = bip32_1.HDKey.fromMasterSeed(seed, WATCH_ONLY_TESTNET_VERSIONS).derive(accountPath);
+    const privateKeyAt = (index) => {
+        const child = account.deriveChild(0).deriveChild(index);
+        if (child.privateKey === null) {
+            throw new Error(`makeWatchOnlyTestAccount: no private key at receive index ${index}`);
+        }
+        return child.privateKey;
+    };
+    return {
+        accountExtendedPublicKey: account.publicExtendedKey,
+        addressAt(index) {
+            const child = account.deriveChild(0).deriveChild(index);
+            if (child.publicKey === null) {
+                throw new Error(`makeWatchOnlyTestAccount: no public key at receive index ${index}`);
+            }
+            // x-only key: drop the compressed-form parity byte. Keypath-only p2tr,
+            // matching the SDK's own watch-only derivation, which
+            // watch-only-test-account.spec.ts asserts address-for-address.
+            const xOnly = child.publicKey.slice(1, 33);
+            const address = btc.p2tr(xOnly, undefined, REGTEST_SCURE_NETWORK, true).address;
+            if (address === undefined) {
+                throw new Error(`makeWatchOnlyTestAccount: p2tr gave no address at index ${index}`);
+            }
+            return address;
+        },
+        signExportedPsbt(unsignedPsbtBase64, receiveIndexPerInput) {
+            const tx = btc.Transaction.fromPSBT(base_1.base64.decode(unsignedPsbtBase64));
+            for (let i = 0; i < tx.inputsLength; i++) {
+                tx.signIdx(privateKeyAt(receiveIndexPerInput?.[i] ?? 0), i);
+            }
+            return base_1.base64.encode(tx.toPSBT());
+        },
+    };
 }
 //# sourceMappingURL=regtest-helpers.js.map
