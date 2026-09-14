@@ -16,6 +16,22 @@ import { installWizzOfflineRoutes } from '../wizz-offline-routes';
  * testnet networks, so the cross-network-keys trick from Unisat
  * applies: we sign a regtest-encoded PSBT against the wallet's
  * mainnet address (the P2WPKH script hash is HRP-independent).
+ *
+ * SCOPE, because the title claims more than the spec proves: the
+ * postage recipient here is NOT the wallet's ordinals identity. Both
+ * addresses come from `deriveRegtestAddresses(wallet.paymentPublicKey)`,
+ * so `regtest.ordinalsAddress` is a taproot address over the PAYMENT
+ * key, while Wizz derives its real ordinals address from a different
+ * path. A user minting through a consumer app pays postage to their
+ * OWN ordinals address, which this spec never exercises.
+ *
+ * That difference is under investigation: a consumer driving Wizz with
+ * postage to the wallet's real ordinals address sees the popup's Sign
+ * button never become clickable, while this spec signs and confirms.
+ * Whether the recipient key is the CAUSE is not established, so do not
+ * read a green run here as "Wizz can mint a cat for a user". It proves
+ * Wizz signs a lockTime=21 transaction whose postage goes to a taproot
+ * address the wallet does not treat as its ordinals identity.
  */
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
