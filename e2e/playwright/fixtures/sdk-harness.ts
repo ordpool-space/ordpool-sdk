@@ -831,6 +831,21 @@ function expectedTxidFromUnsignedPsbt(psbtBytes: Uint8Array): string {
  * networkType (mainnet) — and they match, because the hash is
  * the same. Wallet signs. We broadcast via local electrs.
  */
+/**
+ * SCOPE: `ordinalsAddress` here is SYNTHETIC. Both addresses come from the ONE
+ * payment public key passed in, so the taproot address is p2tr over the payment
+ * key, not any address the wallet derives for ordinals.
+ *
+ * That is fine for what these specs prove, which is that a wallet signs the
+ * PSBT and the cat lands at the recipient the builder named. It is NOT a
+ * user-shaped mint: a user pays postage to an address their wallet watches.
+ * For a single-address wallet (Unisat, Wizz: one address for both payments and
+ * ordinals) that is the P2WPKH; for a two-address wallet it is the wallet's own
+ * ordinals address. Neither is what this returns.
+ *
+ * So do not read a green mint spec here as "this wallet can mint a cat a user
+ * will see in it". Consumer-side cells cover the user-shaped mint.
+ */
 window.ordpoolSdkHarness.deriveRegtestAddresses = (paymentPublicKeyHex: string) => {
   const pubkey = hexToBytes(paymentPublicKeyHex);
   const regtest = toScureNetwork(Network.Regtest);
