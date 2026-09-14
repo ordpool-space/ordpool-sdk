@@ -197,6 +197,63 @@ services:
     # No healthcheck: the slim runtime image has no wget/curl. Consumers
     # poll the host-exposed :8080/status before running specs.
 
+  # ord-stock — profile-gated, the SAME binary WITHOUT --index-cat21, so it
+  # indexes real inscriptions, runes and sat ranges. Enable with the
+  # bootstrap's --with-ord-stock flag.
+  #
+  # Why both ords rather than one: the funding-safety scan asks the full ord
+  # for inscriptions and cat21-ord for cats, and merges the two. cat21-ord
+  # with --index-cat21 indexes ONLY cats and its /output carries no
+  # `inscriptions` field at all, so a consumer that points its ord base URL
+  # at cat21-ord reads every inscription-bearing coin back as clean. The scan
+  # then permits spending an inscribed coin as fee, and the suite is green
+  # while the guard it was testing is off. A consumer proving that guard
+  # needs this service, and points ordBaseUrls here and cat21OrdBaseUrl at
+  # cat21-ord.
+  ord-stock:
+    profiles:
+      - ord-stock
+    build:
+      context: ${ORD_SRC:-${CAT21_ORD_SRC:-../../cat21-ord}}
+      dockerfile_inline: |
+        FROM rust:1.90-bookworm AS builder
+        WORKDIR /usr/src/ord
+        COPY . .
+        RUN cargo build --bin ord --release
+        FROM debian:bookworm-slim
+        COPY --from=builder /usr/src/ord/target/release/ord /usr/local/bin
+        RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+        ENV RUST_BACKTRACE=1
+        ENV RUST_LOG=info
+    image: ordpool-e2e-consumer-ord-stock:local
+    container_name: ordpool-e2e-consumer-ord-stock
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+    command:
+      - ord
+      - --regtest
+      - --index-sats
+      - --index-addresses
+      - --bitcoin-rpc-url=bitcoind:18443
+      - --bitcoin-rpc-username=ordpool
+      - --bitcoin-rpc-password=ordpool
+      - --data-dir=/data
+      - server
+      - --http
+      - --http-port=8081
+      - --address=0.0.0.0
+    ports:
+      - "8081:8081"     # full-ord HTTP API
+    volumes:
+      - ord-stock-data:/data
+    # No healthcheck: the slim runtime image has no wget/curl. Consumers
+    # poll the host-exposed :8081/status before running specs.
+
 volumes:
   electrs-data:
   cat21-ord-data:
+  ord-stock-data:

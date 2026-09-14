@@ -47,6 +47,17 @@ while [ $# -gt 0 ]; do
       PROFILES+=( --profile cat21-ord )
       shift
       ;;
+    --with-ord-stock)
+      # A full ord WITHOUT --index-cat21, on :8081, so a consumer can read
+      # real inscriptions / runes / sat ranges. Needed by any spec that
+      # proves the funding-safety scan: cat21-ord indexes only cats and its
+      # /output carries no `inscriptions` field, so pointing an ord base URL
+      # there makes every inscribed coin read back clean and silently
+      # disables the guard. Built from ORD_SRC (defaults to the cat21-ord
+      # checkout, which is the same binary). Poll :8081/status for readiness.
+      PROFILES+=( --profile ord-stock )
+      shift
+      ;;
     --extra-file)
       EXTRA_FILES+=( -f "$2" )
       shift 2
