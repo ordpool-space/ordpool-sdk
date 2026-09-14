@@ -344,6 +344,49 @@ export interface StockOrdOutput {
     script_pubkey: string;
     address: string;
 }
+/** A regtest coin seeded so that it really carries an inscription. */
+export interface SeededInscribedCoin {
+    txid: string;
+    vout: number;
+    /** The coin's value in sats. Sized to be a real funding candidate. */
+    value: number;
+    /** The inscription it carries, as stock ord reports it. */
+    inscriptionId: string;
+    /** Where the coin sits. */
+    address: string;
+}
+/**
+ * Seed a coin that really carries an inscription, for the spec that proves the
+ * funding-safety guard REFUSES it.
+ *
+ * Two properties decide whether such a spec proves anything, and both are easy
+ * to get wrong:
+ *
+ * 1. **It has to be big enough to be a funding candidate.** At ord's default
+ *    546-sat postage the scan may never consider the coin at all, because it
+ *    cannot cover the transaction being funded. The guard is then never asked
+ *    the question, and a spec that "passes" has proven nothing. `postageSats`
+ *    defaults to 2 000 000, comfortably above a mint's funding need, so the
+ *    coin is a genuine candidate the scan is forced to rule on.
+ * 2. **It goes to the PAYMENT address.** The funding scan reads UTXOs at the
+ *    payment address, not the ordinals address. Seeding an inscription to the
+ *    ordinals address produces a coin the scan never sees.
+ *
+ * The inscription is made through stock ord's own wallet, so stock ord indexes
+ * it and `/output/<outpoint>` reports it under `inscriptions`. That is the
+ * field cat21-ord does not have, which is why a guard spec must read the stock
+ * ord and why pointing it at cat21-ord is the mutation that proves the guard
+ * depends on it.
+ *
+ * Mines and waits for electrs and stock ord, so the coin is scannable on
+ * return.
+ */
+export declare function seedInscribedCoin(options: {
+    address: string;
+    postageSats?: number;
+    walletName?: string;
+    feeRate?: number;
+}): Promise<SeededInscribedCoin>;
 /** A regtest coin seeded so that it carries a notable sat. */
 export interface SeededRareSatCoin {
     txid: string;

@@ -464,7 +464,7 @@ export function ordCli(...args: string[]): string {
   return execFileSync(
     'docker',
     [
-      'exec', 'ordpool-e2e-cat21-ord',
+      'exec', process.env.REGTEST_ORD_CONTAINER ?? 'ordpool-e2e-cat21-ord',
       'ord',
       '--regtest',
       '--index-cat21',
@@ -805,6 +805,92 @@ export interface StockOrdOutput {
   address: string;
 }
 
+/** A regtest coin seeded so that it really carries an inscription. */
+export interface SeededInscribedCoin {
+  txid: string;
+  vout: number;
+  /** The coin's value in sats. Sized to be a real funding candidate. */
+  value: number;
+  /** The inscription it carries, as stock ord reports it. */
+  inscriptionId: string;
+  /** Where the coin sits. */
+  address: string;
+}
+
+/**
+ * Seed a coin that really carries an inscription, for the spec that proves the
+ * funding-safety guard REFUSES it.
+ *
+ * Two properties decide whether such a spec proves anything, and both are easy
+ * to get wrong:
+ *
+ * 1. **It has to be big enough to be a funding candidate.** At ord's default
+ *    546-sat postage the scan may never consider the coin at all, because it
+ *    cannot cover the transaction being funded. The guard is then never asked
+ *    the question, and a spec that "passes" has proven nothing. `postageSats`
+ *    defaults to 2 000 000, comfortably above a mint's funding need, so the
+ *    coin is a genuine candidate the scan is forced to rule on.
+ * 2. **It goes to the PAYMENT address.** The funding scan reads UTXOs at the
+ *    payment address, not the ordinals address. Seeding an inscription to the
+ *    ordinals address produces a coin the scan never sees.
+ *
+ * The inscription is made through stock ord's own wallet, so stock ord indexes
+ * it and `/output/<outpoint>` reports it under `inscriptions`. That is the
+ * field cat21-ord does not have, which is why a guard spec must read the stock
+ * ord and why pointing it at cat21-ord is the mutation that proves the guard
+ * depends on it.
+ *
+ * Mines and waits for electrs and stock ord, so the coin is scannable on
+ * return.
+ */
+export async function seedInscribedCoin(
+  options: { address: string; postageSats?: number; walletName?: string; feeRate?: number },
+): Promise<SeededInscribedCoin> {
+  const postageSats = options.postageSats ?? 2_000_000;
+  const walletName = options.walletName ?? 'seed-inscribed';
+  const feeRate = options.feeRate ?? 2;
+
+  // Fund ord's own wallet with room for the postage plus fees.
+  const needBtc = ((postageSats + 1_000_000) / 1e8).toFixed(8);
+  await fundOrdStockWallet(walletName, needBtc);
+
+  const body = `seeded inscription for the funding-safety guard ${Date.now()}`;
+  const path = `/tmp/seed-inscribed-${Date.now()}.txt`;
+  writeOrdStockFile(path, new TextEncoder().encode(body));
+
+  const { reveal } = ordStockWalletInscribe(walletName, path, feeRate, [
+    '--postage', `${postageSats}sat`,
+    '--destination', options.address,
+  ]);
+
+  const tip = mineBlocks(1);
+  await waitForElectrsSync(tip);
+  await waitForOrdStockSync(tip);
+
+  const inscriptionId = `${reveal}i0`;
+  await waitForOrdStockInscription(inscriptionId);
+
+  // Read the coin back from ord rather than assuming the reveal's shape, and
+  // refuse to hand back a coin ord does not actually report as inscribed:
+  // a guard spec seeded with a clean coin would pass while proving nothing.
+  const outpoint = `${reveal}:0`;
+  const output = await getStockOrdOutput(outpoint);
+  if (!output.inscriptions?.includes(inscriptionId)) {
+    throw new Error(
+      `seedInscribedCoin: stock ord does not report ${inscriptionId} on ${outpoint}; ` +
+      `it reports ${JSON.stringify(output.inscriptions)}. The coin would not exercise the guard.`,
+    );
+  }
+  if (output.value < postageSats) {
+    throw new Error(
+      `seedInscribedCoin: ${outpoint} holds ${output.value} sats, short of the ${postageSats} asked for; ` +
+      'it may be too small for the funding scan to consider.',
+    );
+  }
+
+  return { txid: reveal, vout: 0, value: output.value, inscriptionId, address: output.address };
+}
+
 /** A regtest coin seeded so that it carries a notable sat. */
 export interface SeededRareSatCoin {
   txid: string;
@@ -1020,7 +1106,7 @@ export async function waitForOrdStockInscription(
 // helpers exactly, minus `--index-cat21`.
 // ---------------------------------------------------------------------------
 
-const ORD_STOCK_CONTAINER = 'ordpool-e2e-ord-stock';
+const ORD_STOCK_CONTAINER = process.env.REGTEST_ORD_STOCK_CONTAINER ?? 'ordpool-e2e-ord-stock';
 
 export function ordStockCli(...args: string[]): string {
   return execFileSync(
