@@ -27,7 +27,11 @@ export interface RecordedBackendRequest {
     url: string;
     /** Response status, or null when the request failed outright. */
     status: number | null;
-    /** POST body, truncated. The decode endpoints carry the PSBT here. */
+    /**
+     * POST body, truncated at `maxPostDataChars` (default 20000, enough for a
+     * PSBT). The decode endpoints carry the transaction here, so this is usually
+     * the field worth diffing between two flows.
+     */
     postData?: string;
 }
 /**
@@ -44,7 +48,9 @@ export interface RecordedBackendRequest {
  * change which handler wins or perturb the behaviour being measured. Localhost
  * is filtered out, leaving only the wallet's own backends.
  */
-export declare function recordWalletBackendRequests(context: BrowserContext): {
+export declare function recordWalletBackendRequests(context: BrowserContext, options?: {
+    maxPostDataChars?: number;
+}): {
     requests: RecordedBackendRequest[];
     hosts(): string[];
 };

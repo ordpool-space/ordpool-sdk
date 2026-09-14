@@ -138,7 +138,12 @@ async function installWizzOfflineRoutes(context) {
  * change which handler wins or perturb the behaviour being measured. Localhost
  * is filtered out, leaving only the wallet's own backends.
  */
-function recordWalletBackendRequests(context) {
+function recordWalletBackendRequests(context, options = {}) {
+    // Big enough to hold a whole PSBT, because the PSBT is usually the point:
+    // the decode endpoints carry it in the body, and comparing two flows'
+    // transactions is what the recorder exists for. A cut body turns that
+    // comparison into a re-run.
+    const maxPostDataChars = options.maxPostDataChars ?? 20_000;
     const requests = [];
     const offBox = (url) => !url.includes('localhost') && !url.includes('127.0.0.1') && !url.startsWith('chrome-extension:');
     context.on('response', (response) => {
@@ -149,7 +154,7 @@ function recordWalletBackendRequests(context) {
             method: response.request().method(),
             url,
             status: response.status(),
-            postData: response.request().postData()?.slice(0, 400),
+            postData: response.request().postData()?.slice(0, maxPostDataChars),
         });
     });
     context.on('requestfailed', (request) => {
@@ -160,7 +165,7 @@ function recordWalletBackendRequests(context) {
             method: request.method(),
             url,
             status: null,
-            postData: request.postData()?.slice(0, 400),
+            postData: request.postData()?.slice(0, maxPostDataChars),
         });
     });
     return {

@@ -138,7 +138,11 @@ export interface RecordedBackendRequest {
   url: string;
   /** Response status, or null when the request failed outright. */
   status: number | null;
-  /** POST body, truncated. The decode endpoints carry the PSBT here. */
+  /**
+   * POST body, truncated at `maxPostDataChars` (default 20000, enough for a
+   * PSBT). The decode endpoints carry the transaction here, so this is usually
+   * the field worth diffing between two flows.
+   */
   postData?: string;
 }
 
@@ -158,7 +162,13 @@ export interface RecordedBackendRequest {
  */
 export function recordWalletBackendRequests(
   context: BrowserContext,
+  options: { maxPostDataChars?: number } = {},
 ): { requests: RecordedBackendRequest[]; hosts(): string[] } {
+  // Big enough to hold a whole PSBT, because the PSBT is usually the point:
+  // the decode endpoints carry it in the body, and comparing two flows'
+  // transactions is what the recorder exists for. A cut body turns that
+  // comparison into a re-run.
+  const maxPostDataChars = options.maxPostDataChars ?? 20_000;
   const requests: RecordedBackendRequest[] = [];
   const offBox = (url: string): boolean =>
     !url.includes('localhost') && !url.includes('127.0.0.1') && !url.startsWith('chrome-extension:');
@@ -170,7 +180,7 @@ export function recordWalletBackendRequests(
       method: response.request().method(),
       url,
       status: response.status(),
-      postData: response.request().postData()?.slice(0, 400),
+      postData: response.request().postData()?.slice(0, maxPostDataChars),
     });
   });
   context.on('requestfailed', (request) => {
@@ -180,7 +190,7 @@ export function recordWalletBackendRequests(
       method: request.method(),
       url,
       status: null,
-      postData: request.postData()?.slice(0, 400),
+      postData: request.postData()?.slice(0, maxPostDataChars),
     });
   });
 
