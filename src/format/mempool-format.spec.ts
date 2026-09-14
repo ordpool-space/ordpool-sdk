@@ -4,6 +4,7 @@ import {
   formatBitcoinAmount,
   formatSats,
   formatSatsWithUsd,
+  formatSatsWithFiat,
   groupAddressForVerification,
   addressVerificationChunks,
   shortenId,
@@ -178,5 +179,63 @@ describe('addressVerificationChunks', () => {
 
   it('is empty for an empty address rather than yielding one empty chunk', () => {
     expect(addressVerificationChunks('')).toEqual([]);
+  });
+});
+
+describe('formatSatsWithFiat', () => {
+  /**
+   * The rates are a real `/api/v1/prices` payload from api.ordpool.space
+   * (2026-09-14), which is the endpoint all three family sites read and which
+   * already serves seven currencies while the callers only ever read USD.
+   */
+  const LIVE = { USD: 77603, EUR: 67078, GBP: 57489, CAD: 107728, CHF: 63516, AUD: 108624, JPY: 11962841 };
+
+  it('is byte-identical to formatSatsWithUsd for USD, which now delegates to it', () => {
+    for (const sats of [0, 1, 10, 3000, 546, 100_000_000, 21_000_000]) {
+      expect(formatSatsWithFiat(sats, LIVE.USD, { currency: 'USD' })).toBe(formatSatsWithUsd(sats, LIVE.USD));
+    }
+    expect(formatSatsWithFiat(3000, null, { currency: 'USD' })).toBe(formatSatsWithUsd(3000, null));
+  });
+
+  it('uses each currency\'s own symbol rather than assuming a dollar sign', () => {
+    expect(formatSatsWithFiat(100_000_000, LIVE.EUR, { currency: 'EUR' })).toContain('€');
+    expect(formatSatsWithFiat(100_000_000, LIVE.GBP, { currency: 'GBP' })).toContain('£');
+    // A$ and CA$ are not $; a site showing "$" for AUD would be stating a
+    // different amount of money.
+    expect(formatSatsWithFiat(100_000_000, LIVE.AUD, { currency: 'AUD' })).toContain('A$');
+    expect(formatSatsWithFiat(100_000_000, LIVE.CAD, { currency: 'CAD' })).toContain('CA$');
+    expect(formatSatsWithFiat(100_000_000, LIVE.CHF, { currency: 'CHF' })).toContain('CHF');
+  });
+
+  it('gives a currency with no minor unit no decimal places', () => {
+    // JPY has none. Two decimals here would be wrong by two orders of magnitude.
+    expect(formatSatsWithFiat(3000, LIVE.JPY, { currency: 'JPY' })).toBe('3 000 sat (~¥359)');
+    expect(formatSatsWithFiat(0, LIVE.JPY, { currency: 'JPY' })).toBe('0 sat (¥0)');
+  });
+
+  it('sets the "less than" bucket from the currency\'s smallest unit, not from a hardcoded cent', () => {
+    // 1 sat is a fraction of a cent, and also a fraction of a yen.
+    expect(formatSatsWithFiat(1, LIVE.USD, { currency: 'USD' })).toBe('1 sat (<$0.01)');
+    expect(formatSatsWithFiat(1, LIVE.EUR, { currency: 'EUR' })).toBe('1 sat (<€0.01)');
+    expect(formatSatsWithFiat(1, LIVE.JPY, { currency: 'JPY' })).toBe('1 sat (<¥1)');
+    // 10 sat IS more than a yen at this rate, so it is a real figure.
+    expect(formatSatsWithFiat(10, LIVE.JPY, { currency: 'JPY' })).toBe('10 sat (~¥1)');
+  });
+
+  it('drops the suffix entirely when there is no rate', () => {
+    for (const c of ['USD', 'EUR', 'JPY']) {
+      expect(formatSatsWithFiat(3000, null, { currency: c })).toBe('3 000 sat');
+    }
+  });
+
+  it('takes a locale, and leaves the grouping of the sat count alone', () => {
+    const de = formatSatsWithFiat(100_000_000, LIVE.EUR, { currency: 'EUR', locale: 'de-DE' });
+    expect(de.startsWith('100 000 000 sat (')).toBe(true); // sats grouped the family way
+    expect(de).toContain('€');
+  });
+
+  it('refuses a code Intl does not recognise rather than printing it as a symbol', () => {
+    expect(() => formatSatsWithFiat(1000, 65000, { currency: 'NOPE' })).toThrow('not a currency code');
+    expect(() => formatSatsWithFiat(1000, 65000, { currency: '' })).toThrow('not a currency code');
   });
 });

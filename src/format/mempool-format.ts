@@ -86,20 +86,77 @@ export function formatSats(sats: number | bigint): string {
  * 0.01` becomes `<$0.01`, the "less than a cent" bucket that would otherwise
  * round to `$0.00` and mislead.
  */
-export function formatSatsWithUsd(sats: number | bigint, usdPerBtc: number | null): string {
-  const satStr = `${formatSats(sats)} sat`;
-  if (usdPerBtc == null) return satStr;
+export interface FiatDisplayOptions {
+  /**
+   * ISO 4217 code, as the backend's `/api/v1/prices` keys them: USD, EUR, GBP,
+   * CAD, CHF, AUD, JPY at the time of writing. Not restricted to that list on
+   * purpose. The endpoint decides what it serves, and a copy of its keys here
+   * would be a second source of truth that goes stale.
+   */
+  currency: string;
+  /** Formatting locale. Defaults to `en-US`, matching the family's other readouts. */
+  locale?: string;
+}
 
-  const dollarValue = (Number(sats) / 1e8) * usdPerBtc;
-  let dollarStr: string;
-  if (dollarValue === 0) {
-    dollarStr = '$0.00';
-  } else if (dollarValue > 0 && dollarValue < 0.01) {
-    dollarStr = '<$0.01';
-  } else {
-    dollarStr = `~$${dollarValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+/**
+ * A sat amount with a CURRENT fiat equivalent appended, in whichever currency
+ * the caller asks for.
+ *
+ *   formatSatsWithFiat(3000, 65000, { currency: 'USD' })  ->  "3 000 sat (~$1.95)"
+ *   formatSatsWithFiat(3000, 60000, { currency: 'EUR' })  ->  "3 000 sat (~€1.80)"
+ *   formatSatsWithFiat(3000, 11962841, { currency: 'JPY' }) -> "3 000 sat (~¥359)"
+ *   formatSatsWithFiat(3000, null,  { currency: 'EUR' })  ->  "3 000 sat"
+ *
+ * The currency decides its own symbol, grouping and number of decimal places,
+ * via `Intl.NumberFormat`, rather than any of those being assumed. That is not
+ * cosmetic: JPY has NO minor unit, so a fixed two decimals renders a yen
+ * figure that is wrong by two orders of magnitude and a "less than" bucket
+ * that talks about hundredths of a yen. The threshold below which a value is
+ * shown as "less than" is likewise the currency's own smallest representable
+ * unit, `<$0.01` for dollars and `<¥1` for yen.
+ *
+ * `ratePerBtc == null` (no live price: regtest, a failed fetch, or the
+ * backend's cold-start sentinel) drops the suffix entirely rather than show a
+ * stale or zero figure, exactly as {@link formatSatsWithUsd} does.
+ *
+ * @throws When `currency` is not a code `Intl` recognises, rather than
+ *         silently rendering the code as though it were a symbol.
+ */
+export function formatSatsWithFiat(
+  sats: number | bigint,
+  ratePerBtc: number | null,
+  options: FiatDisplayOptions,
+): string {
+  const satStr = `${formatSats(sats)} sat`;
+  if (ratePerBtc == null) return satStr;
+
+  const locale = options.locale ?? 'en-US';
+  let format: Intl.NumberFormat;
+  try {
+    format = new Intl.NumberFormat(locale, { style: 'currency', currency: options.currency });
+  } catch {
+    throw new Error(`formatSatsWithFiat: ${JSON.stringify(options.currency)} is not a currency code Intl recognises`);
   }
-  return `${satStr} (${dollarStr})`;
+
+  const value = (Number(sats) / 1e8) * ratePerBtc;
+  // The currency's own smallest representable unit: 0.01 for dollars and
+  // euros, 1 for yen. Anything positive below it would round to a displayed
+  // zero, which reads as free.
+  const smallestUnit = 10 ** -(format.resolvedOptions().minimumFractionDigits ?? 2);
+
+  let fiatStr: string;
+  if (value === 0) {
+    fiatStr = format.format(0);
+  } else if (value > 0 && value < smallestUnit) {
+    fiatStr = `<${format.format(smallestUnit)}`;
+  } else {
+    fiatStr = `~${format.format(value)}`;
+  }
+  return `${satStr} (${fiatStr})`;
+}
+
+export function formatSatsWithUsd(sats: number | bigint, usdPerBtc: number | null): string {
+  return formatSatsWithFiat(sats, usdPerBtc, { currency: 'USD' });
 }
 
 /**
