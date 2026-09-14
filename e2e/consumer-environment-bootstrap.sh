@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 # Bring up the consumer-environment compose stack — bitcoind, electrs,
+# THE SUPERSET. Do NOT also run regtest-bootstrap.sh: that brings up a SECOND
+# bitcoind publishing the same host port, and since stacks are isolated by
+# compose project the two no longer silently merge, they collide. This script
+# already creates the ordpool-e2e wallet, mines, and emits the SAME
+# fundedAddress / fundedWif that regtest-bootstrap.sh emits, so a consumer
+# needs only this one.
+#
 # mariadb (always) + redis (when --with-redis is passed) — mine 101
 # blocks to mature coinbase, then print a JSON descriptor on stdout
 # with every URL the consumer's Playwright spec needs to talk to the
@@ -120,6 +127,20 @@ TIP=$($RPC getblockcount)
 if [ "$TIP" -lt 101 ]; then
   NEEDED=$((101 - TIP))
   $RPC -rpcwallet=ordpool-e2e generatetoaddress "$NEEDED" "$MINING_ADDR" >/dev/null
+fi
+
+# --- and keep mining until the wallet actually has something to spend ---
+# 101 blocks matures the first coinbase only on a chain that started empty. A
+# chain that has been run against before can sit above 101 with every mature
+# coin already spent; every spec then fails on "Insufficient funds" with
+# nothing pointing at the wallet. Same hardening as regtest-bootstrap.sh.
+for _ in $(seq 1 20); do
+  if [ "$($RPC -rpcwallet=ordpool-e2e getbalance | tr -d '.0')" != "" ]; then break; fi
+  $RPC -rpcwallet=ordpool-e2e generatetoaddress 20 "$MINING_ADDR" >/dev/null
+done
+if [ "$($RPC -rpcwallet=ordpool-e2e getbalance | tr -d '.0')" = "" ]; then
+  echo "consumer-environment-bootstrap: wallet ordpool-e2e has no spendable balance after mining; aborting" >&2
+  exit 1
 fi
 
 # --- wait for electrs to catch up to bitcoind's tip ---
