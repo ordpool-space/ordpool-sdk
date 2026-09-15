@@ -20,28 +20,20 @@ jobs:
     - run: npm install
     - run: npm run test
 
-    # Guard the /core entry. A clean include-only `tsc -p tsconfig.core.json`
-    # does NOT emit imported-but-unlisted files — a local tsc graph-follows and
-    # emits them, hiding the gap, so `dist-core/` looks complete on a dev box
-    # while CI's clean build produces a broken require graph. Rebuild core and
-    # require the emitted entry: a missing include (e.g. a helper added to an
-    # import but not to tsconfig.core.json's `include`) fails HERE, at the
-    # source, instead of in a /core consumer's (cat21-wallet) red CI.
-    - name: Smoke-load the /core require graph
-      run: |
-        npm run build:core
-        node -e "require('./dist-core/core.js')"
-
-    # dist/ (the main entry) is NOT checked in — regenerated per-install
-    # via the prepare hook (plain tsc, ESM). Rebuild it and bundle-check the
-    # barrel with esbuild (deps external) — the same bundler resolution a
-    # consumer uses — so a broken internal import graph fails HERE, at the
-    # source, instead of in a consumer's CI. (Node's native ESM loader can't
-    # resolve tsc's extensionless directory imports; a bundler can, which is
-    # exactly how every consumer imports this package.)
-    - name: Bundle-check the main entry
+    # dist/ is NOT checked in — regenerated per-install via the prepare hook.
+    # Build it once, then check BOTH entry points it serves.
+    #
+    # Requiring each barrel catches a broken emit or require cycle at the
+    # source, instead of in a consumer's red CI: /core's consumers are
+    # cat21-wallet and cat21-indexer's CommonJS backend, and a CommonJS app
+    # loads it exactly this way. The esbuild pass additionally resolves the
+    # main barrel's whole internal import graph the way a frontend bundler
+    # does, with deps external.
+    - name: Build dist/ and check both entry points
       run: |
         npm run build:main
+        node -e "require('./dist/core.js')"
+        node -e "require('./dist/index.js')"
         node -e "require('esbuild').build({entryPoints:['dist/index.js'],bundle:true,write:false,format:'esm',packages:'external'}).catch(() => process.exit(1))"
 
     # dist-e2e/ (compiled e2e helpers, imported by consumers as

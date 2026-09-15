@@ -173,8 +173,8 @@ jobs:
           # out as a sibling at /tmp/ordpool-sdk. This workflow
           # checks the SDK out at $GITHUB_WORKSPACE (default
           # location); symlink so the wallet's freshness check
-          # finds it. dist-core is already built earlier in this
-          # job by `npm ci` → prepare → npm run build.
+          # finds it. dist/ is already built earlier in this
+          # job by `npm ci` → prepare → npm run build:main.
           rm -rf /tmp/ordpool-sdk
           ln -s "$GITHUB_WORKSPACE" /tmp/ordpool-sdk
           cd "$WALLET_DIR"
