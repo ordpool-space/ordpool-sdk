@@ -1,7 +1,7 @@
 {
   "name": "ordpool-sdk",
   "version": "0.1.0",
-  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool — REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Framework-agnostic; runs in the browser and in plain Node.",
+  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool \u2014 REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Framework-agnostic; runs in the browser and in plain Node.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ordpool-space/ordpool-sdk.git"
@@ -10,7 +10,6 @@
     "url": "https://github.com/ordpool-space/ordpool-sdk/issues"
   },
   "main": "./dist/index.js",
-  "module": "./dist/index.js",
   "typings": "./dist/index.d.ts",
   "exports": {
     ".": {
@@ -18,8 +17,8 @@
       "default": "./dist/index.js"
     },
     "./core": {
-      "types": "./dist-core/core.d.ts",
-      "default": "./dist-core/core.js"
+      "types": "./dist/core.d.ts",
+      "default": "./dist/core.js"
     },
     "./e2e": {
       "types": "./dist-e2e/index.d.ts",
@@ -28,7 +27,6 @@
   },
   "files": [
     "dist",
-    "dist-core",
     "dist-e2e",
     "src",
     "e2e",
@@ -37,12 +35,11 @@
     "*.json"
   ],
   "scripts": {
-    "clean": "rimraf dist dist-core dist-e2e",
-    "build": "npm run build:main && npm run build:core && npm run build:e2e",
-    "build:main": "tsc -p tsconfig.lib.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({type:'module'},null,2))\"",
-    "build:core": "tsc -p tsconfig.core.json && node -e \"require('fs').writeFileSync('dist-core/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
+    "clean": "rimraf dist dist-e2e",
+    "build": "npm run build:main && npm run build:e2e",
+    "build:main": "tsc -p tsconfig.lib.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
     "build:e2e": "tsc -p tsconfig.e2e.json && node -e \"require('fs').writeFileSync('dist-e2e/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
-    "prepare": "npm run build:main && npm run build:core",
+    "prepare": "npm run build:main",
     "start": "npm run test",
     "test": "npm run test:node && npm run test:browser",
     "test:node": "jest --config jest.config.node.js",

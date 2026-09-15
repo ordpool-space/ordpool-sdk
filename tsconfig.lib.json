@@ -1,3 +1,14 @@
+// The ONE build. Both entry points, `ordpool-sdk` and `ordpool-sdk/core`, are
+// emitted here from the same source set; `src/index.ts` and `src/core.ts` are
+// the barrels that decide what each exposes.
+//
+// CommonJS, deliberately. The SDK has consumers on both sides: three Angular
+// frontends whose bundlers take either format, and cat21-indexer's backend,
+// a CommonJS NestJS app that imports validateCat21BuyOfferPsbt and MAX_ASK_SATS
+// from `/core` on the offer path. A CommonJS app cannot require() an ESM
+// package, so ESM-only is not available to us; CommonJS is the one format every
+// consumer can read. The cost is that bundlers tree-shake CommonJS less well
+// than ESM, which is accepted in exchange for a single build.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -6,13 +17,12 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "module": "es2022",
-    "moduleResolution": "bundler",
+    "module": "commonjs",
+    "moduleResolution": "node",
     "target": "es2022",
     "lib": ["dom", "esnext"],
-    "esModuleInterop": true,
-    "types": []
+    "esModuleInterop": true
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "**/*.spec.ts", "e2e"]
+  "exclude": ["node_modules", "**/*.spec.ts", "**/*.angular.spec.ts", "e2e"]
 }

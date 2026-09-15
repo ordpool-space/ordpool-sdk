@@ -1,5 +1,5 @@
 /**
- * `ordpool-sdk/core` — the CommonJS entry point (`dist-core`).
+ * `ordpool-sdk/core` — the lean entry point (`dist/core.js`).
  *
  * Re-exports the pure helpers, constants, types and the subscribe-based
  * orchestrators. The cat21-wallet extension, CLIs, GitHub Actions and any

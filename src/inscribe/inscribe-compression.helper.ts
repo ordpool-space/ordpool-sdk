@@ -44,7 +44,7 @@
  * {@link assessCompression} is deliberately generic (arbitrary bytes + a
  * content-type). cubes-frontend's cube HTML is highly compressible text,
  * so cubes can adopt it for its cube inscriptions with no inscribe-specific
- * coupling. This file ships in `dist-core`, so both browser consumers
+ * coupling. This file ships in `dist/`, so both browser consumers
  * import it from `ordpool-sdk/core`.
  */
 

@@ -27,7 +27,7 @@ import {
 
 Why not `/core` here: the genesis cubes e2e workflow
 (`e2e-cubes-regtest.yml`) installs with `npm ci --ignore-scripts`, so the
-SDK's `prepare` step never runs and `dist-core/` (what `/core` maps to, and
+SDK's `prepare` step never runs and `dist/` (what both entry points map to, and
 which is NOT checked into git) is never built. `import … from
 'ordpool-sdk/core'` then fails the CI build with `Could not resolve
 "ordpool-sdk/core"`. The matrix is pure data + functions, so the main entry loads fine under
