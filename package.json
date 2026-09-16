@@ -20,6 +20,46 @@
       "types": "./dist/core.d.ts",
       "default": "./dist/core.js"
     },
+    "./format": {
+      "types": "./dist/format/index.d.ts",
+      "default": "./dist/format/index.js"
+    },
+    "./family": {
+      "types": "./dist/family/index.d.ts",
+      "default": "./dist/family/index.js"
+    },
+    "./cat21-session": {
+      "types": "./dist/cat21-session/index.d.ts",
+      "default": "./dist/cat21-session/index.js"
+    },
+    "./cat21-share": {
+      "types": "./dist/cat21-share/index.d.ts",
+      "default": "./dist/cat21-share/index.js"
+    },
+    "./cat21-protocol": {
+      "types": "./dist/cat21-protocol/index.d.ts",
+      "default": "./dist/cat21-protocol/index.js"
+    },
+    "./cat21-script": {
+      "types": "./dist/cat21-script/index.d.ts",
+      "default": "./dist/cat21-script/index.js"
+    },
+    "./cat21-fee": {
+      "types": "./dist/cat21-fee/index.d.ts",
+      "default": "./dist/cat21-fee/index.js"
+    },
+    "./cat21-validation": {
+      "types": "./dist/cat21-validation/index.d.ts",
+      "default": "./dist/cat21-validation/index.js"
+    },
+    "./inscribe-validation": {
+      "types": "./dist/inscribe-validation/index.d.ts",
+      "default": "./dist/inscribe-validation/index.js"
+    },
+    "./network": {
+      "types": "./dist/network.d.ts",
+      "default": "./dist/network.js"
+    },
     "./e2e": {
       "types": "./dist-e2e/index.d.ts",
       "default": "./dist-e2e/index.js"
