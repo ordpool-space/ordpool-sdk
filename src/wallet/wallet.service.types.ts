@@ -1,5 +1,5 @@
 import { Observable } from 'rxjs';
-import { AddressPurpose } from 'sats-connect';
+import { AddressPurpose } from './address-purpose';
 
 import { Network } from '../network';
 
@@ -518,7 +518,7 @@ export interface XverseAddressResponse {
   addresses: {
     address: string,
     publicKey: string,
-    purpose: AddressPurpose.Ordinals | AddressPurpose.Payment
+    purpose: typeof AddressPurpose.Ordinals | typeof AddressPurpose.Payment
   }[];
 }
 

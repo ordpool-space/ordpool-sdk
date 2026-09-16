@@ -1,5 +1,5 @@
 import { bech32m } from '@scure/base';
-import { AddressPurpose } from 'sats-connect';
+import { AddressPurpose } from './address-purpose';
 
 import {
   KnownOrdinalWalletType,
