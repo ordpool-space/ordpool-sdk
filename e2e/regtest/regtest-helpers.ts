@@ -851,7 +851,21 @@ export interface SeededRuneCoin {
  * Every one of those was found by doing it rather than by reading about it.
  */
 export async function seedRuneCoin(
-  options: { address?: string; runeName?: string; walletName?: string; feeRate?: number } = {},
+  options: {
+    address?: string;
+    runeName?: string;
+    walletName?: string;
+    feeRate?: number;
+    /**
+     * The value of the coin the rune lands on, when `address` is given.
+     *
+     * ord's `wallet send` defaults to 10 000 sat postage. That matters for a
+     * guard spec: best-fit selection takes the SMALLEST covering coin, so a
+     * rune coin the caller cannot position is a coin an unguarded selection
+     * would never have picked, and its survival proves nothing.
+     */
+    valueSats?: number;
+  } = {},
 ): Promise<SeededRuneCoin> {
   const runeName = options.runeName ?? uniqueRuneName();
   const walletName = options.walletName ?? 'rune-etcher';
@@ -935,14 +949,21 @@ export async function seedRuneCoin(
   if (options.address !== undefined) {
     // The funding scan reads the PAYMENT address, so a rune left at ord's own
     // address is a coin the scan never sees.
-    const sent = ordStockWalletCli(
-      walletName, 'send', '--fee-rate', String(feeRate), options.address, `1000:${runeName}`,
-    );
+    const sendArgs = ['send', '--fee-rate', String(feeRate)];
+    if (options.valueSats !== undefined) sendArgs.push('--postage', `${options.valueSats}sat`);
+    sendArgs.push(options.address, `1000:${runeName}`);
+    const sent = ordStockWalletCli(walletName, ...sendArgs);
     const sentTxid = (JSON.parse(sent) as { txid: string }).txid;
     const sentTip = mineBlocks(1);
     await waitForElectrsSync(sentTip);
     await waitForOrdStockSync(sentTip);
     const moved = await findRuneOutput(sentTxid, runeName, options.address);
+    if (options.valueSats !== undefined && moved.value !== options.valueSats) {
+      throw new Error(
+        `seedRuneCoin: the rune landed on a ${moved.value}-sat coin, not the ${options.valueSats} asked for. ` +
+        'A guard spec positions this coin by value, so a different one silently changes what is proven.',
+      );
+    }
     seeded = { txid: sentTxid, vout: moved.vout, value: moved.value, address: moved.address };
   }
 
@@ -1055,9 +1076,22 @@ export interface SeededInscribedCoin {
  * rendered inscription id made the same mutation go red.
  */
 export async function seedInscribedCoin(
-  options: { address: string; postageSats?: number; walletName?: string; feeRate?: number },
+  options: {
+    address: string;
+    /** Preferred name, matching every other seed helper. */
+    valueSats?: number;
+    /** Older name for the same thing. */
+    postageSats?: number;
+    walletName?: string;
+    feeRate?: number;
+  },
 ): Promise<SeededInscribedCoin> {
-  const postageSats = options.postageSats ?? 2_000_000;
+  // The 2 000 000 default is deliberately large for callers that just need an
+  // inscribed coin to exist. It is the WRONG value for a funding-guard spec:
+  // best-fit selection takes the SMALLEST covering coin, so a coin this size is
+  // never a candidate and the spec passes with the guard deleted. Guard specs
+  // pass `valueSats` explicitly, which `seedDirtyCoin` requires.
+  const postageSats = options.valueSats ?? options.postageSats ?? 2_000_000;
   const walletName = options.walletName ?? 'seed-inscribed';
   const feeRate = options.feeRate ?? 2;
 
@@ -1092,10 +1126,10 @@ export async function seedInscribedCoin(
       `it reports ${JSON.stringify(output.inscriptions)}. The coin would not exercise the guard.`,
     );
   }
-  if (output.value < postageSats) {
+  if (output.value !== postageSats) {
     throw new Error(
-      `seedInscribedCoin: ${outpoint} holds ${output.value} sats, short of the ${postageSats} asked for; ` +
-      'it may be too small for the funding scan to consider.',
+      `seedInscribedCoin: ${outpoint} holds ${output.value} sats, not the ${postageSats} asked for. ` +
+      'A guard spec positions this coin by value, so a different one silently changes what is proven.',
     );
   }
 
@@ -1136,9 +1170,16 @@ export interface SeededRareSatCoin {
  *                appear in that wallet's scan.
  */
 export async function seedRareSatCoin(
-  options: { address?: string } = {},
+  options: { address?: string; valueSats?: number } = {},
 ): Promise<SeededRareSatCoin> {
   const address = options.address ?? rpc('-rpcwallet=ordpool-e2e', 'getnewaddress').trim();
+  // The notable sat is the FIRST sat of vout 0, and FIFO puts it there whatever
+  // that output is worth, so the value is free to be whatever the caller needs.
+  // It matters because a guard spec has to seed the coin where an unguarded
+  // best-fit selection would actually pick it, and best-fit takes the SMALLEST
+  // covering coin: a rare-sat coin seeded at half a bitcoin is never a
+  // candidate, so its survival proves nothing.
+  const valueSats = options.valueSats ?? 50_000_000;
   // It has to be a real COINBASE output, not merely the biggest coin. Only a
   // coinbase begins at a block's first sat; a change output from an earlier
   // seed begins mid-block, and funding from one yields a common sat. Repeated
@@ -1163,11 +1204,10 @@ export async function seedRareSatCoin(
     );
   }
 
-  const AMOUNT_BTC = 0.5;
   const raw = rpc(
     'createrawtransaction',
     JSON.stringify([{ txid: coinbase.txid, vout: coinbase.vout }]),
-    JSON.stringify([{ [address]: AMOUNT_BTC }]),
+    JSON.stringify([{ [address]: Number((valueSats / 1e8).toFixed(8)) }]),
   );
   // changePosition 1 keeps the payment at vout 0, so it inherits the input's
   // first sats. Change after it takes the rest.
@@ -1193,7 +1233,14 @@ export async function seedRareSatCoin(
     );
   }
 
-  return { txid, vout: 0, value: Math.round(AMOUNT_BTC * 1e8), sat, rarity, address: output.address };
+  if (output.value !== valueSats) {
+    throw new Error(
+      `seedRareSatCoin: ${txid}:0 holds ${output.value} sats, not the ${valueSats} asked for. ` +
+      'A guard spec positions this coin by value, so a different one silently changes what is proven.',
+    );
+  }
+
+  return { txid, vout: 0, value: output.value, sat, rarity, address: output.address };
 }
 
 /** ord's own verdict on a sat: `GET /sat/<sat>`, which carries its rarity. */
@@ -1728,5 +1775,122 @@ export async function seedListedCat(
     sellerOrdinalsAddress: options.ordinalsAddress,
     inscriptionId,
     catNumber: indexed.number,
+  };
+}
+
+/** An asset class a user destroys by spending the coin that carries it. */
+export type DirtyCoinAsset = 'inscription' | 'cat' | 'rune' | 'rareSat';
+
+/** A coin carrying a real, indexed asset, seeded where a guard spec needs it. */
+export interface SeededDirtyCoin {
+  asset: DirtyCoinAsset;
+  /** `<txid>:<vout>`. The thing a guard spec asserts was NOT spent. */
+  outpoint: string;
+  txid: string;
+  vout: number;
+  /** The coin's value, equal to the `valueSats` asked for. */
+  value: number;
+  /** Where it sits, equal to the `address` asked for. */
+  address: string;
+  /**
+   * What ord names when it refuses the coin: an inscription id, a cat's
+   * inscription id, a rune name, or a sat number as a string.
+   */
+  assetId: string;
+}
+
+/**
+ * Seed a coin carrying a real asset, at an address and a value the caller
+ * chooses, confirmed and indexed by the time this returns.
+ *
+ * One entry point for all four classes so a guard spec is a loop rather than
+ * four bespoke setups, and so the classes cannot drift apart in the shape they
+ * hand back.
+ *
+ * ## Why `valueSats` is required
+ *
+ * Because a guard spec proves nothing unless the dirty coin is the coin an
+ * UNGUARDED selection would actually have taken. Selection picks the SMALLEST
+ * covering candidate, so the dirty coin belongs slightly above the funding
+ * requirement with a clean coin well above it. Seed it too large and it is
+ * never a candidate; the spec then passes with the guard deleted.
+ *
+ * A default would make that mistake silently, which is exactly how the
+ * inscription case sat at 2 000 000 sats and proved nothing. Requiring the
+ * argument forces the caller to answer the question.
+ *
+ * ## Three ways a guard spec proves nothing
+ *
+ * All three have been found in this family's suites, so check for them:
+ *
+ *  1. Every coin in the pool is clean, so the guard is never engaged.
+ *  2. The dirty coin is too large to be a best-fit candidate.
+ *  3. The dirty coin is the ONLY coin, so there is no alternative to steer to.
+ *     That proves the guard FLAGS; it does not prove selection AVOIDS.
+ *
+ * The shape that proves something: a dirty coin just over the requirement, a
+ * clean coin well over it, and an assertion that {@link SeededDirtyCoin.outpoint}
+ * is absent from the spent outpoints afterwards. Then break the guard and watch
+ * that assertion fail.
+ *
+ * ## Indexing
+ *
+ * Cats come from `cat21-ord` (`--index-cat21`); inscriptions, runes and rare
+ * sats come from the full ord (`--index-runes` and `--index-sats`). A stack
+ * whose full ord lacks those flags reports a dirty coin as clean, and a guard
+ * spec against it is green for the wrong reason.
+ */
+export async function seedDirtyCoin(options: {
+  asset: DirtyCoinAsset;
+  address: string;
+  valueSats: number;
+}): Promise<SeededDirtyCoin> {
+  const { asset, address, valueSats } = options;
+  if (!Number.isInteger(valueSats) || valueSats < 546) {
+    throw new Error(`seedDirtyCoin: valueSats must be a whole number of sats at or above the dust floor; got ${valueSats}`);
+  }
+
+  const seeded = await (async (): Promise<{ txid: string; vout: number; value: number; address: string; assetId: string }> => {
+    switch (asset) {
+      case 'inscription': {
+        const c = await seedInscribedCoin({ address, valueSats });
+        return { ...c, assetId: c.inscriptionId };
+      }
+      case 'cat': {
+        // A real nLockTime=21 mint, so cat21-ord indexes it as a cat rather
+        // than the coin merely looking like one.
+        const c = await seedListedCat({ ordinalsAddress: address, valueSats });
+        return { txid: c.txid, vout: c.vout, value: c.value, address: c.sellerOrdinalsAddress, assetId: c.inscriptionId };
+      }
+      case 'rune': {
+        const c = await seedRuneCoin({ address, valueSats });
+        return { ...c, assetId: c.runeName };
+      }
+      case 'rareSat': {
+        // The notable sat sits at offset 0 of this coin, which is where a
+        // rare-sat classifier reads it.
+        const c = await seedRareSatCoin({ address, valueSats });
+        return { ...c, assetId: String(c.sat) };
+      }
+    }
+  })();
+
+  // Postconditions, because every one of these failing silently turns a guard
+  // spec green for the wrong reason.
+  if (seeded.value !== valueSats) {
+    throw new Error(`seedDirtyCoin(${asset}): got a ${seeded.value}-sat coin, not the ${valueSats} asked for`);
+  }
+  if (seeded.address !== address) {
+    throw new Error(`seedDirtyCoin(${asset}): landed at ${seeded.address}, not the ${address} asked for`);
+  }
+
+  return {
+    asset,
+    outpoint: `${seeded.txid}:${seeded.vout}`,
+    txid: seeded.txid,
+    vout: seeded.vout,
+    value: seeded.value,
+    address: seeded.address,
+    assetId: seeded.assetId,
   };
 }

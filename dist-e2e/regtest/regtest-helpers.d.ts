@@ -390,6 +390,15 @@ export declare function seedRuneCoin(options?: {
     runeName?: string;
     walletName?: string;
     feeRate?: number;
+    /**
+     * The value of the coin the rune lands on, when `address` is given.
+     *
+     * ord's `wallet send` defaults to 10 000 sat postage. That matters for a
+     * guard spec: best-fit selection takes the SMALLEST covering coin, so a
+     * rune coin the caller cannot position is a coin an unguarded selection
+     * would never have picked, and its survival proves nothing.
+     */
+    valueSats?: number;
 }): Promise<SeededRuneCoin>;
 /** A regtest coin seeded so that it really carries an inscription. */
 export interface SeededInscribedCoin {
@@ -444,6 +453,9 @@ export interface SeededInscribedCoin {
  */
 export declare function seedInscribedCoin(options: {
     address: string;
+    /** Preferred name, matching every other seed helper. */
+    valueSats?: number;
+    /** Older name for the same thing. */
     postageSats?: number;
     walletName?: string;
     feeRate?: number;
@@ -482,6 +494,7 @@ export interface SeededRareSatCoin {
  */
 export declare function seedRareSatCoin(options?: {
     address?: string;
+    valueSats?: number;
 }): Promise<SeededRareSatCoin>;
 /** ord's own verdict on a sat: `GET /sat/<sat>`, which carries its rarity. */
 export declare function getStockOrdSat(sat: number): Promise<{
@@ -686,4 +699,69 @@ export declare function seedListedCat(options: {
     ordinalsAddress: string;
     valueSats?: number;
 }): Promise<SeededListedCat>;
+/** An asset class a user destroys by spending the coin that carries it. */
+export type DirtyCoinAsset = 'inscription' | 'cat' | 'rune' | 'rareSat';
+/** A coin carrying a real, indexed asset, seeded where a guard spec needs it. */
+export interface SeededDirtyCoin {
+    asset: DirtyCoinAsset;
+    /** `<txid>:<vout>`. The thing a guard spec asserts was NOT spent. */
+    outpoint: string;
+    txid: string;
+    vout: number;
+    /** The coin's value, equal to the `valueSats` asked for. */
+    value: number;
+    /** Where it sits, equal to the `address` asked for. */
+    address: string;
+    /**
+     * What ord names when it refuses the coin: an inscription id, a cat's
+     * inscription id, a rune name, or a sat number as a string.
+     */
+    assetId: string;
+}
+/**
+ * Seed a coin carrying a real asset, at an address and a value the caller
+ * chooses, confirmed and indexed by the time this returns.
+ *
+ * One entry point for all four classes so a guard spec is a loop rather than
+ * four bespoke setups, and so the classes cannot drift apart in the shape they
+ * hand back.
+ *
+ * ## Why `valueSats` is required
+ *
+ * Because a guard spec proves nothing unless the dirty coin is the coin an
+ * UNGUARDED selection would actually have taken. Selection picks the SMALLEST
+ * covering candidate, so the dirty coin belongs slightly above the funding
+ * requirement with a clean coin well above it. Seed it too large and it is
+ * never a candidate; the spec then passes with the guard deleted.
+ *
+ * A default would make that mistake silently, which is exactly how the
+ * inscription case sat at 2 000 000 sats and proved nothing. Requiring the
+ * argument forces the caller to answer the question.
+ *
+ * ## Three ways a guard spec proves nothing
+ *
+ * All three have been found in this family's suites, so check for them:
+ *
+ *  1. Every coin in the pool is clean, so the guard is never engaged.
+ *  2. The dirty coin is too large to be a best-fit candidate.
+ *  3. The dirty coin is the ONLY coin, so there is no alternative to steer to.
+ *     That proves the guard FLAGS; it does not prove selection AVOIDS.
+ *
+ * The shape that proves something: a dirty coin just over the requirement, a
+ * clean coin well over it, and an assertion that {@link SeededDirtyCoin.outpoint}
+ * is absent from the spent outpoints afterwards. Then break the guard and watch
+ * that assertion fail.
+ *
+ * ## Indexing
+ *
+ * Cats come from `cat21-ord` (`--index-cat21`); inscriptions, runes and rare
+ * sats come from the full ord (`--index-runes` and `--index-sats`). A stack
+ * whose full ord lacks those flags reports a dirty coin as clean, and a guard
+ * spec against it is green for the wrong reason.
+ */
+export declare function seedDirtyCoin(options: {
+    asset: DirtyCoinAsset;
+    address: string;
+    valueSats: number;
+}): Promise<SeededDirtyCoin>;
 //# sourceMappingURL=regtest-helpers.d.ts.map
