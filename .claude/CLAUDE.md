@@ -567,10 +567,26 @@ the specs green. The hardcoded literal is what makes a postage change turn those
 assertions red so a human reviews each one. Same reasoning as pinning ord's
 `Display for Pile` vectors as literals rather than deriving them.
 
-The rule that separates the two columns: consolidate a constant that is
-MECHANICAL (a path, a URL, a fixture input, something with no meaning beyond
-"these must match"). Keep a literal that is a CLAIM about behaviour, because an
-imported claim cannot fail.
+The rule that separates the two columns is about WHERE a value is read from,
+not how many copies of it exist. A value the spec ASSERTS must not come from the
+code under test, because then both sides of the comparison move together and the
+assertion cannot fail. A value the spec merely USES (a path, a URL, a fixture
+input, anything whose only property is "these must match") should be one
+constant, imported.
+
+A shared constant in a TEST-owned module is not the thing this forbids: the
+helper is not the code under test, so `expect(x).toBe(EXPECTED_POSTAGE)` with
+the expectation owned by the suite still goes red when the SDK changes. Many
+hand-copied literals are not more honest than one test-owned constant, only
+more numerous.
+
+The one property the copies do buy, worth weighing rather than treating as
+decisive: changing 53 literals is a 53-line diff a reviewer notices, while
+changing one shared constant is a line that slips through. That matters here
+because "update the expectation to match" has been proposed for real
+regressions in this workspace and was wrong both times (see the electrs
+duplicate-outpoint rule). Prefer the shared test-owned constant; if the value is
+one a wrong fix would be tempted to edit, say so where it is defined.
 
 ## HARD RULE: CI is the test. No manual smoke.
 
