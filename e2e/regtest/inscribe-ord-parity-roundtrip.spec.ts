@@ -41,6 +41,7 @@ const scureRegtest = toScureNetwork(Network.Regtest);
 const ORD_WALLET = 'ordparity';
 const PSBT_WALLET = 'ordpool-e2e';
 const TXT_CONTENT_TYPE = 'text/plain;charset=utf-8'; // ord's inferred type for a .txt file
+const HTML_CONTENT_TYPE = 'text/html;charset=utf-8'; // ord's inferred type for a .html file
 
 function bitcoinCliPsbtWallet(...args: string[]): string {
   return rpc('-rpcwallet=' + PSBT_WALLET, ...args);
@@ -94,6 +95,22 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
     await waitForOrdSync(mineBlocks(1));
 
     expect(sdkEnvelopePostPubkey(TXT_CONTENT_TYPE, body)).toBe(ordEnvelopePostPubkey(reveal));
+  }, 120_000);
+
+  it('SDK envelope is byte-identical to ord for a plain HTML inscription, the cubes shape', async () => {
+    // The shape cubes actually mints: one HTML inscription, no compression,
+    // no parent, no metadata. The adjacent cases bracket it (plain text with
+    // no flags here, and text/html under --compress in
+    // inscribe-compress-parity), and the content type is a pushed value
+    // rather than a branch in the encoder, so the combination was covered by
+    // argument. A consumer's live mint shape is worth proving rather than
+    // arguing.
+    const body = new TextEncoder().encode('<html><body><p class="cube">cube</p></body></html>');
+    writeCat21OrdFile('/tmp/parity-plain.html', body);
+    const { reveal } = ordWalletInscribe(ORD_WALLET, '/tmp/parity-plain.html', 5);
+    await waitForOrdSync(mineBlocks(1));
+
+    expect(sdkEnvelopePostPubkey(HTML_CONTENT_TYPE, body)).toBe(ordEnvelopePostPubkey(reveal));
   }, 120_000);
 
   it('SDK envelope is byte-identical to ord WITH a metaprotocol tag (multi-tag order + encoding)', async () => {
