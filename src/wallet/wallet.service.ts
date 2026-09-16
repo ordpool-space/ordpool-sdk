@@ -26,16 +26,8 @@ import { findSignerOrThrow } from './signers';
 import { verifyBip322Signature } from './verify-bip322-signature';
 import { WatchOnlyAddress, WatchOnlyScriptType } from './xpub/derive-watch-only';
 import { AddressProbe, WatchOnlyScanResult, scanWatchOnly } from './xpub/scan-watch-only';
-import {
-  KnownOrdinalWallet,
-  KnownOrdinalWalletType,
-  KnownOrdinalWallets,
-  SignMessageArgs,
-  SignMessageResult,
-  WalletConnector,
-  WalletInfo,
-  WindowLike,
-} from './wallet.service.types';
+import { KnownOrdinalWallet, KnownOrdinalWalletType, SignMessageArgs, SignMessageResult, WalletConnector, WalletInfo, WindowLike } from './wallet.service.types';
+import { KnownOrdinalWallets } from './known-ordinal-wallets';
 
 
 // Re-exports kept for backward compatibility: consumers import these from

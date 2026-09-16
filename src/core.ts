@@ -41,7 +41,6 @@ export * from './network';
 // SDK CLAUDE.md.
 export {
   KnownOrdinalWalletType,
-  KnownOrdinalWallets,
   type KnownOrdinalWallet,
   type WalletInfo,
   type WalletConnector,
@@ -52,6 +51,7 @@ export {
   type LeatherBtcAddress,
   type LeatherStxAddress,
 } from './wallet/wallet.service.types';
+export { KnownOrdinalWallets } from './wallet/known-ordinal-wallets';
 
 // --- Branded Bitcoin address types (compile-time separation of
 //     OrdinalsAddress vs PaymentAddress). Belongs at core so any

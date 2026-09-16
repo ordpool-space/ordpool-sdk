@@ -6,11 +6,8 @@ import {
 } from './wallet-capabilities';
 import { walletInAppBrowserDeepLink } from './wallet-deeplink';
 import { detectInstalledWallets } from './connectors';
-import {
-  KnownOrdinalWalletType,
-  KnownOrdinalWallets,
-  WindowLike,
-} from './wallet.service.types';
+import { KnownOrdinalWalletType, WindowLike } from './wallet.service.types';
+import { KnownOrdinalWallets } from './known-ordinal-wallets';
 
 /**
  * What a person does next with this row. Drives the button, and only

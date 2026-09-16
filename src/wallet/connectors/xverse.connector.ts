@@ -6,14 +6,8 @@ import {
   isXverseInstalled,
   parseXverseAddressResponse,
 } from '../wallet.service.helper';
-import {
-  KnownOrdinalWallets,
-  KnownOrdinalWalletType,
-  WalletConnector,
-  WalletInfo,
-  WindowLike,
-  XverseAddressResponse,
-} from '../wallet.service.types';
+import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse } from '../wallet.service.types';
+import { KnownOrdinalWallets } from '../known-ordinal-wallets';
 
 
 /**

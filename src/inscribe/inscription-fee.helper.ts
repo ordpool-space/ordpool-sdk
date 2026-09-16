@@ -5,7 +5,7 @@ import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
 import { ordFeeSats } from '../cat21-fee/ord-coin-select';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
 import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import type { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
 
 import { buildInscribeCommitPsbt, resolveInscribePostage, type InscribeCommitArgs, type InscribeCommitResult } from './inscription-commit.helper';
 import { buildInscriptionEnvelope, type OrdEnvelopeField } from './inscription-envelope';

@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { KnownOrdinalWalletType, KnownOrdinalWallets } from './wallet.service.types';
+import { KnownOrdinalWalletType } from './wallet.service.types';
+import { KnownOrdinalWallets } from './known-ordinal-wallets';
 import { walletSigners } from './signers';
 import {
   WALLET_MATRIX,

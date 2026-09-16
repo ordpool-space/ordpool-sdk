@@ -11,7 +11,6 @@ export * from './wallet/wallet.service';
 // Public types only — see core.ts for the rationale.
 export {
   KnownOrdinalWalletType,
-  KnownOrdinalWallets,
   type KnownOrdinalWallet,
   type WalletInfo,
   type WalletConnector,
@@ -24,6 +23,7 @@ export {
   type SignMessageArgs,
   type SignMessageResult,
 } from './wallet/wallet.service.types';
+export { KnownOrdinalWallets } from './wallet/known-ordinal-wallets';
 // Branded Bitcoin address types — see core.ts for the rationale.
 export * from './wallet/address-types';
 export * from './format/mempool-format';

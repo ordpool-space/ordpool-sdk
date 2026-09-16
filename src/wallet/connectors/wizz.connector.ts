@@ -6,13 +6,8 @@ import {
   isWizzInstalled,
   wizzBasicInfoToWalletInfo,
 } from '../wallet.service.helper';
-import {
-  KnownOrdinalWallets,
-  KnownOrdinalWalletType,
-  WalletConnector,
-  WalletInfo,
-  WindowLike,
-} from '../wallet.service.types';
+import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types';
+import { KnownOrdinalWallets } from '../known-ordinal-wallets';
 
 
 interface WizzApi {

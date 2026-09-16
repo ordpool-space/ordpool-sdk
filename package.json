@@ -56,6 +56,10 @@
       "types": "./dist/inscribe-validation/index.d.ts",
       "default": "./dist/inscribe-validation/index.js"
     },
+    "./inscribe-fee": {
+      "types": "./dist/inscribe-fee/index.d.ts",
+      "default": "./dist/inscribe-fee/index.js"
+    },
     "./network": {
       "types": "./dist/network.d.ts",
       "default": "./dist/network.js"

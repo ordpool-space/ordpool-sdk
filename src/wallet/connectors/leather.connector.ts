@@ -6,14 +6,8 @@ import {
   isLeatherInstalled,
   parseLeatherAddressResponse,
 } from '../wallet.service.helper';
-import {
-  KnownOrdinalWallets,
-  KnownOrdinalWalletType,
-  LeatherAddressResponse,
-  WalletConnector,
-  WalletInfo,
-  WindowLike,
-} from '../wallet.service.types';
+import { KnownOrdinalWalletType, LeatherAddressResponse, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types';
+import { KnownOrdinalWallets } from '../known-ordinal-wallets';
 
 
 /**
