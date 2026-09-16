@@ -14,5 +14,13 @@
     "skipLibCheck": true
   },
   "include": ["e2e/index.ts", "e2e/globals.d.ts"],
+  // Specs are excluded because they import from src/, which is outside this
+  // config's rootDir. The consequence is a trap: `npm run build:e2e` going
+  // green says NOTHING about whether a spec typechecks. ts-jest checks them at
+  // run time, so a type error costs a full regtest lane to discover.
+  //
+  // To typecheck a spec without the stack up (ts-jest compiles before it
+  // connects to anything):
+  //   npx jest --config e2e/jest.config.regtest.js -t "__none__" --testPathPatterns=<spec>
   "exclude": ["node_modules", "**/*.spec.ts", "**/*.angular.spec.ts"]
 }
