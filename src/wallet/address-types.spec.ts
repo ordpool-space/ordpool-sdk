@@ -63,9 +63,16 @@ describe('address-types (branded PaymentAddress / OrdinalsAddress)', () => {
       function takesPayment(_addr: PaymentAddress): void {}
       function takesOrdinals(_addr: OrdinalsAddress): void {}
 
-      // takesPayment(ord);  // ❌ Argument of type 'OrdinalsAddress' is not assignable to parameter of type 'PaymentAddress'.
-      // takesOrdinals(pay); // ❌ symmetric.
-      // takesPayment(P2WPKH_MAINNET); // ❌ raw string missing the brand.
+      // @ts-expect-error enforces the contract rather than describing it: if the
+      // brands ever collapse into plain strings these calls start compiling,
+      // the directive becomes unused, and tsc fails on the directive itself.
+      // Commented-out lines cannot do that, and the friction here is what
+      // stopped the 2026-07-18 auto-fill bug from re-shipping.
+      takesPayment(ord);
+      // @ts-expect-error symmetric: a PaymentAddress is not an OrdinalsAddress.
+      takesOrdinals(pay);
+      // @ts-expect-error a raw string carries neither brand.
+      takesPayment(P2WPKH_MAINNET);
 
       // Both branded values ARE assignable to bare `string` (unchanged
       // structural behaviour) — nothing existing breaks.
