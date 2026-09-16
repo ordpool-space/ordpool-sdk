@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
+// 1.6.x moved this off the barrel onto the /utils subpath.
+import { taprootTweakPrivKey } from '@scure/btc-signer/utils';
 import { schnorr } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha2';
 
@@ -22,7 +24,7 @@ import { verifyListingSignature } from './verify-listing-signature.js';
 // their signMessage RPC; the test signer mirrors that behaviour.
 // ---------------------------------------------------------------------------
 const PRIVKEY_RAW = hex.decode('0000000000000000000000000000000000000000000000000000000000000003');
-const PRIVKEY = btc.taprootTweakPrivKey(PRIVKEY_RAW);
+const PRIVKEY = taprootTweakPrivKey(PRIVKEY_RAW);
 const XONLY_INTERNAL = schnorr.getPublicKey(PRIVKEY_RAW);
 const P2TR = btc.p2tr(XONLY_INTERNAL, undefined, btc.NETWORK);
 const XONLY = P2TR.tweakedPubkey;
@@ -30,7 +32,7 @@ const P2TR_ADDR = toOrdinalsAddress(P2TR.address!);
 
 // Second key so we can prove "signature by the WRONG key doesn't verify".
 const PRIVKEY_OTHER_RAW = hex.decode('0000000000000000000000000000000000000000000000000000000000000005');
-const PRIVKEY_OTHER = btc.taprootTweakPrivKey(PRIVKEY_OTHER_RAW);
+const PRIVKEY_OTHER = taprootTweakPrivKey(PRIVKEY_OTHER_RAW);
 
 const PAY_ADDR = toPaymentAddress('bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx');
 const TXID = 'ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df';

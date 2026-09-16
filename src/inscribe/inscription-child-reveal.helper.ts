@@ -1,4 +1,11 @@
 import * as btc from '@scure/btc-signer';
+import type { P2TROut } from '@scure/btc-signer/payment';
+// `tapLeafHash` is NOT on the package barrel in 1.6.x; it lives on the
+// `/payment` subpath, which the exports map exposes. 1.2.x had it on the
+// barrel and exposed no subpaths at all, so there is no single import that
+// satisfies both, and the family converged on 1.6.x because cat21-wallet and
+// @leather.io/bitcoin need `@scure/btc-signer/psbt`, which 1.2.x lacks.
+import { tapLeafHash } from '@scure/btc-signer/payment';
 import { schnorr } from '@noble/curves/secp256k1';
 
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
@@ -92,7 +99,7 @@ export interface ChildInscribeRevealArgs {
   /** Taptree spend metadata from the commit builder. */
   taproot: {
     internalKey: Uint8Array;
-    tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
+    tapLeafScript: NonNullable<P2TROut['tapLeafScript']>;
   };
   /** 32-byte ephemeral private key (same key embedded in the envelope). */
   ephemeralPrivKey: Uint8Array;
@@ -299,12 +306,7 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   // tapLeafScript set above). Index-based signers (Leather / cat21-wallet)
   // reach the same finalized witness. The measurement clone below still
   // finalizes the commit input directly so revealTxid / revealVsize are exact.
-  // `tapLeafHash` is on @scure/btc-signer's barrel in the 1.2.x range this
-  // package declares, and was dropped from it by 1.6.0 (which still ships the
-  // function, just not re-exported from the index). So this line pins the
-  // peer range: a consumer resolving 1.6.0 fails to build here. `SigHash` is
-  // on both barrels, which is why the sighash constants use it.
-  const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
+  const leafHash = tapLeafHash(bareLeafScript, leafVersion);
   tx.updateInput(commitInputIndex, {
     tapScriptSig: [[{ pubKey: args.taproot.internalKey, leafHash }, signature]],
   }, true);

@@ -1,6 +1,7 @@
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
+import type { TransactionInputUpdate } from '@scure/btc-signer/psbt';
 
 import { DummyKeypairResult, TxnOutput } from '../cat21-mint/cat21.service.types.js';
 
@@ -87,7 +88,7 @@ export function getDummyLegacyTransaction(txnOutput: TxnOutput, network: typeof 
   const tx = new btc.Transaction();
 
   // P2WPKH requires no damn nonWitnessUtxo which gives us a signable transaction
-  const input: btc.TransactionInputUpdate = {
+  const input: TransactionInputUpdate = {
     txid: '0000000000000000000000000000000000000000000000000000000000000000',
     index: 0,
     witnessUtxo: {

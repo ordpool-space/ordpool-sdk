@@ -1,5 +1,6 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
+import type { TransactionInputUpdate } from '@scure/btc-signer/psbt';
 
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
@@ -124,7 +125,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   const sellerIsTaproot =
     args.sellerInput.scriptPubKey.length === 34 &&
     args.sellerInput.scriptPubKey[0] === 0x51;
-  const sellerInput: btc.TransactionInputUpdate = {
+  const sellerInput: TransactionInputUpdate = {
     txid: args.sellerInput.txid,
     index: args.sellerInput.vout,
     sequence: sequenceNumber,

@@ -1,5 +1,6 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
+import type { TransactionInputUpdate } from '@scure/btc-signer/psbt';
 
 import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
@@ -123,7 +124,7 @@ export function addCat21Input(
   sequence: number,
 ): void {
   if (input.nonWitnessUtxo) {
-    const legacyInput: btc.TransactionInputUpdate = {
+    const legacyInput: TransactionInputUpdate = {
       txid: input.txid,
       index: input.vout,
       sequence,
@@ -138,7 +139,7 @@ export function addCat21Input(
   }
 
   const isTaproot = !!input.tapInternalKey;
-  const base: btc.TransactionInputUpdate = {
+  const base: TransactionInputUpdate = {
     txid: input.txid,
     index: input.vout,
     sequence,

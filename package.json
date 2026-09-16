@@ -122,7 +122,7 @@
   "peerDependencies": {
     "@noble/curves": ">=1",
     "@playwright/test": ">=1.50",
-    "@scure/btc-signer": "1.2.x",
+    "@scure/btc-signer": "1.6.x",
     "rxjs": ">=7",
     "sats-connect": ">=4"
   },
@@ -145,7 +145,7 @@
     "@playwright/test": "^1.50.0",
     "@scure/base": "^1.1.5",
     "@scure/bip32": "1.4.0",
-    "@scure/btc-signer": "1.2.1",
+    "@scure/btc-signer": "1.6.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.14.9",
     "babel-jest": "^30.4.1",

@@ -1,4 +1,6 @@
 import * as btc from '@scure/btc-signer';
+import type { P2TROut, TaprootScriptList } from '@scure/btc-signer/payment';
+import type { TransactionInputUpdate } from '@scure/btc-signer/psbt';
 
 import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
 
@@ -252,7 +254,7 @@ export interface InscribeCommitResult {
      * The reveal builder passes this straight to the script-path reveal;
      * a key-path reveal doesn't need it.
      */
-    tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
+    tapLeafScript: NonNullable<P2TROut['tapLeafScript']>;
   };
   /** Change amount, after the commit output; 0 when sub-dust (absorbed into the fee). */
   changeSats: number;
@@ -292,7 +294,7 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   // allowUnknownOutputs=true because the envelope tapscript isn't a
   // pattern scure recognises (`<pubkey> CHECKSIG OP_FALSE OP_IF
   // "ord" ... OP_ENDIF` is ord-specific).
-  const tree: btc.TaprootScriptList = [{ script: args.envelopeScript }];
+  const tree: TaprootScriptList = [{ script: args.envelopeScript }];
   const commitP2tr = btc.p2tr(args.ephemeralPubkeyXonly, tree, scureNetwork, true);
 
   const commitAddress = commitP2tr.address;
@@ -338,8 +340,8 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   // Funding and padding inputs are payment inputs of the same shape as the
   // cat21 mint adapter's: witnessUtxo for SegWit, nonWitnessUtxo for P2PKH
   // legacy, plus per-address-type optional fields.
-  const paymentInput = (fi: InscribeCommitArgs['fundingInput']): btc.TransactionInputUpdate => {
-    const input: btc.TransactionInputUpdate = {
+  const paymentInput = (fi: InscribeCommitArgs['fundingInput']): TransactionInputUpdate => {
+    const input: TransactionInputUpdate = {
       txid: fi.txid,
       index: fi.vout,
       sequence,

@@ -1,4 +1,5 @@
 import * as btc from '@scure/btc-signer';
+import type { P2Ret, P2TROut } from '@scure/btc-signer/payment';
 
 import { getAddressFormat, toXOnly } from './address-format.js';
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair.js';
@@ -41,7 +42,7 @@ export interface BuildInputScriptResult {
    * and Taproot additionally exposes the script-path tweaks the
    * adapter merges into the input.
    */
-  scriptData: btc.P2Ret | btc.P2TROut;
+  scriptData: P2Ret | P2TROut;
   /**
    * Only set for Taproot — the x-only internal key the adapter
    * attaches to the input so a key-path signer produces a valid

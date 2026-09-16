@@ -1,4 +1,5 @@
 import * as btc from '@scure/btc-signer';
+import type { P2TROut } from '@scure/btc-signer/payment';
 import { schnorr } from '@noble/curves/secp256k1';
 
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
@@ -63,7 +64,7 @@ export interface InscribeRevealArgs {
   /** Taptree spend metadata (output of commit helper). */
   taproot: {
     internalKey: Uint8Array;
-    tapLeafScript: NonNullable<btc.P2TROut['tapLeafScript']>;
+    tapLeafScript: NonNullable<P2TROut['tapLeafScript']>;
   };
   /**
    * 32-byte ephemeral private key. SAME key whose Schnorr x-only

@@ -6,6 +6,7 @@ import { Network, toScureNetwork } from '../network.js';
 import { sha256 } from '@noble/hashes/sha256';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
+import type { P2TROut } from '@scure/btc-signer/payment';
 import { CreateTransactionResult, TxnOutput, TxnOutputStatus } from './cat21.service.types.js';
 
 // Most UTXO fixtures don't care about the confirmation status — the
@@ -160,7 +161,7 @@ describe('proof that we can create+sign a taproot input + output with dummy data
 
     const { dummyPrivateKey, xOnlyDummyPublicKey } = getDummyKeypair(btc.TEST_NETWORK);
     const tx = new btc.Transaction();
-    const scriptP2tr: btc.P2TROut = btc.p2tr(xOnlyDummyPublicKey, undefined, btc.TEST_NETWORK, true);
+    const scriptP2tr: P2TROut = btc.p2tr(xOnlyDummyPublicKey, undefined, btc.TEST_NETWORK, true);
 
     // Add the Taproot input
     tx.addInput({
