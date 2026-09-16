@@ -60,6 +60,10 @@
       "types": "./dist/inscribe-fee/index.d.ts",
       "default": "./dist/inscribe-fee/index.js"
     },
+    "./rune": {
+      "types": "./dist/rune/index.d.ts",
+      "default": "./dist/rune/index.js"
+    },
     "./network": {
       "types": "./dist/network.d.ts",
       "default": "./dist/network.js"
