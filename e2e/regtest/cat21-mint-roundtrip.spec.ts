@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1 } from '@noble/curves/secp256k1';
+import { sha256 } from '@noble/hashes/sha256';
 import { base58, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
@@ -156,10 +157,33 @@ describe('cat21 mint roundtrip on regtest', () => {
     funderPrivateKey = wifToPrivateKey(funded.wif);
     funderPublicKey  = secp256k1.getPublicKey(funderPrivateKey, true);
 
-    // Recipient is fixed across all cases, Taproot.
-    const p2tr = btc.p2tr(funderPublicKey.subarray(1, 33), undefined, regtestNetwork, true);
-    recipientTaprootAddress = p2tr.address!;
+    // Recipient is fixed across all cases, Taproot, and derived from a key of
+    // its OWN rather than the funder's.
+    //
+    // Deriving it from funderPublicKey made it byte-identical to the Taproot
+    // case's payment address, since that case builds its payment with the same
+    // key and the same p2tr call. In that case `expectedRecipientScript` and
+    // `expectedChangeScript` are the same bytes, so the two output-script
+    // assertions below collapse into one and a mint paying the cat to the
+    // wallet's own payment address instead of the recipient reads as correct.
+    // The differing amounts still catch a swap, and the other three cases still
+    // catch the destination, so the property was covered but one case was blind.
+    // A distinct key makes all four cases prove it.
+    const recipientPrivateKey = sha256(funderPrivateKey);
+    const recipientPublicKey = secp256k1.getPublicKey(recipientPrivateKey, true);
+    const p2tr = btc.p2tr(recipientPublicKey.subarray(1, 33), undefined, regtestNetwork, true);
+    if (p2tr.address === undefined) throw new Error('p2tr gave no recipient address');
+    recipientTaprootAddress = p2tr.address;
     expectedRecipientScript = p2tr.script;
+
+    // The collision this replaces is invisible by construction, so pin its
+    // absence: every case's payment address must differ from the recipient.
+    for (const c of cases) {
+      const payment = c.buildPayment(funderPublicKey, regtestNetwork);
+      if (payment.address === recipientTaprootAddress) {
+        throw new Error(`fixture collision: ${c.label} pays to the recipient address`);
+      }
+    }
 
     // Bootstrap mines exactly 101 blocks, so only the block-1
     // coinbase is mature. We need two separate mature 50-BTC inputs
