@@ -47,16 +47,49 @@ async function clickAndAwaitTransition(page, buttonText, sentinelGoneRegex, atte
     }
     throw new Error(`"${buttonText}" did not transition past "${sentinelGoneRegex}" after ${attempts} attempts`);
 }
+/**
+ * Open an Xverse extension page and wait for it to hydrate, re-navigating
+ * between attempts.
+ *
+ * A single `goto` plus a long timeout is the wrong shape here. When the
+ * extension's service worker is slow to wake under load, the page renders a
+ * shell that never hydrates, and no ceiling rescues it: the wait is not racing
+ * a slow render, it is watching a dead page. Re-navigating re-triggers the
+ * extension's bootstrap, which is what actually recovers it. Raising the
+ * ceiling only makes the failure take longer to report, which is how this wait
+ * already went from 30 s to 60 s and still timed out under three concurrent
+ * regtest lanes.
+ *
+ * Each attempt gets a short window; the budget is the product, so the total
+ * patience is higher than the old single wait while a stuck shell is retried
+ * rather than watched.
+ */
+async function gotoAndHydrate(page, url, ready, opts) {
+    const attempts = opts.attempts ?? 4;
+    const perAttemptMs = opts.perAttemptMs ?? 20_000;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+        const hydrated = await page
+            .waitForFunction(ready, undefined, { timeout: perAttemptMs, polling: 250 })
+            .then(() => true)
+            .catch(() => false);
+        if (hydrated)
+            return;
+        // eslint-disable-next-line no-console
+        console.log(`[xverse] ${opts.what} did not hydrate in ${perAttemptMs} ms (attempt ${attempt}/${attempts}); re-navigating`);
+    }
+    throw new Error(`Xverse ${opts.what} never hydrated after ${attempts} navigations of ${perAttemptMs} ms each (${url}). ` +
+        `The extension's service worker is not answering; this is load or install related, not a selector change.`);
+}
 /** Drive Xverse onboarding from the BIP-39 test seed to a restored wallet. */
 async function onboardXverse(context, extensionId, opts = {}) {
     const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.xverse;
     const mnemonic = opts.mnemonic ?? wallet_test_vectors_1.TEST_MNEMONIC;
     const page = await context.newPage();
-    await page.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
-    await page.waitForFunction(() => {
+    await gotoAndHydrate(page, `chrome-extension://${extensionId}/options.html`, () => {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes('restore') && t.includes('create');
-    }, undefined, { timeout: 30_000 });
+    }, { what: 'onboarding page' });
     await page.getByText(/restore an existing wallet|restore.*wallet/i).first().click();
     await (0, test_1.expect)(page.getByText(/legal/i).first()).toBeVisible({ timeout: 15_000 });
     const dc = page.getByText(/authorize data collection/i).first();
@@ -98,14 +131,10 @@ async function onboardXverse(context, extensionId, opts = {}) {
 async function primeAndSwitchToRegtest(context, extensionId) {
     const primer = await context.newPage();
     await primer.setViewportSize({ width: 400, height: 800 });
-    await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-    // 60s, not 30s: the wallet matrix runs several extension jobs in parallel on
-    // shared CI runners, so Xverse's popup can be slow to hydrate here — it flaked
-    // on a 30s ceiling once under matrix load.
-    await primer.waitForFunction(() => {
+    await gotoAndHydrate(primer, `chrome-extension://${extensionId}/popup.html`, () => {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes('account 1') || t.includes('not now') || t.includes('zest');
-    }, undefined, { timeout: 60_000, polling: 250 });
+    }, { what: 'popup' });
     const notNow = primer.getByText('Not now', { exact: true }).first();
     if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
         await notNow.click({ force: true }).catch(() => undefined);
