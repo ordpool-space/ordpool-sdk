@@ -655,6 +655,15 @@ export interface SeededListedCat {
     sellerOrdinalsAddress: string;
     /** cat21-ord's id for it, for a `waitForCatAtAddress` of your own. */
     inscriptionId: string;
+    /**
+     * The CAT NUMBER, as cat21-ord assigns it.
+     *
+     * Returned so a consumer driving a number-lookup page does not have to
+     * discover it by reading `/cats` and assuming an ordering. Under
+     * `--index-cat21` ord's inscription number IS the cat number, because the
+     * index contains nothing else.
+     */
+    catNumber: number;
 }
 /**
  * Mint a real `nLockTime=21` cat to an address the CALLER chooses, and wait

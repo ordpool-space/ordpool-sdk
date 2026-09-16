@@ -37,6 +37,10 @@ describe('seedListedCat', () => {
     expect(cat.sellerOrdinalsAddress).toBe(owner);
     expect(cat.vout).toBe(0);
     expect(cat.txid).toMatch(/^[0-9a-f]{64}$/);
+    // The cat NUMBER, so a number-lookup page can be driven without reading
+    // /cats and assuming an ordering.
+    expect(typeof cat.catNumber).toBe('number');
+    expect(cat.catNumber).toBeGreaterThanOrEqual(0);
 
     // cat21-ord is the authority, not our own return value.
     const indexed = await waitForCatAtAddress(cat.inscriptionId, owner);
@@ -61,6 +65,7 @@ describe('seedListedCat', () => {
 
     expect(first.txid).not.toBe(second.txid);
     expect(first.inscriptionId).not.toBe(second.inscriptionId);
+    expect(first.catNumber).not.toBe(second.catNumber);
     expect((await waitForCatAtAddress(first.inscriptionId, a)).address).toBe(a);
     expect((await waitForCatAtAddress(second.inscriptionId, b)).address).toBe(b);
   }, 420_000);

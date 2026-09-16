@@ -1335,6 +1335,7 @@ async function seedListedCat(options) {
         value: indexed.value,
         sellerOrdinalsAddress: options.ordinalsAddress,
         inscriptionId,
+        catNumber: indexed.number,
     };
 }
 //# sourceMappingURL=regtest-helpers.js.map
