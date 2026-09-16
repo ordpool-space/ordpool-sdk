@@ -91,7 +91,9 @@ export default async function globalSetup(): Promise<void> {
   ) {
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] reusing seed user-data-dir (Xverse ${extVersion}) at ${SEED_USER_DATA_DIR}`);
-    assertSeedLanded('reused an existing seed');
+    // No assertSeedLanded here: the condition above already required
+    // `Default` to exist, so an assertion at this point cannot fail. It is the
+    // produce path below that can report success without leaving output.
     return;
   }
 
