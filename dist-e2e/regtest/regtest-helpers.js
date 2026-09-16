@@ -91,7 +91,9 @@ exports.ordStockWalletBatch = ordStockWalletBatch;
 exports.fundOrdStockWallet = fundOrdStockWallet;
 exports.sendFromCleanFunderCoin = sendFromCleanFunderCoin;
 exports.makeWatchOnlyTestAccount = makeWatchOnlyTestAccount;
+exports.seedListedCat = seedListedCat;
 const node_child_process_1 = require("node:child_process");
+const node_crypto_1 = require("node:crypto");
 const node_util_1 = require("node:util");
 const bip32_1 = require("@scure/bip32");
 const base_1 = require("@scure/base");
@@ -1262,6 +1264,77 @@ function makeWatchOnlyTestAccount(options = {}) {
             }
             return base_1.base64.encode(tx.toPSBT());
         },
+    };
+}
+/**
+ * Mint a real `nLockTime=21` cat to an address the CALLER chooses, and wait
+ * until cat21-ord has indexed it there.
+ *
+ * For driving an offer page end to end. The point of choosing the owner is
+ * that a seller's ORDINALS address `O` must be DISTINCT from the payment
+ * address `P` a seller types in, so a spec can assert the page pays `P` and
+ * never `O`. That is the 2026-07-18 regression: `make-offer` took
+ * `resolvedSellerAddress` from an ord lookup, which returns the ordinals
+ * address, and piped it in as the payment address, so every URL-driven accept
+ * broke silently. A fixture that lets O and P coincide cannot catch it.
+ *
+ * `valueSats` defaults to 546, the mint postage. **Pass something else too.**
+ * Offer and transfer PRESERVE the cat UTXO's value rather than normalising it,
+ * so a 546-only test proves nothing about size handling, which is exactly how
+ * an offer builder that hardcoded 546 stayed green until it was run at 9000.
+ */
+async function seedListedCat(options) {
+    const valueSats = options.valueSats ?? 546;
+    const fundingSats = Math.max(1_000_000, valueSats * 4);
+    // Throwaway key that owns only the funding coin, so the cat's provenance is
+    // a plain mint and nothing else in the suite can spend it out from under us.
+    const seed = (0, node_crypto_1.randomBytes)(32);
+    const key = bip32_1.HDKey.fromMasterSeed(seed, WATCH_ONLY_TESTNET_VERSIONS);
+    if (key.privateKey === null || key.publicKey === null) {
+        throw new Error('seedListedCat: no key material');
+    }
+    const payment = btc.p2wpkh(key.publicKey, REGTEST_SCURE_NETWORK);
+    const fundingAddress = payment.address;
+    if (fundingAddress === undefined)
+        throw new Error('seedListedCat: no funding address');
+    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', fundingAddress, (fundingSats / 1e8).toFixed(8));
+    let tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    const funding = await waitForUtxoAt(fundingAddress, fundingSats);
+    // lockTime 21 IS the mint: cat21-ord indexes any such output as a cat.
+    // Sequence 0xfffffffe is the non-RBF value every third-party wallet gets,
+    // so an accelerate UI can never replace a mint and drop the lockTime.
+    const tx = new btc.Transaction({ lockTime: 21 });
+    tx.addInput({
+        txid: funding.txid,
+        index: funding.vout,
+        sequence: 0xfffffffe,
+        witnessUtxo: { script: payment.script, amount: BigInt(funding.value) },
+    });
+    tx.addOutputAddress(options.ordinalsAddress, BigInt(valueSats), REGTEST_SCURE_NETWORK);
+    const changeSats = funding.value - valueSats - 1_000;
+    if (changeSats < 546)
+        throw new Error(`seedListedCat: funding too small for ${valueSats} sats`);
+    tx.addOutputAddress(fundingAddress, BigInt(changeSats), REGTEST_SCURE_NETWORK);
+    tx.signIdx(key.privateKey, 0, [btc.SigHash.ALL]);
+    tx.finalize();
+    const txid = await postTx(tx.hex);
+    tip = mineBlocks(1);
+    await waitForElectrsSync(tip);
+    await waitForTxConfirmed(txid);
+    await waitForOrdSync(tip);
+    // cat21-ord is the authority that this is a cat AND that it sits at O.
+    const inscriptionId = catInscriptionId(txid);
+    const indexed = await waitForCatAtAddress(inscriptionId, options.ordinalsAddress);
+    if (indexed.value !== valueSats) {
+        throw new Error(`seedListedCat: ord reports ${indexed.value} sats, expected ${valueSats}`);
+    }
+    return {
+        txid,
+        vout: 0,
+        value: indexed.value,
+        sellerOrdinalsAddress: options.ordinalsAddress,
+        inscriptionId,
     };
 }
 //# sourceMappingURL=regtest-helpers.js.map

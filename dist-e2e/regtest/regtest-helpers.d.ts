@@ -645,4 +645,36 @@ export declare function makeWatchOnlyTestAccount(options?: {
     seed?: Uint8Array;
     accountPath?: string;
 }): WatchOnlyTestAccount;
+/** A real cat on chain, owned by the address the caller named. */
+export interface SeededListedCat {
+    txid: string;
+    vout: number;
+    /** The cat UTXO's real value. Offer and transfer must PRESERVE this. */
+    value: number;
+    /** The ordinals address holding it: the `O` a seller owns. */
+    sellerOrdinalsAddress: string;
+    /** cat21-ord's id for it, for a `waitForCatAtAddress` of your own. */
+    inscriptionId: string;
+}
+/**
+ * Mint a real `nLockTime=21` cat to an address the CALLER chooses, and wait
+ * until cat21-ord has indexed it there.
+ *
+ * For driving an offer page end to end. The point of choosing the owner is
+ * that a seller's ORDINALS address `O` must be DISTINCT from the payment
+ * address `P` a seller types in, so a spec can assert the page pays `P` and
+ * never `O`. That is the 2026-07-18 regression: `make-offer` took
+ * `resolvedSellerAddress` from an ord lookup, which returns the ordinals
+ * address, and piped it in as the payment address, so every URL-driven accept
+ * broke silently. A fixture that lets O and P coincide cannot catch it.
+ *
+ * `valueSats` defaults to 546, the mint postage. **Pass something else too.**
+ * Offer and transfer PRESERVE the cat UTXO's value rather than normalising it,
+ * so a 546-only test proves nothing about size handling, which is exactly how
+ * an offer builder that hardcoded 546 stayed green until it was run at 9000.
+ */
+export declare function seedListedCat(options: {
+    ordinalsAddress: string;
+    valueSats?: number;
+}): Promise<SeededListedCat>;
 //# sourceMappingURL=regtest-helpers.d.ts.map
