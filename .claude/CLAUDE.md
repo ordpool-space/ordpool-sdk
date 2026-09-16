@@ -108,17 +108,22 @@ npm run clean           # removes dist/ dist-e2e/
 `npm install` produces the runtime output. `dist-e2e/` is
 committed (see Shipped artifacts).
 
-### Consumer-side staleness guard
+### Consumer-side staleness: there is NO guard
 
-cat21-wallet imports the COMPILED bytes from `dist/`, not
-`src/*.ts`. If you edit SDK source without rebuilding, the wallet
-runs against stale bytes. The wallet ships a pre-hook
-(`apps/extension/scripts/check-sdk-fresh.cjs`) that fires before
-`vitest`, `webpack`, and `tsc`; if `src/` mtimes are newer than
-`dist/` mtimes, it exits 1 with the rebuild command.
+cat21-wallet imports the COMPILED bytes, not `src/*.ts`. Edit SDK source
+without rebuilding and a linked wallet runs against stale bytes, silently.
 
-In wallet-side dev, a side-terminal `pnpm sdk:watch` keeps the
-core build incremental, so you never trip the guard.
+**Nothing catches that.** This section previously described a pre-hook at
+`apps/extension/scripts/check-sdk-fresh.cjs` firing before vitest, webpack
+and tsc, and a `pnpm sdk:watch`. Neither exists: no such file, no such
+package.json script. It was written here and never verified, and a doc
+inventing a safety net is worse than one admitting the gap, because a
+reader stops looking for the problem.
+
+For a SHA-pinned consumer this cannot bite: `prepare` builds `dist/` from
+that SHA's source at install. It bites a developer using `npm link`
+against a local checkout. Until a real guard exists, `npm run build:main`
+in the SDK between iterations is the whole mitigation.
 
 ## HARD RULE: Keep useful comments
 
