@@ -30,6 +30,7 @@
 import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha256';
+import { randomBytes } from 'node:crypto';
 import * as btc from '@scure/btc-signer';
 
 import { executeMint } from '../../src/cat21-core/mint.core';
@@ -74,9 +75,14 @@ describe('funding safety end to end: an asset-bearing coin is never auto-spent',
   it.each<DirtyCoinAsset>(['inscription', 'cat', 'rune', 'rareSat'])(
     'a coin carrying a %s is scanned, refused, and still unspent after a real mint',
     async (asset) => {
-      // A fresh identity per class, so one case's leftovers cannot become
-      // another's funding and quietly change which coin is the best fit.
-      const priv = sha256(new TextEncoder().encode(`funding-safety-not-spent/${asset}`));
+      // A fresh identity per class AND per run. Deriving it from the class name
+      // alone is deterministic, which sounds like a virtue and is not: a second
+      // run against the same chain reuses the address, finds the previous run's
+      // coins still sitting there, and the dirty coin is no longer the smallest.
+      // CI never sees it because every run gets a fresh chain; anyone iterating
+      // against a long-lived regtest stack sees it on the second run, and the
+      // failure lands on the premise rather than on the assertion under test.
+      const priv = sha256(randomBytes(32));
       const pub = secp256k1.getPublicKey(priv, true);
       const paymentAddress = btc.p2wpkh(pub, scure).address;
       const ordinalsAddress = btc.p2tr(pub.subarray(1, 33), undefined, scure, true).address;

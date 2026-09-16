@@ -82,14 +82,15 @@ while [ $# -gt 0 ]; do
 done
 
 COMPOSE=( docker compose "${COMPOSE_BASE[@]}" "${EXTRA_FILES[@]}" "${PROFILES[@]}" )
-RPC="docker exec ordpool-e2e-consumer-bitcoind bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
+BITCOIND_CONTAINER="${REGTEST_BITCOIND_CONTAINER:-ordpool-e2e-consumer-bitcoind}"
+RPC="docker exec $BITCOIND_CONTAINER bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
 # The wallet name these helpers spend from. A consumer stack brings this
 # compose up under its own project prefix, so the name must match what its
 # regtest-helpers use (REGTEST_WALLET there).
 WALLET="${REGTEST_WALLET:-ordpool-e2e}"
 
 # --- bring containers up if not already running ---
-if ! docker ps --format '{{.Names}}' | grep -q 'ordpool-e2e-consumer-bitcoind'; then
+if ! docker ps --format '{{.Names}}' | grep -q "$BITCOIND_CONTAINER"; then
   if [ "$BUILDX_CACHE" = 1 ]; then
     # Build every buildable service of the ACTIVE profile set through
     # buildx bake so the gha overlay's cache_from/to take effect (electrs

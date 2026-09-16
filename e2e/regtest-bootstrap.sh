@@ -10,14 +10,15 @@
 set -euo pipefail
 
 COMPOSE="docker compose -f $(dirname "$0")/docker-compose.regtest.yml"
-RPC="docker exec ordpool-e2e-bitcoind bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
+BITCOIND_CONTAINER="${REGTEST_BITCOIND_CONTAINER:-ordpool-e2e-bitcoind}"
+RPC="docker exec $BITCOIND_CONTAINER bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
 # The wallet name these helpers spend from. A consumer stack brings this
 # compose up under its own project prefix, so the name must match what its
 # regtest-helpers use (REGTEST_WALLET there).
 WALLET="${REGTEST_WALLET:-ordpool-e2e}"
 
 # --- bring containers up if not already running ---
-if ! docker ps --format '{{.Names}}' | grep -q 'ordpool-e2e-bitcoind'; then
+if ! docker ps --format '{{.Names}}' | grep -q "$BITCOIND_CONTAINER"; then
   $COMPOSE up -d >&2
 fi
 
