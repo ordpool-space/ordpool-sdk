@@ -125,6 +125,12 @@
   "peerDependenciesMeta": {
     "@playwright/test": {
       "optional": true
+    },
+    "rxjs": {
+      "optional": true
+    },
+    "sats-connect": {
+      "optional": true
     }
   },
   "devDependencies": {

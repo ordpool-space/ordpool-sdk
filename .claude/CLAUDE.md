@@ -110,6 +110,27 @@ When adding a new pure helper:
 3. Re-export from `src/core.ts`.
 4. `npm run build:main` — regenerates `dist/`.
 
+### Peer dependencies: which entry point needs what
+
+`@scure/btc-signer`, `@noble/curves`, `rxjs` and `sats-connect` are PEER
+dependencies, never bundled: `dist/` leaves them as plain requires and the
+consumer supplies one copy. That is why a subpath's bundled size overstates
+what it costs: `/cat21-fee` measures 227 kB with deps inlined but is **8.5 kB
+of our code**, and the rest is a btc-signer any Bitcoin-touching import would
+have pulled anyway.
+
+`rxjs` and `sats-connect` are marked **optional** in `peerDependenciesMeta`,
+because only the two BARRELS need them. Measured across all 13 entry points:
+
+| entry | needs rxjs | needs sats-connect |
+|---|---|---|
+| `.` and `./core` | yes | yes |
+| every other subpath | no | no |
+
+So a consumer importing only `ordpool-sdk/format` is no longer told to install
+the whole wallet stack. Do NOT un-optional them without re-running that
+measurement: the claim is per-entry-point, not per-package.
+
 ### Build commands
 
 ```bash
