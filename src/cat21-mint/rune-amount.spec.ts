@@ -82,16 +82,52 @@ describe('formatRuneAmount: refusals', () => {
 });
 
 describe('formatRunePile: ord\'s complete rendering', () => {
-  // Also ord's own vectors: the symbol write is unconditional in the same
-  // Display, so these are the same tests with the tail restored.
   const NBSP = '\u00A0'; // written as an escape on purpose: invisible in source is the hazard
 
+  /**
+   * ord's OWN vectors, transcribed from `impl Display for Pile` in
+   * `crates/ordinals/src/pile.rs` (ord 0.27.0). All twelve, not a selection:
+   * this function exists so a rune row agrees with the explorer it links to,
+   * and the only thing that establishes that is ord's own expectations.
+   *
+   * Transcribed rather than derived, so an ord bump is a diff against one
+   * place. `symbol: None` in Rust is a rune with no symbol, which ord renders
+   * with the currency sign.
+   *
+   * The pairs that earn their place are the zero-padded fractions: 1 at
+   * divisibility 2 is `0.01`, not `0.1`. Losing the pad reports a balance ten
+   * times too small.
+   */
   it.each([
-    ['0', 0, '¤', `0${NBSP}¤`],
+    ['0', 0, null, `0${NBSP}¤`],
+    ['25', 0, null, `25${NBSP}¤`],
+    ['0', 1, null, `0${NBSP}¤`],
+    ['1', 1, null, `0.1${NBSP}¤`],
+    ['1', 2, null, `0.01${NBSP}¤`],
+    ['10', 2, null, `0.1${NBSP}¤`],
+    ['1100', 3, null, `1.1${NBSP}¤`],
+    ['100', 2, null, `1${NBSP}¤`],
+    ['101', 2, null, `1.01${NBSP}¤`],
+    ['340282366920938463463374607431768211455', 18, null,
+      `340282366920938463463.374607431768211455${NBSP}¤`],
+    ['340282366920938463463374607431768211455', 38, null,
+      `3.40282366920938463463374607431768211455${NBSP}¤`],
     ['0', 0, '$', `0${NBSP}$`],
+  ])('ord renders %s at divisibility %i with symbol %s as %s', (amount, divisibility, symbol, expected) => {
+    expect(formatRunePile({
+      amount: amount as string,
+      divisibility: divisibility as number,
+      symbol: symbol as string | null,
+    })).toBe(expected);
+  });
+
+  it.each([
     ['1100', 3, '🐕', `1.1${NBSP}🐕`],
     ['100', 2, '⧉', `1${NBSP}⧉`],
-  ])('%s at divisibility %i with %s renders %s', (amount, divisibility, symbol, expected) => {
+  ])('carries a real rune symbol through: %s at divisibility %i with %s', (amount, divisibility, symbol, expected) => {
+    // ord's own vectors only ever use `$`, because its symbol is a Rust char.
+    // Real runes use symbols outside the BMP, which is where a UTF-16 length
+    // assumption would show up.
     expect(formatRunePile({ amount: amount as string, divisibility: divisibility as number, symbol: symbol as string }))
       .toBe(expected);
   });
@@ -127,7 +163,7 @@ describe('formatRuneAmount: the shapes ord actually emits', () => {
   it('takes the number /output/ emits and the string /address/ emits alike', () => {
     expect(formatRuneAmount(12600000, 0)).toBe('12600000');
     expect(formatRuneAmount('12600000', 0)).toBe('12600000');
-    expect(formatRunePile({ amount: 12600000, divisibility: 0, symbol: '⬛' })).toBe('12600000 ⬛');
+    expect(formatRunePile({ amount: 12600000, divisibility: 0, symbol: '⬛' })).toBe('12600000\u00A0⬛');
   });
 
   it('applies the divisibility rules to a number the same way', () => {
