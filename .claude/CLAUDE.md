@@ -541,6 +541,37 @@ pipelines, with different blast radii and different questions:
   `~/Work/ordpool/E2E_BEST_PRACTICES.md`. Read it before touching
   any spec.
 
+## Duplicated constants in the Playwright specs: which to sweep, which to leave
+
+Several constants are declared once per spec instead of imported. They all
+agree today; the hazard is that moving one copy leaves the rest behind
+silently, which is how the Xverse seed path broke a consumer's lane.
+
+**Worth consolidating when the lanes are quiet** (one constant each, the specs
+import it):
+
+| Constant | Where the source of truth is |
+|---|---|
+| `TEST_MNEMONIC`, `TEST_PASSWORD` | already exported from `e2e/playwright/wallet-test-vectors.ts`; the specs simply do not use it. The password split is deliberate: the Leather family (leather, cat21wallet) needs the strong one because of a zxcvbn meter, everything else takes the simple one |
+| `RESULTS_DIR` | must equal `outputDir` in `playwright.config.ts`, which derives the same path independently. Move `outputDir` and the specs write into a directory Playwright no longer manages |
+| `HARNESS_URL` | the local harness server's address |
+| `EXT_PATH` | per-wallet, so a shared `requireUnpackedExtension(wallet)` helper rather than a constant |
+
+**Do NOT sweep `CAT21_POSTAGE_SATS` into that list.** It looks identical to the
+others (declared as a bare `546` in many specs while `src/cat21-protocol/cat21-postage.ts`
+exports it) and importing it would make the specs worse. Most uses are
+assertions: `expect(cat.value).toBe(546)`. The SDK BUILDS that output from its
+own constant, so importing the same constant into the assertion compares the
+value against itself, and changing the postage would move both sides and leave
+the specs green. The hardcoded literal is what makes a postage change turn those
+assertions red so a human reviews each one. Same reasoning as pinning ord's
+`Display for Pile` vectors as literals rather than deriving them.
+
+The rule that separates the two columns: consolidate a constant that is
+MECHANICAL (a path, a URL, a fixture input, something with no meaning beyond
+"these must match"). Keep a literal that is a CLAIM about behaviour, because an
+imported claim cannot fail.
+
 ## HARD RULE: CI is the test. No manual smoke.
 
 The maintainer is Bitcoin-poor and will not install wallets +
