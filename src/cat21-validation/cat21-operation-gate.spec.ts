@@ -1,4 +1,5 @@
 import { describe, expect, it } from '@jest/globals';
+import { hex } from '@scure/base';
 
 import { Network } from '../network.js';
 
@@ -99,9 +100,21 @@ describe('validateCat21Operation — mint happy paths', () => {
       },
     });
     if (!result.ok) throw new Error(`expected ok, got ${result.reason}`);
-    if (result.resources.kind === 'mint') {
-      expect(result.resources.tipScript).toBeDefined();
-    }
+    // Asserted, not branched on: inside an `if` this whole test silently drops
+    // to zero assertions the moment the discriminant changes.
+    expect(result.resources.kind).toBe('mint');
+    if (result.resources.kind !== 'mint') throw new Error('unreachable');
+
+    // The VALUE, not its presence. `toBeDefined` passes for any wrong script,
+    // and this one addresses real sats. Pinned as a literal rather than
+    // re-decoded here: decoding the same address with the same library on both
+    // sides would compare the result against itself.
+    //
+    // MAINNET_TAPROOT is the BIP350 vector, whose key is the secp256k1
+    // generator point, so the script is OP_1 (0x51) + push-32 (0x20) + G.x.
+    expect(hex.encode(result.resources.tipScript!)).toBe(
+      '512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798',
+    );
   });
 
   it('accepts a mint with tip.value === 0 (builder will skip the output) without decoding tip address', () => {

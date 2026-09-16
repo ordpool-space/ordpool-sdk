@@ -418,13 +418,31 @@ describe('createTransaction across all Network variants', () => {
     Network.Regtest,
   ];
 
+  // Per-network prefixes, which is the part that carries the meaning here:
+  // the keypair is fixed, so only the NETWORK PARAMETERS vary, and the whole
+  // risk is a network being encoded with another's. `toBeTruthy` passes for
+  // every one of those mistakes, including regtest emitting testnet's `tb1`,
+  // which would send an e2e's funds to an address the regtest node does not
+  // recognise. Prefixes rather than whole addresses because the mainnet case
+  // below already pins full values; these pin the discriminator.
+  const PREFIXES: Record<string, { p2pkh: string; p2sh: string; bech32: string }> = {
+    [Network.Mainnet]:  { p2pkh: '1', p2sh: '3', bech32: 'bc' },
+    [Network.Testnet3]:  { p2pkh: 'm', p2sh: '2', bech32: 'tb' },
+    [Network.Testnet4]: { p2pkh: 'm', p2sh: '2', bech32: 'tb' },
+    [Network.Signet]:   { p2pkh: 'm', p2sh: '2', bech32: 'tb' },
+    [Network.Regtest]:  { p2pkh: 'm', p2sh: '2', bech32: 'bcrt' },
+  };
+
   allNetworks.forEach(network => {
-    it(`derives a usable dummy keypair for ${network}`, () => {
+    it(`derives a dummy keypair encoded for ${network}, not another network`, () => {
       const kp = getDummyKeypair(toScureNetwork(network));
-      expect(kp.addressP2PKH).toBeTruthy();
-      expect(kp.addressP2SH_P2WPKH).toBeTruthy();
-      expect(kp.addressP2WPKH).toBeTruthy();
-      expect(kp.addressP2TR).toBeTruthy();
+      const want = PREFIXES[network];
+
+      expect(kp.addressP2PKH.slice(0, 1)).toBe(want.p2pkh);
+      expect(kp.addressP2SH_P2WPKH.slice(0, 1)).toBe(want.p2sh);
+      // The human-readable part, up to the bech32 separator.
+      expect(kp.addressP2WPKH.split('1')[0]).toBe(want.bech32);
+      expect(kp.addressP2TR.split('1')[0]).toBe(want.bech32);
     });
   });
 
