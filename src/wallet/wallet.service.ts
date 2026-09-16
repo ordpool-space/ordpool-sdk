@@ -28,6 +28,7 @@ import { WatchOnlyAddress, WatchOnlyScriptType } from './xpub/derive-watch-only'
 import { AddressProbe, WatchOnlyScanResult, scanWatchOnly } from './xpub/scan-watch-only';
 import { KnownOrdinalWallet, KnownOrdinalWalletType, SignMessageArgs, SignMessageResult, WalletConnector, WalletInfo, WindowLike } from './wallet.service.types';
 import { KnownOrdinalWallets } from './known-ordinal-wallets';
+import { WalletPlatform, walletsForPlatform } from './wallet-capabilities';
 
 
 // Re-exports kept for backward compatibility: consumers import these from
@@ -102,20 +103,28 @@ export class WalletService {
     .pipe(
       take(4), // Take 4 intervals only, i.e., perform the check four times
       map(() => this.getInstalledWallets()),
-      // Drop wallets flagged `hiddenFromPicker` (Phantom, Binance):
-      // their DESKTOP binary is structurally incapable of driving the
-      // SDK's flows, so they never belong in this desktop-detection
-      // stream — not even the "install this wallet" list. The matrix
-      // `platforms` list is the AUTHORITY for reachability, and
-      // hiddenFromPicker is pinned to it (a wallet is hidden here IFF
-      // the matrix marks it non-Desktop; wallet-capabilities.spec.ts
-      // asserts the equivalence). A mobile-in-app picker instead reads
-      // `walletsForPlatform(Mobile)`, where these two DO appear, and
-      // ignores hiddenFromPicker.
-      map(({ installedWallets, notInstalledWallets }) => ({
-        installedWallets:    installedWallets.filter((w) => !w.hiddenFromPicker),
-        notInstalledWallets: notInstalledWallets.filter((w) => !w.hiddenFromPicker),
-      })),
+      // Drop wallets that cannot work on DESKTOP (Phantom, Binance): their
+      // desktop binary does not inject the provider the SDK needs, so
+      // offering them here — even as "install this" — would be a lie.
+      //
+      // Derived from the matrix rather than read off a `hiddenFromPicker`
+      // flag. The flag said exactly "not reachable on Desktop", which the
+      // matrix already states, and a spec existed solely to assert the two
+      // never drifted. One source of truth needs no such spec.
+      //
+      // This stream is DESKTOP-ONLY by construction, which is why it can
+      // filter at all. A picker must not: use `walletPickerRows`, which
+      // lists every wallet on both platforms and marks the unreachable
+      // ones `reachableHere: false` instead of hiding them.
+      map(({ installedWallets, notInstalledWallets }) => {
+        const onDesktop = new Set(
+          walletsForPlatform(WalletPlatform.Desktop).map((e) => e.wallet),
+        );
+        return {
+          installedWallets:    installedWallets.filter((w) => onDesktop.has(w.type)),
+          notInstalledWallets: notInstalledWallets.filter((w) => onDesktop.has(w.type)),
+        };
+      }),
       // The only thing that ever changes between emissions is WHICH
       // wallets are detected in each bucket; every wallet's metadata
       // (label, ~1.5-19 KB base64 logo data-URI) is static. Compare the

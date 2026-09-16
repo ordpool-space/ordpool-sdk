@@ -179,7 +179,7 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
       [WalletCapability.InscriptionParentChild]: { support: CapabilitySupport.Proven },
       [WalletCapability.SignMessage]: { support: CapabilitySupport.Proven },
     },
-    note: 'Desktop extension only. Ordinals and BRC-20 are supported; the Leather mobile app does not work with this site.',
+    note: 'Desktop extension only. Ordinals and BRC-20 are supported. Leather does ship a mobile app with an in-app browser, but its developer docs describe the injected provider for the browser extension and never mention mobile, so we cannot claim the Bitcoin methods are reachable there.',
   },
   {
     wallet: KnownOrdinalWalletType.unisat,

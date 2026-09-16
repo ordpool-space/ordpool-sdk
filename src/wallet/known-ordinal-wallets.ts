@@ -60,7 +60,6 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     // phantom-inscribe-connect-blocked.spec.ts +
     // phantom-sdk-handshake.spec.ts:370-476. Hidden until Phantom
     // wires the SW handlers.
-    hiddenFromPicker: true,
   },
   [KnownOrdinalWalletType.alby]: {
     type: KnownOrdinalWalletType.alby,
@@ -82,7 +81,6 @@ export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalW
     // wallet is hidden from consumer pickers until Binance enables
     // the documented surface. See honest-wallet-coverage.spec.ts's
     // WALLETS_WITHOUT_PIPELINE_B carve-out for the full trail.
-    hiddenFromPicker: true,
   },
   [KnownOrdinalWalletType.cat21wallet]: {
     type: KnownOrdinalWalletType.cat21wallet,

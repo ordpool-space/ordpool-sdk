@@ -70,13 +70,46 @@ describe('walletPickerRows', () => {
     expect(xverse?.deepLink).toBe('https://connect.xverse.app/browser?url=https://cat21.space/cat/42');
   });
 
-  it('hides a wallet unreachable on this platform rather than badging it', () => {
-    const desktop = walletPickerRows({ platform: WalletPlatform.Desktop }).map(r => r.wallet);
-    const mobile = walletPickerRows({ platform: WalletPlatform.Mobile }).map(r => r.wallet);
+  it('lists a wallet unreachable on this platform instead of hiding it, with an inert action', () => {
+    // Replaces a spec that asserted the opposite. Hiding meant someone
+    // holding Leather on a phone saw no Leather and no reason, and read
+    // that as "unsupported" — while the picker happily advertised wallets
+    // they did not have at all via `install`.
+    const desktop = walletPickerRows({ platform: WalletPlatform.Desktop });
+    const mobile = walletPickerRows({ platform: WalletPlatform.Mobile });
 
-    expect(desktop).not.toContain(KnownOrdinalWalletType.phantom);
-    expect(mobile).toContain(KnownOrdinalWalletType.phantom);
-    expect(mobile).not.toContain(KnownOrdinalWalletType.leather);
+    const phantomOnDesktop = desktop.find(r => r.wallet === KnownOrdinalWalletType.phantom);
+    expect(phantomOnDesktop).toBeDefined();
+    expect(phantomOnDesktop?.reachableHere).toBe(false);
+    expect(phantomOnDesktop?.action).toBe('use-on-mobile');
+    expect(phantomOnDesktop?.actionLabel).toBe('Mobile only');
+
+    const leatherOnMobile = mobile.find(r => r.wallet === KnownOrdinalWalletType.leather);
+    expect(leatherOnMobile).toBeDefined();
+    expect(leatherOnMobile?.reachableHere).toBe(false);
+    expect(leatherOnMobile?.action).toBe('use-on-desktop');
+    expect(leatherOnMobile?.actionLabel).toBe('Desktop only');
+
+    // and the ones that DO work here are still marked usable
+    expect(mobile.find(r => r.wallet === KnownOrdinalWalletType.phantom)?.reachableHere).toBe(true);
+    expect(desktop.find(r => r.wallet === KnownOrdinalWalletType.leather)?.reachableHere).toBe(true);
+  });
+
+  it('orders by actionability: usable here first, unreachable last, watch-only not promoted', () => {
+    const rows = walletPickerRows({
+      win: windowWith('LeatherProvider'),
+      platform: WalletPlatform.Desktop,
+    });
+    const order = rows.map(r => r.wallet);
+
+    // the connected one leads
+    expect(order[0]).toBe(KnownOrdinalWalletType.leather);
+    // watch-only is `installed` by definition but must NOT jump the queue
+    expect(order.indexOf(KnownOrdinalWalletType.xpub)).toBeGreaterThan(0);
+    // every unreachable row sits after every usable one
+    const lastUsable = rows.map(r => r.reachableHere).lastIndexOf(true);
+    const firstUnreachable = rows.map(r => r.reachableHere).indexOf(false);
+    expect(firstUnreachable).toBeGreaterThan(lastUsable);
   });
 
   it('drops wallets that cannot do the action when the picker serves one action', () => {
@@ -94,7 +127,7 @@ describe('walletPickerRows', () => {
     for (const r of rows) {
       expect(r.logo.startsWith('data:image/svg+xml;base64,')).toBe(true);
       expect(r.label.length).toBeGreaterThan(0);
-      expect(['Connect', 'Install']).toContain(
+      expect(['Connect', 'Install', 'Desktop only', 'Mobile only']).toContain(
         r.actionLabel.startsWith('Open in ') ? 'Connect' : r.actionLabel,
       );
     }
@@ -136,7 +169,7 @@ describe('detectWalletPlatform', () => {
     const phone = withUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)');
     expect(walletPickerRows({ win: phone }).map(r => r.wallet))
       .toContain(KnownOrdinalWalletType.phantom);
-    expect(walletPickerRows({ win: phone }).map(r => r.wallet))
-      .not.toContain(KnownOrdinalWalletType.leather);
+    expect(walletPickerRows({ win: phone })
+      .find(r => r.wallet === KnownOrdinalWalletType.leather)?.reachableHere).toBe(false);
   });
 });

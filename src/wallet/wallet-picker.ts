@@ -1,7 +1,7 @@
 import {
   WalletCapability,
   WalletPlatform,
-  walletsForPlatform,
+  WALLET_MATRIX,
   walletsSupporting,
 } from './wallet-capabilities';
 import { walletInAppBrowserDeepLink } from './wallet-deeplink';
@@ -13,15 +13,34 @@ import { KnownOrdinalWallets } from './known-ordinal-wallets';
  * What a person does next with this row. Drives the button, and only
  * the button: a picker row carries no other affordance.
  */
-export type WalletPickerAction = 'connect' | 'install' | 'open-in-app' | 'connect-xpub';
+export type WalletPickerAction =
+  | 'connect'
+  | 'install'
+  | 'open-in-app'
+  | 'connect-xpub'
+  /** Supported, but only on the OTHER platform. The button is inert. */
+  | 'use-on-desktop'
+  | 'use-on-mobile';
 
 /**
  * One row of a wallet picker: a logo, a name, and one button.
  *
- * Deliberately nothing else. No platform badge, no signing mode, no
- * capability list, no support level, no note. Someone at this screen is
- * trying to connect; anything we know about a wallet waits until it can
- * change what they do, which is at the action, not at the door.
+ * Deliberately nothing else. No signing mode, no capability list, no
+ * support level. Someone at this screen is trying to connect; anything we
+ * know about a wallet waits until it can change what they do.
+ *
+ * Platform is the one exception, and it earns it. A wallet unreachable on
+ * this device used to be dropped from the list entirely, on the reasoning
+ * that telling a phone user about a desktop extension answers a question
+ * they did not ask. That reasoning does not survive its own picker: the
+ * `install` action exists purely to tell someone about a wallet they do
+ * NOT have, so the list already answers unasked questions. Meanwhile
+ * someone holding Leather on their phone saw no Leather and no reason,
+ * and concluded the site does not support it.
+ *
+ * So nothing is hidden. `reachableHere` says whether this wallet can be
+ * used on this device, and the unreachable rows carry an inert
+ * `use-on-desktop` / `use-on-mobile` action instead of vanishing.
  */
 export interface WalletPickerRow {
   wallet: KnownOrdinalWalletType;
@@ -30,6 +49,14 @@ export interface WalletPickerRow {
   logo: string;
   /** Whether this wallet's provider is reachable in this browser right now. */
   installed: boolean;
+  /**
+   * Whether this wallet can be used on THIS device at all.
+   *
+   * False means supported by the SDK but only on the other platform, so
+   * the row is discovery rather than an affordance: render it muted, in a
+   * separate group, and do not wire its button.
+   */
+  reachableHere: boolean;
   action: WalletPickerAction;
   /** The button's text. Comes from here so the three sites cannot drift. */
   actionLabel: string;
@@ -94,17 +121,38 @@ export function detectWalletPlatform(win: WindowLike | undefined): WalletPlatfor
  */
 export function walletPickerRows(options: WalletPickerOptions = {}): WalletPickerRow[] {
   const platform = options.platform ?? detectWalletPlatform(options.win);
+  const other = platform === WalletPlatform.Mobile
+    ? WalletPlatform.Desktop
+    : WalletPlatform.Mobile;
 
-  const reachable = options.capability !== undefined
-    ? walletsSupporting(options.capability, { platform })
-    : walletsForPlatform(platform);
+  // Every wallet that can do the job on EITHER platform. Capability still
+  // filters (a picker for "sell this cat" must not offer a wallet that
+  // cannot sell), but platform no longer removes rows, it only decides
+  // which are actionable here.
+  const usable = options.capability !== undefined
+    ? walletsSupporting(options.capability, {})
+    : WALLET_MATRIX;
 
   const { installedWallets } = detectInstalledWallets(options.win);
   const installedTypes = new Set(installedWallets.map(w => w.type));
 
-  return reachable.map((entry): WalletPickerRow => {
+  const rows = usable.map((entry): WalletPickerRow => {
     const meta = KnownOrdinalWallets[entry.wallet];
     const installed = installedTypes.has(entry.wallet);
+    const reachableHere = entry.platforms.includes(platform);
+
+    // Supported, but not on this device. Discovery, not an affordance.
+    if (!reachableHere) {
+      return {
+        wallet: entry.wallet,
+        label: entry.label,
+        logo: meta.logo,
+        installed: false,
+        reachableHere: false,
+        action: other === WalletPlatform.Desktop ? 'use-on-desktop' : 'use-on-mobile',
+        actionLabel: other === WalletPlatform.Desktop ? 'Desktop only' : 'Mobile only',
+      };
+    }
 
     if (entry.signingMode === 'watch-only') {
       return {
@@ -112,6 +160,7 @@ export function walletPickerRows(options: WalletPickerOptions = {}): WalletPicke
         label: entry.label,
         logo: meta.logo,
         installed: true,
+        reachableHere: true,
         action: 'connect-xpub',
         // Just "Connect": the row's own name already says Watch-only
         // (xpub), and repeating it made this the widest button in the
@@ -127,6 +176,7 @@ export function walletPickerRows(options: WalletPickerOptions = {}): WalletPicke
         label: entry.label,
         logo: meta.logo,
         installed: true,
+        reachableHere: true,
         action: 'connect',
         actionLabel: 'Connect',
       };
@@ -146,6 +196,7 @@ export function walletPickerRows(options: WalletPickerOptions = {}): WalletPicke
         label: entry.label,
         logo: meta.logo,
         installed: false,
+        reachableHere: true,
         action: 'open-in-app',
         actionLabel: `Open in ${entry.label}`,
         deepLink,
@@ -157,9 +208,25 @@ export function walletPickerRows(options: WalletPickerOptions = {}): WalletPicke
       label: entry.label,
       logo: meta.logo,
       installed: false,
+      reachableHere: true,
       action: 'install',
       actionLabel: 'Install',
       installUrl: meta.downloadLink,
     };
   });
+
+  // Actionability descending, so the list still leads with what works even
+  // though nothing is hidden: usable here first (installed before not),
+  // then the other platform's wallets as a discovery group. Ties keep
+  // matrix order, which is the curated preference order.
+  // Watch-only is `installed` by definition (it needs no provider), so a
+  // plain installed-first sort would rocket it to the top of every picker.
+  // It keeps its matrix position instead, which is last among the usable
+  // rows: it is the fallback, not the recommendation.
+  const rank = (r: WalletPickerRow): number =>
+    !r.reachableHere ? 2 : (r.installed && r.action !== 'connect-xpub') ? 0 : 1;
+  return rows
+    .map((row, i) => ({ row, i }))
+    .sort((a, b) => rank(a.row) - rank(b.row) || a.i - b.i)
+    .map(({ row }) => row);
 }

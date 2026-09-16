@@ -493,25 +493,6 @@ export interface KnownOrdinalWallet {
   subLabel?: string;
   logo: string;
   downloadLink: string;
-  /**
-   * When `true`, `WalletService.wallets$` drops this wallet from BOTH
-   * `installedWallets` AND `notInstalledWallets` — the wallet
-   * disappears from every consumer's picker AND from every "install
-   * this wallet" list.
-   *
-   * Use this ONLY when the wallet's shipped binary is structurally
-   * incapable of driving the SDK's inscribe / CAT-21 flows — either
-   * the required in-page provider surface isn't injected (Binance
-   * v1.17.2 omits `window.binancew3w.bitcoin`) or the service worker
-   * doesn't implement the required RPC methods (Phantom v26.x has no
-   * `btc_*` handlers). Offering a wallet as "installable" when
-   * installing it still leaves the user unable to sign is a lie.
-   *
-   * The connector + signer files stay in the SDK — the day the
-   * vendor ships the missing surface, flip this back to `false`
-   * (or delete) and the wallet lights up automatically.
-   */
-  hiddenFromPicker?: boolean;
 }
 
 

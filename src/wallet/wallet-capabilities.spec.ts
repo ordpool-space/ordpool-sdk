@@ -48,19 +48,31 @@ describe('WALLET_MATRIX / signer registry consistency', () => {
   });
 });
 
-describe('hiddenFromPicker is consistent with the matrix platforms (single authority)', () => {
-  // The matrix `platforms` list is the single source of truth for where a
-  // wallet is reachable. `hiddenFromPicker` is only a desktop-detection-
-  // bucket convenience (wallet.service.ts filters `wallets$` by it so a
-  // desktop-broken binary never surfaces in the "install this" list). The
-  // two must never disagree: a wallet is hidden IFF it is not
-  // desktop-reachable per the matrix. A mobile-in-app picker reads
-  // `walletsForPlatform(Mobile)` and ignores hiddenFromPicker.
-  it('a wallet is hiddenFromPicker IFF the matrix says it is not Desktop-reachable', () => {
+describe('the matrix is the only authority on where a wallet is reachable', () => {
+  // This replaces a spec that asserted a `hiddenFromPicker` flag never
+  // disagreed with the matrix. The flag said exactly "not reachable on
+  // Desktop", which the matrix already states, so it was a second copy of
+  // one fact and the spec existed only to police the copy. The flag is
+  // gone and wallet.service derives the same set from the matrix, which is
+  // what these pin instead.
+  it('names the wallets a desktop detection stream must drop, and they are the non-Desktop ones', () => {
+    const desktop = walletsForPlatform(WalletPlatform.Desktop).map(e => e.wallet);
+    const dropped = WALLET_MATRIX
+      .filter(e => !e.platforms.includes(WalletPlatform.Desktop))
+      .map(e => e.wallet);
+
+    // Positive assertion on the actual membership, not a property that
+    // holds for any partition: these two wallets ship no working Bitcoin
+    // provider in their DESKTOP binary.
+    expect(dropped).toEqual([KnownOrdinalWalletType.phantom, KnownOrdinalWalletType.binance]);
+    expect(desktop).not.toContain(KnownOrdinalWalletType.phantom);
+    expect(desktop).not.toContain(KnownOrdinalWalletType.binance);
+    expect(desktop).toContain(KnownOrdinalWalletType.leather);
+  });
+
+  it('every wallet is reachable on at least one platform, or it could never be used', () => {
     for (const entry of WALLET_MATRIX) {
-      const hidden = KnownOrdinalWallets[entry.wallet].hiddenFromPicker === true;
-      const desktopReachable = entry.platforms.includes(WalletPlatform.Desktop);
-      expect(hidden).toBe(!desktopReachable);
+      expect(entry.platforms.length).toBeGreaterThan(0);
     }
   });
 });
