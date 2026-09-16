@@ -59,7 +59,7 @@ async function dumpHtml(page: Page, name: string): Promise<void> {
 
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
-    throw new Error(`Leather extension not unpacked at ${EXT_PATH}.`);
+    throw new Error(`Leather extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh leather.`);
   }
 
   context = await chromium.launchPersistentContext('', {

@@ -15,7 +15,10 @@
 #
 # Usage: bash playwright-bootstrap.sh <wallet>
 #
-# Supported wallets: xverse, unisat, leather.
+# Supported wallets: xverse, unisat, leather, okx, phantom, wizz,
+# alby, cat21wallet. Every wallet the matrix runs in CI can also be
+# bootstrapped locally, so a dependency bump can be proven on a real
+# signing path before it reaches CI.
 # To bump a version: edit the per-wallet block below, then create a
 # new release tagged <wallet>-extension-v<version> with the .crx
 # attached on ordpool-space/ordpool-sdk.
@@ -24,7 +27,7 @@ set -euo pipefail
 WALLET="${1:-}"
 if [ -z "$WALLET" ]; then
   echo "ERROR: usage: $0 <wallet>" >&2
-  echo "       supported: xverse, unisat, leather" >&2
+  echo "       supported: xverse, unisat, leather, okx, phantom, wizz, alby, cat21wallet" >&2
   exit 2
 fi
 

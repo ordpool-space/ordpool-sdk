@@ -35,7 +35,7 @@ export const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
 
 export default async function globalSetup(): Promise<void> {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
-    throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. Run e2e/playwright/playwright-bootstrap.sh.`);
+    throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh xverse.`);
   }
 
   // The wallet-matrix runs one shard per wallet (the CI sets WALLET);
