@@ -29,18 +29,26 @@ never uses):
 | `ordpool-sdk` | `src/index.ts` | `dist/index.js` + `dist/index.d.ts` | cat21.space, cubes, ordpool frontends |
 | `ordpool-sdk/core` | `src/core.ts` | `dist/core.js` + `dist/core.d.ts` | cat21-wallet, cat21-indexer's backend, any plain Node consumer |
 
-**ONE build, CommonJS.** Both entry points come out of `tsconfig.lib.json` from
-the same source set; the two barrels decide what each exposes, and `/core` still
-omits the stateful RxJS service classes so the wallet's bundle stays lean.
+**ONE build, ESM.** Both entry points come out of `tsconfig.lib.json` from the
+same source set; the two barrels decide what each exposes, and `/core` still
+omits the stateful RxJS service classes.
 
-CommonJS is the format every consumer can read. `cat21-indexer`'s backend is a
-CommonJS NestJS app importing `validateCat21BuyOfferPsbt` from `/core` on the
-offer path, and a CommonJS app cannot `require()` an ESM package. The cost is
-measured, not theoretical: building cat21.space against the CommonJS package
-takes its initial bundle from **1.38 MB to 1.91 MB (+543 kB, +38%)**, and Angular
-warns `Module 'ordpool-sdk' ... is not ESM`. That was accepted deliberately in
-exchange for a single build. A consumer only pays it when it bumps its pinned
-SHA.
+ESM, and every relative specifier in `src/` carries an explicit `.js` (19 of
+them `/index.js`). That is what makes the emit resolvable by NODE and not only
+by a bundler: tsc does not rewrite specifiers, so an extensionless `./foo` stays
+`./foo` in the output and Node rejects it. Keep writing the extension; a new
+import without one breaks Node resolution while every test still passes.
+
+**A CommonJS consumer is fine, and this is the trap to not re-derive.** The
+package spent a day on a CommonJS build because "a CommonJS app cannot
+`require()` an ESM package". That is true of older Node and FALSE here: Node
+22.12+ requires ESM that has no top-level await, this package has none, and
+`cat21-indexer`'s backend declares `node >= 24`. Verified by requiring `/core`
+and `/inscribe-fee` from a package with no `type` field, the NestJS shape
+exactly. The cost of getting that wrong was measured: CommonJS took
+cat21.space's initial bundle from 1.38 MB to 1.91 MB, cubes' from 1.46 to
+1.86, and hard-failed ordpool's production build against its budget. ESM
+returns all three.
 
 The `dist/` ESM uses extensionless / directory imports — resolved by
 any bundler (every consumer uses one), NOT by Node's native ESM loader
@@ -75,61 +83,17 @@ DI-token layer; the config interfaces (`Cat21SdkConfig`, `StorageLike`,
 
 ### What goes in `core.ts`
 
-`src/core.ts` is the manifest for the `/core` subpath (`dist/core.js`).
-Both entry points compile the SAME source set
-(`src/**/*.ts`); `tsconfig.core.json` differs from `tsconfig.lib.json`
-only in module format and outDir. `core.ts` alone decides what `/core`
-exposes, so a file compiled but not re-exported there is simply
-unreachable through that entry.
+`src/core.ts` is the manifest for the `/core` subpath (`dist/core.js`), and
+`src/index.ts` for the main one. Both come out of ONE build
+(`tsconfig.lib.json`, `src/**/*.ts`); the barrels alone decide what each entry
+exposes, so a file compiled but not re-exported is simply unreachable there.
 
-**Why the second format exists**: not Angular, and not anything the SDK
-imports. `cat21-indexer`'s backend is a CommonJS NestJS app that imports
-`validateCat21BuyOfferPsbt` and `MAX_ASK_SATS` from this entry on the
-offer path, and a CommonJS app cannot `require()` an ESM package. The
-ESM `dist/` additionally uses directory imports, which a bundler
-resolves and Node rejects (`ERR_UNSUPPORTED_DIR_IMPORT`). Collapsing to
-one format means choosing CommonJS for everyone, which costs the three
-Angular frontends their ESM tree-shaking. That is a trade to make
-deliberately, not a cleanup.
-
-Re-export the pure helpers, types, constants and the subscribe-based
-orchestrators. Keep the four stateful service classes (`WalletService`,
-`Cat21Service`, `Cat21ApiService`, `UtxoContentScanner`) at the main
-entry only.
-
-The five orchestrators (`Cat21MintOrchestrator`,
-`Cat21TransferOrchestrator`, `Cat21CreateOfferOrchestrator`,
-`Cat21AcceptOfferOrchestrator`, `InscribeMintOrchestrator`) are the
-subscribe-based plain classes, exported from BOTH `core.ts` and
-`index.ts` — the single Bitcoin-operation surface for every consumer.
-
-When adding a new pure helper:
-
-1. Create the file under `src/`.
-2. Export from its own file.
-3. Re-export from `src/core.ts`.
-4. `npm run build:main` — regenerates `dist/`.
-
-### Peer dependencies: which entry point needs what
-
-`@scure/btc-signer`, `@noble/curves`, `rxjs` and `sats-connect` are PEER
-dependencies, never bundled: `dist/` leaves them as plain requires and the
-consumer supplies one copy. That is why a subpath's bundled size overstates
-what it costs: `/cat21-fee` measures 227 kB with deps inlined but is **8.5 kB
-of our code**, and the rest is a btc-signer any Bitcoin-touching import would
-have pulled anyway.
-
-`rxjs` and `sats-connect` are marked **optional** in `peerDependenciesMeta`,
-because only the two BARRELS need them. Measured across all 13 entry points:
-
-| entry | needs rxjs | needs sats-connect |
-|---|---|---|
-| `.` and `./core` | yes | yes |
-| every other subpath | no | no |
-
-So a consumer importing only `ordpool-sdk/format` is no longer told to install
-the whole wallet stack. Do NOT un-optional them without re-running that
-measurement: the claim is per-entry-point, not per-package.
+**Both barrels reach the wallet connectors**, so both drag the same
+third-party set: sats-connect, axios, base58-js, bowser and the rest, roughly
+955 kB bundled. `/core` is NOT a light entry point; it is the same weight as
+the barrel minus the stateful service classes. A consumer that wants one
+helper should import the SUBPATH for it, not `/core`. That difference is the
+whole reason the subpaths exist.
 
 ### Build commands
 
@@ -454,7 +418,7 @@ There is no npm publish for this package. Consumers pin a git SHA:
 `prepare` hook at consumer-install time (`npm run build:main`).
 `dist-e2e/` IS checked in.
 
-  - **`dist/`** (both entry points, CommonJS) — gitignored, prepare-built.
+  - **`dist/`** (both entry points, ESM) — gitignored, prepare-built.
   - **`dist-e2e/`** (`/e2e` entry) — **checked in**. Its barrel imports
     the Playwright onboarding helpers, and `@playwright/test` is an
     OPTIONAL peer dep, so building it in the prepare hook would fail for
@@ -466,7 +430,7 @@ Consumer contract:
 
   - **Frontend consumers** (cat21.space, cubes) import from `ordpool-sdk`
     (ESM `dist/`); their bundlers resolve the per-file ESM.
-  - **CommonJS consumers** (cat21-wallet, plain Node) import from
+  - **Node / CommonJS consumers** (cat21-wallet, the cat21-indexer backend) import from
     `ordpool-sdk/core` (`dist/core.js`).
   Both dist outputs are generated by the `prepare` script at install
   time. Install scripts must be enabled — in this workspace they are:
