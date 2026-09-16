@@ -3,7 +3,7 @@
 # THE SUPERSET. Do NOT also run regtest-bootstrap.sh: that brings up a SECOND
 # bitcoind publishing the same host port, and since stacks are isolated by
 # compose project the two no longer silently merge, they collide. This script
-# already creates the ordpool-e2e wallet, mines, and emits the SAME
+# already creates the wallet (REGTEST_WALLET, default ordpool-e2e), mines, and emits the SAME
 # fundedAddress / fundedWif that regtest-bootstrap.sh emits, so a consumer
 # needs only this one.
 #
@@ -83,6 +83,10 @@ done
 
 COMPOSE=( docker compose "${COMPOSE_BASE[@]}" "${EXTRA_FILES[@]}" "${PROFILES[@]}" )
 RPC="docker exec ordpool-e2e-consumer-bitcoind bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
+# The wallet name these helpers spend from. A consumer stack brings this
+# compose up under its own project prefix, so the name must match what its
+# regtest-helpers use (REGTEST_WALLET there).
+WALLET="${REGTEST_WALLET:-ordpool-e2e}"
 
 # --- bring containers up if not already running ---
 if ! docker ps --format '{{.Names}}' | grep -q 'ordpool-e2e-consumer-bitcoind'; then
@@ -109,10 +113,10 @@ $RPC getblockchaininfo >/dev/null
 # A descriptor wallet (the only kind Bitcoin Core 29+ can create — the
 # legacy/BDB backend was removed). It owns the mined coinbases the
 # consumer specs spend from; it does NOT hold the funder signing key.
-$RPC -named createwallet wallet_name=ordpool-e2e load_on_startup=true >/dev/null 2>&1 || \
-  $RPC loadwallet ordpool-e2e >/dev/null 2>&1 || true
+$RPC -named createwallet wallet_name="$WALLET" load_on_startup=true >/dev/null 2>&1 || \
+  $RPC loadwallet "$WALLET" >/dev/null 2>&1 || true
 
-MINING_ADDR=$($RPC -rpcwallet=ordpool-e2e getnewaddress)
+MINING_ADDR=$($RPC -rpcwallet="$WALLET" getnewaddress)
 
 # --- funder keypair the consumer specs sign with ---
 # Supplied as a fixed regtest keypair instead of dumped from bitcoind:
@@ -126,7 +130,7 @@ WIF="cNvr6PMcpe862cZuaxP4kqMDodEUxLXSW7DGxW6c7PiYTZ5sWQcK"
 TIP=$($RPC getblockcount)
 if [ "$TIP" -lt 101 ]; then
   NEEDED=$((101 - TIP))
-  $RPC -rpcwallet=ordpool-e2e generatetoaddress "$NEEDED" "$MINING_ADDR" >/dev/null
+  $RPC -rpcwallet="$WALLET" generatetoaddress "$NEEDED" "$MINING_ADDR" >/dev/null
 fi
 
 # --- and keep mining until the wallet actually has something to spend ---
@@ -135,11 +139,11 @@ fi
 # coin already spent; every spec then fails on "Insufficient funds" with
 # nothing pointing at the wallet. Same hardening as regtest-bootstrap.sh.
 for _ in $(seq 1 20); do
-  if [ "$($RPC -rpcwallet=ordpool-e2e getbalance | tr -d '.0')" != "" ]; then break; fi
-  $RPC -rpcwallet=ordpool-e2e generatetoaddress 20 "$MINING_ADDR" >/dev/null
+  if [ "$($RPC -rpcwallet="$WALLET" getbalance | tr -d '.0')" != "" ]; then break; fi
+  $RPC -rpcwallet="$WALLET" generatetoaddress 20 "$MINING_ADDR" >/dev/null
 done
-if [ "$($RPC -rpcwallet=ordpool-e2e getbalance | tr -d '.0')" = "" ]; then
-  echo "consumer-environment-bootstrap: wallet ordpool-e2e has no spendable balance after mining; aborting" >&2
+if [ "$($RPC -rpcwallet="$WALLET" getbalance | tr -d '.0')" = "" ]; then
+  echo "consumer-environment-bootstrap: wallet $WALLET has no spendable balance after mining; aborting" >&2
   exit 1
 fi
 

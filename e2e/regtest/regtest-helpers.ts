@@ -28,6 +28,16 @@ export const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localh
 // `ordpool-e2e-consumer-bitcoind`) and override via env.
 const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? 'ordpool-e2e-bitcoind';
 
+// The bitcoind WALLET these helpers spend from. Overridable for the same
+// reason the container name is: a consumer stack brings the compose up under
+// its own project prefix and its bootstrap names the wallet to match, so a
+// hardcoded name fails with bitcoind's `-18 Requested wallet does not exist or
+// is not loaded`, which reads like a stack that is down rather than a naming
+// mismatch.
+const RPC_WALLET = process.env.REGTEST_WALLET ?? 'ordpool-e2e';
+/** `-rpcwallet=<name>` for a `bitcoin-cli` call, honouring REGTEST_WALLET. */
+const RPC_WALLET_ARG = `-rpcwallet=${RPC_WALLET}`;
+
 export interface FundedAccount {
   address: string;
   wif: string;
@@ -59,8 +69,8 @@ export function rpc(...args: string[]): string {
 
 /** Mine N blocks to a throwaway address. Returns the new tip height. */
 export function mineBlocks(n: number): number {
-  const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'legacy');
-  rpc('-rpcwallet=ordpool-e2e', 'generatetoaddress', String(n), address);
+  const address = rpc(RPC_WALLET_ARG, 'getnewaddress', '', 'legacy');
+  rpc(RPC_WALLET_ARG, 'generatetoaddress', String(n), address);
   return Number(rpc('getblockcount'));
 }
 
@@ -72,7 +82,7 @@ export function mineBlocks(n: number): number {
  * would. Returns the new tip height.
  */
 export function mineBlockWithRawTxs(rawTxHexes: string[]): number {
-  const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'legacy');
+  const address = rpc(RPC_WALLET_ARG, 'getnewaddress', '', 'legacy');
   rpc('generateblock', address, JSON.stringify(rawTxHexes));
   return Number(rpc('getblockcount'));
 }
@@ -207,7 +217,7 @@ export async function getTxHex(txid: string): Promise<string> {
  */
 export async function fundCommonSats(paymentAddress: string, amountBtc: number): Promise<void> {
   const unspent = JSON.parse(
-    rpc('-rpcwallet=ordpool-e2e', 'listunspent', '100'),
+    rpc(RPC_WALLET_ARG, 'listunspent', '100'),
   ) as Array<{ txid: string; vout: number; amount: number }>;
   const coin = [...unspent].sort((a, b) => b.amount - a.amount)[0];
   if (!coin) throw new Error('fundCommonSats: no mature coin to fund from');
@@ -217,12 +227,12 @@ export async function fundCommonSats(paymentAddress: string, amountBtc: number):
     JSON.stringify([{ [paymentAddress]: amountBtc }]),
   );
   const funded = JSON.parse(
-    rpc('-rpcwallet=ordpool-e2e', 'fundrawtransaction', raw, JSON.stringify({ changePosition: 0 })),
+    rpc(RPC_WALLET_ARG, 'fundrawtransaction', raw, JSON.stringify({ changePosition: 0 })),
   ) as { hex: string };
   const signed = JSON.parse(
-    rpc('-rpcwallet=ordpool-e2e', 'signrawtransactionwithwallet', funded.hex),
+    rpc(RPC_WALLET_ARG, 'signrawtransactionwithwallet', funded.hex),
   ) as { hex: string };
-  rpc('-rpcwallet=ordpool-e2e', 'sendrawtransaction', signed.hex);
+  rpc(RPC_WALLET_ARG, 'sendrawtransaction', signed.hex);
 
   const tip = mineBlocks(1);
   await waitForElectrsSync(tip);
@@ -1172,7 +1182,7 @@ export interface SeededRareSatCoin {
 export async function seedRareSatCoin(
   options: { address?: string; valueSats?: number } = {},
 ): Promise<SeededRareSatCoin> {
-  const address = options.address ?? rpc('-rpcwallet=ordpool-e2e', 'getnewaddress').trim();
+  const address = options.address ?? rpc(RPC_WALLET_ARG, 'getnewaddress').trim();
   // The notable sat is the FIRST sat of vout 0, and FIFO puts it there whatever
   // that output is worth, so the value is free to be whatever the caller needs.
   // It matters because a guard spec has to seed the coin where an unguarded
@@ -1185,7 +1195,7 @@ export async function seedRareSatCoin(
   // seed begins mid-block, and funding from one yields a common sat. Repeated
   // seeding exhausts the pristine coinbases, so the type is checked rather
   // than assumed from the size.
-  const unspent = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent', '100')) as Array<{
+  const unspent = JSON.parse(rpc(RPC_WALLET_ARG, 'listunspent', '100')) as Array<{
     txid: string; vout: number; amount: number;
   }>;
   const byValue = [...unspent].sort((a, b) => b.amount - a.amount);
@@ -1212,10 +1222,10 @@ export async function seedRareSatCoin(
   // changePosition 1 keeps the payment at vout 0, so it inherits the input's
   // first sats. Change after it takes the rest.
   const funded = JSON.parse(
-    rpc('-rpcwallet=ordpool-e2e', 'fundrawtransaction', raw, JSON.stringify({ changePosition: 1 })),
+    rpc(RPC_WALLET_ARG, 'fundrawtransaction', raw, JSON.stringify({ changePosition: 1 })),
   ) as { hex: string };
   const signed = JSON.parse(
-    rpc('-rpcwallet=ordpool-e2e', 'signrawtransactionwithwallet', funded.hex),
+    rpc(RPC_WALLET_ARG, 'signrawtransactionwithwallet', funded.hex),
   ) as { hex: string };
   const txid = rpc('sendrawtransaction', signed.hex).trim();
 
@@ -1291,9 +1301,9 @@ export async function fundUninscribed(): Promise<{
   utxo: { txid: string; vout: number; value: number };
 }> {
   for (let attempt = 0; attempt < 8; attempt++) {
-    const fundingAddr = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'bech32');
-    const fundingPubkey = new Uint8Array(Buffer.from(JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'getaddressinfo', fundingAddr)).pubkey, 'hex'));
-    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', fundingAddr, '1.0');
+    const fundingAddr = rpc(RPC_WALLET_ARG, 'getnewaddress', '', 'bech32');
+    const fundingPubkey = new Uint8Array(Buffer.from(JSON.parse(rpc(RPC_WALLET_ARG, 'getaddressinfo', fundingAddr)).pubkey, 'hex'));
+    rpc(RPC_WALLET_ARG, 'sendtoaddress', fundingAddr, '1.0');
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
     await waitForOrdStockSync(tip);
@@ -1532,7 +1542,7 @@ export async function fundOrdStockWallet(walletName: string, btc = '2.0'): Promi
 export async function sendFromCleanFunderCoin(outputs: Record<string, string>): Promise<string> {
   const wantSats = Object.values(outputs).reduce((sum, btc) => sum + Math.round(Number(btc) * 1e8), 0);
   await waitForOrdStockSync(Number(rpc('getblockcount')));
-  const unspent = JSON.parse(rpc('-rpcwallet=ordpool-e2e', 'listunspent', '1')) as Array<{
+  const unspent = JSON.parse(rpc(RPC_WALLET_ARG, 'listunspent', '1')) as Array<{
     txid: string; vout: number; amount: number; spendable: boolean;
   }>;
   const candidates = unspent
@@ -1550,7 +1560,7 @@ export async function sendFromCleanFunderCoin(outputs: Record<string, string>): 
   }
   // change_position after the payments keeps output i = the i-th payment.
   const sent = JSON.parse(rpc(
-    '-rpcwallet=ordpool-e2e', 'send',
+    RPC_WALLET_ARG, 'send',
     JSON.stringify(Object.entries(outputs).map(([address, btc]) => ({ [address]: btc }))), 'null', 'unset', 'null',
     JSON.stringify({ inputs: [input], add_inputs: false, change_position: Object.keys(outputs).length }),
   )) as { txid: string };
@@ -1733,7 +1743,7 @@ export async function seedListedCat(
   const fundingAddress = payment.address;
   if (fundingAddress === undefined) throw new Error('seedListedCat: no funding address');
 
-  rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', fundingAddress, (fundingSats / 1e8).toFixed(8));
+  rpc(RPC_WALLET_ARG, 'sendtoaddress', fundingAddress, (fundingSats / 1e8).toFixed(8));
   let tip = mineBlocks(1);
   await waitForElectrsSync(tip);
   const funding = await waitForUtxoAt(fundingAddress, fundingSats);
