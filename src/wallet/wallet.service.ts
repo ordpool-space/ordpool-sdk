@@ -1,14 +1,17 @@
 import {
   BehaviorSubject,
+  concat,
   defer,
   distinctUntilChanged,
   from,
   map,
   Observable,
   of,
+  shareReplay,
   Subject,
   switchMap,
   take,
+  takeWhile,
   tap,
   throwError,
   timer,
@@ -26,7 +29,7 @@ import { findSignerOrThrow } from './signers/index.js';
 import { verifyBip322Signature } from './verify-bip322-signature.js';
 import { WatchOnlyAddress, WatchOnlyScriptType } from './xpub/derive-watch-only.js';
 import { AddressProbe, WatchOnlyScanResult, scanWatchOnly } from './xpub/scan-watch-only.js';
-import { KnownOrdinalWallet, KnownOrdinalWalletType, SignMessageArgs, SignMessageResult, WalletConnector, WalletInfo, WindowLike } from './wallet.service.types.js';
+import { KnownOrdinalWallet, KnownOrdinalWalletType, SignMessageArgs, SignMessageResult, WalletConnector, WalletInfo, WalletReadiness, WindowLike } from './wallet.service.types.js';
 import { KnownOrdinalWallets } from './known-ordinal-wallets.js';
 import { WalletPlatform, walletsForPlatform } from './wallet-capabilities.js';
 
@@ -99,6 +102,98 @@ export class WalletService {
   walletConnectRequested$ = new Subject<boolean>();
 
   connectedWallet$ = new BehaviorSubject<WalletInfo | null>(null);
+
+  /**
+   * How long to wait for an extension to inject its provider before calling it
+   * unreachable. Injection normally happens before the app's first paint; this
+   * is the ceiling for a slow or waking service worker.
+   */
+  private static readonly PROVIDER_HYDRATION_TIMEOUT_MS = 3_000;
+  private static readonly PROVIDER_POLL_MS = 100;
+
+  /**
+   * Whether the connected wallet can be ACTED ON.
+   *
+   * This is a different question from whether one is connected, and conflating
+   * them is what produces a dead first click. `connectedWallet$` answers
+   * "whose wallet is this", and it emits from TWO places: a fresh connect,
+   * where the extension has demonstrably answered, and `restoreFromStorage`
+   * on page load, which emits a persisted identity synchronously from
+   * localStorage. In the second case the app knows the user's addresses before
+   * the extension has necessarily injected its provider into `window`. A
+   * consumer that renders "connected" and acts on the next click reaches for a
+   * provider that is not there yet.
+   *
+   * Waiting is the consumer's problem only if the contract leaves it there, so
+   * it does not: this stream reports the state instead.
+   *
+   *   disconnected  nobody is connected
+   *   hydrating     identity known, provider not present YET. Show the wallet,
+   *                 disable actions that call it.
+   *   ready         safe to act on
+   *   unreachable   identity known and the provider never appeared. The
+   *                 extension is disabled, removed, or broken. Offer a
+   *                 reconnect; do not spin forever.
+   *
+   * Watch-only (`xpub`) is READY immediately and by definition: there is no
+   * provider to wait for, because signing happens outside the browser via the
+   * PSBT export/paste bridge. It is also not in `walletConnectors`, so anything
+   * that reaches for its connector throws. A readiness check that forgets this
+   * leaves every hardware-wallet user hydrating forever.
+   *
+   * Fails toward action, never silently: a provider that never arrives ends in
+   * `unreachable` with a reason, not in a permanent `hydrating`.
+   */
+  readonly walletReadiness$: Observable<WalletReadiness> = this.connectedWallet$.pipe(
+    switchMap((wallet): Observable<WalletReadiness> => {
+      if (wallet === null) return of({ state: 'disconnected' as const });
+
+      // No provider exists for watch-only, so there is nothing to wait for.
+      if (wallet.type === KnownOrdinalWalletType.xpub) {
+        return of({ state: 'ready' as const, wallet });
+      }
+
+      const connector = walletConnectors.find(c => c.providerId === wallet.type);
+      if (connector === undefined) {
+        return of({
+          state: 'unreachable' as const,
+          wallet,
+          reason: `no connector ships for wallet type ${wallet.type}`,
+        });
+      }
+
+      // Already injected (the usual case, and always true right after a fresh
+      // connect) — no tick of `hydrating` that a consumer would have to debounce.
+      if (connector.detect(this.win)) return of({ state: 'ready' as const, wallet });
+
+      const deadline = Math.ceil(
+        WalletService.PROVIDER_HYDRATION_TIMEOUT_MS / WalletService.PROVIDER_POLL_MS,
+      );
+      const poll = timer(WalletService.PROVIDER_POLL_MS, WalletService.PROVIDER_POLL_MS).pipe(
+        take(deadline),
+        map((tick): WalletReadiness =>
+          connector.detect(this.win)
+            ? { state: 'ready', wallet }
+            : tick === deadline - 1
+              ? {
+                  state: 'unreachable',
+                  wallet,
+                  reason:
+                    `${wallet.type} did not inject its provider within ` +
+                    `${WalletService.PROVIDER_HYDRATION_TIMEOUT_MS} ms; the extension may be ` +
+                    'disabled or removed',
+                }
+              : { state: 'hydrating', wallet },
+        ),
+        // Stop at the first terminal state, and emit it.
+        takeWhile(r => r.state === 'hydrating', true),
+      );
+
+      return concat(of({ state: 'hydrating' as const, wallet }), poll);
+    }),
+    distinctUntilChanged((a, b) => a.state === b.state),
+    shareReplay({ bufferSize: 1, refCount: true }),
+  );
   wallets$ = timer(0, 500) // Start immediately and repeat every 500ms
     .pipe(
       take(4), // Take 4 intervals only, i.e., perform the check four times

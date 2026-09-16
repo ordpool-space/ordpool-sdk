@@ -38,6 +38,24 @@ const EXT_PATH = path.resolve(__dirname, '../extensions/xverse');
 export const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
   ?? path.resolve(__dirname, '.xverse-seed/user-data-dir');
 
+/**
+ * Assert the seed really landed, before this step reports success.
+ *
+ * A setup step whose success is its EXIT CODE rather than its OUTPUT is a
+ * green that lies: the consumer's next step fails instead, far from the cause,
+ * and the failure reads like the consumer's bug. This turns that into a loud
+ * failure at the producer.
+ */
+function assertSeedLanded(where: string): void {
+  const defaultProfile = path.join(SEED_USER_DATA_DIR, 'Default');
+  if (!fs.existsSync(defaultProfile)) {
+    throw new Error(
+      `[globalSetup] ${where} but produced no seed profile at ${defaultProfile}. ` +
+      'Reporting success here would fail in whatever runs next, far from the cause.',
+    );
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
     throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh xverse.`);
@@ -47,8 +65,15 @@ export default async function globalSetup(): Promise<void> {
   // only the xverse-*.spec.ts clone this seed, so every non-xverse shard
   // skips the ~25s Xverse onboarding entirely.
   if (process.env.WALLET && process.env.WALLET !== 'xverse') {
+    // Correct for the wallet matrix, where one shard runs one wallet. It is a
+    // trap for a consumer invoking this AS a producer step: nothing is
+    // produced and the exit code is 0, so the failure surfaces later as a
+    // missing directory. Say so in the log, loudly enough to find.
     // eslint-disable-next-line no-console
-    console.log(`[globalSetup] ${process.env.WALLET} shard — skipping Xverse seed (only xverse specs use it)`);
+    console.log(
+      `[globalSetup] WALLET=${process.env.WALLET} (not xverse) — NO Xverse seed will be produced. ` +
+      'If you invoked this to produce one, unset WALLET or set it to xverse.',
+    );
     return;
   }
 
@@ -66,6 +91,7 @@ export default async function globalSetup(): Promise<void> {
   ) {
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] reusing seed user-data-dir (Xverse ${extVersion}) at ${SEED_USER_DATA_DIR}`);
+    assertSeedLanded('reused an existing seed');
     return;
   }
 
@@ -113,4 +139,6 @@ export default async function globalSetup(): Promise<void> {
   // After close, wait for Chrome to release its singleton lock so
   // downstream tests can safely clone the user-data-dir.
   await waitForSingletonLockGone(SEED_USER_DATA_DIR).catch(() => undefined);
+
+  assertSeedLanded('onboarded Xverse');
 }

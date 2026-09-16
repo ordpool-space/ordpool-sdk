@@ -545,3 +545,18 @@ export interface LeatherStxAddress {
   symbol: 'STX';
   address: string;
 }
+
+/**
+ * Whether the connected wallet can be acted on. See
+ * `WalletService.walletReadiness$` for what each state means and why
+ * "connected" and "ready" are different questions.
+ *
+ * A discriminated union rather than `{ wallet?: WalletInfo; ready: boolean }`,
+ * so a consumer narrows instead of asserting non-null on a wallet that is
+ * absent in exactly one of the four states.
+ */
+export type WalletReadiness =
+  | { state: 'disconnected' }
+  | { state: 'hydrating'; wallet: WalletInfo }
+  | { state: 'ready'; wallet: WalletInfo }
+  | { state: 'unreachable'; wallet: WalletInfo; reason: string };
