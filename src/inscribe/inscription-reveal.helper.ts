@@ -226,7 +226,7 @@ export function buildInscribeRevealTx(args: InscribeRevealArgs): InscribeRevealR
   const sighash = tx.preimageWitnessV1(
     0,
     [args.commitOutputScript],
-    btc.SignatureHash.DEFAULT,
+    btc.SigHash.DEFAULT,
     [BigInt(args.commitOutputValueSats)],
     undefined,
     bareLeafScript,

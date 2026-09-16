@@ -280,7 +280,7 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   const sighash = tx.preimageWitnessV1(
     commitInputIndex,
     [...walletUtxos.map(u => u.scriptPubKey), args.commitOutputScript],
-    btc.SignatureHash.DEFAULT,
+    btc.SigHash.DEFAULT,
     [...walletUtxos.map(u => BigInt(u.value)), BigInt(args.commitOutputValueSats)],
     undefined,
     bareLeafScript,
@@ -299,6 +299,11 @@ export function buildChildInscribeRevealTx(args: ChildInscribeRevealArgs): Child
   // tapLeafScript set above). Index-based signers (Leather / cat21-wallet)
   // reach the same finalized witness. The measurement clone below still
   // finalizes the commit input directly so revealTxid / revealVsize are exact.
+  // `tapLeafHash` is on @scure/btc-signer's barrel in the 1.2.x range this
+  // package declares, and was dropped from it by 1.6.0 (which still ships the
+  // function, just not re-exported from the index). So this line pins the
+  // peer range: a consumer resolving 1.6.0 fails to build here. `SigHash` is
+  // on both barrels, which is why the sighash constants use it.
   const leafHash = btc.tapLeafHash(bareLeafScript, leafVersion);
   tx.updateInput(commitInputIndex, {
     tapScriptSig: [[{ pubKey: args.taproot.internalKey, leafHash }, signature]],
