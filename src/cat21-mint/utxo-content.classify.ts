@@ -11,12 +11,12 @@
  * ordinals content a watch-only user could burn if it were spent for fees.
  */
 
-import { findRareSatInRanges, SatRarity } from './sat-rarity.helper';
+import { findRareSatInRanges, SatRarity } from './sat-rarity.helper.js';
 import {
   Cat21OrdOutputResponse,
   OrdOutputResponse,
   RARE_SAT_MAX_RANGES,
-} from './utxo-content.types';
+} from './utxo-content.types.js';
 
 export interface UtxoContentClassification {
   /** No inscription, rune, cat, or rare sat: safe to spend as funding. */

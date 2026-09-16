@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
-import { classifyOutpoint } from './classify-outpoint';
+import { classifyOutpoint } from './classify-outpoint.js';
 
 const ORD = 'https://ord.ordpool.space';
 const CAT21ORD = 'https://ord.cat21.space';

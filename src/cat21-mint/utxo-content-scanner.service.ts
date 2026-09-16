@@ -1,15 +1,15 @@
 import { BehaviorSubject, Observable, catchError, firstValueFrom, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
 
-import { ContentScanPort, UtxoClassification } from '../cat21-core/ports';
-import { Cat21SdkConfig } from './cat21-sdk-config';
-import { fetchJson } from './http-fetch.helper';
-import { classifyUtxoContent } from './utxo-content.classify';
+import { ContentScanPort, UtxoClassification } from '../cat21-core/ports.js';
+import { Cat21SdkConfig } from './cat21-sdk-config.js';
+import { fetchJson } from './http-fetch.helper.js';
+import { classifyUtxoContent } from './utxo-content.classify.js';
 import {
   Cat21OrdOutputResponse,
   OrdOutputResponse,
   UtxoContent,
   UtxoScanState,
-} from './utxo-content.types';
+} from './utxo-content.types.js';
 
 /**
  * UTXOs at or below this value are auto-scanned by callers that respect

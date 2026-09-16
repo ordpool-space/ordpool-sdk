@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { firstValueFrom, of } from 'rxjs';
 
-import { Cat21SdkConfig } from './cat21-sdk-config';
-import { UtxoContentScanner } from './utxo-content-scanner.service';
-import { UtxoScanState } from './utxo-content.types';
+import { Cat21SdkConfig } from './cat21-sdk-config.js';
+import { UtxoContentScanner } from './utxo-content-scanner.service.js';
+import { UtxoScanState } from './utxo-content.types.js';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {

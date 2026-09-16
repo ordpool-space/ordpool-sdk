@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { KnownOrdinalWalletType } from './wallet.service.types';
-import { KnownOrdinalWallets } from './known-ordinal-wallets';
-import { walletSigners } from './signers';
+import { KnownOrdinalWalletType } from './wallet.service.types.js';
+import { KnownOrdinalWallets } from './known-ordinal-wallets.js';
+import { walletSigners } from './signers/index.js';
 import {
   WALLET_MATRIX,
   WalletCapability,
@@ -20,7 +20,7 @@ import {
   singleAddressCaveat,
   SINGLE_ADDRESS_PILL_LABEL,
   singleAddressPillAccessibleName,
-} from './wallet-capabilities';
+} from './wallet-capabilities.js';
 
 const ids = (entries: readonly { wallet: KnownOrdinalWalletType }[]): KnownOrdinalWalletType[] =>
   entries.map(e => e.wallet).sort();

@@ -1,26 +1,26 @@
 import { secp256k1 } from '@noble/curves/secp256k1';
 
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
 
-import { buildBatchInscriptionScript } from './inscription-envelope';
-import type { BatchEnvelope } from './inscription-envelope';
-import { resolveInscribePostage } from './inscription-commit.helper';
-import type { InscribeCommitResult } from './inscription-commit.helper';
-import { buildChildInscribeRevealTx } from './inscription-child-reveal.helper';
-import type { ChildRevealParent } from './inscription-child-reveal.helper';
-import type { InscriptionPropertiesInput } from './inscription-properties';
-import { assertRevealWithinStandardWeight, deriveRevealPubkeyXonly } from './inscription-reveal.helper';
-import { simulateInscribeFees, type SimulateInscribeFeesArgs, type SimulateInscribeFeesResult } from './inscription-fee.helper';
+import { buildBatchInscriptionScript } from './inscription-envelope.js';
+import type { BatchEnvelope } from './inscription-envelope.js';
+import { resolveInscribePostage } from './inscription-commit.helper.js';
+import type { InscribeCommitResult } from './inscription-commit.helper.js';
+import { buildChildInscribeRevealTx } from './inscription-child-reveal.helper.js';
+import type { ChildRevealParent } from './inscription-child-reveal.helper.js';
+import type { InscriptionPropertiesInput } from './inscription-properties.js';
+import { assertRevealWithinStandardWeight, deriveRevealPubkeyXonly } from './inscription-reveal.helper.js';
+import { simulateInscribeFees, type SimulateInscribeFeesArgs, type SimulateInscribeFeesResult } from './inscription-fee.helper.js';
 import {
   assembleInscribeTransactions,
   planInscribeCommit,
   synthesizeBatchEntryFields,
-} from './inscription.service.helper';
-import { failInscribe } from './inscribe-errors';
+} from './inscription.service.helper.js';
+import { failInscribe } from './inscribe-errors.js';
 import type {
   CreateInscribeTransactionsArgs,
   CreateInscribeTransactionsResult,
-} from './inscription.service.helper';
+} from './inscription.service.helper.js';
 
 /**
  * Several inscriptions in one commit and one reveal, as `ord wallet batch`

@@ -1,15 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { singleAddressCaveat } from '../wallet/wallet-capabilities';
-import { COIN_CHECK_PROMISE } from './coin-check-promise';
-import * as family from './ordpool-family';
+import { singleAddressCaveat } from '../wallet/wallet-capabilities.js';
+import { COIN_CHECK_PROMISE } from './coin-check-promise.js';
+import * as family from './ordpool-family.js';
 import {
   CAT21_WALLET_POSITIONING,
   ORDPOOL_FAMILY,
   ORDPOOL_FAMILY_HEADING,
   CAT21_LORE_POINTER,
   ordpoolFamilyMember,
-} from './ordpool-family';
+} from './ordpool-family.js';
 
 describe('the family module hosts no per-site lede', () => {
   it('exports no lede helper, because a site\'s tagline is its own repo\'s copy', () => {

@@ -2,10 +2,10 @@ import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { BroadcastPort, ContentScanPort, CoreFundingUtxo, SignPort, UtxosPort } from './ports';
-import { MintCoreParams, executeMint, simulateMint } from './mint.core';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { BroadcastPort, ContentScanPort, CoreFundingUtxo, SignPort, UtxosPort } from './ports.js';
+import { MintCoreParams, executeMint, simulateMint } from './mint.core.js';
 
 // Plain NODE unit test — no jsdom.
 

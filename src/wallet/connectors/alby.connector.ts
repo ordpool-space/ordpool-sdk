@@ -1,9 +1,9 @@
 import { from, map, Observable } from 'rxjs';
 
-import { Network } from '../../network';
-import { isAlbyInstalled } from '../wallet.service.helper';
-import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types';
-import { KnownOrdinalWallets } from '../known-ordinal-wallets';
+import { Network } from '../../network.js';
+import { isAlbyInstalled } from '../wallet.service.helper.js';
+import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types.js';
+import { KnownOrdinalWallets } from '../known-ordinal-wallets.js';
 
 
 interface WebBtcApi {

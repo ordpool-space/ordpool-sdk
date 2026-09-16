@@ -1,10 +1,10 @@
 import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
-import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
-import { resolveInscribePostage } from './inscription-commit.helper';
-import { Network, toScureNetwork } from '../network';
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
+import { resolveInscribePostage } from './inscription-commit.helper.js';
+import { Network, toScureNetwork } from '../network.js';
 
 /**
  * Layer-1 builder for a **child** inscription's reveal transaction —

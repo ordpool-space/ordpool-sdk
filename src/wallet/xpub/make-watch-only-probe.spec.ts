@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
-import { makeWatchOnlyProbe } from './make-watch-only-probe';
+import { makeWatchOnlyProbe } from './make-watch-only-probe.js';
 
 const ESPLORA = 'https://api.ordpool.space';
 const ORD = 'https://ord.ordpool.space';

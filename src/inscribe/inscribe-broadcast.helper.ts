@@ -35,7 +35,7 @@
  * concern.
  */
 
-import { STANDARD_TX_WEIGHT_LIMIT } from '../cat21-broadcast/broadcast.helper';
+import { STANDARD_TX_WEIGHT_LIMIT } from '../cat21-broadcast/broadcast.helper.js';
 
 /**
  * Default fan-out endpoints. Both speak BIP-331 `submitpackage`

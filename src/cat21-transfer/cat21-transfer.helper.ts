@@ -1,16 +1,16 @@
 import * as btc from '@scure/btc-signer';
 
-import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
-import { Network, toScureNetwork } from '../network';
-import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
-import { addCat21Input } from '../cat21-script/prepare-cat21-input';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
+import { Network, toScureNetwork } from '../network.js';
+import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence.js';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
+import { addCat21Input } from '../cat21-script/prepare-cat21-input.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   Cat21TransferCatInput,
   Cat21TransferDestinations,
   Cat21TransferFundingInput,
-} from './cat21-transfer.types';
+} from './cat21-transfer.types.js';
 
 /**
  * Dust threshold for the change output. 546 sats is the conservative

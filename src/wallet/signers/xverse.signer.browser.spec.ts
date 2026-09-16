@@ -4,7 +4,7 @@ import * as btc from '@scure/btc-signer';
 import { firstValueFrom, lastValueFrom, of } from 'rxjs';
 import { BitcoinNetworkType, SignTransactionOptions, SignTransactionResponse } from 'sats-connect';
 
-import { Network } from '../../network';
+import { Network } from '../../network.js';
 
 // Mocks must be in place BEFORE the signer-under-test is imported.
 jest.mock('sats-connect', () => {
@@ -27,10 +27,10 @@ jest.mock('./child-reveal-finalize.helper', () => {
   };
 });
 import { signTransaction, request, MessageSigningProtocols } from 'sats-connect';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
+import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper.js';
 
-import { xverseSigner } from './xverse.signer';
+import { xverseSigner } from './xverse.signer.js';
 
 
 describe('xverseSigner.signSingleFundingInput', () => {

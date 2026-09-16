@@ -2,16 +2,16 @@ import {
   KnownOrdinalWallet,
   WalletConnector,
   WindowLike,
-} from '../wallet.service.types';
-import { albyConnector } from './alby.connector';
-import { binanceConnector } from './binance.connector';
-import { cat21walletConnector } from './cat21wallet.connector';
-import { leatherConnector } from './leather.connector';
-import { okxConnector } from './okx.connector';
-import { phantomConnector } from './phantom.connector';
-import { unisatConnector } from './unisat.connector';
-import { wizzConnector } from './wizz.connector';
-import { xverseConnector } from './xverse.connector';
+} from '../wallet.service.types.js';
+import { albyConnector } from './alby.connector.js';
+import { binanceConnector } from './binance.connector.js';
+import { cat21walletConnector } from './cat21wallet.connector.js';
+import { leatherConnector } from './leather.connector.js';
+import { okxConnector } from './okx.connector.js';
+import { phantomConnector } from './phantom.connector.js';
+import { unisatConnector } from './unisat.connector.js';
+import { wizzConnector } from './wizz.connector.js';
+import { xverseConnector } from './xverse.connector.js';
 
 
 /**
@@ -71,12 +71,12 @@ export function detectInstalledWallets(
   return { installedWallets, notInstalledWallets };
 }
 
-export { albyConnector } from './alby.connector';
-export { binanceConnector } from './binance.connector';
-export { cat21walletConnector } from './cat21wallet.connector';
-export { leatherConnector } from './leather.connector';
-export { okxConnector } from './okx.connector';
-export { phantomConnector } from './phantom.connector';
-export { unisatConnector } from './unisat.connector';
-export { wizzConnector } from './wizz.connector';
-export { xverseConnector } from './xverse.connector';
+export { albyConnector } from './alby.connector.js';
+export { binanceConnector } from './binance.connector.js';
+export { cat21walletConnector } from './cat21wallet.connector.js';
+export { leatherConnector } from './leather.connector.js';
+export { okxConnector } from './okx.connector.js';
+export { phantomConnector } from './phantom.connector.js';
+export { unisatConnector } from './unisat.connector.js';
+export { wizzConnector } from './wizz.connector.js';
+export { xverseConnector } from './xverse.connector.js';

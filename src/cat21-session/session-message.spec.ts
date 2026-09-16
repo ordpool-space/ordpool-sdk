@@ -4,7 +4,7 @@ import {
   buildCat21SessionMessage,
   checkSessionValidity,
   CAT21_SESSION_MAX_VALIDITY_MS,
-} from './session-message';
+} from './session-message.js';
 
 describe('buildCat21SessionMessage', () => {
   it('produces the canonical single-line format', () => {

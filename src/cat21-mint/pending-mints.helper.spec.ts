@@ -1,12 +1,12 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { MempoolTx } from './cat21.service.types';
+import { MempoolTx } from './cat21.service.types.js';
 import {
   gcFirstSeen,
   matchesCat21Mint,
   selectMatchingPendingMints,
   txToPendingMint,
-} from './pending-mints.helper';
+} from './pending-mints.helper.js';
 
 const ORDINALS_ADDR = 'bc1ptrrx4duc8afs4ye63xgcyf6d7kg29a4myay4nqxmd04zx8j9jers899d0x';
 const PAYMENT_ADDR  = 'bc1qfoo';

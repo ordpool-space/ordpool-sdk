@@ -1,11 +1,11 @@
 import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
-import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
-import { Network, toScureNetwork } from '../network';
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
+import { Network, toScureNetwork } from '../network.js';
 
-import { resolveInscribePostage } from './inscription-commit.helper';
-import { failInscribe } from './inscribe-errors';
+import { resolveInscribePostage } from './inscription-commit.helper.js';
+import { failInscribe } from './inscribe-errors.js';
 
 /**
  * Layer-1 builder for the **reveal** transaction.

@@ -6,7 +6,7 @@ import {
   estimateTaprootVbytes,
   selectCardinalUtxo,
   selectOrdParityFunding,
-} from './ord-coin-select';
+} from './ord-coin-select.js';
 
 /**
  * ord's own fixture from `transaction_builder.rs`

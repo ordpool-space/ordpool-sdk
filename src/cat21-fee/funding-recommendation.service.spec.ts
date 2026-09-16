@@ -1,9 +1,9 @@
 import { describe, expect, it, beforeEach } from '@jest/globals';
 import { BehaviorSubject, Observable, firstValueFrom, of } from 'rxjs';
 
-import { FundingRecommendationService } from './funding-recommendation.service';
-import { UtxoContentScanner } from '../cat21-mint/utxo-content-scanner.service';
-import { UtxoScanState } from '../cat21-mint/utxo-content.types';
+import { FundingRecommendationService } from './funding-recommendation.service.js';
+import { UtxoContentScanner } from '../cat21-mint/utxo-content-scanner.service.js';
+import { UtxoScanState } from '../cat21-mint/utxo-content.types.js';
 
 /** A controllable stand-in for the ord-backed scanner. */
 class FakeScanner {

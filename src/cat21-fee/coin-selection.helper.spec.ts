@@ -4,7 +4,7 @@ import {
   listFundingUtxosThatCover,
   pickLargestFundingUtxoThatCovers,
   pickSmallestFundingUtxoThatCovers,
-} from './coin-selection.helper';
+} from './coin-selection.helper.js';
 
 const u = (txid: string, value: number) => ({ txid, vout: 0, value });
 

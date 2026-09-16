@@ -1,6 +1,6 @@
-import { COIN_CHECK_PROMISE } from '../family/coin-check-promise';
-import { KnownOrdinalWalletType } from './wallet.service.types';
-import { KnownOrdinalWallets } from './known-ordinal-wallets';
+import { COIN_CHECK_PROMISE } from '../family/coin-check-promise.js';
+import { KnownOrdinalWalletType } from './wallet.service.types.js';
+import { KnownOrdinalWallets } from './known-ordinal-wallets.js';
 
 /**
  * Wallet capability matrix — the single source of truth for "which wallet

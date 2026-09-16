@@ -1,12 +1,12 @@
 import { firstValueFrom, from } from 'rxjs';
 
-import { Network } from '../network';
-import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { findSignerOrThrow } from '../wallet/signers';
-import { validateCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper';
-import { Cat21OfferValidation } from '../cat21-offer/cat21-offer.types';
-import { BroadcastOutcome, BroadcastPort } from './ports';
+import { Network } from '../network.js';
+import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
+import { validateCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper.js';
+import { Cat21OfferValidation } from '../cat21-offer/cat21-offer.types.js';
+import { BroadcastOutcome, BroadcastPort } from './ports.js';
 
 /**
  * Everything the accept-offer core needs. The SELLER accepts a buyer-built

@@ -2,7 +2,7 @@ import {
   Cat21PreparedInput,
   PrepareCat21InputArgs,
   prepareCat21Input,
-} from '../cat21-script/prepare-cat21-input';
+} from '../cat21-script/prepare-cat21-input.js';
 
 /**
  * Layer-2 input adapter for the CAT-21 inscribe pipeline. Thin wrapper

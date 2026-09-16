@@ -3,11 +3,11 @@ import { firstValueFrom, of } from 'rxjs';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { Cat21SdkConfig } from './cat21-sdk-config';
-import { Cat21Service } from './cat21.service';
-import { MempoolTx, RecommendedFees, TxnOutput } from './cat21.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { Cat21SdkConfig } from './cat21-sdk-config.js';
+import { Cat21Service } from './cat21.service.js';
+import { MempoolTx, RecommendedFees, TxnOutput } from './cat21.service.types.js';
 
 
 const mempoolApiUrl = 'https://mempool.test';

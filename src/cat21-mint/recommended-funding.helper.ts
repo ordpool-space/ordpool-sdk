@@ -1,11 +1,11 @@
 import * as btc from '@scure/btc-signer';
 
-import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
-import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { buildCat21MintPsbt } from './cat21-mint.helper';
+import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper.js';
+import { getDummyKeypair } from '../cat21-fee/dummy-keypair.js';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { buildCat21MintPsbt } from './cat21-mint.helper.js';
 
 /**
  * vsize of a canonical single-taproot-input CAT-21 mint (1 input, cat output

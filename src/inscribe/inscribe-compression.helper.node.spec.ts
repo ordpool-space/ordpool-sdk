@@ -22,14 +22,14 @@ import { join } from 'node:path';
 import { hex } from '@scure/base';
 import { gzipDecode } from 'ordpool-parser';
 
-import { compressBrotliWasm } from './brotli-wasm-encoder';
+import { compressBrotliWasm } from './brotli-wasm-encoder.js';
 import {
   assessCompression,
   compressGzip,
   compressLikeOrd,
   decompressGzip,
   nativeBrotliAvailable,
-} from './inscribe-compression.helper';
+} from './inscribe-compression.helper.js';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 

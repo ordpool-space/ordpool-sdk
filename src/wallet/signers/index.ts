@@ -1,14 +1,14 @@
-import { KnownOrdinalWalletType, WalletSigner } from '../wallet.service.types';
-import { albySigner } from './alby.signer';
-import { binanceSigner } from './binance.signer';
-import { cat21walletSigner } from './cat21wallet.signer';
-import { leatherSigner } from './leather.signer';
-import { okxSigner } from './okx.signer';
-import { phantomSigner } from './phantom.signer';
-import { psbtExportSigner } from './psbt-export.signer';
-import { unisatSigner } from './unisat.signer';
-import { wizzSigner } from './wizz.signer';
-import { xverseSigner } from './xverse.signer';
+import { KnownOrdinalWalletType, WalletSigner } from '../wallet.service.types.js';
+import { albySigner } from './alby.signer.js';
+import { binanceSigner } from './binance.signer.js';
+import { cat21walletSigner } from './cat21wallet.signer.js';
+import { leatherSigner } from './leather.signer.js';
+import { okxSigner } from './okx.signer.js';
+import { phantomSigner } from './phantom.signer.js';
+import { psbtExportSigner } from './psbt-export.signer.js';
+import { unisatSigner } from './unisat.signer.js';
+import { wizzSigner } from './wizz.signer.js';
+import { xverseSigner } from './xverse.signer.js';
 
 
 /**
@@ -71,13 +71,13 @@ export function findSignerOrThrow(type: KnownOrdinalWalletType): WalletSigner {
   return signer;
 }
 
-export { albySigner } from './alby.signer';
-export { binanceSigner } from './binance.signer';
-export { cat21walletSigner } from './cat21wallet.signer';
-export { leatherSigner } from './leather.signer';
-export { okxSigner } from './okx.signer';
-export { phantomSigner } from './phantom.signer';
-export { psbtExportSigner } from './psbt-export.signer';
-export { unisatSigner } from './unisat.signer';
-export { wizzSigner } from './wizz.signer';
-export { xverseSigner } from './xverse.signer';
+export { albySigner } from './alby.signer.js';
+export { binanceSigner } from './binance.signer.js';
+export { cat21walletSigner } from './cat21wallet.signer.js';
+export { leatherSigner } from './leather.signer.js';
+export { okxSigner } from './okx.signer.js';
+export { phantomSigner } from './phantom.signer.js';
+export { psbtExportSigner } from './psbt-export.signer.js';
+export { unisatSigner } from './unisat.signer.js';
+export { wizzSigner } from './wizz.signer.js';
+export { xverseSigner } from './xverse.signer.js';

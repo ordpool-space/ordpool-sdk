@@ -26,8 +26,8 @@
  * Pure functions. No I/O.
  */
 
-import { PaymentAddress, toPaymentAddress } from '../wallet/address-types';
-import { CatOutpoint } from './cat-outpoint';
+import { PaymentAddress, toPaymentAddress } from '../wallet/address-types.js';
+import { CatOutpoint } from './cat-outpoint.js';
 
 /** Query param keys — single source of truth. */
 export const CAT21_QUERY_KEYS = {

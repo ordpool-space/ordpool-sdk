@@ -48,8 +48,8 @@
  * import it from `ordpool-sdk/core`.
  */
 
-import { brotliModeForContentType, compressBrotliWasm } from './brotli-wasm-encoder';
-import type { BrotliWasmSource } from './brotli-wasm-encoder';
+import { brotliModeForContentType, compressBrotliWasm } from './brotli-wasm-encoder.js';
+import type { BrotliWasmSource } from './brotli-wasm-encoder.js';
 
 /**
  * Body encodings the inscribe builder can tag on-chain (`content_encoding`,

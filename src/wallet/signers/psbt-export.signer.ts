@@ -8,10 +8,10 @@ import {
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
-} from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { unsupportedSignMessage } from './unsupported-sign-message';
-import { decodePastedPsbt } from '../../cat21-offer/decode-pasted-psbt';
+} from '../wallet.service.types.js';
+import { operationNamedDefaults } from './operation-named-defaults.js';
+import { unsupportedSignMessage } from './unsupported-sign-message.js';
+import { decodePastedPsbt } from '../../cat21-offer/decode-pasted-psbt.js';
 
 /**
  * Watch-only signer. Covers any wallet that doesn't inject into the

@@ -1,6 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
-import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types';
+import { KnownOrdinalWalletType, WalletInfo } from '../wallet/wallet.service.types.js';
 
 /**
  * Shared wallet fixture builder for SDK Jest specs. Default is a

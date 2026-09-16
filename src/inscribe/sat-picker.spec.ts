@@ -16,11 +16,11 @@ import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 import { schnorr, secp256k1 } from '@noble/curves/secp256k1';
 
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
-import { Network } from '../network';
-import { InscribeInputError } from './inscribe-errors';
-import { findRareSatsInOutputs, inscribeSatSourceFromRow, type SatPickerRow } from './sat-picker';
-import { satPaddingRequirement } from './sat-offset';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
+import { Network } from '../network.js';
+import { InscribeInputError } from './inscribe-errors.js';
+import { findRareSatsInOutputs, inscribeSatSourceFromRow, type SatPickerRow } from './sat-picker.js';
+import { satPaddingRequirement } from './sat-offset.js';
 
 const GENESIS_TXID = '98316dcb21daaa221865208fe0323616ee6dd84e6020b78bc6908e914ac03892';
 const GENESIS_ADDR = 'bc1p85ra9kv6a48yvk4mq4hx08wxk6t32tdjw9ylahergexkymsc3uwsdrx6sh';

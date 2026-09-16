@@ -2,7 +2,7 @@ import { describe, it, expect } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { verifyBip322Signature } from './verify-bip322-signature';
+import { verifyBip322Signature } from './verify-bip322-signature.js';
 
 /**
  * Real-wallet regression vectors. Before this spec existed the verifier had

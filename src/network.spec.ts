@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import * as btc from '@scure/btc-signer';
 import { BitcoinNetworkType } from 'sats-connect';
 
-import { Network, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork } from './network';
+import { Network, toBitcoinNetworkType, toLeatherNetworkString, toScureNetwork } from './network.js';
 
 describe('toScureNetwork', () => {
 

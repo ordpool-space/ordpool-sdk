@@ -5,7 +5,7 @@ import {
   getAddressFormat,
   isInscribeSupportedPaymentAddress,
   isSegWit,
-} from './address-format';
+} from './address-format.js';
 
 describe('changeDustFloor', () => {
   it('returns the per-address-type minimum for recognised prefixes', () => {

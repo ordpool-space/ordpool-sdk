@@ -26,11 +26,11 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { InscriptionParserService } from 'ordpool-parser';
 
-import { Network, toScureNetwork } from '../network';
+import { Network, toScureNetwork } from '../network.js';
 
-import { buildInscribeCommitPsbt, INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
-import { buildInscriptionEnvelope } from './inscription-envelope';
-import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-reveal.helper';
+import { buildInscribeCommitPsbt, INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper.js';
+import { buildInscriptionEnvelope } from './inscription-envelope.js';
+import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-reveal.helper.js';
 
 
 const FUNDING_PRIV = new Uint8Array(32).fill(0x11);

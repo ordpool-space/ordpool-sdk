@@ -3,7 +3,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { secp256k1 } from '@noble/curves/secp256k1';
 
-import { extractWireTxFromPsbt } from './psbt-extract';
+import { extractWireTxFromPsbt } from './psbt-extract.js';
 
 /**
  * Fresh-key builder — sigs verify against the derived pubkey so

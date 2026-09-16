@@ -18,7 +18,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { CBOR } from 'ordpool-parser';
 
-import { CborOrderedMap, encodeCborDeterministic } from './inscription-cbor';
+import { CborOrderedMap, encodeCborDeterministic } from './inscription-cbor.js';
 
 const decode = (bytes: Uint8Array): unknown => CBOR.decode(bytes);
 

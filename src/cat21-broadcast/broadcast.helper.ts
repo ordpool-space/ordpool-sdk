@@ -1,4 +1,4 @@
-import { submitToSlipstream } from './slipstream.helper';
+import { submitToSlipstream } from './slipstream.helper.js';
 
 /**
  * Standard-relay weight ceiling — matches Bitcoin Core's

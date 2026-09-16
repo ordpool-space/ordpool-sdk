@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { Network } from '../network';
+import { Network } from '../network.js';
 
-import { validateCat21Operation } from './cat21-operation-gate';
+import { validateCat21Operation } from './cat21-operation-gate.js';
 import type {
   Cat21AcceptOfferIntent,
   Cat21BuyIntent,
@@ -10,7 +10,7 @@ import type {
   Cat21MintIntent,
   Cat21OperationGateConfig,
   Cat21TransferIntent,
-} from './cat21-operation-gate.types';
+} from './cat21-operation-gate.types.js';
 
 const MAINNET_ADDR = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4';
 // Mainnet P2TR (bech32m). From the BIP350 reference vectors.

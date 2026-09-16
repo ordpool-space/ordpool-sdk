@@ -3,11 +3,11 @@ import {
   WalletPlatform,
   WALLET_MATRIX,
   walletsSupporting,
-} from './wallet-capabilities';
-import { walletInAppBrowserDeepLink } from './wallet-deeplink';
-import { detectInstalledWallets } from './connectors';
-import { KnownOrdinalWalletType, WindowLike } from './wallet.service.types';
-import { KnownOrdinalWallets } from './known-ordinal-wallets';
+} from './wallet-capabilities.js';
+import { walletInAppBrowserDeepLink } from './wallet-deeplink.js';
+import { detectInstalledWallets } from './connectors/index.js';
+import { KnownOrdinalWalletType, WindowLike } from './wallet.service.types.js';
+import { KnownOrdinalWallets } from './known-ordinal-wallets.js';
 
 /**
  * What a person does next with this row. Drives the button, and only

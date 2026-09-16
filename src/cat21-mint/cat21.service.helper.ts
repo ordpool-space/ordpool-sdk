@@ -1,11 +1,11 @@
 import * as btc from '@scure/btc-signer';
-import { Network, toScureNetwork } from '../network';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
-import { buildCat21MintPsbt } from './cat21-mint.helper';
-import { prepareMintInputForWallet } from './cat21-mint-input-adapter';
-import { CreateTransactionResult, SimulateTransactionResult, TxnOutput } from './cat21.service.types';
+import { Network, toScureNetwork } from '../network.js';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
+import { buildCat21MintPsbt } from './cat21-mint.helper.js';
+import { prepareMintInputForWallet } from './cat21-mint-input-adapter.js';
+import { CreateTransactionResult, SimulateTransactionResult, TxnOutput } from './cat21.service.types.js';
 
 // Re-export from the new locations so existing consumers keep working
 // while the v2 ecosystem migrates to the canonical import paths.
@@ -16,8 +16,8 @@ export {
   getMinimumUtxoSize,
   isSegWit,
   toXOnly,
-} from '../cat21-script/address-format';
-import { getDummyKeypair, getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
+} from '../cat21-script/address-format.js';
+import { getDummyKeypair, getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair.js';
 export { getDummyKeypair, getDummyLegacyTransaction };
 
 /**

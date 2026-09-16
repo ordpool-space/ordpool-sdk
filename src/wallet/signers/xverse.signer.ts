@@ -3,8 +3,8 @@ import * as btc from '@scure/btc-signer';
 import { defer, from, Observable, map, switchMap } from 'rxjs';
 import { MessageSigningProtocols, request, signTransaction } from 'sats-connect';
 
-import { toBitcoinNetworkType } from '../../network';
-import { broadcastSignedPsbt, extractWireTxFromPsbt } from '../psbt-extract';
+import { toBitcoinNetworkType } from '../../network.js';
+import { broadcastSignedPsbt, extractWireTxFromPsbt } from '../psbt-extract.js';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -19,11 +19,11 @@ import {
   SignTransferArgs,
   WalletSigner,
   paddedSatCommitSigningPositions,
-} from '../wallet.service.types';
-import { childRevealParentIndexes, mergeParentSigAndBroadcast, prepareOfferAcceptWalletFacing } from './child-reveal-finalize.helper';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { resolveSigningTargets } from './signing-targets.helper';
-import { wrapSignMessage } from './wrap-sign-message';
+} from '../wallet.service.types.js';
+import { childRevealParentIndexes, mergeParentSigAndBroadcast, prepareOfferAcceptWalletFacing } from './child-reveal-finalize.helper.js';
+import { operationNamedDefaults } from './operation-named-defaults.js';
+import { resolveSigningTargets } from './signing-targets.helper.js';
+import { wrapSignMessage } from './wrap-sign-message.js';
 
 
 /**

@@ -1,5 +1,5 @@
 import { OP, Script } from '@scure/btc-signer';
-import { failInscribe } from './inscribe-errors';
+import { failInscribe } from './inscribe-errors.js';
 
 // scure-btc-signer 1.2.x's ScriptOP union is internal: a string
 // opcode name like `'CHECKSIG'`, a Uint8Array data push, or a

@@ -1,8 +1,8 @@
 import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType, WalletInfo } from './wallet.service.types';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType, WalletInfo } from './wallet.service.types.js';
 
 /**
  * Non-native regtest wallets (Leather / Unisat / Wizz / OKX)

@@ -1,5 +1,5 @@
-import { fetchCat21Status, fetchLatestCatNumbers } from './cat21-api.fetch';
-import { CatNumbersResult, StatusResult } from './cat21-api.types';
+import { fetchCat21Status, fetchLatestCatNumbers } from './cat21-api.fetch.js';
+import { CatNumbersResult, StatusResult } from './cat21-api.types.js';
 
 // Framework-agnostic twin of Cat21ApiService: pins that it hits the right URL
 // (the real builders) and returns the parsed body. global.fetch is mocked.

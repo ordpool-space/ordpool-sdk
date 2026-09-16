@@ -3,7 +3,7 @@ import {
   AgentPolicy,
   AgentPolicyDecision,
   AgentPolicyDenyReason,
-} from './agent-policy.types';
+} from './agent-policy.types.js';
 
 /**
  * Pure-functional policy gate for agent-mode CAT-21 actions.

@@ -4,8 +4,8 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, Observable } from 'rxjs';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 
 // Mock ONLY the signer registry: the service must run its REAL build
 // path (createTransaction) and its REAL broadcast wiring; the fake
@@ -14,11 +14,11 @@ jest.mock('../wallet/signers', () => {
   const actual = jest.requireActual('../wallet/signers') as Record<string, unknown>;
   return { ...actual, findSignerOrThrow: jest.fn() };
 });
-import { findSignerOrThrow } from '../wallet/signers';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
 
-import { Cat21SdkConfig } from './cat21-sdk-config';
-import { Cat21Service } from './cat21.service';
-import { TxnOutput } from './cat21.service.types';
+import { Cat21SdkConfig } from './cat21-sdk-config.js';
+import { Cat21Service } from './cat21.service.js';
+import { TxnOutput } from './cat21.service.types.js';
 
 /**
  * Happy-path pin for `createCat21Transaction` on the injected

@@ -2,9 +2,9 @@ import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals
 import { hex } from '@scure/base';
 import { firstValueFrom, of, throwError } from 'rxjs';
 
-import { Network } from '../../network';
+import { Network } from '../../network.js';
 
-import { albySigner } from './alby.signer';
+import { albySigner } from './alby.signer.js';
 
 
 describe('albySigner.signSingleFundingInput', () => {

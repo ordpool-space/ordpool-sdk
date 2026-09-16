@@ -1,9 +1,9 @@
-import { findRareSatInRanges, type SatRarity } from '../cat21-mint/sat-rarity.helper';
-import type { OrdOutputResponse } from '../cat21-mint/utxo-content.types';
-import type { Network } from '../network';
-import type { InscribeSatSource } from './inscription-commit.helper';
-import { findSatOffset } from './sat-offset';
-import { deriveOwnedTaprootInput } from './taproot-owned-input';
+import { findRareSatInRanges, type SatRarity } from '../cat21-mint/sat-rarity.helper.js';
+import type { OrdOutputResponse } from '../cat21-mint/utxo-content.types.js';
+import type { Network } from '../network.js';
+import type { InscribeSatSource } from './inscription-commit.helper.js';
+import { findSatOffset } from './sat-offset.js';
+import { deriveOwnedTaprootInput } from './taproot-owned-input.js';
 
 /**
  * Rare-sat discovery for an inscribe screen: which of a wallet's coins hold a

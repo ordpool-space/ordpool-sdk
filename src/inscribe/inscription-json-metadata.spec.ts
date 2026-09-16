@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { encodeJsonMetadata } from './inscription-json-metadata';
+import { encodeJsonMetadata } from './inscription-json-metadata.js';
 
 const hex = (b: Uint8Array) => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
 

@@ -1,16 +1,16 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import {
   Cat21TransferOrchestrator,
   TransferOrchestratorDeps,
   TransferSnapshot,
   TransferWalletContext,
-} from './cat21-transfer-orchestrator';
-import { Cat21Holding } from './cat21-transfer.types';
+} from './cat21-transfer-orchestrator.js';
+import { Cat21Holding } from './cat21-transfer.types.js';
 
 // Node unit test. Real keys so buildTransfer actually builds a
 // PSBT. Pins the framework-agnostic transfer orchestration: state machine,

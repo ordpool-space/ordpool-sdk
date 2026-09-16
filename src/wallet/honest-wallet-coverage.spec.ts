@@ -2,8 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from './wallet.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from './wallet.service.types.js';
 
 /**
  * Audit gate. Asserts that the Pipeline B harness does NOT lie about

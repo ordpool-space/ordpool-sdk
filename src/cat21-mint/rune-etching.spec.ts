@@ -10,7 +10,7 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { lookupRuneEtching, resolveRuneEtchingTxid } from './rune-etching';
+import { lookupRuneEtching, resolveRuneEtchingTxid } from './rune-etching.js';
 
 const ORD = 'https://ord.example';
 const DOG = 'DOG•GO•TO•THE•MOON';

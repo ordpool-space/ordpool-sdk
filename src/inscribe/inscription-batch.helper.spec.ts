@@ -11,11 +11,11 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { InscriptionParserService } from 'ordpool-parser';
 
-import { Network, toScureNetwork } from '../network';
+import { Network, toScureNetwork } from '../network.js';
 
-import { createBatchInscribeTransactions, simulateBatchInscribeFees } from './inscription-batch.helper';
-import { prepareInscribeFundingInput } from './inscription-input-adapter';
-import type { CreateBatchInscribeTransactionsArgs } from './inscription-batch.helper';
+import { createBatchInscribeTransactions, simulateBatchInscribeFees } from './inscription-batch.helper.js';
+import { prepareInscribeFundingInput } from './inscription-input-adapter.js';
+import type { CreateBatchInscribeTransactionsArgs } from './inscription-batch.helper.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);

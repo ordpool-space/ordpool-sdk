@@ -4,7 +4,7 @@ import {
   PaymentAddress,
   toOrdinalsAddress,
   toPaymentAddress,
-} from './address-types';
+} from './address-types.js';
 
 const P2WPKH_MAINNET = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx';
 const P2TR_MAINNET = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxq7pkrz9';

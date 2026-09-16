@@ -1,12 +1,12 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { Network, toScureNetwork } from '../network';
+import { getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { Network, toScureNetwork } from '../network.js';
 
-import { isSegWit } from './address-format';
-import { buildInputScript } from './build-input-script';
+import { isSegWit } from './address-format.js';
+import { buildInputScript } from './build-input-script.js';
 
 /**
  * The canonical prepared-PSBT-input shape every CAT-21 Layer-1 builder

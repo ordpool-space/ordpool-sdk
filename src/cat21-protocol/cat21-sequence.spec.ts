@@ -2,18 +2,18 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { describe, expect, it } from '@jest/globals';
 
-import { Network } from '../network';
-import { buildCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper';
-import { buildCat21TransferPsbt } from '../cat21-transfer/cat21-transfer.helper';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network.js';
+import { buildCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper.js';
+import { buildCat21TransferPsbt } from '../cat21-transfer/cat21-transfer.helper.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE,
   CAT21_WALLET_INPUT_SEQUENCE,
   resolveCat21MintInputSequence,
-} from './cat21-sequence';
-import { buildCat21MintPsbt } from '../cat21-mint/cat21-mint.helper';
-import { createTransaction, getDummyKeypair } from '../cat21-mint/cat21.service.helper';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
+} from './cat21-sequence.js';
+import { buildCat21MintPsbt } from '../cat21-mint/cat21-mint.helper.js';
+import { createTransaction, getDummyKeypair } from '../cat21-mint/cat21.service.helper.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 
 const publicKey = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
 const p2wpkhMainnet = btc.p2wpkh(publicKey, btc.NETWORK);

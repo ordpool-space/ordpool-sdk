@@ -2,10 +2,10 @@ import { describe, expect, it, jest } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { BroadcastPort, ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports';
-import { InscribeCoreParams, executeInscribe, simulateInscribe } from './inscribe.core';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { BroadcastPort, ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
+import { InscribeCoreParams, executeInscribe, simulateInscribe } from './inscribe.core.js';
 
 // Plain NODE unit test — no jsdom.
 

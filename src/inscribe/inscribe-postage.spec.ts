@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { INSCRIBE_POSTAGE_SATS, resolveInscribePostage } from './inscription-commit.helper';
+import { INSCRIBE_POSTAGE_SATS, resolveInscribePostage } from './inscription-commit.helper.js';
 
 /**
  * Parity with `ord wallet inscribe --postage` is proven on regtest at four
@@ -24,7 +24,7 @@ describe('resolveInscribePostage', () => {
 
 describe('MAX_STANDARD_TX_WEIGHT', () => {
   it('is the Core relay limit of 400000, allowed exactly, refused one over, unless noLimit', async () => {
-    const { MAX_STANDARD_TX_WEIGHT, assertRevealWithinStandardWeight } = await import('./inscription-reveal.helper');
+    const { MAX_STANDARD_TX_WEIGHT, assertRevealWithinStandardWeight } = await import('./inscription-reveal.helper.js');
     expect(MAX_STANDARD_TX_WEIGHT).toBe(400_000);
     expect(() => assertRevealWithinStandardWeight(400_000, false)).not.toThrow();
     expect(() => assertRevealWithinStandardWeight(400_001, false))

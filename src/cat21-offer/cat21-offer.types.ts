@@ -1,6 +1,6 @@
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { Cat21PreparedInput } from '../cat21-script/prepare-cat21-input';
-import { CatOutpoint } from '../cat21-share/cat-outpoint';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
+import { Cat21PreparedInput } from '../cat21-script/prepare-cat21-input.js';
+import { CatOutpoint } from '../cat21-share/cat-outpoint.js';
 
 /**
  * What the buyer needs to know about the cat they want to bid on. A consumer

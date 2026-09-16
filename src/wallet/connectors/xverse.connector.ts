@@ -1,13 +1,13 @@
 import { Observable } from 'rxjs';
 import { addListener, AddressPurpose, getAddress } from 'sats-connect';
 
-import { Network, toBitcoinNetworkType } from '../../network';
+import { Network, toBitcoinNetworkType } from '../../network.js';
 import {
   isXverseInstalled,
   parseXverseAddressResponse,
-} from '../wallet.service.helper';
-import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse } from '../wallet.service.types';
-import { KnownOrdinalWallets } from '../known-ordinal-wallets';
+} from '../wallet.service.helper.js';
+import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike, XverseAddressResponse } from '../wallet.service.types.js';
+import { KnownOrdinalWallets } from '../known-ordinal-wallets.js';
 
 
 /**

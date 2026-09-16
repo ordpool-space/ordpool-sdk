@@ -1,11 +1,11 @@
 import * as btc from '@scure/btc-signer';
 
-import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { Cat21PreparedInput, addCat21Input } from '../cat21-script/prepare-cat21-input';
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
+import { Cat21PreparedInput, addCat21Input } from '../cat21-script/prepare-cat21-input.js';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence.js';
 
 /**
  * Alias for {@link CAT21_POSTAGE_SATS}. The canonical constant lives in

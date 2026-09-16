@@ -1,18 +1,18 @@
 import { Observable, defer, map, switchMap, throwError } from 'rxjs';
 import { hex } from '@scure/base';
 
-import { findSignerOrThrow } from '../wallet/signers';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { Network } from '../network';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { Network } from '../network.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 
 import {
   CreateChildInscribeTransactionsResult,
   createChildInscribeTransactions,
-} from './inscription.service.helper';
-import { ChildRevealParent } from './inscription-child-reveal.helper';
-import { OrdEnvelopeField } from './inscription-envelope';
-import type { InscriptionContentEncoding } from './inscribe-compression.helper';
+} from './inscription.service.helper.js';
+import { ChildRevealParent } from './inscription-child-reveal.helper.js';
+import { OrdEnvelopeField } from './inscription-envelope.js';
+import type { InscriptionContentEncoding } from './inscribe-compression.helper.js';
 
 /**
  * Public orchestrator for the ord parent/child (provenance) inscribe.

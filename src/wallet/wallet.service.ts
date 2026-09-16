@@ -18,22 +18,22 @@ import {
   AddressNetworkGroup,
   getAddressNetwork,
   isAddressCompatibleWithNetwork,
-} from '../cat21-script/address-format';
-import { Network } from '../network';
-import { StorageLike } from '../storage-like';
-import { detectInstalledWallets, walletConnectors } from './connectors';
-import { findSignerOrThrow } from './signers';
-import { verifyBip322Signature } from './verify-bip322-signature';
-import { WatchOnlyAddress, WatchOnlyScriptType } from './xpub/derive-watch-only';
-import { AddressProbe, WatchOnlyScanResult, scanWatchOnly } from './xpub/scan-watch-only';
-import { KnownOrdinalWallet, KnownOrdinalWalletType, SignMessageArgs, SignMessageResult, WalletConnector, WalletInfo, WindowLike } from './wallet.service.types';
-import { KnownOrdinalWallets } from './known-ordinal-wallets';
-import { WalletPlatform, walletsForPlatform } from './wallet-capabilities';
+} from '../cat21-script/address-format.js';
+import { Network } from '../network.js';
+import { StorageLike } from '../storage-like.js';
+import { detectInstalledWallets, walletConnectors } from './connectors/index.js';
+import { findSignerOrThrow } from './signers/index.js';
+import { verifyBip322Signature } from './verify-bip322-signature.js';
+import { WatchOnlyAddress, WatchOnlyScriptType } from './xpub/derive-watch-only.js';
+import { AddressProbe, WatchOnlyScanResult, scanWatchOnly } from './xpub/scan-watch-only.js';
+import { KnownOrdinalWallet, KnownOrdinalWalletType, SignMessageArgs, SignMessageResult, WalletConnector, WalletInfo, WindowLike } from './wallet.service.types.js';
+import { KnownOrdinalWallets } from './known-ordinal-wallets.js';
+import { WalletPlatform, walletsForPlatform } from './wallet-capabilities.js';
 
 
 // Re-exports kept for backward compatibility: consumers import these from
 // this module, though the implementations live in wallet.service.helper.
-export { leatherOrdinalsAddressType, leatherPaymentAddressType } from './wallet.service.helper';
+export { leatherOrdinalsAddressType, leatherPaymentAddressType } from './wallet.service.helper.js';
 
 export const LAST_CONNECTED_WALLET = 'LAST_CONNECTED_WALLET';
 

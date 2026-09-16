@@ -21,7 +21,7 @@ import { brotliDecode } from 'ordpool-parser';
 
 import { hex } from '@scure/base';
 
-import { brotliModeForContentType, compressBrotliWasm } from './brotli-wasm-encoder';
+import { brotliModeForContentType, compressBrotliWasm } from './brotli-wasm-encoder.js';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const WASM = readFileSync(join(__dirname, '../../wasm/brotli_wasm_bg.wasm'));

@@ -13,7 +13,7 @@
  * risk applies to a UTXO carrying a rare sat.
  */
 
-import type { SatRarity } from './sat-rarity.helper';
+import type { SatRarity } from './sat-rarity.helper.js';
 
 /**
  * Raw `/output/{outpoint}` shape returned by ord with the JSON API

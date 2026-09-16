@@ -24,12 +24,12 @@
  *   - payment identity   = the highest-funded address, else receive index 0
  */
 
-import { Network } from '../../network';
+import { Network } from '../../network.js';
 import {
   deriveWatchOnlyAddresses,
   WatchOnlyAddress,
   WatchOnlyScriptType,
-} from './derive-watch-only';
+} from './derive-watch-only.js';
 
 /** On-chain state of one address, as reported by the consumer's probe. */
 export interface AddressProbe {

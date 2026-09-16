@@ -1,6 +1,6 @@
 import { Observable, switchMap } from 'rxjs';
 
-import { childRevealParentIndexes, mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
+import { childRevealParentIndexes, mergeParentSigAndBroadcast } from './child-reveal-finalize.helper.js';
 import {
   SignChildRevealParentInputsArgs,
   SignOfferAcceptArgs,
@@ -11,7 +11,7 @@ import {
   WalletSigner,
   WalletSignerInternalImpls,
   paddedSatCommitSigningPositions,
-} from '../wallet.service.types';
+} from '../wallet.service.types.js';
 
 /**
  * Default operation-named methods, delegating to a signer's existing

@@ -1,6 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
-import { getDummyKeypair } from './dummy-keypair';
+import { getDummyKeypair } from './dummy-keypair.js';
 
 /**
  * Fake taproot key-path witness: a single 64-byte schnorr signature.

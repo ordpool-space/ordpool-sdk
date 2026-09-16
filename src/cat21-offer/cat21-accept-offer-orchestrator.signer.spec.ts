@@ -12,16 +12,16 @@ jest.mock('../wallet/signers', () => ({
   findSignerOrThrow: () => ({ signOfferAccept: mockSignOfferAccept }),
 }));
 
-import { Network } from '../network';
-import { toPaymentAddress } from '../wallet/address-types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { buildCat21BuyOfferPsbt } from './cat21-offer.helper';
-import { prepareBuyOfferBuyerInput } from './cat21-offer-input-adapter';
+import { Network } from '../network.js';
+import { toPaymentAddress } from '../wallet/address-types.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { buildCat21BuyOfferPsbt } from './cat21-offer.helper.js';
+import { prepareBuyOfferBuyerInput } from './cat21-offer-input-adapter.js';
 import {
   AcceptOfferOrchestratorDeps,
   AcceptOfferWalletContext,
   Cat21AcceptOfferOrchestrator,
-} from './cat21-accept-offer-orchestrator';
+} from './cat21-accept-offer-orchestrator.js';
 
 const SELLER_KEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000002');
 const SELLER_P2TR = btc.p2tr(SELLER_KEY.slice(1, 33), undefined, btc.NETWORK);

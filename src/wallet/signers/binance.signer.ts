@@ -1,18 +1,18 @@
 import { hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { BIP341_KEYPATH_SIGHASHES, keypathSighashWhitelist } from '../sighash';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
+import { BIP341_KEYPATH_SIGHASHES, keypathSighashWhitelist } from '../sighash.js';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
-} from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { unsupportedSignMessage } from './unsupported-sign-message';
-import { resolveSigningTargets } from './signing-targets.helper';
+} from '../wallet.service.types.js';
+import { operationNamedDefaults } from './operation-named-defaults.js';
+import { unsupportedSignMessage } from './unsupported-sign-message.js';
+import { resolveSigningTargets } from './signing-targets.helper.js';
 
 
 interface BinanceBtcRpc {

@@ -7,11 +7,11 @@
 
 import * as btc from '@scure/btc-signer';
 
-import { addressesEquivalent, allowlistContainsAddress } from '../cat21-script/address-format';
-import { INSCRIPTION_CONTENT_ENCODINGS, type InscriptionContentEncoding } from '../inscribe/inscribe-compression.helper';
-import { INSCRIBE_POSTAGE_SATS } from '../inscribe/inscription-commit.helper';
-import { encodeParentInscriptionId } from '../inscribe/inscription-envelope';
-import { Network, toScureNetwork } from '../network';
+import { addressesEquivalent, allowlistContainsAddress } from '../cat21-script/address-format.js';
+import { INSCRIPTION_CONTENT_ENCODINGS, type InscriptionContentEncoding } from '../inscribe/inscribe-compression.helper.js';
+import { INSCRIBE_POSTAGE_SATS } from '../inscribe/inscription-commit.helper.js';
+import { encodeParentInscriptionId } from '../inscribe/inscription-envelope.js';
+import { Network, toScureNetwork } from '../network.js';
 
 import {
   InscribeGateRejectReason,
@@ -20,7 +20,7 @@ import {
   InscribeOperation,
   InscribeOperationGateConfig,
   InscribeOperationGateResult,
-} from './inscribe-operation-gate.types';
+} from './inscribe-operation-gate.types.js';
 
 /* ──────────────────────────  Public entry  ────────────────────────── */
 

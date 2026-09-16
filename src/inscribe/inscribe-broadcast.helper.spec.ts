@@ -14,12 +14,12 @@
  */
 import { describe, expect, it } from '@jest/globals';
 
-import { STANDARD_TX_WEIGHT_LIMIT } from '../cat21-broadcast/broadcast.helper';
+import { STANDARD_TX_WEIGHT_LIMIT } from '../cat21-broadcast/broadcast.helper.js';
 
 import {
   broadcastInscribePackage,
   DEFAULT_INSCRIBE_BROADCAST_ENDPOINTS,
-} from './inscribe-broadcast.helper';
+} from './inscribe-broadcast.helper.js';
 
 const COMMIT_HEX = '02000000000101aa'; // shape-only, fan-out doesn't decode
 const REVEAL_HEX = '02000000000101bb';

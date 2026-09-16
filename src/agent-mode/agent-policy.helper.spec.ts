@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { evaluateAgentPolicy, evaluateAgentPolicyCaps } from './agent-policy.helper';
-import { AgentActionContext, AgentActionKind, AgentPolicy } from './agent-policy.types';
+import { evaluateAgentPolicy, evaluateAgentPolicyCaps } from './agent-policy.helper.js';
+import { AgentActionContext, AgentActionKind, AgentPolicy } from './agent-policy.types.js';
 
 const basePolicy: AgentPolicy = {
   enabled: true,

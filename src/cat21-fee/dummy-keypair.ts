@@ -2,7 +2,7 @@ import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { DummyKeypairResult, TxnOutput } from '../cat21-mint/cat21.service.types';
+import { DummyKeypairResult, TxnOutput } from '../cat21-mint/cat21.service.types.js';
 
 /**
  * Dummy keypair + helper-transaction utilities used only during

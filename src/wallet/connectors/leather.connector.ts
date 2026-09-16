@@ -1,13 +1,13 @@
 import { from, map, Observable } from 'rxjs';
 
-import { Network } from '../../network';
-import { toRegtestWalletInfo } from '../network-address-shim';
+import { Network } from '../../network.js';
+import { toRegtestWalletInfo } from '../network-address-shim.js';
 import {
   isLeatherInstalled,
   parseLeatherAddressResponse,
-} from '../wallet.service.helper';
-import { KnownOrdinalWalletType, LeatherAddressResponse, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types';
-import { KnownOrdinalWallets } from '../known-ordinal-wallets';
+} from '../wallet.service.helper.js';
+import { KnownOrdinalWalletType, LeatherAddressResponse, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types.js';
+import { KnownOrdinalWallets } from '../known-ordinal-wallets.js';
 
 
 /**

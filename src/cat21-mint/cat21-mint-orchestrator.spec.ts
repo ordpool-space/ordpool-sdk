@@ -1,15 +1,15 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   Cat21MintOrchestrator,
   MintOrchestratorDeps,
   MintSnapshot,
   MintWalletContext,
-} from './cat21-mint-orchestrator';
-import { TxnOutput } from './cat21.service.types';
+} from './cat21-mint-orchestrator.js';
+import { TxnOutput } from './cat21.service.types.js';
 
 // Node unit test — no browser. Real keys so simulateMintTransaction
 // actually builds a PSBT. Pins the framework-agnostic orchestration: the state

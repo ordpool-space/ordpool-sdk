@@ -1,6 +1,6 @@
 import { AddressPurpose as SatsConnectAddressPurpose } from 'sats-connect';
 
-import { AddressPurpose } from './address-purpose';
+import { AddressPurpose } from './address-purpose.js';
 
 /**
  * The local `AddressPurpose` is a hand-copy of sats-connect's enum, made so

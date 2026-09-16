@@ -13,12 +13,12 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, map, of } from 'rxjs';
 
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 
 jest.mock('../wallet/signers', () => ({ findSignerOrThrow: jest.fn() }));
-import { findSignerOrThrow } from '../wallet/signers';
-import { inscribeChildAndBroadcast } from './inscribe-child-orchestrator';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
+import { inscribeChildAndBroadcast } from './inscribe-child-orchestrator.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);

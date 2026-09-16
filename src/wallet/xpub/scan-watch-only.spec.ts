@@ -1,8 +1,8 @@
 import { describe, expect, it, jest } from '@jest/globals';
 
-import { Network } from '../../network';
-import { deriveWatchOnlyAddresses } from './derive-watch-only';
-import { scanWatchOnly, AddressProbe } from './scan-watch-only';
+import { Network } from '../../network.js';
+import { deriveWatchOnlyAddresses } from './derive-watch-only.js';
+import { scanWatchOnly, AddressProbe } from './scan-watch-only.js';
 
 const BIP86_ACCOUNT_XPUB =
   'xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ';

@@ -1,37 +1,37 @@
 import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
-import { ContentScanPort } from '../cat21-core/ports';
-import { selectFunding } from '../cat21-core/select-funding';
-import { changeDustFloor } from '../cat21-script/address-format';
-import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety';
-import { Network } from '../network';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { ContentScanPort } from '../cat21-core/ports.js';
+import { selectFunding } from '../cat21-core/select-funding.js';
+import { changeDustFloor } from '../cat21-script/address-format.js';
+import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety.js';
+import { Network } from '../network.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   compressLikeOrd,
   type InscriptionContentEncoding,
   type OrdCompressedBody,
-} from './inscribe-compression.helper';
-import { loadBrotliWasm, type BrotliWasmSource } from './brotli-wasm-encoder';
-import type { InscribeSatSource } from './inscription-commit.helper';
-import type { ChildRevealParent } from './inscription-child-reveal.helper';
+} from './inscribe-compression.helper.js';
+import { loadBrotliWasm, type BrotliWasmSource } from './brotli-wasm-encoder.js';
+import type { InscribeSatSource } from './inscription-commit.helper.js';
+import type { ChildRevealParent } from './inscription-child-reveal.helper.js';
 import {
   simulateBatchInscribeFees,
   type BatchInscribeMode,
   type BatchParent,
   type CreateBatchInscribeTransactionsArgs,
-} from './inscription-batch.helper';
-import { OrdEnvelopeField } from './inscription-envelope';
-import { SimulateInscribeFeesArgs, SimulateInscribeFeesResult, simulateInscribeFees } from './inscription-fee.helper';
-import type { InscriptionPropertiesInput } from './inscription-properties';
-import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from './inscription.service.helper';
-import { prepareInscribeFundingInput } from './inscription-input-adapter';
+} from './inscription-batch.helper.js';
+import { OrdEnvelopeField } from './inscription-envelope.js';
+import { SimulateInscribeFeesArgs, SimulateInscribeFeesResult, simulateInscribeFees } from './inscription-fee.helper.js';
+import type { InscriptionPropertiesInput } from './inscription-properties.js';
+import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
+import { prepareInscribeFundingInput } from './inscription-input-adapter.js';
 import {
   InscribeAndBroadcastResult,
   inscribeAndBroadcast,
   inscribeBatchAndBroadcast,
-} from './inscribe-orchestrator';
+} from './inscribe-orchestrator.js';
 
 /**
  * High-level inscribe API. Plain class, no signals. Sibling of
@@ -59,9 +59,9 @@ import {
  * vout[1]; the rest are optional ord envelope tags. `recipient` defaults to the
  * connected wallet's ordinals address when unset.
  */
-import { InscribeInputError, failInscribe, inscribeUserMessage } from './inscribe-errors';
-import { selectPaddingUtxo } from './padding-utxo';
-import { batchParentFromInscriptionId } from './parent-resolve';
+import { InscribeInputError, failInscribe, inscribeUserMessage } from './inscribe-errors.js';
+import { selectPaddingUtxo } from './padding-utxo.js';
+import { batchParentFromInscriptionId } from './parent-resolve.js';
 
 /**
  * What is being inscribed: a file, or a delegate that points at another

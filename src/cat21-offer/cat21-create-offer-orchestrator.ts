@@ -1,18 +1,18 @@
 import { firstValueFrom, from } from 'rxjs';
 import { base64, hex } from '@scure/base';
 
-import { buildOffer, CreateOfferCoreParams, simulateCreateOffer } from '../cat21-core/create-offer.core';
-import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports';
+import { buildOffer, CreateOfferCoreParams, simulateCreateOffer } from '../cat21-core/create-offer.core.js';
+import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   liftRecommendationByOutpoint,
-} from '../cat21-fee/funding-safety';
-import { Network } from '../network';
-import { findSignerOrThrow } from '../wallet/signers';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { BuyOfferTargetCat } from './cat21-offer.types';
+} from '../cat21-fee/funding-safety.js';
+import { Network } from '../network.js';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { BuyOfferTargetCat } from './cat21-offer.types.js';
 
 /**
  * FRAMEWORK-AGNOSTIC high-level create-offer (buyer bid) API. Plain class.

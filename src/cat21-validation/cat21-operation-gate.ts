@@ -15,8 +15,8 @@
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { addressesEquivalent, allowlistContainsAddress } from '../cat21-script/address-format';
-import { Network, toScureNetwork } from '../network';
+import { addressesEquivalent, allowlistContainsAddress } from '../cat21-script/address-format.js';
+import { Network, toScureNetwork } from '../network.js';
 
 import type {
   Cat21AcceptOfferIntent,
@@ -29,7 +29,7 @@ import type {
   Cat21OperationGateConfig,
   Cat21OperationGateResult,
   Cat21TransferIntent,
-} from './cat21-operation-gate.types';
+} from './cat21-operation-gate.types.js';
 
 /* ──────────────────────────  Public entry  ────────────────────────── */
 

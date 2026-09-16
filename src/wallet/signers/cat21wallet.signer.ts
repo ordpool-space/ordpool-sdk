@@ -2,9 +2,9 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { defer, from, Observable, map, switchMap } from 'rxjs';
 
-import { toLeatherNetworkString } from '../../network';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { findCat21WalletProvider } from '../wallet.service.helper';
+import { toLeatherNetworkString } from '../../network.js';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
+import { findCat21WalletProvider } from '../wallet.service.helper.js';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -14,10 +14,10 @@ import {
   SignPsbtOnlyInput,
   WalletSigner,
   WindowLike,
-} from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { resolveSigningTargets } from './signing-targets.helper';
-import { wrapSignMessage } from './wrap-sign-message';
+} from '../wallet.service.types.js';
+import { operationNamedDefaults } from './operation-named-defaults.js';
+import { resolveSigningTargets } from './signing-targets.helper.js';
+import { wrapSignMessage } from './wrap-sign-message.js';
 
 
 interface Cat21WalletPSBTResponse {

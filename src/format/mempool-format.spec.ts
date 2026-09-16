@@ -8,7 +8,7 @@ import {
   groupAddressForVerification,
   addressVerificationChunks,
   shortenId,
-} from './mempool-format';
+} from './mempool-format.js';
 
 /**
  * Reference implementation, transcribed from mempool's own

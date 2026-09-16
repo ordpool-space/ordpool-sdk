@@ -12,13 +12,13 @@ import * as btc from '@scure/btc-signer';
 import { InscriptionParserService } from 'ordpool-parser';
 import { firstValueFrom, of } from 'rxjs';
 
-import { Network, toScureNetwork } from '../network';
-import { childRevealParentIndexes, mergeParentSigAndBroadcast } from '../wallet/signers/child-reveal-finalize.helper';
-import { operationNamedDefaults } from '../wallet/signers/operation-named-defaults';
-import type { WalletSignerInternalImpls } from '../wallet/wallet.service.types';
+import { Network, toScureNetwork } from '../network.js';
+import { childRevealParentIndexes, mergeParentSigAndBroadcast } from '../wallet/signers/child-reveal-finalize.helper.js';
+import { operationNamedDefaults } from '../wallet/signers/operation-named-defaults.js';
+import type { WalletSignerInternalImpls } from '../wallet/wallet.service.types.js';
 
-import { createBatchChildInscribeTransactions } from './inscription-batch.helper';
-import type { BatchParent, CreateBatchChildInscribeTransactionsArgs } from './inscription-batch.helper';
+import { createBatchChildInscribeTransactions } from './inscription-batch.helper.js';
+import type { BatchParent, CreateBatchChildInscribeTransactionsArgs } from './inscription-batch.helper.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);

@@ -1,5 +1,5 @@
-import { Network } from '../network';
-import { Cat21Listing, MAX_ASK_SATS } from './cat21-listing.types';
+import { Network } from '../network.js';
+import { Cat21Listing, MAX_ASK_SATS } from './cat21-listing.types.js';
 
 /**
  * Canonical listing-message format version. Bump when the field set,

@@ -2,7 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { buildInputScript } from './build-input-script';
+import { buildInputScript } from './build-input-script.js';
 
 const PUBKEY_33 = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
 const PUBKEY_XONLY = PUBKEY_33.subarray(1, 33);

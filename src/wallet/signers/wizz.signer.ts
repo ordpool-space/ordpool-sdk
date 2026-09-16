@@ -1,19 +1,19 @@
 import { hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
-import { walletSidePaymentAddress } from '../network-address-shim';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { keypathSighashWhitelist } from '../sighash';
+import { walletSidePaymentAddress } from '../network-address-shim.js';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
+import { keypathSighashWhitelist } from '../sighash.js';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
-} from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { unsupportedSignMessage } from './unsupported-sign-message';
-import { resolveSigningTargets } from './signing-targets.helper';
+} from '../wallet.service.types.js';
+import { operationNamedDefaults } from './operation-named-defaults.js';
+import { unsupportedSignMessage } from './unsupported-sign-message.js';
+import { resolveSigningTargets } from './signing-targets.helper.js';
 
 
 interface WizzToSignInput {

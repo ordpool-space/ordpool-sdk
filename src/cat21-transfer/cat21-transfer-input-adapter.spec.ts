@@ -2,8 +2,8 @@ import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network, toScureNetwork } from '../network';
-import { prepareTransferCatInput, prepareTransferFundingInput } from './cat21-transfer-input-adapter';
+import { Network, toScureNetwork } from '../network.js';
+import { prepareTransferCatInput, prepareTransferFundingInput } from './cat21-transfer-input-adapter.js';
 
 const PUBKEY = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
 const NETWORK = Network.Mainnet;

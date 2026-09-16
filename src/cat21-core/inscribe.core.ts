@@ -4,17 +4,17 @@ import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   recommendFunding,
-} from '../cat21-fee/funding-safety';
+} from '../cat21-fee/funding-safety.js';
 import {
   InscribeAndBroadcastArgs,
   InscribeAndBroadcastResult,
   inscribeAndBroadcast,
-} from '../inscribe/inscribe-orchestrator';
-import { simulateInscribeFees } from '../inscribe/inscription-fee.helper';
-import { prepareInscribeFundingInput } from '../inscribe/inscription-input-adapter';
-import { changeDustFloor } from '../cat21-script/address-format';
-import { BroadcastPort, ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports';
-import { resolveFundingPick, selectFunding } from './select-funding';
+} from '../inscribe/inscribe-orchestrator.js';
+import { simulateInscribeFees } from '../inscribe/inscription-fee.helper.js';
+import { prepareInscribeFundingInput } from '../inscribe/inscription-input-adapter.js';
+import { changeDustFloor } from '../cat21-script/address-format.js';
+import { BroadcastPort, ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
+import { resolveFundingPick, selectFunding } from './select-funding.js';
 
 /**
  * Everything the inscribe core needs, framework-agnostic. Reuses the existing

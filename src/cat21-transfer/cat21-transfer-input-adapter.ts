@@ -1,8 +1,8 @@
-import { prepareCat21Input, PrepareCat21InputArgs } from '../cat21-script/prepare-cat21-input';
+import { prepareCat21Input, PrepareCat21InputArgs } from '../cat21-script/prepare-cat21-input.js';
 import {
   Cat21TransferCatInput,
   Cat21TransferFundingInput,
-} from './cat21-transfer.types';
+} from './cat21-transfer.types.js';
 
 /**
  * Layer-2 input adapter for the CAT-21 transfer pipeline. Two semantic

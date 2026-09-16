@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { checkInscriptionsExist } from './inscription-existence';
+import { checkInscriptionsExist } from './inscription-existence.js';
 
 const EXISTING = `${'6f'.repeat(32)}i0`;
 const MISSING = `${'00'.repeat(32)}i0`;

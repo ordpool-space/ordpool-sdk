@@ -1,15 +1,15 @@
 import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
-import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
-import { ordFeeSats } from '../cat21-fee/ord-coin-select';
-import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
-import { Network, toScureNetwork } from '../network';
-import type { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { getDummyKeypair } from '../cat21-fee/dummy-keypair.js';
+import { ordFeeSats } from '../cat21-fee/ord-coin-select.js';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
+import { Network, toScureNetwork } from '../network.js';
+import type { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 
-import { buildInscribeCommitPsbt, resolveInscribePostage, type InscribeCommitArgs, type InscribeCommitResult } from './inscription-commit.helper';
-import { buildInscriptionEnvelope, type OrdEnvelopeField } from './inscription-envelope';
-import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-reveal.helper';
+import { buildInscribeCommitPsbt, resolveInscribePostage, type InscribeCommitArgs, type InscribeCommitResult } from './inscription-commit.helper.js';
+import { buildInscriptionEnvelope, type OrdEnvelopeField } from './inscription-envelope.js';
+import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-reveal.helper.js';
 
 /**
  * Layer-3 fee simulation for the inscribe commit + reveal pair.
@@ -311,7 +311,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
 /**
  * Re-export for consumers that need to forward the field-array.
  */
-export type { OrdEnvelopeField } from './inscription-envelope';
+export type { OrdEnvelopeField } from './inscription-envelope.js';
 
 /**
  * Local alias for the Layer-1 funding-input shape referenced in

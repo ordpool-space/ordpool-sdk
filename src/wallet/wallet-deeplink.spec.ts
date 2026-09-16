@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { KnownOrdinalWalletType } from './wallet.service.types';
-import { walletInAppBrowserDeepLink } from './wallet-deeplink';
+import { KnownOrdinalWalletType } from './wallet.service.types.js';
+import { walletInAppBrowserDeepLink } from './wallet-deeplink.js';
 
 describe('walletInAppBrowserDeepLink', () => {
 

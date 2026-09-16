@@ -1,6 +1,6 @@
-import type { CardinalUtxoCandidate } from '../cat21-fee/ord-coin-select';
-import { selectCardinalUtxo } from '../cat21-fee/ord-coin-select';
-import { satPaddingRequirement } from './sat-offset';
+import type { CardinalUtxoCandidate } from '../cat21-fee/ord-coin-select.js';
+import { selectCardinalUtxo } from '../cat21-fee/ord-coin-select.js';
+import { satPaddingRequirement } from './sat-offset.js';
 
 /**
  * Choosing the second coin that pads a chosen sat's alignment output.

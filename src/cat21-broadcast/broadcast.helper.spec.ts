@@ -4,7 +4,7 @@ import {
   STANDARD_TX_WEIGHT_LIMIT,
   broadcastCat21,
   decideBroadcastChannel,
-} from './broadcast.helper';
+} from './broadcast.helper.js';
 
 function fakeResponse(body: unknown, init: { status?: number } = {}): Response {
   const status = init.status ?? 200;

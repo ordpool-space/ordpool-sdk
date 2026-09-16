@@ -2,11 +2,11 @@ import { describe, expect, it } from '@jest/globals';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 
-import { Network, toScureNetwork } from '../network';
+import { Network, toScureNetwork } from '../network.js';
 
-import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper';
-import { simulateInscribeFees } from './inscription-fee.helper';
-import { prepareInscribeFundingInput } from './inscription-input-adapter';
+import { INSCRIBE_POSTAGE_SATS } from './inscription-commit.helper.js';
+import { simulateInscribeFees } from './inscription-fee.helper.js';
+import { prepareInscribeFundingInput } from './inscription-input-adapter.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);

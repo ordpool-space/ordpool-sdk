@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { isValidPersistedWalletInfo } from './wallet.service';
-import { KnownOrdinalWalletType } from './wallet.service.types';
+import { isValidPersistedWalletInfo } from './wallet.service.js';
+import { KnownOrdinalWalletType } from './wallet.service.types.js';
 
 describe('isValidPersistedWalletInfo — protects the WalletService constructor from wedging construction', () => {
 

@@ -19,7 +19,7 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { assessCompression, compressGzip } from './inscribe-compression.helper';
+import { assessCompression, compressGzip } from './inscribe-compression.helper.js';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 

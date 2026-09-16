@@ -10,10 +10,10 @@ import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network, toScureNetwork } from '../network';
+import { Network, toScureNetwork } from '../network.js';
 
-import { createInscribeTransactions } from './inscription.service.helper';
-import type { CreateInscribeTransactionsArgs } from './inscription.service.helper';
+import { createInscribeTransactions } from './inscription.service.helper.js';
+import type { CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);
@@ -75,7 +75,7 @@ describe('satOffset', () => {
   });
 
   it('a batch takes satOffset only in same-sat mode, as ord takes sat / satpoint only there', async () => {
-    const { createBatchInscribeTransactions } = await import('./inscription-batch.helper');
+    const { createBatchInscribeTransactions } = await import('./inscription-batch.helper.js');
     const args = {
       inscriptions: [{ body: new TextEncoder().encode('x'), contentType: 'text/plain' }],
       recipientAddress: paymentAddress,
@@ -131,8 +131,8 @@ describe('satSource', () => {
   });
 
   it('the orchestrator has the wallet sign the commit as a transfer: the sat\'s UTXO at 0, the funding at 1', async () => {
-    const { inscribeAndBroadcast } = await import('./inscribe-orchestrator');
-    const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');
+    const { inscribeAndBroadcast } = await import('./inscribe-orchestrator.js');
+    const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types.js');
     const { base64 } = await import('@scure/base');
     const { firstValueFrom, of } = await import('rxjs');
     const handed: string[][] = [];
@@ -192,15 +192,15 @@ describe('paddingUtxo', () => {
   });
 
   it('the signing positions: payment 0 and 1; with a satSource, payment 0 and 2 and ordinals 1', async () => {
-    const { paddedSatCommitSigningPositions } = await import('../wallet/wallet.service.types');
+    const { paddedSatCommitSigningPositions } = await import('../wallet/wallet.service.types.js');
     expect(paddedSatCommitSigningPositions({ paymentAddress: 'pay' })).toEqual([{ address: 'pay', indexes: [0, 1] }]);
     expect(paddedSatCommitSigningPositions({ paymentAddress: 'pay', ordinalsAddress: 'ord' }))
       .toEqual([{ address: 'pay', indexes: [0, 2] }, { address: 'ord', indexes: [1] }]);
   });
 
   it('the orchestrator hands the wallet the padded commit: padding at 0, the funding holding the sat at 1', async () => {
-    const { inscribeAndBroadcast } = await import('./inscribe-orchestrator');
-    const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');
+    const { inscribeAndBroadcast } = await import('./inscribe-orchestrator.js');
+    const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types.js');
     const { base64 } = await import('@scure/base');
     const { firstValueFrom, of } = await import('rxjs');
     const handed: string[][] = [];

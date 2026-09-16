@@ -1,4 +1,4 @@
-import { KnownOrdinalWalletType } from './wallet.service.types';
+import { KnownOrdinalWalletType } from './wallet.service.types.js';
 
 /**
  * Deep link that opens a URL inside a wallet's own in-app dApp browser.

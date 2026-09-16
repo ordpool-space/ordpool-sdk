@@ -1,5 +1,5 @@
 import { bech32m } from '@scure/base';
-import { AddressPurpose } from './address-purpose';
+import { AddressPurpose } from './address-purpose.js';
 
 import {
   KnownOrdinalWalletType,
@@ -8,7 +8,7 @@ import {
   WalletInfo,
   WindowLike,
   XverseAddressResponse,
-} from './wallet.service.types';
+} from './wallet.service.types.js';
 
 /**
  * Xverse's regtest getAddress bug: the wallet encodes the taproot

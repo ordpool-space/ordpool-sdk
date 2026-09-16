@@ -9,6 +9,6 @@
  *     per-wallet RBF policy (cat21wallet → RBF on, every other
  *     wallet → RBF off).
  */
-export * from './cat21-postage';
-export * from './cat21-lock-time';
-export * from './cat21-sequence';
+export * from './cat21-postage.js';
+export * from './cat21-lock-time.js';
+export * from './cat21-sequence.js';

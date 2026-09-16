@@ -1,6 +1,6 @@
 import { Observable } from 'rxjs';
 
-import { SignMessageArgs, SignMessageResult } from '../wallet.service.types';
+import { SignMessageArgs, SignMessageResult } from '../wallet.service.types.js';
 
 /**
  * Shared "signMessage is not wired for this wallet yet" implementation.

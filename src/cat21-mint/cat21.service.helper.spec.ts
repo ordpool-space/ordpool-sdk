@@ -1,12 +1,12 @@
 import { describe, expect, it, afterEach } from '@jest/globals';
 
-import { createTransaction, getAddressFormat, getDummyKeypair, getMinimumUtxoSize, getDummyLegacyTransaction, toXOnly, isSegWit, simulateMintTransaction } from './cat21.service.helper';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { Network, toScureNetwork } from '../network';
+import { createTransaction, getAddressFormat, getDummyKeypair, getMinimumUtxoSize, getDummyLegacyTransaction, toXOnly, isSegWit, simulateMintTransaction } from './cat21.service.helper.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { Network, toScureNetwork } from '../network.js';
 import { sha256 } from '@noble/hashes/sha256';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { CreateTransactionResult, TxnOutput, TxnOutputStatus } from './cat21.service.types';
+import { CreateTransactionResult, TxnOutput, TxnOutputStatus } from './cat21.service.types.js';
 
 // Most UTXO fixtures don't care about the confirmation status — the
 // mint flow reads txid / vout / value and ignores `status` entirely.

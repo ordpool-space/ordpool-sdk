@@ -10,17 +10,17 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { selectPaddingUtxo } from './padding-utxo';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { selectPaddingUtxo } from './padding-utxo.js';
 import {
   InscribeContent,
   InscribeMintOrchestrator,
   InscribeOrchestratorDeps,
   InscribeSnapshot,
   InscribeWalletContext,
-} from './inscribe-mint-orchestrator';
+} from './inscribe-mint-orchestrator.js';
 
 
 const PAYMENT_PUB = '0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b';

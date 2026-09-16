@@ -1,21 +1,21 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence';
-import { addressesEquivalent, getMinimumUtxoSize } from '../cat21-script/address-format';
-import { addCat21Input } from '../cat21-script/prepare-cat21-input';
-import { Network, toScureNetwork } from '../network';
-import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
+import { CAT21_WALLET_INPUT_SEQUENCE } from '../cat21-protocol/cat21-sequence.js';
+import { addressesEquivalent, getMinimumUtxoSize } from '../cat21-script/address-format.js';
+import { addCat21Input } from '../cat21-script/prepare-cat21-input.js';
+import { Network, toScureNetwork } from '../network.js';
+import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   Cat21OfferBuyerInput,
   Cat21OfferDestinations,
   Cat21OfferRejectionReason,
   Cat21OfferSellerInput,
   Cat21OfferValidation,
-} from './cat21-offer.types';
+} from './cat21-offer.types.js';
 
 /**
  * Arguments for `buildCat21BuyOfferPsbt`.

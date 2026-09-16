@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { ORD_TAGS } from './inscription-envelope';
-import { synthesizeEnvelopeFields } from './inscription.service.helper';
-import type { CreateInscribeTransactionsArgs } from './inscription.service.helper';
+import { ORD_TAGS } from './inscription-envelope.js';
+import { synthesizeEnvelopeFields } from './inscription.service.helper.js';
+import type { CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
 
 /**
  * The tag order ord's `append_reveal_script` emits, read from

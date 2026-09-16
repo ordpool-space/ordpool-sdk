@@ -1,5 +1,5 @@
 import { hex } from '@scure/base';
-import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos';
+import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos.js';
 import * as btc from '@scure/btc-signer';
 import {
   catchError,
@@ -19,28 +19,28 @@ import {
   toArray,
 } from 'rxjs';
 
-import { Network, toScureNetwork } from '../network';
-import { findSignerOrThrow } from '../wallet/signers';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { Cat21SdkConfig } from './cat21-sdk-config';
-import { fetchJson, fetchText, postText } from './http-fetch.helper';
+import { Network, toScureNetwork } from '../network.js';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { Cat21SdkConfig } from './cat21-sdk-config.js';
+import { fetchJson, fetchText, postText } from './http-fetch.helper.js';
 import {
   createTransaction,
   getDummyKeypair,
   isSegWit,
   simulateMintTransaction,
-} from './cat21.service.helper';
+} from './cat21.service.helper.js';
 import {
   MempoolTx,
   PendingMint,
   RecommendedFees,
   SimulateTransactionResult,
   TxnOutput,
-} from './cat21.service.types';
+} from './cat21.service.types.js';
 import {
   gcFirstSeen,
   selectMatchingPendingMints,
-} from './pending-mints.helper';
+} from './pending-mints.helper.js';
 
 /**
  * How often `pendingMints$` polls electrs for each subscribed address

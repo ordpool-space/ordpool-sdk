@@ -3,13 +3,13 @@ import { schnorr, secp256k1 } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, of } from 'rxjs';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   prepareOfferAcceptWalletFacing,
   mergeParentSigAndBroadcast,
-} from '../wallet/signers/child-reveal-finalize.helper';
-import { buildCat21BuyOfferPsbt } from './cat21-offer.helper';
+} from '../wallet/signers/child-reveal-finalize.helper.js';
+import { buildCat21BuyOfferPsbt } from './cat21-offer.helper.js';
 
 /**
  * Pins the Xverse offer-accept fix mechanics WITHOUT the real wallet: a

@@ -3,9 +3,9 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, of } from 'rxjs';
 
-import { Network, toScureNetwork } from '../../network';
-import { getDummyKeypair } from '../../cat21-mint/cat21.service.helper';
-import { leatherSigner } from './leather.signer';
+import { Network, toScureNetwork } from '../../network.js';
+import { getDummyKeypair } from '../../cat21-mint/cat21.service.helper.js';
+import { leatherSigner } from './leather.signer.js';
 
 
 // Build a real signed-but-not-finalized PSBT the way Leather would

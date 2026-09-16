@@ -17,9 +17,9 @@
  * stays byte-aligned with ord.
  */
 
-import { UtxoScanBucket } from '../cat21-mint/utxo-content.types';
-import { FundingUtxo } from './coin-selection.helper';
-import { selectCardinalUtxo } from './ord-coin-select';
+import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
+import { FundingUtxo } from './coin-selection.helper.js';
+import { selectCardinalUtxo } from './ord-coin-select.js';
 
 /** A funding UTXO annotated with its content classification. */
 export interface AnnotatedFundingUtxo extends FundingUtxo {

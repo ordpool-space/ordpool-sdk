@@ -1,5 +1,5 @@
-import { Network } from '../network';
-import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types';
+import { Network } from '../network.js';
+import { OrdinalsAddress, PaymentAddress } from '../wallet/address-types.js';
 
 /**
  * Upper bound on `askSats`. 21 million BTC = 2.1 × 10^15 sats — the

@@ -1,16 +1,16 @@
 import { from, Observable, switchMap } from 'rxjs';
 
-import { broadcastSignedPsbt } from '../psbt-extract';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
-} from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { unsupportedSignMessage } from './unsupported-sign-message';
-import { resolveSigningTargets } from './signing-targets.helper';
+} from '../wallet.service.types.js';
+import { operationNamedDefaults } from './operation-named-defaults.js';
+import { unsupportedSignMessage } from './unsupported-sign-message.js';
+import { resolveSigningTargets } from './signing-targets.helper.js';
 
 
 interface PhantomBitcoinSigner {

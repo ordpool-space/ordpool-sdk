@@ -1,5 +1,5 @@
-import { buildListingMessage, ListingMessageFields } from './build-listing-message';
-import { verifyBip322Signature } from '../wallet/verify-bip322-signature';
+import { buildListingMessage, ListingMessageFields } from './build-listing-message.js';
+import { verifyBip322Signature } from '../wallet/verify-bip322-signature.js';
 
 /**
  * Result of `verifyListingSignature`. On success, `ok: true` — the

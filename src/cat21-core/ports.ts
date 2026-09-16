@@ -1,4 +1,4 @@
-import { FundingUtxo } from '../cat21-fee/coin-selection.helper';
+import { FundingUtxo } from '../cat21-fee/coin-selection.helper.js';
 
 /**
  * The framework-agnostic orchestration core's injected ports. Everything that

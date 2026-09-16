@@ -2,7 +2,7 @@
 // service so the filter + dedupe logic is testable without HTTP mocks
 // or fake timers.
 
-import { MempoolTx, PendingMint } from './cat21.service.types';
+import { MempoolTx, PendingMint } from './cat21.service.types.js';
 
 /**
  * A mempool tx counts as a CAT-21 mint for the given query set when:

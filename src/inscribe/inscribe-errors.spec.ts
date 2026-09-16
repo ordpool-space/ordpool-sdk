@@ -8,12 +8,12 @@ import { describe, expect, it } from '@jest/globals';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 
-import { Network, toScureNetwork } from '../network';
+import { Network, toScureNetwork } from '../network.js';
 
-import { InscribeInputError, inscribeUserMessage } from './inscribe-errors';
-import { createInscribeTransactions } from './inscription.service.helper';
-import type { CreateInscribeTransactionsArgs } from './inscription.service.helper';
-import { packInscriptionProperties } from './inscription-properties';
+import { InscribeInputError, inscribeUserMessage } from './inscribe-errors.js';
+import { createInscribeTransactions } from './inscription.service.helper.js';
+import type { CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
+import { packInscriptionProperties } from './inscription-properties.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);

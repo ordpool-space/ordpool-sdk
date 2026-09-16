@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   BITCOIN_MIN_RELAY_FEE_SAT_PER_KVB,
   BITCOIN_MIN_RELAY_FEE_SAT_PER_VBYTE,
-} from './min-relay-fee';
+} from './min-relay-fee.js';
 
 describe('Bitcoin min-relay-fee constant', () => {
   it('matches Bitcoin Core DEFAULT_MIN_RELAY_TX_FEE as of v29.1 (100 sat/kvB)', () => {

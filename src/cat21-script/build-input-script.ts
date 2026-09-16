@@ -1,7 +1,7 @@
 import * as btc from '@scure/btc-signer';
 
-import { getAddressFormat, toXOnly } from './address-format';
-import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
+import { getAddressFormat, toXOnly } from './address-format.js';
+import { getDummyKeypair } from '../cat21-fee/dummy-keypair.js';
 
 /**
  * Universal input-script builder. Dispatches purely on the

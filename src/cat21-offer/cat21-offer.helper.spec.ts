@@ -2,16 +2,16 @@ import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { attachDummyBuyerSig } from '../testing/fixtures';
-import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network.js';
+import { attachDummyBuyerSig } from '../testing/fixtures.js';
+import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   BuildCat21BuyOfferArgs,
   buildCat21BuyOfferPsbt,
   validateCat21BuyOfferPsbt,
-} from './cat21-offer.helper';
-import { CAT21_OFFER_POSTAGE_SATS } from './cat21-offer.types';
+} from './cat21-offer.helper.js';
+import { CAT21_OFFER_POSTAGE_SATS } from './cat21-offer.types.js';
 
 const publicKey = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
 const p2wpkh = btc.p2wpkh(publicKey, btc.NETWORK);

@@ -3,9 +3,9 @@ import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, of, throwError } from 'rxjs';
 
-import { Network, toScureNetwork } from '../../network';
-import { getDummyKeypair } from '../../cat21-mint/cat21.service.helper';
-import { psbtExportSigner } from './psbt-export.signer';
+import { Network, toScureNetwork } from '../../network.js';
+import { getDummyKeypair } from '../../cat21-mint/cat21.service.helper.js';
+import { psbtExportSigner } from './psbt-export.signer.js';
 
 
 /**

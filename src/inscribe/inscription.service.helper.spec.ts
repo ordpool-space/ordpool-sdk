@@ -23,11 +23,11 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { InscriptionParserService } from 'ordpool-parser';
 
-import { Network, toScureNetwork } from '../network';
+import { Network, toScureNetwork } from '../network.js';
 
-import { encodeCborDeterministic } from './inscription-cbor';
-import { encodeInscriptionId } from './inscription-envelope';
-import { createInscribeTransactions } from './inscription.service.helper';
+import { encodeCborDeterministic } from './inscription-cbor.js';
+import { encodeInscriptionId } from './inscription-envelope.js';
+import { createInscribeTransactions } from './inscription.service.helper.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);
@@ -337,7 +337,7 @@ describe('createInscribeTransactions', () => {
 
     it('non-cat21wallet sets sequence = 0xfffffffe on the funding input (RBF disabled)', async () => {
       const { paymentPublicKey, paymentAddress } = paymentContext();
-      const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');
+      const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types.js');
       const result = createInscribeTransactions({
         paymentOutput: paymentOutputAt(100_000),
         paymentPublicKey,
@@ -355,7 +355,7 @@ describe('createInscribeTransactions', () => {
 
     it('cat21wallet sets sequence = 0xfffffffd on the funding input (RBF allowed, our wallet preserves lockTime=21)', async () => {
       const { paymentPublicKey, paymentAddress } = paymentContext();
-      const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types');
+      const { KnownOrdinalWalletType } = await import('../wallet/wallet.service.types.js');
       const result = createInscribeTransactions({
         paymentOutput: paymentOutputAt(100_000),
         paymentPublicKey,

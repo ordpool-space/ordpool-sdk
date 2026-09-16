@@ -23,7 +23,7 @@
  * Where the brotli wasm is loaded from: a URL string (browser, hosted by the
  * consumer app) or the raw bytes / a `Response` (Node, tests).
  */
-import { failInscribe } from './inscribe-errors';
+import { failInscribe } from './inscribe-errors.js';
 
 export type BrotliWasmSource = string | BufferSource | Response;
 

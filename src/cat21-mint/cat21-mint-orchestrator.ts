@@ -1,20 +1,20 @@
 import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
-import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports';
-import { MintCoreParams, simulateMint } from '../cat21-core/mint.core';
-import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
+import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
+import { MintCoreParams, simulateMint } from '../cat21-core/mint.core.js';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   liftRecommendationByOutpoint,
-} from '../cat21-fee/funding-safety';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { Network } from '../network';
-import { findSignerOrThrow } from '../wallet/signers';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { createTransaction, simulateMintTransaction } from './cat21.service.helper';
-import { SimulateTransactionResult, TxnOutput } from './cat21.service.types';
+} from '../cat21-fee/funding-safety.js';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
+import { Network } from '../network.js';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { createTransaction, simulateMintTransaction } from './cat21.service.helper.js';
+import { SimulateTransactionResult, TxnOutput } from './cat21.service.types.js';
 
 /**
  * High-level mint API. Plain class, no signals. The SDK owns this

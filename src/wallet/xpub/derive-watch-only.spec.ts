@@ -2,12 +2,12 @@ import { describe, expect, it } from '@jest/globals';
 import { base58check } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha2';
 
-import { Network } from '../../network';
+import { Network } from '../../network.js';
 import {
   deriveWatchOnlyAddresses,
   WatchOnlyDeriveError,
   watchOnlyScriptType,
-} from './derive-watch-only';
+} from './derive-watch-only.js';
 
 const b58c = base58check(sha256);
 

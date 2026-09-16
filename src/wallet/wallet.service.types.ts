@@ -1,7 +1,7 @@
 import { Observable } from 'rxjs';
-import { AddressPurpose } from './address-purpose';
+import { AddressPurpose } from './address-purpose.js';
 
-import { Network } from '../network';
+import { Network } from '../network.js';
 
 
 /**

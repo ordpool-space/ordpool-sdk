@@ -2,14 +2,14 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { describe, expect, it } from '@jest/globals';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   BuildCat21TransferArgs,
   CAT21_TRANSFER_CHANGE_DUST_LIMIT_SATS,
   buildCat21TransferPsbt,
-} from './cat21-transfer.helper';
-import { CAT21_TRANSFER_POSTAGE_SATS } from './cat21-transfer.types';
+} from './cat21-transfer.helper.js';
+import { CAT21_TRANSFER_POSTAGE_SATS } from './cat21-transfer.types.js';
 
 const publicKey = hex.decode('030000000000000000000000000000000000000000000000000000000000000001');
 const p2wpkhMainnet = btc.p2wpkh(publicKey, btc.NETWORK);

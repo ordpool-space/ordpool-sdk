@@ -15,11 +15,11 @@ import { firstValueFrom, of } from 'rxjs';
 
 import { InscriptionParserService } from 'ordpool-parser';
 
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 
-import { encodeCborDeterministic } from './inscription-cbor';
-import { inscribeAndBroadcast, inscribeBatchAndBroadcast } from './inscribe-orchestrator';
+import { encodeCborDeterministic } from './inscription-cbor.js';
+import { inscribeAndBroadcast, inscribeBatchAndBroadcast } from './inscribe-orchestrator.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);

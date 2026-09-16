@@ -1,27 +1,27 @@
 import { Observable, defer, from, map, of, switchMap, throwError } from 'rxjs';
-import type { InscriptionPropertiesInput } from './inscription-properties';
+import type { InscriptionPropertiesInput } from './inscription-properties.js';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { findSignerOrThrow } from '../wallet/signers';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { Network, toScureNetwork } from '../network';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { Network, toScureNetwork } from '../network.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 
 import {
   CreateInscribeTransactionsResult,
   createInscribeTransactions,
-} from './inscription.service.helper';
-import type { InscriptionContentEncoding } from './inscribe-compression.helper';
-import type { InscribeSatSource } from './inscription-commit.helper';
-import { createBatchChildInscribeTransactions, createBatchInscribeTransactions } from './inscription-batch.helper';
+} from './inscription.service.helper.js';
+import type { InscriptionContentEncoding } from './inscribe-compression.helper.js';
+import type { InscribeSatSource } from './inscription-commit.helper.js';
+import { createBatchChildInscribeTransactions, createBatchInscribeTransactions } from './inscription-batch.helper.js';
 import type {
   BatchParent,
   CreateBatchChildInscribeTransactionsResult,
   CreateBatchInscribeTransactionsArgs,
   CreateBatchInscribeTransactionsResult,
-} from './inscription-batch.helper';
-import { OrdEnvelopeField } from './inscription-envelope';
+} from './inscription-batch.helper.js';
+import { OrdEnvelopeField } from './inscription-envelope.js';
 
 /**
  * Public orchestrator for the inscribe operation. Build commit +

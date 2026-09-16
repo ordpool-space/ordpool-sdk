@@ -13,13 +13,13 @@
  */
 import { describe, expect, it } from '@jest/globals';
 
-import { Network } from '../network';
+import { Network } from '../network.js';
 
-import { validateInscribeOperation } from './inscribe-operation-gate';
+import { validateInscribeOperation } from './inscribe-operation-gate.js';
 import type {
   InscribeIntent,
   InscribeOperationGateConfig,
-} from './inscribe-operation-gate.types';
+} from './inscribe-operation-gate.types.js';
 
 const MAINNET_TAPROOT =
   'bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0';

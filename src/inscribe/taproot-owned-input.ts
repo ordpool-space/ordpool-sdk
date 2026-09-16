@@ -1,9 +1,9 @@
 import { hex } from '@scure/base';
 
-import { getAddressFormat } from '../cat21-script/address-format';
-import { buildInputScript } from '../cat21-script/build-input-script';
-import { Network, toScureNetwork } from '../network';
-import { failInscribe, type InscribeErrorCode } from './inscribe-errors';
+import { getAddressFormat } from '../cat21-script/address-format.js';
+import { buildInputScript } from '../cat21-script/build-input-script.js';
+import { Network, toScureNetwork } from '../network.js';
+import { failInscribe, type InscribeErrorCode } from './inscribe-errors.js';
 
 /** The two byte-level fields a P2TR input the wallet can sign needs. */
 export interface OwnedTaprootInput {

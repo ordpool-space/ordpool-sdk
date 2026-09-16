@@ -2,16 +2,16 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import {
   InscribeContent,
   InscribeMintOrchestrator,
   InscribeOrchestratorDeps,
   InscribeSnapshot,
   InscribeWalletContext,
-} from './inscribe-mint-orchestrator';
+} from './inscribe-mint-orchestrator.js';
 
 // Node unit test. Real keys/addresses so simulateInscribeFees +
 // prepareInscribeFundingInput actually run. Pins the framework-agnostic
@@ -237,7 +237,7 @@ describe('InscribeMintOrchestrator: the preview prices what the build signs', ()
 
 describe('InscribeMintOrchestrator: preview equals the build', () => {
   it('for rich content, the preview row\'s fees and commit output equal createInscribeTransactions for the same coin', async () => {
-    const { createInscribeTransactions } = await import('./inscription.service.helper');
+    const { createInscribeTransactions } = await import('./inscription.service.helper.js');
     const rich: InscribeContent = {
       ...content,
       title: 'My Piece',

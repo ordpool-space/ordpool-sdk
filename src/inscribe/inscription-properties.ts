@@ -1,7 +1,7 @@
-import { compressBrotliSync } from './brotli-wasm-encoder';
-import { CborOrderedMap, encodeCborDeterministic } from './inscription-cbor';
-import { encodeInscriptionId } from './inscription-envelope';
-import { failInscribe } from './inscribe-errors';
+import { compressBrotliSync } from './brotli-wasm-encoder.js';
+import { CborOrderedMap, encodeCborDeterministic } from './inscription-cbor.js';
+import { encodeInscriptionId } from './inscription-envelope.js';
+import { failInscribe } from './inscribe-errors.js';
 
 /**
  * Typed inputs for ord's `properties` field (envelope tag `0x11`): the

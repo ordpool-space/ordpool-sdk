@@ -1,9 +1,9 @@
-import type { BatchParent } from './inscription-batch.helper';
-import { encodeInscriptionId } from './inscription-envelope';
-import { failInscribe } from './inscribe-errors';
-import type { Network } from '../network';
-import type { OrdOutputResponse } from '../cat21-mint/utxo-content.types';
-import { deriveOwnedTaprootInput } from './taproot-owned-input';
+import type { BatchParent } from './inscription-batch.helper.js';
+import { encodeInscriptionId } from './inscription-envelope.js';
+import { failInscribe } from './inscribe-errors.js';
+import type { Network } from '../network.js';
+import type { OrdOutputResponse } from '../cat21-mint/utxo-content.types.js';
+import { deriveOwnedTaprootInput } from './taproot-owned-input.js';
 
 /**
  * Turning a parent inscription's id into the input a child's reveal spends.

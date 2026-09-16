@@ -2,14 +2,14 @@ import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, of, throwError } from 'rxjs';
 
-import { Network } from '../../network';
+import { Network } from '../../network.js';
 
 jest.mock('../psbt-extract', () => ({
   broadcastSignedPsbt: jest.fn(() => of({ txId: 'TXID-FROM-BROADCAST' })),
 }));
-import { broadcastSignedPsbt } from '../psbt-extract';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
 
-import { phantomSigner } from './phantom.signer';
+import { phantomSigner } from './phantom.signer.js';
 
 
 /**

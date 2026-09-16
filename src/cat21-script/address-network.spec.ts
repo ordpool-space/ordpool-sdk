@@ -3,7 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   getAddressNetwork,
   isAddressCompatibleWithNetwork,
-} from './address-format';
+} from './address-format.js';
 
 describe('getAddressNetwork', () => {
 

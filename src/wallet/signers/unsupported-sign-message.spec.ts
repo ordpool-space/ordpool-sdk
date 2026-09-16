@@ -1,13 +1,13 @@
 import { describe, expect, it } from '@jest/globals';
 import { firstValueFrom } from 'rxjs';
 
-import { Network } from '../../network';
-import { albySigner } from './alby.signer';
-import { binanceSigner } from './binance.signer';
-import { phantomSigner } from './phantom.signer';
-import { psbtExportSigner } from './psbt-export.signer';
-import { unsupportedSignMessage } from './unsupported-sign-message';
-import { wizzSigner } from './wizz.signer';
+import { Network } from '../../network.js';
+import { albySigner } from './alby.signer.js';
+import { binanceSigner } from './binance.signer.js';
+import { phantomSigner } from './phantom.signer.js';
+import { psbtExportSigner } from './psbt-export.signer.js';
+import { unsupportedSignMessage } from './unsupported-sign-message.js';
+import { wizzSigner } from './wizz.signer.js';
 
 describe('unsupportedSignMessage — shared "wallet cannot sign a BIP-322 message yet" stub', () => {
 

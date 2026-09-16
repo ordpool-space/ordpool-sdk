@@ -1,7 +1,7 @@
 import * as btc from '@scure/btc-signer';
 import { map, Observable } from 'rxjs';
 
-import { SignAndBroadcastInput, SignMultiInputAndBroadcastInput } from './wallet.service.types';
+import { SignAndBroadcastInput, SignMultiInputAndBroadcastInput } from './wallet.service.types.js';
 
 /**
  * The two signer-input shapes share `broadcast` — that's all the

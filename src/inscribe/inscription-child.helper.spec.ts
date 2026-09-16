@@ -13,13 +13,13 @@ import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network, toScureNetwork } from '../network';
-import { encodeInscriptionId } from './inscription-envelope';
+import { Network, toScureNetwork } from '../network.js';
+import { encodeInscriptionId } from './inscription-envelope.js';
 import {
   createChildInscribeTransactions,
   type CreateChildInscribeTransactionsArgs,
-} from './inscription.service.helper';
-import { buildChildInscribeRevealTx } from './inscription-child-reveal.helper';
+} from './inscription.service.helper.js';
+import { buildChildInscribeRevealTx } from './inscription-child-reveal.helper.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);

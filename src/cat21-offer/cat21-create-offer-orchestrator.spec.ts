@@ -1,16 +1,16 @@
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import {
   Cat21CreateOfferOrchestrator,
   CreateOfferOrchestratorDeps,
   CreateOfferSnapshot,
   CreateOfferWalletContext,
-} from './cat21-create-offer-orchestrator';
-import { BuyOfferTargetCat } from './cat21-offer.types';
+} from './cat21-create-offer-orchestrator.js';
+import { BuyOfferTargetCat } from './cat21-offer.types.js';
 
 // Node unit test. Real keys so buildOffer/simulateCreateOffer
 // actually build a PSBT. Pins the framework-agnostic create-offer (buyer bid)

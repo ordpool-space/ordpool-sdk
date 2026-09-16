@@ -7,7 +7,7 @@ import {
   parseAskQueryParams,
   parseBuyOfferQueryParams,
   parseTransferQueryParams,
-} from './permalink.helper';
+} from './permalink.helper.js';
 
 const REAL_TXID = 'ab49227cce490e2137872f7d08924187ee4f4bc7e8b3bda7ac63d7bba1d897df';
 const REAL_P2WPKH = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx';

@@ -3,7 +3,7 @@ import { hex } from '@scure/base';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 
-import { computePsbtVsize } from './compute-psbt-vsize.helper';
+import { computePsbtVsize } from './compute-psbt-vsize.helper.js';
 
 const PRIV = hex.decode('11'.repeat(32));
 const NETWORK = btc.NETWORK;

@@ -13,13 +13,13 @@ import {
   parseXverseAddressResponse,
   repairXverseRegtestTaproot,
   unisatBasicInfoToWalletInfo,
-} from './wallet.service.helper';
+} from './wallet.service.helper.js';
 import {
   KnownOrdinalWalletType,
   LeatherAddressResponse,
   LeatherBtcAddress,
   XverseAddressResponse,
-} from './wallet.service.types';
+} from './wallet.service.types.js';
 
 
 describe('isXverseInstalled / isLeatherInstalled / isUnisatInstalled', () => {

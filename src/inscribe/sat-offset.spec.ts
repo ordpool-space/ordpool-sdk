@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { findSatOffset } from './sat-offset';
+import { findSatOffset } from './sat-offset.js';
 
 describe('findSatOffset', () => {
   // Two ranges, as an output assembled from two inputs reports them.

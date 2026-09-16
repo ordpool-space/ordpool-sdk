@@ -25,7 +25,7 @@
  * value wins, which is what serde_json's map insert does with preserve_order.
  */
 
-import { failInscribe } from './inscribe-errors';
+import { failInscribe } from './inscribe-errors.js';
 
 type JsonNode =
   | { k: 'null' }

@@ -2,10 +2,10 @@ import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { ContentScanPort, CoreFundingUtxo, OfferCreateSignPort, UtxosPort } from './ports';
-import { CreateOfferCoreParams, createOffer, simulateCreateOffer } from './create-offer.core';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { ContentScanPort, CoreFundingUtxo, OfferCreateSignPort, UtxosPort } from './ports.js';
+import { CreateOfferCoreParams, createOffer, simulateCreateOffer } from './create-offer.core.js';
 
 // Plain NODE unit test — no jsdom.
 

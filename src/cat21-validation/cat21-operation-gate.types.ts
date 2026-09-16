@@ -22,7 +22,7 @@
  *     the gate produced.
  */
 
-import { type Network } from '../network';
+import { type Network } from '../network.js';
 
 /* ──────────────────────────  Intent shapes  ────────────────────────── */
 

@@ -13,11 +13,11 @@ import { join } from 'node:path';
 import { brotliDecompressSync } from 'node:zlib';
 import { hex } from '@scure/base';
 
-import { loadBrotliWasm } from './brotli-wasm-encoder';
-import { ORD_TAGS } from './inscription-envelope';
-import { encodeInscriptionProperties, packInscriptionProperties } from './inscription-properties';
-import { synthesizeEnvelopeFields } from './inscription.service.helper';
-import type { CreateInscribeTransactionsArgs } from './inscription.service.helper';
+import { loadBrotliWasm } from './brotli-wasm-encoder.js';
+import { ORD_TAGS } from './inscription-envelope.js';
+import { encodeInscriptionProperties, packInscriptionProperties } from './inscription-properties.js';
+import { synthesizeEnvelopeFields } from './inscription.service.helper.js';
+import type { CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
 
 const WASM = readFileSync(join(__dirname, '../../wasm/brotli_wasm_bg.wasm'));
 // Hash-derived txids: as incompressible as real ones.

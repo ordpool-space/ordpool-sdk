@@ -1,11 +1,11 @@
-import { FundingUtxo } from '../cat21-fee/coin-selection.helper';
+import { FundingUtxo } from '../cat21-fee/coin-selection.helper.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   recommendFunding,
-} from '../cat21-fee/funding-safety';
-import { UtxoScanBucket } from '../cat21-mint/utxo-content.types';
-import { ContentScanPort } from './ports';
+} from '../cat21-fee/funding-safety.js';
+import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
+import { ContentScanPort } from './ports.js';
 
 const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
 

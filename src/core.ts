@@ -24,13 +24,13 @@
  */
 
 // --- Protocol-wide constants (postage, lockTime, per-wallet sequence) ---
-export * from './cat21-protocol';
+export * from './cat21-protocol/index.js';
 
 // --- Bitcoin / per-wallet script construction (used by every flow) ---
-export * from './cat21-script';
+export * from './cat21-script/index.js';
 
 // --- Network primitives ---
-export * from './network';
+export * from './network.js';
 
 // --- Wallet types (KnownOrdinalWalletType enum and friends; pure) ---
 // Public types only. The bypass surface (WalletSigner, signingMap
@@ -50,52 +50,52 @@ export {
   type LeatherAddress,
   type LeatherBtcAddress,
   type LeatherStxAddress,
-} from './wallet/wallet.service.types';
-export { KnownOrdinalWallets } from './wallet/known-ordinal-wallets';
+} from './wallet/wallet.service.types.js';
+export { KnownOrdinalWallets } from './wallet/known-ordinal-wallets.js';
 
 // --- Branded Bitcoin address types (compile-time separation of
 //     OrdinalsAddress vs PaymentAddress). Belongs at core so any
 //     consumer — a frontend or a plain-Node bot — can opt into the
 //     compile-time protection at critical boundaries.
-export * from './wallet/address-types';
-export * from './format/mempool-format';
-export * from './wallet/connect-ui';
-export * from './inscribe/inscription-properties';
-export * from './inscribe/inscription-batch.helper';
-export * from './inscribe/sat-offset';
-export * from './inscribe/inscription-existence';
-export * from './inscribe/sat-picker';
-export * from './inscribe/padding-utxo';
-export * from './inscribe/parent-resolve';
-export * from './inscribe/taproot-owned-input';
-export * from './inscribe/inscribe-errors';
-export * from './inscribe/inscription-json-metadata';
-export * from './family/coin-check-promise';
-export * from './family/ordpool-family';
-export * from './wallet/wallet-capabilities';
-export * from './wallet/wallet-deeplink';
-export * from './wallet/xpub/derive-watch-only';
-export * from './wallet/xpub/scan-watch-only';
-export * from './wallet/xpub/cats-at-address';
-export * from './wallet/xpub/classify-outpoint';
-export * from './wallet/xpub/make-watch-only-probe';
+export * from './wallet/address-types.js';
+export * from './format/mempool-format.js';
+export * from './wallet/connect-ui.js';
+export * from './inscribe/inscription-properties.js';
+export * from './inscribe/inscription-batch.helper.js';
+export * from './inscribe/sat-offset.js';
+export * from './inscribe/inscription-existence.js';
+export * from './inscribe/sat-picker.js';
+export * from './inscribe/padding-utxo.js';
+export * from './inscribe/parent-resolve.js';
+export * from './inscribe/taproot-owned-input.js';
+export * from './inscribe/inscribe-errors.js';
+export * from './inscribe/inscription-json-metadata.js';
+export * from './family/coin-check-promise.js';
+export * from './family/ordpool-family.js';
+export * from './wallet/wallet-capabilities.js';
+export * from './wallet/wallet-deeplink.js';
+export * from './wallet/xpub/derive-watch-only.js';
+export * from './wallet/xpub/scan-watch-only.js';
+export * from './wallet/xpub/cats-at-address.js';
+export * from './wallet/xpub/classify-outpoint.js';
+export * from './wallet/xpub/make-watch-only-probe.js';
 
 // --- CAT-21 mint (PSBT-build helpers; the stateful Cat21Service is at the
 //     main entry only). ---
-export * from './cat21-mint/cat21.service.helper';
-export * from './cat21-mint/cat21.service.types';
-export * from './cat21-mint/cat21-mint.helper';
-export * from './cat21-mint/cat21-mint-input-adapter';
+export * from './cat21-mint/cat21.service.helper.js';
+export * from './cat21-mint/cat21.service.types.js';
+export * from './cat21-mint/cat21-mint.helper.js';
+export * from './cat21-mint/cat21-mint-input-adapter.js';
 
 // --- CAT-21 mint orchestrator (subscribe-based high-level API). ---
-export * from './cat21-mint/cat21-mint-orchestrator';
+export * from './cat21-mint/cat21-mint-orchestrator.js';
 
 // --- CAT-21 data API: the fetch twin of the Observable-returning
 //     Cat21ApiService (status + latest-cat-numbers), the shared wire
 //     types, and the pure URL builders. Consumers own caching/reactivity. ---
-export * from './cat21-mint/cat21-api.types';
-export * from './cat21-mint/cat21-api.urls';
-export * from './cat21-mint/cat21-api.fetch';
+export * from './cat21-mint/cat21-api.types.js';
+export * from './cat21-mint/cat21-api.urls.js';
+export * from './cat21-mint/cat21-api.fetch.js';
 
 // --- UTXO content-safety scanner: pure types + detection primitives.
 //     The stateful `UtxoContentScanner` class stays in the main entry
@@ -104,60 +104,60 @@ export * from './cat21-mint/cat21-api.fetch';
 //     bots, cat21-wallet autonomous flows and CLIs can reach them.
 //     Content-safe funding auto-pick is `selectFunding` (force-scans
 //     covering candidates), not a raw bucket helper.
-export * from './cat21-mint/utxo-content.types';
-export * from './cat21-mint/rune-etching';
-export * from './cat21-mint/rune-amount';
-export * from './cat21-mint/recommended-funding.helper';
-export * from './cat21-mint/sat-rarity.helper';
+export * from './cat21-mint/utxo-content.types.js';
+export * from './cat21-mint/rune-etching.js';
+export * from './cat21-mint/rune-amount.js';
+export * from './cat21-mint/recommended-funding.helper.js';
+export * from './cat21-mint/sat-rarity.helper.js';
 
 // --- CAT-21 fee simulation + coin selection (shared across flows) ---
-export * from './cat21-fee/coin-selection.helper';
-export * from './cat21-fee/dummy-keypair';
-export * from './cat21-fee/compute-psbt-vsize.helper';
-export * from './cat21-fee/min-relay-fee';
-export * from './cat21-fee/ord-coin-select';
-export * from './cat21-fee/funding-safety';
+export * from './cat21-fee/coin-selection.helper.js';
+export * from './cat21-fee/dummy-keypair.js';
+export * from './cat21-fee/compute-psbt-vsize.helper.js';
+export * from './cat21-fee/min-relay-fee.js';
+export * from './cat21-fee/ord-coin-select.js';
+export * from './cat21-fee/funding-safety.js';
 
 // --- Orchestration core (ports + async flows; no RxJS — the single source
 //     of truth all three CAT-21 paths compose) ---
-export * from './cat21-core/ports';
-export * from './cat21-core/select-funding';
-export * from './cat21-core/dedupe-utxos';
-export * from './cat21-core/transfer.core';
-export * from './cat21-core/mint.core';
-export * from './cat21-core/create-offer.core';
-export * from './cat21-core/inscribe.core';
-export * from './cat21-core/accept-offer.core';
+export * from './cat21-core/ports.js';
+export * from './cat21-core/select-funding.js';
+export * from './cat21-core/dedupe-utxos.js';
+export * from './cat21-core/transfer.core.js';
+export * from './cat21-core/mint.core.js';
+export * from './cat21-core/create-offer.core.js';
+export * from './cat21-core/inscribe.core.js';
+export * from './cat21-core/accept-offer.core.js';
 
 // --- CAT-21 transfer ---
-export * from './cat21-transfer/cat21-transfer.helper';
-export * from './cat21-transfer/cat21-transfer.types';
-export * from './cat21-transfer/cat21-transfer-input-adapter';
+export * from './cat21-transfer/cat21-transfer.helper.js';
+export * from './cat21-transfer/cat21-transfer.types.js';
+export * from './cat21-transfer/cat21-transfer-input-adapter.js';
 
 // --- CAT-21 transfer framework-agnostic orchestrator (subscribe-based). ---
-export * from './cat21-transfer/cat21-transfer-orchestrator';
+export * from './cat21-transfer/cat21-transfer-orchestrator.js';
 
 // --- CAT-21 offer (ord-style buy-offer builder + seller validator) ---
-export * from './cat21-offer/cat21-offer.helper';
-export * from './cat21-offer/cat21-offer.types';
-export * from './cat21-offer/cat21-offer-input-adapter';
+export * from './cat21-offer/cat21-offer.helper.js';
+export * from './cat21-offer/cat21-offer.types.js';
+export * from './cat21-offer/cat21-offer-input-adapter.js';
 
 // --- CAT-21 create-offer framework-agnostic orchestrator (subscribe-based). ---
-export * from './cat21-offer/cat21-create-offer-orchestrator';
+export * from './cat21-offer/cat21-create-offer-orchestrator.js';
 
 // --- CAT-21 accept-offer framework-agnostic orchestrator (subscribe-based). ---
-export * from './cat21-offer/decode-pasted-psbt';
-export * from './cat21-offer/cat21-accept-offer-orchestrator';
+export * from './cat21-offer/decode-pasted-psbt.js';
+export * from './cat21-offer/cat21-accept-offer-orchestrator.js';
 
 // --- CAT-21 broadcast (mempool / Slipstream dispatcher) ---
-export * from './cat21-broadcast/broadcast.helper';
-export * from './cat21-broadcast/slipstream.helper';
+export * from './cat21-broadcast/broadcast.helper.js';
+export * from './cat21-broadcast/slipstream.helper.js';
 
 // --- CAT-21 share (canonical CatOutpoint type + permalink query
 //     builders/parsers for ask, buy, accept-offer, transfer — single
 //     source of truth for URL params and outpoint shape across
 //     cat21.space, cat21-wallet, and any future consumer). ---
-export * from './cat21-share';
+export * from './cat21-share/index.js';
 
 // --- CAT-21 listing (public "cat orderbook" listing shape).
 //     Historical per-listing BIP-322 helpers (buildListingMessage,
@@ -167,43 +167,43 @@ export * from './cat21-share';
 //     DELETE. See workspace CLAUDE.md philosophy: the marketplace
 //     layer is convenience; the tamper-proof record is the PSBT +
 //     Bitcoin as the ledger. ---
-export * from './cat21-listing/cat21-listing.types';
-export * from './cat21-listing/build-listing-message';
-export * from './cat21-listing/verify-listing-signature';
+export * from './cat21-listing/cat21-listing.types.js';
+export * from './cat21-listing/build-listing-message.js';
+export * from './cat21-listing/verify-listing-signature.js';
 
 // --- CAT-21 session-token capability layer. Prompts the user for
 //     ONE BIP-322 signature per ~24h; every marketplace mutation
 //     (CREATE listing, DELETE listing, DELETE bid, future capability
 //     endpoints) reuses the cached session token via headers. NOT
 //     used for CREATE bid (PSBT SIGHASH_ALL self-authenticates). ---
-export * from './cat21-session/session-message';
+export * from './cat21-session/session-message.js';
 
 // --- BIP-322 verification primitive. Extracted from
 //     verify-listing-signature.ts so the session guard + any future
 //     capability verifier share exactly one implementation. ---
-export * from './wallet/verify-bip322-signature';
+export * from './wallet/verify-bip322-signature.js';
 
 // --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
-export * from './inscribe/inscription-envelope';
-export * from './inscribe/inscription-cbor';
-export * from './inscribe/inscription-commit.helper';
-export * from './inscribe/inscription-reveal.helper';
-export * from './inscribe/inscription-child-reveal.helper';
-export * from './inscribe/inscription-input-adapter';
-export * from './inscribe/inscription-fee.helper';
-export * from './inscribe/inscription.service.helper';
-export * from './inscribe/inscribe-broadcast.helper';
-export * from './inscribe/inscribe-orchestrator';
+export * from './inscribe/inscription-envelope.js';
+export * from './inscribe/inscription-cbor.js';
+export * from './inscribe/inscription-commit.helper.js';
+export * from './inscribe/inscription-reveal.helper.js';
+export * from './inscribe/inscription-child-reveal.helper.js';
+export * from './inscribe/inscription-input-adapter.js';
+export * from './inscribe/inscription-fee.helper.js';
+export * from './inscribe/inscription.service.helper.js';
+export * from './inscribe/inscribe-broadcast.helper.js';
+export * from './inscribe/inscribe-orchestrator.js';
 // --- inscribe framework-agnostic mint orchestrator (subscribe-based). ---
-export * from './inscribe/inscribe-mint-orchestrator';
-export * from './inscribe/inscribe-child-orchestrator';
-export * from './inscribe/inscribe-compression.helper';
-export * from './inscribe/brotli-wasm-encoder';
+export * from './inscribe/inscribe-mint-orchestrator.js';
+export * from './inscribe/inscribe-child-orchestrator.js';
+export * from './inscribe/inscribe-compression.helper.js';
+export * from './inscribe/brotli-wasm-encoder.js';
 
 // --- Agent-mode policy gate ---
-export * from './agent-mode/agent-policy.helper';
-export * from './agent-mode/agent-policy.types';
+export * from './agent-mode/agent-policy.helper.js';
+export * from './agent-mode/agent-policy.types.js';
 
 // --- Bulletproof operation validation gates ---
-export * from './cat21-validation';
-export * from './inscribe-validation';
+export * from './cat21-validation/index.js';
+export * from './inscribe-validation/index.js';

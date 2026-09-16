@@ -1,4 +1,4 @@
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 
 /**
  * RBF-signalling sequence. Used on every input that comes from a

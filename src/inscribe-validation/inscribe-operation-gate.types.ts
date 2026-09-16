@@ -31,8 +31,8 @@
  *   - Config is wholly optional except for `network`.
  */
 
-import { type Network } from '../network';
-import { type InscriptionContentEncoding } from '../inscribe/inscribe-compression.helper';
+import { type Network } from '../network.js';
+import { type InscriptionContentEncoding } from '../inscribe/inscribe-compression.helper.js';
 
 /* ──────────────────────────  Intent shape  ────────────────────────── */
 

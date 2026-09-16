@@ -1,13 +1,13 @@
 import * as btc from '@scure/btc-signer';
 
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
 
-import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
-import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence';
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { failInscribe } from './inscribe-errors';
+import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
+import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence.js';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { failInscribe } from './inscribe-errors.js';
 
 /**
  * Layer-1 builder for the inscribe **commit** transaction.

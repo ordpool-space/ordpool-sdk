@@ -1,7 +1,7 @@
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { decodePastedPsbt } from './decode-pasted-psbt';
+import { decodePastedPsbt } from './decode-pasted-psbt.js';
 
 // Pure-function spec for the shared PSBT paste decoder (accept-offer + the
 // watch-only psbt-export signer both route through it). Exercises BOTH the

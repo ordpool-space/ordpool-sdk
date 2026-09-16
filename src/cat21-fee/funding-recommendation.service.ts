@@ -1,13 +1,13 @@
 import { Observable, combineLatest, map, of, switchMap } from 'rxjs';
 
-import { UtxoContentScanner } from '../cat21-mint/utxo-content-scanner.service';
-import { bucketOf } from '../cat21-mint/utxo-content.types';
-import { FundingUtxo } from './coin-selection.helper';
+import { UtxoContentScanner } from '../cat21-mint/utxo-content-scanner.service.js';
+import { bucketOf } from '../cat21-mint/utxo-content.types.js';
+import { FundingUtxo } from './coin-selection.helper.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   recommendFunding,
-} from './funding-safety';
+} from './funding-safety.js';
 
 const outpointKey = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
 

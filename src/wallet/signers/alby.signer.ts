@@ -1,16 +1,16 @@
 import { hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
-import { BIP341_KEYPATH_SIGHASHES } from '../sighash';
+import { BIP341_KEYPATH_SIGHASHES } from '../sighash.js';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
-} from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { unsupportedSignMessage } from './unsupported-sign-message';
+} from '../wallet.service.types.js';
+import { operationNamedDefaults } from './operation-named-defaults.js';
+import { unsupportedSignMessage } from './unsupported-sign-message.js';
 
 
 interface WebBtcApi {

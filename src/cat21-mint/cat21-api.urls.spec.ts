@@ -4,7 +4,7 @@ import {
   buildCatImageUrl,
   buildLatestCatNumbersUrl,
   buildStatusUrl,
-} from './cat21-api.urls';
+} from './cat21-api.urls.js';
 
 const base = 'https://api.cat21.test';
 

@@ -1,12 +1,12 @@
-import { acceptOffer as acceptOfferCore, AcceptOfferCoreParams } from '../cat21-core/accept-offer.core';
-import { BroadcastOutcome } from '../cat21-core/ports';
-import { CatOutpoint } from '../cat21-share/cat-outpoint';
-import { Network } from '../network';
-import { PaymentAddress } from '../wallet/address-types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { validateCat21BuyOfferPsbt } from './cat21-offer.helper';
-import { Cat21OfferValidation } from './cat21-offer.types';
-import { decodePastedPsbt } from './decode-pasted-psbt';
+import { acceptOffer as acceptOfferCore, AcceptOfferCoreParams } from '../cat21-core/accept-offer.core.js';
+import { BroadcastOutcome } from '../cat21-core/ports.js';
+import { CatOutpoint } from '../cat21-share/cat-outpoint.js';
+import { Network } from '../network.js';
+import { PaymentAddress } from '../wallet/address-types.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { validateCat21BuyOfferPsbt } from './cat21-offer.helper.js';
+import { Cat21OfferValidation } from './cat21-offer.types.js';
+import { decodePastedPsbt } from './decode-pasted-psbt.js';
 
 /**
  * FRAMEWORK-AGNOSTIC seller-side accept-offer API. Plain class.

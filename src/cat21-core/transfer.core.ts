@@ -1,21 +1,21 @@
-import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
-import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
+import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper.js';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   recommendFunding,
-} from '../cat21-fee/funding-safety';
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+} from '../cat21-fee/funding-safety.js';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   BuildCat21TransferResult,
   buildCat21TransferPsbt,
-} from '../cat21-transfer/cat21-transfer.helper';
-import { changeDustFloor } from '../cat21-script/address-format';
+} from '../cat21-transfer/cat21-transfer.helper.js';
+import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
   prepareTransferCatInput,
   prepareTransferFundingInput,
-} from '../cat21-transfer/cat21-transfer-input-adapter';
+} from '../cat21-transfer/cat21-transfer-input-adapter.js';
 import {
   BroadcastOutcome,
   BroadcastPort,
@@ -23,8 +23,8 @@ import {
   CoreFundingUtxo,
   SignPort,
   UtxosPort,
-} from './ports';
-import { resolveFundingPick, selectFunding } from './select-funding';
+} from './ports.js';
+import { resolveFundingPick, selectFunding } from './select-funding.js';
 
 
 /**

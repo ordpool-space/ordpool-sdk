@@ -4,10 +4,10 @@ import * as btc from '@scure/btc-signer';
 import { schnorr } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha2';
 
-import { Network } from '../network';
-import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types';
-import { buildListingMessage, ListingMessageFields } from './build-listing-message';
-import { verifyListingSignature } from './verify-listing-signature';
+import { Network } from '../network.js';
+import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types.js';
+import { buildListingMessage, ListingMessageFields } from './build-listing-message.js';
+import { verifyListingSignature } from './verify-listing-signature.js';
 
 // ---------------------------------------------------------------------------
 // Test key material. Not used for any real address anywhere.

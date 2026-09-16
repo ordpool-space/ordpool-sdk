@@ -3,14 +3,14 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, of, throwError } from 'rxjs';
 
-import { Network } from '../../network';
+import { Network } from '../../network.js';
 
 jest.mock('../psbt-extract', () => ({
   broadcastSignedPsbt: jest.fn(() => of({ txId: 'TXID-FROM-BROADCAST' })),
 }));
-import { broadcastSignedPsbt } from '../psbt-extract';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
 
-import { unisatSigner } from './unisat.signer';
+import { unisatSigner } from './unisat.signer.js';
 
 
 describe('unisatSigner.signSingleFundingInput', () => {

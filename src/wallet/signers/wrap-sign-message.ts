@@ -1,6 +1,6 @@
 import { defer, from, map, Observable } from 'rxjs';
 
-import { SignMessageResult } from '../wallet.service.types';
+import { SignMessageResult } from '../wallet.service.types.js';
 
 /**
  * Wrap a wallet-specific `signMessage`-RPC Promise into the

@@ -7,9 +7,9 @@
  * `FundingRecommendationService` is deliberately NOT re-exported here: it is a
  * stateful service class and belongs to the main entry, like the other four.
  */
-export * from './coin-selection.helper';
-export * from './compute-psbt-vsize.helper';
-export * from './funding-safety';
-export * from './min-relay-fee';
-export * from './ord-coin-select';
-export * from './resolve-cat-tx-fee.helper';
+export * from './coin-selection.helper.js';
+export * from './compute-psbt-vsize.helper.js';
+export * from './funding-safety.js';
+export * from './min-relay-fee.js';
+export * from './ord-coin-select.js';
+export * from './resolve-cat-tx-fee.helper.js';

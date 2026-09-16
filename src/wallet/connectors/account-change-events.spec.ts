@@ -8,12 +8,12 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { unisatConnector } from './unisat.connector';
-import { wizzConnector } from './wizz.connector';
-import { okxConnector } from './okx.connector';
-import { binanceConnector } from './binance.connector';
-import { phantomConnector } from './phantom.connector';
-import { xverseConnector } from './xverse.connector';
+import { unisatConnector } from './unisat.connector.js';
+import { wizzConnector } from './wizz.connector.js';
+import { okxConnector } from './okx.connector.js';
+import { binanceConnector } from './binance.connector.js';
+import { phantomConnector } from './phantom.connector.js';
+import { xverseConnector } from './xverse.connector.js';
 
 interface MockProvider {
   on: (event: string, handler: () => void) => void;

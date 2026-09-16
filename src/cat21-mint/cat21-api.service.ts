@@ -1,16 +1,16 @@
 import { Observable, shareReplay } from 'rxjs';
 
-import { Cat21SdkConfig } from './cat21-sdk-config';
-import { fetchJson } from './http-fetch.helper';
+import { Cat21SdkConfig } from './cat21-sdk-config.js';
+import { fetchJson } from './http-fetch.helper.js';
 import {
   buildCatImageUrl,
   buildLatestCatNumbersUrl,
   buildStatusUrl,
-} from './cat21-api.urls';
-import { CatNumbersResult, StatusResult } from './cat21-api.types';
+} from './cat21-api.urls.js';
+import { CatNumbersResult, StatusResult } from './cat21-api.types.js';
 
 // Wire contract shared with the framework-agnostic `cat21-api.fetch` twin.
-export * from './cat21-api.types';
+export * from './cat21-api.types.js';
 
 /**
  * Stateful `Observable`-returning client over the cat21-indexer REST API.

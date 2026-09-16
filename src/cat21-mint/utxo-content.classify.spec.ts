@@ -2,12 +2,12 @@ import {
   classifyUtxoContent,
   detectRareSat,
   firstSat,
-} from './utxo-content.classify';
+} from './utxo-content.classify.js';
 import {
   Cat21OrdOutputResponse,
   OrdOutputResponse,
   RARE_SAT_MAX_RANGES,
-} from './utxo-content.types';
+} from './utxo-content.types.js';
 
 // Pins the content-safety classification the funding force-scan depends on:
 // a UTXO is `clean` (auto-spendable as fee funding) ONLY when it carries no

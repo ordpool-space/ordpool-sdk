@@ -1,2 +1,2 @@
-export * from './inscribe-operation-gate';
-export * from './inscribe-operation-gate.types';
+export * from './inscribe-operation-gate.js';
+export * from './inscribe-operation-gate.types.js';

@@ -1,14 +1,14 @@
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import { firstValueFrom, Observable, of, throwError } from 'rxjs';
 
-import { Network } from '../network';
-import { WalletService } from './wallet.service';
+import { Network } from '../network.js';
+import { WalletService } from './wallet.service.js';
 import {
   KnownOrdinalWalletType,
   SignMessageArgs,
   SignMessageResult,
   WalletInfo,
-} from './wallet.service.types';
+} from './wallet.service.types.js';
 
 // Mock the signers registry — pin THIS service's dispatch, not the
 // per-wallet signMessage correctness (each signer file has its own spec).

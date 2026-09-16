@@ -1,7 +1,7 @@
-import { prepareCat21Input } from '../cat21-script/prepare-cat21-input';
-import { Network } from '../network';
-import { TxnOutput } from './cat21.service.types';
-import { Cat21MintFundingInput } from './cat21-mint.helper';
+import { prepareCat21Input } from '../cat21-script/prepare-cat21-input.js';
+import { Network } from '../network.js';
+import { TxnOutput } from './cat21.service.types.js';
+import { Cat21MintFundingInput } from './cat21-mint.helper.js';
 
 /**
  * Layer-2 input adapter for the CAT-21 mint pipeline. Thin,

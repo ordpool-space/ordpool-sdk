@@ -4,7 +4,7 @@ import {
   CONNECT_BUTTON_ACCESSIBLE_NAME,
   CONNECT_BUTTON_LABEL,
   CONNECT_PANEL_HEADING,
-} from './connect-ui';
+} from './connect-ui.js';
 
 describe('connect UI strings', () => {
   it('is the maintainer wording, exactly', () => {

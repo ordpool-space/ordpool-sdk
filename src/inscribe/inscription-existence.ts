@@ -1,4 +1,4 @@
-import { encodeInscriptionId } from './inscription-envelope';
+import { encodeInscriptionId } from './inscription-envelope.js';
 
 /**
  * Whether an inscription id exists, per an ord server. `unknown` is a

@@ -30,7 +30,11 @@ module.exports = {
     // packages (base58-js etc.) via moduleNameMapper below.
     customExportConditions: ['node', 'require', 'default'],
   },
+    // Source imports carry explicit `.js` extensions so the ESM build is
+  // resolvable by Node. Jest compiles the .ts sources, so strip the
+  // extension back off. (ESM-extension mapping)
   moduleNameMapper: {
+    '^(\.{1,2}/.*)\.js$': '$1',
     // base58-js's exports map only declares an `import` condition;
     // map it directly to the file so Jest's resolver doesn't bail.
     '^base58-js$': '<rootDir>/node_modules/base58-js/index.js',

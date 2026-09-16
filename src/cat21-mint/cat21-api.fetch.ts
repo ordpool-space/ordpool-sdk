@@ -8,9 +8,9 @@
  * directly; there is no twin function for it.
  */
 
-import { fetchJsonAsync } from './http-fetch.helper';
-import { buildLatestCatNumbersUrl, buildStatusUrl } from './cat21-api.urls';
-import { CatNumbersResult, StatusResult } from './cat21-api.types';
+import { fetchJsonAsync } from './http-fetch.helper.js';
+import { buildLatestCatNumbersUrl, buildStatusUrl } from './cat21-api.urls.js';
+import { CatNumbersResult, StatusResult } from './cat21-api.types.js';
 
 /** `GET /api/status` → indexer status (total cats, last synced, PoCW). */
 export function fetchCat21Status(baseUrl: string): Promise<StatusResult> {

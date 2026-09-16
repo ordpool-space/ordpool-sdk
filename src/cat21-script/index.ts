@@ -5,6 +5,6 @@
  * into this folder for address-format detection + per-wallet script
  * assembly.
  */
-export * from './address-format';
-export * from './build-input-script';
-export * from './prepare-cat21-input';
+export * from './address-format.js';
+export * from './build-input-script.js';
+export * from './prepare-cat21-input.js';

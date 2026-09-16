@@ -14,18 +14,18 @@ import { of } from 'rxjs';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { compressLikeOrd } from './inscribe-compression.helper';
-import { createInscribeTransactions } from './inscription.service.helper';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { compressLikeOrd } from './inscribe-compression.helper.js';
+import { createInscribeTransactions } from './inscription.service.helper.js';
 import {
   InscribeContent,
   InscribeMintOrchestrator,
   InscribeOrchestratorDeps,
   InscribeSnapshot,
   InscribeWalletContext,
-} from './inscribe-mint-orchestrator';
+} from './inscribe-mint-orchestrator.js';
 
 // The SUT is the orchestrator; `inscribe-orchestrator` is the build/sign/
 // broadcast boundary it delegates to. Mocking it makes the arguments mint()

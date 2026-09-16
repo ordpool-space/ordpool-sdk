@@ -1,19 +1,19 @@
-import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
-import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
+import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper.js';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   recommendFunding,
-} from '../cat21-fee/funding-safety';
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage';
+} from '../cat21-fee/funding-safety.js';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
 import {
   BuildCat21MintResult,
   buildCat21MintPsbt,
   CAT21_MINT_CHANGE_DUST_LIMIT_SATS,
-} from '../cat21-mint/cat21-mint.helper';
-import { prepareMintInputForWallet } from '../cat21-mint/cat21-mint-input-adapter';
+} from '../cat21-mint/cat21-mint.helper.js';
+import { prepareMintInputForWallet } from '../cat21-mint/cat21-mint-input-adapter.js';
 import {
   BroadcastOutcome,
   BroadcastPort,
@@ -21,8 +21,8 @@ import {
   CoreFundingUtxo,
   SignPort,
   UtxosPort,
-} from './ports';
-import { resolveFundingPick, selectFunding } from './select-funding';
+} from './ports.js';
+import { resolveFundingPick, selectFunding } from './select-funding.js';
 
 
 /**

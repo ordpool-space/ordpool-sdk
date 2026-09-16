@@ -1,4 +1,4 @@
-import { resolveCatTxFee, CatTxFeeSimulation } from './resolve-cat-tx-fee.helper';
+import { resolveCatTxFee, CatTxFeeSimulation } from './resolve-cat-tx-fee.helper.js';
 
 // Guess-free fee resolution, verified against a model of the real builder's two
 // topologies. A cat tx is either WITH a change output (vsize V_WC) or WITHOUT

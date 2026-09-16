@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
-import { addressHoldsCat, catsAtAddress } from './cats-at-address';
+import { addressHoldsCat, catsAtAddress } from './cats-at-address.js';
 
 /**
  * Real cat21-ord `/address/{address}` response, captured from

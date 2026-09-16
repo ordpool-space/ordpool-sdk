@@ -1,8 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { KnownOrdinalWalletType, WindowLike } from './wallet.service.types';
-import { WalletCapability, WalletPlatform } from './wallet-capabilities';
-import { detectWalletPlatform, walletPickerRows } from './wallet-picker';
+import { KnownOrdinalWalletType, WindowLike } from './wallet.service.types.js';
+import { WalletCapability, WalletPlatform } from './wallet-capabilities.js';
+import { detectWalletPlatform, walletPickerRows } from './wallet-picker.js';
 
 /** A window with only the named providers injected. */
 const windowWith = (...providers: string[]): WindowLike => {

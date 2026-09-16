@@ -81,7 +81,7 @@
   "scripts": {
     "clean": "rimraf dist dist-e2e",
     "build": "npm run build:main && npm run build:e2e",
-    "build:main": "tsc -p tsconfig.lib.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
+    "build:main": "tsc -p tsconfig.lib.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({type:'module'},null,2))\"",
     "build:e2e": "tsc -p tsconfig.e2e.json && node -e \"require('fs').writeFileSync('dist-e2e/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
     "prepare": "npm run build:main",
     "start": "npm run test",

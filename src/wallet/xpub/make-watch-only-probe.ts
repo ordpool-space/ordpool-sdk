@@ -21,10 +21,10 @@
  *                 spendable.
  */
 
-import { dedupeUtxosByOutpoint } from '../../cat21-core/dedupe-utxos';
-import { catsAtAddress } from './cats-at-address';
-import { classifyOutpoint } from './classify-outpoint';
-import { AddressProbe } from './scan-watch-only';
+import { dedupeUtxosByOutpoint } from '../../cat21-core/dedupe-utxos.js';
+import { catsAtAddress } from './cats-at-address.js';
+import { classifyOutpoint } from './classify-outpoint.js';
+import { AddressProbe } from './scan-watch-only.js';
 
 export interface WatchOnlyProbeConfig {
   /**

@@ -1,7 +1,7 @@
 import * as btc from '@scure/btc-signer';
 import { Observable, map } from 'rxjs';
 
-import { extractWireTxFromPsbt } from '../psbt-extract';
+import { extractWireTxFromPsbt } from '../psbt-extract.js';
 
 /**
  * Shared tail for the child-inscription reveal, wallet-agnostic.

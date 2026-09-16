@@ -2,17 +2,17 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { toPaymentAddress } from '../wallet/address-types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { buildCat21BuyOfferPsbt } from './cat21-offer.helper';
-import { prepareBuyOfferBuyerInput } from './cat21-offer-input-adapter';
+import { Network } from '../network.js';
+import { toPaymentAddress } from '../wallet/address-types.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { buildCat21BuyOfferPsbt } from './cat21-offer.helper.js';
+import { prepareBuyOfferBuyerInput } from './cat21-offer-input-adapter.js';
 import {
   AcceptOfferOrchestratorDeps,
   AcceptOfferSnapshot,
   AcceptOfferWalletContext,
   Cat21AcceptOfferOrchestrator,
-} from './cat21-accept-offer-orchestrator';
+} from './cat21-accept-offer-orchestrator.js';
 
 // Node unit test. Builds a REAL buyer-signed offer so the paste
 // reaches `parsed`. Pins the framework-agnostic accept-offer orchestration:

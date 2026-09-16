@@ -6,18 +6,18 @@ import {
   simulateTransfer,
   TransferCoreParams,
   TransferSimulationResult,
-} from '../cat21-core/transfer.core';
-import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports';
+} from '../cat21-core/transfer.core.js';
+import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   liftRecommendationByOutpoint,
-} from '../cat21-fee/funding-safety';
-import { Network } from '../network';
-import { findSignerOrThrow } from '../wallet/signers';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { Cat21Holding } from './cat21-transfer.types';
+} from '../cat21-fee/funding-safety.js';
+import { Network } from '../network.js';
+import { findSignerOrThrow } from '../wallet/signers/index.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { Cat21Holding } from './cat21-transfer.types.js';
 
 /**
  * FRAMEWORK-AGNOSTIC high-level transfer API. Plain class. Owns

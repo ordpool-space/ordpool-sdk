@@ -1,13 +1,13 @@
 import { from, map, Observable } from 'rxjs';
 
-import { Network, toLeatherNetworkString } from '../../network';
+import { Network, toLeatherNetworkString } from '../../network.js';
 import {
   findCat21WalletProvider,
   isCat21WalletInstalled,
   parseLeatherAddressResponse,
-} from '../wallet.service.helper';
-import { KnownOrdinalWalletType, LeatherAddressResponse, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types';
-import { KnownOrdinalWallets } from '../known-ordinal-wallets';
+} from '../wallet.service.helper.js';
+import { KnownOrdinalWalletType, LeatherAddressResponse, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types.js';
+import { KnownOrdinalWallets } from '../known-ordinal-wallets.js';
 
 
 /**

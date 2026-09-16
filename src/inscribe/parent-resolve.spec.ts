@@ -14,9 +14,9 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { schnorr, secp256k1 } from '@noble/curves/secp256k1';
 
-import { Network } from '../network';
-import { InscribeInputError } from './inscribe-errors';
-import { batchParentFromInscriptionId } from './parent-resolve';
+import { Network } from '../network.js';
+import { InscribeInputError } from './inscribe-errors.js';
+import { batchParentFromInscriptionId } from './parent-resolve.js';
 
 const priv = schnorr.utils.randomPrivateKey();
 const xonly = schnorr.getPublicKey(priv);

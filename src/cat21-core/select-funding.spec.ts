@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { ContentScanPort, UtxoClassification } from './ports';
-import { selectFunding } from './select-funding';
+import { ContentScanPort, UtxoClassification } from './ports.js';
+import { selectFunding } from './select-funding.js';
 
 // A plain NODE unit test — no jsdom. That the framework-agnostic
 // core selection is testable this way is the whole point of the migration.

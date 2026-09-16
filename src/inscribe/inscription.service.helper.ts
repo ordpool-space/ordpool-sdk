@@ -1,13 +1,13 @@
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { encodeInscriptionProperties } from './inscription-properties';
-import type { InscriptionPropertiesInput } from './inscription-properties';
+import { encodeInscriptionProperties } from './inscription-properties.js';
+import type { InscriptionPropertiesInput } from './inscription-properties.js';
 import * as btc from '@scure/btc-signer';
 
-import { getDummyKeypair } from '../cat21-fee/dummy-keypair';
-import { getAddressFormat, getMinimumUtxoSize, isInscribeSupportedPaymentAddress } from '../cat21-script/address-format';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { getDummyKeypair } from '../cat21-fee/dummy-keypair.js';
+import { getAddressFormat, getMinimumUtxoSize, isInscribeSupportedPaymentAddress } from '../cat21-script/address-format.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 
 import {
   resolveInscribePostage,
@@ -15,7 +15,7 @@ import {
   satSourceRemainder,
   type InscribeCommitResult,
   type InscribeSatSource,
-} from './inscription-commit.helper';
+} from './inscription-commit.helper.js';
 import {
   ORD_TAGS,
   buildInscriptionEnvelope,
@@ -25,28 +25,28 @@ import {
   encodePointerValue,
   encodeRuneCommitment,
   type OrdEnvelopeField,
-} from './inscription-envelope';
+} from './inscription-envelope.js';
 import {
   prepareInscribeFundingInput,
-} from './inscription-input-adapter';
+} from './inscription-input-adapter.js';
 import {
   assertRevealWithinStandardWeight,
   buildInscribeRevealTx,
   deriveRevealPubkeyXonly,
-} from './inscription-reveal.helper';
+} from './inscription-reveal.helper.js';
 import {
   simulateInscribeFees,
   type SimulateInscribeFeesArgs,
   type SimulateInscribeFeesResult,
-} from './inscription-fee.helper';
-import { ordFeeSats } from '../cat21-fee/ord-coin-select';
-import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
+} from './inscription-fee.helper.js';
+import { ordFeeSats } from '../cat21-fee/ord-coin-select.js';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   buildChildInscribeRevealTx,
   type ChildRevealParent,
-} from './inscription-child-reveal.helper';
-import type { InscriptionContentEncoding } from './inscribe-compression.helper';
-import { failInscribe } from './inscribe-errors';
+} from './inscription-child-reveal.helper.js';
+import type { InscriptionContentEncoding } from './inscribe-compression.helper.js';
+import { failInscribe } from './inscribe-errors.js';
 
 /**
  * Layer-4 orchestration entry: ties the envelope encoder + per-

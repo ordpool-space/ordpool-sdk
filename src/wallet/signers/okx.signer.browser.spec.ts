@@ -2,7 +2,7 @@ import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals
 import { hex } from '@scure/base';
 import { firstValueFrom, of, throwError } from 'rxjs';
 
-import { Network } from '../../network';
+import { Network } from '../../network.js';
 
 jest.mock('../psbt-extract', () => ({
   broadcastSignedPsbt: jest.fn(() => of({ txId: 'TXID-FROM-BROADCAST' })),
@@ -11,10 +11,10 @@ jest.mock('./child-reveal-finalize.helper', () => {
   const actual = jest.requireActual('./child-reveal-finalize.helper') as Record<string, unknown>;
   return { ...actual, mergeParentSigAndBroadcast: jest.fn() };
 });
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
+import { mergeParentSigAndBroadcast } from './child-reveal-finalize.helper.js';
 
-import { okxSigner } from './okx.signer';
+import { okxSigner } from './okx.signer.js';
 
 
 describe('okxSigner.signSingleFundingInput', () => {

@@ -11,16 +11,16 @@ jest.mock('../wallet/signers', () => ({
   findSignerOrThrow: () => ({ signOfferCreatePsbt: mockSignOfferCreatePsbt }),
 }));
 
-import { Network } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { TxnOutput } from '../cat21-mint/cat21.service.types';
+import { Network } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import {
   Cat21CreateOfferOrchestrator,
   CreateOfferOrchestratorDeps,
   CreateOfferSnapshot,
   CreateOfferWalletContext,
-} from './cat21-create-offer-orchestrator';
-import { BuyOfferTargetCat } from './cat21-offer.types';
+} from './cat21-create-offer-orchestrator.js';
+import { BuyOfferTargetCat } from './cat21-offer.types.js';
 
 const PAYMENT_PUB = '0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b';
 const ORDINALS_XONLY = '5df12ac222a1cd78dd4681c7c7a56f3e273884a086b2b6100957d20c73be3c37';

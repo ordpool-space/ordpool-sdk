@@ -1,6 +1,6 @@
 import * as btc from '@scure/btc-signer';
 
-import { PsbtSigningTarget } from '../wallet.service.types';
+import { PsbtSigningTarget } from '../wallet.service.types.js';
 
 /**
  * Both `SignMultiInputAndBroadcastInput` and `SignPsbtOnlyInput` carry a

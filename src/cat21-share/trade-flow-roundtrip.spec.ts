@@ -2,20 +2,20 @@ import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network } from '../network';
-import { attachDummyBuyerSig } from '../testing/fixtures';
-import { toPaymentAddress } from '../wallet/address-types';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
+import { Network } from '../network.js';
+import { attachDummyBuyerSig } from '../testing/fixtures.js';
+import { toPaymentAddress } from '../wallet/address-types.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
   buildCat21BuyOfferPsbt,
   validateCat21BuyOfferPsbt,
-} from '../cat21-offer/cat21-offer.helper';
+} from '../cat21-offer/cat21-offer.helper.js';
 import {
   buildAskQueryParams,
   buildBuyOfferQueryParams,
   parseAskQueryParams,
   parseBuyOfferQueryParams,
-} from './permalink.helper';
+} from './permalink.helper.js';
 
 // ---------------------------------------------------------------------------
 // End-to-end round-trip that would have caught the 2026-07-18 make-offer

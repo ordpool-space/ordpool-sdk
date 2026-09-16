@@ -9,7 +9,7 @@ import {
   SLIPSTREAM_DEFAULT_BASE_URL,
   SLIPSTREAM_SUBMIT_PATH,
   submitToSlipstream,
-} from './slipstream.helper';
+} from './slipstream.helper.js';
 
 /**
  * Lightweight Response-shape stub. jsdom in this jest configuration does

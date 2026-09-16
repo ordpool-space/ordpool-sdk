@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { dedupeUtxosByOutpoint } from './dedupe-utxos';
+import { dedupeUtxosByOutpoint } from './dedupe-utxos.js';
 
 const TXID = 'a8e8467c132d2198513552b56c4768f989c4af739a9d83b5df7cc60c6c2e708d';
 const CONFIRMED = { txid: TXID, vout: 0, value: 500_000, status: { confirmed: true } };

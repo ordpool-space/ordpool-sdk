@@ -10,8 +10,8 @@
  *
  * Keep it that way: types and enums here stay free of payload.
  */
-import { KnownOrdinalWallet, KnownOrdinalWalletType } from './wallet.service.types';
-import { walletLogos } from './wallet-logos';
+import { KnownOrdinalWallet, KnownOrdinalWalletType } from './wallet.service.types.js';
+import { walletLogos } from './wallet-logos.js';
 
 export const KnownOrdinalWallets: { [K in KnownOrdinalWalletType]: KnownOrdinalWallet } = {
   [KnownOrdinalWalletType.xverse]: {

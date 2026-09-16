@@ -30,7 +30,7 @@ import { sha256 } from '@noble/hashes/sha2';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
-import { Network, toScureNetwork } from '../../network';
+import { Network, toScureNetwork } from '../../network.js';
 
 const base58checkSha256 = base58check(sha256);
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { KnownOrdinalWallets } from '../known-ordinal-wallets';
-import { detectInstalledWallets, walletConnectors } from './index';
+import { KnownOrdinalWallets } from '../known-ordinal-wallets.js';
+import { detectInstalledWallets, walletConnectors } from './index.js';
 
 
 describe('walletConnectors registry', () => {

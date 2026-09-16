@@ -1,11 +1,11 @@
 import { describe, expect, it, jest } from '@jest/globals';
 import { firstValueFrom } from 'rxjs';
 
-import { Network } from '../network';
-import { WalletService } from './wallet.service';
-import { KnownOrdinalWalletType } from './wallet.service.types';
-import { deriveWatchOnlyAddresses } from './xpub/derive-watch-only';
-import { AddressProbe, WatchOnlyScanResult } from './xpub/scan-watch-only';
+import { Network } from '../network.js';
+import { WalletService } from './wallet.service.js';
+import { KnownOrdinalWalletType } from './wallet.service.types.js';
+import { deriveWatchOnlyAddresses } from './xpub/derive-watch-only.js';
+import { AddressProbe, WatchOnlyScanResult } from './xpub/scan-watch-only.js';
 
 const BIP86_ACCOUNT_XPUB =
   'xpub6BgBgsespWvERF3LHQu6CnqdvfEvtMcQjYrcRzx53QJjSxarj2afYWcLteoGVky7D3UKDP9QyrLprQ3VCECoY49yfdDEHGCtMMj92pReUsQ';

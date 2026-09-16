@@ -3,15 +3,15 @@ import { secp256k1 } from '@noble/curves/secp256k1';
 import * as btc from '@scure/btc-signer';
 import { hex } from '@scure/base';
 
-import { Network, toScureNetwork } from '../network';
+import { Network, toScureNetwork } from '../network.js';
 import {
   toMainnetAddress,
   toRegtestAddress,
   toRegtestWalletInfo,
   toWireNetworkFor,
   walletSidePaymentAddress,
-} from './network-address-shim';
-import { KnownOrdinalWalletType, WalletInfo } from './wallet.service.types';
+} from './network-address-shim.js';
+import { KnownOrdinalWalletType, WalletInfo } from './wallet.service.types.js';
 
 /**
  * The shim's whole point is: derived bcrt address encodes the SAME

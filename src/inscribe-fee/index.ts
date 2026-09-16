@@ -16,5 +16,5 @@ export {
   simulateInscribeFees,
   type SimulateInscribeFeesArgs,
   type SimulateInscribeFeesResult,
-} from '../inscribe/inscription-fee.helper';
-export { simulateBatchInscribeFees } from '../inscribe/inscription-batch.helper';
+} from '../inscribe/inscription-fee.helper.js';
+export { simulateBatchInscribeFees } from '../inscribe/inscription-batch.helper.js';

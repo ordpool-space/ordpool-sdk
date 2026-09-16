@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { calculateRecommendedFundingSats } from './recommended-funding.helper';
+import { calculateRecommendedFundingSats } from './recommended-funding.helper.js';
 
 describe('calculateRecommendedFundingSats', () => {
   it('is just the 546 postage (rounded up to 600) at a zero fee rate', () => {

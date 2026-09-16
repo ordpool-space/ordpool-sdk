@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { AnnotatedFundingUtxo, recommendFunding } from './funding-safety';
-import { UtxoScanBucket } from '../cat21-mint/utxo-content.types';
+import { AnnotatedFundingUtxo, recommendFunding } from './funding-safety.js';
+import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
 
 let n = 0;
 const u = (value: number, bucket: UtxoScanBucket): AnnotatedFundingUtxo => ({

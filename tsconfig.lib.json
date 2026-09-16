@@ -2,13 +2,17 @@
 // emitted here from the same source set; `src/index.ts` and `src/core.ts` are
 // the barrels that decide what each exposes.
 //
-// CommonJS, deliberately. The SDK has consumers on both sides: three Angular
-// frontends whose bundlers take either format, and cat21-indexer's backend,
-// a CommonJS NestJS app that imports validateCat21BuyOfferPsbt and MAX_ASK_SATS
-// from `/core` on the offer path. A CommonJS app cannot require() an ESM
-// package, so ESM-only is not available to us; CommonJS is the one format every
-// consumer can read. The cost is that bundlers tree-shake CommonJS less well
-// than ESM, which is accepted in exchange for a single build.
+// ESM, with explicit `.js` extensions written in the SOURCE imports. That is
+// what makes the output resolvable by NODE and not only by a bundler: tsc does
+// not rewrite specifiers, so an extensionless `./foo` stays `./foo` in the
+// emit and Node rejects it (ERR_UNSUPPORTED_DIR_IMPORT / not-found).
+//
+// Why ESM rather than CommonJS, since a CommonJS consumer exists: Node 22.12+
+// can `require()` an ESM package that has no top-level await, and this package
+// has none. cat21-indexer's backend declares node >= 24, so its CommonJS
+// NestJS app loads this fine. Verified, not assumed. The payoff is that
+// bundlers tree-shake ESM properly, which CommonJS cost the three Angular
+// frontends.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -17,12 +21,22 @@
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "es2022",
+    "moduleResolution": "bundler",
     "target": "es2022",
-    "lib": ["dom", "esnext"],
+    "lib": [
+      "dom",
+      "esnext"
+    ],
     "esModuleInterop": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "**/*.spec.ts", "**/*.angular.spec.ts", "e2e"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/*.spec.ts",
+    "**/*.angular.spec.ts",
+    "e2e"
+  ]
 }

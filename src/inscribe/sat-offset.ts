@@ -1,4 +1,4 @@
-import { getMinimumUtxoSize } from '../cat21-script/address-format';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
 
 /**
  * The offset of `sat` within an output, from the output's sat ranges as ord

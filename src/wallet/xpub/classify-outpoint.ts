@@ -13,11 +13,11 @@
 import {
   classifyUtxoContent,
   UtxoContentClassification,
-} from '../../cat21-mint/utxo-content.classify';
+} from '../../cat21-mint/utxo-content.classify.js';
 import {
   Cat21OrdOutputResponse,
   OrdOutputResponse,
-} from '../../cat21-mint/utxo-content.types';
+} from '../../cat21-mint/utxo-content.types.js';
 
 export interface ClassifyOutpointOptions {
   /** Full ord (inscriptions + runes + rare sats), e.g. `https://ord.ordpool.space`. */

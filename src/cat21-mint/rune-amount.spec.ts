@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from '@jest/globals';
 
-import { MAX_RUNE_DIVISIBILITY, formatRuneAmount, formatRunePile } from './rune-amount';
+import { MAX_RUNE_DIVISIBILITY, formatRuneAmount, formatRunePile } from './rune-amount.js';
 
 const U128_MAX = '340282366920938463463374607431768211455';
 

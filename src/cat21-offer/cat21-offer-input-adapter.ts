@@ -1,5 +1,5 @@
-import { prepareCat21Input, PrepareCat21InputArgs } from '../cat21-script/prepare-cat21-input';
-import { Cat21OfferBuyerInput } from './cat21-offer.types';
+import { prepareCat21Input, PrepareCat21InputArgs } from '../cat21-script/prepare-cat21-input.js';
+import { Cat21OfferBuyerInput } from './cat21-offer.types.js';
 
 /**
  * Layer-2 input adapter for the BUYER side of the CAT-21 buy-offer flow.

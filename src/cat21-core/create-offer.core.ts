@@ -1,22 +1,22 @@
-import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper';
-import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper';
+import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper.js';
+import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   recommendFunding,
-} from '../cat21-fee/funding-safety';
-import { Network, toScureNetwork } from '../network';
-import { KnownOrdinalWalletType } from '../wallet/wallet.service.types';
-import { buildCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper';
-import { prepareBuyOfferBuyerInput } from '../cat21-offer/cat21-offer-input-adapter';
-import { changeDustFloor } from '../cat21-script/address-format';
+} from '../cat21-fee/funding-safety.js';
+import { Network, toScureNetwork } from '../network.js';
+import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { buildCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper.js';
+import { prepareBuyOfferBuyerInput } from '../cat21-offer/cat21-offer-input-adapter.js';
+import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
   ContentScanPort,
   CoreFundingUtxo,
   OfferCreateSignPort,
   UtxosPort,
-} from './ports';
-import { resolveFundingPick, selectFunding } from './select-funding';
+} from './ports.js';
+import { resolveFundingPick, selectFunding } from './select-funding.js';
 
 
 /**

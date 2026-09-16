@@ -4,7 +4,7 @@ import {
   locateSat,
   rarityOfBlockFirstSat,
   rarityOfSat,
-} from './sat-rarity.helper';
+} from './sat-rarity.helper.js';
 
 // Well-known first-sats-of-block for verification:
 // - block 0        → sat 0                 → mythic

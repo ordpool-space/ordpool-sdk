@@ -1,9 +1,9 @@
 import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 
-import { packInscriptionProperties } from './inscription-properties';
-import { synthesizeEnvelopeFields } from './inscription.service.helper';
-import type { CreateInscribeTransactionsArgs } from './inscription.service.helper';
+import { packInscriptionProperties } from './inscription-properties.js';
+import { synthesizeEnvelopeFields } from './inscription.service.helper.js';
+import type { CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
 
 const ID0 = `${'ab'.repeat(32)}i0`;
 

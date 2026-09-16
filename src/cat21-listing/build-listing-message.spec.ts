@@ -1,15 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { Network } from '../network';
-import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types';
+import { Network } from '../network.js';
+import { toOrdinalsAddress, toPaymentAddress } from '../wallet/address-types.js';
 import {
   CAT21_LISTING_MESSAGE_VERSION,
   buildListingMessage,
   ListingMessageFields,
   parseCatsList,
   serializeCats,
-} from './build-listing-message';
-import { MAX_ASK_SATS } from './cat21-listing.types';
+} from './build-listing-message.js';
+import { MAX_ASK_SATS } from './cat21-listing.types.js';
 
 // Real derived addresses from a known test key so shape checks pass.
 const ORD_ADDR = toOrdinalsAddress('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxq7pkrz9');

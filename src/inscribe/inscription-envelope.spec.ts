@@ -18,7 +18,7 @@ import { describe, expect, it } from '@jest/globals';
 import { bytesToHex } from '@noble/hashes/utils';
 import { InscriptionParserService } from 'ordpool-parser';
 
-import { encodeCborDeterministic } from './inscription-cbor';
+import { encodeCborDeterministic } from './inscription-cbor.js';
 import {
   buildInscriptionEnvelope,
   chunkFieldValue,
@@ -28,7 +28,7 @@ import {
   encodeRuneCommitment,
   ORD_TAGS,
   type OrdEnvelopeField,
-} from './inscription-envelope';
+} from './inscription-envelope.js';
 
 
 /**

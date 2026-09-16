@@ -1,2 +1,2 @@
-export * from './cat-outpoint';
-export * from './permalink.helper';
+export * from './cat-outpoint.js';
+export * from './permalink.helper.js';

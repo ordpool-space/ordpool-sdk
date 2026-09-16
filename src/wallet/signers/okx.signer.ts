@@ -1,9 +1,9 @@
 import { hex } from '@scure/base';
 import { from, map, Observable, switchMap } from 'rxjs';
 
-import { walletSidePaymentAddress } from '../network-address-shim';
-import { broadcastSignedPsbt } from '../psbt-extract';
-import { BIP341_KEYPATH_SIGHASHES, keypathSighashWhitelist } from '../sighash';
+import { walletSidePaymentAddress } from '../network-address-shim.js';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
+import { BIP341_KEYPATH_SIGHASHES, keypathSighashWhitelist } from '../sighash.js';
 import {
   KnownOrdinalWalletType,
   SignAndBroadcastInput,
@@ -12,10 +12,10 @@ import {
   SignMultiInputAndBroadcastInput,
   SignPsbtOnlyInput,
   WalletSigner,
-} from '../wallet.service.types';
-import { operationNamedDefaults } from './operation-named-defaults';
-import { resolveSigningTargets } from './signing-targets.helper';
-import { wrapSignMessage } from './wrap-sign-message';
+} from '../wallet.service.types.js';
+import { operationNamedDefaults } from './operation-named-defaults.js';
+import { resolveSigningTargets } from './signing-targets.helper.js';
+import { wrapSignMessage } from './wrap-sign-message.js';
 
 
 interface OkxToSignInput {

@@ -3,15 +3,15 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { firstValueFrom, of, throwError } from 'rxjs';
 
-import { Network } from '../../network';
+import { Network } from '../../network.js';
 
 jest.mock('../psbt-extract', () => ({
   broadcastSignedPsbt: jest.fn(() => of({ txId: 'TXID-FROM-BROADCAST' })),
 }));
-import { broadcastSignedPsbt } from '../psbt-extract';
+import { broadcastSignedPsbt } from '../psbt-extract.js';
 
-import { binanceSigner } from './binance.signer';
-import { binanceConnector } from '../connectors/binance.connector';
+import { binanceSigner } from './binance.signer.js';
+import { binanceConnector } from '../connectors/binance.connector.js';
 
 /**
  * Happy-path pins for the Binance Web3 Wallet adapter. There is no
