@@ -14,6 +14,7 @@ import {
   postTx,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup } from '../approval-popup';
+import { SEED_USER_DATA_DIR } from '../global-setup';
 
 /**
  * Full inscribe roundtrip with the real Xverse extension.
@@ -42,8 +43,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 const TEST_PASSWORD = 'TestPassword123!';
-const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
-  ?? path.resolve(__dirname, '../../../test-results/xverse-seed-user-data-dir');
 
 const FUND_AMOUNT_BTC = 0.001;
 

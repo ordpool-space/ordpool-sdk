@@ -35,3 +35,7 @@ Thumbs.db
 # the tree on each run.
 coverage/
 coverage-browser/
+
+# Xverse onboarding seed cache. Outside test-results on purpose: Playwright
+# clears its outputDir at the start of every run.
+/e2e/playwright/.xverse-seed/

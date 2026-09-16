@@ -24,6 +24,7 @@ import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21MintPsbt } from '../../../src/cat21-mint/cat21-mint.helper';
 import { validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
+import { SEED_USER_DATA_DIR } from '../global-setup';
 
 /**
  * Xverse CREATE-OFFER roundtrip on regtest — Xverse is the BUYER.
@@ -60,8 +61,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 const TEST_PASSWORD = 'TestPassword123!';
-const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
-  ?? path.resolve(__dirname, '../../../test-results/xverse-seed-user-data-dir');
 
 const FUND_AMOUNT_BTC = 0.001;
 const SELLER_FUND_AMOUNT_BTC = 0.001;

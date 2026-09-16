@@ -30,8 +30,13 @@ import { onboardXverse, primeAndSwitchToRegtest, overrideRegtestElectrsUrl } fro
 const EXT_PATH = path.resolve(__dirname, '../extensions/xverse');
 // Seeded chromium user-data-dir — specs clone this per-test so each
 // gets a fresh context but skip the onboarding click flow.
+// NOT under `outputDir` (test-results): Playwright clears that directory at
+// the start of every run, so a cache kept there is deleted before globalSetup
+// can read it and the ~25 s onboarding is re-paid every time. Neutral in CI,
+// where each job runs one wallet and onboards once regardless; it also keeps a
+// wallet profile from riding along inside the failure artifact.
 export const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
-  ?? path.resolve(__dirname, '../../test-results/xverse-seed-user-data-dir');
+  ?? path.resolve(__dirname, '.xverse-seed/user-data-dir');
 
 export default async function globalSetup(): Promise<void> {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {

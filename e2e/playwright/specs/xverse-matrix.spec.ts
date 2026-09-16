@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import { applyXverseVariant, XverseVariant } from '../xverse-vault';
 import { waitForApprovalPopup } from '../approval-popup';
 import { waitForChromeStorageKey, waitForSingletonLockGone } from '../wait-helpers';
+import { SEED_USER_DATA_DIR } from '../global-setup';
 
 /**
  * Matrix coverage for every Xverse Network × Payment-Address-Type
@@ -30,8 +31,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 const TEST_PASSWORD = 'TestPassword123!';
-const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
-  ?? path.resolve(__dirname, '../../../test-results/xverse-seed-user-data-dir');
 
 // BIP-49/84/86 derivations of the BIP-39 test seed `abandon × 11 +
 // about` at account 0 / index 0, per the click-onboarded dump. The
@@ -53,7 +52,6 @@ const VARIANTS: ReadonlyArray<XverseVariant> = [
   { network: 'bitcoin-regtest',  paymentType: 'native' },
   { network: 'bitcoin-regtest',  paymentType: 'nested' },
 ];
-
 
 async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({
@@ -99,7 +97,6 @@ async function approveSatsConnectInline(context: BrowserContext, knownPages: Set
   await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click({ force: true });
 }
 
-
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
     throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh xverse.`);
@@ -111,7 +108,6 @@ test.beforeAll(async () => {
     throw new Error(`Xverse seed dir missing at ${SEED_USER_DATA_DIR}. globalSetup must have produced it.`);
   }
 });
-
 
 for (const variant of VARIANTS) {
   test(`SDK returns the right paymentAddress for ${variant.network} + ${variant.paymentType}`, async () => {

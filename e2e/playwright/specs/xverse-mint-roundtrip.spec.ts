@@ -8,6 +8,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { installContextErrorGuard } from '../browser-error-guard';
+import { SEED_USER_DATA_DIR } from '../global-setup';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -36,8 +37,6 @@ const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
 const TEST_PASSWORD = 'TestPassword123!';
-const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
-  ?? path.resolve(__dirname, '../../../test-results/xverse-seed-user-data-dir');
 
 // In regtest 1 BTC = 100M sats; fund the wallet with 0.001 BTC so
 // the mint has plenty of headroom plus a meaningful change output.

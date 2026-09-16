@@ -1,6 +1,7 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { SEED_USER_DATA_DIR } from '../global-setup';
 
 /**
  * Iteration 3a — SDK ↔ Xverse handshake via sats-connect.
@@ -55,9 +56,6 @@ async function shot(page: Page, name: string): Promise<void> {
     // diagnostic only
   }
 }
-
-const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
-  ?? path.resolve(__dirname, '../../../test-results/xverse-seed-user-data-dir');
 
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {

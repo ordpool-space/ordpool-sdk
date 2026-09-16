@@ -61,11 +61,10 @@ case "$WALLET" in
     ASSET_NAME="alby-bitcoin-wallet-v${VERSION}.crx"
     ;;
   cat21wallet)
-    # Cat21 Wallet — our own fork of Leather. Built from source in
-    # the cat21-wallet repo's apps/extension/dist/ (no CRX
-    # packaging in the wallet's CI yet); CI publishes the same
-    # bytes attested via gh attestation under the release tag
-    # below.
+    # Cat21 Wallet, our own fork of Leather. There is no CRX release:
+    # it is staged from an unpacked source build via
+    # CAT21_WALLET_LOCAL_DIST (see the guard below). The version is
+    # here only to label the cache directory.
     VERSION="6.103.0.675"
     ASSET_NAME="cat21-wallet-v${VERSION}.crx"
     ;;
@@ -81,6 +80,19 @@ REPO="ordpool-space/ordpool-sdk"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXT_DIR="${SCRIPT_DIR}/../extensions/${WALLET}"
 CRX_FILE="$(mktemp "/tmp/${WALLET}.XXXXXX.crx")"
+
+# cat21wallet has no CRX release to download: it is our own Leather fork and
+# the wallet's CI does not package one. CI builds it from source and stages the
+# unpacked dist, and a local run does the same through CAT21_WALLET_LOCAL_DIST.
+# Say so here rather than letting the download path 404 on a tag that has never
+# existed.
+if [ "$WALLET" = "cat21wallet" ] && [ -z "${CAT21_WALLET_LOCAL_DIST:-}" ]; then
+  echo "ERROR: cat21wallet is built from source, not downloaded." >&2
+  echo "       Build it in the cat21-wallet repo (pnpm build:extension), then:" >&2
+  echo "         CAT21_WALLET_LOCAL_DIST=/path/to/cat21-wallet/apps/extension/dist \\" >&2
+  echo "           bash $0 cat21wallet" >&2
+  exit 2
+fi
 
 trap 'rm -f "$CRX_FILE"' EXIT
 
