@@ -79,7 +79,16 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
     } catch { /* ignore */ }
   });
   await seedPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
-  await seedPage.waitForFunction(() => true, undefined, { timeout: 2_000 }).catch(() => undefined);
+  // seedAlbyAccount talks to the extension over `chrome.runtime.sendMessage`,
+  // so wait for that to exist rather than for a duration. The previous form
+  // here resolved on its first poll and therefore waited for nothing, while
+  // reading like a wait and being unable to fail.
+  await seedPage.waitForFunction(
+    () => typeof (globalThis as { chrome?: { runtime?: { sendMessage?: unknown } } })
+      .chrome?.runtime?.sendMessage === 'function',
+    undefined,
+    { timeout: 15_000, polling: 100 },
+  );
   await shot(seedPage, '00-options');
 
   // Seed via internal SW actions in one page.evaluate.

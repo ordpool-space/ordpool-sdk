@@ -115,8 +115,17 @@ test.beforeAll(async () => {
     } catch { /* ignore */ }
   });
   await seedPage.goto(`chrome-extension://${extensionId}/options.html`, { waitUntil: 'domcontentloaded' });
-  // Give the SW a moment to finish initializing its state machine.
-  await seedPage.waitForFunction(() => true, undefined, { timeout: 2_000 }).catch(() => undefined);
+  // seedAlbyAccount talks to the extension over `chrome.runtime.sendMessage`,
+  // so wait for that to exist rather than for a duration. The previous form
+  // here was `waitForFunction(() => true)` with the rejection swallowed, which
+  // resolves on its first poll and therefore waited for nothing at all, while
+  // reading like a wait and being unable to fail.
+  await seedPage.waitForFunction(
+    () => typeof (globalThis as { chrome?: { runtime?: { sendMessage?: unknown } } })
+      .chrome?.runtime?.sendMessage === 'function',
+    undefined,
+    { timeout: 15_000, polling: 100 },
+  );
   test.setTimeout(240_000);
 
   await seedAlbyAccount(seedPage);

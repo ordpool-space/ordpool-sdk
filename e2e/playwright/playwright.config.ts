@@ -14,7 +14,12 @@ export default defineConfig({
   globalSetup: path.resolve(__dirname, 'global-setup.ts'),
   fullyParallel: false,           // extension state is shared across specs
   workers: 1,
-  retries: process.env.CI ? 2 : 0,
+  // Zero. A retry converts a defect into a quieter lane, and every one this
+  // suite has hidden turned out to be a located cause rather than noise: a
+  // closing popup accepted as an approval, a wait satisfied by a placeholder,
+  // a seed path moved under a consumer. A cell that needs a retry is an open
+  // question, and the lane should say so on the first run.
+  retries: 0,
   timeout: 60_000,
   expect: {
     timeout: 20_000,
