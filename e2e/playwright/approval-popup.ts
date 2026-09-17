@@ -64,10 +64,28 @@ export async function waitForApprovalPopup(opts: {
       if (settled || knownPages.has(p)) return;
       try {
         const res = await isApproval(p);
-        if (res === true) finishOk(p);
+        if (res !== true) return;
+
+        // A CLOSING popup still satisfies "the confirm button is visible":
+        // the DOM is alive while the window goes away. Handing that page back
+        // means the caller's `click()` waits for the element to be visible,
+        // enabled AND STABLE, never gets stable because the page is dying, and
+        // fails with "Target page, context or browser has been closed". The
+        // observed shape is a fast failure in specs that approve twice in
+        // quick succession, passing on retry.
+        //
+        // So require the page to answer a round-trip before returning it. A
+        // page that is going away cannot, and the search continues for the one
+        // that is actually live. This is a liveness check rather than a delay:
+        // nothing is waited out, the page either responds or it does not.
+        await p.title();
+        if (p.isClosed()) return;
+
+        finishOk(p);
       } catch {
-        // isApproval rejected (e.g. internal timeout). Don't abort
-        // the search — another page may still match.
+        // isApproval rejected (e.g. internal timeout), or the liveness probe
+        // failed because the page went away. Don't abort the search — another
+        // page may still match.
       }
     };
 

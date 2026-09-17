@@ -11,7 +11,19 @@ module.exports = {
   // `.browser.spec.ts` needs jsdom globals (wallet signers reading
   // `window.<wallet>`, WebCrypto), so it runs only under the browser
   // config; the node config skips it.
-  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/', '\\.browser\\.spec\\.ts$'],
+  // `/e2e/` is skipped because those specs need a live regtest stack or a real
+  // browser. Harness code in there still deserves unit tests, and without a
+  // home for them a helper's branches only ever run when the rare condition
+  // they guard actually occurs, which is the case they exist for. So
+  // `*.unit.spec.ts` under e2e/ runs here: pure logic, stubbed inputs, no
+  // stack, no browser.
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/dist/',
+    '/e2e/(?!.*\\.unit\\.spec\\.ts$)',
+    '/RESCUE/',
+    '\\.browser\\.spec\\.ts$',
+  ],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // Transform every node_modules file except snapshots — sats-connect
   // v4 and several of its transitive deps (synckit, base58-js,
