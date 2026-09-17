@@ -36,6 +36,7 @@ Thumbs.db
 coverage/
 coverage-browser/
 
-# Xverse onboarding seed cache. Outside test-results on purpose: Playwright
-# clears its outputDir at the start of every run.
-/e2e/playwright/.xverse-seed/
+# Seeded wallet profile for the Playwright harness (E2E_WALLET_SEED_DIR).
+# Outside test-results on purpose: Playwright clears its outputDir at the
+# start of every run, so a cache kept there can never be reused.
+/e2e/playwright/.wallet-seed/

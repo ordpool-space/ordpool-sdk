@@ -35,8 +35,27 @@ const EXT_PATH = path.resolve(__dirname, '../extensions/xverse');
 // can read it and the ~25 s onboarding is re-paid every time. Neutral in CI,
 // where each job runs one wallet and onboards once regardless; it also keeps a
 // wallet profile from riding along inside the failure artifact.
-export const SEED_USER_DATA_DIR = process.env.XVERSE_SEED_USER_DATA_DIR
-  ?? path.resolve(__dirname, '.xverse-seed/user-data-dir');
+/**
+ * Where the seeded, already-onboarded browser profile lives.
+ *
+ * The env name is wallet-agnostic on purpose. What it points at is "the
+ * profile for the wallet this harness seeds", and baking one wallet's name
+ * into a consumer-facing variable means the next wallet either collides with
+ * it or needs a second variable saying the same thing. Xverse is simply the
+ * wallet seeded today; a second one would take a subdirectory keyed by wallet
+ * name rather than another env var.
+ *
+ * `XVERSE_SEED_USER_DATA_DIR` is still honoured so a consumer that already
+ * sets it keeps working.
+ */
+export const SEED_USER_DATA_DIR =
+  process.env.E2E_WALLET_SEED_DIR
+  ?? process.env.XVERSE_SEED_USER_DATA_DIR
+  ?? path.resolve(__dirname, '.wallet-seed/user-data-dir');
+
+/** Re-onboard even when a reusable profile is present. Same naming reasoning. */
+const forceReonboard = (): boolean =>
+  Boolean(process.env.E2E_WALLET_FORCE_REONBOARD ?? process.env.XVERSE_FORCE_REONBOARD);
 
 /**
  * Assert the seed really landed, before this step reports success.
@@ -87,7 +106,7 @@ export default async function globalSetup(): Promise<void> {
     fs.existsSync(path.join(SEED_USER_DATA_DIR, 'Default')) &&
     fs.existsSync(versionMarker) &&
     fs.readFileSync(versionMarker, 'utf8') === extVersion &&
-    !process.env.XVERSE_FORCE_REONBOARD
+    !forceReonboard()
   ) {
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] reusing seed user-data-dir (Xverse ${extVersion}) at ${SEED_USER_DATA_DIR}`);
