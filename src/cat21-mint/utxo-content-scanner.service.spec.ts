@@ -94,6 +94,25 @@ describe('UtxoContentScanner catSat', () => {
     expect(state.content.catSat).toBeNull();
   });
 
+  it('routes an output NEITHER ord has indexed to scan-failed, not to clean', async () => {
+    // Both instances answer 200 with no sat ranges, which is what ord returns
+    // for an output whose block it has not finished indexing. That body is
+    // byte-identical to a genuinely empty output, so reading it as clean is how
+    // a freshly-confirmed asset-bearing coin gets spent for fees.
+    const { scanner } = buildScanner(
+      { value: 546, inscriptions: [], runes: null },
+      { value: 546, cats: [] },
+    );
+
+    const state = await firstValueFrom(scanner.scan(OUTPOINT));
+
+    expect(state.kind).toBe('scan-failed');
+    if (state.kind !== 'scan-failed') throw new Error('expected scan-failed');
+    // The message says "unknown", not "has assets": the caller and any human
+    // reading a log need to know this is no-answer rather than a detection.
+    expect(state.message).toContain('has not indexed');
+  });
+
   it('sources catSat from cat21-ord (authoritative) when the full ord has not indexed the output', async () => {
     const { scanner } = buildScanner(
       // Full ord lagging: no sat ranges for this output yet.
