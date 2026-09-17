@@ -6,9 +6,15 @@
  * HTTP layers, then hand them here so the "is this UTXO spendable" decision
  * has ONE implementation and cannot drift between the consumers.
  *
- * A UTXO is `clean` (safe to spend as funding) only when it carries no
- * inscription, no rune, no CAT-21 cat, and no rare sat. Anything else is
- * ordinals content a watch-only user could burn if it were spent for fees.
+ * A UTXO is `clean` (safe to spend as funding) only when ord has INDEXED it
+ * and it carries no inscription, no rune, no CAT-21 cat, and no rare sat.
+ * Anything else is ordinals content a watch-only user could burn if it were
+ * spent for fees.
+ *
+ * The indexed half matters as much as the content half: ord answers 200 with
+ * empty fields both for an output it has not indexed and for one that is
+ * genuinely empty, so a classifier that only looks at content reports an
+ * unindexed output as safe to spend.
  */
 
 import { findRareSatInRanges, SatRarity } from './sat-rarity.helper.js';
@@ -21,6 +27,15 @@ import {
 export interface UtxoContentClassification {
   /** No inscription, rune, cat, or rare sat: safe to spend as funding. */
   clean: boolean;
+  /**
+   * Whether the full ord has actually INDEXED this output.
+   *
+   * ord answers 200 with empty fields for an output whose block it has not
+   * finished indexing, which is byte-identical to its answer for an output
+   * that genuinely carries nothing. Absence of data is not absence of assets,
+   * and reading it as `clean` spends the coin.
+   */
+  indexed: boolean;
   inscriptionIds: string[];
   runes: { [runeName: string]: unknown } | null;
   catIds: string[];
@@ -42,7 +57,15 @@ export function classifyUtxoContent(
   const catIds = cat21Ord.cats ?? [];
   const rareSat = detectRareSat(ord.sat_ranges);
 
-  const clean = inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat;
+  // Every output ord has indexed carries sat ranges, because the scanner
+  // requires an ord running `--index-sats` (rare-sat detection depends on it).
+  // So empty ranges mean one of two things, and both must fail CLOSED: ord has
+  // not indexed this output yet, or it is running without `--index-sats` and
+  // cannot answer the question at all. Treating either as "no assets here" is
+  // how a freshly-confirmed inscription gets spent for fees.
+  const indexed = (ord.sat_ranges?.length ?? 0) > 0;
+
+  const clean = indexed && inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat;
 
   // Source the cat's sat from cat21-ord (the cat indexer, authoritative and
   // always in step with `cats`); fall back to the full ord only if cat21-ord
@@ -52,7 +75,7 @@ export function classifyUtxoContent(
     ? (firstSat(cat21Ord.sat_ranges) ?? firstSat(ord.sat_ranges))
     : null;
 
-  return { clean, inscriptionIds, runes, catIds, catSat, rareSat };
+  return { clean, indexed, inscriptionIds, runes, catIds, catSat, rareSat };
 }
 
 /**

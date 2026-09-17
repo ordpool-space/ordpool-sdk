@@ -245,14 +245,6 @@ export declare function ordWalletSend(recipientAddress: string, inscriptionId: s
 export interface OrdAddressResponse {
     address: string;
 }
-/**
- * Create + restore (idempotent) an ord-side bitcoin wallet. ord stores
- * the wallet inside the regtest bitcoind via `wallet_process_psbt`-
- * shaped RPCs; this helper exists so the test setup can construct one
- * deterministically before mining funding blocks to it.
- *
- * Returns a fresh receive address from the wallet.
- */
 export declare function ordCreateWallet(name?: string): string;
 /**
  * Write arbitrary bytes to a file inside the cat21-ord container (via

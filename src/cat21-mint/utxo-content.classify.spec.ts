@@ -37,6 +37,38 @@ const cat21 = (over: Partial<Cat21OrdOutputResponse> = {}): Cat21OrdOutputRespon
 });
 
 describe('classifyUtxoContent — the content-safety gate', () => {
+
+  // ord answers 200 with empty fields BOTH for an output it has not finished
+  // indexing and for one that genuinely carries nothing. The two are
+  // byte-identical, so a classifier that only reads content calls the first
+  // one safe to spend. Observed on a real chain: a freshly-confirmed
+  // asset-bearing coin classified clean and was spent for fees.
+  describe('an output ord has NOT indexed is never clean', () => {
+
+    it.each([
+      ['no sat_ranges field at all', undefined],
+      ['an empty sat_ranges array', [] as ReadonlyArray<readonly [number, number]>],
+    ])('%s means unknown, not empty', (_label, ranges) => {
+      const c = classifyUtxoContent(
+        ord({ sat_ranges: ranges, inscriptions: [], runes: null }),
+        cat21({ cats: [], sat_ranges: ranges }),
+      );
+
+      expect(c.indexed).toBe(false);
+      // The load-bearing one. Without it this is the shape that spends a coin.
+      expect(c.clean).toBe(false);
+    });
+
+    it('an indexed output with nothing on it IS clean, so the guard is not just always-false', () => {
+      // The counterpart that keeps the rule honest: if absence of ranges made
+      // everything unclean, the test above would pass for a classifier that
+      // never returns clean at all.
+      const c = classifyUtxoContent(ord(), cat21());
+
+      expect(c.indexed).toBe(true);
+      expect(c.clean).toBe(true);
+    });
+  });
   it('CLEAN: no inscription, rune, cat, or rare sat → clean, everything empty', () => {
     const r = classifyUtxoContent(ord(), cat21());
     expect(r.clean).toBe(true);

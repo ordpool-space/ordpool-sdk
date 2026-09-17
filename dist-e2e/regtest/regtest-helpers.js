@@ -499,6 +499,18 @@ function ordWalletSend(recipientAddress, inscriptionId, feeRateSatPerVb, postage
  *
  * Returns a fresh receive address from the wallet.
  */
+/**
+ * Whether an `execFileSync` failure carries any of `needles`, looking at the
+ * child's stderr and stdout as well as the Error's own message. ord prints its
+ * diagnostics to stderr, so `message` alone misses them.
+ */
+function ordCliErrorSays(e, ...needles) {
+    const err = e;
+    const text = [err.message, err.stderr, err.stdout]
+        .map(part => (part == null ? '' : String(part)))
+        .join('\n');
+    return needles.some(n => text.includes(n));
+}
 function ordCreateWallet(name = 'ord') {
     // ord's `wallet create` is idempotent only on the wallet's existence;
     // we ignore the "wallet already exists" error path so the helper can
@@ -507,8 +519,11 @@ function ordCreateWallet(name = 'ord') {
         ordWalletCli(name, 'create');
     }
     catch (e) {
-        const msg = e.message ?? '';
-        if (!msg.includes('already exists') && !msg.includes('already loaded'))
+        // The child's own text lands on `stderr`; `message` is a generic
+        // non-zero-exit string. Matching only `message` re-throws on a wallet that
+        // already exists, so this stops being idempotent across local re-runs. CI
+        // never sees it, because its stack is always fresh.
+        if (!ordCliErrorSays(e, 'already exists', 'already loaded'))
             throw e;
     }
     const stdout = ordWalletCli(name, 'receive');
@@ -1142,8 +1157,11 @@ function ordStockCreateWallet(name) {
         ordStockWalletCli(name, 'create');
     }
     catch (e) {
-        const msg = e.message ?? '';
-        if (!msg.includes('already exists') && !msg.includes('already loaded'))
+        // The child's own text lands on `stderr`; `message` is a generic
+        // non-zero-exit string. Matching only `message` re-throws on a wallet that
+        // already exists, so this stops being idempotent across local re-runs. CI
+        // never sees it, because its stack is always fresh.
+        if (!ordCliErrorSays(e, 'already exists', 'already loaded'))
             throw e;
     }
     const stdout = ordStockWalletCli(name, 'receive');

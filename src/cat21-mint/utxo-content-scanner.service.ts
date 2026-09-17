@@ -113,6 +113,22 @@ export class UtxoContentScanner implements ContentScanPort {
         if (c.clean) {
           return { kind: 'scanned-clean' };
         }
+        // `clean` is false for two different reasons and they are not the same
+        // answer. A POSITIVE detection means we know the output carries
+        // something, and that stands even when the full ord is lagging, because
+        // cat21-ord reports cats independently. No detection at all means
+        // `clean` was false only because the full ord has not indexed the
+        // output: 200 with empty fields, which is "no answer" rather than "no
+        // assets". That one goes to scan-failed, which callers already treat as
+        // not-auto-spendable.
+        const detectedSomething =
+          c.inscriptionIds.length > 0 || c.runes !== null || c.catIds.length > 0 || c.rareSat !== null;
+        if (!detectedSomething) {
+          return {
+            kind: 'scan-failed',
+            message: `ord has not indexed ${outpoint} yet, so its content is unknown`,
+          };
+        }
         const content: UtxoContent = {
           outpoint,
           inscriptionIds: c.inscriptionIds,
