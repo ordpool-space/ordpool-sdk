@@ -18,6 +18,7 @@ import { findSignerOrThrow } from '../wallet/signers/index.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import { Cat21Holding } from './cat21-transfer.types.js';
+import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos.js';
 
 /**
  * FRAMEWORK-AGNOSTIC high-level transfer API. Plain class. Owns
@@ -136,7 +137,11 @@ export class Cat21TransferOrchestrator {
     }
     this.patch({ state: 'loading-utxos' });
     try {
-      this.utxos = await this.deps.getUtxos(wallet.paymentAddress);
+      // Deduped here, not only in the SDK's own electrs readers: `getUtxos` is a
+      // CONSUMER-supplied port, and electrs can list the same outpoint twice around
+      // the moment a tx confirms. A consumer wiring its own fetch would otherwise
+      // double-count a funding row and show a doubled balance.
+      this.utxos = dedupeUtxosByOutpoint(await this.deps.getUtxos(wallet.paymentAddress));
       this.patch({ state: 'ready' });
     } catch (err) {
       this.utxos = [];

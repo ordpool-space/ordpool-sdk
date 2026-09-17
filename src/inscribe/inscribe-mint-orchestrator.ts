@@ -27,6 +27,7 @@ import { SimulateInscribeFeesArgs, SimulateInscribeFeesResult, simulateInscribeF
 import type { InscriptionPropertiesInput } from './inscription-properties.js';
 import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
 import { prepareInscribeFundingInput } from './inscription-input-adapter.js';
+import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos.js';
 import {
   InscribeAndBroadcastResult,
   inscribeAndBroadcast,
@@ -477,7 +478,11 @@ export class InscribeMintOrchestrator {
     }
     this.patch({ state: 'loading-utxos' });
     try {
-      this.utxos = await this.deps.getUtxos(wallet.paymentAddress);
+      // Deduped here, not only in the SDK's own electrs readers: `getUtxos` is a
+      // CONSUMER-supplied port, and electrs can list the same outpoint twice around
+      // the moment a tx confirms. A consumer wiring its own fetch would otherwise
+      // double-count a funding row and show a doubled balance.
+      this.utxos = dedupeUtxosByOutpoint(await this.deps.getUtxos(wallet.paymentAddress));
       this.patch({ state: 'ready' });
     } catch (err) {
       this.utxos = [];
