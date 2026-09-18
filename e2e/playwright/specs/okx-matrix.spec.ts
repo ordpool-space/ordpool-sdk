@@ -1,4 +1,5 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -131,5 +132,14 @@ for (const variant of VARIANTS) {
     expect(info.paymentAddress).toBe(variant.expectedAddress);
     // Single-address contract: ordinalsAddress mirrors paymentAddress.
     expect(info.ordinalsAddress).toBe(variant.expectedAddress);
+    // The funding ruling's notice-vs-block decision is DERIVED from the
+    // wallet's own addresses (`isOneAddressWallet`), and every unit test of
+    // that decision ASSUMES the topology rather than establishing it. This is
+    // the only place a real wallet binary supplies the fact, so it is the one
+    // assertion that can catch a wallet changing its address model: a wallet
+    // that moved to separate addresses would keep being blocked, and far
+    // worse, one that collapsed to a single address would keep being merely
+    // noticed while its assets and its spending money share a lane.
+    expect(isOneAddressWallet(info)).toBe(true);
   });
 }
