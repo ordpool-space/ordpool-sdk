@@ -137,20 +137,43 @@ describe('UtxoContentScanner.classify (ContentScanPort adapter)', () => {
   it('scanned-clean => clean', async () => {
     const scanner = makeScanner();
     jest.spyOn(scanner, 'scan').mockReturnValue(of<UtxoScanState>({ kind: 'scanned-clean' }));
-    expect(await scanner.classify('aa:0')).toBe('clean');
+    expect(await scanner.classify('aa:0')).toEqual({ verdict: 'clean' });
   });
 
-  it('scanned-with-assets => has-assets', async () => {
+  it('scanned-with-assets => has-assets, carrying WHAT was found', async () => {
     const scanner = makeScanner();
     jest.spyOn(scanner, 'scan').mockReturnValue(
-      of<UtxoScanState>({ kind: 'scanned-with-assets', content: {} as never }),
+      of<UtxoScanState>({
+        kind: 'scanned-with-assets',
+        content: {
+          outpoint: 'aa:0',
+          inscriptionIds: ['abc123i0'],
+          runes: { 'UNCOMMON•GOODS': { amount: '1', divisibility: 0, symbol: '⧉' } },
+          catIds: ['def456i0'],
+          catSat: 1857900000000000,
+          rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' },
+        },
+      }),
     );
-    expect(await scanner.classify('aa:0')).toBe('has-assets');
+    // The names, not just the flag: nobody can consent to losing an asset they
+    // cannot see, and this adapter is the single place that already knows.
+    expect(await scanner.classify('aa:0')).toEqual({
+      verdict: 'has-assets',
+      assets: {
+        inscriptionIds: ['abc123i0'],
+        // Rune BALANCES stay behind; a row renders the name.
+        runeNames: ['UNCOMMON•GOODS'],
+        catIds: ['def456i0'],
+        rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' },
+      },
+    });
   });
 
   it('scan-failed => has-assets (FAIL-CLOSED — an unverified coin is never auto-spent)', async () => {
     const scanner = makeScanner();
     jest.spyOn(scanner, 'scan').mockReturnValue(of<UtxoScanState>({ kind: 'scan-failed', message: 'ord down' }));
-    expect(await scanner.classify('aa:0')).toBe('has-assets');
+    // Unknown content fails closed AND offers no detail, because there is none
+    // to offer. A caller must not read absent detail as "nothing on the coin".
+    expect(await scanner.classify('aa:0')).toEqual({ verdict: 'has-assets' });
   });
 });

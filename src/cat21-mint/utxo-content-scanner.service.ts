@@ -1,6 +1,6 @@
 import { BehaviorSubject, Observable, catchError, firstValueFrom, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
 
-import { ContentScanPort, UtxoClassification } from '../cat21-core/ports.js';
+import { ContentScanPort, UtxoAssetDetail, UtxoClassification } from '../cat21-core/ports.js';
 import { Cat21SdkConfig } from './cat21-sdk-config.js';
 import { fetchJson } from './http-fetch.helper.js';
 import { classifyUtxoContent } from './utxo-content.classify.js';
@@ -82,7 +82,20 @@ export class UtxoContentScanner implements ContentScanPort {
    */
   async classify(outpoint: string): Promise<UtxoClassification> {
     const state = await firstValueFrom(this.scan(outpoint));
-    return state.kind === 'scanned-clean' ? 'clean' : 'has-assets';
+    if (state.kind === 'scanned-clean') {
+      return { verdict: 'clean' };
+    }
+    if (state.kind === 'scanned-with-assets') {
+      // Carry WHAT was found, not just that something was. A caller has to name
+      // the assets before anyone can consent to losing them, and this adapter
+      // already holds the answer — flattening it here forced every consumer to
+      // ask the scanner a second time for the names, which is two sources for
+      // one decision and a place for them to disagree.
+      return { verdict: 'has-assets', assets: toAssetDetail(state.content) };
+    }
+    // scanning / not-scanned / scan-failed: content unknown, so fail closed
+    // with no detail to offer.
+    return { verdict: 'has-assets' };
   }
 
   /**
@@ -205,4 +218,18 @@ export class UtxoContentScanner implements ContentScanPort {
 
 function trimSlash(url: string): string {
   return url.endsWith('/') ? url.slice(0, -1) : url;
+}
+
+/**
+ * Project a completed scan onto the port's asset shape. Rune BALANCES stay
+ * behind; the names are what a notice or a picker row shows, and ord's balance
+ * objects are not renderable without `formatRunePile`.
+ */
+function toAssetDetail(content: UtxoContent): UtxoAssetDetail {
+  return {
+    inscriptionIds: content.inscriptionIds,
+    runeNames: content.runes ? Object.keys(content.runes) : [],
+    catIds: content.catIds,
+    rareSat: content.rareSat,
+  };
 }
