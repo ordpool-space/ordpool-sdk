@@ -122,6 +122,7 @@ export * from './cat21-fee/compute-psbt-vsize.helper.js';
 export * from './cat21-fee/min-relay-fee.js';
 export * from './cat21-fee/ord-coin-select.js';
 export * from './cat21-fee/funding-safety.js';
+export * from './cat21-fee/candidate-fees.js';
 
 // --- Orchestration core (ports + async flows; no RxJS — the single source
 //     of truth all three CAT-21 paths compose) ---

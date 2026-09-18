@@ -6,6 +6,7 @@ import {
   recommendFunding,
   WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
+import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import {
   InscribeAndBroadcastArgs,
   InscribeAndBroadcastResult,
@@ -76,6 +77,13 @@ export interface InscribeSimulation {
    * opposite fixes.
    */
   fundingTargetError: string | null;
+  /**
+   * What each candidate coin would cost as the funding input (commit + reveal).
+   * Present so a coin picker (a screen or an agent's API) can show the fee per
+   * row: the dust-absorb rule makes the realised fee differ between coins, so
+   * the cost is part of the choice, not a constant.
+   */
+  candidateFees: CandidateFeeRow[];
 }
 
 interface InscribePlan {
@@ -99,6 +107,7 @@ interface InscribePlan {
    * opposite fixes.
    */
   fundingTargetError: string | null;
+  candidateFees: CandidateFeeRow[];
 }
 
 /**
@@ -155,6 +164,63 @@ function inscribeFundingTarget(params: InscribeCoreParams): { target: number | n
   }
 }
 
+/**
+ * What each candidate coin would cost to inscribe with: the commit + reveal
+ * package fee, measured per coin.
+ *
+ * Unlike the single-tx flows this is a two-transaction package, so the cost is
+ * `totalFeeSats` (commit + reveal) and the size is `combinedVsize`. The commit
+ * half already reflects the dust-absorb rule, which is why the number differs
+ * between coins rather than being one figure for the whole pool.
+ *
+ * A coin below the feasibility target cannot fund the commit at all and is
+ * reported unfundable without simulating. For the rest, a throw is
+ * COIN-specific: the caller only reaches here once `inscribeFundingTarget`
+ * measured successfully, so a malformed param set has already been reported as
+ * `fundingTargetError` rather than being hidden behind a row of nulls.
+ */
+function inscribeCandidateFees(
+  params: InscribeCoreParams,
+  candidates: readonly CoreFundingUtxo[],
+  targetSats: number,
+): CandidateFeeRow[] {
+  return candidates.map((candidate) => {
+    const unfundable = { txid: candidate.txid, vout: candidate.vout, finalFeeSats: null, vsize: null };
+    if (candidate.value < targetSats) return unfundable;
+    try {
+      const fundingInput = prepareInscribeFundingInput({
+        utxo: { txid: candidate.txid, vout: candidate.vout, value: candidate.value, status: { confirmed: true } },
+        paymentPublicKey: params.paymentPublicKey,
+        paymentAddress: params.paymentAddress,
+        isSimulation: true,
+        network: params.network,
+      });
+      const sim = simulateInscribeFees({
+        feeRatePerVbyte: params.feeRatePerVbyte,
+        body: params.body,
+        contentType: params.contentType,
+        envelopeFields: params.envelopeFields,
+        minimalTagPush: params.minimalTagPush,
+        fundingInput,
+        senderChangeAddress: params.paymentAddress,
+        recipientAddress: params.recipientAddress,
+        ephemeralPubkeyXonly: new Uint8Array(32).fill(0x02),
+        tip: params.tip,
+        walletType: params.walletType,
+        network: params.network,
+      });
+      return {
+        txid: candidate.txid,
+        vout: candidate.vout,
+        finalFeeSats: sim.totalFeeSats,
+        vsize: sim.combinedVsize,
+      };
+    } catch {
+      return unfundable;
+    }
+  });
+}
+
 async function planInscribe(
   params: InscribeCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort },
@@ -165,6 +231,7 @@ async function planInscribe(
     return {
       status: 'insufficient', recommendation: empty, pick: null,
       fundingRequirementSats: null, fundingPreferredSats: null, fundingTargetError: targetError,
+      candidateFees: [],
     };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
@@ -176,6 +243,7 @@ async function planInscribe(
   // to a tight coin when none has headroom — never a false insufficient.
   const preferredTarget = target + changeDustFloor(params.paymentAddress);
   const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget, params.fundingTopology);
+  const candidateFees = inscribeCandidateFees(params, recommendation.candidates, target);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
@@ -185,6 +253,7 @@ async function planInscribe(
       fundingRequirementSats: target,
       fundingPreferredSats: preferredTarget,
       fundingTargetError: null,
+      candidateFees,
     };
   }
   return {
@@ -194,6 +263,7 @@ async function planInscribe(
     fundingRequirementSats: target,
     fundingPreferredSats: preferredTarget,
     fundingTargetError: null,
+    candidateFees,
   };
 }
 
@@ -213,6 +283,7 @@ export async function simulateInscribe(
     fundingRequirementSats: plan.fundingRequirementSats,
     fundingPreferredSats: plan.fundingPreferredSats,
     fundingTargetError: plan.fundingTargetError,
+    candidateFees: plan.candidateFees,
   };
 }
 

@@ -6,6 +6,7 @@ import {
   recommendFunding,
   WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
+import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import {
@@ -86,6 +87,22 @@ export interface TransferSimulationResult {
   changeSats: number | null;
   /** Output-0 size actually emitted (the recipient's cat UTXO). */
   catOutputSats: number | null;
+  /**
+   * The two targets selection actually uses. `fundingRequirementSats` is the
+   * feasibility floor: a coin below it cannot fund the transfer at all.
+   * `fundingPreferredSats` is the change-headroom target, and selection PREFERS
+   * a candidate clearing it whenever any does. Anyone choosing a coin size from
+   * the requirement alone is working from half the rule.
+   */
+  fundingRequirementSats: number;
+  fundingPreferredSats: number;
+  /**
+   * What each candidate coin would cost as the funding input. Present so a coin
+   * picker (a screen or an agent's API) can show the fee per row: the
+   * dust-absorb rule makes the realised fee differ between coins, so the cost
+   * is part of the choice, not a constant.
+   */
+  candidateFees: CandidateFeeRow[];
 }
 
 interface TransferPlan {
@@ -96,6 +113,9 @@ interface TransferPlan {
   built: BuildCat21TransferResult | null;
   vsize: number | null;
   buildFeeSats: number | null;
+  requirementSats: number;
+  preferredSats: number;
+  candidateFees: CandidateFeeRow[];
 }
 
 /** Build the transfer PSBT for one funding pick + fee (sim or real). */
@@ -155,7 +175,13 @@ async function planTransfer(
 ): Promise<TransferPlan> {
   const empty = recommendFunding<CoreFundingUtxo & AnnotatedFundingUtxo>([], 0);
   if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
-    return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+    return {
+      status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null,
+      // Not measurable on this path: the targets come from a real build, and
+      // there is either no fee rate or no coin to build against. 0 says
+      // "unknown" honestly rather than implying a floor nobody computed.
+      requirementSats: 0, preferredSats: 0, candidateFees: [],
+    };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
   const measureVsize = (built: { psbt: Uint8Array }) =>
@@ -171,7 +197,13 @@ async function planTransfer(
   // build (vsize depends on input/output TYPES, not values).
   const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
   if (!largest) {
-    return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+    return {
+      status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null,
+      // Not measurable on this path: the targets come from a real build, and
+      // there is either no fee rate or no coin to build against. 0 says
+      // "unknown" honestly rather than implying a floor nobody computed.
+      requirementSats: 0, preferredSats: 0, candidateFees: [],
+    };
   }
   const noChangeVsize = measureVsize(buildTransfer(params, largest, feeBudget(largest.value), true));
   const target = Math.ceil(noChangeVsize * params.feeRatePerVbyte);
@@ -188,6 +220,17 @@ async function planTransfer(
     Math.ceil(noChangeVsize * params.feeRatePerVbyte) +
     changeDustFloor(params.paymentAddress);
   const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget, params.fundingTopology);
+  // Per-coin cost for the picker, on every status: the surface that renders a
+  // choice needs the fee for each row, not only for the row we would have
+  // picked. Same two-pass resolution the chosen coin goes through.
+  const candidateFees = resolveCandidateFees(recommendation.candidates, {
+    simulate: (candidate, feeSats) => {
+      const built = buildTransfer(params, candidate, feeSats, true);
+      return { vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+    },
+    feeBudgetFor: (candidate) => feeBudget(candidate.value),
+    feeRatePerVbyte: params.feeRatePerVbyte,
+  });
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
@@ -197,6 +240,9 @@ async function planTransfer(
       built: null,
       vsize: null,
       buildFeeSats: null,
+      requirementSats: target,
+      preferredSats: preferredTarget,
+      candidateFees,
     };
   }
   // Guess-free per-coin fee: with-change form, falling back to no-change/absorb.
@@ -209,7 +255,10 @@ async function planTransfer(
     feeBudgetSats: feeBudget(pick.value),
   });
   if (!resolved) {
-    return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
+    return {
+      status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null,
+      requirementSats: target, preferredSats: preferredTarget, candidateFees,
+    };
   }
   return {
     status: recommendation.status === 'asset-notice' ? 'asset-notice' : 'ready',
@@ -218,6 +267,9 @@ async function planTransfer(
     built: resolved.built,
     vsize: resolved.vsize,
     buildFeeSats: resolved.finalFeeSats,
+    requirementSats: target,
+    preferredSats: preferredTarget,
+    candidateFees,
   };
 }
 
@@ -240,6 +292,9 @@ export async function simulateTransfer(
     feeSats: plan.built ? plan.built.finalFeeSats : null,
     changeSats: plan.built ? plan.built.changeSats : null,
     catOutputSats: plan.built ? plan.built.catOutputSats : null,
+    fundingRequirementSats: plan.requirementSats,
+    fundingPreferredSats: plan.preferredSats,
+    candidateFees: plan.candidateFees,
   };
 }
 

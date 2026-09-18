@@ -6,6 +6,7 @@ import {
   recommendFunding,
   WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
+import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -96,6 +97,13 @@ export interface MintSimulationResult {
    */
   fundingRequirementSats: number;
   fundingPreferredSats: number;
+  /**
+   * What each candidate coin would cost as the funding input. Present so a coin
+   * picker (a screen or an agent's API) can show the fee per row: the
+   * dust-absorb rule makes the realised fee differ between coins, so the cost
+   * is part of the choice, not a constant.
+   */
+  candidateFees: CandidateFeeRow[];
 }
 
 interface MintPlan {
@@ -107,6 +115,8 @@ interface MintPlan {
   built: BuildCat21MintResult | null;
   vsize: number | null;
   buildFeeSats: number | null;
+  /** What each candidate coin would cost as the funding input. */
+  candidateFees: CandidateFeeRow[];
 }
 
 function buildMint(
@@ -153,7 +163,7 @@ async function planMint(
       // there is either no fee rate or no coin to build against. 0 says
       // "unknown" honestly rather than implying a floor nobody computed.
       requirementSats: 0, preferredSats: 0,
-      pick: null, built: null, vsize: null, buildFeeSats: null,
+      pick: null, built: null, vsize: null, buildFeeSats: null, candidateFees: [],
     };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
@@ -174,7 +184,7 @@ async function planMint(
       // there is either no fee rate or no coin to build against. 0 says
       // "unknown" honestly rather than implying a floor nobody computed.
       requirementSats: 0, preferredSats: 0,
-      pick: null, built: null, vsize: null, buildFeeSats: null,
+      pick: null, built: null, vsize: null, buildFeeSats: null, candidateFees: [],
     };
   }
   const noChangeVsize = measureVsize(buildMint(params, largest, largest.value - fixedOutputs, true));
@@ -199,6 +209,17 @@ async function planMint(
     changeDustFloor(params.paymentAddress);
 
   const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget, params.fundingTopology);
+  // Per-coin cost for the picker, on every status: the surface that renders a
+  // choice needs the fee for each row, not only for the row we would have
+  // picked. Same two-pass resolution the chosen coin goes through.
+  const candidateFees = resolveCandidateFees(recommendation.candidates, {
+    simulate: (candidate, feeSats) => {
+      const built = buildMint(params, candidate, feeSats, true);
+      return { vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+    },
+    feeBudgetFor: (candidate) => candidate.value - fixedOutputs,
+    feeRatePerVbyte: params.feeRatePerVbyte,
+  });
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
@@ -210,6 +231,7 @@ async function planMint(
       built: null,
       vsize: null,
       buildFeeSats: null,
+      candidateFees,
     };
   }
   // Guess-free per-coin fee: measures the with-change form, falls back to the
@@ -229,7 +251,7 @@ async function planMint(
     return {
       status: 'insufficient', recommendation,
       requirementSats: target, preferredSats: preferredTarget,
-      pick: null, built: null, vsize: null, buildFeeSats: null,
+      pick: null, built: null, vsize: null, buildFeeSats: null, candidateFees,
     };
   }
   return {
@@ -241,6 +263,7 @@ async function planMint(
     built: resolved.built,
     vsize: resolved.vsize,
     buildFeeSats: resolved.finalFeeSats,
+    candidateFees,
   };
 }
 
@@ -263,6 +286,7 @@ export async function simulateMint(
     changeSats: plan.built ? plan.built.changeSats : null,
     fundingRequirementSats: plan.requirementSats,
     fundingPreferredSats: plan.preferredSats,
+    candidateFees: plan.candidateFees,
   };
 }
 
