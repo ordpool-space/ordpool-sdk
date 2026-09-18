@@ -125,6 +125,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
       const text = (document.body.innerText || '').toLowerCase();
       return text.includes('restore') && text.includes('create');
     },
+    undefined,
     { timeout: 30_000 },
   );
   await shot(page, '01-welcome');
@@ -234,6 +235,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
           || text.includes('we found funds')
           || /bc1[qp][a-z0-9]{20,}/.test(document.body.innerText || '');
     },
+    undefined,
     { timeout: 90_000 },
   );
   await shot(page, '07-after-scan');
@@ -261,6 +263,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
         if (!c) return false;
         return !c.hasAttribute('disabled') && getComputedStyle(c).pointerEvents !== 'none';
       },
+      undefined,
       { timeout: 10_000 },
     );
     await commit.click();

@@ -5,6 +5,7 @@
 // MUST stay green-or-loudly-failing on every CI run.
 
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { clickUntilEffect } from '../click-until-effect';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -183,7 +184,14 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await expect(continueBtn).toBeVisible({ timeout: 10_000 });
   await continueBtn.scrollIntoViewIfNeeded();
   await shot(page, '08c-before-continue-click');
-  await continueBtn.click();
+  // The address-type row above re-renders on selection, so this button can be
+  // replaced between the locator resolving and the click landing. The shared
+  // onboard-wizz helper hit exactly this and reported it as "Security Tips:
+  // element(s) not found", one step from the cause; this spec drives the same
+  // screens with its own copy of the flow, so it needs the same treatment.
+  await clickUntilEffect(continueBtn, page.getByText('Security Tips', { exact: true }), {
+    label: 'wizz onboarding spec: continue after address type',
+  });
   await shot(page, '08d-after-continue-click');
 
   // ─── Phase 6b: Security Tips modal ───

@@ -162,7 +162,7 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   }
 
   // Wait for the SDK harness bundle to run + set its ready flag.
-  await page.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, { timeout: 15_000 });
+  await page.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined, { timeout: 15_000 });
   await shot(page, '01-harness-loaded');
 
   // sats-connect's getAddress triggers Xverse to open its approval

@@ -192,7 +192,7 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
   // eslint-disable-next-line no-console
   harness.on('console', (m) => console.log(`[H] ${m.text()}`));
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
-  await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, { timeout: 15_000 });
+  await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined, { timeout: 15_000 });
 
   const connectPagePromise = context.waitForEvent('page', { timeout: 60_000 });
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));

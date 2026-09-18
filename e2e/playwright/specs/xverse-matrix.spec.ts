@@ -243,7 +243,7 @@ for (const variant of VARIANTS) {
       // Drive the SDK harness for the address.
       const harness = await context.newPage();
       await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
-      await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, { timeout: 15_000 });
+      await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined, { timeout: 15_000 });
 
       const networkArg = variant.network === 'bitcoin-mainnet' ? 'mainnet'
         : variant.network === 'bitcoin-testnet4' ? 'testnet4'
