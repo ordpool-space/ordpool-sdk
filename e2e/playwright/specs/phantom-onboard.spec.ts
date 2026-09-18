@@ -8,6 +8,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { cdpClick } from '../cdp-click';
+import { waitForPageShowing } from '../approval-popup';
 
 /**
  * Iteration 2 of the OKX E2E pipeline: restore from the BIP-39 test

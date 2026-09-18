@@ -117,9 +117,6 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, d
  * one just confirmed (OKX reuses pages + exposes no per-request testid).
  */
 async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () => boolean): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  let approval: Page | null = null;
-  while (Date.now() < deadline) {
   // Two outcomes are legitimate here, so they race: OKX may present a signing
   // popup, or it may auto-approve for the connected dapp and present nothing.
   //
