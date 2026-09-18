@@ -238,3 +238,69 @@ export async function clickApprovalButton(
     throw e;
   }
 }
+
+/**
+ * Wait for the extension page that is offering a CONFIRM BUTTON.
+ *
+ * Replaces a pattern that was hand-copied across most wallet specs: poll every
+ * extension page's body text every 500ms against a list of headings, until a
+ * deadline. That shape has two defects, and neither is a property of the wallet.
+ *
+ * It makes the result depend on MACHINE SPEED. One such spec passed in 5.4
+ * seconds on an idle runner and timed out at 120 on a loaded one, with
+ * identical code and extension. A test whose verdict moves with CPU contention
+ * is a bad test, not an unlucky one.
+ *
+ * And it couples the spec to the wallet's COPY. Wallets rename headings between
+ * releases, so a rename reads as a broken flow.
+ *
+ * A confirm button is what the caller needs next, so waiting for it removes the
+ * gap between "a heading appeared" and "something is clickable", and it is
+ * driven by Playwright's own event-based waiting rather than a busy loop. The
+ * search covers pages that are ALREADY open as well as ones that appear, which
+ * matters for wallets that reuse one notification page across approvals.
+ */
+export async function waitForApprovalByConfirmButton(opts: {
+  context: BrowserContext;
+  /** What the confirm control says. Default covers the common wallet verbs. */
+  buttonText?: RegExp;
+  timeoutMs?: number;
+  /** Named in the failure message, e.g. 'mint' or 'listing-message'. */
+  label?: string;
+}): Promise<Page> {
+  const buttonText = opts.buttonText ?? /^(Confirm|Sign|Approve)$/;
+  const timeoutMs = opts.timeoutMs ?? 60_000;
+  const label = opts.label ?? 'approval';
+
+  try {
+    return await waitForApprovalPopup({
+      context: opts.context,
+      // Empty on purpose: a wallet may serve this approval from the SAME page
+      // it used for an earlier one, and a populated set would skip it.
+      knownPages: new Set<Page>(),
+      timeoutMs,
+      isApproval: async (p) => {
+        if (!p.url().startsWith('chrome-extension://')) return false;
+        await p.getByText(buttonText, { exact: true }).first()
+          .waitFor({ state: 'visible', timeout: timeoutMs });
+        return true;
+      },
+    });
+  } catch (e) {
+    const seen = await Promise.all(
+      opts.context.pages()
+        .filter((p) => p.url().startsWith('chrome-extension://'))
+        .map(async (p) => {
+          const text = await p.locator('body').innerText().catch(() => '<unreadable>');
+          return `${p.url().slice(0, 60)} => ${text.trim().split('\n')[0]?.slice(0, 80) || '<empty>'}`;
+        }),
+    );
+    throw new Error(
+      `${label}: no extension page offered a confirm button within ${timeoutMs}ms (${(e as Error).message})\n` +
+      `Extension pages at timeout (${seen.length}):\n` +
+      (seen.length ? seen.map((l) => `  - ${l}`).join('\n') : '  <none>') +
+      '\nA page shown as <empty> opened and never painted, which is a different failure ' +
+      'from one that painted something this matcher does not recognise.',
+    );
+  }
+}

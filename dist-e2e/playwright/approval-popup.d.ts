@@ -107,4 +107,33 @@ export declare function clickApprovalButton(button: {
 }, page: {
     isClosed: () => boolean;
 }, timeoutMs?: number): Promise<void>;
+/**
+ * Wait for the extension page that is offering a CONFIRM BUTTON.
+ *
+ * Replaces a pattern that was hand-copied across most wallet specs: poll every
+ * extension page's body text every 500ms against a list of headings, until a
+ * deadline. That shape has two defects, and neither is a property of the wallet.
+ *
+ * It makes the result depend on MACHINE SPEED. One such spec passed in 5.4
+ * seconds on an idle runner and timed out at 120 on a loaded one, with
+ * identical code and extension. A test whose verdict moves with CPU contention
+ * is a bad test, not an unlucky one.
+ *
+ * And it couples the spec to the wallet's COPY. Wallets rename headings between
+ * releases, so a rename reads as a broken flow.
+ *
+ * A confirm button is what the caller needs next, so waiting for it removes the
+ * gap between "a heading appeared" and "something is clickable", and it is
+ * driven by Playwright's own event-based waiting rather than a busy loop. The
+ * search covers pages that are ALREADY open as well as ones that appear, which
+ * matters for wallets that reuse one notification page across approvals.
+ */
+export declare function waitForApprovalByConfirmButton(opts: {
+    context: BrowserContext;
+    /** What the confirm control says. Default covers the common wallet verbs. */
+    buttonText?: RegExp;
+    timeoutMs?: number;
+    /** Named in the failure message, e.g. 'mint' or 'listing-message'. */
+    label?: string;
+}): Promise<Page>;
 //# sourceMappingURL=approval-popup.d.ts.map

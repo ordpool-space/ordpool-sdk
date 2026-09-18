@@ -3,7 +3,12 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import {
+  clickApprovalButton,
+  waitForApprovalByConfirmButton,
+  waitForApprovalPopup,
+  closeLeftoverExtensionPages,
+} from '../approval-popup';
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardOkx } from '../onboard-okx';
@@ -47,58 +52,28 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
  * heading rather than relying on knownPages. Then dismiss the optional
  * "Asset transfer pending" promo modal and click Confirm.
  */
-/**
- * The Page object of the last approval we drove. OKX serves every popup from
- * one notification.html, so a URL cannot tell a REUSED page from a fresh one at
- * the same address; only object identity can, and that is the difference the
- * open-but-blank failure turns on.
- */
-let lastApprovalPage: Page | null = null;
-
 async function approveSignMessagePopup(ctx: BrowserContext, label: string): Promise<void> {
-  const deadline = Date.now() + 120_000;
-  let approval: Page | null = null;
-  // Last thing each extension page was showing, so a timeout can say whether
-  // the popup never opened, opened blank, or opened with a heading this regex
-  // does not know. A bare "never showed" cannot distinguish those, and the
-  // three have different causes.
-  let lastSeen: string[] = [];
-  while (Date.now() < deadline) {
-    const seen: string[] = [];
-    for (const p of ctx.pages()) {
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '<unreadable>');
-      seen.push(`${p.url().slice(0, 60)} => ${text.trim().split('\n')[0]?.slice(0, 80) || '<empty>'}`);
-      if (/Signature request|Confirm Trade|Sign Message|Sign message/i.test(text)) { approval = p; break; }
-    }
-    lastSeen = seen;
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (!approval) {
-    throw new Error(
-      `OKX sign-message popup never showed a signature-request heading within 120s (${label}).\n` +
-      `Extension pages at timeout (${lastSeen.length}):\n` +
-      (lastSeen.length ? lastSeen.map((l) => `  - ${l}`).join('\n') : '  <none>') +
-      `\nPrevious approval page: ${
-        lastApprovalPage === null
-          ? '<none, this is the first>'
-          : lastApprovalPage.isClosed()
-            ? 'CLOSED, so the blank page is a NEW one that never painted'
-            : ctx.pages().includes(lastApprovalPage)
-              ? 'STILL OPEN and still in the context — if the blank page is this same object, OKX reused it and never re-rendered'
-              : 'still open but no longer in the context'
-      }` +
-      '\nObserved, cause NOT established: this has only ever failed on the SECOND approval, ' +
-      'while every other okx spec in the same job passes, including onboarding (which reaches ' +
-      "OKX's servers) and five specs that open and click a signing popup. So the runner's egress " +
-      'works and OKX can paint. A blank page here is therefore specific to a second message-sign ' +
-      'in one session, and OKX reuses the connect popup page for signing (see above), which is ' +
-      'the first thing to check.',
-    );
-  }
+  // Wait for the CONFIRM BUTTON, not for heading text.
+  //
+  // The previous version polled every extension page's body text every 500ms
+  // against a list of headings, for two minutes. That made the result depend on
+  // machine speed (the same spec passes in 5.4s on an idle runner and timed out
+  // at 120s on a loaded one) and on OKX's copy, which it renames across
+  // releases. Both are properties of the test rather than of the wallet.
+  //
+  // The button is what the next line actually needs, so waiting for it removes
+  // the gap between "a heading appeared" and "something is clickable", and
+  // Playwright's own waiting is event-driven rather than a busy-wait.
+  //
+  // An EMPTY knownPages is deliberate: OKX serves signing from the same
+  // notification page it used for connect, so a set carrying that page would
+  // make the helper skip the very page the popup lives on.
+  const approval = await waitForApprovalByConfirmButton({
+    context: ctx,
+    label: `OKX ${label} signing popup`,
+  });
+
   await shot(approval, `02a-sign-message-approval-${label}`);
-  lastApprovalPage = approval;
 
   const promo = approval.getByText('Asset transfer pending');
   if (await promo.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -106,7 +81,12 @@ async function approveSignMessagePopup(ctx: BrowserContext, label: string): Prom
     await closeBtn.click({ force: true }).catch(() => undefined);
     await promo.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
   }
-  await approval.getByText(/^(Confirm|Sign|Approve)$/, { exact: true }).first().click({ timeout: 45_000 });
+  // OKX closes this popup on accepting the click; see clickApprovalButton.
+  await clickApprovalButton(
+    approval.getByText(/^(Confirm|Sign|Approve)$/, { exact: true }).first(),
+    approval,
+    45_000,
+  );
 }
 
 test.beforeAll(async () => {
