@@ -610,7 +610,14 @@ export async function waitForOrdWalletCardinal(
       const outputs = JSON.parse(ordWalletCli(walletName, 'outputs')) as Array<{
         output: string; amount: number; inscriptions?: string[];
       }>;
-      lastSeen = outputs.map(o => `${o.output}=${o.amount}${o.inscriptions?.length ? ' (inscribed)' : ''}`).join(', ') || '<empty>';
+      // Name what ord thinks is on each output. "(inscribed)" alone cannot
+      // distinguish a cat (cat21-ord indexes nLockTime=21 txs as fake
+      // inscriptions, so a funding coin whose sats passed through one is
+      // labelled inscribed) from a real inscription, and those have different
+      // causes and different fixes.
+      lastSeen = outputs
+        .map(o => `${o.output}=${o.amount}${o.inscriptions?.length ? ` inscribed[${o.inscriptions.join('|')}]` : ''}`)
+        .join(', ') || '<empty>';
       const cardinal = outputs.find(o => o.amount >= minSats && !(o.inscriptions && o.inscriptions.length));
       if (cardinal) return;
     } catch (e) {
@@ -620,7 +627,12 @@ export async function waitForOrdWalletCardinal(
   }
   throw new Error(
     `ord wallet "${walletName}" never showed a cardinal of >= ${minSats} sats within ${timeoutMs}ms. ` +
-    `Its --no-sync view held: ${lastSeen}`,
+    `Its --no-sync view held: ${lastSeen}\n` +
+    'If the funding coin itself is listed as inscribed, this is NOT a sync race: ord genuinely ' +
+    'has no cardinal to spend, which is the same fact `ord wallet send` reports as "not enough ' +
+    'cardinal UTXOs". On a chain indexed with --index-cat21 that happens when the coin\'s sats ' +
+    'passed through an nLockTime=21 transaction, so the fix is to fund from sats that cannot ' +
+    'have, not to wait longer.',
   );
 }
 
