@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardOkx = onboardOkx;
 const test_1 = require("@playwright/test");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
+const cdp_click_1 = require("./cdp-click");
 /**
  * Drive OKX v4.1.0 onboarding from welcome to dashboard. Multi-page,
  * multi-iframe flow (CI iterations 22-31, 2026-05-31):
@@ -36,16 +37,7 @@ async function onboardOkx(page, extensionId, opts = {}) {
     const importBtn = page.getByTestId('onboard-page-import-wallet-button');
     await (0, test_1.expect)(importBtn).toBeVisible({ timeout: 10_000 });
     const cdp = await page.context().newCDPSession(page);
-    const box = await importBtn.boundingBox();
-    if (box) {
-        const x = box.x + box.width / 2;
-        const y = box.y + box.height / 2;
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 20, y: y - 20, button: 'none', buttons: 0 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 5, y: y - 5, button: 'none', buttons: 0 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
+    await (0, cdp_click_1.cdpClick)(page, importBtn, 'the OKX import-wallet button');
     await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
     const stillOnWelcome = await page.locator('text="Your portal to Web3"').isVisible({ timeout: 3_000 }).catch(() => false);
     if (stillOnWelcome) {
@@ -56,14 +48,7 @@ async function onboardOkx(page, extensionId, opts = {}) {
     }
     const seedOption = page.getByText('Seed phrase or private key', { exact: true });
     await (0, test_1.expect)(seedOption).toBeVisible({ timeout: 15_000 });
-    const seedBox = await seedOption.boundingBox();
-    if (seedBox) {
-        const x = seedBox.x + seedBox.width / 2;
-        const y = seedBox.y + seedBox.height / 2;
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
+    await (0, cdp_click_1.cdpClick)(page, seedOption, 'the OKX seed-phrase option');
     // Seed form inside #ui-ses-iframe.
     const seedFrame = page.frameLocator('#ui-ses-iframe');
     await (0, test_1.expect)(seedFrame.locator('text="My seed phrase has"').first()).toBeVisible({ timeout: 30_000 });

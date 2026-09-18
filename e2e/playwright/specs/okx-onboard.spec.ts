@@ -7,6 +7,7 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { cdpClick } from '../cdp-click';
 
 /**
  * Iteration 2 of the OKX E2E pipeline: restore from the BIP-39 test
@@ -110,19 +111,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // checks require the mouse to have moved through multiple
   // positions before the click registers.
   const cdp = await page.context().newCDPSession(page);
-  const box = await importBtn.boundingBox();
-  if (box) {
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
-    // Move through intermediate positions, hover briefly, then click.
-    // OKX's anti-automation may require both pointer-move history AND
-    // a click-after-stable-hover sequence.
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 20, y: y - 20, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 5, y: y - 5, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-  }
+  await cdpClick(page, importBtn, 'the OKX import-wallet button');
   // Fallback: also dispatch a Playwright force-click as a belt-and-
   // suspenders in case the CDP click was absorbed by an overlay.
   await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
@@ -147,14 +136,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // regular Playwright clicks the same way the welcome button does).
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible({ timeout: 15_000 });
-  const seedBox = await seedOption.boundingBox();
-  if (seedBox) {
-    const x = seedBox.x + seedBox.width / 2;
-    const y = seedBox.y + seedBox.height / 2;
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-  }
+  await cdpClick(page, seedOption, 'the OKX seed-phrase option');
   // OKX renders the 12-input seed-phrase form inside an iframe
   // (#ui-ses-iframe-container). body.innerText on the page returns
   // almost nothing — main-container-wrapper is empty in the parent

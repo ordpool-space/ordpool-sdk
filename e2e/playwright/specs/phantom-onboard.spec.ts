@@ -7,6 +7,7 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { cdpClick } from '../cdp-click';
 
 /**
  * Iteration 2 of the OKX E2E pipeline: restore from the BIP-39 test
@@ -98,15 +99,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // through page.mouse.move+down+up (CI 26621231674..26650482318).
   // Drop to raw CDP Input.dispatchMouseEvent — one layer below
   // page.mouse — with explicit clickCount and buttons params.
-  const cdp = await page.context().newCDPSession(page);
-  const box = await importBtn.boundingBox();
-  if (box) {
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-  }
+  await cdpClick(page, importBtn, 'the "I Already Have a Wallet" button');
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
@@ -119,14 +112,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // Use the same CDP click for this one.
   const recoveryBtn = page.getByRole('button', { name: /Import Recovery Phrase/i });
   await expect(recoveryBtn).toBeVisible({ timeout: 20_000 });
-  const recoveryBox = await recoveryBtn.boundingBox();
-  if (recoveryBox) {
-    const x = recoveryBox.x + recoveryBox.width / 2;
-    const y = recoveryBox.y + recoveryBox.height / 2;
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-  }
+  await cdpClick(page, recoveryBtn, 'the "Import Recovery Phrase" button');
   await shot(page, '03-recovery-phrase-picked');
   await dumpHtml(page, '03-recovery-phrase-picked');
 
@@ -198,13 +184,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   }, undefined, { timeout: 45_000, polling: 500 });
   const importAccountsContinue = page.getByText('Continue', { exact: true }).first();
   const newCdp = await page.context().newCDPSession(page);
-  const b = await importAccountsContinue.boundingBox();
-  if (b) {
-    const x = b.x + b.width / 2; const y = b.y + b.height / 2;
-    await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await newCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-  }
+  await cdpClick(page, importAccountsContinue, 'the import-accounts Continue button');
   await shot(page, '05b-after-import-accounts-continue');
   await dumpHtml(page, '05b-after-import-accounts-continue');
 
@@ -261,14 +241,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
     return true;
   }, undefined, { timeout: 30_000, polling: 500 });
   const pwContinue = page.getByText('Continue', { exact: true }).first();
-  const pwCdp = await page.context().newCDPSession(page);
-  const pwBox = await pwContinue.boundingBox();
-  if (pwBox) {
-    const x = pwBox.x + pwBox.width / 2; const y = pwBox.y + pwBox.height / 2;
-    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-  }
+  await cdpClick(page, pwContinue, 'the password Continue button');
   await shot(page, '07-after-password-submit');
 
   // Phantom's onboarding completes on a "You're good to go!" screen

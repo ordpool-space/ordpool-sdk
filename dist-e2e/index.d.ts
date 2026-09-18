@@ -3,6 +3,7 @@ export * from './playwright/onboard-wizz';
 export * from './playwright/wizz-offline-routes';
 export * from './playwright/alby-auto-approve';
 export * from './playwright/onboard-leather';
+export * from './playwright/cdp-click';
 export * from './playwright/onboard-okx';
 export * from './playwright/onboard-phantom';
 export * from './playwright/onboard-alby';

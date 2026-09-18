@@ -1,6 +1,7 @@
 import { expect, Page } from '@playwright/test';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
+import { cdpClick } from './cdp-click';
 
 /**
  * Drive OKX v4.1.0 onboarding from welcome to dashboard. Multi-page,
@@ -42,16 +43,7 @@ export async function onboardOkx(
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
   await expect(importBtn).toBeVisible({ timeout: 10_000 });
   const cdp = await page.context().newCDPSession(page);
-  const box = await importBtn.boundingBox();
-  if (box) {
-    const x = box.x + box.width / 2;
-    const y = box.y + box.height / 2;
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 20, y: y - 20, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - 5, y: y - 5, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-  }
+  await cdpClick(page, importBtn, 'the OKX import-wallet button');
   await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
   const stillOnWelcome = await page.locator('text="Your portal to Web3"').isVisible({ timeout: 3_000 }).catch(() => false);
   if (stillOnWelcome) {
@@ -63,14 +55,7 @@ export async function onboardOkx(
 
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible({ timeout: 15_000 });
-  const seedBox = await seedOption.boundingBox();
-  if (seedBox) {
-    const x = seedBox.x + seedBox.width / 2;
-    const y = seedBox.y + seedBox.height / 2;
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-  }
+  await cdpClick(page, seedOption, 'the OKX seed-phrase option');
 
   // Seed form inside #ui-ses-iframe.
   const seedFrame = page.frameLocator('#ui-ses-iframe');

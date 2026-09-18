@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardPhantom = onboardPhantom;
 const test_1 = require("@playwright/test");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
+const cdp_click_1 = require("./cdp-click");
 /**
  * Drive Phantom v26 onboarding from welcome to the "You're good to go"
  * completion screen. Multi-page flow (CI iterations 22-30, 2026-05-31):
@@ -27,26 +28,6 @@ const wallet_test_vectors_1 = require("./wallet-test-vectors");
  *     CDP+pointer-event volley and leave the wallet on the completion
  *     screen — callers can navigate to popup.html afterwards.
  */
-/**
- * The centre of an element that must be there, for a CDP mouse dispatch.
- *
- * `boundingBox()` returns null for an element that is not laid out, and the
- * pattern this replaces was `const box = await x.boundingBox(); if (box) { ...click... }`:
- * when the box was null the CLICK WAS SILENTLY SKIPPED and the next
- * `waitForFunction` then burned its full ceiling waiting for a screen that
- * could never arrive. The failure surfaced 60 s later as a timeout on an
- * unrelated condition, with nothing pointing at the click that never happened.
- *
- * Waiting for the box makes the step either happen or fail where it is.
- */
-async function centreOf(locator, what) {
-    await locator.waitFor({ state: 'visible', timeout: 15_000 });
-    const box = await locator.boundingBox();
-    if (box === null) {
-        throw new Error(`onboard-phantom: ${what} is visible but has no layout box, so the click cannot be dispatched`);
-    }
-    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-}
 async function onboardPhantom(page, extensionId, opts = {}) {
     const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.phantom;
     const mnemonicWords = (opts.mnemonicWords ?? wallet_test_vectors_1.TEST_MNEMONIC_WORDS.join(' ')).split(' ');
@@ -57,25 +38,10 @@ async function onboardPhantom(page, extensionId, opts = {}) {
     }
     const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
     await (0, test_1.expect)(importBtn).toBeVisible({ timeout: 30_000 });
-    const cdp = await page.context().newCDPSession(page);
-    const box = await importBtn.boundingBox();
-    if (box) {
-        const x = box.x + box.width / 2;
-        const y = box.y + box.height / 2;
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
+    await (0, cdp_click_1.cdpClick)(page, importBtn, 'the "I Already Have a Wallet" button');
     const recoveryBtn = page.getByRole('button', { name: /Import Recovery Phrase/i });
     await (0, test_1.expect)(recoveryBtn).toBeVisible({ timeout: 20_000 });
-    const recoveryBox = await recoveryBtn.boundingBox();
-    if (recoveryBox) {
-        const x = recoveryBox.x + recoveryBox.width / 2;
-        const y = recoveryBox.y + recoveryBox.height / 2;
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-        await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
+    await (0, cdp_click_1.cdpClick)(page, recoveryBtn, 'the "Import Recovery Phrase" button');
     const mnemonicInputs = page.locator('input, textarea');
     await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
     const inputCount = await mnemonicInputs.count();
@@ -119,15 +85,7 @@ async function onboardPhantom(page, extensionId, opts = {}) {
         return true;
     }, undefined, { timeout: 45_000, polling: 500 });
     const importAccountsContinue = page.getByText('Continue', { exact: true }).first();
-    const newCdp = await page.context().newCDPSession(page);
-    const b = await importAccountsContinue.boundingBox();
-    if (b) {
-        const x = b.x + b.width / 2;
-        const y = b.y + b.height / 2;
-        await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-        await newCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-        await newCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-    }
+    await (0, cdp_click_1.cdpClick)(page, importAccountsContinue, 'the import-accounts Continue button');
     // Create a password screen opens on yet another page.
     const createPwDeadline = Date.now() + 60_000;
     let pwPage = null;
@@ -171,17 +129,16 @@ async function onboardPhantom(page, extensionId, opts = {}) {
         return true;
     }, undefined, { timeout: 30_000, polling: 500 });
     const pwContinue = page.getByText('Continue', { exact: true }).first();
-    const pwCdp = await page.context().newCDPSession(page);
-    const { x, y } = await centreOf(pwContinue, 'the password Continue button');
-    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-    await pwCdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
+    await (0, cdp_click_1.cdpClick)(page, pwContinue, 'the password Continue button');
     await page.waitForFunction(() => {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes("you're good to go") || t.includes('get started')
             || t.includes('send') || t.includes('receive') || t.includes('balance');
     }, undefined, { timeout: 60_000, polling: 500 });
-    // Best-effort Get Started click — unlikely to land, but harmless if not.
+    // Best-effort Get Started click: unlikely to land, harmless if not. This one
+    // keeps its box guard ON PURPOSE, because skipping it is the documented
+    // behaviour rather than a silent failure. Every REQUIRED click above goes
+    // through cdpClick and fails naming itself instead.
     const gsLocator = page.getByText('Get Started', { exact: true }).first();
     if (await gsLocator.isVisible({ timeout: 5_000 }).catch(() => false)) {
         await page.bringToFront();
