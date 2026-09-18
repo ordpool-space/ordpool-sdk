@@ -16,7 +16,13 @@ import { BrowserContext } from '@playwright/test';
  *     see handler attachment, so the click retries until the popup
  *     closes — the success signal of an accepted approval.
  */
+export interface AlbyAutoApproveHandle {
+    /** How many popups this listener actually clicked through. */
+    approved: () => number;
+    /** Every extension page it considered, with the first line it was showing. */
+    seen: () => string[];
+}
 export declare function installAlbyAutoApprove(context: BrowserContext, opts?: {
     labels?: RegExp;
-}): void;
+}): AlbyAutoApproveHandle;
 //# sourceMappingURL=alby-auto-approve.d.ts.map

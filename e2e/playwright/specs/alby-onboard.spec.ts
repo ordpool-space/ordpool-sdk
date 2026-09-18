@@ -133,12 +133,16 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
   // the public alby.webbtc API. We need to auto-click any Alby
   // popups that appear (alby.enable() permission, getAddress
   // confirmation).
-  installAlbyAutoApprove(context, { labels: /^(connect|allow|confirm|approve)$/i });
+  const approver = installAlbyAutoApprove(context, { labels: /^(connect|allow|confirm|approve)$/i });
 
   const probePage = await context.newPage();
   await probePage.goto('http://localhost:4500/', { waitUntil: 'domcontentloaded' });
 
-  const address = await probePage.evaluate(async () => {
+  // Bounded, and it says what it saw. Unbounded this hangs on a permission
+  // popup that was never approved (a renamed button label, or one Alby served
+  // from a page the listener missed) until the whole test budget expires, and
+  // the only evidence is "target closed after 3 minutes".
+  const derive = probePage.evaluate(async () => {
     interface WebBtc { enable?(): Promise<void>; getAddress(): Promise<{ address: string } | string> }
     interface AlbyApi { enable(): Promise<void>; webbtc: WebBtc }
     const alby = (window as unknown as { alby: AlbyApi }).alby;
@@ -147,6 +151,17 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
     const res = await alby.webbtc.getAddress();
     return typeof res === 'string' ? res : res.address;
   });
+  const address = await Promise.race([
+    derive,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(
+      'alby.webbtc.getAddress() did not return within 90s. ' +
+      `Auto-approver clicked ${approver.approved()} popup(s); extension pages it considered:\n` +
+      (approver.seen().length ? approver.seen().map((l) => `  - ${l}`).join('\n') : '  <none>') +
+      '\nZero approvals with pages listed means a permission popup appeared and its button ' +
+      'did not match the label regex. Zero approvals with none listed means no popup was ever ' +
+      'opened, so the call is stuck before the permission step.',
+    )), 90_000)),
+  ]);
   // eslint-disable-next-line no-console
   console.log(`[alby-onboard] derived address = ${address}`);
 
