@@ -69,6 +69,13 @@ export interface InscribeSimulation {
    * rule.
    */
   fundingPreferredSats: number | null;
+  /**
+   * Why the targets are null, when they are. Null on a healthy plan. A caller
+   * seeing `insufficient` with populated targets has a coin problem; one seeing
+   * `insufficient` with a message here has a PARAMS problem, and those want
+   * opposite fixes.
+   */
+  fundingTargetError: string | null;
 }
 
 interface InscribePlan {
@@ -85,6 +92,13 @@ interface InscribePlan {
    * rule.
    */
   fundingPreferredSats: number | null;
+  /**
+   * Why the targets are null, when they are. Null on a healthy plan. A caller
+   * seeing `insufficient` with populated targets has a coin problem; one seeing
+   * `insufficient` with a message here has a PARAMS problem, and those want
+   * opposite fixes.
+   */
+  fundingTargetError: string | null;
 }
 
 /**
@@ -93,8 +107,20 @@ interface InscribePlan {
  * wallet-default-shaped dummy funding input — known before any coin is chosen.
  * Returns null when the content can't be simulated (unbuildable).
  */
-function inscribeFundingTarget(params: InscribeCoreParams): number | null {
-  if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) return null;
+/**
+ * The feasibility target, plus WHY when it cannot be computed.
+ *
+ * Everything here runs inside a try, because a malformed param set throws deep
+ * in address or key handling rather than returning anything. Swallowing that
+ * into a bare null is what made a caller's `insufficient` unexplainable: a
+ * missing `network`, an address that does not match its network, or a pubkey
+ * that is not a curve point all looked identical to "your coin is too small".
+ * So the reason travels with the null.
+ */
+function inscribeFundingTarget(params: InscribeCoreParams): { target: number | null; error: string | null } {
+  if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
+    return { target: null, error: `feeRatePerVbyte must be positive; got ${String(params.feeRatePerVbyte)}` };
+  }
   try {
     const fundingInput = prepareInscribeFundingInput({
       utxo: { txid: '0'.repeat(64), vout: 0, value: 100_000_000, status: { confirmed: true } },
@@ -117,9 +143,15 @@ function inscribeFundingTarget(params: InscribeCoreParams): number | null {
       walletType: params.walletType,
       network: params.network,
     });
-    return sim.fundingRequirementSats;
-  } catch {
-    return null;
+    return { target: sim.fundingRequirementSats, error: null };
+  } catch (e) {
+    return {
+      target: null,
+      error:
+        `could not measure the inscribe target: ${(e as Error).message}. ` +
+        'Check that `network` is set and that paymentAddress / recipientAddress belong to it, ' +
+        'and that paymentPublicKey is the key for paymentAddress.',
+    };
   }
 }
 
@@ -128,9 +160,12 @@ async function planInscribe(
   ports: { utxos: UtxosPort; scan: ContentScanPort },
 ): Promise<InscribePlan> {
   const empty = recommendFunding<CoreFundingUtxo & AnnotatedFundingUtxo>([], 0);
-  const target = inscribeFundingTarget(params);
+  const { target, error: targetError } = inscribeFundingTarget(params);
   if (target == null) {
-    return { status: 'insufficient', recommendation: empty, pick: null, fundingRequirementSats: null, fundingPreferredSats: null };
+    return {
+      status: 'insufficient', recommendation: empty, pick: null,
+      fundingRequirementSats: null, fundingPreferredSats: null, fundingTargetError: targetError,
+    };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
   // `target` already reflects the WITH-CHANGE commit fee (simulated against a
@@ -149,6 +184,7 @@ async function planInscribe(
       pick: null,
       fundingRequirementSats: target,
       fundingPreferredSats: preferredTarget,
+      fundingTargetError: null,
     };
   }
   return {
@@ -157,6 +193,7 @@ async function planInscribe(
     pick,
     fundingRequirementSats: target,
     fundingPreferredSats: preferredTarget,
+    fundingTargetError: null,
   };
 }
 
@@ -175,6 +212,7 @@ export async function simulateInscribe(
     fundingUtxo: plan.pick,
     fundingRequirementSats: plan.fundingRequirementSats,
     fundingPreferredSats: plan.fundingPreferredSats,
+    fundingTargetError: plan.fundingTargetError,
   };
 }
 

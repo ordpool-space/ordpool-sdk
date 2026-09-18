@@ -127,3 +127,36 @@ describe('inscribe.core — both funding targets are reachable', () => {
     expect(sim.fundingPreferredSats!).toBeGreaterThan(sim.fundingRequirementSats!);
   });
 });
+
+describe('inscribe.core — an unmeasurable target says WHY', () => {
+  // A caller cannot act on `insufficient` without knowing whether its COIN is
+  // too small or its PARAMS are wrong, and those want opposite fixes. The bare
+  // catch that used to sit here made both look identical.
+  it('reports the reason when the params cannot produce a target', async () => {
+    const sim = await simulateInscribe(
+      // A payment address that is not a real address throws deep in address
+      // handling, which is the shape a missing `network` also produces.
+      { ...params(), paymentAddress: 'not-an-address' },
+      { utxos: utxosPort([coin('a', 10_000_000)]), scan: scanPort() },
+    );
+    expect(sim.status).toBe('insufficient');
+    expect(sim.fundingRequirementSats).toBeNull();
+    expect(sim.fundingTargetError).toContain('could not measure the inscribe target');
+    // And it points at the three things that actually cause it.
+    expect(sim.fundingTargetError).toContain('network');
+  });
+
+  it('reports the reason for a non-positive fee rate rather than a bare null', async () => {
+    const sim = await simulateInscribe(
+      { ...params(), feeRatePerVbyte: 0 },
+      { utxos: utxosPort([coin('a', 10_000_000)]), scan: scanPort() },
+    );
+    expect(sim.fundingTargetError).toContain('feeRatePerVbyte must be positive');
+  });
+
+  it('carries NO error on a healthy plan, so the field cannot be read as a warning', async () => {
+    const sim = await simulateInscribe(params(), { utxos: utxosPort([coin('a', 500_000)]), scan: scanPort() });
+    expect(sim.fundingTargetError).toBeNull();
+    expect(sim.fundingRequirementSats).toBeGreaterThan(0);
+  });
+});
