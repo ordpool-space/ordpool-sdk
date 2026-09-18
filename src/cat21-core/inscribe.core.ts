@@ -185,7 +185,12 @@ function inscribeCandidateFees(
   targetSats: number,
 ): CandidateFeeRow[] {
   return candidates.map((candidate) => {
-    const unfundable = { txid: candidate.txid, vout: candidate.vout, finalFeeSats: null, vsize: null };
+    // The commit's own sub-dust fold is not surfaced by `simulateInscribeFees`,
+    // so the package price is reported without it rather than guessed at.
+    const unfundable = {
+      txid: candidate.txid, vout: candidate.vout,
+      finalFeeSats: null, vsize: null, absorbedSubDustSats: null,
+    };
     if (candidate.value < targetSats) return unfundable;
     try {
       const fundingInput = prepareInscribeFundingInput({
@@ -214,6 +219,7 @@ function inscribeCandidateFees(
         vout: candidate.vout,
         finalFeeSats: sim.totalFeeSats,
         vsize: sim.combinedVsize,
+        absorbedSubDustSats: null,
       };
     } catch {
       return unfundable;

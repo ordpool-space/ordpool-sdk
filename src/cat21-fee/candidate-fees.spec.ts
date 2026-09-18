@@ -14,8 +14,8 @@ const NO_CHANGE_VSIZE = 110;
 function simulate(candidate: { value: number }, feeSats: number) {
   const leftover = candidate.value - FIXED_OUTPUTS - feeSats;
   return leftover >= DUST_FLOOR
-    ? { vsize: WITH_CHANGE_VSIZE, finalFeeSats: feeSats }
-    : { vsize: NO_CHANGE_VSIZE, finalFeeSats: feeSats + leftover };
+    ? { vsize: WITH_CHANGE_VSIZE, finalFeeSats: feeSats, absorbedSubDustSats: 0 }
+    : { vsize: NO_CHANGE_VSIZE, finalFeeSats: feeSats + leftover, absorbedSubDustSats: leftover };
 }
 
 const utxo = (value: number, vout = 0) => ({ txid: 'a'.repeat(64), vout, value });
@@ -41,6 +41,21 @@ describe('resolveCandidateFees', () => {
     expect(roomy.finalFeeSats).toBe(WITH_CHANGE_VSIZE);
     expect(cliff.finalFeeSats).toBe(1_200 - FIXED_OUTPUTS);
     expect(cliff.finalFeeSats).toBeGreaterThan(roomy.finalFeeSats as number);
+  });
+
+  it('separates a coin that over-pays from one that cannot pay at all', () => {
+    // Three distinct situations the picker must not collapse into two:
+    //   roomy  - emits change, pays the rate, nothing folded
+    //   cliff  - CAN fund, but its leftover is sub-dust and goes to the miner
+    //   broke  - cannot meet the rate at any fee
+    // A user can act on the middle one; lumping it with `broke` hides a usable
+    // coin, and lumping it with `roomy` hides an over-pay.
+    const [roomy, cliff, broke] = feesFor([100_000, 1_200, 600]);
+
+    expect(roomy.absorbedSubDustSats).toBe(0);
+    expect(cliff.absorbedSubDustSats).toBe(1_200 - FIXED_OUTPUTS - WITH_CHANGE_VSIZE);
+    expect(broke.absorbedSubDustSats).toBeNull();
+    expect(broke.finalFeeSats).toBeNull();
   });
 
   it('prices a no-change coin at its whole budget', () => {

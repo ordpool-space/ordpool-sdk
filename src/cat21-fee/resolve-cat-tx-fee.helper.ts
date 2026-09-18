@@ -29,6 +29,18 @@ export interface CatTxFeeSimulation {
   vsize: number;
   /** Realised miner fee for this build = requested fee + any absorbed sub-dust change. */
   finalFeeSats: number;
+  /**
+   * Of that fee, how many sats were would-be CHANGE folded in because they fell
+   * below the dust floor. `0` means a change output was emitted and the coin
+   * pays the rate. Omitted by a flow that does not report it.
+   *
+   * Carried because the two situations a coin can be in are different and a
+   * user can act on only one: a coin that cannot fund the spend is unavailable,
+   * while a coin that funds it but folds its leftover into the fee is usable
+   * and over-pays. Consumers must not re-derive that from the funding targets;
+   * a rule re-implemented in three surfaces drifts in three directions.
+   */
+  absorbedSubDustSats?: number;
 }
 
 export interface ResolveCatTxFeeArgs<T extends CatTxFeeSimulation> {

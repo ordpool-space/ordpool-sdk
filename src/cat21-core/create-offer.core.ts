@@ -221,7 +221,12 @@ async function planOffer(
   const candidateFees = resolveCandidateFees(recommendation.candidates, {
     simulate: (candidate, feeSats) => {
       const built = buildOffer(params, candidate, feeSats, true);
-      return { vsize: offerVsize(built), finalFeeSats: feeBudget(candidate.value) - built.changeSats };
+      const finalFeeSats = feeBudget(candidate.value) - built.changeSats;
+      return {
+        vsize: offerVsize(built),
+        finalFeeSats,
+        absorbedSubDustSats: finalFeeSats - feeSats,
+      };
     },
     feeBudgetFor: (candidate) => feeBudget(candidate.value),
     feeRatePerVbyte: params.feeRatePerVbyte,

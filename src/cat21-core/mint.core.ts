@@ -215,7 +215,11 @@ async function planMint(
   const candidateFees = resolveCandidateFees(recommendation.candidates, {
     simulate: (candidate, feeSats) => {
       const built = buildMint(params, candidate, feeSats, true);
-      return { vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+      return {
+        vsize: measureVsize(built),
+        finalFeeSats: built.finalFeeSats,
+        absorbedSubDustSats: built.finalFeeSats - feeSats,
+      };
     },
     feeBudgetFor: (candidate) => candidate.value - fixedOutputs,
     feeRatePerVbyte: params.feeRatePerVbyte,

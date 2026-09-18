@@ -36,6 +36,18 @@ export interface CandidateFeeRow {
   finalFeeSats: number | null;
   /** Measured vsize of that build; `null` alongside an unfundable fee. */
   vsize: number | null;
+  /**
+   * Of `finalFeeSats`, how many sats were would-be change folded into the miner
+   * fee because they fell below the dust floor. `0` means the coin emits change
+   * and pays the requested rate. `null` means the coin cannot fund the action,
+   * or the flow does not report it.
+   *
+   * A coin with a positive value here is USABLE and over-paying, which is a
+   * different thing from an unavailable coin and the user can act on only one
+   * of them. Render it as its own informational signal, not as a block: the
+   * fold is deliberate behaviour, not a fault.
+   */
+  absorbedSubDustSats: number | null;
 }
 
 export interface ResolveCandidateFeesArgs<C extends FundingUtxo> {
@@ -69,6 +81,7 @@ export function resolveCandidateFees<C extends FundingUtxo>(
       vout: candidate.vout,
       finalFeeSats: resolved ? resolved.finalFeeSats : null,
       vsize: resolved ? resolved.vsize : null,
+      absorbedSubDustSats: resolved ? resolved.absorbedSubDustSats ?? null : null,
     };
   });
 }

@@ -226,7 +226,11 @@ async function planTransfer(
   const candidateFees = resolveCandidateFees(recommendation.candidates, {
     simulate: (candidate, feeSats) => {
       const built = buildTransfer(params, candidate, feeSats, true);
-      return { vsize: measureVsize(built), finalFeeSats: built.finalFeeSats };
+      return {
+        vsize: measureVsize(built),
+        finalFeeSats: built.finalFeeSats,
+        absorbedSubDustSats: built.finalFeeSats - feeSats,
+      };
     },
     feeBudgetFor: (candidate) => feeBudget(candidate.value),
     feeRatePerVbyte: params.feeRatePerVbyte,
