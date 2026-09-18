@@ -79,10 +79,28 @@ export interface MintSimulationResult {
   /** Realised miner fee (incl. absorbed sub-dust change). */
   feeSats: number | null;
   changeSats: number | null;
+  /**
+   * The two targets selection actually uses, exposed because a caller sizing a
+   * coin has to know BOTH.
+   *
+   * `fundingRequirementSats` is the feasibility floor: a coin below it cannot
+   * fund the spend at all. `fundingPreferredSats` is the change-headroom
+   * target, the with-change fee plus a dust floor, and selection PREFERS a
+   * candidate clearing it whenever any candidate does, falling back to the
+   * feasibility set only when none does.
+   *
+   * A coin sized between the two is fundable in principle and, in a pool where
+   * anything clears headroom, is never selected. Anyone choosing a coin size
+   * from the requirement alone is working from half the rule.
+   */
+  fundingRequirementSats: number;
+  fundingPreferredSats: number;
 }
 
 interface MintPlan {
   status: MintStatus;
+  requirementSats: number;
+  preferredSats: number;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   pick: CoreFundingUtxo | null;
   built: BuildCat21MintResult | null;
@@ -128,7 +146,14 @@ async function planMint(
 ): Promise<MintPlan> {
   const empty = recommendFunding<CoreFundingUtxo & AnnotatedFundingUtxo>([], 0);
   if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
-    return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+    return {
+      status: 'insufficient', recommendation: empty,
+      // Not measurable on this path: the targets come from a real build, and
+      // there is either no fee rate or no coin to build against. 0 says
+      // "unknown" honestly rather than implying a floor nobody computed.
+      requirementSats: 0, preferredSats: 0,
+      pick: null, built: null, vsize: null, buildFeeSats: null,
+    };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
   const tipValue = params.tip?.valueSats ?? 0;
@@ -142,7 +167,14 @@ async function planMint(
   // below it cannot — the exact feasibility threshold.
   const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
   if (!largest || largest.value < fixedOutputs) {
-    return { status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null };
+    return {
+      status: 'insufficient', recommendation: empty,
+      // Not measurable on this path: the targets come from a real build, and
+      // there is either no fee rate or no coin to build against. 0 says
+      // "unknown" honestly rather than implying a floor nobody computed.
+      requirementSats: 0, preferredSats: 0,
+      pick: null, built: null, vsize: null, buildFeeSats: null,
+    };
   }
   const noChangeVsize = measureVsize(buildMint(params, largest, largest.value - fixedOutputs, true));
   const target = fixedOutputs + Math.ceil(noChangeVsize * params.feeRatePerVbyte);
@@ -166,6 +198,8 @@ async function planMint(
     return {
       status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
       recommendation,
+      requirementSats: target,
+      preferredSats: preferredTarget,
       pick: null,
       built: null,
       vsize: null,
@@ -184,11 +218,19 @@ async function planMint(
     feeBudgetSats: pick.value - fixedOutputs,
   });
   if (!resolved) {
-    return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
+    // Past measurement, so the targets are known and worth reporting: a caller
+    // seeing `insufficient` here can compare them against the coin it offered.
+    return {
+      status: 'insufficient', recommendation,
+      requirementSats: target, preferredSats: preferredTarget,
+      pick: null, built: null, vsize: null, buildFeeSats: null,
+    };
   }
   return {
     status: recommendation.status === 'asset-notice' ? 'asset-notice' : 'ready',
     recommendation,
+    requirementSats: target,
+    preferredSats: preferredTarget,
     pick,
     built: resolved.built,
     vsize: resolved.vsize,
@@ -213,6 +255,8 @@ export async function simulateMint(
     vsize: plan.vsize,
     feeSats: plan.built ? plan.built.finalFeeSats : null,
     changeSats: plan.built ? plan.built.changeSats : null,
+    fundingRequirementSats: plan.requirementSats,
+    fundingPreferredSats: plan.preferredSats,
   };
 }
 

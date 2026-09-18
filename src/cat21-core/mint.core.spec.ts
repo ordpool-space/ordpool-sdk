@@ -235,3 +235,44 @@ describe('mint.core — the pre-click preview is where a notice comes from', () 
     }
   });
 });
+
+describe('mint.core — a caller sizing a coin needs BOTH targets', () => {
+  // Sizing from the requirement alone is working from half the rule: selection
+  // prefers a candidate clearing the change-headroom target whenever any does,
+  // so a coin between the two is fundable in principle and never selected.
+  it('reports the feasibility target and the change-headroom target', async () => {
+    const sim = await simulateMint(params(), { utxos: utxosPort([coin('c', 100_000)]), scan: scanPort() });
+    expect(sim.status).toBe('ready');
+    expect(sim.fundingRequirementSats).toBeGreaterThan(0);
+    // Headroom is strictly above feasibility: it adds a with-change fee and a
+    // dust floor on top. If these ever collapse into one number, the gap that
+    // silently excludes a coin has gone with it, and so has the reason to
+    // expose two.
+    expect(sim.fundingPreferredSats).toBeGreaterThan(sim.fundingRequirementSats);
+    // The gap is at least the change output's own dust floor.
+    expect(sim.fundingPreferredSats - sim.fundingRequirementSats).toBeGreaterThanOrEqual(546);
+  });
+
+  it('a coin between the two targets funds a mint when nothing better exists', async () => {
+    // Proves the gap is a PREFERENCE, not a floor: with no headroom candidate
+    // the flow falls back and the in-between coin mints.
+    const probe = await simulateMint(params(), { utxos: utxosPort([coin('c', 100_000)]), scan: scanPort() });
+    const between = Math.floor((probe.fundingRequirementSats + probe.fundingPreferredSats) / 2);
+    const sim = await simulateMint(params(), { utxos: utxosPort([coin('d', between)]), scan: scanPort() });
+    expect(sim.status).toBe('ready');
+    expect(sim.fundingUtxo?.value).toBe(between);
+  });
+
+  it('but is SKIPPED when another coin clears headroom', async () => {
+    const probe = await simulateMint(params(), { utxos: utxosPort([coin('c', 100_000)]), scan: scanPort() });
+    const between = Math.floor((probe.fundingRequirementSats + probe.fundingPreferredSats) / 2);
+    const clears = probe.fundingPreferredSats + 1_000;
+    const sim = await simulateMint(
+      params(),
+      { utxos: utxosPort([coin('d', between), coin('e', clears)]), scan: scanPort() },
+    );
+    // The smaller coin would win a plain best-fit. It loses because it cannot
+    // leave an above-dust change, which is the whole reason both targets exist.
+    expect(sim.fundingUtxo?.value).toBe(clears);
+  });
+});
