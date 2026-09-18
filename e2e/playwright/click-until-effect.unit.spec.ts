@@ -44,13 +44,32 @@ describe('clickUntilEffect', () => {
     // The money-path case. A CTA that disables itself while it works has
     // accepted the click; a second one would start a second mint or transfer.
     const h = harness({ appearsAfterClicks: 99, afterClick: { visible: true, enabled: false } });
-    await expect(clickUntilEffect(h.control, h.effect, { settleMs: 1 })).rejects.toThrow(/Timeout exceeded/);
+    await expect(clickUntilEffect(h.control, h.effect, { settleMs: 1 })).rejects.toThrow(
+      /reacted to the click \(visible=true enabled=false\).*defect is downstream/s,
+    );
     expect(h.state.clicks).toBe(1);
   });
 
   it('does NOT re-click a control that disappeared: the click registered', async () => {
     const h = harness({ appearsAfterClicks: 99, afterClick: { visible: false, enabled: false } });
-    await expect(clickUntilEffect(h.control, h.effect, { settleMs: 1 })).rejects.toThrow(/Timeout exceeded/);
+    await expect(clickUntilEffect(h.control, h.effect, { settleMs: 1 })).rejects.toThrow(
+      /reacted to the click \(visible=false enabled=false\).*defect is downstream/s,
+    );
+    expect(h.state.clicks).toBe(1);
+  });
+
+  it('lets a toggle define its own pre-click state, so a second click cannot undo the first', async () => {
+    // A <details> summary stays visible and enabled after opening, so the
+    // default test would read the swallowed-click signature and click again,
+    // closing what the first click opened. The toggle's own state says
+    // otherwise: it flipped, so no second click is sent.
+    const h = harness({ appearsAfterClicks: 99 });
+    await expect(
+      clickUntilEffect(h.control, h.effect, {
+        settleMs: 1,
+        stillPreClick: async () => h.state.clicks === 0,
+      }),
+    ).rejects.toThrow(/reacted to the click \(stillPreClick=false\)/);
     expect(h.state.clicks).toBe(1);
   });
 

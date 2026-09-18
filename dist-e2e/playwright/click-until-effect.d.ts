@@ -26,6 +26,20 @@
  * itself while it works would otherwise take a second click and start a second
  * mint, transfer or offer. The check belongs here rather than in the luck of a
  * particular button's implementation.
+ *
+ * ## Precondition: the control must REPEAT its action, not toggle it
+ *
+ * This is for a control where clicking twice attempts the same thing twice. It
+ * is WRONG for a toggle: a `<details>` summary, a disclosure, a switch. Such a
+ * control stays visible and enabled after opening, so the default
+ * still-in-pre-click test reads "the click was swallowed" and the second click
+ * CLOSES what the first one opened, turning a slow render into a guaranteed
+ * failure.
+ *
+ * A toggle can still be hardened here by passing `stillPreClick`, which
+ * replaces that test with the control's own state (`open` on a `<details>`, an
+ * `aria-expanded` attribute). Then a second click is sent only when the toggle
+ * genuinely never flipped.
  */
 export interface ClickUntilEffectOptions {
     /** Total clicks allowed, including the first. */
@@ -34,6 +48,14 @@ export interface ClickUntilEffectOptions {
     settleMs?: number;
     /** Name used in the failure message. Defaults to the control's selector. */
     label?: string;
+    /**
+     * Whether the control is still in its pre-click state, i.e. the click did not
+     * register. Defaults to "visible and enabled", which is right for a button
+     * that repeats its action. A TOGGLE must override this with its own open
+     * state, or the second click undoes the first. Returning false means the
+     * control reacted, and no further click is sent.
+     */
+    stillPreClick?: () => Promise<boolean>;
 }
 /**
  * The part of a Playwright `Locator` this needs. Structural so the decision
