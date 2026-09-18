@@ -32,6 +32,12 @@ export interface PlacementUtxo {
  * @param requirementSats What the flow must cover. MEASURE it (simulate the
  *   flow, read the fee plus outputs); do not guess, because a guessed
  *   requirement silently moves which trap you are in.
+ * @param preferredSats The flow's CHANGE-HEADROOM target, when it has one
+ *   (`preferredTarget` in the cores: the with-change fee plus a dust floor on
+ *   top of the outputs). Selection prefers a coin clearing this whenever ANY
+ *   candidate does, so a coin that merely covers `requirementSats` is skipped
+ *   in a pool where something else clears headroom. Omitting it checks a
+ *   weaker premise than the flow actually applies.
  */
-export declare function assertDirtyCoinIsBestFit(pool: ReadonlyArray<PlacementUtxo>, dirtyOutpoint: string, requirementSats: number): void;
+export declare function assertDirtyCoinIsBestFit(pool: ReadonlyArray<PlacementUtxo>, dirtyOutpoint: string, requirementSats: number, preferredSats?: number): void;
 //# sourceMappingURL=dirty-coin-placement.d.ts.map

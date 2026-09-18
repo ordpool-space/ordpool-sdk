@@ -47,3 +47,52 @@ describe('assertDirtyCoinIsBestFit', () => {
       .toThrow(/not in the pool at all/);
   });
 });
+
+describe('assertDirtyCoinIsBestFit and the change-headroom target', () => {
+  // Reproduces a real matrix run: four rungs above a 700-sat requirement, the
+  // bottom one below the ~1277 headroom target. Three cells red under the
+  // mutation and the fourth passed, which looked like the fourth asset class
+  // being protected by something and was actually selection never considering
+  // that coin.
+  const REQUIREMENT = 700;
+  const HEADROOM = 1_277;
+
+  it('rejects a coin that covers the requirement but not the headroom target', () => {
+    const dirty = coin('a', 1_200);
+    const others = [coin('b', 2_200), coin('c', 100_000)];
+    expect(() => assertDirtyCoinIsBestFit([dirty, ...others], at(dirty), REQUIREMENT, HEADROOM))
+      .toThrow(/not the 1277 change-headroom target/);
+  });
+
+  it('accepts the same coin when NOTHING clears the headroom target', () => {
+    // With no headroom candidate the flow falls back to the covering set, so a
+    // sub-headroom coin is genuinely what selection would take.
+    const dirty = coin('a', 800);
+    const clean = coin('b', 1_100);
+    expect(() => assertDirtyCoinIsBestFit([dirty, clean], at(dirty), REQUIREMENT, HEADROOM))
+      .not.toThrow();
+  });
+
+  it('accepts a coin that clears the headroom target and is smallest among those', () => {
+    const dirty = coin('a', 1_400);
+    const clean = coin('b', 100_000);
+    expect(() => assertDirtyCoinIsBestFit([dirty, clean], at(dirty), REQUIREMENT, HEADROOM))
+      .not.toThrow();
+  });
+
+  it('still compares smallest-first WITHIN the headroom set, not across the whole pool', () => {
+    // A sub-headroom coin is smaller than the dirty one but irrelevant: it is
+    // not selectable, so it must not make the dirty coin look non-smallest.
+    const dirty = coin('a', 1_400);
+    const tiny = coin('b', 900);
+    const clean = coin('c', 100_000);
+    expect(() => assertDirtyCoinIsBestFit([dirty, tiny, clean], at(dirty), REQUIREMENT, HEADROOM))
+      .not.toThrow();
+  });
+
+  it('ignores a headroom target that is not above the requirement', () => {
+    const dirty = coin('a', 800);
+    const clean = coin('b', 100_000);
+    expect(() => assertDirtyCoinIsBestFit([dirty, clean], at(dirty), REQUIREMENT, 500)).not.toThrow();
+  });
+});

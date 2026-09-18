@@ -30,8 +30,14 @@ exports.assertDirtyCoinIsBestFit = assertDirtyCoinIsBestFit;
  * @param requirementSats What the flow must cover. MEASURE it (simulate the
  *   flow, read the fee plus outputs); do not guess, because a guessed
  *   requirement silently moves which trap you are in.
+ * @param preferredSats The flow's CHANGE-HEADROOM target, when it has one
+ *   (`preferredTarget` in the cores: the with-change fee plus a dust floor on
+ *   top of the outputs). Selection prefers a coin clearing this whenever ANY
+ *   candidate does, so a coin that merely covers `requirementSats` is skipped
+ *   in a pool where something else clears headroom. Omitting it checks a
+ *   weaker premise than the flow actually applies.
  */
-function assertDirtyCoinIsBestFit(pool, dirtyOutpoint, requirementSats) {
+function assertDirtyCoinIsBestFit(pool, dirtyOutpoint, requirementSats, preferredSats) {
     const at = (u) => `${u.txid}:${u.vout}`;
     const dirty = pool.find(u => at(u) === dirtyOutpoint);
     if (dirty === undefined) {
@@ -49,7 +55,22 @@ function assertDirtyCoinIsBestFit(pool, dirtyOutpoint, requirementSats) {
             'no clean alternative to steer to. That proves the guard FLAGS, not that selection AVOIDS. ' +
             'Add a clean coin well above the requirement.');
     }
-    const smallestCovering = [...covering].sort((a, b) => a.value - b.value)[0];
+    // Mirror the selection rule rather than approximating it. `recommendFunding`
+    // biases toward candidates clearing the change-headroom target whenever any
+    // clears it, and falls back to the whole covering set when none does. A guard
+    // that only knows the feasibility target passes a coin the flow will never
+    // take, which reads afterwards as the coin being protected by something.
+    const headroom = preferredSats !== undefined && preferredSats > requirementSats
+        ? covering.filter((u) => u.value >= preferredSats)
+        : [];
+    const selectable = headroom.length > 0 ? headroom : covering;
+    if (headroom.length > 0 && !selectable.some((u) => at(u) === dirtyOutpoint)) {
+        throw new Error(`dirty-coin placement: the dirty coin holds ${dirty.value} sats, which covers the ${requirementSats} ` +
+            `requirement but not the ${preferredSats} change-headroom target, while ${headroom.length} other ` +
+            'coin(s) do clear it. Selection prefers those, so it never considers the dirty coin and the ' +
+            'mutation proves nothing. Seed it at or above the headroom target.');
+    }
+    const smallestCovering = [...selectable].sort((a, b) => a.value - b.value)[0];
     if (at(smallestCovering) !== dirtyOutpoint) {
         throw new Error(`dirty-coin placement: the smallest covering coin is ${at(smallestCovering)} at ` +
             `${smallestCovering.value} sats, not the dirty ${dirtyOutpoint} at ${dirty.value}. ` +
