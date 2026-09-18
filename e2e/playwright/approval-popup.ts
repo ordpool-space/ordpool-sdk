@@ -272,6 +272,13 @@ export async function waitForApprovalByConfirmButton(opts: {
   const timeoutMs = opts.timeoutMs ?? 60_000;
   const label = opts.label ?? 'approval';
 
+  // Which extension pages existed BEFORE we started waiting. A blank page that
+  // was already open is a stale one the wallet is reusing and never
+  // re-rendering; a blank page that appeared while we waited is one the wallet
+  // opened fresh and never painted. Same symptom, different cause, and only
+  // this distinction separates them.
+  const preexisting = new Set(opts.context.pages().filter((p) => p.url().startsWith('chrome-extension://')));
+
   try {
     return await waitForApprovalPopup({
       context: opts.context,
@@ -292,15 +299,18 @@ export async function waitForApprovalByConfirmButton(opts: {
         .filter((p) => p.url().startsWith('chrome-extension://'))
         .map(async (p) => {
           const text = await p.locator('body').innerText().catch(() => '<unreadable>');
-          return `${p.url().slice(0, 60)} => ${text.trim().split('\n')[0]?.slice(0, 80) || '<empty>'}`;
+          const age = preexisting.has(p) ? 'ALREADY-OPEN' : 'opened-while-waiting';
+          return `${p.url().slice(0, 60)} [${age}] => ${text.trim().split('\n')[0]?.slice(0, 80) || '<empty>'}`;
         }),
     );
     throw new Error(
       `${label}: no extension page offered a confirm button within ${timeoutMs}ms (${(e as Error).message})\n` +
       `Extension pages at timeout (${seen.length}):\n` +
       (seen.length ? seen.map((l) => `  - ${l}`).join('\n') : '  <none>') +
-      '\nA page shown as <empty> opened and never painted, which is a different failure ' +
-      'from one that painted something this matcher does not recognise.',
+      '\nA page shown as <empty> never painted. ALREADY-OPEN means the wallet is reusing a ' +
+      'stale page and not re-rendering it, so closing leftovers before the request is the fix; ' +
+      'opened-while-waiting means the wallet opened a fresh page and failed to render it, which ' +
+      'is the wallet\'s own defect. A page with text is neither: the matcher does not know it.',
     );
   }
 }
