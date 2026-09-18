@@ -42,6 +42,7 @@ exports.ORD_STOCK_URL = void 0;
 exports.getFundedAccount = getFundedAccount;
 exports.rpc = rpc;
 exports.mineBlocks = mineBlocks;
+exports.fundWithFreshCoinbase = fundWithFreshCoinbase;
 exports.mineBlockWithRawTxs = mineBlockWithRawTxs;
 exports.waitForElectrsSync = waitForElectrsSync;
 exports.waitForUtxoMatching = waitForUtxoMatching;
@@ -144,6 +145,29 @@ function rpc(...args) {
 function mineBlocks(n) {
     const address = rpc(RPC_WALLET_ARG, 'getnewaddress', '', 'legacy');
     rpc(RPC_WALLET_ARG, 'generatetoaddress', String(n), address);
+    return Number(rpc('getblockcount'));
+}
+/**
+ * Fund `address` with a freshly MINED coinbase output, then mature it.
+ *
+ * A normal `sendtoaddress` draws from whatever the shared wallet happens to
+ * hold, and on a chain indexed with `--index-cat21` that coin's sats may have
+ * passed through an `nLockTime=21` transaction. ord then reports the output as
+ * inscribed, the wallet has no cardinal to spend, and `ord wallet send` refuses
+ * with "wallet does not contain enough cardinal UTXOs" for a coin that electrs
+ * shows as perfectly ordinary. Which UTXO the shared wallet picks varies per
+ * run, so the failure is intermittent.
+ *
+ * Coinbase sats are newly issued and have passed through no transaction at all,
+ * so they cannot carry a cat, an inscription or a rare sat. That makes this
+ * deterministic where `sendtoaddress` is not.
+ *
+ * Costs 1 + `COINBASE_MATURITY` blocks, which is instant on regtest.
+ */
+function fundWithFreshCoinbase(address) {
+    rpc(RPC_WALLET_ARG, 'generatetoaddress', '1', address);
+    // Coinbase outputs are unspendable until 100 further blocks confirm them.
+    mineBlocks(100);
     return Number(rpc('getblockcount'));
 }
 /**

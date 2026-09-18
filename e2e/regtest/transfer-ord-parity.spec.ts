@@ -33,6 +33,7 @@ import {
   postTx,
   rpc,
   waitForElectrsSync,
+  fundWithFreshCoinbase,
   waitForOrdReady,
   waitForOrdWalletCardinal,
   waitForOrdSync,
@@ -68,8 +69,14 @@ describe('transfer byte-parity vs live `ord wallet send`', () => {
     ordWalletAddress = ordCreateWallet('ordsend');
     expect(ordWalletAddress).toMatch(/^bcrt1p/); // ord wallets are taproot
 
-    // Give it exactly ONE cardinal UTXO (1 BTC).
-    rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', ordWalletAddress, '1.0');
+    // Give it exactly ONE cardinal UTXO, from a freshly mined COINBASE rather
+    // than a sendtoaddress. The shared wallet's coins may carry sats that
+    // passed through an nLockTime=21 transaction, which ord (running
+    // --index-cat21) reports as inscribed; the wallet then has no cardinal and
+    // `ord wallet send` refuses, intermittently, depending on which UTXO the
+    // shared wallet happened to pick. Coinbase sats have passed through no
+    // transaction at all.
+    fundWithFreshCoinbase(ordWalletAddress);
     // Fund a mint source for the cat.
     const minterPriv = secp256k1.utils.randomPrivateKey();
     const minterAddr = btc.p2wpkh(secp256k1.getPublicKey(minterPriv, true), regtestNetwork).address!;
@@ -105,14 +112,20 @@ describe('transfer byte-parity vs live `ord wallet send`', () => {
     // `ord wallet send` runs with --no-sync, so it reads ord's own wallet view
     // rather than the node's. electrs and the ord index being caught up says
     // nothing about that third view, and depending on it without waiting for it
-    // is what makes this spec fail intermittently with "wallet does not contain
-    // enough cardinal UTXOs" on a chain that demonstrably holds the coin.
-    await waitForOrdWalletCardinal('ordsend', 100_000_000);
+    // leaves the send to discover the problem instead of the setup.
+    //
+    // The floor is deliberately loose: a regtest coinbase subsidy halves every
+    // 150 blocks, so the amount depends on how far the shared chain has run and
+    // pinning it would make this spec fail on chain age rather than on
+    // behaviour. Anything comfortably above the cat plus a fee proves the point.
+    await waitForOrdWalletCardinal('ordsend', 1_000_000);
 
-    // Resolve the ord wallet's UTXOs: the cat (546) and the cardinal (1 BTC).
+    // Resolve the ord wallet's UTXOs: the cat (546) and the coinbase cardinal.
     const utxos = await getUtxos(ordWalletAddress);
     const catUtxo = utxos.find((u) => u.txid === catTxid && u.vout === 0)!;
-    const cardinalUtxo = utxos.find((u) => u.value === 100_000_000)!;
+    // Identified as "the one that is not the cat" rather than by amount, for
+    // the same subsidy-halving reason.
+    const cardinalUtxo = utxos.find((u) => !(u.txid === catTxid && u.vout === 0))!;
     expect(catUtxo).toBeTruthy();
     expect(cardinalUtxo).toBeTruthy();
 
