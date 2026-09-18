@@ -9,6 +9,7 @@ import {
   waitForApprovalPopup,
   closeLeftoverExtensionPages,
 } from '../approval-popup';
+import { isVisibleWithin } from '../is-visible-within';
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardOkx } from '../onboard-okx';
@@ -76,7 +77,7 @@ async function approveSignMessagePopup(ctx: BrowserContext, label: string): Prom
   await shot(approval, `02a-sign-message-approval-${label}`);
 
   const promo = approval.getByText('Asset transfer pending');
-  if (await promo.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  if (await isVisibleWithin(promo, 2_000)) {
     const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
     await closeBtn.click({ force: true }).catch(() => undefined);
     await promo.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);

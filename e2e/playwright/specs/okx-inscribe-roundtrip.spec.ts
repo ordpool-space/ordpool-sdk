@@ -13,6 +13,7 @@ import {
   postTx,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
+import { isVisibleWithin } from '../is-visible-within';
 import { onboardOkx } from '../onboard-okx';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
@@ -66,9 +67,9 @@ async function approveSignPopup(ctx: BrowserContext): Promise<void> {
   await shot(approval, 'sign-approval');
 
   const promoModalText = approval.getByText('Asset transfer pending');
-  if (await promoModalText.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  if (await isVisibleWithin(promoModalText, 2_000)) {
     const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
-    if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (await isVisibleWithin(closeBtn, 2_000)) {
       await closeBtn.click({ force: true }).catch(() => undefined);
     }
     await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);

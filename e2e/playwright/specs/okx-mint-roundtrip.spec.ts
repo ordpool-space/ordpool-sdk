@@ -6,6 +6,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
+import { isVisibleWithin } from '../is-visible-within';
 import { onboardOkx } from '../onboard-okx';
 
 /**
@@ -84,11 +85,11 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   // click Confirm. Trace from CI 26830193081 confirmed this is the
   // blocker on iter 38.
   const promoModalText = approval.getByText('Asset transfer pending');
-  if (await promoModalText.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  if (await isVisibleWithin(promoModalText, 2_000)) {
     // The X close button has aria-label or is the trailing icon button
     // inside the modal header. Try a few selectors.
     const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
-    if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (await isVisibleWithin(closeBtn, 2_000)) {
       await closeBtn.click({ force: true }).catch(() => undefined);
     }
     // Wait for the modal to disappear (Confirm becomes enabled).

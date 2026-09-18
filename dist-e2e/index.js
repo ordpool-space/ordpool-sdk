@@ -43,6 +43,7 @@ __exportStar(require("./playwright/wallet-onboarders"), exports);
 __exportStar(require("./playwright/wallet-test-vectors"), exports);
 __exportStar(require("./playwright/approval-popup"), exports);
 __exportStar(require("./playwright/click-until-effect"), exports);
+__exportStar(require("./playwright/is-visible-within"), exports);
 __exportStar(require("./playwright/wait-helpers"), exports);
 __exportStar(require("./playwright/browser-error-guard"), exports);
 __exportStar(require("./playwright/radix-checkbox"), exports);
