@@ -109,7 +109,17 @@ export class UtxoContentScanner implements ContentScanPort {
    */
   scan(outpoint: string): Observable<UtxoScanState> {
     const cached = this.states.get(outpoint);
-    if (cached && cached.kind !== 'not-scanned' && cached.kind !== 'scanning') {
+    // A settled verdict is served from cache, with ONE exception: `scan-failed`
+    // is not a fact about the outpoint, it is a fact about the last attempt.
+    // Caching it forever freezes a coin for the scanner's whole lifetime
+    // because ord was briefly unreachable, or because ord had not yet indexed
+    // the output when we happened to ask. Both resolve on their own, and the
+    // next caller asking is exactly when to find out.
+    //
+    // The two content verdicts stay cached: an outpoint's contents do not
+    // change once ord has processed the block that created it, so re-fetching
+    // them is pure cost.
+    if (cached && cached.kind !== 'not-scanned' && cached.kind !== 'scanning' && cached.kind !== 'scan-failed') {
       return of(cached);
     }
     const existing = this.inFlight.get(outpoint);

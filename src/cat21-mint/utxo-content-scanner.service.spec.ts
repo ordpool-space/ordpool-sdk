@@ -177,3 +177,42 @@ describe('UtxoContentScanner.classify (ContentScanPort adapter)', () => {
     expect(await scanner.classify('aa:0')).toEqual({ verdict: 'has-assets' });
   });
 });
+
+describe('UtxoContentScanner cache: a failed scan is not a verdict', () => {
+  /** Count real HTTP attempts; the cache is what decides whether one happens. */
+  function countingFetch(fail: boolean): { calls: () => number } {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      if (fail) throw new Error('ord unreachable');
+      return { ok: true, status: 200, json: async () => ({ sat_ranges: [[100, 200]], inscriptions: [], runes: {} }) };
+    }) as unknown as typeof globalThis.fetch;
+    return { calls: () => calls };
+  }
+
+  it('RE-ATTEMPTS an outpoint whose previous scan failed', async () => {
+    const { calls } = countingFetch(true);
+    const scanner = new UtxoContentScanner(cfg);
+    await firstValueFrom(scanner.scan('bb:0'));
+    const afterFirst = calls();
+    expect(scanner.getState('bb:0').kind).toBe('scan-failed');
+
+    // A failure describes the last ATTEMPT, not the outpoint: ord being briefly
+    // unreachable, or not yet having indexed the output, both resolve on their
+    // own. Serving that from cache would freeze the coin for the scanner's
+    // whole lifetime.
+    await firstValueFrom(scanner.scan('bb:0'));
+    expect(calls()).toBeGreaterThan(afterFirst);
+  });
+
+  it('does NOT re-attempt an outpoint that scanned cleanly', async () => {
+    // Contents cannot change once ord has processed the block that created the
+    // output, so re-fetching is pure cost.
+    const { calls } = countingFetch(false);
+    const scanner = new UtxoContentScanner(cfg);
+    await firstValueFrom(scanner.scan('cc:0'));
+    const afterFirst = calls();
+    await firstValueFrom(scanner.scan('cc:0'));
+    expect(calls()).toBe(afterFirst);
+  });
+});
