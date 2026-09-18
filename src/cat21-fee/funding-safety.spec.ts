@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { AnnotatedFundingUtxo, recommendFunding } from './funding-safety.js';
+import { AnnotatedFundingUtxo, isOneAddressWallet, recommendFunding } from './funding-safety.js';
 import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
 
 let n = 0;
@@ -152,5 +152,77 @@ describe('the documented mutation point', () => {
 
     const matches = src.match(/covering\.filter\(\(c\) => c\.bucket === 'clean'\)/g) ?? [];
     expect(matches).toHaveLength(1);
+  });
+});
+
+describe('recommendFunding — how hard to stand in the way depends on the wallet', () => {
+  // The risk to the coin is identical in both cases; only the obstruction
+  // differs, because a one-address wallet keeps assets and spending money in
+  // the same lane where an accidental spend is likelier and less visible.
+  const onlyDirtyCovers = () => [u(200, 'clean'), u(9_000, 'assets'), u(50_000, 'assets')];
+
+  it('NOTICE, not a block, on a wallet with a separate payment address', () => {
+    const r = recommendFunding(onlyDirtyCovers(), 2_000, undefined, 'separate-payment-address');
+    expect(r.status).toBe('asset-notice');
+    expect(r.recommended?.value).toBe(9_000);
+    expect(r.recommended?.bucket).toBe('assets');
+  });
+
+  it('BLOCKS on a wallet that uses one address for everything', () => {
+    const r = recommendFunding(onlyDirtyCovers(), 2_000, undefined, 'one-address-for-everything');
+    expect(r.status).toBe('expert-required');
+    expect(r.recommended?.value).toBe(9_000);
+  });
+
+  it('recommends the SAME coin either way, so only the obstruction differs', () => {
+    const separate = recommendFunding(onlyDirtyCovers(), 2_000, undefined, 'separate-payment-address');
+    const shared = recommendFunding(onlyDirtyCovers(), 2_000, undefined, 'one-address-for-everything');
+    expect(separate.recommended?.value).toBe(shared.recommended?.value);
+    expect(separate.candidates.length).toBe(shared.candidates.length);
+  });
+
+  it('defaults to the BLOCKING branch, so an un-migrated caller over-blocks', () => {
+    // Fail closed: a consumer that has not yet threaded its wallet's topology
+    // keeps the stricter behaviour rather than silently letting an asset
+    // through on a single-address wallet.
+    expect(recommendFunding(onlyDirtyCovers(), 2_000).status).toBe('expert-required');
+  });
+
+  it('topology never overrides a clean coin: a separate-address wallet still goes silent', () => {
+    const r = recommendFunding(
+      [u(2_500, 'assets'), u(10_000, 'clean')],
+      2_000,
+      undefined,
+      'separate-payment-address',
+    );
+    expect(r.status).toBe('auto');
+    expect(r.recommended?.bucket).toBe('clean');
+  });
+
+  it('topology never overrides an unfinished scan', () => {
+    const r = recommendFunding(
+      [u(9_000, 'assets'), u(20_000, 'scanning')],
+      2_000,
+      undefined,
+      'separate-payment-address',
+    );
+    expect(r.status).toBe('scanning');
+    expect(r.recommended).toBeNull();
+  });
+});
+
+describe('isOneAddressWallet derives topology instead of listing wallet names', () => {
+  it('is true when both lanes hold the same address (unisat / wizz / okx / binance / alby shape)', () => {
+    expect(isOneAddressWallet({
+      paymentAddress: 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx',
+      ordinalsAddress: 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx',
+    })).toBe(true);
+  });
+
+  it('is false when the lanes differ (xverse / leather / phantom / cat21wallet shape)', () => {
+    expect(isOneAddressWallet({
+      paymentAddress: 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx',
+      ordinalsAddress: 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxq7pkrz9',
+    })).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   recommendFunding,
+  WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
 import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
 import { ContentScanPort } from './ports.js';
@@ -17,7 +18,11 @@ const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
  * `recommendFunding`:
  *
  * - a content-clean coin covers  -> `auto` (auto-selected, no picker)
- * - only asset coins cover       -> `expert-required` (surface the picker)
+ * - only asset coins cover, and the wallet keeps a SEPARATE payment address
+ *                                -> `asset-notice` (proceed, but say what the
+ *                                   coin carries)
+ * - only asset coins cover, and the wallet uses ONE address for everything
+ *                                -> `expert-required` (block; surface the picker)
  * - a covering coin's scan fails -> that coin is `failed` (never auto-spent)
  * - nothing covers               -> `insufficient`
  *
@@ -38,6 +43,7 @@ export async function selectFunding<T extends FundingUtxo>(
   targetSats: number,
   scan: ContentScanPort,
   preferredSats?: number,
+  topology?: WalletAddressTopology,
 ): Promise<FundingRecommendation<T & AnnotatedFundingUtxo>> {
   if (!targetSats || targetSats <= 0 || utxos.length === 0) {
     return recommendFunding<T & AnnotatedFundingUtxo>([], targetSats > 0 ? targetSats : 0);
@@ -63,15 +69,25 @@ export async function selectFunding<T extends FundingUtxo>(
       bucket: bucketByOutpoint.get(outpoint(u)) ?? 'unscanned',
     }),
   );
-  return recommendFunding(annotated, targetSats, preferredSats);
+  return recommendFunding(annotated, targetSats, preferredSats, topology);
 }
 
 /**
- * Resolve the funding coin a flow will spend: the user's EXPLICIT expert-mode
- * pick when it still covers the target (honoured even if it carries assets —
- * they chose it), otherwise the SAFE auto coin (only when a content-clean coin
- * covers, i.e. `status: 'auto'`). Returns null when there is no safe auto-pick
- * and no explicit override — the flow then surfaces the picker / an error.
+ * Resolve the funding coin a flow will spend:
+ *
+ * - the user's EXPLICIT expert-mode pick when it still covers the target,
+ *   honoured even when it carries assets, because they chose it;
+ * - otherwise the recommended coin when the flow may PROCEED, which is `auto`
+ *   (a clean coin covers) and `asset-notice` (only a dirty coin covers, but the
+ *   wallet keeps a separate payment address, so the UI informs rather than
+ *   obstructs);
+ * - otherwise null, which is what BLOCKS the flow: `expert-required` (a
+ *   one-address wallet, where the user must override deliberately), `scanning`,
+ *   `insufficient`.
+ *
+ * Returning the coin on `asset-notice` is the half of the policy that makes it
+ * a notice and not a wall. The UI still owes the user the notice; this only
+ * decides whether a coin is available to spend.
  */
 export function resolveFundingPick<T extends AnnotatedFundingUtxo>(
   recommendation: FundingRecommendation<T>,
@@ -84,5 +100,7 @@ export function resolveFundingPick<T extends AnnotatedFundingUtxo>(
       )
     : undefined;
   if (stillPresent && stillPresent.value >= target) return stillPresent;
-  return recommendation.status === 'auto' ? recommendation.recommended : null;
+  const mayProceed =
+    recommendation.status === 'auto' || recommendation.status === 'asset-notice';
+  return mayProceed ? recommendation.recommended : null;
 }

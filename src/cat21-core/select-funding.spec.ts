@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { ContentScanPort, UtxoClassification } from './ports.js';
-import { selectFunding } from './select-funding.js';
+import { resolveFundingPick, selectFunding } from './select-funding.js';
 
 // A plain NODE unit test — no jsdom. That the framework-agnostic
 // core selection is testable this way is the whole point of the migration.
@@ -101,5 +101,63 @@ describe('selectFunding (framework-agnostic content-checked selection)', () => {
 
     expect(rec.status).toBe('insufficient');
     expect(scanned.length).toBe(0);
+  });
+});
+
+describe('the wallet topology decides whether a dirty-only wallet proceeds or blocks', () => {
+  // The same pool, the same risk, two wallets. Only the obstruction differs.
+  const dirtyOnly = [u('a', 200), u('b', 9_000)];
+  const verdicts = { [op(u('b', 9_000))]: 'has-assets' as const };
+
+  it('a separate-payment-address wallet PROCEEDS on the dirty coin, with a notice', async () => {
+    const { port } = fakeScan(verdicts);
+    const rec = await selectFunding(dirtyOnly, 2_000, port, undefined, 'separate-payment-address');
+    expect(rec.status).toBe('asset-notice');
+    // The half that makes it a notice and not a wall: a coin comes back.
+    expect(resolveFundingPick(rec, 2_000)?.value).toBe(9_000);
+  });
+
+  it('a one-address wallet BLOCKS until the user overrides in expert mode', async () => {
+    const { port } = fakeScan(verdicts);
+    const rec = await selectFunding(dirtyOnly, 2_000, port, undefined, 'one-address-for-everything');
+    expect(rec.status).toBe('expert-required');
+    expect(resolveFundingPick(rec, 2_000)).toBeNull();
+  });
+
+  it('the one-address block is lifted by an EXPLICIT expert-mode pick', async () => {
+    const { port } = fakeScan(verdicts);
+    const rec = await selectFunding(dirtyOnly, 2_000, port, undefined, 'one-address-for-everything');
+    const chosen = resolveFundingPick(rec, 2_000, { txid: u('b', 9_000).txid, vout: 0 });
+    // They were shown what sits on it and chose it anyway. Their call.
+    expect(chosen?.value).toBe(9_000);
+    expect(chosen?.bucket).toBe('assets');
+  });
+
+  it('omitting the topology blocks, so an un-migrated caller over-blocks', async () => {
+    const { port } = fakeScan(verdicts);
+    const rec = await selectFunding(dirtyOnly, 2_000, port);
+    expect(rec.status).toBe('expert-required');
+    expect(resolveFundingPick(rec, 2_000)).toBeNull();
+  });
+
+  it('a clean coin still wins silently on either wallet', async () => {
+    const pool = [u('c', 10_000), u('b', 9_000)];
+    for (const topology of ['separate-payment-address', 'one-address-for-everything'] as const) {
+      const { port } = fakeScan(verdicts);
+      const rec = await selectFunding(pool, 2_000, port, undefined, topology);
+      expect(rec.status).toBe('auto');
+      expect(resolveFundingPick(rec, 2_000)?.value).toBe(10_000);
+    }
+  });
+
+  it('never proceeds while a covering coin is still being scanned', async () => {
+    const { port } = fakeScan({ [op(u('b', 9_000))]: 'has-assets', [op(u('d', 20_000))]: 'reject' });
+    const rec = await selectFunding(
+      [u('b', 9_000), u('d', 20_000)], 2_000, port, undefined, 'separate-payment-address',
+    );
+    // A failed scan is unknown content, never clean: it may be recommended but
+    // it is not silently auto-spent on a clean path.
+    expect(rec.status).toBe('asset-notice');
+    expect(rec.candidates.find((c) => c.value === 20_000)?.bucket).toBe('failed');
   });
 });

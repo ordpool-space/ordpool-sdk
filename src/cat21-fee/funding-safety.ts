@@ -36,15 +36,48 @@ export interface AnnotatedFundingUtxo extends FundingUtxo {
  * What the caller should do about funding:
  *   - `auto`             — a CLEAN UTXO covers the spend; `recommended` is
  *                          auto-selected. No coin picker needed (the default).
- *   - `expert-required`  — no clean UTXO covers, but an asset-bearing (or
- *                          scan-failed) one does. `recommended` is the best-fit
- *                          such coin, but the UI MUST confirm / offer the picker
- *                          before spending it (it would burn content).
+ *   - `asset-notice`     — no clean UTXO covers, but an asset-bearing (or
+ *                          scan-failed) one does, AND the wallet keeps a
+ *                          separate payment address. Show a NOTICE naming what
+ *                          the coin carries and PROCEED; do not block. Expert
+ *                          mode stays available but is optional.
+ *   - `expert-required`  — the same situation on a wallet that uses ONE address
+ *                          for everything, where assets and spending money
+ *                          share a lane. Show a WARNING and BLOCK until the
+ *                          user enters expert mode and overrides.
  *   - `scanning`         — a covering candidate hasn't finished scanning; wait
  *                          for the scan, then re-evaluate. `recommended` null.
  *   - `insufficient`     — nothing covers the spend. `recommended` null.
+ *
+ * `asset-notice` and `expert-required` describe the SAME coin risk; they differ
+ * only in how hard the UI stands in the way, because the two wallet topologies
+ * make an accidental spend differently likely and differently visible.
  */
-export type FundingRecommendationStatus = 'auto' | 'expert-required' | 'scanning' | 'insufficient';
+export type FundingRecommendationStatus =
+  | 'auto'
+  | 'asset-notice'
+  | 'expert-required'
+  | 'scanning'
+  | 'insufficient';
+
+/**
+ * How the connected wallet lays out its addresses.
+ *
+ * Derive it, never hardcode a wallet list: a wallet uses one address for
+ * everything exactly when `walletInfo.paymentAddress ===
+ * walletInfo.ordinalsAddress`. A name list rots silently the first time a
+ * wallet changes its model, and the dangerous direction is a wallet that
+ * COLLAPSES to one address while a stale list still calls it separate.
+ */
+export type WalletAddressTopology = 'separate-payment-address' | 'one-address-for-everything';
+
+/**
+ * True when this wallet keeps everything on one address, so its funding coins
+ * and its assets share a lane.
+ */
+export function isOneAddressWallet(wallet: { paymentAddress: string; ordinalsAddress: string }): boolean {
+  return wallet.paymentAddress === wallet.ordinalsAddress;
+}
 
 export interface FundingRecommendation<T extends AnnotatedFundingUtxo = AnnotatedFundingUtxo> {
   status: FundingRecommendationStatus;
@@ -71,6 +104,7 @@ export function recommendFunding<T extends AnnotatedFundingUtxo>(
   candidates: ReadonlyArray<T>,
   targetSpendSats: number,
   preferredSpendSats?: number,
+  topology: WalletAddressTopology = 'one-address-for-everything',
 ): FundingRecommendation<T> {
   const covering = candidates.filter((c) => c.value >= targetSpendSats);
   if (covering.length === 0) {
@@ -113,10 +147,20 @@ export function recommendFunding<T extends AnnotatedFundingUtxo>(
   }
 
   // 3. Every covering candidate is scanned and carries assets (or its scan
-  //    failed — content unknown). Never auto-spend those: recommend the best-fit
-  //    covering coin but require expert confirmation.
+  //    failed — content unknown). Never auto-spend those. How hard to stand in
+  //    the way depends on the wallet's address layout: on a separate-payment-
+  //    address wallet a dirty funding coin is unusual and the user is assumed to
+  //    know what a funding address is for, so inform and step aside; on a
+  //    one-address wallet the assets and the spending money share a lane, so an
+  //    accidental spend is likelier and less visible and a notice they can walk
+  //    past is not enough.
+  //
+  //    Default is the blocking branch, so a caller that has not yet threaded its
+  //    topology over-blocks rather than under-blocks.
   const best = selectCardinalUtxo(covering, targetSpendSats, false)!;
-  return { status: 'expert-required', recommended: annotatedFor(best), candidates };
+  const status: FundingRecommendationStatus =
+    topology === 'separate-payment-address' ? 'asset-notice' : 'expert-required';
+  return { status, recommended: annotatedFor(best), candidates };
 }
 
 /**
