@@ -61,12 +61,19 @@ case "$WALLET" in
     ASSET_NAME="alby-bitcoin-wallet-v${VERSION}.crx"
     ;;
   cat21wallet)
-    # Cat21 Wallet, our own fork of Leather. There is no CRX release:
-    # it is staged from an unpacked source build via
-    # CAT21_WALLET_LOCAL_DIST (see the guard below). The version is
-    # here only to label the cache directory.
-    VERSION="6.103.0.675"
-    ASSET_NAME="cat21-wallet-v${VERSION}.crx"
+    # Cat21 Wallet is OUR wallet and it is under active development, so every
+    # e2e suite in every repo builds it FROM THE LATEST SOURCES rather than
+    # pinning a published binary. That is deliberate: a regression in the
+    # wallet then surfaces in the next e2e run anywhere in the family, instead
+    # of hiding until somebody cuts a release. A pinned .crx would test a
+    # version nobody is developing against.
+    #
+    # Staged from an unpacked source build via CAT21_WALLET_LOCAL_DIST. The
+    # version is read back from the built manifest, so the cache directory is
+    # labelled with what was actually staged rather than a number that drifts
+    # in this file.
+    VERSION="from-source"
+    ASSET_NAME=""
     ;;
   *)
     echo "ERROR: unknown wallet '$WALLET'. Supported: xverse, unisat, leather, okx, phantom, wizz, alby, cat21wallet." >&2
@@ -79,7 +86,14 @@ REPO="ordpool-space/ordpool-sdk"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EXT_DIR="${SCRIPT_DIR}/../extensions/${WALLET}"
-CRX_FILE="$(mktemp "/tmp/${WALLET}.XXXXXX.crx")"
+# BSD mktemp (macOS) only substitutes X's at the END of the template: given
+# "...XXXXXX.crx" it returns the template VERBATIM, so every run writes the same
+# literal path and the second run of any wallet dies with "File exists". GNU
+# mktemp accepts the suffix, which is why CI never saw it. Generate the unique
+# name first, then add the extension.
+CRX_FILE="$(mktemp "/tmp/${WALLET}.XXXXXX")"
+mv "$CRX_FILE" "$CRX_FILE.crx"
+CRX_FILE="$CRX_FILE.crx"
 
 # cat21wallet has no CRX release to download: it is our own Leather fork and
 # the wallet's CI does not package one. CI builds it from source and stages the
@@ -87,10 +101,18 @@ CRX_FILE="$(mktemp "/tmp/${WALLET}.XXXXXX.crx")"
 # Say so here rather than letting the download path 404 on a tag that has never
 # existed.
 if [ "$WALLET" = "cat21wallet" ] && [ -z "${CAT21_WALLET_LOCAL_DIST:-}" ]; then
-  echo "ERROR: cat21wallet is built from source, not downloaded." >&2
-  echo "       Build it in the cat21-wallet repo (pnpm build:extension), then:" >&2
-  echo "         CAT21_WALLET_LOCAL_DIST=/path/to/cat21-wallet/apps/extension/dist \\" >&2
-  echo "           bash $0 cat21wallet" >&2
+  echo "cat21wallet is BUILT FROM SOURCE on purpose, not downloaded." >&2
+  echo "" >&2
+  echo "  It is our own wallet and still in development, so every e2e suite" >&2
+  echo "  builds the latest sources. That is how a wallet regression shows up" >&2
+  echo "  in the next run anywhere in the family instead of waiting for a" >&2
+  echo "  release. There is no .crx to fetch and there is not meant to be one." >&2
+  echo "" >&2
+  echo "  In the cat21-wallet repo:   pnpm build:extension" >&2
+  echo "  then point this at the result:" >&2
+  echo "" >&2
+  echo "    CAT21_WALLET_LOCAL_DIST=/path/to/cat21-wallet/apps/extension/dist \\" >&2
+  echo "      bash $0 cat21wallet" >&2
   exit 2
 fi
 
@@ -102,7 +124,13 @@ if [ -d "$EXT_DIR" ] && [ -f "$EXT_DIR/manifest.json" ]; then
     echo "${WALLET} v${VERSION} already unpacked at ${EXT_DIR}. Skipping."
     exit 0
   fi
-  echo "Cached extension is v${CACHED_VERSION}, want v${VERSION}. Re-downloading."
+  if [ "$WALLET" = "cat21wallet" ]; then
+    # Always re-stage: this wallet is built from source and the point is to run
+    # whatever was just built, so a cached copy is never the answer.
+    echo "Re-staging cat21wallet from source (cached copy is v${CACHED_VERSION})."
+  else
+    echo "Cached extension is v${CACHED_VERSION}, want v${VERSION}. Re-downloading."
+  fi
 fi
 
 if [ "$WALLET" = "cat21wallet" ] && [ -n "${CAT21_WALLET_LOCAL_DIST:-}" ]; then
