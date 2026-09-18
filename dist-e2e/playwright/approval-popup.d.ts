@@ -108,6 +108,39 @@ export declare function clickApprovalButton(button: {
     isClosed: () => boolean;
 }, timeoutMs?: number): Promise<void>;
 /**
+ * Click an approval button and require the popup to actually close.
+ *
+ * `clickApprovalButton` alone cannot distinguish "the wallet accepted and
+ * dismissed its popup" from "the click never registered", because both look
+ * like a click that returned without error. The difference only surfaces much
+ * later, as a missing broadcast or a harness wait that times out, by which
+ * point the popup is one of several suspects.
+ *
+ * This closes that gap by naming the outcome at the click site. It does NOT
+ * re-click: a second click on a SIGNING popup is a second signature request,
+ * and the point here is to learn whether clicks are being swallowed, not to
+ * paper over it. The failure message carries what the control looked like
+ * afterwards, which is what separates the two hypotheses:
+ *
+ *   - button still visible and enabled, page still open — the click did not
+ *     register (the swallowed-click signature, see E2E_BEST_PRACTICES 7.7)
+ *   - button gone or disabled, page still open — the click registered and the
+ *     wallet is stuck or slow on its own side
+ */
+export declare function clickApprovalAndRequireClose(button: {
+    click: (opts?: {
+        timeout?: number;
+    }) => Promise<void>;
+    isVisible: () => Promise<boolean>;
+    isEnabled: () => Promise<boolean>;
+}, page: {
+    isClosed: () => boolean;
+}, opts?: {
+    clickTimeoutMs?: number;
+    closeTimeoutMs?: number;
+    label?: string;
+}): Promise<void>;
+/**
  * Wait for the extension page that is offering a CONFIRM BUTTON.
  *
  * Replaces a pattern that was hand-copied across most wallet specs: poll every

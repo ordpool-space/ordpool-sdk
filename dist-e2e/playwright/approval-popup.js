@@ -4,6 +4,7 @@ exports.waitForApprovalPopup = waitForApprovalPopup;
 exports.closeLeftoverExtensionPages = closeLeftoverExtensionPages;
 exports.approveWizzSignPopup = approveWizzSignPopup;
 exports.clickApprovalButton = clickApprovalButton;
+exports.clickApprovalAndRequireClose = clickApprovalAndRequireClose;
 exports.waitForApprovalByConfirmButton = waitForApprovalByConfirmButton;
 exports.waitForPageShowing = waitForPageShowing;
 /**
@@ -219,6 +220,43 @@ async function clickApprovalButton(button, page, timeoutMs = 15_000) {
             return;
         }
         throw e;
+    }
+}
+/**
+ * Click an approval button and require the popup to actually close.
+ *
+ * `clickApprovalButton` alone cannot distinguish "the wallet accepted and
+ * dismissed its popup" from "the click never registered", because both look
+ * like a click that returned without error. The difference only surfaces much
+ * later, as a missing broadcast or a harness wait that times out, by which
+ * point the popup is one of several suspects.
+ *
+ * This closes that gap by naming the outcome at the click site. It does NOT
+ * re-click: a second click on a SIGNING popup is a second signature request,
+ * and the point here is to learn whether clicks are being swallowed, not to
+ * paper over it. The failure message carries what the control looked like
+ * afterwards, which is what separates the two hypotheses:
+ *
+ *   - button still visible and enabled, page still open — the click did not
+ *     register (the swallowed-click signature, see E2E_BEST_PRACTICES 7.7)
+ *   - button gone or disabled, page still open — the click registered and the
+ *     wallet is stuck or slow on its own side
+ */
+async function clickApprovalAndRequireClose(button, page, opts = {}) {
+    const label = opts.label ?? 'approval popup';
+    await clickApprovalButton(button, page, opts.clickTimeoutMs ?? 15_000);
+    const deadline = Date.now() + (opts.closeTimeoutMs ?? 20_000);
+    while (!page.isClosed()) {
+        if (Date.now() > deadline) {
+            const visible = await button.isVisible().catch(() => false);
+            const enabled = visible ? await button.isEnabled().catch(() => false) : false;
+            const diagnosis = visible && enabled
+                ? 'the button is STILL VISIBLE AND ENABLED, which is the swallowed-click signature'
+                : 'the button is gone or disabled, so the click registered and the wallet did not finish';
+            throw new Error(`${label}: clicked the confirm button and the popup never closed. ` +
+                `After the click, ${diagnosis} (visible=${visible} enabled=${enabled}).`);
+        }
+        await new Promise((r) => setTimeout(r, 100));
     }
 }
 /**

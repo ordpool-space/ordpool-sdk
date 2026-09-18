@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import {
-  clickApprovalButton,
+  clickApprovalAndRequireClose,
   waitForApprovalByConfirmButton,
   waitForApprovalPopup,
   closeLeftoverExtensionPages,
@@ -81,11 +81,13 @@ async function approveSignMessagePopup(ctx: BrowserContext, label: string): Prom
     await closeBtn.click({ force: true }).catch(() => undefined);
     await promo.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
   }
-  // OKX closes this popup on accepting the click; see clickApprovalButton.
-  await clickApprovalButton(
+  // OKX closes this popup on accepting the click, so the close IS the proof the
+  // click landed. Requiring it names the outcome here instead of letting a lost
+  // click surface later as a harness wait that times out with several suspects.
+  await clickApprovalAndRequireClose(
     approval.getByText(/^(Confirm|Sign|Approve)$/, { exact: true }).first(),
     approval,
-    45_000,
+    { clickTimeoutMs: 45_000, closeTimeoutMs: 30_000, label: `OKX ${label} signing popup` },
   );
 }
 
