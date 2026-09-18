@@ -64,6 +64,7 @@ export * from './cat21-mint/utxo-content.types.js';
 // classifier contract. Test-only in practice; exported because the consumers
 // that need them are separate repos.
 export * from './cat21-mint/utxo-content.fixtures.js';
+export * from './cat21-mint/recommended-fees.fixtures.js';
 export * from './cat21-mint/rune-etching.js';
 export * from './cat21-mint/rune-amount.js';
 export * from './cat21-mint/recommended-funding.helper.js';
