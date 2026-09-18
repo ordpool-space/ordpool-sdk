@@ -3,6 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { computePsbtVsize } from '../cat21-fee/compute-psbt-vsize.helper.js';
 import { getDummyKeypair } from '../cat21-fee/dummy-keypair.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
+import { CAT21_MINT_CHANGE_DUST_LIMIT_SATS } from './cat21-mint.helper.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { buildCat21MintPsbt } from './cat21-mint.helper.js';
@@ -55,4 +56,32 @@ function defaultMintVsize(): number {
  */
 export function calculateRecommendedFundingSats(feeRatePerVb: number): number {
   return Math.ceil((CAT21_POSTAGE_SATS + defaultMintVsize() * feeRatePerVb) / 100) * 100;
+}
+
+/**
+ * The CHANGE-HEADROOM floor, as a pure function of the fee rate.
+ *
+ * Selection does not simply take the smallest coin that can pay. Whenever any
+ * candidate clears this second, higher target, it prefers those and falls back
+ * to the feasibility set only when none does, so that the spend emits an
+ * above-dust change and the realised fee rate lands on the requested one
+ * instead of absorbing a sub-dust leftover. A coin sized between the two is
+ * therefore fundable in principle and, in a pool where anything clears
+ * headroom, never selected.
+ *
+ * Exists because a caller without a connected wallet cannot reach the
+ * authoritative number. `simulateMint` returns `fundingPreferredSats` measured
+ * against the real wallet and pool and is what production should use; this is
+ * for a page-driven test or an empty-state hint, which has a fee rate and
+ * nothing else.
+ *
+ * CONSERVATIVE BY CONSTRUCTION, in the safe direction for a floor. It measures
+ * the same taproot-representative build as `calculateRecommendedFundingSats`
+ * and rounds up to the next 100 sat, so a native-segwit funding input (about
+ * 11 vB smaller) comes out slightly over rather than under.
+ */
+export function calculateRecommendedPreferredSats(feeRatePerVb: number): number {
+  return Math.ceil(
+    (CAT21_POSTAGE_SATS + defaultMintVsize() * feeRatePerVb + CAT21_MINT_CHANGE_DUST_LIMIT_SATS) / 100,
+  ) * 100;
 }

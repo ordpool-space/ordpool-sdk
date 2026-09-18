@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { calculateRecommendedFundingSats } from './recommended-funding.helper.js';
+import { calculateRecommendedFundingSats, calculateRecommendedPreferredSats } from './recommended-funding.helper.js';
 
 describe('calculateRecommendedFundingSats', () => {
   it('is just the 546 postage (rounded up to 600) at a zero fee rate', () => {
@@ -24,5 +24,32 @@ describe('calculateRecommendedFundingSats', () => {
     // The old hardcoded 200-vB guess produced 20_600 at r=100; the simulated
     // vsize must produce a strictly smaller (more honest) floor.
     expect(at100).toBeLessThan(20_600);
+  });
+});
+
+describe('calculateRecommendedPreferredSats — the change-headroom floor', () => {
+  it('sits strictly above the feasibility floor, by at least the change dust limit', () => {
+    for (const rate of [1, 5, 20]) {
+      const feasible = calculateRecommendedFundingSats(rate);
+      const preferred = calculateRecommendedPreferredSats(rate);
+      expect(preferred).toBeGreaterThan(feasible);
+      // The gap is what a change output needs to exist at all. Collapse it and
+      // a caller sizing against the lower number picks coins selection skips.
+      expect(preferred - feasible).toBeGreaterThanOrEqual(500);
+    }
+  });
+
+  it('grows with the fee rate, because the with-change fee does', () => {
+    expect(calculateRecommendedPreferredSats(20)).toBeGreaterThan(calculateRecommendedPreferredSats(1));
+  });
+
+  it('is a whole number of hundreds, like its sibling', () => {
+    for (const rate of [1, 3, 7]) {
+      expect(calculateRecommendedPreferredSats(rate) % 100).toBe(0);
+    }
+  });
+
+  it('is deterministic across calls (the measured build is cached, not re-randomised)', () => {
+    expect(calculateRecommendedPreferredSats(5)).toBe(calculateRecommendedPreferredSats(5));
   });
 });
