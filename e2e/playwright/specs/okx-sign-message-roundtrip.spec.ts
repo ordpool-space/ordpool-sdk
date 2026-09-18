@@ -47,6 +47,14 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
  * heading rather than relying on knownPages. Then dismiss the optional
  * "Asset transfer pending" promo modal and click Confirm.
  */
+/**
+ * The Page object of the last approval we drove. OKX serves every popup from
+ * one notification.html, so a URL cannot tell a REUSED page from a fresh one at
+ * the same address; only object identity can, and that is the difference the
+ * open-but-blank failure turns on.
+ */
+let lastApprovalPage: Page | null = null;
+
 async function approveSignMessagePopup(ctx: BrowserContext, label: string): Promise<void> {
   const deadline = Date.now() + 120_000;
   let approval: Page | null = null;
@@ -72,6 +80,15 @@ async function approveSignMessagePopup(ctx: BrowserContext, label: string): Prom
       `OKX sign-message popup never showed a signature-request heading within 120s (${label}).\n` +
       `Extension pages at timeout (${lastSeen.length}):\n` +
       (lastSeen.length ? lastSeen.map((l) => `  - ${l}`).join('\n') : '  <none>') +
+      `\nPrevious approval page: ${
+        lastApprovalPage === null
+          ? '<none, this is the first>'
+          : lastApprovalPage.isClosed()
+            ? 'CLOSED, so the blank page is a NEW one that never painted'
+            : ctx.pages().includes(lastApprovalPage)
+              ? 'STILL OPEN and still in the context — if the blank page is this same object, OKX reused it and never re-rendered'
+              : 'still open but no longer in the context'
+      }` +
       '\nObserved, cause NOT established: this has only ever failed on the SECOND approval, ' +
       'while every other okx spec in the same job passes, including onboarding (which reaches ' +
       "OKX's servers) and five specs that open and click a signing popup. So the runner's egress " +
@@ -81,6 +98,7 @@ async function approveSignMessagePopup(ctx: BrowserContext, label: string): Prom
     );
   }
   await shot(approval, `02a-sign-message-approval-${label}`);
+  lastApprovalPage = approval;
 
   const promo = approval.getByText('Asset transfer pending');
   if (await promo.isVisible({ timeout: 2_000 }).catch(() => false)) {
