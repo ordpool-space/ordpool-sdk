@@ -15,6 +15,7 @@ import {
   FundingTopologySetting,
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
+import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import { Network } from '../network.js';
 import { findSignerOrThrow } from '../wallet/signers/index.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -90,6 +91,21 @@ export interface TransferSnapshot {
   // `status`, `transactionHex`, …) so a picker UI renders them directly.
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
   simulation: TransferSimulationView | null;
+  /**
+   * What each candidate coin would cost as the funding input, on the same
+   * outpoint key the recommendation uses (`outpointKey`). A picker binds to it
+   * so every surface shows one figure, and `absorbedSubDustSats` tells a coin
+   * that over-pays apart from one that cannot pay at all.
+   */
+  candidateFees: CandidateFeeRow[];
+  /**
+   * The two targets selection uses. A coin below `fundingRequirementSats`
+   * cannot fund the action; selection PREFERS one clearing
+   * `fundingPreferredSats`, the change-headroom target. Both are 0 before a
+   * measurable plan exists, which says "unknown" rather than implying a floor.
+   */
+  fundingRequirementSats: number;
+  fundingPreferredSats: number;
   errorMessage: string | null;
   successTxId: string | null;
 }
@@ -116,6 +132,9 @@ export class Cat21TransferOrchestrator {
     targetPostageSats: null,
     fundingRecommendation: EMPTY_RECOMMENDATION,
     simulation: null,
+    candidateFees: [],
+    fundingRequirementSats: 0,
+    fundingPreferredSats: 0,
     errorMessage: null,
     successTxId: null,
   };
@@ -162,7 +181,7 @@ export class Cat21TransferOrchestrator {
     }
     if (!wallet) {
       this.utxos = [];
-      this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     this.patch({ state: 'loading-utxos' });
@@ -288,7 +307,7 @@ export class Cat21TransferOrchestrator {
     const cat = this.snap.catUtxo;
     const recipient = this.snap.recipientAddress;
     if (!wallet || !feeRate || !cat || !recipient || this.utxos.length === 0) {
-      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     let sim: TransferSimulationResult;
@@ -299,12 +318,15 @@ export class Cat21TransferOrchestrator {
       );
     } catch {
       if (seq !== this.recomputeSeq) return;
-      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
     this.patch({
       fundingRecommendation: liftRecommendationByOutpoint(sim.recommendation, this.utxos),
+      candidateFees: sim.candidateFees,
+      fundingRequirementSats: sim.fundingRequirementSats,
+      fundingPreferredSats: sim.fundingPreferredSats,
       simulation:
         sim.status === 'ready' && sim.fundingUtxo && sim.feeSats != null
           ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, fundingUtxo: sim.fundingUtxo, catOutputSats: sim.catOutputSats ?? this.snap.catUtxo!.value }

@@ -10,6 +10,7 @@ import {
   FundingTopologySetting,
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
+import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import { Network } from '../network.js';
 import { findSignerOrThrow } from '../wallet/signers/index.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -80,6 +81,21 @@ export interface CreateOfferSnapshot {
   // `transactionHex`, …) so a picker UI renders them directly.
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
   simulation: CreateOfferSimulationView | null;
+  /**
+   * What each candidate coin would cost as the funding input, on the same
+   * outpoint key the recommendation uses (`outpointKey`). A picker binds to it
+   * so every surface shows one figure, and `absorbedSubDustSats` tells a coin
+   * that over-pays apart from one that cannot pay at all.
+   */
+  candidateFees: CandidateFeeRow[];
+  /**
+   * The two targets selection uses. A coin below `fundingRequirementSats`
+   * cannot fund the action; selection PREFERS one clearing
+   * `fundingPreferredSats`, the change-headroom target. Both are 0 before a
+   * measurable plan exists, which says "unknown" rather than implying a floor.
+   */
+  fundingRequirementSats: number;
+  fundingPreferredSats: number;
   bid: OfferBidArtifact | null;
   errorMessage: string | null;
 }
@@ -107,6 +123,9 @@ export class Cat21CreateOfferOrchestrator {
     selectedFundingUtxo: null,
     fundingRecommendation: EMPTY_RECOMMENDATION,
     simulation: null,
+    candidateFees: [],
+    fundingRequirementSats: 0,
+    fundingPreferredSats: 0,
     bid: null,
     errorMessage: null,
   };
@@ -153,7 +172,7 @@ export class Cat21CreateOfferOrchestrator {
     }
     if (!wallet) {
       this.utxos = [];
-      this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     this.patch({ state: 'loading-utxos' });
@@ -244,7 +263,7 @@ export class Cat21CreateOfferOrchestrator {
     const seq = ++this.recomputeSeq;
     const params = this.params();
     if (!params) {
-      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     try {
@@ -252,6 +271,9 @@ export class Cat21CreateOfferOrchestrator {
       if (seq !== this.recomputeSeq) return; // a newer input superseded this run
       this.patch({
         fundingRecommendation: liftRecommendationByOutpoint(sim.recommendation, this.utxos),
+        candidateFees: sim.candidateFees,
+        fundingRequirementSats: sim.fundingRequirementSats,
+        fundingPreferredSats: sim.fundingPreferredSats,
         simulation:
           sim.status === 'ready' && sim.buyerFundingUtxo && sim.feeSats != null
             ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, buyerFundingUtxo: sim.buyerFundingUtxo }
@@ -259,7 +281,7 @@ export class Cat21CreateOfferOrchestrator {
       });
     } catch {
       if (seq !== this.recomputeSeq) return;
-      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
     }
   }
 

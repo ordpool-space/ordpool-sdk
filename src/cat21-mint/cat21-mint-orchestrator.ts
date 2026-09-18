@@ -11,6 +11,7 @@ import {
   FundingTopologySetting,
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
+import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
 import { Network } from '../network.js';
 import { findSignerOrThrow } from '../wallet/signers/index.js';
@@ -79,6 +80,22 @@ export interface MintSnapshot {
   selectedUtxo: TxnOutput | null;
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
   simulations: UtxoSimulationRow[];
+  /**
+   * What each candidate coin would cost as the funding input, on the same
+   * outpoint key the recommendation uses (`outpointKey`). This is the core's
+   * number, not the orchestrator's grid: a picker binds to it so every surface
+   * shows one figure, and `absorbedSubDustSats` tells a coin that over-pays
+   * apart from one that cannot pay at all.
+   */
+  candidateFees: CandidateFeeRow[];
+  /**
+   * The two targets selection uses. A coin below `fundingRequirementSats`
+   * cannot fund the mint; selection PREFERS one clearing
+   * `fundingPreferredSats`, the change-headroom target. Both are 0 before a
+   * measurable plan exists, which says "unknown" rather than implying a floor.
+   */
+  fundingRequirementSats: number;
+  fundingPreferredSats: number;
   errorMessage: string | null;
   successTxId: string | null;
 }
@@ -102,6 +119,9 @@ export class Cat21MintOrchestrator {
     selectedUtxo: null,
     fundingRecommendation: EMPTY_RECOMMENDATION,
     simulations: [],
+    candidateFees: [],
+    fundingRequirementSats: 0,
+    fundingPreferredSats: 0,
     errorMessage: null,
     successTxId: null,
   };
@@ -160,7 +180,7 @@ export class Cat21MintOrchestrator {
     }
     if (!wallet) {
       this.utxos = [];
-      this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     this.patch({ state: 'loading-utxos' });
@@ -264,6 +284,9 @@ export class Cat21MintOrchestrator {
       selectedUtxo: null,
       simulations: [],
       fundingRecommendation: EMPTY_RECOMMENDATION,
+      candidateFees: [],
+      fundingRequirementSats: 0,
+      fundingPreferredSats: 0,
       errorMessage: null,
       successTxId: null,
       state: this.wallet ? 'ready' : 'idle',
@@ -277,7 +300,7 @@ export class Cat21MintOrchestrator {
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
     if (!wallet || !feeRate || this.utxos.length === 0) {
-      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
@@ -293,17 +316,23 @@ export class Cat21MintOrchestrator {
     // guess-free target + content-scan selection, single source of truth), then
     // lift its CoreFundingUtxo picks back into the TxnOutput domain by outpoint.
     let fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = EMPTY_RECOMMENDATION;
+    let candidateFees: CandidateFeeRow[] = [];
+    let fundingRequirementSats = 0;
+    let fundingPreferredSats = 0;
     try {
       const mintSim = await simulateMint(this.mintParams(wallet, paymentPublicKey, feeRate), {
         utxos: this.utxosPort(),
         scan: this.deps.scan,
       });
       fundingRecommendation = liftRecommendationByOutpoint(mintSim.recommendation, this.utxos);
+      candidateFees = mintSim.candidateFees;
+      fundingRequirementSats = mintSim.fundingRequirementSats;
+      fundingPreferredSats = mintSim.fundingPreferredSats;
     } catch {
       fundingRecommendation = EMPTY_RECOMMENDATION;
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
-    this.patch({ simulations, fundingRecommendation });
+    this.patch({ simulations, fundingRecommendation, candidateFees, fundingRequirementSats, fundingPreferredSats });
   }
 
   /**

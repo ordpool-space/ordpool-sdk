@@ -10,6 +10,7 @@ import {
   MintWalletContext,
 } from './cat21-mint-orchestrator.js';
 import { TxnOutput } from './cat21.service.types.js';
+import { outpointKey } from '../cat21-fee/candidate-fees.js';
 
 // Node unit test — no browser. Real keys so simulateMintTransaction
 // actually builds a PSBT. Pins the framework-agnostic orchestration: the state
@@ -81,6 +82,45 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     expect(s.fundingRecommendation.recommended?.txid).toBe(coin('c', 100_000).txid);
     expect(s.simulations).toHaveLength(1);
     expect(s.simulations[0].insufficient).toBe(false);
+  });
+
+  it('the snapshot carries a per-coin fee for every candidate, keyed by outpoint', async () => {
+    // What a picker binds to. The orchestrator computes this inside its call to
+    // the core and used to discard it, so a page could show which coins are
+    // safe and not what any of them would cost.
+    const big = coin('c', 100_000);
+    const small = coin('e', 1_000);
+    const o = new Cat21MintOrchestrator(deps({ getUtxos: async () => [big, small] }));
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (s) => s.candidateFees.length > 0);
+
+    const byOutpoint = new Map(s.candidateFees.map((f) => [outpointKey(f), f]));
+    expect([...byOutpoint.keys()].sort()).toEqual([outpointKey(big), outpointKey(small)].sort());
+
+    const rich = byOutpoint.get(outpointKey(big));
+    const poor = byOutpoint.get(outpointKey(small));
+    // The roomy coin funds the mint and emits change, so nothing is folded into
+    // the fee. The 1000-sat coin cannot cover postage + fee at 10 sat/vB at
+    // all, so it is unavailable rather than free.
+    expect({ richAbsorbed: rich?.absorbedSubDustSats, poorFee: poor?.finalFeeSats, poorAbsorbed: poor?.absorbedSubDustSats })
+      .toEqual({ richAbsorbed: 0, poorFee: null, poorAbsorbed: null });
+
+    // The fee the core reports and the fee the orchestrator's own per-UTXO grid
+    // reports are the same number. Two sources for one figure is how a picker
+    // and a cost line end up disagreeing on the same screen.
+    const gridRow = s.simulations.find((r) => r.utxo.txid === big.txid);
+    expect(rich?.finalFeeSats).toBe(Number(gridRow?.simulation?.finalTransactionFee));
+  });
+
+  it('the snapshot carries both funding targets, not only the feasibility floor', async () => {
+    // Anyone sizing a coin from the requirement alone is working from half the
+    // rule: selection PREFERS a coin clearing the change-headroom target.
+    const o = new Cat21MintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (s) => s.fundingRequirementSats > 0);
+    expect(s.fundingPreferredSats).toBeGreaterThan(s.fundingRequirementSats);
   });
 
   it('EXPERT-REQUIRED: only an asset-bearing covering coin => no auto-pick, mint() refuses', async () => {
