@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 
 /**
@@ -71,37 +71,11 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   //     "Signature request"
   // The legacy "Confirm Trade" copy is gone. Match either so we
   // tolerate version drift across cached extensions.
-  const deadline = Date.now() + 120_000;
-  let approval: Page | null = null;
-  let lastLog = 0;
-  const seenSnapshots = new Set<string>();
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/Signature request|Confirm Trade|Asset transfer pending/i.test(text)) {
-        approval = p;
-        break;
-      }
-      // Diagnostic snapshot of every extension page's URL + first
-      // headline text, deduped, logged on a 10s cadence. Helps spot
-      // OKX moving the sign approval to a side panel or a new hash
-      // route across versions.
-      const snippet = (text.split('\n').find(s => s.trim().length > 0) ?? '').slice(0, 80);
-      const key = `${p.url()}|${snippet}`;
-      if (!seenSnapshots.has(key)) {
-        seenSnapshots.add(key);
-        console.log(`[okx-mint:diag] page url=${p.url().slice(0, 100)} first-line="${snippet}"`);
-      }
-    }
-    if (approval) break;
-    if (Date.now() - lastLog > 10_000) {
-      console.log(`[okx-mint:diag] waiting for sign popup… elapsed=${Math.round((Date.now() - (deadline - 120_000)) / 1000)}s pages=${ctx.pages().length}`);
-      lastLog = Date.now();
-    }
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (!approval) throw new Error('OKX sign popup never showed Signature request | Confirm Trade within 120s');
+  // Wait for the CONFIRM BUTTON rather than polling body text for a
+  // heading. Heading strings change between OKX releases, and a 500ms
+  // poll against a wall-clock deadline makes the verdict depend on how
+  // busy the runner is. Both are defects in the test.
+  const approval = await waitForApprovalByConfirmButton({ context: ctx, label: `OKX sign popup` });
   await shot(approval, '03a-sign-approval');
 
   // OKX's sign popup may open with an "Asset transfer pending" promo
@@ -128,7 +102,9 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   // visually disabled by an overlay, not a real `disabled` attribute).
   const confirmBtn = approval.getByText('Confirm', { exact: true }).first();
   try {
-    await confirmBtn.click({ timeout: 45_000 });
+    // OKX closes this popup on accepting the click; a 'target closed' error
+    // there is the SUCCESS shape, not a failure. See clickApprovalButton.
+    await clickApprovalButton(confirmBtn, approval, 45_000);
   } catch {
     await shot(approval, '03c-confirm-stuck');
     // eslint-disable-next-line no-console

@@ -12,7 +12,7 @@ import {
   mineBlocks,
   postTx,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
@@ -58,21 +58,11 @@ async function approveSignPopup(ctx: BrowserContext): Promise<void> {
   // when the page was created. Sign-popup heading varies across
   // OKX versions: "Signature request" (new) vs "Confirm Trade"
   // (legacy) vs "Asset transfer pending" promo overlay.
-  const deadline = Date.now() + 120_000;
-  let approval: Page | null = null;
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/Signature request|Confirm Trade|Asset transfer pending/i.test(text)) {
-        approval = p;
-        break;
-      }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (!approval) throw new Error('OKX sign popup never showed Signature request | Confirm Trade within 120s');
+  // Wait for the CONFIRM BUTTON rather than polling body text for a
+  // heading. Heading strings change between OKX releases, and a 500ms
+  // poll against a wall-clock deadline makes the verdict depend on how
+  // busy the runner is. Both are defects in the test.
+  const approval = await waitForApprovalByConfirmButton({ context: ctx, label: `OKX sign popup` });
   await shot(approval, 'sign-approval');
 
   const promoModalText = approval.getByText('Asset transfer pending');

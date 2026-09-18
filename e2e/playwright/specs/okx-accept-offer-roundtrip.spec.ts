@@ -18,7 +18,7 @@ import {
   assertAllInputsSighashAll,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
@@ -92,33 +92,11 @@ async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void>
   // varies across OKX versions: "Signature request" (new) vs "Confirm
   // Trade" (legacy) vs an "Asset transfer pending" promo overlay. Copied
   // from okx-mint-roundtrip.spec.ts.
-  const deadline = Date.now() + 120_000;
-  let approval: Page | null = null;
-  let lastLog = 0;
-  const seenSnapshots = new Set<string>();
-  while (Date.now() < deadline) {
-    for (const p of ctx.pages()) {
-      if (!p.url().startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/Signature request|Confirm Trade|Asset transfer pending/i.test(text)) {
-        approval = p;
-        break;
-      }
-      const snippet = (text.split('\n').find(s => s.trim().length > 0) ?? '').slice(0, 80);
-      const key = `${p.url()}|${snippet}`;
-      if (!seenSnapshots.has(key)) {
-        seenSnapshots.add(key);
-        console.log(`[okx-accept-offer:diag] page url=${p.url().slice(0, 100)} first-line="${snippet}"`);
-      }
-    }
-    if (approval) break;
-    if (Date.now() - lastLog > 10_000) {
-      console.log(`[okx-accept-offer:diag] waiting for ${tag} sign popup… pages=${ctx.pages().length}`);
-      lastLog = Date.now();
-    }
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (!approval) throw new Error(`OKX ${tag} sign popup never showed Signature request | Confirm Trade within 120s`);
+  // Wait for the CONFIRM BUTTON rather than polling body text for a
+  // heading. Heading strings change between OKX releases, and a 500ms
+  // poll against a wall-clock deadline makes the verdict depend on how
+  // busy the runner is. Both are defects in the test.
+  const approval = await waitForApprovalByConfirmButton({ context: ctx, label: `OKX ${tag} sign popup` });
   await shot(approval, `${tag}-sign-approval`);
 
   const promoModalText = approval.getByText('Asset transfer pending');
