@@ -242,6 +242,22 @@ export interface OrdSendOutput {
  * omitted). The wallet must OWN the inscription being sent.
  */
 export declare function ordWalletSend(recipientAddress: string, inscriptionId: string, feeRateSatPerVb: number, postageSats?: number, wallet?: string): OrdSendOutput;
+/**
+ * Block until ord's OWN wallet view shows a spendable cardinal of at least
+ * `minSats`.
+ *
+ * `ordWalletCli` passes `--no-sync`, so every wallet subcommand reads whatever
+ * ord has already indexed rather than asking the node. Waiting for electrs, or
+ * even for ord's index tip, therefore does NOT establish that ord's WALLET can
+ * see a freshly mined funding output: those are three different views and a
+ * spec depends on the third. Waiting on the wrong one produces "wallet does not
+ * contain enough cardinal UTXOs" intermittently, on a chain where the coin
+ * demonstrably exists.
+ *
+ * Polls through the same `--no-sync` path the later command uses, so what this
+ * observes is exactly what that command will see.
+ */
+export declare function waitForOrdWalletCardinal(walletName: string, minSats: number, timeoutMs?: number): Promise<void>;
 export interface OrdAddressResponse {
     address: string;
 }

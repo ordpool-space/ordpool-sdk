@@ -583,6 +583,47 @@ export function ordWalletSend(
   return JSON.parse(ordWalletCli(wallet, ...args)) as OrdSendOutput;
 }
 
+/**
+ * Block until ord's OWN wallet view shows a spendable cardinal of at least
+ * `minSats`.
+ *
+ * `ordWalletCli` passes `--no-sync`, so every wallet subcommand reads whatever
+ * ord has already indexed rather than asking the node. Waiting for electrs, or
+ * even for ord's index tip, therefore does NOT establish that ord's WALLET can
+ * see a freshly mined funding output: those are three different views and a
+ * spec depends on the third. Waiting on the wrong one produces "wallet does not
+ * contain enough cardinal UTXOs" intermittently, on a chain where the coin
+ * demonstrably exists.
+ *
+ * Polls through the same `--no-sync` path the later command uses, so what this
+ * observes is exactly what that command will see.
+ */
+export async function waitForOrdWalletCardinal(
+  walletName: string,
+  minSats: number,
+  timeoutMs = 60_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastSeen = '<never read>';
+  while (Date.now() < deadline) {
+    try {
+      const outputs = JSON.parse(ordWalletCli(walletName, 'outputs')) as Array<{
+        output: string; amount: number; inscriptions?: string[];
+      }>;
+      lastSeen = outputs.map(o => `${o.output}=${o.amount}${o.inscriptions?.length ? ' (inscribed)' : ''}`).join(', ') || '<empty>';
+      const cardinal = outputs.find(o => o.amount >= minSats && !(o.inscriptions && o.inscriptions.length));
+      if (cardinal) return;
+    } catch (e) {
+      lastSeen = `<outputs failed: ${(e as Error).message.split('\n')[0]}>`;
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  throw new Error(
+    `ord wallet "${walletName}" never showed a cardinal of >= ${minSats} sats within ${timeoutMs}ms. ` +
+    `Its --no-sync view held: ${lastSeen}`,
+  );
+}
+
 export interface OrdAddressResponse {
   address: string;
 }

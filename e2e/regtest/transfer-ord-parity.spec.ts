@@ -34,6 +34,7 @@ import {
   rpc,
   waitForElectrsSync,
   waitForOrdReady,
+  waitForOrdWalletCardinal,
   waitForOrdSync,
   waitForTxConfirmed,
   waitForUtxoAt,
@@ -100,6 +101,13 @@ describe('transfer byte-parity vs live `ord wallet send`', () => {
     await waitForOrdSync(tip);
 
     inscriptionId = catInscriptionId(catTxid);
+
+    // `ord wallet send` runs with --no-sync, so it reads ord's own wallet view
+    // rather than the node's. electrs and the ord index being caught up says
+    // nothing about that third view, and depending on it without waiting for it
+    // is what makes this spec fail intermittently with "wallet does not contain
+    // enough cardinal UTXOs" on a chain that demonstrably holds the coin.
+    await waitForOrdWalletCardinal('ordsend', 100_000_000);
 
     // Resolve the ord wallet's UTXOs: the cat (546) and the cardinal (1 BTC).
     const utxos = await getUtxos(ordWalletAddress);
