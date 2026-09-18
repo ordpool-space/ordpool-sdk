@@ -46,5 +46,6 @@ __exportStar(require("./playwright/wait-helpers"), exports);
 __exportStar(require("./playwright/browser-error-guard"), exports);
 __exportStar(require("./playwright/radix-checkbox"), exports);
 __exportStar(require("./playwright/cat21wallet-sign-popup"), exports);
+__exportStar(require("./regtest/dirty-coin-placement"), exports);
 __exportStar(require("./regtest/regtest-helpers"), exports);
 //# sourceMappingURL=index.js.map

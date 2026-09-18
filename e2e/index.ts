@@ -30,4 +30,5 @@ export * from './playwright/wait-helpers';
 export * from './playwright/browser-error-guard';
 export * from './playwright/radix-checkbox';
 export * from './playwright/cat21wallet-sign-popup';
+export * from './regtest/dirty-coin-placement';
 export * from './regtest/regtest-helpers';
