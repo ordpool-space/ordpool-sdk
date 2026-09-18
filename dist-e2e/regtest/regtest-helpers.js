@@ -1478,14 +1478,14 @@ async function seedListedCat(options) {
  * spec against it is green for the wrong reason.
  */
 async function seedDirtyCoin(options) {
-    const { asset, address, valueSats } = options;
+    const { asset, address, valueSats, walletName } = options;
     if (!Number.isInteger(valueSats) || valueSats < 546) {
         throw new Error(`seedDirtyCoin: valueSats must be a whole number of sats at or above the dust floor; got ${valueSats}`);
     }
     const seeded = await (async () => {
         switch (asset) {
             case 'inscription': {
-                const c = await seedInscribedCoin({ address, valueSats });
+                const c = await seedInscribedCoin({ address, valueSats, walletName });
                 return { ...c, assetId: c.inscriptionId };
             }
             case 'cat': {
@@ -1495,7 +1495,7 @@ async function seedDirtyCoin(options) {
                 return { txid: c.txid, vout: c.vout, value: c.value, address: c.sellerOrdinalsAddress, assetId: c.inscriptionId };
             }
             case 'rune': {
-                const c = await seedRuneCoin({ address, valueSats });
+                const c = await seedRuneCoin({ address, valueSats, walletName });
                 return { ...c, assetId: c.runeName };
             }
             case 'rareSat': {

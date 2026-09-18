@@ -1926,8 +1926,24 @@ export async function seedDirtyCoin(options: {
   asset: DirtyCoinAsset;
   address: string;
   valueSats: number;
+  /**
+   * Which ord-side wallet does the seeding. Defaults to one name per asset
+   * class, which is fine for a single spec and collides the moment TWO specs
+   * seed the same class against one bitcoind: they share a wallet, its funding,
+   * and its UTXO set, so each run's coin selection depends on the other's.
+   *
+   * Pass distinct names to decouple them. Distinct wallets beat a shared
+   * idempotent one here, because the hazard is not creating a wallet twice
+   * (`ordStockCreateWallet` already tolerates that), it is two specs drawing
+   * from the same coins.
+   *
+   * Only `inscription` and `rune` consult it: those seed through an ord stock
+   * wallet. `cat` and `rareSat` build raw transactions against the bitcoind
+   * wallet and have no ord wallet to collide over.
+   */
+  walletName?: string;
 }): Promise<SeededDirtyCoin> {
-  const { asset, address, valueSats } = options;
+  const { asset, address, valueSats, walletName } = options;
   if (!Number.isInteger(valueSats) || valueSats < 546) {
     throw new Error(`seedDirtyCoin: valueSats must be a whole number of sats at or above the dust floor; got ${valueSats}`);
   }
@@ -1935,7 +1951,7 @@ export async function seedDirtyCoin(options: {
   const seeded = await (async (): Promise<{ txid: string; vout: number; value: number; address: string; assetId: string }> => {
     switch (asset) {
       case 'inscription': {
-        const c = await seedInscribedCoin({ address, valueSats });
+        const c = await seedInscribedCoin({ address, valueSats, walletName });
         return { ...c, assetId: c.inscriptionId };
       }
       case 'cat': {
@@ -1945,7 +1961,7 @@ export async function seedDirtyCoin(options: {
         return { txid: c.txid, vout: c.vout, value: c.value, address: c.sellerOrdinalsAddress, assetId: c.inscriptionId };
       }
       case 'rune': {
-        const c = await seedRuneCoin({ address, valueSats });
+        const c = await seedRuneCoin({ address, valueSats, walletName });
         return { ...c, assetId: c.runeName };
       }
       case 'rareSat': {

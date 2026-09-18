@@ -771,5 +771,21 @@ export declare function seedDirtyCoin(options: {
     asset: DirtyCoinAsset;
     address: string;
     valueSats: number;
+    /**
+     * Which ord-side wallet does the seeding. Defaults to one name per asset
+     * class, which is fine for a single spec and collides the moment TWO specs
+     * seed the same class against one bitcoind: they share a wallet, its funding,
+     * and its UTXO set, so each run's coin selection depends on the other's.
+     *
+     * Pass distinct names to decouple them. Distinct wallets beat a shared
+     * idempotent one here, because the hazard is not creating a wallet twice
+     * (`ordStockCreateWallet` already tolerates that), it is two specs drawing
+     * from the same coins.
+     *
+     * Only `inscription` and `rune` consult it: those seed through an ord stock
+     * wallet. `cat` and `rareSat` build raw transactions against the bitcoind
+     * wallet and have no ord wallet to collide over.
+     */
+    walletName?: string;
 }): Promise<SeededDirtyCoin>;
 //# sourceMappingURL=regtest-helpers.d.ts.map
