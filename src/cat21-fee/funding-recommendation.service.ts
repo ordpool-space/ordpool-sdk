@@ -24,11 +24,23 @@ const outpointKey = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
  * `expert-required` (only asset/scan-failed coins cover → recommend best-fit but
  * the UI must confirm), or `insufficient`.
  *
- * Wiring this into mint / transfer / offer / inscribe gives all four actions
- * identical safe-auto + expert-with-recommendation behaviour, in the SDK, so no
- * consumer (cat21.space, cat21-wallet, bots) re-implements it. The "by value"
- * pick inside `recommendFunding` is ord's best-fit `selectCardinalUtxo`, so an
- * auto-selected clean coin stays byte-aligned with `ord wallet send`.
+ * The "by value" pick inside `recommendFunding` is ord's best-fit
+ * `selectCardinalUtxo`, so an auto-selected clean coin stays byte-aligned with
+ * `ord wallet send`.
+ *
+ * **No consumer in the family calls this today.** cat21.space, ordpool and
+ * cubes reach the same logic through the orchestrators; cat21-wallet calls the
+ * `*.core` functions directly. Stated here rather than left to be rediscovered,
+ * because two things follow from it. Its `topology$` path has never run against
+ * a real consumer. And it is the one of the two doors that CANNOT derive
+ * topology from a wallet context, since it holds none, so a caller must supply
+ * that policy decision by hand: an unexercised path and a hand-supplied
+ * decision in the same place.
+ *
+ * Prefer the orchestrator's `fundingTopology: 'derive'` for anything with a
+ * connected wallet. Reach for this only when you genuinely need a reactive
+ * recommendation over streams that no orchestrator owns, and treat its topology
+ * wiring as the part to test first.
  */
 export class FundingRecommendationService {
   constructor(private readonly scanner: UtxoContentScanner) {}
