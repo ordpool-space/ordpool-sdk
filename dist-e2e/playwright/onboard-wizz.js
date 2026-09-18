@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardWizz = onboardWizz;
 const test_1 = require("@playwright/test");
+const click_until_effect_1 = require("./click-until-effect");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 /**
  * Drive Wizz (a UniSat fork) onboarding from the BIP-39 test seed to the
@@ -23,19 +24,24 @@ async function onboardWizz(page, extensionId, opts = {}) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++)
         await pwInputs.nth(i).fill(password);
-    await page.getByRole('button', { name: /^continue$/i }).first().click();
+    await (0, click_until_effect_1.clickUntilEffect)(page.getByRole('button', { name: /^continue$/i }).first(), page.getByText('Wizz Wallet', { exact: true }).first(), { label: 'wizz onboarding: continue after password' });
     await (0, test_1.expect)(page.getByText('Wizz Wallet', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
     await page.getByText('Wizz Wallet', { exact: true }).first().click({ force: true });
     const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
     await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
     for (let i = 0; i < words.length; i++)
         await mnemonicInputs.nth(i).fill(words[i]);
-    await page.getByRole('button', { name: /^continue$/i }).first().click();
+    await (0, click_until_effect_1.clickUntilEffect)(page.getByRole('button', { name: /^continue$/i }).first(), page.getByText(addressTypeRowLabel, { exact: true }).first(), { label: 'wizz onboarding: continue after mnemonic' });
     await (0, test_1.expect)(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
     await page.getByText(addressTypeRowLabel, { exact: true }).first().click({ force: true });
     const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
     await continueBtn.scrollIntoViewIfNeeded();
-    await continueBtn.click();
+    // The address-type row above re-renders on selection, so this button can be
+    // replaced between the locator resolving and the click landing. Observed in
+    // CI as "Security Tips: element(s) not found", one step from the cause.
+    await (0, click_until_effect_1.clickUntilEffect)(continueBtn, page.getByText('Security Tips', { exact: true }), {
+        label: 'wizz onboarding: continue after address type',
+    });
     await (0, test_1.expect)(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
     const checkboxes = page.locator('label.ant-checkbox-wrapper');
     await (0, test_1.expect)(checkboxes).toHaveCount(3, { timeout: 10_000 });
