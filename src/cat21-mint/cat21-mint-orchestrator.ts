@@ -8,6 +8,8 @@ import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   liftRecommendationByOutpoint,
+  FundingTopologySetting,
+  resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
 import { Network } from '../network.js';
@@ -54,6 +56,17 @@ export interface MintOrchestratorDeps {
   getUtxos(paymentAddress: string): Promise<TxnOutput[]>;
   /** Content classification for the force-scan funding safety (ord + cat21-ord). */
   scan: ContentScanPort;
+  /**
+   * How this consumer's wallet lays out its addresses, deciding whether a
+   * dirty-only funding pool produces a NOTICE (separate payment address) or a
+   * blocking WARNING (one address for everything).
+   *
+   * Pass `'derive'` and it is worked out from the connected wallet. UI and
+   * agent callers both do; they get the same answer, because the decision is
+   * the same decision. Omitting it keeps the blocking answer, which protects a
+   * caller who forgot rather than expressing anything about agents.
+   */
+  fundingTopology?: FundingTopologySetting;
   /** Broadcast a signed tx hex; resolves to the txid. */
   broadcast(signedTxHex: string): Promise<string>;
   network: Network;
@@ -311,6 +324,7 @@ export class Cat21MintOrchestrator {
       recipientAddress: wallet.ordinalsAddress,
       feeRatePerVbyte: feeRate,
       selectedFundingUtxo: this.snap.selectedUtxo ? toCore(this.snap.selectedUtxo) : undefined,
+      fundingTopology: resolveFundingTopology(this.deps.fundingTopology, wallet),
     };
   }
 

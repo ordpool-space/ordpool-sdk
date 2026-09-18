@@ -24,8 +24,48 @@ export interface CoreFundingUtxo extends FundingUtxo {
   transactionHex?: string;
 }
 
-/** Content-safety verdict for one outpoint. The core auto-spends only `clean`. */
-export type UtxoClassification = 'clean' | 'has-assets';
+/**
+ * What a scan found on one outpoint, in enough detail to ACT on.
+ *
+ * A bare verdict is not enough for either audience. A person needs to be told
+ * which inscription, which rune, which cat, which rare sat, or they cannot
+ * consent to losing it; an agent needs the same facts for the same reason, on
+ * an API instead of a screen. Both decisions are the same decision, so both get
+ * the same information.
+ */
+export interface UtxoAssetDetail {
+  /** Inscription ids sitting on this outpoint. */
+  inscriptionIds: string[];
+  /** Rune names present, in ord's spelling (spacers included). */
+  runeNames: string[];
+  /** CAT-21 cat ids, from a cat21-ord index. */
+  catIds: string[];
+  /** The rare sat, when one is present. */
+  rareSat: { sat: string; block: number; rarity: string } | null;
+}
+
+/**
+ * Content-safety verdict for one outpoint. The core auto-spends only `clean`.
+ *
+ * The bare strings remain valid, so a port that only knows yes-or-no keeps
+ * working. Returning the object form additionally carries WHAT was found
+ * through to the recommendation, which is what lets a caller name the assets
+ * rather than say "this coin carries assets".
+ */
+export type UtxoClassification =
+  | 'clean'
+  | 'has-assets'
+  | { verdict: 'clean' | 'has-assets'; assets?: UtxoAssetDetail };
+
+/** Narrow either form to the verdict alone. */
+export function classificationVerdict(c: UtxoClassification): 'clean' | 'has-assets' {
+  return typeof c === 'string' ? c : c.verdict;
+}
+
+/** The detail a classification carries, when it carries any. */
+export function classificationAssets(c: UtxoClassification): UtxoAssetDetail | undefined {
+  return typeof c === 'string' ? undefined : c.assets;
+}
 
 /** Where the account's spendable funding UTXOs come from. */
 export interface UtxosPort {

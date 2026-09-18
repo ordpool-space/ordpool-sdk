@@ -18,6 +18,7 @@
  */
 
 import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
+import { UtxoAssetDetail } from '../cat21-core/ports.js';
 import { FundingUtxo } from './coin-selection.helper.js';
 import { selectCardinalUtxo } from './ord-coin-select.js';
 
@@ -30,6 +31,13 @@ export interface AnnotatedFundingUtxo extends FundingUtxo {
    * (content unknown, treat as unsafe to auto-spend).
    */
   bucket: UtxoScanBucket;
+  /**
+   * What the scan found, when the port reported it. Present so a caller can
+   * NAME the assets rather than say "this coin carries assets" — a person
+   * cannot consent to a loss they cannot see, and an agent deciding on an API
+   * is making that same decision without a screen.
+   */
+  assets?: UtxoAssetDetail;
 }
 
 /**
@@ -85,6 +93,41 @@ export interface FundingRecommendation<T extends AnnotatedFundingUtxo = Annotate
   recommended: T | null;
   /** The full annotated candidate list, for the expert-mode picker. */
   candidates: ReadonlyArray<T>;
+}
+
+/**
+ * What a STATEFUL caller (an orchestrator, a reactive service) was told about
+ * its wallet's layout.
+ *
+ * `'derive'` means "work it out from the wallet context you already hold".
+ * Offered because the alternative, making every consumer compute and pass the
+ * value, is a thing each of them can forget, and forgetting is invisible: the
+ * flow silently over-blocks and the notice simply never appears.
+ *
+ * Omitting the setting still blocks, but that is a guard against a caller who
+ * FORGOT, not a policy about agents. An agent is treated exactly like a person:
+ * both are entitled to the same answer and the same facts, one on a screen and
+ * one on an API. So an agent passes `'derive'` too, and what makes its decision
+ * safe is that the recommendation NAMES what it found (see `assets` on
+ * `AnnotatedFundingUtxo`), not that the answer was withheld from it.
+ */
+export type FundingTopologySetting = WalletAddressTopology | 'derive';
+
+/**
+ * Resolve a caller's setting against the wallet it holds. `undefined` in,
+ * `undefined` out, which `recommendFunding` reads as the blocking branch.
+ */
+export function resolveFundingTopology(
+  setting: FundingTopologySetting | undefined,
+  wallet: { paymentAddress: string; ordinalsAddress: string },
+): WalletAddressTopology | undefined {
+  if (setting === undefined) {
+    return undefined;
+  }
+  if (setting === 'derive') {
+    return isOneAddressWallet(wallet) ? 'one-address-for-everything' : 'separate-payment-address';
+  }
+  return setting;
 }
 
 /**

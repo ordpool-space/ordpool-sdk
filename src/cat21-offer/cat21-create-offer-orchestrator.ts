@@ -7,6 +7,8 @@ import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   liftRecommendationByOutpoint,
+  FundingTopologySetting,
+  resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
 import { Network } from '../network.js';
 import { findSignerOrThrow } from '../wallet/signers/index.js';
@@ -40,6 +42,17 @@ export interface CreateOfferWalletContext {
 export interface CreateOfferOrchestratorDeps {
   getUtxos(paymentAddress: string): Promise<TxnOutput[]>;
   scan: ContentScanPort;
+  /**
+   * How this consumer's wallet lays out its addresses, deciding whether a
+   * dirty-only funding pool produces a NOTICE (separate payment address) or a
+   * blocking WARNING (one address for everything).
+   *
+   * Pass `'derive'` and it is worked out from the connected wallet. UI and
+   * agent callers both do; they get the same answer, because the decision is
+   * the same decision. Omitting it keeps the blocking answer, which protects a
+   * caller who forgot rather than expressing anything about agents.
+   */
+  fundingTopology?: FundingTopologySetting;
   network: Network;
 }
 
@@ -249,6 +262,7 @@ export class Cat21CreateOfferOrchestrator {
       priceSats,
       feeRatePerVbyte: feeRate,
       selectedFundingUtxo: selectedFundingUtxo ? toCore(selectedFundingUtxo) : undefined,
+      fundingTopology: resolveFundingTopology(this.deps.fundingTopology, w),
     };
   }
 

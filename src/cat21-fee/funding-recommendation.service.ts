@@ -1,3 +1,4 @@
+import { WalletAddressTopology } from './funding-safety.js';
 import { Observable, combineLatest, map, of, switchMap } from 'rxjs';
 
 import { UtxoContentScanner } from '../cat21-mint/utxo-content-scanner.service.js';
@@ -40,14 +41,20 @@ export class FundingRecommendationService {
    * the requested rate instead of a sub-dust leftover being absorbed into the
    * fee. `targetSpendSats$` stays the coverage gate (never a false
    * `insufficient`). Mirrors `selectFunding`'s `preferredSats`.
+   *
+   * `topology$` (optional) says how the connected wallet lays out its
+   * addresses, deciding whether a dirty-only pool yields a NOTICE or a blocking
+   * WARNING. It is an Observable because the connected wallet can change under
+   * a live subscription. Emitting `undefined` keeps the blocking answer.
    */
   recommend<T extends FundingUtxo>(
     fundingUtxos$: Observable<ReadonlyArray<T>>,
     targetSpendSats$: Observable<number | null>,
     preferredSpendSats$: Observable<number | null> = of(null),
+    topology$: Observable<WalletAddressTopology | undefined> = of(undefined),
   ): Observable<FundingRecommendation<T & AnnotatedFundingUtxo>> {
-    return combineLatest([fundingUtxos$, targetSpendSats$, preferredSpendSats$]).pipe(
-      switchMap(([utxos, target, preferred]) => {
+    return combineLatest([fundingUtxos$, targetSpendSats$, preferredSpendSats$, topology$]).pipe(
+      switchMap(([utxos, target, preferred, topology]) => {
         if (!target || target <= 0 || utxos.length === 0) {
           return of(recommendFunding<T & AnnotatedFundingUtxo>([], target ?? 0));
         }
@@ -70,7 +77,7 @@ export class FundingRecommendationService {
                 bucket: bucketOf(this.scanner.getState(outpointKey(u))),
               }),
             );
-            return recommendFunding(annotated, target, preferred ?? undefined);
+            return recommendFunding(annotated, target, preferred ?? undefined, topology);
           }),
         );
       }),

@@ -6,7 +6,7 @@ import {
   WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
 import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
-import { ContentScanPort } from './ports.js';
+import { classificationAssets, classificationVerdict, ContentScanPort, UtxoAssetDetail } from './ports.js';
 
 const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
 
@@ -50,25 +50,37 @@ export async function selectFunding<T extends FundingUtxo>(
   }
 
   const bucketByOutpoint = new Map<string, UtxoScanBucket>();
+  const assetsByOutpoint = new Map<string, UtxoAssetDetail>();
   await Promise.all(
     utxos
       .filter((u) => u.value >= targetSats)
       .map(async (u) => {
         try {
-          const verdict = await scan.classify(outpoint(u));
-          bucketByOutpoint.set(outpoint(u), verdict === 'clean' ? 'clean' : 'assets');
+          const classification = await scan.classify(outpoint(u));
+          bucketByOutpoint.set(
+            outpoint(u),
+            classificationVerdict(classification) === 'clean' ? 'clean' : 'assets',
+          );
+          // Carried through when the port reports it, so the caller can name
+          // what it found instead of only that it found something.
+          const detail = classificationAssets(classification);
+          if (detail) {
+            assetsByOutpoint.set(outpoint(u), detail);
+          }
         } catch {
           bucketByOutpoint.set(outpoint(u), 'failed');
         }
       }),
   );
 
-  const annotated = utxos.map(
-    (u): T & AnnotatedFundingUtxo => ({
+  const annotated = utxos.map((u): T & AnnotatedFundingUtxo => {
+    const detail = assetsByOutpoint.get(outpoint(u));
+    return {
       ...u,
       bucket: bucketByOutpoint.get(outpoint(u)) ?? 'unscanned',
-    }),
-  );
+      ...(detail ? { assets: detail } : {}),
+    };
+  });
   return recommendFunding(annotated, targetSats, preferredSats, topology);
 }
 

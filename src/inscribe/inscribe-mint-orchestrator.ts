@@ -4,7 +4,12 @@ import { hex } from '@scure/base';
 import { ContentScanPort } from '../cat21-core/ports.js';
 import { selectFunding } from '../cat21-core/select-funding.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
-import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety.js';
+import {
+  AnnotatedFundingUtxo,
+  FundingRecommendation,
+  FundingTopologySetting,
+  resolveFundingTopology,
+} from '../cat21-fee/funding-safety.js';
 import { Network } from '../network.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -259,6 +264,17 @@ export interface InscribeOrchestratorDeps {
   getUtxos(paymentAddress: string): Promise<TxnOutput[]>;
   /** Content classification for the force-scan funding safety (ord + cat21-ord). */
   scan: ContentScanPort;
+  /**
+   * How this consumer's wallet lays out its addresses, deciding whether a
+   * dirty-only funding pool produces a NOTICE (separate payment address) or a
+   * blocking WARNING (one address for everything).
+   *
+   * Pass `'derive'` and it is worked out from the connected wallet. UI and
+   * agent callers both do; they get the same answer, because the decision is
+   * the same decision. Omitting it keeps the blocking answer, which protects a
+   * caller who forgot rather than expressing anything about agents.
+   */
+  fundingTopology?: FundingTopologySetting;
   /** Broadcast a signed tx hex; resolves to the txid. Called for commit AND reveal. */
   broadcast(signedTxHex: string): Promise<string>;
   network: Network;
@@ -796,6 +812,7 @@ export class InscribeMintOrchestrator {
           target,
           this.deps.scan,
           preferredTarget,
+          resolveFundingTopology(this.deps.fundingTopology, wallet),
         );
       } catch {
         fundingRecommendation = EMPTY_RECOMMENDATION;
@@ -867,7 +884,11 @@ export class InscribeMintOrchestrator {
     const fundingRecommendation = target === null
       ? EMPTY_RECOMMENDATION
       : await selectFunding<TxnOutput>(
-        this.utxos, target, this.deps.scan, target + changeDustFloor(wallet.paymentAddress),
+        this.utxos,
+        target,
+        this.deps.scan,
+        target + changeDustFloor(wallet.paymentAddress),
+        resolveFundingTopology(this.deps.fundingTopology, wallet),
       ).catch(() => EMPTY_RECOMMENDATION);
     if (seq !== this.recomputeSeq) return;
     this.patch({ simulations, fundingRecommendation });

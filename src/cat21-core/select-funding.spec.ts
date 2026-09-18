@@ -161,3 +161,67 @@ describe('the wallet topology decides whether a dirty-only wallet proceeds or bl
     expect(rec.candidates.find((c) => c.value === 20_000)?.bucket).toBe('failed');
   });
 });
+
+describe('the recommendation names what it found, so an API caller can decide like a person', () => {
+  // A screen and an API are the same decision. Someone looking at a panel is
+  // told WHICH inscription and WHICH cat sit on the coin; an agent choosing
+  // over an API needs the same facts, or it is being asked to consent to a
+  // loss it cannot see.
+  const detail = {
+    inscriptionIds: ['abc123i0'],
+    runeNames: ['UNCOMMON•GOODS'],
+    catIds: ['def456i0'],
+    rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' },
+  };
+
+  const detailPort = (dirty: { txid: string; vout: number }) => ({
+    classify: async (outpoint: string) =>
+      outpoint === `${dirty.txid}:${dirty.vout}`
+        ? ({ verdict: 'has-assets' as const, assets: detail })
+        : ('clean' as const),
+  });
+
+  it('carries the asset detail onto the recommended coin', async () => {
+    const dirty = u('b', 9_000);
+    const rec = await selectFunding(
+      [u('a', 200), dirty], 2_000, detailPort(dirty), undefined, 'separate-payment-address',
+    );
+    expect(rec.status).toBe('asset-notice');
+    expect(rec.recommended?.assets).toEqual(detail);
+    // Named, not merely flagged: every class is individually reachable.
+    expect(rec.recommended?.assets?.inscriptionIds).toEqual(['abc123i0']);
+    expect(rec.recommended?.assets?.catIds).toEqual(['def456i0']);
+    expect(rec.recommended?.assets?.runeNames).toEqual(['UNCOMMON•GOODS']);
+    expect(rec.recommended?.assets?.rareSat?.rarity).toBe('uncommon');
+  });
+
+  it('carries it on a BLOCKED recommendation too, which is what a picker renders', async () => {
+    const dirty = u('b', 9_000);
+    const rec = await selectFunding(
+      [u('a', 200), dirty], 2_000, detailPort(dirty), undefined, 'one-address-for-everything',
+    );
+    expect(rec.status).toBe('expert-required');
+    // No coin is handed over, but the user (or agent) must still be told what
+    // they would be spending before they can override.
+    expect(rec.recommended?.assets).toEqual(detail);
+  });
+
+  it('a port that reports only a bare verdict still works, with no detail', async () => {
+    const dirty = u('b', 9_000);
+    const { port } = fakeScan({ [op(dirty)]: 'has-assets' });
+    const rec = await selectFunding(
+      [u('a', 200), dirty], 2_000, port, undefined, 'separate-payment-address',
+    );
+    expect(rec.status).toBe('asset-notice');
+    expect(rec.recommended?.bucket).toBe('assets');
+    expect(rec.recommended?.assets).toBeUndefined();
+  });
+
+  it('a clean coin carries no asset detail', async () => {
+    const dirty = u('b', 9_000);
+    const clean = u('c', 20_000);
+    const rec = await selectFunding([clean, dirty], 2_000, detailPort(dirty), undefined, 'separate-payment-address');
+    expect(rec.status).toBe('auto');
+    expect(rec.recommended?.assets).toBeUndefined();
+  });
+});
