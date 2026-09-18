@@ -206,3 +206,35 @@ export async function approveWizzSignPopup(opts: {
   // best-effort by design.
   await opts.onScreenshot?.(approval, 'after-sign-click').catch(() => undefined);
 }
+
+/**
+ * Click an approval button that DISMISSES ITS OWN PAGE.
+ *
+ * A wallet closes its approval popup the moment it accepts the click, and
+ * Playwright's post-click bookkeeping then runs against a target that no longer
+ * exists, throwing "Target page, context or browser has been closed". From the
+ * click's own error there is no way to tell that outcome, which is SUCCESS,
+ * apart from a click that never landed.
+ *
+ * So the close is tolerated only when the page is genuinely gone, which is what
+ * an accepted approval looks like. This hides nothing: if the click did not
+ * land, the wallet never signs, and the spec's own downstream assertion (a
+ * broadcast txid, a confirmed transaction, a success panel) fails with a
+ * message about the thing that actually matters. Any other error still throws.
+ */
+export async function clickApprovalButton(
+  button: { click: (opts?: { timeout?: number }) => Promise<void> },
+  page: { isClosed: () => boolean },
+  timeoutMs = 15_000,
+): Promise<void> {
+  try {
+    await button.click({ timeout: timeoutMs });
+  } catch (e) {
+    const message = (e as Error).message ?? '';
+    const targetGone = /Target (page|closed)|context or browser has been closed|has been closed/i.test(message);
+    if (targetGone && page.isClosed()) {
+      return;
+    }
+    throw e;
+  }
+}

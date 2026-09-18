@@ -16,7 +16,7 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { clickApprovalButton, waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardLeather } from '../onboard-leather';
 
 /**
@@ -106,7 +106,11 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   await shot(approval, tag);
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
   await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
-  await confirmBtn.click();
+  // Leather closes this popup the instant it accepts the click, and the
+  // post-click bookkeeping then runs against a target that is already gone.
+  // The downstream assertions (the reveal broadcasting, the child linking to
+  // its parent) are what prove the click actually landed.
+  await clickApprovalButton(confirmBtn, approval);
   knownPages.add(approval);
 }
 
