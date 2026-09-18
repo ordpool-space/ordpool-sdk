@@ -170,16 +170,13 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
 
   // OKX "Secure your wallet" step opens on a NEW page (CI 26717287969
   // trace, guid 1cb3b9dd). Switch to whichever page now shows it.
-  const secureDeadline = Date.now() + 30_000;
-  let securePage: Page | null = null;
-  while (Date.now() < secureDeadline) {
-    for (const p of context.pages()) {
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/Secure your wallet/i.test(text)) { securePage = p; break; }
-    }
-    if (securePage) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
+  // Event-driven rather than a 500ms poll: on a slow machine the old loop could
+  // expire before OKX painted this step and the flow would continue against the
+  // wrong page, failing later somewhere unrelated. Optional by design, so the
+  // catch is explicit.
+  const securePage = await waitForPageShowing({
+    context, text: /Secure your wallet/i, timeoutMs: 30_000, label: 'okx secure-wallet step',
+  }).catch(() => null);
   if (securePage) {
     page = securePage;
   }

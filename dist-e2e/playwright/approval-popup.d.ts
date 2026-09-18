@@ -136,4 +136,27 @@ export declare function waitForApprovalByConfirmButton(opts: {
     /** Named in the failure message, e.g. 'mint' or 'listing-message'. */
     label?: string;
 }): Promise<Page>;
+/**
+ * Resolve to the page currently SHOWING `text`, across pages that are already
+ * open and pages that appear while waiting.
+ *
+ * Extension onboarding hands a step to an unpredictable page: a wallet may
+ * continue in the tab you have, or open a fresh one, and which it does varies
+ * by version. The specs handled that by polling every page's innerText every
+ * 500ms until a deadline, then continuing on the original page if nothing
+ * matched. So on a slow machine the search could expire before the wallet
+ * painted, and the flow would carry on against the WRONG page and fail later
+ * somewhere unrelated.
+ *
+ * This waits on Playwright's event-driven text matching instead, so it returns
+ * the moment the text appears rather than on the next tick of a timer, and it
+ * throws rather than silently yielding null. A caller that genuinely treats the
+ * step as optional can still `.catch(() => null)`, but it has to say so.
+ */
+export declare function waitForPageShowing(opts: {
+    context: BrowserContext;
+    text: RegExp;
+    timeoutMs?: number;
+    label?: string;
+}): Promise<Page>;
 //# sourceMappingURL=approval-popup.d.ts.map

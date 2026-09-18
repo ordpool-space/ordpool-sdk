@@ -151,13 +151,13 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
     }
     return null;
   };
-  const deadline = Date.now() + 60_000;
-  let newPage: Page | null = null;
-  while (Date.now() < deadline) {
-    newPage = await findResultPage();
-    if (newPage) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
+  // Event-driven rather than a 500ms poll, for the same reason as okx's secure
+  // step: expiring before the wallet paints made the flow continue against the
+  // wrong page. Optional by design, so the catch is explicit.
+  const newPage = await waitForPageShowing({
+    context, text: /We found .* accounts? with activity/i, timeoutMs: 60_000,
+    label: 'phantom accounts-found step',
+  }).catch(() => null);
   if (newPage) {
     page = newPage;
   }
