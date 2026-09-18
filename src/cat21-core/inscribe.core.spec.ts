@@ -101,3 +101,29 @@ describe('inscribe.core — executeInscribe', () => {
     expect(prompt).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('inscribe.core — both funding targets are reachable', () => {
+  // Same reason as the mint: a caller sizing a coin needs the headroom target
+  // too, because a coin between the two is fundable in principle and skipped
+  // whenever anything else clears headroom.
+  it('reports the headroom target above the requirement', async () => {
+    const sim = await simulateInscribe(params(), { utxos: utxosPort([coin('a', 500_000)]), scan: scanPort() });
+    expect(sim.fundingRequirementSats).not.toBeNull();
+    expect(sim.fundingPreferredSats).not.toBeNull();
+    expect(sim.fundingPreferredSats!).toBeGreaterThan(sim.fundingRequirementSats!);
+    // The gap is this payment address's dust floor: what a change output costs
+    // to exist. Collapse it and the preference it encodes disappears.
+    expect(sim.fundingPreferredSats! - sim.fundingRequirementSats!).toBeGreaterThanOrEqual(294);
+  });
+
+  it('reports both targets even with an EMPTY pool, because neither depends on it', async () => {
+    // Unlike the mint, which measures against the largest available coin, the
+    // inscribe target comes from the envelope and the fee rate alone. So a
+    // caller can ask what it needs BEFORE funding anything, which is what a
+    // page-driven spec wants when it is deciding what size coin to seed.
+    const sim = await simulateInscribe(params(), { utxos: utxosPort([]), scan: scanPort() });
+    expect(sim.status).toBe('insufficient');
+    expect(sim.fundingRequirementSats).toBeGreaterThan(0);
+    expect(sim.fundingPreferredSats!).toBeGreaterThan(sim.fundingRequirementSats!);
+  });
+});

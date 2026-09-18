@@ -60,6 +60,15 @@ export interface InscribeSimulation {
   fundingUtxo: CoreFundingUtxo | null;
   /** commit output + commit fee the funding coin must cover. Null if the content is unbuildable. */
   fundingRequirementSats: number | null;
+  /**
+   * The CHANGE-HEADROOM target: the requirement plus this payment address's
+   * dust floor. Selection PREFERS a candidate clearing it whenever any
+   * candidate does, so a coin between the two is fundable in principle and
+   * never chosen in a pool where something else clears it. Exposed because a
+   * caller sizing a coin from the requirement alone is working from half the
+   * rule.
+   */
+  fundingPreferredSats: number | null;
 }
 
 interface InscribePlan {
@@ -67,6 +76,15 @@ interface InscribePlan {
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   pick: CoreFundingUtxo | null;
   fundingRequirementSats: number | null;
+  /**
+   * The CHANGE-HEADROOM target: the requirement plus this payment address's
+   * dust floor. Selection PREFERS a candidate clearing it whenever any
+   * candidate does, so a coin between the two is fundable in principle and
+   * never chosen in a pool where something else clears it. Exposed because a
+   * caller sizing a coin from the requirement alone is working from half the
+   * rule.
+   */
+  fundingPreferredSats: number | null;
 }
 
 /**
@@ -112,7 +130,7 @@ async function planInscribe(
   const empty = recommendFunding<CoreFundingUtxo & AnnotatedFundingUtxo>([], 0);
   const target = inscribeFundingTarget(params);
   if (target == null) {
-    return { status: 'insufficient', recommendation: empty, pick: null, fundingRequirementSats: null };
+    return { status: 'insufficient', recommendation: empty, pick: null, fundingRequirementSats: null, fundingPreferredSats: null };
   }
   const utxos = await ports.utxos.spendableUtxos(params.paymentAddress);
   // `target` already reflects the WITH-CHANGE commit fee (simulated against a
@@ -130,9 +148,16 @@ async function planInscribe(
       recommendation,
       pick: null,
       fundingRequirementSats: target,
+      fundingPreferredSats: preferredTarget,
     };
   }
-  return { status: recommendation.status === 'asset-notice' ? 'asset-notice' : 'ready', recommendation, pick, fundingRequirementSats: target };
+  return {
+    status: recommendation.status === 'asset-notice' ? 'asset-notice' : 'ready',
+    recommendation,
+    pick,
+    fundingRequirementSats: target,
+    fundingPreferredSats: preferredTarget,
+  };
 }
 
 /**
@@ -149,6 +174,7 @@ export async function simulateInscribe(
     recommendation: plan.recommendation,
     fundingUtxo: plan.pick,
     fundingRequirementSats: plan.fundingRequirementSats,
+    fundingPreferredSats: plan.fundingPreferredSats,
   };
 }
 
