@@ -129,6 +129,35 @@ describe('recommendFunding — change-headroom preference (dust-cliff over-pay g
     const r = recommendFunding([u(10_000, 'clean')], FEASIBILITY, PREFERRED);
     expect(r.status).toBe('insufficient');
   });
+
+  it('the headroom bias applies ONLY to clean coins: a dirty-only pool best-fits the REQUIREMENT', () => {
+    // Both coins carry assets, so there is nothing clean to prefer. The pick is
+    // the smallest that COVERS, even though the 20_000 would clear PREFERRED
+    // and avoid the dust-fold. That is deliberate: in a pool where every
+    // covering coin carries something, spending the least is worth more than
+    // avoiding a sub-dust over-pay, and biasing toward the bigger coin could
+    // burn the more valuable asset.
+    //
+    // The visible consequence, which a surface must render rather than hide:
+    // the recommended row can be flagged as over-paying at the same time.
+    const notice = recommendFunding(
+      [u(13_100, 'assets'), u(20_000, 'assets')],
+      FEASIBILITY,
+      PREFERRED,
+      'separate-payment-address',
+    );
+    expect(notice.status).toBe('asset-notice');
+    expect(notice.recommended?.value).toBe(13_100);
+
+    const blocked = recommendFunding(
+      [u(13_100, 'assets'), u(20_000, 'assets')],
+      FEASIBILITY,
+      PREFERRED,
+      'one-address-for-everything',
+    );
+    expect(blocked.status).toBe('expert-required');
+    expect(blocked.recommended?.value).toBe(13_100);
+  });
 });
 
 describe('the documented mutation point', () => {

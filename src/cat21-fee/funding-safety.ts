@@ -200,6 +200,15 @@ export function recommendFunding<T extends AnnotatedFundingUtxo>(
   //
   //    Default is the blocking branch, so a caller that has not yet threaded its
   //    topology over-blocks rather than under-blocks.
+  //
+  //    The change-headroom bias above is deliberately NOT applied here: the pick
+  //    is best-fit against FEASIBILITY, so it is the smallest coin that covers
+  //    even when a larger one would clear `preferredSpendSats` and avoid the
+  //    dust-fold. In a pool where every covering coin carries something,
+  //    spending the least is worth more than avoiding a sub-dust over-pay, and
+  //    biasing toward the bigger coin could burn the more valuable asset.
+  //    Consequence a surface must RENDER rather than hide: the recommended row
+  //    can carry an over-pay flag at the same time as the recommendation.
   const best = selectCardinalUtxo(covering, targetSpendSats, false)!;
   const status: FundingRecommendationStatus =
     topology === 'separate-payment-address' ? 'asset-notice' : 'expert-required';
