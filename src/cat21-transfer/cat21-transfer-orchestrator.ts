@@ -133,6 +133,23 @@ export class Cat21TransferOrchestrator {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * Refetch the funding UTXOs for the connected wallet and recompute.
+   *
+   * The set is otherwise read ONCE, when the wallet connects, so a page that
+   * connected while its funding transaction was still unconfirmed, or before
+   * electrs had indexed it, stays stuck: the CTA sits disabled and no fee-rate
+   * change fixes it, because the fee rate is not what is missing.
+   *
+   * Deliberately NOT polled here. How often to re-read, and on what event, is
+   * the consumer's call. Leaves the fee rate and any expert-mode selection
+   * alone, since neither is invalidated by new coins arriving.
+   */
+  async refreshUtxos(): Promise<void> {
+    if (!this.wallet) return;
+    await this.setWallet(this.wallet);
+  }
+
   async setWallet(wallet: TransferWalletContext | null): Promise<void> {
     const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
     this.wallet = wallet;

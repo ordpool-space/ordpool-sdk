@@ -398,3 +398,33 @@ describe('InscribeMintOrchestrator: batches', () => {
     expect(s.errorMessage).toContain('destinations cannot be set');
   });
 });
+
+describe('InscribeMintOrchestrator.refreshUtxos', () => {
+  it('re-reads the funding set, so a page that connected too early recovers', async () => {
+    // Same real path as the mint page: connect while the funding tx is still
+    // unconfirmed, getUtxos returns nothing, and the CTA stays disabled for the
+    // life of the page because the set is read once on connect. No fee-rate
+    // change fixes it, because the fee rate is not what is missing.
+    let call = 0;
+    const o = new InscribeMintOrchestrator(deps({
+      getUtxos: async () => (call++ === 0 ? [] : [coin('c', 100_000)]),
+    }));
+    await o.setWallet(wallet);
+    o.setContent(content);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'insufficient');
+
+    await o.refreshUtxos();
+    const after = await waitFor(o, (s) => s.fundingRecommendation.status !== 'insufficient');
+    expect(after.fundingRecommendation.status).toBe('auto');
+    // The fee rate the user already chose must survive a refresh.
+    expect(o.getSnapshot().feeRate).toBe(10);
+  });
+
+  it('is a no-op with no wallet, rather than throwing', async () => {
+    const o = new InscribeMintOrchestrator(deps({
+      getUtxos: async () => { throw new Error('must not be called without a wallet'); },
+    }));
+    await expect(o.refreshUtxos()).resolves.toBeUndefined();
+  });
+});
