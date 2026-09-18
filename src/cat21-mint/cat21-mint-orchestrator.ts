@@ -129,6 +129,28 @@ export class Cat21MintOrchestrator {
    * Set (or clear) the connected wallet. On a genuine wallet change, resets
    * form state, fetches the new wallet's UTXOs, and recomputes.
    */
+  /**
+   * Refetch the funding UTXOs for the connected wallet and recompute.
+   *
+   * The set is otherwise read ONCE, when the wallet connects. So a page that
+   * connected while the funding transaction was still unconfirmed, or before
+   * electrs had indexed it, holds an empty or stale set for as long as it
+   * stays open: the CTA sits disabled, and no fee-rate change fixes it,
+   * because the fee rate is not what is missing. Only a reload was.
+   *
+   * Deliberately NOT polled here. How often to re-read, and on what event, is
+   * the consumer's call: a page that knows it just funded an address can ask
+   * immediately, and one that does not should not be made to poll electrs on a
+   * timer by a decision taken in this layer.
+   *
+   * Leaves the fee rate and any expert-mode selection alone, since neither is
+   * invalidated by new coins arriving.
+   */
+  async refreshUtxos(): Promise<void> {
+    if (!this.wallet) return;
+    await this.setWallet(this.wallet);
+  }
+
   async setWallet(wallet: MintWalletContext | null): Promise<void> {
     const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
     this.wallet = wallet;

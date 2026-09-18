@@ -196,3 +196,36 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     expect(s.state).toBe('ready');
   });
 });
+
+describe('Cat21MintOrchestrator.refreshUtxos', () => {
+  it('re-reads the funding set, so a page that connected too early recovers', async () => {
+    // The real path this exists for: the page connects while the funding tx is
+    // still unconfirmed, getUtxos returns nothing, and the CTA sits disabled
+    // for the life of the page because the set is read once on connect.
+    let call = 0;
+    const o = new Cat21MintOrchestrator(deps({
+      getUtxos: async () => (call++ === 0 ? [] : [coin('c', 100_000)]),
+    }));
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    // Nothing to fund with, and no fee rate will change that: this is the
+    // stuck-disabled state a user sees after connecting too early.
+    await waitFor(o, (s) => s.state === 'ready');
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+
+    // The coin has since confirmed. Re-reading the set is the only thing that
+    // recovers it, and it must keep the fee rate the user already chose.
+    await o.refreshUtxos();
+    const after = await waitFor(o, (s) => s.fundingRecommendation.status !== 'insufficient');
+    expect(after.fundingRecommendation.status).toBe('auto');
+    expect(after.fundingRecommendation.recommended?.txid).toBe(coin('c', 100_000).txid);
+    expect(o.getSnapshot().feeRate).toBe(10);
+  });
+
+  it('is a no-op with no wallet, rather than throwing', async () => {
+    const o = new Cat21MintOrchestrator(deps({
+      getUtxos: async () => { throw new Error('must not be called without a wallet'); },
+    }));
+    await expect(o.refreshUtxos()).resolves.toBeUndefined();
+  });
+});
