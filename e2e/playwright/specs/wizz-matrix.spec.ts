@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { waitForApprovalPopup } from '../approval-popup';
+import { describeWalletRejection, REFUSED_WITH_DETAIL } from '../wallet-rejection';
 import { onboardWizz } from '../onboard-wizz';
 
 /**
@@ -295,9 +296,26 @@ for (const variant of VARIANTS) {
           });
           return Promise.race([probe, timeoutSignal]);
         });
+        // eslint-disable-next-line no-console
         console.log(`[wizz-matrix:${variant.label}] fixture-gated outcome = ${JSON.stringify(outcome).slice(0, 250)}`);
-        expect(outcome.ok).toBe(false);
-        expect(JSON.stringify(outcome)).toMatch(/-32603|Connection error|hung 30s/);
+
+        // WHAT THIS PINS: without the captured configs.wizz.cash payload the
+        // wallet hands out no P2TR account, and it says so with a real
+        // rejection carrying a code and a message, rather than resolving empty,
+        // returning undefined, or hanging silently.
+        //
+        // WHAT IT DELIBERATELY DOES NOT PIN: which rejection. That taxonomy
+        // belongs to the wallet, changes between its releases, and the same
+        // fixture-absent state has produced -32603 "Connection error", a 30s
+        // hang, and 4001 "User rejected the request". Matching those strings
+        // turned this cell red on outcomes that all mean the same thing here,
+        // and each red added another alternative, which makes a catalogue
+        // rather than an assertion.
+        //
+        // The positive path is proved by the P2WPKH cell in the same run: it
+        // asserts the exact expected address, so a broken SDK cannot leave this
+        // pair green.
+        expect(describeWalletRejection(outcome)).toEqual(REFUSED_WITH_DETAIL);
       } else {
         const knownPages = new Set(context.pages());
         const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());

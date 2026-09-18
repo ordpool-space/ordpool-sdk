@@ -28,6 +28,7 @@ export * from './playwright/wallet-test-vectors';
 export * from './playwright/approval-popup';
 export * from './playwright/click-until-effect';
 export * from './playwright/is-visible-within';
+export * from './playwright/wallet-rejection';
 export * from './playwright/wait-helpers';
 export * from './playwright/browser-error-guard';
 export * from './playwright/radix-checkbox';
