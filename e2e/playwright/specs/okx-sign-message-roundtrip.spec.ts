@@ -47,20 +47,37 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
  * heading rather than relying on knownPages. Then dismiss the optional
  * "Asset transfer pending" promo modal and click Confirm.
  */
-async function approveSignMessagePopup(ctx: BrowserContext): Promise<void> {
+async function approveSignMessagePopup(ctx: BrowserContext, label: string): Promise<void> {
   const deadline = Date.now() + 120_000;
   let approval: Page | null = null;
+  // Last thing each extension page was showing, so a timeout can say whether
+  // the popup never opened, opened blank, or opened with a heading this regex
+  // does not know. A bare "never showed" cannot distinguish those, and the
+  // three have different causes.
+  let lastSeen: string[] = [];
   while (Date.now() < deadline) {
+    const seen: string[] = [];
     for (const p of ctx.pages()) {
       if (!p.url().startsWith('chrome-extension://')) continue;
-      const text = await p.locator('body').innerText().catch(() => '');
+      const text = await p.locator('body').innerText().catch(() => '<unreadable>');
+      seen.push(`${p.url().slice(0, 60)} => ${text.trim().split('\n')[0]?.slice(0, 80) || '<empty>'}`);
       if (/Signature request|Confirm Trade|Sign Message|Sign message/i.test(text)) { approval = p; break; }
     }
+    lastSeen = seen;
     if (approval) break;
     await new Promise(r => setTimeout(r, 500));
   }
-  if (!approval) throw new Error('OKX sign-message popup never showed a signature-request heading within 120s');
-  await shot(approval, '02a-sign-message-approval');
+  if (!approval) {
+    throw new Error(
+      `OKX sign-message popup never showed a signature-request heading within 120s (${label}).\n` +
+      `Extension pages at timeout (${lastSeen.length}):\n` +
+      (lastSeen.length ? lastSeen.map((l) => `  - ${l}`).join('\n') : '  <none>') +
+      '\nNote: OKX\'s extension calls its own backend (wss://wsdexpri.coinall.ltd). ' +
+      'Handshake timeouts plus "uiConnection not available" in the page console mean the ' +
+      'wallet could not reach its servers, which is an upstream outage rather than a defect here.',
+    );
+  }
+  await shot(approval, `02a-sign-message-approval-${label}`);
 
   const promo = approval.getByText('Asset transfer pending');
   if (await promo.isVisible({ timeout: 2_000 }).catch(() => false)) {
@@ -138,7 +155,7 @@ test('sign a BIP-322 message via OKX: real extension signs, SDK verifies', async
     (args) => window.ordpoolSdkHarness.signMessage(args),
     { walletType: 'okx' as const, address: wallet.ordinalsAddress, message: MESSAGE },
   );
-  await approveSignMessagePopup(context);
+  await approveSignMessagePopup(context, 'single-line');
 
   const result = await resultPromise;
   console.log(`[okx-sign-message] signature=${result.signature}`);
@@ -169,7 +186,7 @@ test('sign a BIP-322 message via OKX: real extension signs, SDK verifies', async
     (args) => window.ordpoolSdkHarness.signMessage(args),
     { walletType: 'okx' as const, address: wallet.ordinalsAddress, message: listingMessage },
   );
-  await approveSignMessagePopup(context);
+  await approveSignMessagePopup(context, 'listing-message');
   const listingResult = await listingPromise;
   console.log(`[okx-sign-message] listing verified=${listingResult.verified} reason=${listingResult.reason}`);
   expect(listingResult.reason).toBeNull();
