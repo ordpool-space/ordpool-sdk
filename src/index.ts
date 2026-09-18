@@ -60,6 +60,10 @@ export * from './cat21-mint/cat21-api.service.js';
 export * from './cat21-mint/cat21-mint-orchestrator.js';
 export * from './cat21-mint/cat21-mint-input-adapter.js';
 export * from './cat21-mint/utxo-content.types.js';
+// Canonical /output fixtures, so a consumer's mock cannot drift from the
+// classifier contract. Test-only in practice; exported because the consumers
+// that need them are separate repos.
+export * from './cat21-mint/utxo-content.fixtures.js';
 export * from './cat21-mint/rune-etching.js';
 export * from './cat21-mint/rune-amount.js';
 export * from './cat21-mint/recommended-funding.helper.js';

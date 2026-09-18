@@ -130,3 +130,27 @@ describe('recommendFunding — change-headroom preference (dust-cliff over-pay g
     expect(r.status).toBe('insufficient');
   });
 });
+
+describe('the documented mutation point', () => {
+
+  it('the clean filter is still one line matching the recipe three repos mutate', () => {
+    // All FOUR consumers (ordpool, cat21-indexer, cubes, cat21-wallet)
+    // prove their own wiring by neutralising the SAME line in this file:
+    //
+    //     covering.filter((c) => c.bucket === 'clean')  ->  covering.filter(() => true)
+    //
+    // A refactor that splits or renames it does not break anything here, so
+    // their recipes would quietly stop neutralising the guard and their
+    // mutations would pass while proving nothing. That matters most for
+    // cat21-wallet, whose autonomous mode signs with no human watching, so
+    // this guard is its last line rather than one of two. This pins the shape so that
+    // change fails HERE, where whoever makes it is looking.
+    //
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const src: string = require('node:fs').readFileSync(
+      require('node:path').join(__dirname, 'funding-safety.ts'), 'utf8');
+
+    const matches = src.match(/covering\.filter\(\(c\) => c\.bucket === 'clean'\)/g) ?? [];
+    expect(matches).toHaveLength(1);
+  });
+});
