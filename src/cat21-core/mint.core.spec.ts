@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
+import { changeDustFloor } from '../cat21-script/address-format.js';
 import { Network } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { BroadcastPort, ContentScanPort, CoreFundingUtxo, SignPort, UtxosPort } from './ports.js';
@@ -12,6 +13,8 @@ import { MintCoreParams, executeMint, simulateMint } from './mint.core.js';
 const PAYMENT_PUB = hex.decode('0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b');
 const ORDINALS_PUB = hex.decode('5df12ac222a1cd78dd4681c7c7a56f3e273884a086b2b6100957d20c73be3c37');
 const PAYMENT_ADDR = btc.p2wpkh(PAYMENT_PUB, btc.NETWORK).address!;
+// A legacy P2PKH payer, whose change must clear 546 rather than segwit's 294.
+const LEGACY_PAYMENT_ADDR = btc.p2pkh(PAYMENT_PUB, btc.NETWORK).address!;
 const ORDINALS_ADDR = btc.p2tr(ORDINALS_PUB, undefined, btc.NETWORK).address!;
 
 const coin = (id: string, value: number): CoreFundingUtxo => ({ txid: id.repeat(64).slice(0, 64), vout: 0, value });
@@ -249,8 +252,31 @@ describe('mint.core — a caller sizing a coin needs BOTH targets', () => {
     // silently excludes a coin has gone with it, and so has the reason to
     // expose two.
     expect(sim.fundingPreferredSats).toBeGreaterThan(sim.fundingRequirementSats);
-    // The gap is at least the change output's own dust floor.
-    expect(sim.fundingPreferredSats - sim.fundingRequirementSats).toBeGreaterThanOrEqual(546);
+    // The gap is at least the change output's own dust floor, and that floor is
+    // the PAYMENT ADDRESS's rather than a flat constant. Asserting >= 546 here
+    // passed by coincidence once the fee difference was added, so it pinned
+    // nothing: compare against the address's real floor instead.
+    expect(sim.fundingPreferredSats - sim.fundingRequirementSats)
+      .toBeGreaterThanOrEqual(changeDustFloor(params().paymentAddress));
+  });
+
+  it('uses the payment address OWN dust floor, not a flat constant', async () => {
+    // A legacy payment address needs 546 of change to be worth emitting; a
+    // native-segwit one needs 294. If the headroom target hardcodes one number,
+    // these two gaps are identical and the target disagrees with the builder,
+    // which applies getMinimumUtxoSize(paymentAddress).
+    const segwit = await simulateMint(params(), { utxos: utxosPort([coin('c', 500_000)]), scan: scanPort() });
+    const legacy = await simulateMint(
+      params({ paymentAddress: LEGACY_PAYMENT_ADDR }),
+      { utxos: utxosPort([coin('c', 500_000)]), scan: scanPort() },
+    );
+    const segwitGap = segwit.fundingPreferredSats - segwit.fundingRequirementSats;
+    const legacyGap = legacy.fundingPreferredSats - legacy.fundingRequirementSats;
+    expect(legacyGap).toBeGreaterThan(segwitGap);
+    // At LEAST the floor difference. Not exactly it: a legacy change output is
+    // also bigger, so the fee term moves too, and pinning an exact number here
+    // would be pinning the vsize model rather than the dust floor.
+    expect(legacyGap - segwitGap).toBeGreaterThanOrEqual(546 - 294);
   });
 
   it('a coin between the two targets funds a mint when nothing better exists', async () => {

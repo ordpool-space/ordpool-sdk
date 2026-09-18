@@ -6,6 +6,7 @@ import {
   recommendFunding,
   WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
+import { changeDustFloor } from '../cat21-script/address-format.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
@@ -184,13 +185,18 @@ async function planMint(
   // a sub-dust leftover being absorbed into the fee (a 7-13% over-pay in the
   // dust-cliff band). selectFunding biases the auto-pick toward such a coin and
   // falls back to a feasibility-only (tight) coin when none exists — bounded
-  // over-pay, never a false insufficient. The dust floor is 546 (the mint
-  // builder's change dust limit).
+  // over-pay, never a false insufficient.
+  //
+  // The dust floor is the PAYMENT ADDRESS's own, matching what the builder
+  // applies (`getMinimumUtxoSize(paymentAddress)`) and what inscribe and
+  // transfer use. A flat 546 here would ask a native-segwit wallet to clear a
+  // bar ~250 sats above the change its own builder would actually emit, so the
+  // target and the builder would disagree about when a change output fits.
   const withChangeVsize = measureVsize(buildMint(params, largest, 0, true));
   const preferredTarget =
     fixedOutputs +
     Math.ceil(withChangeVsize * params.feeRatePerVbyte) +
-    CAT21_MINT_CHANGE_DUST_LIMIT_SATS;
+    changeDustFloor(params.paymentAddress);
 
   const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget, params.fundingTopology);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
