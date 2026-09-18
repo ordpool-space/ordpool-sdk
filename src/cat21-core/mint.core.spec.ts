@@ -180,3 +180,58 @@ describe('mint.core — change-headroom coin selection (dust-cliff over-pay guar
     expect(sim.feeSats! / sim.vsize!).toBeGreaterThan(RATE);
   });
 });
+
+describe('mint.core — the pre-click preview is where a notice comes from', () => {
+  // Consumers must be able to decide the CTA state BEFORE the user clicks.
+  // simulateMint is that surface: it selects and prices without signing or
+  // broadcasting, so the notice text and the button state come from the same
+  // computation the execute path will later repeat.
+  const dirtyOnly = () => {
+    const asset = coin('d', 100_000);
+    return { asset, ports: { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: 'has-assets' }) } };
+  };
+
+  it('a separate-address wallet previews ASSET-NOTICE and gets a spendable coin', async () => {
+    const { asset, ports } = dirtyOnly();
+    const sim = await simulateMint(
+      params({ fundingTopology: 'separate-payment-address' }),
+      ports,
+    );
+    expect(sim.status).toBe('asset-notice');
+    // A coin comes back, which is what lets the CTA stay enabled.
+    expect(sim.fundingUtxo?.txid).toBe(asset.txid);
+    expect(sim.recommendation.recommended?.bucket).toBe('assets');
+  });
+
+  it('a one-address wallet previews EXPERT-REQUIRED and gets no coin', async () => {
+    const { ports } = dirtyOnly();
+    const sim = await simulateMint(
+      params({ fundingTopology: 'one-address-for-everything' }),
+      ports,
+    );
+    expect(sim.status).toBe('expert-required');
+    expect(sim.fundingUtxo).toBeNull();
+    // The picker still needs something to recommend, so the coin is named even
+    // though it is not handed over.
+    expect(sim.recommendation.recommended?.bucket).toBe('assets');
+  });
+
+  it('omitting the topology previews the BLOCKING answer, which is what an agent gets', async () => {
+    const { ports } = dirtyOnly();
+    const sim = await simulateMint(params(), ports);
+    expect(sim.status).toBe('expert-required');
+    expect(sim.fundingUtxo).toBeNull();
+  });
+
+  it('a clean coin previews ready on either wallet, so the quiet path is unchanged', async () => {
+    for (const fundingTopology of ['separate-payment-address', 'one-address-for-everything'] as const) {
+      const clean = coin('c', 100_000);
+      const sim = await simulateMint(
+        params({ fundingTopology }),
+        { utxos: utxosPort([clean]), scan: scanPort() },
+      );
+      expect(sim.status).toBe('ready');
+      expect(sim.fundingUtxo?.txid).toBe(clean.txid);
+    }
+  });
+});

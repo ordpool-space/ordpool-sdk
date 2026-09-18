@@ -4,6 +4,7 @@ import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
   recommendFunding,
+  WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -45,9 +46,30 @@ export interface MintCoreParams {
    * Omitted ⇒ the safe auto-recommendation is used.
    */
   selectedFundingUtxo?: CoreFundingUtxo | null;
+  /**
+   * How the CALLER's wallet lays out its addresses, from
+   * `isOneAddressWallet({ paymentAddress, ordinalsAddress })`.
+   *
+   * Passed in rather than derived here for two reasons. This layer holds
+   * `paymentAddress` but not `ordinalsAddress` (`recipientAddress` is a
+   * destination, which may be someone else entirely), so it cannot derive the
+   * answer correctly. And the same core serves UI flows and autonomous agent
+   * flows: the notice-versus-warning relaxation is a policy about what a HUMAN
+   * is shown before clicking, so an unattended caller must be able to decline
+   * it by simply not passing anything. Omitted means the blocking branch, which
+   * is the correct direction for a caller that forgot.
+   */
+  fundingTopology?: WalletAddressTopology;
 }
 
-export type MintStatus = 'ready' | 'expert-required' | 'insufficient';
+/**
+ * `asset-notice` is `ready` plus an obligation: a funding coin WAS selected and
+ * the flow may proceed, but the coin carries assets, so the caller must show
+ * the user what is on it BEFORE they can act. Kept distinct from `ready` so a
+ * consumer renders the status instead of re-deriving the distinction from the
+ * recommendation, which is how two surfaces drift apart.
+ */
+export type MintStatus = 'ready' | 'asset-notice' | 'expert-required' | 'insufficient';
 
 export interface MintSimulationResult {
   status: MintStatus;
@@ -138,7 +160,7 @@ async function planMint(
     Math.ceil(withChangeVsize * params.feeRatePerVbyte) +
     CAT21_MINT_CHANGE_DUST_LIMIT_SATS;
 
-  const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget);
+  const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget, params.fundingTopology);
   const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
@@ -165,7 +187,7 @@ async function planMint(
     return { status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null };
   }
   return {
-    status: 'ready',
+    status: recommendation.status === 'asset-notice' ? 'asset-notice' : 'ready',
     recommendation,
     pick,
     built: resolved.built,
