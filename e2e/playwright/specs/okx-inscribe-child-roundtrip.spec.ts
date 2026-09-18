@@ -16,7 +16,12 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import {
+  clickApprovalButton,
+  waitForApprovalByConfirmButton,
+  waitForApprovalPopup,
+  closeLeftoverExtensionPages,
+} from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 
 /**
@@ -115,38 +120,30 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
   const deadline = Date.now() + 120_000;
   let approval: Page | null = null;
   while (Date.now() < deadline) {
-    // Best-effort: current OKX auto-approves signPsbt for the connected dapp
-    // without a persistent interactive popup (same as mint/transfer/offers),
-    // so if the operation already completed, stop polling — there is no popup
-    // to approve.
-    if (isDone?.()) return;
-    for (const p of ctx.pages()) {
-      // OKX tears its own popup/extension pages down the instant it
-      // auto-approves; a page enumerated here can be closed by the time we
-      // touch it. `p.url()` on a closed page throws "guid not bound" (NOT
-      // caught by the innerText .catch), which was the residual child flake
-      // after both signs already completed. Re-check isDone (the operation
-      // may have finished mid-scan), skip closed pages, and wrap the access
-      // so a page closing between the isClosed() check and the read is
-      // swallowed instead of failing the test.
-      if (isDone?.()) return;
-      if (p.isClosed()) continue;
-      let text = '';
-      try {
-        if (!p.url().startsWith('chrome-extension://')) continue;
-        text = await p.locator('body').innerText().catch(() => '');
-      } catch {
-        continue;
-      }
-      if (SIGN_HEADING.test(text)) { approval = p; break; }
-    }
-    if (approval) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (!approval) {
-    if (isDone?.()) return;
-    throw new Error('OKX sign popup never showed the sign heading within 120s');
-  }
+  // Two outcomes are legitimate here, so they race: OKX may present a signing
+  // popup, or it may auto-approve for the connected dapp and present nothing.
+  //
+  // The popup side waits for the CONFIRM BUTTON rather than polling body text
+  // for a heading. The old loop read innerText from every page every 500ms
+  // against three heading strings until a 120s deadline, which made the verdict
+  // depend on how busy the runner was and on copy OKX renames between
+  // releases. It also had to defend by hand against pages closing mid-scan,
+  // because it touched every page on every tick; the helper touches a page only
+  // when it is a candidate, and its liveness probe drops one that is going
+  // away.
+  //
+  // If the operation completes first, there was no popup to approve and this
+  // returns. If NEITHER happens the helper throws, which is the real failure.
+  const raced = await Promise.race([
+    waitForApprovalByConfirmButton({ context: ctx, label: `OKX ${tag} sign popup`, timeoutMs: 120_000 })
+      .then((page) => ({ page })),
+    (async (): Promise<{ page: Page | null }> => {
+      while (!isDone?.()) await new Promise((r) => setTimeout(r, 250));
+      return { page: null };
+    })(),
+  ]);
+  if (!raced.page) return; // auto-approved; nothing to click
+  const approval = raced.page;
   await shot(approval, tag);
 
   const promo = approval.getByText('Asset transfer pending');
@@ -162,8 +159,11 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
   // click is in flight ("guid not bound" / target-closed). The sign already
   // succeeded in that case, so swallow the click error; the caller's
   // operation-promise await settles the true outcome.
-  await approval.getByText('Confirm', { exact: true }).first().click()
-    .catch(() => undefined);
+  // Tolerate the popup dismissing itself, and ONLY that. The previous
+  // `.catch(() => undefined)` swallowed every error, so a wrong selector or a
+  // disabled control would have passed silently and left the real failure to
+  // surface somewhere unrelated.
+  await clickApprovalButton(approval.getByText('Confirm', { exact: true }).first(), approval);
   // Wait for this request's heading to disappear so a later call can't
   // re-detect the request we just confirmed. Poll from the Node side
   // (isClosed-guarded innerText), NOT page.waitForFunction: OKX CLOSES the
