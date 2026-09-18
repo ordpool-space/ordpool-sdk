@@ -327,8 +327,14 @@ export class Cat21TransferOrchestrator {
       candidateFees: sim.candidateFees,
       fundingRequirementSats: sim.fundingRequirementSats,
       fundingPreferredSats: sim.fundingPreferredSats,
+      // `asset-notice` is a PROCEED state: the plan is built and the coin is
+      // chosen, the caller's obligation is to name what sits on it. Withholding
+      // the summary here would leave a consumer with a buildable transaction it
+      // cannot render, which reads on screen as a disabled control with nothing
+      // explaining it. `ready` and `asset-notice` both carry a plan; only
+      // `expert-required` and `insufficient` do not.
       simulation:
-        sim.status === 'ready' && sim.fundingUtxo && sim.feeSats != null
+        (sim.status === 'ready' || sim.status === 'asset-notice') && sim.fundingUtxo && sim.feeSats != null
           ? { feeSats: sim.feeSats, changeSats: sim.changeSats ?? 0, fundingUtxo: sim.fundingUtxo, catOutputSats: sim.catOutputSats ?? this.snap.catUtxo!.value }
           : null,
     });

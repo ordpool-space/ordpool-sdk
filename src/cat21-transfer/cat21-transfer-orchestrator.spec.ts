@@ -110,6 +110,27 @@ describe('Cat21TransferOrchestrator (framework-agnostic)', () => {
     await expect(o.transfer()).rejects.toThrow(/Select a funding UTXO/);
   });
 
+  it('ASSET-NOTICE: a proceed state carries its simulation, so a page can render the summary', async () => {
+    // On a separate-address wallet a dirty-only pool NOTICES and proceeds: the
+    // plan is built and the coin is chosen. Withholding the summary would leave
+    // a consumer with a buildable transaction it cannot render, which on screen
+    // is a disabled control with nothing explaining it.
+    const o = new Cat21TransferOrchestrator(
+      deps({
+        getUtxos: async () => [coin('d', 100_000)],
+        scan: { classify: async () => 'has-assets' },
+        fundingTopology: 'separate-payment-address',
+      }),
+    );
+    await o.setWallet(wallet);
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    const s = await waitFor(o, (s) => s.fundingRecommendation.status === 'asset-notice');
+    expect(s.simulation?.feeSats).toBeGreaterThan(0);
+    expect(s.simulation?.fundingUtxo.txid).toBe(coin('d', 100_000).txid);
+  });
+
   it('transfer() guards: no wallet / no cat / no recipient / no feeRate', async () => {
     const o = new Cat21TransferOrchestrator(deps());
     await expect(o.transfer()).rejects.toThrow('No wallet connected');
