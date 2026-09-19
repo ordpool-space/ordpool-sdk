@@ -348,7 +348,11 @@ export class Cat21MintOrchestrator {
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
     this.patch({
-      simulations: this.rowsFrom(candidateFees),
+      // A failed recompute yields NO rows rather than rows claiming every coin
+      // cannot fund the mint. That claim would be false: the reason is in
+      // `errorMessage`, not the fee rate, and a picker rendering "can't fund at
+      // this rate" against a whole wallet states something nobody measured.
+      simulations: recomputeError ? [] : this.rowsFrom(candidateFees),
       fundingRecommendation, candidateFees,
       fundingRequirementSats, fundingPreferredSats,
       errorMessage: recomputeError,

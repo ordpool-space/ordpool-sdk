@@ -294,4 +294,21 @@ describe('Cat21MintOrchestrator.refreshUtxos', () => {
     }));
     await expect(o.refreshUtxos()).resolves.toBeUndefined();
   });
+  it('a failed recompute reports the reason and claims nothing about the coins', async () => {
+    // The old swallow produced a disabled control with no explanation. The new
+    // failure must not overcorrect into 200 rows each asserting "can't fund at
+    // this rate", which is a statement about the fee rate that nobody measured.
+    // A scan that throws is NOT this case: selectFunding turns that into a
+    // `failed` bucket, which is a coin state rather than a crash. The recompute
+    // throws when the BUILDER cannot work from the params at all, which is what
+    // a wrong-network address looks like.
+    const o = new Cat21MintOrchestrator(deps());
+    await o.setWallet({ ...wallet, ordinalsAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' });
+    o.setFeeRate(10);
+    const s = await waitFor(o, (s) => s.errorMessage !== null);
+    expect(s.errorMessage).toMatch(/Could not price the funding coins/);
+    expect(s.simulations).toEqual([]);
+    expect(s.fundingRecommendation.status).toBe('insufficient');
+  });
+
 });
