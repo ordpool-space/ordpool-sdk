@@ -48,13 +48,13 @@ function args(src, openIdx) {
 }
 
 /**
- * The isVisible class is a RATCHET, not a clean gate: 41 inherited sites are
+ * The isVisible class is a RATCHET, not a clean gate: 30 inherited sites are
  * harmless-by-accident (their stated timeout equals the config's actionTimeout)
  * and rewriting them blind is the mechanical-sweep mistake that has broken
  * specs here twice. New ones fail; the count may only go down. Lower this
  * number when you fix some, never raise it.
  */
-const IS_VISIBLE_BASELINE = 41;
+const IS_VISIBLE_BASELINE = 30;
 
 const slotFindings = [];
 const isVisibleFindings = [];

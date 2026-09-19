@@ -1,4 +1,5 @@
 import { expect, Page } from '@playwright/test';
+import { isVisibleWithin } from './is-visible-within';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 
@@ -41,15 +42,15 @@ export async function onboardUnisat(
 
   if (opts.addressTypeIndex !== undefined) {
     const card = page.getByTestId(`address-type-card-${opts.addressTypeIndex}`);
-    if (await card.isVisible({ timeout: 5_000 }).catch(() => false)) await card.click();
+    if (await isVisibleWithin(card, 5_000)) await card.click();
   }
   const addressTypeContinue = page.getByTestId('address-type-continue-button');
-  if (await addressTypeContinue.isVisible({ timeout: 10_000 }).catch(() => false)) {
+  if (await isVisibleWithin(addressTypeContinue, 10_000)) {
     await addressTypeContinue.click();
   }
 
   const noticeCheckbox = page.getByTestId('notice-checkbox-1');
-  if (await noticeCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  if (await isVisibleWithin(noticeCheckbox, 5_000)) {
     await noticeCheckbox.click();
     const noticeOk = page.getByTestId('notice-ok-button');
     if (await noticeOk.isEnabled({ timeout: 3_000 }).catch(() => false)) await noticeOk.click();

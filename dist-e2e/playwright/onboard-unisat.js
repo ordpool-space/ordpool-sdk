@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardUnisat = onboardUnisat;
 const test_1 = require("@playwright/test");
+const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 /**
  * Drive UniSat onboarding from the BIP-39 test seed to the home tab.
@@ -32,15 +33,15 @@ async function onboardUnisat(page, extensionId, opts = {}) {
     await page.getByTestId('mnemonic-import-continue-button').click();
     if (opts.addressTypeIndex !== undefined) {
         const card = page.getByTestId(`address-type-card-${opts.addressTypeIndex}`);
-        if (await card.isVisible({ timeout: 5_000 }).catch(() => false))
+        if (await (0, is_visible_within_1.isVisibleWithin)(card, 5_000))
             await card.click();
     }
     const addressTypeContinue = page.getByTestId('address-type-continue-button');
-    if (await addressTypeContinue.isVisible({ timeout: 10_000 }).catch(() => false)) {
+    if (await (0, is_visible_within_1.isVisibleWithin)(addressTypeContinue, 10_000)) {
         await addressTypeContinue.click();
     }
     const noticeCheckbox = page.getByTestId('notice-checkbox-1');
-    if (await noticeCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    if (await (0, is_visible_within_1.isVisibleWithin)(noticeCheckbox, 5_000)) {
         await noticeCheckbox.click();
         const noticeOk = page.getByTestId('notice-ok-button');
         if (await noticeOk.isEnabled({ timeout: 3_000 }).catch(() => false))

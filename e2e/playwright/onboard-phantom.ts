@@ -1,4 +1,5 @@
 import { expect, Page } from '@playwright/test';
+import { isVisibleWithin } from './is-visible-within';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 import { cdpClick } from './cdp-click';
@@ -138,7 +139,7 @@ export async function onboardPhantom(
   // behaviour rather than a silent failure. Every REQUIRED click above goes
   // through cdpClick and fails naming itself instead.
   const gsLocator = page.getByText('Get Started', { exact: true }).first();
-  if (await gsLocator.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  if (await isVisibleWithin(gsLocator, 5_000)) {
     await page.bringToFront();
     const gsBox = await gsLocator.boundingBox();
     if (gsBox) {

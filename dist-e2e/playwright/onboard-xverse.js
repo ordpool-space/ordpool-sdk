@@ -4,6 +4,7 @@ exports.onboardXverse = onboardXverse;
 exports.primeAndSwitchToRegtest = primeAndSwitchToRegtest;
 exports.overrideRegtestElectrsUrl = overrideRegtestElectrsUrl;
 const test_1 = require("@playwright/test");
+const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 async function nextPostMnemonicState(page) {
     const handle = await page.waitForFunction(() => {
@@ -93,7 +94,7 @@ async function onboardXverse(context, extensionId, opts = {}) {
     await page.getByText(/restore an existing wallet|restore.*wallet/i).first().click();
     await (0, test_1.expect)(page.getByText(/legal/i).first()).toBeVisible({ timeout: 15_000 });
     const dc = page.getByText(/authorize data collection/i).first();
-    if (await dc.isVisible({ timeout: 3_000 }).catch(() => false))
+    if (await (0, is_visible_within_1.isVisibleWithin)(dc, 3_000))
         await dc.click();
     await page.getByRole('button', { name: /^accept$/i }).first().click();
     const pws = page.locator('input[type="password"]');
@@ -136,7 +137,7 @@ async function primeAndSwitchToRegtest(context, extensionId) {
         return t.includes('account 1') || t.includes('not now') || t.includes('zest');
     }, { what: 'popup' });
     const notNow = primer.getByText('Not now', { exact: true }).first();
-    if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    if (await (0, is_visible_within_1.isVisibleWithin)(notNow, 1_500)) {
         await notNow.click({ force: true }).catch(() => undefined);
     }
     await primer.goto(`chrome-extension://${extensionId}/popup.html#/settings/change-network`, { waitUntil: 'domcontentloaded' });

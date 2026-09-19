@@ -1,4 +1,5 @@
 import { expect, Page } from '@playwright/test';
+import { isVisibleWithin } from './is-visible-within';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 import { cdpClick } from './cdp-click';
@@ -45,7 +46,10 @@ export async function onboardOkx(
   const cdp = await page.context().newCDPSession(page);
   await cdpClick(page, importBtn, 'the OKX import-wallet button');
   await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
-  const stillOnWelcome = await page.locator('text="Your portal to Web3"').isVisible({ timeout: 3_000 }).catch(() => false);
+  // Deliberately INSTANT: this asks whether the click failed to navigate, so
+  // the answer is about the DOM as it stands now. Waiting would mean waiting
+  // for the old page to reappear, which is not a thing that happens.
+  const stillOnWelcome = await page.locator('text="Your portal to Web3"').isVisible().catch(() => false);
   if (stillOnWelcome) {
     await page.evaluate(() => {
       const btn = document.querySelector('[data-testid="onboard-page-import-wallet-button"]') as HTMLElement | null;
@@ -89,13 +93,13 @@ export async function onboardOkx(
   if (securePage) page = securePage;
   const secureFrame = page.frameLocator('#ui-ses-iframe');
   const nextBtn = secureFrame.getByRole('button', { name: /^next$/i }).first();
-  if (await nextBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
+  if (await isVisibleWithin(nextBtn, 10_000)) {
     await expect(nextBtn).toBeEnabled({ timeout: 10_000 });
     await nextBtn.click();
   }
 
   const pwInputs = secureFrame.locator('input[type="password"]');
-  if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
+  if (await isVisibleWithin(pwInputs.first(), 10_000)) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++) {
       await pwInputs.nth(i).fill(password);
@@ -119,12 +123,12 @@ export async function onboardOkx(
   if (welcomePage) {
     page = welcomePage;
     const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
-    if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    if (await isVisibleWithin(startBtn, 5_000)) {
       await startBtn.click().catch(() => undefined);
     } else {
       const fr = page.frameLocator('#ui-ses-iframe');
       const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
-      if (await frStart.isVisible({ timeout: 3_000 }).catch(() => false)) {
+      if (await isVisibleWithin(frStart, 3_000)) {
         await frStart.click().catch(() => undefined);
       }
     }

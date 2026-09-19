@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardPhantom = onboardPhantom;
 const test_1 = require("@playwright/test");
+const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 const cdp_click_1 = require("./cdp-click");
 /**
@@ -140,7 +141,7 @@ async function onboardPhantom(page, extensionId, opts = {}) {
     // behaviour rather than a silent failure. Every REQUIRED click above goes
     // through cdpClick and fails naming itself instead.
     const gsLocator = page.getByText('Get Started', { exact: true }).first();
-    if (await gsLocator.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    if (await (0, is_visible_within_1.isVisibleWithin)(gsLocator, 5_000)) {
         await page.bringToFront();
         const gsBox = await gsLocator.boundingBox();
         if (gsBox) {

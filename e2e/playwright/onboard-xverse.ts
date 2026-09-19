@@ -1,4 +1,5 @@
 import { expect, BrowserContext, Page } from '@playwright/test';
+import { isVisibleWithin } from './is-visible-within';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from './wallet-test-vectors';
 
@@ -113,7 +114,7 @@ export async function onboardXverse(
   await page.getByText(/restore an existing wallet|restore.*wallet/i).first().click();
   await expect(page.getByText(/legal/i).first()).toBeVisible({ timeout: 15_000 });
   const dc = page.getByText(/authorize data collection/i).first();
-  if (await dc.isVisible({ timeout: 3_000 }).catch(() => false)) await dc.click();
+  if (await isVisibleWithin(dc, 3_000)) await dc.click();
   await page.getByRole('button', { name: /^accept$/i }).first().click();
 
   const pws = page.locator('input[type="password"]');
@@ -161,7 +162,7 @@ export async function primeAndSwitchToRegtest(context: BrowserContext, extension
     { what: 'popup' },
   );
   const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+  if (await isVisibleWithin(notNow, 1_500)) {
     await notNow.click({ force: true }).catch(() => undefined);
   }
 
