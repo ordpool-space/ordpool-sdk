@@ -1,4 +1,4 @@
-import { resolveCandidateFees, outpointKey } from './candidate-fees.js';
+import { classifyCandidateFee, resolveCandidateFees, outpointKey } from './candidate-fees.js';
 
 /**
  * A funding model with the two shapes every cat tx has: WITH a change output
@@ -30,6 +30,29 @@ function feesFor(values: number[]) {
     },
   );
 }
+
+describe('classifyCandidateFee', () => {
+  const row = (finalFeeSats: number | null, absorbedSubDustSats: number | null) =>
+    ({ txid: 'a'.repeat(64), vout: 0, finalFeeSats, vsize: 1, absorbedSubDustSats });
+
+  it('reads the four states apart, and never collapses unknown into normal', () => {
+    // The collapse is the one that matters: a consumer doing `?? 0` turns "I
+    // cannot see the fold" into "there was no fold", which claims a number
+    // nobody measured. That is why this reading is shared rather than derived
+    // per surface.
+    expect([
+      classifyCandidateFee(row(770, 0)),
+      classifyCandidateFee(row(954, 189)),
+      classifyCandidateFee(row(1_445, null)),
+      classifyCandidateFee(row(null, null)),
+    ]).toEqual(['normal', 'overpay', 'overpay-unknown', 'unavailable']);
+  });
+
+  it('an unfundable coin is unavailable whatever the fold says', () => {
+    // finalFeeSats decides first: a null fee is not a fold question.
+    expect(classifyCandidateFee(row(null, 42))).toBe('unavailable');
+  });
+});
 
 describe('resolveCandidateFees', () => {
   it('charges each coin its own realised fee, not one figure for the pool', () => {

@@ -50,6 +50,39 @@ export interface CandidateFeeRow {
   absorbedSubDustSats: number | null;
 }
 
+/**
+ * What a picker row should SAY about a coin's cost.
+ *
+ *   - `normal`          the coin emits change and pays the requested rate.
+ *   - `overpay`         it can fund the action, but its leftover fell below the
+ *                       dust floor and goes to the miner. Usable, and costing
+ *                       more than the rate implies. Informational, never a
+ *                       block: folding sub-dust change is deliberate.
+ *   - `overpay-unknown` it can fund the action and the fold is NOT KNOWN. The
+ *                       inscribe flow on an older build reports this, because
+ *                       its package price does not expose the commit's own
+ *                       fold. Show the fee and claim nothing about over-pay;
+ *                       rendering it as `normal` asserts a 0 nobody measured.
+ *   - `unavailable`     it cannot fund the action at the requested rate. Name
+ *                       the RATE as the variable, so a reader can predict the
+ *                       row coming back when they lower it. Never render it as
+ *                       free.
+ */
+export type CandidateFeeState = 'normal' | 'overpay' | 'overpay-unknown' | 'unavailable';
+
+/**
+ * The one reading of a fee row, so three surfaces cannot reach three answers
+ * from the same two fields. `absorbedSubDustSats` ships as a field rather than
+ * a derivation for exactly this reason; the field alone was not enough, because
+ * turning it into a state is where the consumers diverged: one collapsed
+ * `null` into `normal` and claimed a fold that had not been measured.
+ */
+export function classifyCandidateFee(row: CandidateFeeRow): CandidateFeeState {
+  if (row.finalFeeSats === null) return 'unavailable';
+  if (row.absorbedSubDustSats === null) return 'overpay-unknown';
+  return row.absorbedSubDustSats > 0 ? 'overpay' : 'normal';
+}
+
 export interface ResolveCandidateFeesArgs<C extends FundingUtxo> {
   /** Build + measure the transaction funded by `candidate` at an absolute fee. */
   simulate: (candidate: C, feeSats: number) => CatTxFeeSimulation;
