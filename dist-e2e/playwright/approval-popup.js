@@ -5,8 +5,10 @@ exports.closeLeftoverExtensionPages = closeLeftoverExtensionPages;
 exports.approveWizzSignPopup = approveWizzSignPopup;
 exports.clickApprovalButton = clickApprovalButton;
 exports.clickApprovalAndRequireClose = clickApprovalAndRequireClose;
+exports.clickUntilApprovalPopup = clickUntilApprovalPopup;
 exports.waitForApprovalByConfirmButton = waitForApprovalByConfirmButton;
 exports.waitForPageShowing = waitForPageShowing;
+const click_until_effect_1 = require("./click-until-effect");
 /**
  * Wait for a wallet-extension approval popup to open in the given
  * browser context, identified by a caller-supplied predicate.
@@ -258,6 +260,52 @@ async function clickApprovalAndRequireClose(button, page, opts = {}) {
         }
         await new Promise((r) => setTimeout(r, 100));
     }
+}
+/**
+ * Click a page control until the wallet's approval popup appears.
+ *
+ * `waitForApprovalPopup` answers "did a popup show up", and when the answer is
+ * no after 60s it cannot say whether the wallet failed to wake or the CLICK
+ * that should have asked it never registered. Those have opposite fixes, and a
+ * swallowed click is the likelier of the two on a control whose enabled state
+ * comes from data that settles after first paint — which every funding-gated
+ * CTA in this family is, since `scanning` is a real button state fed by an
+ * async scan (see E2E_BEST_PRACTICES 7.7).
+ *
+ * Safe on a money path because it inherits `clickUntilEffect`'s guard: a second
+ * click goes out only while the trigger is STILL VISIBLE AND ENABLED, which is
+ * the signature of a click that never landed. A CTA that disables itself while
+ * it works has accepted the click, so this waits instead, and then fails saying
+ * so rather than asking the wallet to sign twice.
+ *
+ * Returns the popup and the number of clicks it took. Assert `clicks === 1` on
+ * a lane you believe is clean and a swallowed click becomes a named failure
+ * instead of a 60-second timeout blamed on the wallet.
+ *
+ * For an SDK-driven approval — the harness calls the orchestrator and the
+ * wallet pops up on its own — there is no trigger to re-click, so use
+ * `waitForApprovalPopup` directly. This is for a PAGE-driven trigger only.
+ */
+async function clickUntilApprovalPopup(trigger, opts) {
+    let found = null;
+    const effect = {
+        waitFor: async ({ timeout }) => {
+            found = await waitForApprovalPopup({
+                context: opts.context,
+                knownPages: opts.knownPages,
+                isApproval: opts.isApproval,
+                timeoutMs: timeout,
+            });
+        },
+    };
+    const { clicks } = await (0, click_until_effect_1.clickUntilEffect)(trigger, effect, {
+        settleMs: opts.settleMs ?? 20_000,
+        maxClicks: opts.maxClicks ?? 3,
+        label: opts.label ?? 'approval trigger',
+    });
+    if (!found)
+        throw new Error(`${opts.label ?? 'approval trigger'}: popup resolved without a page`);
+    return { page: found, clicks };
 }
 /**
  * Wait for the extension page that is offering a CONFIRM BUTTON.
