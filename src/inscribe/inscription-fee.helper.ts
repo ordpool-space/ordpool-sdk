@@ -141,6 +141,18 @@ export interface SimulateInscribeFeesResult {
   commitOutputValueSats: number;
   /** Total sats the funding UTXO must cover: commitOutputValueSats + commitFeeSats. */
   fundingRequirementSats: number;
+  /**
+   * Of `commitFeeSats`, how many sats were would-be commit CHANGE folded into
+   * the miner fee because they fell below the dust floor. `0` means the commit
+   * emits change and pays the requested rate.
+   *
+   * Present because a coin in the dust-cliff band is USABLE and over-paying,
+   * which is a different situation from one that cannot fund the inscription
+   * and the only one of the two a person can act on. The reveal has no
+   * equivalent: its fee is reserved in the commit output, not funded by a coin
+   * whose change could fall below dust.
+   */
+  commitAbsorbedSubDustSats: number;
 }
 
 /**
@@ -281,7 +293,10 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
         tx.updateInput(commit.satSourceInputIndex, { tapKeySig: new Uint8Array(64) }, true);
       }
       tx.finalize();
-      return { vsize: tx.vsize, finalFeeSats: commitFeeBudget - commit.changeSats };
+      const realisedFee = commitFeeBudget - commit.changeSats;
+      // Whatever the realised fee exceeds the requested one by is change that
+      // fell below the dust floor and was folded in rather than emitted.
+      return { vsize: tx.vsize, finalFeeSats: realisedFee, absorbedSubDustSats: realisedFee - feeSats };
     },
   });
   if (!resolvedCommit) {
@@ -292,6 +307,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   }
   const commitFeeSats = resolvedCommit.finalFeeSats;
   const commitVsize = resolvedCommit.vsize;
+  const commitAbsorbedSubDustSats = resolvedCommit.absorbedSubDustSats ?? 0;
   return {
     commitFeeSats,
     revealFeeSats,
@@ -301,6 +317,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     combinedVsize: commitVsize + revealVsize,
     commitOutputValueSats,
     fundingRequirementSats: fromFunding + commitFeeSats,
+    commitAbsorbedSubDustSats,
   };
 }
 

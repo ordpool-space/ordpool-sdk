@@ -185,8 +185,6 @@ function inscribeCandidateFees(
   targetSats: number,
 ): CandidateFeeRow[] {
   return candidates.map((candidate) => {
-    // The commit's own sub-dust fold is not surfaced by `simulateInscribeFees`,
-    // so the package price is reported without it rather than guessed at.
     const unfundable = {
       txid: candidate.txid, vout: candidate.vout,
       finalFeeSats: null, vsize: null, absorbedSubDustSats: null,
@@ -219,7 +217,10 @@ function inscribeCandidateFees(
         vout: candidate.vout,
         finalFeeSats: sim.totalFeeSats,
         vsize: sim.combinedVsize,
-        absorbedSubDustSats: null,
+        // The commit's own fold. The reveal has no equivalent: its fee is
+        // reserved inside the commit output rather than funded by a coin whose
+        // change could fall below dust.
+        absorbedSubDustSats: sim.commitAbsorbedSubDustSats,
       };
     } catch {
       return unfundable;

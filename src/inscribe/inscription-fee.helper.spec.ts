@@ -165,6 +165,35 @@ describe('simulateInscribeFees', () => {
     expect(ratio).toBeLessThan(2.05);
   });
 
+  it('reports the commit change folded into the fee, and 0 when change is emitted', () => {
+    const sim = (valueSats: number) => {
+      const { fundingInput, fundingAddress } = makeFundingUtxo(valueSats);
+      return simulateInscribeFees({
+        feeRatePerVbyte: 5,
+        body: new TextEncoder().encode('hello'),
+        contentType: 'text/plain',
+        fundingInput,
+        senderChangeAddress: fundingAddress,
+        recipientAddress: makeRecipientP2tr().address!,
+        ephemeralPubkeyXonly: schnorr.getPublicKey(RECIPIENT_PRIV),
+        network: NETWORK,
+      });
+    };
+
+    // Roomy coin: the commit emits change and pays the requested rate.
+    const roomy = sim(100_000);
+    expect(roomy.commitAbsorbedSubDustSats).toBe(0);
+
+    // A coin sized just over the requirement leaves a remainder too small for a
+    // change output, so the builder folds it into the miner fee. That coin is
+    // USABLE and over-paying, which is the state a picker must not collapse
+    // into "cannot fund".
+    const cliff = sim(roomy.fundingRequirementSats + 100);
+    expect(cliff.commitAbsorbedSubDustSats).toBeGreaterThan(0);
+    // The fold is real money: the realised fee exceeds the roomy coin's.
+    expect(cliff.commitFeeSats).toBeGreaterThan(roomy.commitFeeSats);
+  });
+
   it('rejects feeRatePerVbyte <= 0', () => {
     const { fundingInput, fundingAddress } = makeFundingUtxo(100_000);
     expect(() => simulateInscribeFees({
