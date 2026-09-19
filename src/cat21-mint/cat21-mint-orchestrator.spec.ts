@@ -10,6 +10,7 @@ import {
   MintWalletContext,
 } from './cat21-mint-orchestrator.js';
 import { TxnOutput } from './cat21.service.types.js';
+import { simulateMintTransaction } from './cat21.service.helper.js';
 import { outpointKey } from '../cat21-fee/candidate-fees.js';
 
 // Node unit test — no browser. Real keys so simulateMintTransaction
@@ -106,11 +107,36 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     expect({ richAbsorbed: rich?.absorbedSubDustSats, poorFee: poor?.finalFeeSats, poorAbsorbed: poor?.absorbedSubDustSats })
       .toEqual({ richAbsorbed: 0, poorFee: null, poorAbsorbed: null });
 
-    // The fee the core reports and the fee the orchestrator's own per-UTXO grid
-    // reports are the same number. Two sources for one figure is how a picker
-    // and a cost line end up disagreeing on the same screen.
+    // The picker grid is DERIVED from these fees rather than priced again, so
+    // comparing the two would compare a number with itself. Check it against
+    // the BUILDER instead: build the mint at the derived fee and require the
+    // row to describe the transaction that actually comes out.
     const gridRow = s.simulations.find((r) => r.utxo.txid === big.txid);
-    expect(rich?.finalFeeSats).toBe(Number(gridRow?.simulation?.finalTransactionFee));
+    const view = gridRow?.simulation;
+    expect(view).toBeTruthy();
+    if (!view) return;
+
+    const built = simulateMintTransaction(
+      wallet.type, wallet.ordinalsAddress, big, wallet.paymentAddress,
+      hex.decode(wallet.paymentPublicKey), view.finalTransactionFee, Network.Mainnet,
+    );
+    expect({
+      fee: view.finalTransactionFee,
+      change: view.changeAmount,
+      recipient: view.amountToRecipient,
+      vsize: view.vsize,
+    }).toEqual({
+      fee: built.finalTransactionFee,
+      change: built.changeAmount,
+      recipient: built.amountToRecipient,
+      vsize: built.vsize,
+    });
+
+    // Conservation: nothing is invented or lost between the coin and the
+    // three places its sats can go.
+    expect(view.singleInputAmount).toBe(
+      view.amountToRecipient + view.finalTransactionFee + view.changeAmount,
+    );
   });
 
   it('the snapshot carries both funding targets, not only the feasibility floor', async () => {

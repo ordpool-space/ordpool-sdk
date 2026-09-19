@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { firstValueFrom, of } from 'rxjs';
 
 import { Cat21SdkConfig } from './cat21-sdk-config.js';
-import { UtxoContentScanner } from './utxo-content-scanner.service.js';
+import { AUTO_SCAN_MAX_VALUE_SAT, UtxoContentScanner } from './utxo-content-scanner.service.js';
 import { UtxoScanState } from './utxo-content.types.js';
 
 const originalFetch = globalThis.fetch;
@@ -214,5 +214,46 @@ describe('UtxoContentScanner cache: a failed scan is not a verdict', () => {
     const afterFirst = calls();
     await firstValueFrom(scanner.scan('cc:0'));
     expect(calls()).toBe(afterFirst);
+  });
+});
+
+describe('UtxoContentScanner autoScan gates', () => {
+  const clean = { value: 1_000, inscriptions: [], runes: null, sat_ranges: [[1, 2]] };
+  const coin = (value: number, id: string) => ({ txid: id.repeat(64).slice(0, 64), vout: 0, value });
+
+  /** Outpoints the scanner actually fetched, deduped across the two hosts. */
+  const scanned = (fetchMock: { mock: { calls: unknown[][] } }): string[] => [
+    ...new Set(
+      fetchMock.mock.calls
+        .map((c) => String(c[0]).split('/output/')[1])
+        .filter((x): x is string => !!x),
+    ),
+  ];
+
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  it('skips coins ABOVE the ceiling: a big coin is scanned on demand, not in the background', async () => {
+    const { scanner, fetchMock } = buildScanner(clean, { value: 1_000, cats: [] });
+    scanner.autoScan([coin(1_000, 'a'), coin(AUTO_SCAN_MAX_VALUE_SAT + 1, 'b')]);
+    await settle();
+    expect(scanned(fetchMock)).toEqual([`${'a'.repeat(64)}:0`]);
+  });
+
+  it('skips coins BELOW the funding floor: dust can never be selected, so scanning it buys nothing', async () => {
+    const { scanner, fetchMock } = buildScanner(clean, { value: 1_000, cats: [] });
+    // 546 cannot cover postage + a positive fee at any rate, so it is below the
+    // floor for every plan; 5_000 covers.
+    scanner.autoScan([coin(546, 'c'), coin(5_000, 'd')], 1_000);
+    await settle();
+    expect(scanned(fetchMock)).toEqual([`${'d'.repeat(64)}:0`]);
+  });
+
+  it('scans everything under the ceiling when no floor is known yet', async () => {
+    const { scanner, fetchMock } = buildScanner(clean, { value: 1_000, cats: [] });
+    scanner.autoScan([coin(546, 'e'), coin(5_000, 'f')]);
+    await settle();
+    expect(scanned(fetchMock).sort()).toEqual(
+      [`${'e'.repeat(64)}:0`, `${'f'.repeat(64)}:0`].sort(),
+    );
   });
 });

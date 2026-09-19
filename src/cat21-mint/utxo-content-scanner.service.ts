@@ -184,11 +184,25 @@ export class UtxoContentScanner implements ContentScanPort {
    * UTXOs doesn't try to open 60 simultaneous TCP connections (browser
    * per-host cap is 6, anything above queues anyway). Returns nothing
    * — the caller reads results off the `states$` stream.
+   *
+   * `minValueSat` skips coins too small to fund the action at all. Pass the
+   * flow's `fundingRequirementSats`: a coin below it can never be selected, so
+   * scanning it spends two HTTP round-trips against our own ord instances to
+   * learn something no screen can act on. A wallet carrying a long tail of dust
+   * is the common case, not the exotic one, and every one of those coins is
+   * under the ceiling above rather than over it.
+   *
+   * Omitted, every coin under the ceiling is scanned, which is the correct
+   * default for a caller that has no target yet (no fee rate typed).
    */
-  autoScan(utxos: { txid: string; vout: number; value: number }[]): void {
+  autoScan(
+    utxos: { txid: string; vout: number; value: number }[],
+    minValueSat = 0,
+  ): void {
     const targets: string[] = [];
     for (const u of utxos) {
       if (u.value > AUTO_SCAN_MAX_VALUE_SAT) continue;
+      if (u.value < minValueSat) continue;
       const outpoint = `${u.txid}:${u.vout}`;
       if (this.getState(outpoint).kind === 'not-scanned') {
         targets.push(outpoint);

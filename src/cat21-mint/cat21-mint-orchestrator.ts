@@ -11,7 +11,7 @@ import {
   FundingTopologySetting,
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
-import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
+import { CandidateFeeRow, outpointKey } from '../cat21-fee/candidate-fees.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
 import { Network } from '../network.js';
 import { findSignerOrThrow } from '../wallet/signers/index.js';
@@ -36,9 +36,26 @@ export type MintOrchestratorState =
   | 'idle' | 'loading-utxos' | 'ready' | 'minting' | 'success' | 'error';
 
 /** One row in the per-UTXO simulation grid (the expert picker). */
+/**
+ * What a picker row shows about one coin.
+ *
+ * The built `Transaction` is deliberately absent. Nothing reads it — not this
+ * package, not any consumer — and retaining one per coin means a full
+ * Transaction object for every UTXO in the wallet, rebuilt on every recompute.
+ */
+export interface UtxoSimulationView {
+  vsize: number;
+  /** Realised miner fee, sub-dust absorb included. */
+  finalTransactionFee: bigint;
+  /** The cat output a mint creates. */
+  amountToRecipient: bigint;
+  singleInputAmount: bigint;
+  changeAmount: bigint;
+}
+
 export interface UtxoSimulationRow {
   utxo: TxnOutput;
-  simulation: SimulateTransactionResult | null;
+  simulation: UtxoSimulationView | null;
   insufficient: boolean;
 }
 
@@ -304,14 +321,6 @@ export class Cat21MintOrchestrator {
       return;
     }
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
-    // Per-UTXO grid (no core twin — the expert picker's fee breakdown). Each
-    // row's fee is resolved guess-free (measured vsize, no-change fallback).
-    const simulations = this.utxos.map<UtxoSimulationRow>((utxo) => {
-      const resolved = this.resolveFee(wallet, utxo, paymentPublicKey, feeRate);
-      return resolved
-        ? { utxo, simulation: { ...resolved.sim, finalTransactionFee: BigInt(resolved.finalFeeSats) }, insufficient: false }
-        : { utxo, simulation: null, insufficient: true };
-    });
     // Safe-auto recommendation: delegate to mint.core's `simulateMint` (the
     // guess-free target + content-scan selection, single source of truth), then
     // lift its CoreFundingUtxo picks back into the TxnOutput domain by outpoint.
@@ -339,7 +348,8 @@ export class Cat21MintOrchestrator {
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
     this.patch({
-      simulations, fundingRecommendation, candidateFees,
+      simulations: this.rowsFrom(candidateFees),
+      fundingRecommendation, candidateFees,
       fundingRequirementSats, fundingPreferredSats,
       errorMessage: recomputeError,
     });
@@ -350,6 +360,43 @@ export class Cat21MintOrchestrator {
    * the fee rate. Measures the with-change form and falls back to no-change /
    * absorb, so a coin that genuinely fits is never rejected.
    */
+  /**
+   * The picker's per-coin grid, DERIVED from the core's per-candidate fees
+   * rather than priced a second time.
+   *
+   * Every field follows from the fee the core already measured. The cat output
+   * is the mint's fixed postage; change is what is left after postage and the
+   * realised fee, which lands at exactly 0 for a coin whose leftover was folded
+   * in, because that fee already absorbed it. So there is nothing here a second
+   * round of PSBT builds could learn.
+   *
+   * Pricing every coin twice cost ~1.8 ms per coin per pass, and the two passes
+   * disagreed about the tip: this one never subtracted it while the core always
+   * did, so the day a tip was wired through, every row would have shown a fee
+   * and a change the mint would not produce. One source cannot drift from
+   * itself.
+   */
+  private rowsFrom(candidateFees: CandidateFeeRow[]): UtxoSimulationRow[] {
+    const feeByOutpoint = new Map(candidateFees.map((f) => [outpointKey(f), f] as const));
+    return this.utxos.map<UtxoSimulationRow>((utxo) => {
+      const fee = feeByOutpoint.get(outpointKey(utxo));
+      if (!fee || fee.finalFeeSats === null || fee.vsize === null) {
+        return { utxo, simulation: null, insufficient: true };
+      }
+      return {
+        utxo,
+        simulation: {
+          vsize: fee.vsize,
+          finalTransactionFee: BigInt(fee.finalFeeSats),
+          amountToRecipient: BigInt(CAT21_POSTAGE_SATS),
+          singleInputAmount: BigInt(utxo.value),
+          changeAmount: BigInt(utxo.value - CAT21_POSTAGE_SATS - fee.finalFeeSats),
+        },
+        insufficient: false,
+      };
+    });
+  }
+
   private resolveFee(
     wallet: MintWalletContext,
     utxo: TxnOutput,
