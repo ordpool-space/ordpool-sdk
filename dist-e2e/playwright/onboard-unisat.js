@@ -40,12 +40,24 @@ async function onboardUnisat(page, extensionId, opts = {}) {
     if (await (0, is_visible_within_1.isVisibleWithin)(addressTypeContinue, 10_000)) {
         await addressTypeContinue.click();
     }
+    // Unisat shows an acknowledgement notice for SOME address types (nested
+    // segwit and taproot) and none for others, so this branch runs on some runs
+    // and not others.
+    //
+    // Dismissing it is BEST EFFORT on purpose: the notice does not stand between
+    // the wallet and its home screen, and its checkbox is an Ant-Design control
+    // whose input refuses a direct click (`pointer-events` suppressed on the
+    // hidden box — the same quirk the wizz helper documents for its fork of this
+    // UI). Nothing is swallowed by doing so: the `tab-home` assertion below is
+    // what proves onboarding finished, so a notice that genuinely blocked would
+    // still fail there, naming the screen rather than a checkbox.
     const noticeCheckbox = page.getByTestId('notice-checkbox-1');
     if (await (0, is_visible_within_1.isVisibleWithin)(noticeCheckbox, 5_000)) {
-        await noticeCheckbox.click();
+        await noticeCheckbox.click({ timeout: 5_000 }).catch(() => undefined);
         const noticeOk = page.getByTestId('notice-ok-button');
-        if (await noticeOk.isEnabled({ timeout: 3_000 }).catch(() => false))
-            await noticeOk.click();
+        if (await noticeOk.isEnabled().catch(() => false)) {
+            await noticeOk.click({ timeout: 5_000 }).catch(() => undefined);
+        }
     }
     await (0, test_1.expect)(page.getByTestId('tab-home')).toBeVisible({ timeout: 30_000 });
 }
