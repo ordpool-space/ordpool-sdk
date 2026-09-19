@@ -10,6 +10,7 @@ import {
   FundingTopologySetting,
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
+import { sameWallet } from '../wallet/wallet-identity.js';
 import { Network } from '../network.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -492,16 +493,23 @@ export class InscribeMintOrchestrator {
    * the consumer's call. Leaves the fee rate and any expert-mode selection
    * alone, since neither is invalidated by new coins arriving.
    */
+  /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;
-    await this.setWallet(this.wallet);
+    await this.loadUtxos(this.wallet);
   }
 
   async setWallet(wallet: InscribeWalletContext | null): Promise<void> {
-    const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
+    // A RE-EMISSION OF THE SAME WALLET IS A NO-OP: WalletService's subject
+    // pushes the same wallet again on every onAccountChange, and re-running the
+    // load drops this back through `loading-utxos`, which tears any control
+    // gated on that state out of the DOM for a frame. A click landing there is
+    // lost. Identity is the FULL tuple: one address treats a real change as a
+    // re-emission. To re-read for the connected wallet, call `refreshUtxos()`.
+    if (sameWallet(this.wallet, wallet)) return;
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
-    if (changed) {
+    {
       this.patch({ feeRate: null, selectedUtxo: null, content: null, batch: null, errorMessage: null, userMessage: null, successResult: null, compression: null, padding: null, parents: null });
     }
     if (!wallet) {
@@ -509,6 +517,10 @@ export class InscribeMintOrchestrator {
       this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
       return;
     }
+    await this.loadUtxos(wallet);
+  }
+
+  private async loadUtxos(wallet: InscribeWalletContext): Promise<void> {
     this.patch({ state: 'loading-utxos' });
     try {
       // Deduped here, not only in the SDK's own electrs readers: `getUtxos` is a

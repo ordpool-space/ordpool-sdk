@@ -78,6 +78,7 @@ export * from './cat21-fee/min-relay-fee.js';
 export * from './cat21-fee/ord-coin-select.js';
 export * from './cat21-fee/funding-safety.js';
 export * from './cat21-fee/candidate-fees.js';
+export * from './wallet/wallet-identity.js';
 export * from './cat21-fee/funding-recommendation.service.js';
 
 // --- Framework-agnostic orchestration core (ports + async flows) ---

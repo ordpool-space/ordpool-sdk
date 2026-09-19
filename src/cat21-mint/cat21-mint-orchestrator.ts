@@ -12,6 +12,7 @@ import {
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
 import { CandidateFeeRow, outpointKey } from '../cat21-fee/candidate-fees.js';
+import { sameWallet } from '../wallet/wallet-identity.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
 import { Network } from '../network.js';
 import { findSignerOrThrow } from '../wallet/signers/index.js';
@@ -183,23 +184,45 @@ export class Cat21MintOrchestrator {
    * Leaves the fee rate and any expert-mode selection alone, since neither is
    * invalidated by new coins arriving.
    */
+  /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;
-    await this.setWallet(this.wallet);
+    await this.loadUtxos(this.wallet);
   }
 
+  /**
+   * Connect, switch or disconnect the wallet.
+   *
+   * A RE-EMISSION OF THE SAME WALLET IS A NO-OP. `WalletService`'s subject
+   * pushes the same wallet again on every `onAccountChange`, and Xverse and
+   * cat21-wallet fire that repeatedly, so a consumer binding that stream
+   * straight to this method would otherwise re-run the whole load for a wallet
+   * that did not change. That drops the orchestrator back through
+   * `loading-utxos`, which tears any control gated on that state out of the DOM
+   * for a frame; a click landing in that frame is lost, and the symptom is an
+   * approval popup that never appears.
+   *
+   * Identity is the FULL tuple, not one address: comparing a single field
+   * treats a real wallet change as a re-emission and keeps state belonging to
+   * the previous wallet.
+   *
+   * To re-read the UTXO set for the wallet already connected, call
+   * `refreshUtxos()`. This method deliberately no longer doubles as that.
+   */
   async setWallet(wallet: MintWalletContext | null): Promise<void> {
-    const changed = (this.wallet?.ordinalsAddress ?? null) !== (wallet?.ordinalsAddress ?? null);
+    if (sameWallet(this.wallet, wallet)) return;
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
-    if (changed) {
-      this.patch({ feeRate: null, selectedUtxo: null, errorMessage: null, successTxId: null });
-    }
+    this.patch({ feeRate: null, selectedUtxo: null, errorMessage: null, successTxId: null });
     if (!wallet) {
       this.utxos = [];
       this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
+    await this.loadUtxos(wallet);
+  }
+
+  private async loadUtxos(wallet: MintWalletContext): Promise<void> {
     this.patch({ state: 'loading-utxos' });
     try {
       // Deduped here, not only in the SDK's own electrs readers: `getUtxos` is a

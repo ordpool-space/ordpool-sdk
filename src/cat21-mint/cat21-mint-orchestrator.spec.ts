@@ -294,6 +294,50 @@ describe('Cat21MintOrchestrator.refreshUtxos', () => {
     }));
     await expect(o.refreshUtxos()).resolves.toBeUndefined();
   });
+  it('a re-emission of the SAME wallet does not reload, so a gated control is not torn out', async () => {
+    // WalletService's subject pushes the same wallet again on every
+    // onAccountChange. A consumer binding that straight to setWallet used to
+    // re-run the whole load, dropping the orchestrator back through
+    // loading-utxos; a control gated on that state leaves the DOM for a frame
+    // and a click landing there is lost.
+    let fetches = 0;
+    const states: string[] = [];
+    const o = new Cat21MintOrchestrator(
+      deps({ getUtxos: async () => { fetches++; return [coin('c', 100_000)]; } }),
+    );
+    o.subscribe((s) => states.push(s.state));
+    await o.setWallet(wallet);
+    const afterFirst = fetches;
+    await o.setWallet({ ...wallet });
+    await o.setWallet({ ...wallet });
+
+    expect({ afterFirst, total: fetches }).toEqual({ afterFirst: 1, total: 1 });
+    // One load-transition only: the re-emissions produced no second one.
+    expect(states.filter((s) => s === 'loading-utxos')).toHaveLength(1);
+  });
+
+  it('refreshUtxos re-reads for the SAME wallet, which setWallet no longer does', async () => {
+    let fetches = 0;
+    const o = new Cat21MintOrchestrator(
+      deps({ getUtxos: async () => { fetches++; return [coin('c', 100_000)]; } }),
+    );
+    await o.setWallet(wallet);
+    await o.refreshUtxos();
+    expect(fetches).toBe(2);
+  });
+
+  it('a wallet differing only in paymentAddress IS a different wallet', async () => {
+    // The old guard compared ordinalsAddress alone, so this read as a
+    // re-emission and the flow kept the previous wallet's coins.
+    let fetches = 0;
+    const o = new Cat21MintOrchestrator(
+      deps({ getUtxos: async () => { fetches++; return [coin('c', 100_000)]; } }),
+    );
+    await o.setWallet(wallet);
+    await o.setWallet({ ...wallet, paymentAddress: PAYMENT_ADDR.replace(/.$/, 'x') });
+    expect(fetches).toBe(2);
+  });
+
   it('a failed recompute reports the reason and claims nothing about the coins', async () => {
     // The old swallow produced a disabled control with no explanation. The new
     // failure must not overcorrect into 200 rows each asserting "can't fund at

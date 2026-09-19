@@ -201,3 +201,46 @@ describe('Cat21CreateOfferOrchestrator (framework-agnostic)', () => {
     expect(o.getSnapshot().state).toBe('error');
   });
 });
+
+describe('Cat21CreateOfferOrchestrator wallet re-emission', () => {
+  it('a re-emission of the SAME wallet does not reload, so a gated control is not torn out', async () => {
+    // WalletService's subject pushes the same wallet again on every
+    // onAccountChange. Re-running the load drops the orchestrator back through
+    // loading-utxos, a control gated on that state leaves the DOM for a frame,
+    // and a click landing there is lost.
+    let fetches = 0;
+    const states: string[] = [];
+    const o = new Cat21CreateOfferOrchestrator(
+      deps({ getUtxos: async () => { fetches++; return [coin('c', 100_000)]; } }),
+    );
+    o.subscribe((s) => states.push(s.state));
+    await o.setWallet(wallet);
+    await o.setWallet({ ...wallet });
+    await o.setWallet({ ...wallet });
+
+    expect(fetches).toBe(1);
+    expect(states.filter((s) => s === 'loading-utxos')).toHaveLength(1);
+  });
+
+  it('refreshUtxos re-reads for the SAME wallet, which setWallet no longer does', async () => {
+    let fetches = 0;
+    const o = new Cat21CreateOfferOrchestrator(
+      deps({ getUtxos: async () => { fetches++; return [coin('c', 100_000)]; } }),
+    );
+    await o.setWallet(wallet);
+    await o.refreshUtxos();
+    expect(fetches).toBe(2);
+  });
+
+  it('a wallet differing in ONE field is a different wallet', async () => {
+    // The old guard compared a single address, so a change in any other field
+    // read as a re-emission and the flow kept the previous wallet's coins.
+    let fetches = 0;
+    const o = new Cat21CreateOfferOrchestrator(
+      deps({ getUtxos: async () => { fetches++; return [coin('c', 100_000)]; } }),
+    );
+    await o.setWallet(wallet);
+    await o.setWallet({ ...wallet, paymentPublicKey: wallet.paymentPublicKey.replace(/.$/, '0') });
+    expect(fetches).toBe(2);
+  });
+});
