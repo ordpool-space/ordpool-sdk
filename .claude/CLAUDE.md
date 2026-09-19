@@ -106,10 +106,9 @@ connectors. `verifyBip322Signature` lives under `src/wallet/` and is fine: it
 imports only `@scure` and `@noble`, so the directory is misleading rather than
 the module.
 
-955 kB bundled. `/core` is NOT a light entry point; it is the same weight as
-the barrel minus the stateful service classes. A consumer that wants one
-helper should import the SUBPATH for it, not `/core`. That difference is the
-whole reason the subpaths exist.
+`/core` is the same weight as the main barrel minus the stateful service
+classes, so a consumer that wants one helper imports the SUBPATH for it. That
+difference is the whole reason the subpaths exist.
 
 ### Build commands
 
