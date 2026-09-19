@@ -73,6 +73,29 @@ describe('resolveCandidateFees', () => {
     expect(tooSmall.vsize).toBeNull();
   });
 
+  it('a coin the builder refuses is one unfundable ROW, not a failed pool', () => {
+    // Pricing every coin means one coin the builder cannot handle would take
+    // down the recommendation for every other coin, and a caller catching
+    // around the whole computation then shows a disabled control with nothing
+    // to explain it. The poison coin is reported unfundable; its neighbours
+    // keep their real prices.
+    const poison = utxo(2_000, 7);
+    const rows = resolveCandidateFees([utxo(100_000, 0), poison, utxo(1_200, 1)], {
+      simulate: (candidate, feeSats) => {
+        if (candidate.vout === 7) throw new Error('builder refuses this script');
+        return simulate(candidate, feeSats);
+      },
+      feeBudgetFor: (c) => c.value - FIXED_OUTPUTS,
+      feeRatePerVbyte: 1,
+    });
+
+    expect(rows.map((r) => r.finalFeeSats)).toEqual([
+      WITH_CHANGE_VSIZE,
+      null,
+      1_200 - FIXED_OUTPUTS,
+    ]);
+  });
+
   it('keeps the outpoint so a picker can key rows against the recommendation', () => {
     const rows = feesFor([100_000, 1_200]);
     expect(rows.map((r) => outpointKey(r))).toEqual([`${'a'.repeat(64)}:0`, `${'a'.repeat(64)}:1`]);

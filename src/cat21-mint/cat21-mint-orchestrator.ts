@@ -317,6 +317,7 @@ export class Cat21MintOrchestrator {
     // lift its CoreFundingUtxo picks back into the TxnOutput domain by outpoint.
     let fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = EMPTY_RECOMMENDATION;
     let candidateFees: CandidateFeeRow[] = [];
+    let recomputeError: string | null = null;
     let fundingRequirementSats = 0;
     let fundingPreferredSats = 0;
     try {
@@ -328,11 +329,20 @@ export class Cat21MintOrchestrator {
       candidateFees = mintSim.candidateFees;
       fundingRequirementSats = mintSim.fundingRequirementSats;
       fundingPreferredSats = mintSim.fundingPreferredSats;
-    } catch {
+    } catch (err) {
       fundingRecommendation = EMPTY_RECOMMENDATION;
+      // Keep the REASON. An empty recommendation renders as a disabled control,
+      // so discarding the error here produces a screen that refuses and cannot
+      // say why, which is indistinguishable from an empty wallet and takes a CI
+      // bisect to tell apart.
+      recomputeError = `Could not price the funding coins: ${errMsg(err)}`;
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
-    this.patch({ simulations, fundingRecommendation, candidateFees, fundingRequirementSats, fundingPreferredSats });
+    this.patch({
+      simulations, fundingRecommendation, candidateFees,
+      fundingRequirementSats, fundingPreferredSats,
+      errorMessage: recomputeError,
+    });
   }
 
   /**

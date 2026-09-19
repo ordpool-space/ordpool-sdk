@@ -71,11 +71,24 @@ export function resolveCandidateFees<C extends FundingUtxo>(
   return candidates.map((candidate) => {
     // A negative budget means the coin cannot cover the fixed outputs;
     // `resolveCatTxFee` returns null for it without invoking the builder.
-    const resolved = resolveCatTxFee({
-      simulate: (feeSats) => args.simulate(candidate, feeSats),
-      feeRatePerVbyte: args.feeRatePerVbyte,
-      feeBudgetSats: args.feeBudgetFor(candidate),
-    });
+    //
+    // A candidate the BUILDER refuses outright is reported unfundable rather
+    // than allowed to throw. This is a row, not the plan: pricing every coin in
+    // the pool means one coin the builder cannot handle would otherwise take
+    // down the recommendation for every OTHER coin, and a caller that catches
+    // around the whole computation then shows a disabled control with nothing
+    // to explain it. The CHOSEN coin's build is a separate call and still
+    // throws, so a defect on the coin actually being spent still surfaces.
+    let resolved: CatTxFeeSimulation | null = null;
+    try {
+      resolved = resolveCatTxFee({
+        simulate: (feeSats) => args.simulate(candidate, feeSats),
+        feeRatePerVbyte: args.feeRatePerVbyte,
+        feeBudgetSats: args.feeBudgetFor(candidate),
+      });
+    } catch {
+      resolved = null;
+    }
     return {
       txid: candidate.txid,
       vout: candidate.vout,
