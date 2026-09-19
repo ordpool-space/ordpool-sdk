@@ -12,7 +12,8 @@
   points" below):
   - `ordpool-sdk` — ESM (`dist/`), for the frontends' bundlers.
   - `ordpool-sdk/core` — the lean barrel (`dist/core.js`), for
-    cat21-wallet, cat21-indexer's backend, any plain Node consumer.
+    cat21-wallet and other consumers that compose the pure helpers. NOT the
+    lean server entry its name suggests: see the server-facing subpaths below.
 - No external consumers yet — only `ordpool.space`, `cat21.space`, and
   `cat21-wallet` use it. No CHANGELOG, no semver gymnastics.
 
@@ -27,7 +28,8 @@ never uses):
 | Entry point | Barrel | Output | For |
 |---|---|---|---|
 | `ordpool-sdk` | `src/index.ts` | `dist/index.js` + `dist/index.d.ts` | cat21.space, cubes, ordpool frontends |
-| `ordpool-sdk/core` | `src/core.ts` | `dist/core.js` + `dist/core.d.ts` | cat21-wallet, cat21-indexer's backend, any plain Node consumer |
+| `ordpool-sdk/core` | `src/core.ts` | `dist/core.js` + `dist/core.d.ts` | cat21-wallet |
+| `ordpool-sdk/cat21-validation`, `/cat21-session`, `/network` | per-domain barrels | `dist/**` (ESM) + `dist-cjs/**` behind `require` | cat21-indexer's backend, any server |
 
 **ONE build, ESM.** Both entry points come out of `tsconfig.lib.json` from the
 same source set; the two barrels decide what each exposes, and `/core` still
@@ -90,6 +92,20 @@ exposes, so a file compiled but not re-exported is simply unreachable there.
 
 **Both barrels reach the wallet connectors**, so both drag the same
 third-party set: sats-connect, axios, base58-js, bowser and the rest, roughly
+955 kB bundled. **`/core` is not a server entry, and a backend importing it
+fails to RESOLVE**: `sats-connect` is a PEER dependency, so a service with no
+wallet UI never installs it, and the error names sats-connect rather than the
+mistake. Server-facing code takes `ordpool-sdk/cat21-validation`,
+`/cat21-session` or `/network`. Those carry no connector graph (a spec walks
+the BUILT graph and reds if one creeps in) and ship a CommonJS emit behind
+their `require` condition, because a jest CJS runtime with `node_modules`
+untransformed cannot load ESM even where Node itself can.
+
+Do not widen those barrels with anything that reaches `src/wallet/`'s
+connectors. `verifyBip322Signature` lives under `src/wallet/` and is fine: it
+imports only `@scure` and `@noble`, so the directory is misleading rather than
+the module.
+
 955 kB bundled. `/core` is NOT a light entry point; it is the same weight as
 the barrel minus the stateful service classes. A consumer that wants one
 helper should import the SUBPATH for it, not `/core`. That difference is the
