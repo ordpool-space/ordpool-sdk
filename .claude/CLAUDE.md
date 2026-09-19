@@ -1,777 +1,209 @@
 # CLAUDE.md
 
-## Overview
+`ordpool-sdk` is the domain library for the ordpool family: one layer above
+[`ordpool-parser`](https://github.com/ordpool-space/ordpool-parser), which
+extracts artifacts from raw transactions. The SDK does what needs a network or
+holds side-effecting logic: PSBT builders, the offer validator, the funding
+policy, REST wrappers, per-wallet signers.
 
-**ordpool-sdk** is the higher-level domain library for the ordpool ecosystem. It sits one layer above [`ordpool-parser`](https://github.com/ordpool-space/ordpool-parser): the parser extracts artifacts from raw transactions; the SDK does everything one step up from that — REST wrappers, calendar clients, signing helpers, anything that needs to talk to a network or hold side-effecting logic.
+MIT, framework-agnostic (RxJS backs the stateful clients' reactivity; RxJS is
+not a framework), Node and browser. No npm publish: consumers pin a git sha.
+Family-wide rules live in [`/Work/ordpool/CLAUDE.md`](../../CLAUDE.md); this
+file is what is local to the SDK.
 
-- **MIT licensed.**
-- **Framework-agnostic.** Plain classes and functions, no framework
-  dependency. RxJS backs the stateful clients' reactivity (RxJS runs
-  everywhere; it is not a framework). Works in Node.js AND browsers.
-- **Two entry points, same framework-agnostic code** (see "Two entry
-  points" below):
-  - `ordpool-sdk` — ESM (`dist/`), for the frontends' bundlers.
-  - `ordpool-sdk/core` — the lean barrel (`dist/core.js`), for
-    cat21-wallet and other consumers that compose the pure helpers. NOT the
-    lean server entry its name suggests: see the server-facing subpaths below.
-- No external consumers yet — only `ordpool.space`, `cat21.space`, and
-  `cat21-wallet` use it. No CHANGELOG, no semver gymnastics.
-
-## Two entry points: `ordpool-sdk` vs `ordpool-sdk/core`
-
-The whole SDK is framework-agnostic — plain classes, plain functions,
-RxJS for the stateful clients' reactivity. There are two build outputs
-so each consumer gets the module format its bundler wants, and so the
-wallet's build stays lean (it doesn't pull in the stateful classes it
-never uses):
+## Entry points
 
 | Entry point | Barrel | Output | For |
 |---|---|---|---|
 | `ordpool-sdk` | `src/index.ts` | `dist/index.js` + `dist/index.d.ts` | cat21.space, cubes, ordpool frontends |
 | `ordpool-sdk/core` | `src/core.ts` | `dist/core.js` + `dist/core.d.ts` | cat21-wallet |
-| `ordpool-sdk/cat21-validation`, `/cat21-session`, `/network` | per-domain barrels | `dist/**` (ESM) + `dist-cjs/**` behind `require` | cat21-indexer's backend, any server |
+| `/cat21-validation`, `/cat21-session`, `/network` | per-domain barrels | `dist/**` ESM + `dist-cjs/**` behind `require` | cat21-indexer's backend, any server |
 
-**ONE build, ESM.** Both entry points come out of `tsconfig.lib.json` from the
-same source set; the two barrels decide what each exposes, and `/core` still
-omits the stateful RxJS service classes.
-
-ESM, and every relative specifier in `src/` carries an explicit `.js` (19 of
-them `/index.js`). That is what makes the emit resolvable by NODE and not only
-by a bundler: tsc does not rewrite specifiers, so an extensionless `./foo` stays
-`./foo` in the output and Node rejects it. Keep writing the extension; a new
-import without one breaks Node resolution while every test still passes.
-
-**A CommonJS consumer is fine, and this is the trap to not re-derive.** The
-package spent a day on a CommonJS build because "a CommonJS app cannot
-`require()` an ESM package". That is true of older Node and FALSE here: Node
-22.12+ requires ESM that has no top-level await, this package has none, and
-`cat21-indexer`'s backend declares `node >= 24`. Verified by requiring `/core`
-and `/inscribe-fee` from a package with no `type` field, the NestJS shape
-exactly. The cost of getting that wrong was measured: CommonJS took
-cat21.space's initial bundle from 1.38 MB to 1.91 MB, cubes' from 1.46 to
-1.86, and hard-failed ordpool's production build against its budget. ESM
-returns all three.
-
-The `dist/` ESM uses extensionless / directory imports — resolved by
-any bundler (every consumer uses one), NOT by Node's native ESM loader
-directly. `package.json` `exports` wires resolution. Consumers write:
+One build (`tsconfig.lib.json`, `src/**/*.ts`); the barrels alone decide what each entry exposes, so a compiled file that is not re-exported is unreachable there.
 
 ```ts
-// cat21.space + cubes (bundler):
-import { Cat21Service, buildCat21TransferPsbt } from 'ordpool-sdk';
-
-// cat21-wallet (Webpack, CommonJS):
-import { buildCat21TransferPsbt } from 'ordpool-sdk/core';
+import { Cat21Service, buildCat21TransferPsbt } from 'ordpool-sdk';   // bundler
+import { buildCat21TransferPsbt } from 'ordpool-sdk/core';            // cat21-wallet
 ```
 
-The stateful, `Observable`-returning service classes — `WalletService`,
-`Cat21Service`, `Cat21ApiService`, `UtxoContentScanner` — are plain
-classes taking their config in the constructor (no DI container):
+The stateful, `Observable`-returning classes (`WalletService`, `Cat21Service`,
+`Cat21ApiService`, `UtxoContentScanner`) take plain config types in the
+constructor (`Cat21SdkConfig`, `StorageLike`, `Network`), no DI container, and
+live at the MAIN entry only. `/core` is the same set minus those; the wallet
+composes the pure helpers plus the `executeMint` / `executeTransfer` functional
+flows.
 
-```ts
-new WalletService({ storage, network });   // storage: StorageLike, network: Network
-new Cat21Service(config, network);          // config: Cat21SdkConfig
-new Cat21ApiService(config);
-new UtxoContentScanner(config);
-```
+## RULE: `/core` is not a server entry
 
-A consumer instantiates them and, if it uses a DI framework, registers
-them itself (e.g. `{ provide: Cat21Service, useFactory: () => new
-Cat21Service(cfg, net) }`). These four live at the MAIN entry only; the
-wallet doesn't need them (it composes the pure helpers +
-`executeMint` / `executeTransfer` functional flows). There is no
-DI-token layer; the config interfaces (`Cat21SdkConfig`, `StorageLike`,
-`Network`) are plain exported types the constructor takes directly.
+- `/core` reaches the wallet connectors, so it drags `sats-connect`, axios, base58-js, bowser, roughly 955 kB bundled. `sats-connect` is a PEER dep, so a backend that never installs it fails to RESOLVE, and the error names sats-connect rather than the mistake.
+- Server-facing code takes `/cat21-validation`, `/cat21-session` or `/network`. Those carry no connector graph (a spec walks the BUILT graph and reds if one creeps in) and ship a CommonJS emit behind their `require` condition, because a jest CJS runtime with `node_modules` untransformed cannot load ESM even where Node can.
+- Never widen those barrels with anything reaching `src/wallet/`'s connectors. `verifyBip322Signature` lives under `src/wallet/` and is fine: it imports only `@scure` and `@noble`.
 
-### What goes in `core.ts`
+## RULE: ESM, and every relative specifier carries an explicit `.js`
 
-`src/core.ts` is the manifest for the `/core` subpath (`dist/core.js`), and
-`src/index.ts` for the main one. Both come out of ONE build
-(`tsconfig.lib.json`, `src/**/*.ts`); the barrels alone decide what each entry
-exposes, so a file compiled but not re-exported is simply unreachable there.
+- tsc does not rewrite specifiers, so an extensionless `./foo` stays `./foo` in the emit and Node rejects it. A new import without the extension breaks Node resolution while every test still passes.
+- A CommonJS consumer is fine and this trap must not be re-derived: Node 22.12+ requires ESM with no top-level await, this package has none, `cat21-indexer`'s backend declares `node >= 24`. Verified by requiring `/core` and `/inscribe-fee` from a package with no `type` field.
+- A whole-package CommonJS build was measured and reverted: cat21.space 1.38 MB to 1.91 MB, cubes 1.46 to 1.86, and ordpool's production build hard-failed its budget. ESM returns all three.
 
-**Both barrels reach the wallet connectors**, so both drag the same
-third-party set: sats-connect, axios, base58-js, bowser and the rest, roughly
-955 kB bundled. **`/core` is not a server entry, and a backend importing it
-fails to RESOLVE**: `sats-connect` is a PEER dependency, so a service with no
-wallet UI never installs it, and the error names sats-connect rather than the
-mistake. Server-facing code takes `ordpool-sdk/cat21-validation`,
-`/cat21-session` or `/network`. Those carry no connector graph (a spec walks
-the BUILT graph and reds if one creeps in) and ship a CommonJS emit behind
-their `require` condition, because a jest CJS runtime with `node_modules`
-untransformed cannot load ESM even where Node itself can.
+## RULE: `signingMap` is banned, every Bitcoin operation ships as a typed triple
 
-Do not widen those barrels with anything that reaches `src/wallet/`'s
-connectors. `verifyBip322Signature` lives under `src/wallet/` and is fine: it
-imports only `@scure` and `@noble`, so the directory is misleading rather than
-the module.
+<!-- long-rule: the three layers and the four signer methods are the interface, not an illustration -->
 
-`/core` is the same weight as the main barrel minus the stateful service
-classes, so a consumer that wants one helper imports the SUBPATH for it. That
-difference is the whole reason the subpaths exist.
+1. **Builder** (internal): a pure function producing the PSBT bytes and owning the input layout. `cat21-{mint,transfer,offer}/*.helper.ts`, `inscribe/inscription-commit.helper.ts`.
+2. **Signer method** (internal, on every `WalletSigner`): operation-named, HARDCODED topology. No `signingMap: ReadonlyArray<PsbtSigningTarget>`, no `sigHash` override; topology is the method name.
+   - `signSingleFundingInput`: 1 input at paymentAddress, SIGHASH_ALL (mint, inscribe-commit, future RBF / CPFP).
+   - `signTransfer`: input 0 = ordinalsAddress, 1..N = paymentAddress, all SIGHASH_ALL. The caller states `fundingInputCount`; positions are derived.
+   - `signOfferAccept`: input 0 = ordinalsAddress, nothing else touched. Buyer inputs come pre-signed.
+   - `signOfferCreatePsbt`: inputs 1..N = paymentAddress, returns partial-sig bytes, no broadcast.
+3. **Orchestrator** (PUBLIC): the only Bitcoin-operation surface a consumer sees. `Cat21Service.createCat21Transaction`, `Cat21TransferOrchestrator.transfer`, `Cat21CreateOfferOrchestrator.createOffer`, `Cat21AcceptOfferOrchestrator.acceptOffer`, `inscribeAndBroadcast`.
 
-### Build commands
+`WalletSigner` and the per-method arg types (`SignSingleFundingInputArgs`,
+`SignTransferArgs`, `SignOfferAcceptArgs`, `SignOfferCreatePsbtArgs`) are NOT
+exported through `core.ts` or `index.ts`; the `exports` map blocks the deep
+import. `signAndBroadcast` / `signMultiInputAndBroadcast` / `signPsbtOnly`
+remain on each signer for `operationNamedDefaults` delegation and are
+unreachable for the same reason. Adding an operation
+means builder, sibling signer method, orchestrator, then per-signer specs
+pinning the wire-tx bytes plus an orchestrator spec for build to broadcast.
 
-```bash
-npm run build           # dist/ + dist-e2e/ (plain tsc)
-npm run build:main      # tsc -> dist/ (both entry points) only
-npm run build:e2e       # tsc -> dist-e2e/ (/e2e entry) only
-npm run clean           # removes dist/ dist-e2e/
-```
+Why: a caller could pass an array missing an input index, the wallet signed what was listed, auto-finalizing wallets emitted a partially-finalized PSBT, and broadcast failed at electrs with `mandatory-script-verify-flag-failed` AFTER the user clicked Sign.
 
-`prepare` hook on install runs `build:main`, so a fresh clone or
-`npm install` produces the runtime output. `dist-e2e/` is
-committed (see Shipped artifacts).
+## RULE: A cat UTXO's size is set once at mint and preserved afterwards
 
-### Consumer-side staleness: there is NO guard
+<!-- long-rule: one row per operation, and each row is a different money path -->
 
-cat21-wallet imports the COMPILED bytes, not `src/*.ts`. Edit SDK source
-without rebuilding and a linked wallet runs against stale bytes, silently.
-
-**Nothing catches that.** This section previously described a pre-hook at
-`apps/extension/scripts/check-sdk-fresh.cjs` firing before vitest, webpack
-and tsc, and a `pnpm sdk:watch`. Neither exists: no such file, no such
-package.json script. It was written here and never verified, and a doc
-inventing a safety net is worse than one admitting the gap, because a
-reader stops looking for the problem.
-
-For a SHA-pinned consumer this cannot bite: `prepare` builds `dist/` from
-that SHA's source at install. It bites a developer using `npm link`
-against a local checkout. Until a real guard exists, `npm run build:main`
-in the SDK between iterations is the whole mitigation.
-
-## HARD RULE: Keep useful comments
-
-**Don't strip JSDoc or "why" inline comments under the banner of
-"simplification".** The text inside a comment can be trimmed (no
-bombast, no LLM-speak, no before-after history); the block itself
-stays. Wallet quirks, coin-selection rationale, and signing-flow
-edge cases are exactly the kind of comment a future reader cannot
-reconstruct from code alone. Full decision tree in the workspace
-`CLAUDE.md` HARD RULE "Keep useful comments (JSDoc AND inline 'why')".
-
-## HARD RULE: signingMap is BANNED — every Bitcoin operation ships as a typed triple
-
-**`signingMap` is a footgun, not a primitive.** The previous design exposed
-a `signingMap: ReadonlyArray<PsbtSigningTarget>` parameter on
-`signMultiInputAndBroadcast` / `signPsbtOnly`. A caller could pass an
-array that missed an input index; the wallet signed what was listed,
-auto-finalizing wallets emitted a partially-finalized PSBT, and
-broadcast landed at electrs with `mandatory-script-verify-flag-failed`
-AFTER the user clicked Sign. Worse: per-row `sigHash` overrides made
-"change the commitment topology" a silent typo.
-
-**Every on-chain Bitcoin operation ships as a TYPED TRIPLE:**
-
-1. **Builder** (internal): pure function that constructs the PSBT
-   bytes for that operation. Owns the input layout (cat at index 0,
-   funding inputs at 1..N, etc.). Lives in
-   `cat21-{mint,transfer,offer}/…helper.ts` /
-   `inscribe/inscription-commit.helper.ts`.
-
-2. **Signer method** (internal, on every `WalletSigner`): operation-
-   named method with a HARDCODED signing topology. The four shipping
-   methods today:
-
-   - `signSingleFundingInput` — 1 input at paymentAddress, SIGHASH_ALL
-     (mint, inscribe-commit, future RBF replacement, future CPFP child).
-   - `signTransfer` — input 0 = ordinalsAddress, inputs 1..N =
-     paymentAddress, all SIGHASH_ALL. Caller only states
-     `fundingInputCount`; positions are derived.
-   - `signOfferAccept` — input 0 = ordinalsAddress; nothing else
-     touched. Buyer's inputs come pre-signed.
-   - `signOfferCreatePsbt` — inputs 1..N = paymentAddress; returns
-     partial-sig PSBT bytes (no broadcast).
-
-   No method takes a `signingMap`. No method takes a `sigHash`
-   override. Topology is the method name.
-
-3. **Orchestrator** (PUBLIC API): operation-named entry point that
-   composes builder + signer + broadcast callback. The only Bitcoin-
-   operation surface a consumer sees. Examples:
-   `Cat21Service.createCat21Transaction` (mint),
-   `Cat21TransferOrchestrator.transfer`,
-   `Cat21CreateOfferOrchestrator.createOffer`,
-   `Cat21AcceptOfferOrchestrator.acceptOffer`,
-   `inscribeAndBroadcast`. Future RBF / CPFP / Bitcoin-send /
-   rune-etch operations get a sibling orchestrator following the
-   same pattern.
-
-**The signer interface (`WalletSigner`) and the per-method input
-shapes (`SignSingleFundingInputArgs`, `SignTransferArgs`,
-`SignOfferAcceptArgs`, `SignOfferCreatePsbtArgs`) are NOT exported
-through `core.ts` or `index.ts`.** Consumers can't reach them without
-a deep import that the package `exports` map blocks. The only public
-Bitcoin-operation surface is orchestrators.
-
-**When adding a new on-chain operation:**
-
-1. Write the builder under `src/<operation>/<operation>.helper.ts`.
-2. Add a sibling signer method to `WalletSigner` (operation-named,
-   hardcoded topology). Implement on every signer via the
-   `operationNamedDefaults` helper or inline.
-3. Add a subscribe-based orchestrator (plain class) under
-   `src/<operation>/<operation>-orchestrator.ts`. Export through
-   `core.ts` + `index.ts`.
-4. Per-signer specs pin the operation's invariants (positive-equality
-   asserts on the wire-tx bytes); orchestrator spec proves the full
-   build → sign → broadcast chain end-to-end.
-
-**Legacy state:** the internal `signAndBroadcast` /
-`signMultiInputAndBroadcast` / `signPsbtOnly` methods still exist on
-each signer for the `operationNamedDefaults` delegation, and remain
-on the `WalletSigner` interface for the delegation typing. The
-`WalletSigner` interface itself is NOT re-exported through `core.ts`
-or `index.ts`, so no public consumer can reach those methods. Future
-passes can inline the delegation and drop the legacy methods
-entirely from the interface.
-
-## HARD RULE: cat UTXO size — set ONCE at mint (546), PRESERVED by every later operation
-
-**A cat lives on a UTXO. That UTXO's size is set exactly ONCE — when the cat is
-created — and is NEVER changed by any later operation.** Two ways a cat is
-created: our **mint** creates a fresh cat at **546 sats** (`CAT21_POSTAGE_SATS`,
-a conservative cross-address dust floor: taproot 330, segwit 294, p2sh 540; 546
-clears them all); OR **any external tx** mints a cat at **any size**
-(`nLockTime=21` on an any-size output — an inscription-with-nLockTime-21 carries
-a cat on its own UTXO). After creation, **every operation that MOVES the cat
-(transfer, offer/settle) PRESERVES the incoming cat UTXO's exact size**: output
-0 = the incoming cat value, byte-for-byte. We do NOT resize, split, or
-"normalise to 546" an existing cat — every sat on it travels together, intact,
-under ordinal theory. **Resizing an existing cat UTXO, or rejecting one because
-its value isn't 546, is a bug, not a rule.**
-
-### The golden rules, per operation
-
-| Operation | Output 0 (the cat) | Fee paid by | Change |
+| Operation | Output 0 | Fee from | Change |
 |---|---|---|---|
-| **Mint** | **546** — fresh cat we create (nothing to preserve) | the funding input | `funding − 546 − fee`; dust-absorb |
-| **Transfer** | **= `catUtxo.value`** — the WHOLE incoming UTXO, preserved | **separate funding input(s)**; the cat is never touched for the fee | `funding − fee`; dust-absorb |
-| **Offer** | **= `sellerInput.value`** — the WHOLE seller UTXO, preserved (ord `wallet offer create` parity) | buyer funding | `buyerFunding − (price + V + fee)`; dust-absorb. Output 1 (seller payout) = `price + sellerInput.value` |
+| Mint | `CAT21_POSTAGE_SATS` = 546, a fresh cat we create | the funding input | `funding - 546 - fee`, dust-absorb |
+| Transfer | `catUtxo.value`, the WHOLE incoming UTXO | separate funding inputs, never the cat | `funding - fee`, dust-absorb |
+| Offer | `sellerInput.value`, the WHOLE seller UTXO (ord parity) | buyer funding | `buyerFunding - (price + V + fee)`, dust-absorb. Output 1 = `price + sellerInput.value` |
 
-**Dust-absorb (identical for all three):** change ≥ its address's dust floor →
-emit change back to us; sub-dust change → absorb into the miner fee (a tip),
-tracked in each builder's `finalFeeSats`. This is the mint's long-standing "dust
-is a feature" behaviour, now shared by transfer.
+- 546 is a conservative cross-address dust floor (taproot 330, segwit 294, p2sh 540). An external tx can mint a cat at any size.
+- Dust-absorb everywhere: change at or above its address's dust floor comes back, sub-dust change becomes a miner tip, tracked as `finalFeeSats`.
+- The accept-side validator nets `output1 - sellerInputValue` and enforces only the price floor. It does NOT pin output 0 to 546: stock ord sets it to the inscription's real postage (`cat21-ord/tests/wallet/offer/create.rs` inscribes 9000 sats and asserts `output[0].value == 9000`), so pinning 546 rejects every valid ord-built offer.
+- 546 is never a DETECTION rule. Cat membership comes from the cat index (cat21-ord `/address` gives `cat_numbers`, via `catsAtAddress` / `addressHoldsCat`), spendability from `classifyOutpoint` / `makeWatchOnlyProbe`, never from a size heuristic. `CAT21_POSTAGE_SATS` (`src/cat21-protocol/cat21-postage.ts`) is used only by the mint and as a dust-floor fallback.
+- FIFO is load-bearing: the cat must be at input 0 and output 0 must be its landing output, or it lands elsewhere silently. The builders enforce both.
 
-**Fee never shrinks the cat.** Transfer and offer pay the fee from SEPARATE
-funding inputs; the cat UTXO passes straight through input 0 → output 0.
-Transfer therefore REQUIRES funding to cover the fee (same as mint) — a cat on a
-large UTXO cannot "self-fund" a transfer, because that would resize it.
+Code: `cat21-mint/cat21-mint.helper.ts`, `cat21-transfer/cat21-transfer.helper.ts`, `cat21-offer/cat21-offer.helper.ts`. Proven at 546/3000/9000/30000 in `e2e/regtest/offer-ord-parity-sizes.spec.ts`.
 
-**The accept-side offer validator** computes net-to-seller as `output1 −
-sellerInputValue` and enforces only the price floor — never that the seller
-input equals 546. It also does NOT pin output 0 to 546: it accepts any value
-clearing that output address's dust floor, because a stock-ord `wallet offer
-create` sets output 0 to the inscription's REAL postage (ord's own test at
-`cat21-ord/tests/wallet/offer/create.rs` inscribes 9000 sats and asserts
-`output[0].value == 9000`). Pinning 546 there would reject every valid ord-built
-offer for an inscription-that-is-also-a-cat, breaking "buy an inscription from
-stock ord".
+## RULE: Transfer preserves by default, GROW and SHRINK are opt-ins
 
-**546 is never a DETECTION rule either.** Do NOT detect a cat by its UTXO
-size: a 546-sat UTXO is not necessarily a cat (inscriptions and rare sats are
-dust-postaged too), and a cat is not necessarily 546. Cat membership is
-answered only by the cat index (cat21-ord `/address` → `cat_numbers`, i.e.
-`catsAtAddress` / `addressHoldsCat`), never by a size heuristic. Watch-only
-spendability likewise excludes cats AND inscriptions AND runes AND rare sats
-via the full ord + cat21-ord (`classifyOutpoint` / `makeWatchOnlyProbe`),
-never by size.
+- `buildCat21TransferPsbt` takes an optional `targetPostageSats`. Omitted means preserve. Set means output 0 = target: GROW above, SHRINK below. Conservation: `change = catUtxo.value + funding - catOutputSats - fee`.
+- A set target must clear the recipient's dust floor (the builder throws). PRESERVE is exempt, so a sub-dust cat can be preserved for a later grow.
+- GROW rescues a sub-dust cat mined out-of-band (direct-to-miner, bypassing relay's dust rule) and lets a cold wallet self-provision. Bitcoin has no dust rule on INPUTS, only on relayed outputs.
+- SHRINK self-funds the fee from the cat's own surplus, so funding may be empty when `catUtxo.value - target >= fee`. Structural parity with `ord wallet send --postage`; a byte-compare is a follow-up.
+- ord's `wallet send` preserves up to `MAX_POSTAGE` 20,000 and trims larger ones to `TARGET_POSTAGE` 10,000, erroring `NotEnoughCardinalUtxos` on a normal send (`cat21-ord/src/wallet/transaction_builder.rs`, `Target::Postage`, `strip_excess_postage`). We preserve above 20k too, which is stricter.
+- Not done: thread `targetPostageSats` through `Cat21TransferOrchestrator` and its coin selection so cat21.space's UI can offer grow/shrink.
 
-**Why FIFO is load-bearing**: ord assigns the cat to the first sat of the first
-output (ordinal theory). The cat must be at input 0 and output 0 must be its
-landing output, or the cat lands elsewhere silently. The builders enforce
-input-0-is-cat and output-0-is-cat. Because output 0 = the whole cat UTXO
-(transfer/offer) or 546 (mint), the cat's first sat always lands at output 0's
-first sat.
+## RULE: Adopt ord's coin selection, do not invent one
 
-**Where each rule lives (code):**
-- `cat21-mint/cat21-mint.helper.ts`: mint output 0 = 546 (fresh); change `funding − 546 − fee`, dust-absorb, `finalFeeSats`.
-- `cat21-transfer/cat21-transfer.helper.ts`: transfer output 0 = `catUtxo.value` (PRESERVE — never 546); fee from funding; change `funding − fee`, dust-absorb, `finalFeeSats`.
-- `cat21-offer/cat21-offer.helper.ts`: offer output 0 = `sellerInput.value` (PRESERVE, ord parity); output 1 = `price + sellerInput.value`; validator nets `output1 − sellerInputValue`, gates output 0 only on the per-address dust floor. Proven at 546/3000/9000/30000 in `e2e/regtest/offer-ord-parity-sizes.spec.ts` against live `ord wallet offer create`.
-- `CAT21_POSTAGE_SATS = 546` is used ONLY by the mint (fresh cat) + as a dust-floor fallback — never as a transfer/offer output size.
+- `cat21-fee/ord-coin-select.ts` ports ord's `transaction_builder.rs`: `selectCardinalUtxo` (ord's `select_cardinal_utxo`, best-fit, verified against all six `select_cardinal_utxo_prefer_under` vectors), `estimateTaprootVbytes` / `estimateFeeSats`, `selectOrdParityFunding` (ord's `build_transaction` pipeline, verified against `build_transaction_with_custom_postage`).
+- Transfer and create-offer auto-pick the SMALLEST covering UTXO. `pickLargestFundingUtxoThatCovers` is an opt-in preserve-largest-balance strategy.
+- Fee estimation in production stays `computePsbtVsize` (accurate per input type). ord's taproot-only model is for the byte-parity proofs, not a blanket change for non-taproot wallets.
+- Byte-parity proven against live ord except `nLockTime=21` and the change address: `e2e/regtest/transfer-ord-parity.spec.ts` (vs `ord wallet send --dry-run --postage <target>`, same inputs, sequences, output 0 and the exact change value) and `e2e/regtest/inscribe-ord-parity-roundtrip.spec.ts` (vs `ord wallet inscribe`, plain and metaprotocol, and stock ord blesses our inscription).
+- Not applicable: mint has no ord equivalent (`findAutoPickCandidate` selects for content-safety, not value); offer create uses Core's `fundrawtransaction`, so it keeps a structural test.
+- Remaining: wire the multi-input `selectOrdParityFunding` for the rare case where no single UTXO covers.
 
-**Relation to ord:** offer + inscribe are cross-compat surfaces, byte-parity
-with ord except `nLockTime=21`; ord's `wallet offer create` also preserves the
-UTXO size (`output[0] = inscription.value`), so preserve = ord parity there.
-Transfer has no counterparty (nobody accepts a send), so it is not *bound* to
-byte-parity — but our preserve-default is in fact very close to what ord's
-`wallet send` already does (see below). See HQ "cat-touching txs do exactly
-what ord does".
+## RULE: CAT-21 mint sequence is per-wallet
 
-### Transfer size policy vs ord `wallet send` — PRESERVE by default; SHRINK + GROW as explicit opt-ins
+| Wallet | Sequence | RBF |
+|---|---|---|
+| `cat21wallet` | `0xfffffffd` | YES. Our wallet preserves `nLockTime=21` on any replacement (its HARD RULE #1, `CAT21_MINT_INPUT_SEQUENCE`), so a fee bump is safe and useful. |
+| everyone else | `0xfffffffe` | NO. A third-party "accelerate" UI would rebuild without `nLockTime=21` and burn the cat. |
 
-**Precise ord behaviour** (verified in `cat21-ord/src/wallet/transaction_builder.rs`, `Target::Postage`; module doc lines 17-18; `strip_excess_postage` lines 383-413; `build_transaction` pipeline `add_value` → `strip_value` → `deduct_fee`):
-- ord's `wallet send` **PRESERVES the inscription UTXO's value up to `MAX_POSTAGE = 20_000` sats** — it only strips when `value − fee > 20_000`.
-- **Above ~20_000 it trims the output to `TARGET_POSTAGE = 10_000`** and sends the surplus to a change output.
-- The fee is paid by **added cardinal (non-inscription) UTXOs** (`add_value`); ord **errors `NotEnoughCardinalUtxos` ("please add additional funds")** when the wallet has none. Only a > 20k inscription self-funds the fee from its own trimmed surplus.
-- The famous **`10_000` is ord's *inscribe*-time postage** (fresh inscriptions get `TARGET_POSTAGE`) — a CREATE-time padding choice, NOT a move behaviour.
+- Anchored at PSBT-build time, not signer time: the sequence is part of the bytes the wallet signs over.
+- `21` is data, not a time-lock. Block 21 was mined in 2009, so `0xfffffffe` and `0xffffffff` mint identically. We pin `0xfffffffe` because it is the only non-RBF value that is behaviourally well-formed.
+- The real protection is RBF signaling: an acceleration UI fires only on sequence at or below `0xfffffffd`.
+- Enforced in exactly one place: `src/cat21-protocol/cat21-sequence.ts` `resolveCat21MintInputSequence()`, called from `buildCat21MintPsbt`. Never duplicate the branch. `cat21-sequence.spec.ts` pins the values.
+- See also `cat21-wallet/CLAUDE.md` HARD RULE #1 (the wallet half of the contract) and `INTEGRATION-ORDPOOL-SDK.md` in that repo (provider discovery).
 
-So our preserve-default + require-funding transfer is **essentially ord's `wallet send` for a normal-sized cat** (≤20k: ord preserves too and requires cardinal funding — the same "you need extra money to move it"). The only divergence: a cat on a >20k UTXO — ord trims to 10k, we preserve. Ours is the stricter, cleaner rule (never touch the cat).
+## RULE: Never derive a payment address from an on-chain lookup
 
-| Policy | Output 0 | Fee from | Decision |
-|---|---|---|---|
-| **PRESERVE** (default) | = `catUtxo.value` | separate funding | **Default.** Matches ord ≤20k; stricter (never resize) above. |
-| **GROW** (pad output up to a target > `catUtxo.value`) | > `catUtxo.value` | funding pads the output + pays the fee | **BUILT** (`targetPostageSats` on `buildCat21TransferPsbt`). Two use cases: (1) **rescue a sub-dust cat** — one mined out-of-band (direct-to-miner / MARA, bypassing relay's dust rule) sits below the dust limit; growing it to ≥ dust is the ONLY relay-standard way to move it again. (2) **cold-wallet self-provisioning** — grow the cat's UTXO so the cold wallet can move it once later WITHOUT co-funding. Mingling padding sats is the POINT here — the cat's sat stays at output-0 offset-0 (FIFO), the padding is filler. **Proven end-to-end** in `e2e/regtest/offer-ord-parity-sizes.spec.ts` (sub-dust cat mined via `generateblock`, grown to 546 via the builder, cat21-ord confirms the rescue). |
-| **SHRINK** (trim, self-fund the fee from the cat's own surplus) | < `catUtxo.value` | the cat's own surplus (one-in / one-out) or co-funded | **BUILT** (`targetPostageSats < catUtxo.value`). The freed surplus self-funds the fee, so funding may be empty when `catUtxo.value − target ≥ fee` (unit-tested). It **structurally matches** ord `wallet send --postage <target>` (one-in / one-change-out), except `nLockTime=21`. NOTE: this is structural parity, NOT a byte-for-byte port of ord's `TransactionBuilder` coin-selection (ord uses its own cardinal selection + 2 change addresses + fee calc); a live shrink-vs-`ord wallet send` byte-compare is a follow-up. |
+- A seller's PAYMENT address is knowable only from their own wallet. Never from an ownership lookup, an ord `/output/*`, an electrs `/address/*/utxo`, or any chain source: those return the ORDINALS address.
+- Ask permalink: the seller's device reads `wallet.paymentAddress` and puts it in `payTo=`. The buyer's device parses `sellerPaymentAddress` via `parseBuyOfferQueryParams`; missing means an EMPTY field with a prompt, never an auto-fill.
+- Transfer recipients are user-supplied. Buyer receive address is `wallet.ordinalsAddress` (cats land at ordinals). Seller change is `wallet.paymentAddress`.
+- If you write `setSellerPaymentAddress(ord.address)` or `payTo: catOwner`, trace where the value came from. Brand the types (`OrdinalsAddress` vs `PaymentAddress`) and the compiler catches the miscast.
 
-**Sub-dust-rescue feasibility is PROVEN on regtest** (2026-08-29): a `nLockTime=21` tx with a 100-sat output-0 is rejected by normal relay (`testmempoolaccept allowed:false`) but mines out-of-band via `generateblock`; the resulting 100-sat cat UTXO is spendable, and a grow tx (100-sat cat + funding → 546-sat output-0) passes NORMAL relay (`allowed:true`) and confirms. cat21-ord then reports the cat (number 22) at `value:546`, `satpoint = <growtx>:0:0` — the cat's sat rode FIFO to the grown UTXO intact. Bitcoin has no dust rule on INPUTS (only on relayed outputs); consensus lets any UTXO be spent, so growing sub-dust to ≥ dust is always valid.
+Why: the offer's payment output lands at the wrong address, the seller's validator returns `payment-output-wrong-address`, the Sign button never enables, and the trade fails silently. Where the two addresses coincide it contaminates the seller's ordinal-safety accounting instead.
+Ref: `src/cat21-share/permalink.helper.ts` carries the correct flow.
 
-**Design (shipped):** default stays PRESERVE. `buildCat21TransferPsbt` takes an optional `targetPostageSats`; omitted ⇒ preserve (output 0 = `catUtxo.value`, golden-rule default, unchanged). Set ⇒ output 0 = target: GROW (>) or SHRINK (<). Unified conservation: `change = catUtxo.value + funding − catOutputSats − fee`. A set target must clear the recipient's dust floor (builder throws otherwise); PRESERVE is exempt (a sub-dust cat can be preserved for a later grow / out-of-band move). The result reports `catOutputSats`. **Follow-ups (not done):** (1) thread `targetPostageSats` through the framework-agnostic `Cat21TransferOrchestrator` + its coin-selection so cat21.space's UI can offer grow/shrink (the builder is already usable by the wallet + bots directly); (2) a live shrink-vs-`ord wallet send` byte-compare regtest to measure exact parity.
+## RULE: Offers are public, share them anywhere
 
-**Every size test MUST stress non-546 sizes.** A 546-only parity/size test is a
-happy-path test that proves nothing about size-handling.
+- Bare base64 of the unsigned-by-buyer PSBT. Query param, fragment, textarea, QR, gist, IPFS: equivalent.
+- Consumers MAY add discovery aids. They MUST NOT design around a leak threat model, and MUST NOT frame a channel choice as "for privacy".
+- Sniping-proofness is structural: once the seller's signature lands, SIGHASH_ALL commits every byte (`buildCat21BuyOfferPsbt`). No partial-PSBT splicing.
 
-### Coin selection: adopt ord's best-fit, not our own algorithm
+Why: the offer encodes only what lands on-chain when it is accepted, and accepting it costs the taker their own UTXOs at the seller's price.
 
-To eliminate divergence bugs, the SDK adopts ord's own coin selection + fee
-model rather than inventing its own. `cat21-fee/ord-coin-select.ts` is a
-byte-faithful port of ord's `transaction_builder.rs`:
+## RULE: Ship every signer we have code for
 
-- `selectCardinalUtxo` — ord's `select_cardinal_utxo` (best-fit: the smallest
-  UTXO that covers, else closest-under + loop). Verified against all six of
-  ord's own `select_cardinal_utxo_prefer_under` vectors.
-- `estimateTaprootVbytes` / `estimateFeeSats` — ord's all-taproot fee model.
-- `selectOrdParityFunding` — ord's `build_transaction` pipeline (`add_value`
-  deficit loop → `strip_value` → `deduct_fee`). Verified against ord's
-  `build_transaction_with_custom_postage` vector.
+- `walletSigners` (`src/wallet/signers/index.ts`) contains every signer file in the directory. No second gate on top of detect-by-signature.
+- Detect-by-signature already gates visibility: no `window.<wallet>`, no picker entry, no call. Withholding a signer prevents user feedback, not bugs.
+- Phantom ships even though the v26.x desktop binary keeps btc.js dormant (mobile in-app browser has `window.phantom.bitcoin`). Alby ships even without an Alby Hub in CI.
+- Pipeline B gaps are known-caveats in the signer's docstring, never registry exclusions.
 
-**Adopted in production:** the transfer + create-offer orchestrators auto-pick
-the SMALLEST covering UTXO (ord's policy), not the largest.
-`pickLargestFundingUtxoThatCovers` is demoted to an opt-in
-preserve-largest-balance strategy. **Fee estimation stays `computePsbtVsize`**
-(accurate per input type) — ord's taproot-only fee model is for the byte-parity
-PROOF, not a safe blanket production change for non-taproot wallets.
+Ref: `/Work/ordpool/WALLETS.md` holds the definitions, iteration ladder and bootstrap procedure. Read it before starting a new wallet.
 
-**PROVEN byte-parity vs live ord** (except the two intentional diffs,
-`nLockTime=21` and the change address):
+## RULE: CI is the test, no manual smoke
 
-- Transfer: `e2e/regtest/transfer-ord-parity.spec.ts` — the SDK transfer is
-  byte-identical to a live `ord wallet send --dry-run --postage <target>` for
-  the same cat + cardinal (same inputs, sequences, output-0, and the EXACT same
-  change value).
-- Inscribe: `e2e/regtest/inscribe-ord-parity-roundtrip.spec.ts` — the SDK
-  reveal envelope is byte-identical to `ord wallet inscribe` (plain +
-  metaprotocol), and stock ord blesses the SDK inscription.
+- The maintainer will not install wallets and fund them with real BTC per release. CI runs the whole flow against regtest (`e2e/docker-compose.regtest.yml`: bitcoind + electrs, headed Chromium with the real `.crx` under xvfb).
+- CI is a verification tool, not a release gate. Pipeline B evidence shapes documentation and skip-comments; it does not decide what ships in the public API.
 
-**Not applicable:** mint has no ord equivalent (its `findAutoPickCandidate`
-selects a content-clean UTXO for safety, not by value); offer create uses
-Bitcoin Core's `fundrawtransaction`, not ord's `TransactionBuilder`, so it keeps
-its structural parity test. **Remaining refinement:** wire the full multi-input
-`selectOrdParityFunding` (add_value loop) into the orchestrators for the rare
-case where no single UTXO covers the fee; single-pick best-fit covers the
-common case and matches ord there.
+## RULE: Rebuild and commit `dist-e2e/` when its source changes
 
-## HARD RULE: CAT-21 mints — RBF policy (per-wallet)
+- `dist/` is gitignored and built by the `prepare` hook from the pinned sha at consumer-install time. A normal source change has no build step: edit `src/`, `npm test`, commit, push to `main`.
+- `dist-e2e/` IS committed, because its barrel imports the Playwright onboarding helpers and `@playwright/test` is an OPTIONAL peer dep, so a prepare-time build would fail for consumers without Playwright. Change anything the `/e2e` barrel emits, run `npm run build:e2e`, commit the regenerated output in the SAME commit. CI runs the build plus `git diff --exit-code dist-e2e/`.
+- Shipping to a consumer: bump the sha, run `npm install --package-lock-only ordpool-sdk@github:ordpool-space/ordpool-sdk#<sha>`, commit `package.json` and `package-lock.json` together. CI caches by lockfile hash, so a stale lockfile masks the bump.
 
-**CAT-21 mint inputs carry a wallet-specific sequence number.**
-The choice is anchored at PSBT-build time, not at signer time,
-because the sequence is part of the bytes the wallet signs over —
-choosing it later would invalidate the signature.
+## RULE: There is NO staleness guard for a linked consumer
 
-| Wallet | Sequence | RBF-signaling? | Why |
-|---|---|---|---|
-| **Cat21 Wallet** (`KnownOrdinalWalletType.cat21wallet`) | `0xfffffffd` | YES | OUR wallet. Knows about cats by construction. Its mempool-acceleration UI guarantees `nLockTime=21` is preserved on any RBF replacement (HARD RULE #1 in `cat21-wallet/CLAUDE.md` — `CAT21_MINT_INPUT_SEQUENCE` constant, replacement-construction asserts `lockTime === 21` before broadcast). RBF here is safe AND useful — users can bump fee in mempool congestion without rebuilding the mint. |
-| **Everyone else** (Xverse, Unisat, Leather, OKX, Wizz, Phantom, Alby, …) | `0xfffffffe` | NO | Third-party wallets don't know about cats. If their UI offers "accelerate / replace with higher fee" on a CAT-21 mint, the replacement is built without `nLockTime=21` and the cat is burned. The 2024 Xverse incident is the lesson. Default policy: refuse to signal RBF so no external wallet ever offers to accelerate. |
+- cat21-wallet imports the COMPILED bytes. Editing SDK source without rebuilding makes a linked wallet run stale bytes, silently, and nothing catches it.
+- A sha-pinned consumer cannot hit this (`prepare` builds from that sha). It bites `npm link` development. The whole mitigation is `npm run build:main` between iterations.
+- Do not write a guard into this file that does not exist. This section once described `apps/extension/scripts/check-sdk-fresh.cjs` and a `pnpm sdk:watch`; neither has ever existed. A doc inventing a safety net is worse than one admitting the gap.
 
-**Number `21` is data, not a time-lock.** Block 21 was mined in
-2009, so the `nLockTime=21` constraint is trivially satisfied no
-matter when the tx lands. The field is misused as a protocol
-marker — cat21-ord's filter reads it structurally
-(`tx.nLockTime === 21` returns true → mint a cat) regardless of
-whether Bitcoin consensus is actually enforcing the lockTime.
-That means `0xfffffffe` (consensus enforces lockTime against the
-already-long-past block 21) and `0xffffffff` (consensus IGNORES
-the lockTime entirely but the field bytes are still there)
-produce identical cat-mint outcomes. We pin `0xfffffffe` anyway
-because it's the only non-RBF value that's behaviorally well-formed
-(see [BIP-68 / BIP-65](https://github.com/bitcoin/bips)) — but
-the cat would mint either way.
+## RULE: A spec never asserts against the constant the code under test builds from
 
-**The real protection is RBF signaling.** A wallet's
-"accelerate / replace with higher fee" UI only fires on inputs
-that signal RBF (sequence ≤ `0xfffffffd`). Default `0xfffffffe`
-on every external wallet means none of their acceleration UIs
-ever touch a CAT-21 mint — the cat cannot be killed by a fee-bump
-flow because no fee-bump flow is offered. Cat21 Wallet IS allowed
-to signal RBF because its acceleration code path is contractually
-required to preserve `nLockTime=21` (cat21-wallet HARD RULE #1).
+- `CAT21_POSTAGE_SATS` stays a hardcoded `546` in assertions. The SDK builds that output from its own constant, so importing it compares the value against itself and a postage change leaves the specs green.
+- A value the spec merely USES (a path, a URL, a fixture input) should be one imported constant: `TEST_MNEMONIC` / `TEST_PASSWORD` (`e2e/playwright/wallet-test-vectors.ts`), `RESULTS_DIR` (must equal `outputDir` in `playwright.config.ts`), `HARNESS_URL`, and `EXT_PATH` via a `requireUnpackedExtension(wallet)` helper.
+- A shared constant owned by a TEST module is not the thing this forbids; the helper is not the code under test.
+- The Leather-family password split is deliberate: leather and cat21wallet need the strong one for a zxcvbn meter.
 
-The rule is enforced at exactly ONE place:
-`src/cat21-protocol/cat21-sequence.ts → resolveCat21MintInputSequence()`
-(called from `buildCat21MintPsbt`). Don't duplicate the branch
-elsewhere. If a future signer wants to override the sequence, it must
-update this function, not work around it. A focused spec
-(`cat21-sequence.spec.ts`) pins the per-wallet sequence value; touch
-one without the other and CI
-catches it.
+Why: a value the spec asserts must not come from the code under test, or both sides move together and the assertion cannot fail.
 
-**See also**: `cat21-wallet/CLAUDE.md` HARD RULE #1 (the wallet
-side of the contract), `project_cat21_must_not_signal_rbf` memory
-(the 2024 Xverse incident origin), `INTEGRATION-ORDPOOL-SDK.md` in
-the cat21-wallet repo (provider discovery contract).
+## RULE: Keep useful comments
 
-## What goes here vs. where
+- JSDoc and "why" inline comments stay. Trim the text inside (no bombast, no before-after history); never delete the block.
+- Wallet quirks, coin-selection rationale and signing-flow edge cases are exactly what a future reader cannot reconstruct from code.
+- Full decision tree in the HQ rule "Keep JSDoc and 'why' comments in every cleanup pass".
 
-| Where it belongs | Pattern |
+## Where code belongs
+
+| Where | Pattern |
 |---|---|
-| **ordpool-parser** | Pure function, zero runtime deps, no I/O. Byte-twiddling, hex/base64, format detection, parsers, hash utilities. Anything that could run unchanged in a Cloudflare Worker or a fetch event handler. |
-| **ordpool-sdk** | Higher-level domain code with a sane runtime dependency footprint OR networked / stateful logic. REST clients, calendar walkers, signing helpers, ordpool API wrappers. |
-| **ordpool/frontend & ordpool/backend** | Anything that imports a frontend framework, the mempool framework, or the upstream's internal types. |
+| `ordpool-parser` | pure, zero runtime deps, no I/O. Could run unchanged in a Cloudflare Worker |
+| `ordpool-sdk` | domain code with a sane dependency footprint, or networked / stateful logic |
+| `ordpool/frontend`, `ordpool/backend` | anything importing a frontend framework, mempool framework or upstream internals |
 
-When in doubt, ask: "could this be the basis for a standalone npm package, a CLI, or a GitHub Action?" If yes → parser or SDK. If it imports a frontend framework or mempool internals → fork.
+The SDK declares `ordpool-parser` as a runtime dependency via the same `github:`
+shorthand the org uses. Never copy parser code into the SDK.
 
-**No duplication.** If a primitive lives in the parser already, the SDK imports it. The SDK declares `ordpool-parser` as a runtime dependency via the same `github:` shorthand the rest of the org uses (no npm publish involved). Do not copy parser code into the SDK.
+## Conventions
 
-## Consumer wiring
-
-There is no npm publish for this package. Consumers pin a git SHA:
-
-```jsonc
-// In the consumer's package.json:
-"ordpool-sdk": "github:ordpool-space/ordpool-sdk#<sha>"
-```
-
-## Shipped artifacts
-
-`dist/` is not checked in. It is a plain `tsc` build regenerated by the
-`prepare` hook at consumer-install time (`npm run build:main`).
-`dist-e2e/` IS checked in.
-
-  - **`dist/`** (both entry points, ESM) — gitignored, prepare-built.
-  - **`dist-e2e/`** (`/e2e` entry) — **checked in**. Its barrel imports
-    the Playwright onboarding helpers, and `@playwright/test` is an
-    OPTIONAL peer dep, so building it in the prepare hook would fail for
-    consumers without Playwright. Shipping the compiled bytes lets a
-    consumer import `ordpool-sdk/e2e` without that dev dep. Rebuild +
-    commit it when its source changes; CI diffs it.
-
-Consumer contract:
-
-  - **Frontend consumers** (cat21.space, cubes) import from `ordpool-sdk`
-    (ESM `dist/`); their bundlers resolve the per-file ESM.
-  - **Node / CommonJS consumers** (cat21-wallet, the cat21-indexer backend) import from
-    `ordpool-sdk/core` (`dist/core.js`).
-  Both dist outputs are generated by the `prepare` script at install
-  time. Install scripts must be enabled — in this workspace they are:
-  `/Work/ordpool/.npmrc` sets `ignore-scripts=false` for every project
-  below it (the old global `ignore-scripts=true` posture was retired
-  2026-07-17 and the global `~/.npmrc` deleted). If a dist output is
-  missing after an install, the script didn't run — check `npm config
-  get ignore-scripts` resolves to `false` from the consumer's directory.
-
-Trade-off accepted: install scripts running means Shai-Hulud-class
-attack surface across the dep tree (npm has no per-package script
-whitelist). The mitigation is lockfile discipline, not script
-blocking — see the workspace `CLAUDE.md` "Local npm setup" section
-and the header comment in `/Work/ordpool/.npmrc`.
-
-## HARD RULE: rebuild + commit `dist-e2e/` when its source changes
-
-`dist/` is NOT committed — the `prepare` hook builds
-them from the pinned SHA's source at consumer-install time, so a normal
-source change has NO "commit the build" step. Edit `src/`, run
-`npm test`, commit + push to `main`.
-
-The ONE committed build output is `dist-e2e/` (the `/e2e` entry — see
-Shipped artifacts). When you change anything under `e2e/` that the
-`/e2e` barrel emits, run `npm run build:e2e` and commit the regenerated
-`dist-e2e/` in the SAME commit. CI runs `npm run build:e2e` +
-`git diff --exit-code dist-e2e/` and fails on drift.
-
-To ship a change to a consumer:
-
-1. Edit `src/`.
-2. `npm test` (node + browser unit tests).
-3. `git add src/` + commit + push to `main`. (If you touched `/e2e`
-   source, also `npm run build:e2e` + `git add dist-e2e/`.)
-4. In the consumer: bump the SHA in `package.json`, run
-   `npm install --package-lock-only ordpool-sdk@github:ordpool-space/ordpool-sdk#<sha>`
-   to update the lockfile, commit BOTH `package.json` and
-   `package-lock.json` together (CI caches node_modules by
-   lockfile hash; a stale lockfile masks the bump).
-
-For live local development (no commit needed), `npm link` still
-works — the consumer's link target is the locally-built `dist/`
-(`dist/`). Just remember to `npm run build` in the SDK
-between iterations.
+- TypeScript strict, no `any`. `Uint8Array`, never Node `Buffer` outside tests. `ArrayBuffer.isView(x)` rather than `instanceof` for binary type guards. `TextEncoder` / `TextDecoder`. `fetch` + `AbortController`, never axios.
+- Pure functions preferred; compose side effects at the entry point.
+- `src/index.ts` is the single export point for the main entry. Anything not re-exported is internal.
+- Tests: jest in `node` and `jsdom`, real mainnet responses over synthetic fixtures, exact assertions (`toBe(9925)`, not `toBeGreaterThan(0)`).
+- Two wallet pipelines: A pins OUR adapter against a mocked wallet API (`src/wallet/signers/*.signer.ts`, `*.signer.angular.spec.ts`, `src/wallet/connectors/`, runs in `npm test`); B pins the REAL wallet's contract using the published `.crx` headed under xvfb (`e2e/playwright/specs/<wallet>-*.spec.ts`, CI only, never on a dev machine). Playwright rules: `~/Work/ordpool/E2E_BEST_PRACTICES.md`.
 
 ## Commands
 
 ```bash
-npm test                    # node + browser test suites
-npm run test:node           # node tests only
-npm run test:browser        # jsdom browser tests only
-npm run build               # dist/ + dist-e2e/ (plain tsc)
-npm run build:main          # tsc → dist/ (both entry points) only
-npm run build:e2e           # tsc → dist-e2e/ (/e2e) only
-npm run clean               # rimraf dist/ dist-e2e/
-npm run create-link         # build + npm link (for local dev consumers)
+npm test                # node + browser suites
+npm run test:node
+npm run test:browser
+npm run build           # dist/ + dist-e2e/
+npm run build:main      # dist/ only (what the prepare hook runs)
+npm run build:e2e       # dist-e2e/ only
+npm run clean
+npm run create-link     # build + npm link, for local dev consumers
 ```
-
-## Code conventions
-
-- **TypeScript strict mode.** No `any`.
-- **`Uint8Array`, not Node `Buffer`.** Same browser-compatibility rule as the parser. `Buffer` is acceptable in test code only.
-- **Pure functions preferred.** No dependency injection containers, no class-based state where a function would do. The SDK has side effects (it talks to networks), but compose them at the entry point; keep the core pure.
-- **`ArrayBuffer.isView(x)`** not `x instanceof Uint8Array` for binary-data type guards. Cross-realm safety.
-- **`TextEncoder` / `TextDecoder`** for string encoding.
-- **`fetch` + `AbortController`** for HTTP. Never `axios`. The same headquarter HARD RULE applies here.
-- **Behaviour-only comments.** Describe what the code does now, not its history. Regression-pinning tests are the one allowed exception (a one-line note about the bad input is fine there). See the top-level CLAUDE.md "Production code describes what it does, not its past" rule.
-
-## Testing
-
-- Jest, both `node` and `jsdom` environments, same dual-config pattern as the parser.
-- **Real data over fixtures.** When testing anything that talks to a Bitcoin endpoint (REST wrapper, calendar client, signing helper), use real responses from real mainnet endpoints. Synthetic fixtures hide protocol mismatches.
-- **Exact assertions, not ranges.** `toBe(9925)`, not `toBeGreaterThan(0)`. Same rule as the parser — see its `.claude/CLAUDE.md` for the full rationale.
-
-## Architecture
-
-`src/` is currently empty. Modules will land as concrete needs surface. The layout will mirror the parser's pattern: one directory per domain area, service-named files (`xxx-client.service.ts`, `xxx-client.service.helper.ts`, co-located specs).
-
-## Public API
-
-`src/index.ts` is the single export point. Every module that consumers should use re-exports through `src/index.ts`. Anything not in `src/index.ts` is treated as internal.
-
-## Wallet integration: Adapter Pipeline (A) vs Wallet Pipeline (B)
-
-Every wallet (Xverse, Unisat, Leather, …) has two parallel test
-pipelines, with different blast radii and different questions:
-
-- **Adapter Pipeline (A)** — pins *our* adapter code against a
-  mocked wallet API. Lives in `src/wallet/signers/*.signer.ts` +
-  `*.signer.angular.spec.ts` and `src/wallet/connectors/`. Runs via
-  `npm test`, no binaries, fast. Done when every adapter call path
-  (happy + every distinct failure mode) is pinned by a positive-
-  equality unit test.
-- **Wallet Pipeline (B)** — pins *the real wallet's contract*
-  using the published .crx running headed in xvfb. Lives in
-  `e2e/playwright/specs/<wallet>-*.spec.ts`. CI-only — never run
-  unverified extension binaries on a dev machine. Iteration ladder:
-  loads → onboard → SDK-handshake → matrix → mint roundtrip.
-
-  General Playwright rules (data-testid first, click instead of
-  `goto`, wait on states, ordpool-specific regtest bootstrap +
-  wallet-load pattern) live at workspace root:
-  `~/Work/ordpool/E2E_BEST_PRACTICES.md`. Read it before touching
-  any spec.
-
-## Duplicated constants in the Playwright specs: which to sweep, which to leave
-
-Several constants are declared once per spec instead of imported. They all
-agree today; the hazard is that moving one copy leaves the rest behind
-silently, which is how the Xverse seed path broke a consumer's lane.
-
-**Worth consolidating when the lanes are quiet** (one constant each, the specs
-import it):
-
-| Constant | Where the source of truth is |
-|---|---|
-| `TEST_MNEMONIC`, `TEST_PASSWORD` | already exported from `e2e/playwright/wallet-test-vectors.ts`; the specs simply do not use it. The password split is deliberate: the Leather family (leather, cat21wallet) needs the strong one because of a zxcvbn meter, everything else takes the simple one |
-| `RESULTS_DIR` | must equal `outputDir` in `playwright.config.ts`, which derives the same path independently. Move `outputDir` and the specs write into a directory Playwright no longer manages |
-| `HARNESS_URL` | the local harness server's address |
-| `EXT_PATH` | per-wallet, so a shared `requireUnpackedExtension(wallet)` helper rather than a constant |
-
-**Do NOT sweep `CAT21_POSTAGE_SATS` into that list.** It looks identical to the
-others (declared as a bare `546` in many specs while `src/cat21-protocol/cat21-postage.ts`
-exports it) and importing it would make the specs worse. Most uses are
-assertions: `expect(cat.value).toBe(546)`. The SDK BUILDS that output from its
-own constant, so importing the same constant into the assertion compares the
-value against itself, and changing the postage would move both sides and leave
-the specs green. The hardcoded literal is what makes a postage change turn those
-assertions red so a human reviews each one. Same reasoning as pinning ord's
-`Display for Pile` vectors as literals rather than deriving them.
-
-The rule that separates the two columns is about WHERE a value is read from,
-not how many copies of it exist. A value the spec ASSERTS must not come from the
-code under test, because then both sides of the comparison move together and the
-assertion cannot fail. A value the spec merely USES (a path, a URL, a fixture
-input, anything whose only property is "these must match") should be one
-constant, imported.
-
-A shared constant in a TEST-owned module is not the thing this forbids: the
-helper is not the code under test, so `expect(x).toBe(EXPECTED_POSTAGE)` with
-the expectation owned by the suite still goes red when the SDK changes. Many
-hand-copied literals are not more honest than one test-owned constant, only
-more numerous.
-
-The one property the copies do buy, worth weighing rather than treating as
-decisive: changing 53 literals is a 53-line diff a reviewer notices, while
-changing one shared constant is a line that slips through. That matters here
-because "update the expectation to match" has been proposed for real
-regressions in this workspace and was wrong both times (see the electrs
-duplicate-outpoint rule). Prefer the shared test-owned constant; if the value is
-one a wrong fix would be tempted to edit, say so where it is defined.
-
-## HARD RULE: CI is the test. No manual smoke.
-
-The maintainer is Bitcoin-poor and will not install wallets +
-fund them with real BTC to "smoke-test" each release. CI
-simulates the entire flow against regtest (`e2e/docker-compose
-.regtest.yml`: bitcoind + electrs, headed Chromium + the real
-extension `.crx` under xvfb), which is exactly the point.
-
-CI is a verification tool, not a release gate. Pipeline B
-gives us evidence about whether a real wallet binary plays
-along with our adapter; that evidence shapes documentation
-and skip-comments but it does NOT decide what ships in the
-public API.
-
-## HARD RULE: Ship every signer we have code for
-
-`walletSigners` (`src/wallet/signers/index.ts`) contains every
-WalletSigner file in the directory, period. No second-gate
-filtering on top of detect-by-signature.
-
-Reasoning: detect-by-signature already gates surface
-visibility. If `window.<wallet>` isn't present at runtime,
-the wallet picker never offers that option, the user never
-clicks "sign with X," and the signer never gets called. The
-registry's only job is to give us the call shape WHEN detect
-succeeds. Withholding signer code from the registry doesn't
-prevent bugs — it just prevents users from exercising the
-code and giving us real-world feedback.
-
-This means:
-- Phantom signer ships even though the v26.x desktop binary
-  ships btc.js dormant. Mobile users on Phantom's in-app
-  browser have `window.phantom.bitcoin` per the docs; they
-  get the signer. Desktop users don't see Phantom in the
-  picker because detect returns false.
-- Alby signer ships even though we don't have an Alby Hub
-  in CI to drive a mint-roundtrip. Users with a real Alby
-  Hub backend get the signer; users without get a clean
-  runtime error from the wallet.
-
-Pipeline B gaps get documented as known-caveats in the
-signer file's docstring, NOT as registry exclusions.
-
-Goal: complete signer coverage in the published API. Real
-user signal is the missing piece, not a stricter gate.
-
-Full definitions, iteration ladder, and bootstrap/caching procedure
-in `/Work/ordpool/WALLETS.md` (the workspace HQ). Read it before
-starting work on a new wallet.
-
-## HARD RULE: Offers are public; share them anywhere
-
-**A CAT-21 buy-offer PSBT is not secret. There is no need to "protect"
-or "hide" it.** Any channel works — URL query parameter, copy-pasted
-text in a Discord channel, a tweet, an email, a QR code on a poster, a
-file attachment. Every distribution channel is fine.
-
-Reasoning, in priority order:
-
-1. **The offer reveals nothing that won't land on Bitcoin anyway.** A
-   buy-offer PSBT encodes: which cat UTXO is for sale, the asking price
-   in sats, the seller's payout address, `lockTime=21`. The instant the
-   offer is accepted and broadcast, every one of those facts is on a
-   public blockchain forever. A leaked offer that never gets accepted
-   leaks nothing — it's a price quote tied to a cat, both already
-   visible to anyone scanning the chain.
-2. **It's only useful to a willing buyer.** A buy-offer PSBT, by
-   construction, requires the buyer's funding inputs + the buyer's
-   change output + the buyer's signatures (SIGHASH_ALL on every buyer
-   input). A third party who picks the PSBT off a wire cannot accept
-   it without spending their own UTXOs at the seller's price. The
-   worst-case "leak" outcome is the same as the intended outcome: the
-   recipient (or some other willing buyer) accepts the offer at the
-   stated price. The seller's interest is *more* visibility, not less.
-3. **Sniping-proofness is structural, not transport-secrecy.** The
-   PSBT is sniping-proof because once the seller's signature lands,
-   every byte is committed by SIGHASH_ALL signatures (see
-   `buildCat21BuyOfferPsbt`). No partial-PSBT splicing is possible.
-   Transport-layer obfuscation (URL fragments, base64-only artifacts,
-   non-indexable hosting) adds nothing on top of this and creates
-   friction for legitimate distribution.
-
-**Consumer guidance for the SDK's offer flow:**
-
-- The artifact is bare base64 of the unsigned-by-buyer PSBT. Wrap it in
-  whatever transport the consumer wants. Query params (`?accept=…`),
-  fragments (`#…`), plain text in a textarea, QR code, signed message,
-  IPFS pin, GitHub gist — all equivalent from a security perspective.
-- Consumers MAY add cosmetic discovery aids (a hash-fragment so a
-  click-to-buy link works without a server round-trip; a copy-to-
-  clipboard button; a QR rendering). They MUST NOT design around an
-  "offers are leaked" threat model. There is no such threat.
-- If a UI surface chooses one channel for default rendering, don't
-  hand-wave about "for privacy" or "to avoid server logs". The right
-  framing is **"this is the most ergonomic for the average user"** —
-  not security.
-
-Workspace HQ carries the same rule (search "Offers can be shared in
-the wild" in `/Work/ordpool/CLAUDE.md`) so the cat21-indexer / ordpool
-consumer guides stay aligned.
-
-## HARD RULE: Never derive a payment address from an on-chain lookup
-
-**The seller's PAYMENT address is knowable only from the seller's own
-wallet.** It is NEVER derivable from an on-chain ownership lookup, an
-inscription-owner query, an ord `/output/*` response, an electrs
-`/address/*/utxo` listing, or any other on-chain source.
-
-Why: cats live on the seller's ORDINALS address per ordinal theory.
-Any on-chain query "who owns cat #N" returns the ordinals-context
-address. Treating that string as a payment address does two categories
-of damage:
-
-1. **Address-type mismatch on the offer path.** The buyer builds the
-   offer's payment output routed to the seller's ordinals address; the
-   seller's accept-side validator expects the payment output at their
-   wallet's `paymentAddress`. Validator returns `payment-output-wrong-
-   address`. Sign button never enables. Trade fails silently. Even if
-   the two happened to match (single-address wallets), the payment
-   would land at the ordinals address, contaminating the seller's
-   ordinal-safety accounting.
-
-2. **Wallet contamination on any future flow that consumes the
-   auto-filled value.** A payment address used for spendable BTC and
-   an ordinals address used for immovable NFT UTXOs are semantically
-   different categories. Every place that mixes them creates a future
-   burn opportunity.
-
-**The correct flow for cat21 permalinks** (implemented in
-`src/cat21-share/permalink.helper.ts`):
-
-- **Seller's device** (sell modal): read `wallet.paymentAddress` from
-  the connected wallet at modal-open time. Include as `payTo=<addr>`
-  in the ask permalink.
-- **Buyer's device** (make-offer): parse `sellerPaymentAddress` from
-  the URL via `parseBuyOfferQueryParams`. If missing, leave the form
-  field EMPTY with a copy prompt ("ask the seller for their payment
-  address"). NEVER auto-fill from any on-chain lookup.
-- **Any other future flow** that needs the seller's payment address:
-  same rule. Carry it in the URL, ask the user, or take it from the
-  connected wallet. Do NOT derive it.
-
-**How this rule applies beyond cat21 permalinks:**
-
-- Transfer recipient addresses: user-supplied (typed / pasted).
-- Buyer receive address: from the buyer's connected wallet
-  (`wallet.ordinalsAddress` — because cats land at ordinals).
-- Seller change addresses (offer flow): from the seller's connected
-  wallet (`wallet.paymentAddress`).
-- Any address that will EVER be spent from, funded to, or checked
-  against a signing key: comes from a wallet, not from a chain lookup.
-
-**Prevention going forward.** If you catch yourself writing a line
-like `orchestrator.setSellerPaymentAddress(ord.address)` or
-`payTo: catOwner`, stop. Trace where that address value originated.
-If it came from an ord / electrs / inscription-owner query, you're
-about to reproduce this bug. Route the address through the URL
-permalink or the connected wallet instead. When in doubt, brand the
-type: `type OrdinalsAddress = string & { __ord: never }` vs `type
-PaymentAddress = string & { __pay: never }` and the compiler catches
-the miscast.
-
-Illustrative incident: 2026-07-18 in `cat21-indexer/frontend/src/app/
-dashboard/trade/make-offer/make-offer.ts` — `resolvedSellerAddress`
-was set from `CatUtxoLookupService.getTargetByNumber(n)`'s
-`.sellerAddress` (an on-chain ord lookup returning the ordinals
-address), then piped into `orchestrator.setSellerPaymentAddress(...)`
-as if it were the payment address. Every URL-driven accept on
-Xverse/Leather/OKX broke silently. Fix: sellerPaymentAddress now
-travels in the ask permalink via `payTo=` (encoded on the seller's
-device where the paymentAddress is knowable), parsed on the buyer's
-side via `parseBuyOfferQueryParams(query).sellerPaymentAddress`.
