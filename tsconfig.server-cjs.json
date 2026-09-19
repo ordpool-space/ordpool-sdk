@@ -1,0 +1,30 @@
+{
+  // CommonJS emit for the SERVER-FACING subpaths only.
+  //
+  // A NestJS backend consumes cat21-validation / cat21-session / network from
+  // CommonJS. Node itself can require() the ESM build (24+ here, 25 in prod),
+  // but a jest CJS runtime with node_modules untransformed cannot, and that is
+  // where a backend's unit tests live. So those three subpaths carry a require
+  // condition pointing here.
+  //
+  // No bundler resolves through it: bundlers take the `import` condition, and
+  // no frontend imports these subpaths at all, so nothing shipped to a browser
+  // changes size. That is what separates this from the whole-package CommonJS
+  // build that was tried and reverted, which cost cat21.space and cubes ~500kB
+  // each and broke ordpool's budget.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-cjs",
+    "rootDir": "src",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true,
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "target": "es2022",
+    "lib": ["dom", "esnext"],
+    "esModuleInterop": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "**/*.spec.ts", "**/*.angular.spec.ts", "e2e"]
+}

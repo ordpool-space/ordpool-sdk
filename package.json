@@ -30,6 +30,7 @@
     },
     "./cat21-session": {
       "types": "./dist/cat21-session/index.d.ts",
+      "require": "./dist-cjs/cat21-session/index.js",
       "default": "./dist/cat21-session/index.js"
     },
     "./cat21-share": {
@@ -50,6 +51,7 @@
     },
     "./cat21-validation": {
       "types": "./dist/cat21-validation/index.d.ts",
+      "require": "./dist-cjs/cat21-validation/index.js",
       "default": "./dist/cat21-validation/index.js"
     },
     "./inscribe-validation": {
@@ -66,6 +68,7 @@
     },
     "./network": {
       "types": "./dist/network.d.ts",
+      "require": "./dist-cjs/network.js",
       "default": "./dist/network.js"
     },
     "./e2e": {
@@ -75,6 +78,7 @@
   },
   "files": [
     "dist",
+    "dist-cjs",
     "dist-e2e",
     "src",
     "e2e",
@@ -83,9 +87,9 @@
     "*.json"
   ],
   "scripts": {
-    "clean": "rimraf dist dist-e2e",
+    "clean": "rimraf dist dist-cjs dist-e2e",
     "build": "npm run build:main && npm run build:e2e",
-    "build:main": "tsc -p tsconfig.lib.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({type:'module'},null,2))\"",
+    "build:main": "tsc -p tsconfig.lib.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({type:'module'},null,2))\" && npm run build:server-cjs",
     "build:e2e": "tsc -p tsconfig.e2e.json && node -e \"require('fs').writeFileSync('dist-e2e/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
     "prepare": "npm run build:main",
     "start": "npm run test",
@@ -102,7 +106,8 @@
     "e2e:harness:build": "node e2e/playwright/build-harness.js",
     "e2e:harness:serve": "node e2e/playwright/fixtures-server.js",
     "build:brotli-wasm": "bash scripts/build-brotli-wasm.sh",
-    "create-link": "npm run build && cd dist && npm link"
+    "create-link": "npm run build && cd dist && npm link",
+    "build:server-cjs": "tsc -p tsconfig.server-cjs.json && node -e \"require('fs').writeFileSync('dist-cjs/package.json', JSON.stringify({type:'commonjs'},null,2))\""
   },
   "keywords": [
     "bitcoin",

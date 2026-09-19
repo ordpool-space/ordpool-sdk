@@ -40,3 +40,4 @@ coverage-browser/
 # Outside test-results on purpose: Playwright clears its outputDir at the
 # start of every run, so a cache kept there can never be reused.
 /e2e/playwright/.wallet-seed/
+dist-cjs/

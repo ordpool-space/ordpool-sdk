@@ -11,8 +11,16 @@
  * this file PLUS the stateful, `Observable`-returning service classes
  * (`WalletService`, `Cat21Service`, `Cat21ApiService`, `UtxoContentScanner`)
  * that the frontends compose. Everything in the whole SDK is framework-
- * agnostic; the two entries differ only by module format (CJS vs ESM) and by
- * whether the stateful classes are included.
+ * agnostic; the two entries differ only by whether the stateful classes are
+ * included. BOTH are ESM.
+ *
+ * `/core` is NOT the lean server entry its name suggests: it reaches the wallet
+ * connectors, so its graph drags `sats-connect`, a PEER dependency a service
+ * with no wallet UI never installs. A backend that imports `/core` for one
+ * validator fails to resolve, and the error names sats-connect rather than the
+ * mistake. Server-facing code takes `ordpool-sdk/cat21-validation`,
+ * `/cat21-session` or `/network`, which carry no connector graph and ship a
+ * CommonJS build behind their `require` condition.
  *
  * Convention: when adding a new pure helper, export it from its own file AND
  * add a re-export here AND add the file to `tsconfig.core.json`'s `include`
