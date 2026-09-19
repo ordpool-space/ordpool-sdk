@@ -48,6 +48,19 @@ describe('classifyCandidateFee', () => {
     ]).toEqual(['normal', 'overpay', 'overpay-unknown', 'unavailable']);
   });
 
+  it('a HAND-BUILT row with a missing field is not read as paying the plain rate', () => {
+    // A consumer whose flow has no candidateFees map assembles this from its
+    // own simulation; a field it forgets arrives as undefined, not null. Under
+    // a strict === null that row classifies `normal`, which claims a fold
+    // nobody measured. The type cannot help here: the object came from
+    // somewhere else.
+    const handBuilt = { txid: 'a'.repeat(64), vout: 0, finalFeeSats: 1_445, vsize: 289 };
+    expect(classifyCandidateFee(handBuilt as never)).toBe('overpay-unknown');
+
+    const noFee = { txid: 'a'.repeat(64), vout: 0, vsize: null };
+    expect(classifyCandidateFee(noFee as never)).toBe('unavailable');
+  });
+
   it('an unfundable coin is unavailable whatever the fold says', () => {
     // finalFeeSats decides first: a null fee is not a fold question.
     expect(classifyCandidateFee(row(null, 42))).toBe('unavailable');

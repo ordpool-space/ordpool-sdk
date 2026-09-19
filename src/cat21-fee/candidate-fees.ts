@@ -78,8 +78,16 @@ export type CandidateFeeState = 'normal' | 'overpay' | 'overpay-unknown' | 'unav
  * `null` into `normal` and claimed a fold that had not been measured.
  */
 export function classifyCandidateFee(row: CandidateFeeRow): CandidateFeeState {
-  if (row.finalFeeSats === null) return 'unavailable';
-  if (row.absorbedSubDustSats === null) return 'overpay-unknown';
+  // Loose null checks on purpose. A consumer whose flow has no `candidateFees`
+  // map builds this row by hand from its own simulation, and a field it forgets
+  // arrives as `undefined` rather than `null`. Under a strict `=== null` that
+  // row falls through to the numeric compare, `undefined > 0` is false, and a
+  // coin whose fold nobody measured is reported as paying the plain rate —
+  // the exact false claim this function exists to prevent, through a different
+  // door. TypeScript cannot catch it, because the row was assembled from
+  // another shape.
+  if (row.finalFeeSats == null) return 'unavailable';
+  if (row.absorbedSubDustSats == null) return 'overpay-unknown';
   return row.absorbedSubDustSats > 0 ? 'overpay' : 'normal';
 }
 
