@@ -39,10 +39,11 @@ async function onboardUnisat(page, extensionId, opts = {}) {
             // DEFAULT card selected and the wallet ends up on the wrong address
             // type, which surfaces much later as a spec asserting a bc1p address
             // against a bc1q one. Selecting is idempotent, so re-clicking is safe.
-            const { clicks, observable } = await (0, select_card_1.selectCard)(card);
-            if (clicks > 1 || !observable) {
+            const { clicks, observable, selected } = await (0, select_card_1.selectCard)(card);
+            if (clicks > 1 || !observable || selected !== true) {
                 console.log(`[onboard-unisat] address-type card ${opts.addressTypeIndex}: ` +
-                    `${clicks} click(s), selected-state ${observable ? 'observed' : 'NOT observable'}`);
+                    `${clicks} click(s), marker ${observable ? 'readable' : 'NOT readable'}, ` +
+                    `selected=${String(selected)}`);
             }
         }
     }

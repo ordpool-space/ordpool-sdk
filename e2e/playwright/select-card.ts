@@ -27,6 +27,12 @@ export interface SelectCardResult {
   clicks: number;
   /** False when the control carries no readable selected-state marker. */
   observable: boolean;
+  /**
+   * What the LAST read actually said. At the click cap this is the honest
+   * answer rather than an assumption: a helper that reports a state it never
+   * observed is the instrument-lies failure it exists to prevent.
+   */
+  selected: boolean | undefined;
 }
 
 const SELECTED_MARKERS = ['aria-checked', 'aria-selected', 'data-selected', 'data-active'] as const;
@@ -48,12 +54,13 @@ export async function selectCard(
   const maxClicks = opts.maxClicks ?? 3;
   const settleMs = opts.settleMs ?? 400;
 
+  let selected: boolean | undefined;
   for (let clicks = 1; clicks <= maxClicks; clicks++) {
     await card.click();
     await new Promise((r) => setTimeout(r, settleMs));
-    const selected = await readSelected(card);
-    if (selected === undefined) return { clicks, observable: false };
-    if (selected) return { clicks, observable: true };
+    selected = await readSelected(card);
+    if (selected === undefined) return { clicks, observable: false, selected };
+    if (selected) return { clicks, observable: true, selected };
   }
-  return { clicks: maxClicks, observable: true };
+  return { clicks: maxClicks, observable: true, selected };
 }

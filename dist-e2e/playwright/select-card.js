@@ -16,15 +16,16 @@ async function readSelected(card) {
 async function selectCard(card, opts = {}) {
     const maxClicks = opts.maxClicks ?? 3;
     const settleMs = opts.settleMs ?? 400;
+    let selected;
     for (let clicks = 1; clicks <= maxClicks; clicks++) {
         await card.click();
         await new Promise((r) => setTimeout(r, settleMs));
-        const selected = await readSelected(card);
+        selected = await readSelected(card);
         if (selected === undefined)
-            return { clicks, observable: false };
+            return { clicks, observable: false, selected };
         if (selected)
-            return { clicks, observable: true };
+            return { clicks, observable: true, selected };
     }
-    return { clicks: maxClicks, observable: true };
+    return { clicks: maxClicks, observable: true, selected };
 }
 //# sourceMappingURL=select-card.js.map

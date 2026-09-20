@@ -28,6 +28,12 @@ export interface SelectCardResult {
     clicks: number;
     /** False when the control carries no readable selected-state marker. */
     observable: boolean;
+    /**
+     * What the LAST read actually said. At the click cap this is the honest
+     * answer rather than an assumption: a helper that reports a state it never
+     * observed is the instrument-lies failure it exists to prevent.
+     */
+    selected: boolean | undefined;
 }
 export declare function selectCard(card: SelectableCard, opts?: {
     maxClicks?: number;
