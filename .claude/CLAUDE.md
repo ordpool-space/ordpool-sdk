@@ -109,7 +109,7 @@ Code: `cat21-mint/cat21-mint.helper.ts`, `cat21-transfer/cat21-transfer.helper.t
 | Wallet | Sequence | RBF |
 |---|---|---|
 | `cat21wallet` | `0xfffffffd` | YES. Our wallet preserves `nLockTime=21` on any replacement (its HARD RULE #1, `CAT21_MINT_INPUT_SEQUENCE`), so a fee bump is safe and useful. |
-| everyone else | `0xfffffffe` | NO. A third-party "accelerate" UI would rebuild without `nLockTime=21` and burn the cat. |
+| everyone else | `0xfffffffe` | NO. A third-party "accelerate" UI rebuilds the tx without `nLockTime=21`, so the replacement is not a mint and no cat is ever produced. |
 
 - Anchored at PSBT-build time, not signer time: the sequence is part of the bytes the wallet signs over.
 - `21` is data, not a time-lock. Block 21 was mined in 2009, so `0xfffffffe` and `0xffffffff` mint identically. We pin `0xfffffffe` because it is the only non-RBF value that is behaviourally well-formed.
