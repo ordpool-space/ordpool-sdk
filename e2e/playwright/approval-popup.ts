@@ -223,6 +223,13 @@ export async function approveWizzSignPopup(opts: {
  * broadcast txid, a confirmed transaction, a success panel) fails with a
  * message about the thing that actually matters. Any other error still throws.
  */
+/**
+ * How long a target-closed click error is allowed to wait for the close to be
+ * observable. The close and the click's rejection race; this only covers the
+ * gap between them.
+ */
+const CLOSE_GRACE_MS = 2_000;
+
 export async function clickApprovalButton(
   button: { click: (opts?: { timeout?: number }) => Promise<void> },
   page: { isClosed: () => boolean },
@@ -233,9 +240,16 @@ export async function clickApprovalButton(
   } catch (e) {
     const message = (e as Error).message ?? '';
     const targetGone = /Target (page|closed)|context or browser has been closed|has been closed/i.test(message);
-    if (targetGone && page.isClosed()) {
-      return;
+    if (!targetGone) throw e;
+    // The close is IN FLIGHT when the click rejects, so `isClosed()` read once
+    // can still be false and the success case would rethrow. Give the close a
+    // short grace period; anything longer would start hiding a click that
+    // never landed, which is what the caller's own close-wait is for.
+    const graceDeadline = Date.now() + CLOSE_GRACE_MS;
+    while (!page.isClosed() && Date.now() < graceDeadline) {
+      await new Promise((r) => setTimeout(r, 25));
     }
+    if (page.isClosed()) return;
     throw e;
   }
 }

@@ -36,3 +36,29 @@ describe('clickApprovalButton', () => {
     )).rejects.toThrow(/not enabled/);
   });
 });
+
+describe('clickApprovalButton: the close races the click rejection', () => {
+  it('accepts a target-closed error whose close becomes observable a moment later', async () => {
+    let closed = false;
+    // The wallet dismisses its popup; Playwright rejects the click first and
+    // the page reports closed only afterwards. Reading isClosed() once here
+    // would rethrow on the SUCCESS path.
+    setTimeout(() => { closed = true; }, 300);
+
+    await expect(
+      clickApprovalButton(
+        { click: () => Promise.reject(new Error('locator.click: Target page, context or browser has been closed')) },
+        { isClosed: () => closed },
+      ),
+    ).resolves.toBeUndefined();
+  });
+
+  it('still throws when the page never closes, so a swallowed click is not hidden', async () => {
+    await expect(
+      clickApprovalButton(
+        { click: () => Promise.reject(new Error('locator.click: Target page, context or browser has been closed')) },
+        { isClosed: () => false },
+      ),
+    ).rejects.toThrow(/has been closed/);
+  });
+});
