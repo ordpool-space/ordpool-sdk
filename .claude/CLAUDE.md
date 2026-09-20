@@ -49,7 +49,7 @@ flows.
 
 <!-- long-rule: the three layers and the four signer methods are the interface, not an illustration -->
 
-1. **Builder** (internal): a pure function producing the PSBT bytes and owning the input layout. `cat21-{mint,transfer,offer}/*.helper.ts`, `inscribe/inscription-commit.helper.ts`.
+1. **Builder** (internal): a pure function producing the PSBT bytes and owning the input layout. `cat21-mint/cat21-mint.helper.ts`, `cat21-transfer/cat21-transfer.helper.ts`, `cat21-offer/cat21-offer.helper.ts`, `inscribe/inscription-commit.helper.ts`.
 2. **Signer method** (internal, on every `WalletSigner`): operation-named, HARDCODED topology. No `signingMap: ReadonlyArray<PsbtSigningTarget>`, no `sigHash` override; topology is the method name.
    - `signSingleFundingInput`: 1 input at paymentAddress, SIGHASH_ALL (mint, inscribe-commit, future RBF / CPFP).
    - `signTransfer`: input 0 = ordinalsAddress, 1..N = paymentAddress, all SIGHASH_ALL. The caller states `fundingInputCount`; positions are derived.
