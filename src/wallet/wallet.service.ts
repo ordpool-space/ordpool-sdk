@@ -2,6 +2,7 @@ import {
   BehaviorSubject,
   concat,
   defer,
+  merge,
   distinctUntilChanged,
   from,
   map,
@@ -11,6 +12,8 @@ import {
   Subject,
   switchMap,
   take,
+  scan,
+  startWith,
   takeWhile,
   tap,
   throwError,
@@ -112,6 +115,25 @@ export class WalletService {
   private static readonly PROVIDER_POLL_MS = 100;
 
   /**
+   * Detection cadence, and how long it keeps asking.
+   *
+   * An extension injects its inpage script whenever its service worker gets
+   * round to it, which on a loaded machine can be after the app's first
+   * second. A fixed number of polls therefore makes "is this wallet
+   * installed" depend on machine speed: the same browser with the same
+   * extensions answers differently under load, and the user is told their
+   * wallet is not installed with a reload as the only recovery.
+   *
+   * So detection stops when the ANSWER settles, not after a count. Polling
+   * ends once the detected set has been unchanged for SETTLE_MS, and the
+   * ceiling only bounds the timer for a page nobody is looking at. Consumers
+   * that outlive it call `rescanWallets()`.
+   */
+  private static readonly DETECTION_POLL_MS = 500;
+  private static readonly DETECTION_SETTLE_MS = 1_500;
+  private static readonly DETECTION_CEILING_MS = 15_000;
+
+  /**
    * Whether the connected wallet can be ACTED ON.
    *
    * This is a different question from whether one is connected, and conflating
@@ -194,10 +216,53 @@ export class WalletService {
     distinctUntilChanged((a, b) => a.state === b.state),
     shareReplay({ bufferSize: 1, refCount: true }),
   );
-  wallets$ = timer(0, 500) // Start immediately and repeat every 500ms
+  /** Forces a fresh detection sweep; see DETECTION_POLL_MS. */
+  private readonly rescanWallets$ = new Subject<void>();
+
+  /**
+   * Re-open the detection window. For a surface that outlives the initial
+   * sweep and wants to offer the user something better than a page reload
+   * after installing an extension.
+   */
+  rescanWallets(): void {
+    this.rescanWallets$.next();
+  }
+
+  wallets$ = merge(this.rescanWallets$.pipe(startWith(undefined)))
     .pipe(
-      take(4), // Take 4 intervals only, i.e., perform the check four times
-      map(() => this.getInstalledWallets()),
+      switchMap(() =>
+        timer(0, WalletService.DETECTION_POLL_MS).pipe(
+          take(
+            Math.ceil(
+              WalletService.DETECTION_CEILING_MS / WalletService.DETECTION_POLL_MS,
+            ),
+          ),
+          map(() => this.getInstalledWallets()),
+          // Stop once the answer has held still for SETTLE_MS. `scan` carries
+          // the previous bucket key and the run length, so a late injection
+          // re-opens the count instead of arriving after the stream closed.
+          scan(
+            (acc, buckets) => {
+              const key = walletBucketKey(buckets);
+              return { buckets, key, stable: key === acc.key ? acc.stable + 1 : 0 };
+            },
+            { buckets: undefined as unknown as ReturnType<WalletService['getInstalledWallets']>, key: '', stable: -1 },
+          ),
+          // Settling early is only safe once SOMETHING has been detected.
+          // An empty set is exactly the answer a late injection changes, and
+          // it is the answer that tells a user their wallet is not installed,
+          // so an empty sweep keeps asking until the ceiling.
+          takeWhile(
+            (acc) =>
+              acc.buckets === undefined ||
+              acc.buckets.installedWallets.length === 0 ||
+              acc.stable <
+                WalletService.DETECTION_SETTLE_MS / WalletService.DETECTION_POLL_MS,
+            true,
+          ),
+          map((acc) => acc.buckets),
+        ),
+      ),
       // Drop wallets that cannot work on DESKTOP (Phantom, Binance): their
       // desktop binary does not inject the provider the SDK needs, so
       // offering them here — even as "install this" — would be a lie.
