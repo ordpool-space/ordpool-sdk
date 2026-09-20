@@ -1,5 +1,6 @@
 import { expect, Page } from '@playwright/test';
 import { isVisibleWithin } from './is-visible-within';
+import { selectCard } from './select-card';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 
@@ -42,7 +43,19 @@ export async function onboardUnisat(
 
   if (opts.addressTypeIndex !== undefined) {
     const card = page.getByTestId(`address-type-card-${opts.addressTypeIndex}`);
-    if (await isVisibleWithin(card, 5_000)) await card.click();
+    if (await isVisibleWithin(card, 5_000)) {
+      // A swallowed click here does not fail: onboarding continues with the
+      // DEFAULT card selected and the wallet ends up on the wrong address
+      // type, which surfaces much later as a spec asserting a bc1p address
+      // against a bc1q one. Selecting is idempotent, so re-clicking is safe.
+      const { clicks, observable } = await selectCard(card);
+      if (clicks > 1 || !observable) {
+        console.log(
+          `[onboard-unisat] address-type card ${opts.addressTypeIndex}: ` +
+            `${clicks} click(s), selected-state ${observable ? 'observed' : 'NOT observable'}`,
+        );
+      }
+    }
   }
   const addressTypeContinue = page.getByTestId('address-type-continue-button');
   if (await isVisibleWithin(addressTypeContinue, 10_000)) {

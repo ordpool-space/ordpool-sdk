@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardUnisat = onboardUnisat;
 const test_1 = require("@playwright/test");
 const is_visible_within_1 = require("./is-visible-within");
+const select_card_1 = require("./select-card");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 /**
  * Drive UniSat onboarding from the BIP-39 test seed to the home tab.
@@ -33,8 +34,17 @@ async function onboardUnisat(page, extensionId, opts = {}) {
     await page.getByTestId('mnemonic-import-continue-button').click();
     if (opts.addressTypeIndex !== undefined) {
         const card = page.getByTestId(`address-type-card-${opts.addressTypeIndex}`);
-        if (await (0, is_visible_within_1.isVisibleWithin)(card, 5_000))
-            await card.click();
+        if (await (0, is_visible_within_1.isVisibleWithin)(card, 5_000)) {
+            // A swallowed click here does not fail: onboarding continues with the
+            // DEFAULT card selected and the wallet ends up on the wrong address
+            // type, which surfaces much later as a spec asserting a bc1p address
+            // against a bc1q one. Selecting is idempotent, so re-clicking is safe.
+            const { clicks, observable } = await (0, select_card_1.selectCard)(card);
+            if (clicks > 1 || !observable) {
+                console.log(`[onboard-unisat] address-type card ${opts.addressTypeIndex}: ` +
+                    `${clicks} click(s), selected-state ${observable ? 'observed' : 'NOT observable'}`);
+            }
+        }
     }
     const addressTypeContinue = page.getByTestId('address-type-continue-button');
     if (await (0, is_visible_within_1.isVisibleWithin)(addressTypeContinue, 10_000)) {
