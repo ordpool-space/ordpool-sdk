@@ -191,6 +191,7 @@ shorthand the org uses. Never copy parser code into the SDK.
 
 - TypeScript strict, no `any`. `Uint8Array`, never Node `Buffer` outside tests. `ArrayBuffer.isView(x)` rather than `instanceof` for binary type guards. `TextEncoder` / `TextDecoder`. `fetch` + `AbortController`, never axios.
 - Pure functions preferred; compose side effects at the entry point.
+- One directory per domain area under `src/`, service-named files where a module is a service (`wallet.service.ts`, `wallet.service.helper.ts`, `utxo-content-scanner.service.ts`), and specs co-located beside the code they test.
 - `src/index.ts` is the single export point for the main entry. Anything not re-exported is internal.
 - Tests: jest in `node` and `jsdom`, real mainnet responses over synthetic fixtures, exact assertions (`toBe(9925)`, not `toBeGreaterThan(0)`).
 - Two wallet pipelines: A pins OUR adapter against a mocked wallet API (`src/wallet/signers/*.signer.ts`, `*.signer.angular.spec.ts`, `src/wallet/connectors/`, runs in `npm test`); B pins the REAL wallet's contract using the published `.crx` headed under xvfb (`e2e/playwright/specs/<wallet>-*.spec.ts`, CI only, never on a dev machine). Playwright rules: `~/Work/ordpool/E2E_BEST_PRACTICES.md`.
