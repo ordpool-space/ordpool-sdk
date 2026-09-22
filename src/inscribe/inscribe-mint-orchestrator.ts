@@ -2,7 +2,7 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { ContentScanPort } from '../cat21-core/ports.js';
-import { selectFunding } from '../cat21-core/select-funding.js';
+import { resolveFundingPick, selectFunding } from '../cat21-core/select-funding.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
   AnnotatedFundingUtxo,
@@ -292,6 +292,9 @@ export interface InscribeOrchestratorDeps {
 }
 
 /** Everything a consumer template needs, emitted on every state change. */
+/** Mirrors mint.core's three outcomes for the resolved funding answer. */
+export type InscribeFundingStatus = 'ready' | 'expert-required' | 'insufficient';
+
 export interface InscribeSnapshot {
   state: InscribeMintState;
   feeRate: number | null;
@@ -301,6 +304,14 @@ export interface InscribeSnapshot {
   batch: InscribeBatchContent | null;
   simulations: InscribeUtxoSimulation[];
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
+  /**
+   * What the inscribe WOULD actually spend, after the explicit pick is
+   * honoured, and the verdict that goes with it. `fundingRecommendation`
+   * answers "what would we choose"; these answer "what happens if you press
+   * the button", which is the question a CTA is gated on.
+   */
+  resolvedFundingUtxo: TxnOutput | null;
+  resolvedFundingStatus: InscribeFundingStatus | null;
   /** The developer-facing failure text, for logs and existing error handling. */
   errorMessage: string | null;
   /**
@@ -454,6 +465,8 @@ export class InscribeMintOrchestrator {
     batch: null,
     simulations: [],
     fundingRecommendation: EMPTY_RECOMMENDATION,
+    resolvedFundingUtxo: null,
+    resolvedFundingStatus: null,
     errorMessage: null,
     userMessage: null,
     successResult: null,
@@ -865,7 +878,18 @@ export class InscribeMintOrchestrator {
       }
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run
-    this.patch({ simulations, fundingRecommendation });
+    // What the button WOULD spend, after the explicit pick is honoured, and the
+    // verdict that goes with it. `fundingRecommendation.recommended` answers
+    // "what would we choose" and deliberately does not follow an explicit pick,
+    // so a consumer gating a CTA on it has to re-decide locally, which is what
+    // the asset-safety rule forbids. Same derivation mint.core uses.
+    const resolvedFundingUtxo = target === null
+      ? null
+      : resolveFundingPick(fundingRecommendation, target, this.snap.selectedUtxo);
+    const resolvedFundingStatus: InscribeFundingStatus = resolvedFundingUtxo
+      ? 'ready'
+      : fundingRecommendation.status === 'insufficient' ? 'insufficient' : 'expert-required';
+    this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus });
   }
 
   /** The same grid and funding pick as a single inscription, for a batch. */
@@ -937,7 +961,18 @@ export class InscribeMintOrchestrator {
         resolveFundingTopology(this.deps.fundingTopology, wallet),
       ).catch(() => EMPTY_RECOMMENDATION);
     if (seq !== this.recomputeSeq) return;
-    this.patch({ simulations, fundingRecommendation });
+    // What the button WOULD spend, after the explicit pick is honoured, and the
+    // verdict that goes with it. `fundingRecommendation.recommended` answers
+    // "what would we choose" and deliberately does not follow an explicit pick,
+    // so a consumer gating a CTA on it has to re-decide locally, which is what
+    // the asset-safety rule forbids. Same derivation mint.core uses.
+    const resolvedFundingUtxo = target === null
+      ? null
+      : resolveFundingPick(fundingRecommendation, target, this.snap.selectedUtxo);
+    const resolvedFundingStatus: InscribeFundingStatus = resolvedFundingUtxo
+      ? 'ready'
+      : fundingRecommendation.status === 'insufficient' ? 'insufficient' : 'expert-required';
+    this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus });
   }
 
   /**

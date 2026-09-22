@@ -96,6 +96,29 @@ describe('InscribeMintOrchestrator (framework-agnostic)', () => {
     await expect(o.mint()).rejects.toThrow(/Select a funding UTXO/);
   });
 
+  it('an explicit pick RE-DECIDES, so a consumer never overrides the verdict', async () => {
+    // fundingRecommendation.recommended answers "what would we choose" and
+    // deliberately does not follow an explicit pick. resolvedFundingUtxo and
+    // resolvedFundingStatus answer "what happens if you press the button",
+    // which is what a CTA is gated on. Without them a consumer short-circuits
+    // its own CTA, which is a consumer computing funding policy.
+    const dirty = coin('d', 100_000);
+    const o = new InscribeMintOrchestrator(
+      deps({ getUtxos: async () => [dirty], scan: { classify: async () => 'has-assets' } }),
+    );
+    await o.setWallet(wallet);
+    o.setContent(content);
+    o.setFeeRate(10);
+    const blocked = await waitFor(o, (s) => s.fundingRecommendation.status === 'expert-required');
+    expect(blocked.resolvedFundingUtxo).toBeNull();
+    expect(blocked.resolvedFundingStatus).toBe('expert-required');
+
+    o.setSelectedUtxo(dirty);
+    const picked = await waitFor(o, (s) => s.resolvedFundingUtxo != null);
+    expect(picked.resolvedFundingUtxo?.txid).toBe(dirty.txid);
+    expect(picked.resolvedFundingStatus).toBe('ready');
+  });
+
   it('mint() guards: no wallet / no feeRate / no UTXO / no content', async () => {
     const o = new InscribeMintOrchestrator(deps());
     await expect(o.mint()).rejects.toThrow('No wallet connected');
