@@ -2,7 +2,7 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { MintCoreParams, simulateMint } from '../cat21-core/mint.core.js';
+import { MintCoreParams, simulateMint, MintStatus } from '../cat21-core/mint.core.js';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
@@ -114,6 +114,19 @@ export interface MintSnapshot {
    */
   fundingRequirementSats: number;
   fundingPreferredSats: number;
+  /**
+   * The coin the mint WOULD actually spend, after the explicit pick has been
+   * applied, and the verdict that goes with it. `fundingRecommendation` answers
+   * "what would we choose"; these answer "what happens if you press the
+   * button", which is the question a CTA is gated on.
+   *
+   * Without them a consumer has to re-derive the verdict from
+   * `selectedUtxo` plus the recommendation, and a consumer computing its own
+   * funding policy is what the asset-safety rule forbids: the next asset class
+   * added to the scanner would never reach it.
+   */
+  resolvedFundingUtxo: CoreFundingUtxo | null;
+  resolvedFundingStatus: MintStatus | null;
   errorMessage: string | null;
   successTxId: string | null;
 }
@@ -140,6 +153,8 @@ export class Cat21MintOrchestrator {
     candidateFees: [],
     fundingRequirementSats: 0,
     fundingPreferredSats: 0,
+    resolvedFundingUtxo: null,
+    resolvedFundingStatus: null,
     errorMessage: null,
     successTxId: null,
   };
@@ -223,6 +238,11 @@ export class Cat21MintOrchestrator {
   }
 
   private async loadUtxos(wallet: MintWalletContext): Promise<void> {
+    // Invalidate any in-flight recompute BEFORE the first await, not only
+    // via the one at the end: the catch below returns early, so on a failed
+    // load a recompute started by an earlier input would still hold a valid
+    // seq, land afterwards, and patch stale rows over an emptied utxo set.
+    this.recomputeSeq++;
     this.patch({ state: 'loading-utxos' });
     try {
       // Deduped here, not only in the SDK's own electrs readers: `getUtxos` is a
@@ -245,8 +265,20 @@ export class Cat21MintOrchestrator {
     void this.recompute();
   }
 
+  /**
+   * Take an explicit funding pick, then RE-DECIDE.
+   *
+   * The pick feeds `selectedFundingUtxo` in the core, so the recommendation is
+   * a different answer once it is set. Patching without recomputing leaves
+   * `fundingRecommendation.status` describing the AUTO pick, which forces a
+   * consumer to override the verdict locally in order to enable its CTA, and a
+   * consumer that computes its own funding policy is exactly what the
+   * asset-safety rule forbids: the next asset class added to the scanner would
+   * never reach it.
+   */
   setSelectedUtxo(utxo: TxnOutput | null): void {
     this.patch({ selectedUtxo: utxo });
+    void this.recompute();
   }
 
   /**
@@ -352,6 +384,8 @@ export class Cat21MintOrchestrator {
     let recomputeError: string | null = null;
     let fundingRequirementSats = 0;
     let fundingPreferredSats = 0;
+    let resolvedFundingUtxo: CoreFundingUtxo | null = null;
+    let resolvedFundingStatus: MintStatus | null = null;
     try {
       const mintSim = await simulateMint(this.mintParams(wallet, paymentPublicKey, feeRate), {
         utxos: this.utxosPort(),
@@ -361,6 +395,8 @@ export class Cat21MintOrchestrator {
       candidateFees = mintSim.candidateFees;
       fundingRequirementSats = mintSim.fundingRequirementSats;
       fundingPreferredSats = mintSim.fundingPreferredSats;
+      resolvedFundingUtxo = mintSim.fundingUtxo;
+      resolvedFundingStatus = mintSim.status;
     } catch (err) {
       fundingRecommendation = EMPTY_RECOMMENDATION;
       // Keep the REASON. An empty recommendation renders as a disabled control,
@@ -378,6 +414,7 @@ export class Cat21MintOrchestrator {
       simulations: recomputeError ? [] : this.rowsFrom(candidateFees),
       fundingRecommendation, candidateFees,
       fundingRequirementSats, fundingPreferredSats,
+      resolvedFundingUtxo, resolvedFundingStatus,
       // Keeping the reason is not enough on its own: every consumer gates its
       // banner on `state === 'error'`, so a message written while the state
       // stays `ready` is unreachable and the screen falls through to "not

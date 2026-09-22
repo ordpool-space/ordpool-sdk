@@ -521,6 +521,11 @@ export class InscribeMintOrchestrator {
   }
 
   private async loadUtxos(wallet: InscribeWalletContext): Promise<void> {
+    // Invalidate any in-flight recompute BEFORE the first await, not only
+    // via the one at the end: the catch below returns early, so on a failed
+    // load a recompute started by an earlier input would still hold a valid
+    // seq, land afterwards, and patch stale rows over an emptied utxo set.
+    this.recomputeSeq++;
     this.patch({ state: 'loading-utxos' });
     try {
       // Deduped here, not only in the SDK's own electrs readers: `getUtxos` is a
@@ -544,8 +549,20 @@ export class InscribeMintOrchestrator {
     void this.recompute();
   }
 
+  /**
+   * Take an explicit funding pick, then RE-DECIDE.
+   *
+   * The pick feeds `selectedFundingUtxo` in the core, so the recommendation is
+   * a different answer once it is set. Patching without recomputing leaves
+   * `fundingRecommendation.status` describing the AUTO pick, which forces a
+   * consumer to override the verdict locally in order to enable its CTA, and a
+   * consumer that computes its own funding policy is exactly what the
+   * asset-safety rule forbids: the next asset class added to the scanner would
+   * never reach it.
+   */
   setSelectedUtxo(utxo: TxnOutput | null): void {
     this.patch({ selectedUtxo: utxo });
+    void this.recompute();
   }
 
   setContent(content: InscribeContent | null): void {

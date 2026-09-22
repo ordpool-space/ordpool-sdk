@@ -360,6 +360,56 @@ describe('Cat21MintOrchestrator.refreshUtxos', () => {
     expect(s.state).toBe('error');
   });
 
+  it('an explicit pick RE-DECIDES, so the consumer never has to override the verdict', async () => {
+    // The pick feeds selectedFundingUtxo in the core, so the recommendation is
+    // a different answer once it is set. Without a recompute the status and the
+    // recommended coin keep describing the AUTO pick, and a consumer has to
+    // short-circuit its own CTA to make an explicit pick usable. That is a
+    // consumer computing funding policy, which the asset-safety rule forbids.
+    const small = coin('a', 60_000);
+    const big = coin('b', 900_000);
+    const o = new Cat21MintOrchestrator(deps({ getUtxos: async () => [small, big] }));
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+
+    // ord's best-fit picks the SMALLEST covering coin.
+    // `recommendation.recommended` stays the AUTO answer by design: it means
+    // "what would we choose". The RESOLVED pick is what the button spends.
+    const auto = await waitFor(o, (s) => s.resolvedFundingUtxo != null);
+    expect(auto.resolvedFundingUtxo?.txid).toBe(small.txid);
+    expect(auto.resolvedFundingStatus).toBe('ready');
+
+    o.setSelectedUtxo(big);
+    const picked = await waitFor(o, (s) => s.resolvedFundingUtxo?.txid === big.txid);
+    expect(picked.resolvedFundingUtxo?.txid).toBe(big.txid);
+    expect(picked.resolvedFundingStatus).toBe('ready');
+  });
+
+  it('a failed refresh invalidates an in-flight recompute', async () => {
+    // ordpool polls refreshUtxos() while the status is insufficient. One poll
+    // hits an electrs blip while a recompute from a typed fee rate is still
+    // awaiting its content scans. Without an eager seq bump the recompute lands
+    // SECOND and patches its rows and recommendation over an emptied utxo set,
+    // so the page offers funding options for coins the orchestrator no longer
+    // holds.
+    //
+    // Asserted on the SEQUENCE rather than by racing two promises: the property
+    // is an ordering guarantee, and a timing-based version of this test is
+    // flaky by construction, which is what our own rules forbid.
+    const o = new Cat21MintOrchestrator(deps({
+      getUtxos: async () => { throw new Error('electrs blip'); },
+    }));
+    const seq = () => (o as unknown as { recomputeSeq: number }).recomputeSeq;
+
+    await o.setWallet(wallet);
+    const before = seq();
+    await o.refreshUtxos();
+
+    expect(seq()).toBeGreaterThan(before);
+    expect(o.getSnapshot().state).toBe('error');
+    expect(o.getSnapshot().errorMessage).toMatch(/Failed to load UTXOs: electrs blip/);
+  });
+
   it('a SUCCESSFUL recompute does not clear an error it did not write', async () => {
     // mint()'s broadcast failure and loadUtxos's failure both write
     // errorMessage. Clobbering one on the next fee-rate nudge leaves

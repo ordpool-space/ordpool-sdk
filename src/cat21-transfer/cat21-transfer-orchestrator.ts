@@ -196,6 +196,11 @@ export class Cat21TransferOrchestrator {
   }
 
   private async loadUtxos(wallet: TransferWalletContext): Promise<void> {
+    // Invalidate any in-flight recompute BEFORE the first await, not only
+    // via the one at the end: the catch below returns early, so on a failed
+    // load a recompute started by an earlier input would still hold a valid
+    // seq, land afterwards, and patch stale rows over an emptied utxo set.
+    this.recomputeSeq++;
     this.patch({ state: 'loading-utxos' });
     try {
       // Deduped here, not only in the SDK's own electrs readers: `getUtxos` is a
