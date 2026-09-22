@@ -54,7 +54,7 @@ function args(src, openIdx) {
  * specs here twice. New ones fail; the count may only go down. Lower this
  * number when you fix some, never raise it.
  */
-const IS_VISIBLE_BASELINE = 30;
+const IS_VISIBLE_BASELINE = 29;
 
 const slotFindings = [];
 const isVisibleFindings = [];

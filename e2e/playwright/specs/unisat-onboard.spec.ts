@@ -5,6 +5,9 @@
 // MUST stay green-or-loudly-failing on every CI run.
 
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+
+import { isVisibleWithin } from '../is-visible-within';
+import { dismissUnisatUpdateNag } from '../onboard-unisat';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -153,15 +156,20 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await addressTypeContinue.click();
   await shot(page, '09-after-address-type-continue');
 
-  // ─── Phase 7: dismiss any post-restore notice ───
-  // notice-popover has a checkbox + OK button on first dashboard
-  // open. Best-effort: tick the checkbox if visible, click OK.
+  // ─── Phase 7: dismiss what the first dashboard open stacks up ───
+  // The update modal is layered ABOVE the compatibility notice and swallows
+  // every click meant for it, so it goes first. Both are best-effort: neither
+  // stands between the wallet and its home screen, and Phase 8 is what proves
+  // onboarding committed, so a dialog that genuinely blocked would fail there
+  // naming the screen.
+  await dismissUnisatUpdateNag(page);
+
   const noticeCheckbox = page.getByTestId('notice-checkbox-1');
-  if (await noticeCheckbox.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await noticeCheckbox.click();
+  if (await isVisibleWithin(noticeCheckbox, 5_000)) {
+    await noticeCheckbox.click({ timeout: 5_000 }).catch(() => undefined);
     const noticeOk = page.getByTestId('notice-ok-button');
-    if (await noticeOk.isEnabled({ timeout: 3_000 }).catch(() => false)) {
-      await noticeOk.click();
+    if (await noticeOk.isEnabled().catch(() => false)) {
+      await noticeOk.click({ timeout: 5_000 }).catch(() => undefined);
     }
     await shot(page, '10-notice-dismissed');
   }

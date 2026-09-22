@@ -5,6 +5,26 @@ import { selectCard } from './select-card';
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 
 /**
+ * Dismiss UniSat's "a new version is available" modal.
+ *
+ * The pinned extension asks UniSat's server whether a newer build exists, so
+ * the modal appears on the first dashboard open as soon as upstream ships a
+ * release past the pin, and it is layered ABOVE the compatibility notice.
+ * Playwright then reports the notice checkbox as visible, enabled and stable
+ * while `.row-container` from `.popover-container` intercepts every click, so
+ * the failure names the checkbox and not the thing covering it.
+ *
+ * The modal carries no data-testid, so it is anchored on the one string only
+ * it contains; "Skip" alone would also match the notice below it.
+ */
+export async function dismissUnisatUpdateNag(page: Page): Promise<void> {
+  const modal = page.locator('.popover-container').filter({ hasText: 'Go to update' });
+  if (!(await isVisibleWithin(modal, 2_000))) return;
+  await modal.getByText('Skip', { exact: true }).click({ timeout: 5_000 }).catch(() => undefined);
+  await modal.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
+}
+
+/**
  * Drive UniSat onboarding from the BIP-39 test seed to the home tab.
  * Shared by the e2e specs AND the local wallet-runner (matches
  * onboard-okx.ts / onboard-phantom.ts / onboard-cat21wallet.ts).
@@ -74,6 +94,8 @@ export async function onboardUnisat(
   // UI). Nothing is swallowed by doing so: the `tab-home` assertion below is
   // what proves onboarding finished, so a notice that genuinely blocked would
   // still fail there, naming the screen rather than a checkbox.
+  await dismissUnisatUpdateNag(page);
+
   const noticeCheckbox = page.getByTestId('notice-checkbox-1');
   if (await isVisibleWithin(noticeCheckbox, 5_000)) {
     await noticeCheckbox.click({ timeout: 5_000 }).catch(() => undefined);
