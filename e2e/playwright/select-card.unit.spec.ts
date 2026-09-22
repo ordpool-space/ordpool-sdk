@@ -23,11 +23,15 @@ describe('selectCard', () => {
     expect(c.clicks).toBe(2);
   });
 
-  it('degrades to ONE click when the control carries no readable marker', async () => {
+  it('still runs the retry when the control carries no readable marker', async () => {
+    // Unreadable is a statement about the READ-BACK, not about the clicking.
+    // A control whose selection is expressed outside every standard marker
+    // still needs the retry, so the budget is spent and `selected` stays
+    // undefined rather than being claimed.
     const c = card({}, 99);
     const r = await selectCard(c, { settleMs: 1 });
-    expect(r).toEqual({ clicks: 1, observable: false, selected: undefined });
-    expect(c.clicks).toBe(1);
+    expect(r).toEqual({ clicks: 3, observable: false, selected: undefined });
+    expect(c.clicks).toBe(3);
   });
 
   it('reads a class-based marker when no aria attribute exists', async () => {
@@ -41,30 +45,43 @@ it('at the cap it reports what the last read said, not an assumption', async () 
   expect(await selectCard(c, { settleMs: 1, maxClicks: 3 })).toEqual({ clicks: 3, observable: true, selected: false });
 });
 
-describe('selectCard — an unreadable marker is reported as unreadable', () => {
-  it('treats an EMPTY class as no marker, so it clicks once and says so', async () => {
+describe('selectCard — an unreadable marker still gets the full retry', () => {
+  it('an EMPTY class means unobservable, and the clicking still runs to the cap', async () => {
     // UniSat's address-type cards carry `class=""` and express selection
-    // through an inline background colour. Reading the empty string as
-    // "not selected" burned the whole click budget on every healthy run and
-    // printed a diagnostic that contradicted the passing specs around it.
+    // through an inline background colour. The retry is what makes the
+    // selection take: stopping after one click leaves the DEFAULT card
+    // selected, and the wallet lands on the wrong address type, which is the
+    // bug this helper was written for.
     let clicks = 0;
     const card = {
       click: async () => { clicks++; },
       getAttribute: async (n: string) => (n === 'class' ? '' : null),
     };
     const result = await selectCard(card, { settleMs: 0 });
-    expect(clicks).toBe(1);
-    expect(result).toEqual({ clicks: 1, observable: false, selected: undefined });
+    expect(clicks).toBe(3);
+    expect(result).toEqual({ clicks: 3, observable: false, selected: undefined });
   });
 
-  it('a whitespace-only class is equally unreadable', async () => {
+  it('a control with NO attributes at all behaves the same way', async () => {
     let clicks = 0;
     const card = {
       click: async () => { clicks++; },
-      getAttribute: async (n: string) => (n === 'class' ? '   ' : null),
+      getAttribute: async () => null,
     };
     const result = await selectCard(card, { settleMs: 0 });
-    expect(clicks).toBe(1);
+    expect(clicks).toBe(3);
     expect(result.observable).toBe(false);
+    expect(result.selected).toBeUndefined();
+  });
+
+  it('a readable marker still short-circuits on the click that takes', async () => {
+    let clicks = 0;
+    const card = {
+      click: async () => { clicks++; },
+      getAttribute: async (n: string) =>
+        n === 'aria-selected' ? (clicks >= 2 ? 'true' : 'false') : null,
+    };
+    const result = await selectCard(card, { settleMs: 0 });
+    expect(result).toEqual({ clicks: 2, observable: true, selected: true });
   });
 });

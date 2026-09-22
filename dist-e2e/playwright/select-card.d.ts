@@ -14,9 +14,15 @@
  * the first.
  *
  * The selected state is read from whichever standard marker the control
- * carries. When it carries NONE, this degrades to exactly one click, which is
- * the behaviour it replaces: a harness must not invent a marker it cannot
- * observe and then wait for it.
+ * carries. When it carries NONE, the clicking still runs to the cap and the
+ * result says `observable: false`: the retry is what makes the selection
+ * take, and reading it back is a separate question from performing it. What a
+ * harness must not do is CLAIM a state it cannot observe, which is why
+ * `selected` stays `undefined` there rather than becoming `true`.
+ *
+ * UniSat's address-type cards are that case: `class=""`, selection carried by
+ * an inline background colour. One click leaves the DEFAULT card selected and
+ * the wallet lands on the wrong address type.
  */
 export interface SelectableCard {
     click: (opts?: {

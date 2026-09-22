@@ -23,15 +23,21 @@ async function selectCard(card, opts = {}) {
     const maxClicks = opts.maxClicks ?? 3;
     const settleMs = opts.settleMs ?? 400;
     let selected;
+    let observable = true;
     for (let clicks = 1; clicks <= maxClicks; clicks++) {
         await card.click();
         await new Promise((r) => setTimeout(r, settleMs));
         selected = await readSelected(card);
-        if (selected === undefined)
-            return { clicks, observable: false, selected };
+        if (selected === undefined) {
+            // No marker to read. Keep clicking anyway: selecting a card is
+            // idempotent, and the retry is the part that works. Returning here
+            // would hand back a single click, which is the swallowed-click bug.
+            observable = false;
+            continue;
+        }
         if (selected)
             return { clicks, observable: true, selected };
     }
-    return { clicks: maxClicks, observable: true, selected };
+    return { clicks: maxClicks, observable, selected };
 }
 //# sourceMappingURL=select-card.js.map

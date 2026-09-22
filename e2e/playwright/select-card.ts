@@ -14,9 +14,15 @@
  * the first.
  *
  * The selected state is read from whichever standard marker the control
- * carries. When it carries NONE, this degrades to exactly one click, which is
- * the behaviour it replaces: a harness must not invent a marker it cannot
- * observe and then wait for it.
+ * carries. When it carries NONE, the clicking still runs to the cap and the
+ * result says `observable: false`: the retry is what makes the selection
+ * take, and reading it back is a separate question from performing it. What a
+ * harness must not do is CLAIM a state it cannot observe, which is why
+ * `selected` stays `undefined` there rather than becoming `true`.
+ *
+ * UniSat's address-type cards are that case: `class=""`, selection carried by
+ * an inline background colour. One click leaves the DEFAULT card selected and
+ * the wallet lands on the wrong address type.
  */
 export interface SelectableCard {
   click: (opts?: { timeout?: number }) => Promise<void>;
@@ -61,12 +67,19 @@ export async function selectCard(
   const settleMs = opts.settleMs ?? 400;
 
   let selected: boolean | undefined;
+  let observable = true;
   for (let clicks = 1; clicks <= maxClicks; clicks++) {
     await card.click();
     await new Promise((r) => setTimeout(r, settleMs));
     selected = await readSelected(card);
-    if (selected === undefined) return { clicks, observable: false, selected };
+    if (selected === undefined) {
+      // No marker to read. Keep clicking anyway: selecting a card is
+      // idempotent, and the retry is the part that works. Returning here
+      // would hand back a single click, which is the swallowed-click bug.
+      observable = false;
+      continue;
+    }
     if (selected) return { clicks, observable: true, selected };
   }
-  return { clicks: maxClicks, observable: true, selected };
+  return { clicks: maxClicks, observable, selected };
 }
