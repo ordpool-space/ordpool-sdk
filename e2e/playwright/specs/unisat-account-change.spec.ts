@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 
 /**
@@ -94,10 +94,12 @@ test('onAccountChange fires when window.unisat.switchNetwork("testnet") is calle
   const connectApproval = await waitForApprovalPopup({
     context,
     knownPages: connectKnownPages,
-    isApproval: async (p) => {
-      await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
-      return true;
-    },
+    // Anchored on the CONTROL clicked below; the URL is a hash route and
+    // matches while the popup is still a boot spinner.
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByText(/^Connect$/).first(),
+    }),
   });
   await shot(connectApproval, '02a-connect-approval');
   await connectApproval.getByText(/^Connect$/).first().click();
@@ -132,10 +134,17 @@ test('onAccountChange fires when window.unisat.switchNetwork("testnet") is calle
     waitForApprovalPopup({
       context,
       knownPages: switchKnownPages,
-      isApproval: async (p) => {
-        await p.waitForURL(/notification\.html#\/approval/, { timeout: 10_000 });
-        return true;
-      },
+      // 20_000, not 10_000: the original spent 10s on the URL and then a
+      // SECOND 10s on the control below, so the popup had 20s of tolerance in
+      // total. approvalGate shares one budget between the two, and halving it
+      // here would not fail loudly: this gate sits in a Promise.race whose
+      // catch takes the "no popup was needed" branch, after which the probe
+      // await below hangs to the test timeout instead.
+      isApproval: approvalGate({
+        url: /notification\.html#\/approval/,
+        control: (p) => p.getByText(/^(Confirm|Connect|Switch( Network)?)$/).first(),
+        timeoutMs: 20_000,
+      }),
     }).then(p => ({ kind: 'popup' as const, page: p })),
     switchCallPromise.then(() => ({ kind: 'settled' as const })),
   ]).catch(() => ({ kind: 'settled' as const }));

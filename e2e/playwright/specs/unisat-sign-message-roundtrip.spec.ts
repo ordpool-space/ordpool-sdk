@@ -3,7 +3,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardUnisat } from '../onboard-unisat';
@@ -42,7 +42,12 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    isApproval: async (p) => { await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 }); return true; },
+    // Anchored on the CONTROL this helper clicks; the URL is a hash route and
+    // matches while the popup is still a boot spinner.
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByText(/^Connect$/).first(),
+    }),
   });
   await approval.getByText(/^Connect$/).first().click();
 }
@@ -52,7 +57,14 @@ async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page
     context: ctx,
     knownPages,
     timeoutMs: 90_000,
-    isApproval: async (p) => { await p.waitForURL(/notification\.html#\/approval/, { timeout: 90_000 }); return true; },
+    // The sign-message approval renders a different control from Unisat's PSBT
+    // popups, which carry sign-psbt-button; a BIP-322 message approval has no
+    // such testid, so this anchors on the same text the click below uses.
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByText(/^(Sign|Confirm|Approve)$/).first(),
+      timeoutMs: 90_000,
+    }),
   });
   await shot(approval, '02a-sign-message-approval');
   // Unisat renders actions as styled divs, not <button>. Match by text.
