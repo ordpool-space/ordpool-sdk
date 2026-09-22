@@ -842,15 +842,14 @@ export declare function seedDirtyCoin(options: {
     address: string;
     valueSats: number;
     /**
-     * Which ord-side wallet does the seeding. Defaults to one name per asset
-     * class, which is fine for a single spec and collides the moment TWO specs
-     * seed the same class against one bitcoind: they share a wallet, its funding,
-     * and its UTXO set, so each run's coin selection depends on the other's.
+     * Which ord-side wallet does the seeding. Defaults to a name unique to this
+     * call, so two specs seeding the same asset class against one bitcoind get
+     * their own wallet, funding and UTXO set.
      *
-     * Pass distinct names to decouple them. Distinct wallets beat a shared
-     * idempotent one here, because the hazard is not creating a wallet twice
-     * (`ordStockCreateWallet` already tolerates that), it is two specs drawing
-     * from the same coins.
+     * Pass an explicit name only to SHARE one deliberately. The hazard is not
+     * creating a wallet twice (`ordStockCreateWallet` tolerates that), it is two
+     * specs drawing from the same coins, and that is silent: the second caller
+     * gets a coin and fails later on what the picker rendered.
      *
      * Only `inscription` and `rune` consult it: those seed through an ord stock
      * wallet. `cat` and `rareSat` build raw transactions against the bitcoind

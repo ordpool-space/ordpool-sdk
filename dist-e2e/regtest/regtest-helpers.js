@@ -801,7 +801,7 @@ async function getStockOrdOutputInscriptions(outpoint) {
  */
 async function seedRuneCoin(options = {}) {
     const runeName = options.runeName ?? uniqueRuneName();
-    const walletName = options.walletName ?? 'rune-etcher';
+    const walletName = options.walletName ?? uniqueSeedWalletName('rune-etcher');
     const feeRate = options.feeRate ?? 2;
     ordStockCreateWallet(walletName);
     const ordAddress = JSON.parse(ordStockWalletCli(walletName, 'receive'));
@@ -943,6 +943,25 @@ function uniqueRuneName() {
     return `ORDPOOL\u2022${suffix}`;
 }
 /**
+ * A seeding wallet name that cannot collide with another call in the same
+ * container.
+ *
+ * Two specs seeding the same asset class share a wallet, its funding and its
+ * UTXO set, so each one's coin selection depends on what the other left
+ * behind. The failure does not look like a collision: the second caller gets
+ * a coin, `ordStockCreateWallet` tolerates the existing wallet, and the spec
+ * fails much later on an assertion about what the picker rendered.
+ *
+ * Sharing is still available by passing an explicit `walletName`, which is the
+ * right way round: a caller that wants two seeds in one wallet says so, and a
+ * caller that says nothing cannot be surprised by another spec's leftovers.
+ */
+let seedWalletSeq = 0;
+function uniqueSeedWalletName(base) {
+    seedWalletSeq += 1;
+    return `${base}-${process.pid}-${seedWalletSeq}`;
+}
+/**
  * Seed a coin that really carries an inscription, for the spec that proves the
  * funding-safety guard REFUSES it.
  *
@@ -989,7 +1008,7 @@ async function seedInscribedCoin(options) {
     // never a candidate and the spec passes with the guard deleted. Guard specs
     // pass `valueSats` explicitly, which `seedDirtyCoin` requires.
     const postageSats = options.valueSats ?? options.postageSats ?? 2_000_000;
-    const walletName = options.walletName ?? 'seed-inscribed';
+    const walletName = options.walletName ?? uniqueSeedWalletName('seed-inscribed');
     const feeRate = options.feeRate ?? 2;
     // Fund ord's own wallet with room for the postage plus fees.
     const needBtc = ((postageSats + 1_000_000) / 1e8).toFixed(8);
