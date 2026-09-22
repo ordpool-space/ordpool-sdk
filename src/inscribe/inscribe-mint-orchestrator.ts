@@ -345,14 +345,7 @@ export interface InscribeSnapshot {
 const UNEXPECTED_FAILURE_MESSAGE =
   'Something went wrong while preparing this inscription. Nothing has been sent. Please try again, and report it if it keeps happening.';
 
-/**
- * The recommendation before any answer exists.
- *
- * `scanning`, never `insufficient`: "nothing covers" is a MEASURED verdict and
- * this is the absence of one. A consumer reading the placeholder as a verdict
- * tells the user to add funds while the scan that would have found their coin
- * is still running.
- */
+/** No answer yet. `scanning`, never `insufficient`: that is a measured verdict. */
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'scanning',
   recommended: null,
@@ -458,17 +451,10 @@ function batchArgs(
 const DUMMY_PUBKEY_XONLY = new Uint8Array(32).fill(0x02);
 
 /**
- * Whether two funding selections name the same coin.
- *
- * `setSelectedUtxo` recomputes, so re-applying the SAME selection would patch
- * and recompute for an answer that cannot differ. A consumer that re-drives
- * the setter from a stream the recompute itself feeds then loops without
- * bound: patch, emit, set, recompute, emit. Comparing the outpoint makes the
- * no-change call free and the loop impossible.
- *
- * The object identity is deliberately NOT part of this. A refreshed candidate
- * for the same outpoint carries newer annotations, and the live one is
- * `resolvedFundingUtxo`, which consumers render from.
+ * Same coin? `setSelectedUtxo` recomputes, so re-applying an unchanged
+ * selection would loop a consumer that re-drives it from the snapshot.
+ * Outpoint only: a refreshed row for the same coin is not a change, and the
+ * live annotated one is `resolvedFundingUtxo`.
  */
 function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
   if (a === null || b === null) return a === b;
@@ -822,9 +808,7 @@ export class InscribeMintOrchestrator {
       this.patch({ compression: null });
     }
     if (!wallet || !feeRate || !ready || this.utxos.length === 0) {
-      // An EMPTY funding set is a measured verdict: the set was read and holds
-      // nothing. A missing wallet, rate or content is the absence of one,
-      // because no read has happened yet.
+      // Read-and-empty is a verdict; missing wallet, rate or content is none.
       const measuredEmpty = !!wallet && !!feeRate && !!ready && this.utxos.length === 0;
       this.patch({
         simulations: [],

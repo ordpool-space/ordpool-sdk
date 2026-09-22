@@ -458,10 +458,8 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   // Change to the user, after the commit output, when above dust. The
   // funding input covers the fee and whatever part of the commit output the
   // chosen sat's input does not.
-  // DERIVED from the address the change actually goes to. Defaulting to the
-  // postage value priced a picker grid against a floor the signed commit does
-  // not use, so a coin whose leftover sits between the two was reported as an
-  // over-pay while the transaction emitted it as change.
+  // Derived from the change address; the postage value is not the floor the
+  // signed commit enforces.
   let changeDustLimit: number;
   try {
     changeDustLimit = args.changeDustLimitSats ?? getMinimumUtxoSize(args.senderChangeAddress);

@@ -111,14 +111,7 @@ export interface TransferSnapshot {
   successTxId: string | null;
 }
 
-/**
- * The recommendation before any answer exists.
- *
- * `scanning`, never `insufficient`: "nothing covers" is a MEASURED verdict and
- * this is the absence of one. A consumer reading the placeholder as a verdict
- * tells the user to add funds while the scan that would have found their coin
- * is still running.
- */
+/** No answer yet. `scanning`, never `insufficient`: that is a measured verdict. */
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'scanning',
   recommended: null,
@@ -133,17 +126,9 @@ const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFu
 };
 
 /**
- * Whether two funding selections name the same coin.
- *
- * `setSelectedFundingUtxo` recomputes, so re-applying the SAME selection would
- * patch and recompute for an answer that cannot differ. A consumer that
- * re-drives the setter from a stream the recompute itself feeds then loops
- * without bound: patch, emit, set, recompute, emit. Comparing the outpoint
- * makes the no-change call free and the loop impossible.
- *
- * Object identity is deliberately NOT part of this: a refreshed candidate for
- * the same outpoint carries newer annotations, and the live one is on the
- * snapshot.
+ * Same coin? `setSelectedFundingUtxo` recomputes, so re-applying an unchanged
+ * selection would loop a consumer that re-drives it from the snapshot.
+ * Outpoint only: a refreshed row for the same coin is not a change.
  */
 function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
   if (a === null || b === null) return a === b;
@@ -358,10 +343,7 @@ export class Cat21TransferOrchestrator {
     const cat = this.snap.catUtxo;
     const recipient = this.snap.recipientAddress;
     if (!wallet || !feeRate || !cat || !recipient || this.utxos.length === 0) {
-      // An EMPTY funding set is a measured verdict: the set was read and holds
-      // nothing. A missing input is the absence of one, because no read has
-      // happened yet. Collapsing the two tells a user to add funds before
-      // anything has looked at their wallet.
+      // Read-and-empty is a verdict; a missing input is no verdict.
       const measuredEmpty = !!wallet && !!feeRate && !!cat && !!recipient && this.utxos.length === 0;
       this.patch({ simulation: null, fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;

@@ -143,14 +143,7 @@ export interface MintSnapshot {
   successTxId: string | null;
 }
 
-/**
- * The recommendation before any answer exists.
- *
- * `scanning`, never `insufficient`: "nothing covers" is a MEASURED verdict and
- * this is the absence of one. A consumer reading the placeholder as a verdict
- * tells the user to add funds while the scan that would have found their coin
- * is still running.
- */
+/** No answer yet. `scanning`, never `insufficient`: that is a measured verdict. */
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'scanning',
   recommended: null,
@@ -165,17 +158,10 @@ const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFu
 };
 
 /**
- * Whether two funding selections name the same coin.
- *
- * `setSelectedUtxo` recomputes, so re-applying the SAME selection would patch
- * and recompute for an answer that cannot differ. A consumer that re-drives
- * the setter from a stream the recompute itself feeds then loops without
- * bound: patch, emit, set, recompute, emit. Comparing the outpoint makes the
- * no-change call free and the loop impossible.
- *
- * The object identity is deliberately NOT part of this. A refreshed candidate
- * for the same outpoint carries newer annotations, and the live one is
- * `resolvedFundingUtxo`, which consumers render from.
+ * Same coin? `setSelectedUtxo` recomputes, so re-applying an unchanged
+ * selection would loop a consumer that re-drives it from the snapshot.
+ * Outpoint only: a refreshed row for the same coin is not a change, and the
+ * live annotated one is `resolvedFundingUtxo`.
  */
 function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
   if (a === null || b === null) return a === b;
@@ -419,10 +405,7 @@ export class Cat21MintOrchestrator {
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
     if (!wallet || !feeRate || this.utxos.length === 0) {
-      // An EMPTY funding set is a measured verdict: the set was read and holds
-      // nothing. A missing wallet or fee rate is the absence of one, because
-      // no read has happened. Collapsing the two tells a user to add funds
-      // before anything has looked at their wallet.
+      // Read-and-empty is a verdict; missing wallet or fee rate is no verdict.
       const measuredEmpty = !!wallet && !!feeRate && this.utxos.length === 0;
       this.patch({
         simulations: [], candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0,
@@ -433,11 +416,8 @@ export class Cat21MintOrchestrator {
       });
       return;
     }
-    // The answer on the snapshot is now STALE, and a consumer gating a CTA has
-    // to know that before it re-enables a button against the previous coin.
-    // The scan runs inside `simulateMint`, so this window is as long as the
-    // content scanner takes; `state` stays `ready` throughout it, which is why
-    // `state` is the wrong thing to gate on.
+    // The snapshot answer is now stale. `state` stays 'ready' through this
+    // window, so it is the wrong thing to gate a CTA on.
     if (this.snap.resolvedFundingStatus !== 'scanning') {
       this.patch({ resolvedFundingStatus: 'scanning' });
     }

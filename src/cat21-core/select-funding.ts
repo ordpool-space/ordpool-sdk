@@ -102,16 +102,11 @@ export async function selectFunding<T extends FundingUtxo>(
  * decides whether a coin is available to spend.
  */
 /**
- * Why an explicit pick is NOT the coin that will be spent.
+ * Why an explicit pick is not the coin that will be spent.
  *
- * `gone`: the outpoint is no longer among the candidates, so it was spent
- * elsewhere or the set was re-read without it. `below-requirement`: it is
- * still there but no longer covers the action, which is what raising the fee
- * rate does to a tight coin.
- *
- * The two are different problems with different remedies, which is why this is
- * a reason rather than a boolean: one needs another coin, the other needs a
- * lower rate.
+ * `gone`: the outpoint left the candidate set. `below-requirement`: still
+ * there, no longer covers at this rate. Different remedies, so a reason rather
+ * than a boolean.
  */
 export interface DroppedSelection {
   txid: string;
@@ -120,12 +115,10 @@ export interface DroppedSelection {
 }
 
 /**
- * The pick, and whether an explicit selection was silently replaced.
+ * The pick, plus why an explicit selection was replaced.
  *
- * A consumer that renders only the resolved coin is CORRECT about what gets
- * spent and still moves the user onto a different coin than the one they
- * chose, without saying so. Naming the drop is the SDK's job: a consumer
- * comparing two outpoints to work it out is the consumer re-deriving funding
+ * Rendering only the resolved coin is correct about the spend and silent about
+ * the swap. A consumer comparing outpoints to detect it is re-deriving funding
  * policy, which the asset-safety rule forbids.
  */
 export function describeFundingPick<T extends AnnotatedFundingUtxo>(

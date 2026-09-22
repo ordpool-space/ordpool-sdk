@@ -149,12 +149,8 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   // Change calculation. The dust threshold is the smaller of (a) the
   // builder default 546 and (b) the caller-supplied per-address-type
   // floor (cat21.space passes `getMinimumUtxoSize(paymentAddress)`).
-  // DERIVED from the address the change actually goes to, so a caller that
-  // omits the argument gets the right floor rather than a flat one. An
-  // optional parameter whose default is wrong is a defect: it priced a picker
-  // grid against 546 while the signed transaction used 294 or 330, so the grid
-  // reported an over-pay on change the transaction emitted. The constant
-  // survives only for an address this build cannot parse.
+  // Derived from the change address, so an omitted argument still gets the
+  // right floor. The constant is the unparseable-address fallback.
   let changeDustLimit: number;
   try {
     changeDustLimit = args.changeDustLimitSats ?? getMinimumUtxoSize(args.destinations.senderChangeAddress);

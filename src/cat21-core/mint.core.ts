@@ -155,12 +155,7 @@ function buildMint(
       tip: params.tip ? { address: params.tip.address, valueSats: params.tip.valueSats } : undefined,
     },
     feeSats,
-    // The PER-ADDRESS floor, the same one the broadcast path passes. Omitting
-    // it falls back to the flat 546, and the picker grid would then price a
-    // coin differently from the transaction that gets signed: in the band
-    // [per-address floor, 546) the grid folds the leftover into the fee and
-    // warns about an over-pay, while the real tx emits that change. bc1q is
-    // 294 and bc1p 330, so the band is real on every segwit payment address.
+    // Per-address floor, the same one the broadcast path passes.
     changeDustLimitSats: changeDustFloor(params.paymentAddress),
   });
 }
@@ -276,17 +271,10 @@ async function planMint(
       pick: null, built: null, vsize: null, buildFeeSats: null, candidateFees,
     };
   }
-  // The verdict is about the coin that WILL be spent, so it reads the pick's
-  // own content bucket rather than the recommendation's topology-shaped
-  // status. Reading the recommendation made the same user action answer
-  // differently per wallet: an explicit "use anyway" pick of an asset coin
-  // reported 'asset-notice' on a separate-payment-address wallet and 'ready'
-  // on a one-address one, so a consumer gating its notice on the status hid
-  // the warning exactly where the SDK was strictest.
-  //
-  // 'asset-notice' is an ENABLED state with a warning, never a block. The
-  // blocking answers are 'expert-required', 'insufficient' and 'scanning',
-  // and they all return above this with pick === null.
+  // Reads the PICK's content bucket, not the recommendation's topology-shaped
+  // status, so the same action answers the same way on every wallet.
+  // 'asset-notice' is enabled-with-warning; the blocking answers return above
+  // with pick === null.
   return {
     status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
     droppedSelection,
@@ -336,12 +324,9 @@ export async function executeMint(
   ports: { utxos: UtxosPort; scan: ContentScanPort; sign: SignPort; broadcast: BroadcastPort },
 ): Promise<BroadcastOutcome & { feeSats: number }> {
   const plan = await planMint(params, ports);
-  // 'asset-notice' EXECUTES. It means a coin will be spent and it carries
-  // assets, which the money-path rule calls an enabled CTA with a visible
-  // notice, not a block. The blocking answers are 'expert-required',
-  // 'insufficient' and 'scanning', and all three arrive with pick === null.
-  // Requiring 'ready' here refused the separate-payment-address auto-pick,
-  // the one topology where the rule says to proceed.
+  // 'asset-notice' executes: a coin will be spent and it carries assets, which
+  // the money-path rule calls an enabled CTA with a notice. Requiring 'ready'
+  // refused the separate-payment-address auto-pick.
   const proceeds = plan.status === 'ready' || plan.status === 'asset-notice';
   if (!proceeds || !plan.pick || plan.buildFeeSats == null) {
     throw new Error(

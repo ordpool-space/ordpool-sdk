@@ -264,17 +264,10 @@ async function planTransfer(
       requirementSats: target, preferredSats: preferredTarget, candidateFees,
     };
   }
-  // The verdict is about the coin that WILL be spent, so it reads the pick's
-  // own content bucket rather than the recommendation's topology-shaped
-  // status. Reading the recommendation made the same user action answer
-  // differently per wallet: an explicit "use anyway" pick of an asset coin
-  // reported 'asset-notice' on a separate-payment-address wallet and 'ready'
-  // on a one-address one, so a consumer gating its notice on the status hid
-  // the warning exactly where the SDK was strictest.
-  //
-  // 'asset-notice' is an ENABLED state with a warning, never a block. The
-  // blocking answers are 'expert-required', 'insufficient' and 'scanning',
-  // and they all return above this with pick === null.
+  // Reads the PICK's content bucket, not the recommendation's topology-shaped
+  // status, so the same action answers the same way on every wallet.
+  // 'asset-notice' is enabled-with-warning; the blocking answers return above
+  // with pick === null.
   return {
     status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
     recommendation,
@@ -324,12 +317,9 @@ export async function executeTransfer(
   ports: { utxos: UtxosPort; scan: ContentScanPort; sign: SignPort; broadcast: BroadcastPort },
 ): Promise<BroadcastOutcome & { feeSats: number }> {
   const plan = await planTransfer(params, ports);
-  // 'asset-notice' EXECUTES. It means a coin will be spent and it carries
-  // assets, which the money-path rule calls an enabled CTA with a visible
-  // notice, not a block. The blocking answers are 'expert-required',
-  // 'insufficient' and 'scanning', and all three arrive with pick === null.
-  // Requiring 'ready' here refused the separate-payment-address auto-pick,
-  // the one topology where the rule says to proceed.
+  // 'asset-notice' executes: a coin will be spent and it carries assets, which
+  // the money-path rule calls an enabled CTA with a notice. Requiring 'ready'
+  // refused the separate-payment-address auto-pick.
   const proceeds = plan.status === 'ready' || plan.status === 'asset-notice';
   if (!proceeds || !plan.pick || plan.buildFeeSats == null || plan.built == null) {
     throw new Error(

@@ -150,8 +150,7 @@ function inscribeFundingTarget(params: InscribeCoreParams): { target: number | n
       ephemeralPubkeyXonly: new Uint8Array(32).fill(0x02),
       tip: params.tip,
       walletType: params.walletType,
-      // Measured with the floor the real build uses, so the target and the
-      // transaction that has to meet it agree on when change survives.
+      // Same floor as the real build, so target and transaction agree.
       changeDustLimitSats: changeDustFloor(params.paymentAddress),
       network: params.network,
     });
@@ -213,12 +212,7 @@ function inscribeCandidateFees(
         ephemeralPubkeyXonly: new Uint8Array(32).fill(0x02),
         tip: params.tip,
         walletType: params.walletType,
-        // The PER-ADDRESS floor, the same one the real build passes
-        // (`inscription.service.helper` and `inscribe-mint-orchestrator`).
-        // Omitted, the commit falls back to the postage value, and across the
-        // band between that and the address's own floor the grid folds the
-        // leftover into the fee and reports an over-pay while the signed
-        // commit emits it as change.
+        // Per-address floor, the same one the real build passes.
         changeDustLimitSats: changeDustFloor(params.paymentAddress),
         network: params.network,
       });
@@ -274,9 +268,9 @@ async function planInscribe(
     };
   }
   // Reads the PICK's content bucket, not the recommendation's topology-shaped
-  // status, so the same user action answers the same way on every wallet.
-  // 'asset-notice' is an ENABLED state with a warning; the blocking answers
-  // return above with pick === null.
+  // status, so the same action answers the same way on every wallet.
+  // 'asset-notice' is enabled-with-warning; the blocking answers return above
+  // with pick === null.
   return {
     status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
     recommendation,
@@ -325,12 +319,9 @@ export async function executeInscribe(
   },
 ): Promise<InscribeAndBroadcastResult> {
   const plan = await planInscribe(params, ports);
-  // 'asset-notice' EXECUTES. It means a coin will be spent and it carries
-  // assets, which the money-path rule calls an enabled CTA with a visible
-  // notice, not a block. The blocking answers are 'expert-required',
-  // 'insufficient' and 'scanning', and all three arrive with pick === null.
-  // Requiring 'ready' here refused the separate-payment-address auto-pick,
-  // the one topology where the rule says to proceed.
+  // 'asset-notice' executes: a coin will be spent and it carries assets, which
+  // the money-path rule calls an enabled CTA with a notice. Requiring 'ready'
+  // refused the separate-payment-address auto-pick.
   const proceeds = plan.status === 'ready' || plan.status === 'asset-notice';
   if (!proceeds || !plan.pick) {
     throw new Error(

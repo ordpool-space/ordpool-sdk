@@ -1,15 +1,8 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 import { ClickableControl } from './click-until-effect';
 /**
- * Build an `isApproval` predicate anchored on the control the caller is about
- * to use.
- *
- * `url` is an optional pre-filter for contexts holding several extension
- * pages: it is cheap and it narrows, but it never decides. `control` is what
- * actually gates, because it is the thing the caller's next line touches.
- *
- * The two share one budget, so a slow route plus a slow boot cannot add up to
- * twice the deadline the caller asked for.
+ * `isApproval` anchored on the control the caller is about to use. `url` only
+ * narrows; `control` decides. Both share one budget.
  */
 export declare function approvalGate(opts: {
     url?: RegExp;
@@ -30,30 +23,16 @@ export declare function approvalGate(opts: {
  *     page wins and the outer promise resolves with it.
  *
  * ANCHOR ON THE CONTROL, not on the URL. `approvalGate` below builds the
- * predicate; reach for it rather than writing one by hand.
+ * predicate.
  *
  *     isApproval: approvalGate({
- *       url: /notification\.html#\/approval/,      // optional cheap pre-filter
+ *       url: /notification\.html#\/approval/,      // optional pre-filter
  *       control: p => p.getByText(/^Connect$/).first(),
  *     })
  *
- * A URL-only predicate is racy, and the race is invisible until it is not. An
- * extension popup's route is a HASH, so the URL matches the instant the window
- * exists, while the app inside it is still booting. The predicate then reports
- * "this is the approval popup" and hands back a page that is a boot spinner.
- * The caller's click starts its own budget from there and spends all of it
- * auto-waiting for a control that was never going to appear in that window.
- *
- * Measured: on one cubes matrix run under 14-way load, unisat failed this way
- * while wizz passed on the identical gate, the identical control and the same
- * popup implementation (wizz is a unisat fork). Same anchor, opposite outcome,
- * which is a race rather than a broken popup.
- *
- * Anchoring on the control is never worse. If the boot is merely late, the
- * wait happens inside THIS helper's budget and the click starts against a
- * mounted page. If the popup never mounts, both forms fail, but this one fails
- * saying the control never appeared, which is the true sentence and points the
- * investigation at the page instead of at the click.
+ * A URL-only predicate is racy: an extension popup's route is a HASH, so it
+ * matches the instant the window exists while the app is still booting, and
+ * the caller's click then spends its budget on a control that never mounted.
  *
  * `isApproval` may throw (e.g. its internal timeout fires) — the
  * helper swallows the throw and keeps waiting on the OTHER pages,
