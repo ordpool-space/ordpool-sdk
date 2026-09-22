@@ -245,8 +245,14 @@ export async function approveWizzSignPopup(opts: {
   // and all six specs failed: textContent is not the accessible name.
   const byRole = await approval.getByRole('button', { name: /^Sign$/ }).count().catch(() => -1);
   const byText = await approval.locator('button', { hasText: /^Sign$/ }).count().catch(() => -1);
+  // byRole 0 AND byText 0 while the in-page scan finds the button means the
+  // matchers are not the question. These separate "wrong matcher" from "not in
+  // the main frame": anyButton counts every button Playwright can see at all.
+  const anyButton = await approval.locator('button').count().catch(() => -1);
+  const looseText = await approval.getByText(/Sign/).count().catch(() => -1);
+  const frames = approval.frames().length;
   // eslint-disable-next-line no-console
-  console.log(`[wizz:sign-popup] ${JSON.stringify({ ...(await found.jsonValue()), byRole, byText })}`);
+  console.log(`[wizz:sign-popup] ${JSON.stringify({ ...(await found.jsonValue()), byRole, byText, anyButton, looseText, frames })}`);
 
   await approval.evaluate(() => {
     const isSignButton = (el: Element) => /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test((el.textContent || '').trim());
