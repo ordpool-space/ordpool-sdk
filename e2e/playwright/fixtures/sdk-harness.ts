@@ -507,6 +507,13 @@ async function waitForXverseProvider(timeoutMs = 15_000): Promise<boolean> {
 }
 
 window.ordpoolSdkHarness = {
+  // Declared below as hoisted functions, so the harness is one complete object
+  // rather than a literal patched afterwards: assigning the three later leaves
+  // a window of frames where a spec can reach a harness that lacks them.
+  runOperation,
+  signMessage,
+  deriveRegtestAddresses,
+
   detectXverse(): boolean {
     return xverseConnector.detect(window);
   },
@@ -846,7 +853,7 @@ function expectedTxidFromUnsignedPsbt(psbtBytes: Uint8Array): string {
  * So do not read a green mint spec here as "this wallet can mint a cat a user
  * will see in it". Consumer-side cells cover the user-shaped mint.
  */
-window.ordpoolSdkHarness.deriveRegtestAddresses = (paymentPublicKeyHex: string) => {
+function deriveRegtestAddresses(paymentPublicKeyHex: string) {
   const pubkey = hexToBytes(paymentPublicKeyHex);
   const regtest = toScureNetwork(Network.Regtest);
   const payment = p2wpkh(pubkey, regtest);
@@ -982,6 +989,22 @@ function orchestrateInscribe(input: InscribeRequest): {
  * so the wallet's "is this my address?" check passes against its
  * mainnet view of the same key).
  */
+/**
+ * Turn the page-boundary wallet type back into the enum.
+ *
+ * `page.evaluate` serialises an enum to its string value, so every
+ * RunOperation input declares `walletType` as `${KnownOrdinalWalletType}`.
+ * This is the one place that converts it back, and it REJECTS an unknown
+ * string instead of asserting: a typo in a spec then fails here naming the
+ * offending value, rather than several frames deeper in a connector lookup
+ * that reports only "no signer".
+ */
+function asWalletType(t: `${KnownOrdinalWalletType}`): KnownOrdinalWalletType {
+  const known = Object.values(KnownOrdinalWalletType) as string[];
+  if (!known.includes(t)) throw new Error(`unknown wallet type from the spec: ${t}`);
+  return t as KnownOrdinalWalletType;
+}
+
 function signerNetworkFor(walletType: KnownOrdinalWalletType): Network {
   switch (walletType) {
     case KnownOrdinalWalletType.xverse:
@@ -1041,7 +1064,7 @@ function walletSidePaymentAddressFor(
  * address from connect (what the wallet signs under); no regtest shim, since
  * message signing never touches the chain.
  */
-window.ordpoolSdkHarness.signMessage = async (input: { walletType: KnownOrdinalWalletType; address: string; message: string }) => {
+async function signMessage(input: { walletType: KnownOrdinalWalletType; address: string; message: string }) {
   const signer = findSignerOrThrow(input.walletType);
   const result = await firstValueFrom(signer.signMessage({
     address: input.address,
@@ -1060,7 +1083,14 @@ window.ordpoolSdkHarness.signMessage = async (input: { walletType: KnownOrdinalW
   };
 };
 
-window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promise<RunOperationResult> => {
+async function runOperation(input: RunOperationMintInput): Promise<RunOperationMintResult>;
+async function runOperation(input: RunOperationInscribeInput): Promise<RunOperationInscribeResult>;
+async function runOperation(input: RunOperationInscribeChildInput): Promise<RunOperationInscribeChildResult>;
+async function runOperation(input: RunOperationTransferInput): Promise<RunOperationTransferResult>;
+async function runOperation(input: RunOperationCreateOfferInput): Promise<RunOperationCreateOfferResult>;
+async function runOperation(input: RunOperationAcceptOfferInput): Promise<RunOperationAcceptOfferResult>;
+async function runOperation(input: RunOperationInput): Promise<RunOperationResult>;
+async function runOperation(input: RunOperationInput): Promise<RunOperationResult> {
   if (input.walletType === KnownOrdinalWalletType.phantom) {
     throw new Error(
       'runOperation: Phantom v26.x SW lacks btc_* handlers; the connect step fails before any sign happens. Specs assert connect rejection.',
@@ -1082,10 +1112,10 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
   }
 
   const paymentPubkey = hexToBytes(input.paymentPublicKey);
-  const signer = findSignerOrThrow(input.walletType);
-  const sNetwork = signerNetworkFor(input.walletType);
+  const signer = findSignerOrThrow(asWalletType(input.walletType));
+  const sNetwork = signerNetworkFor(asWalletType(input.walletType));
   const walletPaymentAddress = walletSidePaymentAddressFor(
-    input.walletType,
+    asWalletType(input.walletType),
     input.paymentAddress,
     paymentPubkey,
   );
@@ -1095,9 +1125,13 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
       txid:  input.utxo.txid,
       vout:  input.utxo.vout,
       value: input.utxo.value,
+      // Every funding coin a spec hands in was mined by the regtest bootstrap
+      // before the operation runs, the same shape mint.core builds for its own
+      // funding input.
+      status: { confirmed: true },
     };
     const built = createTransaction(
-      input.walletType,
+      asWalletType(input.walletType),
       input.recipientAddress,
       txnOutput,
       paymentPubkey,
@@ -1308,9 +1342,9 @@ window.ordpoolSdkHarness.runOperation = async (input: RunOperationInput): Promis
 async function runTransferOperation(
   input: RunOperationTransferInput,
 ): Promise<RunOperationTransferResult> {
-  const signer = findSignerOrThrow(input.walletType);
+  const signer = findSignerOrThrow(asWalletType(input.walletType));
   const built = buildCat21TransferPsbt({
-    walletType: input.walletType as KnownOrdinalWalletType,
+    walletType: asWalletType(input.walletType),
     network: Network.Regtest,
     catUtxo: {
       txid:        input.catInput.txid,
@@ -1387,9 +1421,9 @@ async function runTransferOperation(
 async function runCreateOfferOperation(
   input: RunOperationCreateOfferInput,
 ): Promise<RunOperationCreateOfferResult> {
-  const signer = findSignerOrThrow(input.walletType);
+  const signer = findSignerOrThrow(asWalletType(input.walletType));
   const built = buildCat21BuyOfferPsbt({
-    walletType: input.walletType as KnownOrdinalWalletType,
+    walletType: asWalletType(input.walletType),
     network:    Network.Regtest,
     sellerInput: {
       txid:        input.sellerInput.txid,
@@ -1450,7 +1484,7 @@ async function runCreateOfferOperation(
 async function runAcceptOfferOperation(
   input: RunOperationAcceptOfferInput,
 ): Promise<RunOperationAcceptOfferResult> {
-  const signer = findSignerOrThrow(input.walletType);
+  const signer = findSignerOrThrow(asWalletType(input.walletType));
   const psbtBytes = hexToBytes(input.psbtHex);
 
   // Same network-uniform-keys reasoning as `runTransferOperation`:

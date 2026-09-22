@@ -93,7 +93,7 @@
     "build:e2e": "tsc -p tsconfig.e2e.json && node -e \"require('fs').writeFileSync('dist-e2e/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
     "prepare": "npm run build:main",
     "start": "npm run test",
-    "test": "npm run check:playwright-slots && npm run test:node && npm run test:browser",
+    "test": "npm run check:playwright-slots && npm run check:harness-types && npm run test:node && npm run test:browser",
     "check:playwright-slots": "node scripts/check-playwright-arg-slots.mjs",
     "test:node": "jest --config jest.config.node.js",
     "test:node:watch": "jest --config jest.config.node.js --watch ",
@@ -107,7 +107,8 @@
     "e2e:harness:serve": "node e2e/playwright/fixtures-server.js",
     "build:brotli-wasm": "bash scripts/build-brotli-wasm.sh",
     "create-link": "npm run build && cd dist && npm link",
-    "build:server-cjs": "tsc -p tsconfig.server-cjs.json && node -e \"require('fs').writeFileSync('dist-cjs/package.json', JSON.stringify({type:'commonjs'},null,2))\""
+    "build:server-cjs": "tsc -p tsconfig.server-cjs.json && node -e \"require('fs').writeFileSync('dist-cjs/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
+    "check:harness-types": "tsc -p e2e/playwright/tsconfig.harness.json"
   },
   "keywords": [
     "bitcoin",

@@ -60,14 +60,18 @@ describe('Honest wallet coverage (audit gate)', () => {
     // pre-2026-09-04 version regexed for buildAndSignMintVia*, which the
     // runOperation refactor had removed, so its loop matched nothing and
     // the gate passed vacuously forever).
-    const anchors = src.match(/window\.ordpoolSdkHarness\.runOperation = async/g) ?? [];
+    // The IMPLEMENTATION, not one of the overload signatures: only the
+    // implementation carries a body, and the body is what this gate audits.
+    const anchors = src.match(/async function runOperation\(input: RunOperationInput\): Promise<RunOperationResult> \{/g) ?? [];
     expect(anchors.length).toBe(1);
 
     // Identity-argument positions: the wallet type handed to the PSBT
     // builder and to the signer registry IS the wallet identity. Both
     // must be the caller's `input.walletType` pass-through.
-    expect(src).toMatch(/createTransaction\(\s*\n?\s*input\.walletType/);
-    expect(src).toMatch(/findSignerOrThrow\(input\.walletType\)/);
+    // `asWalletType` narrows the page-boundary string back to the enum and
+    // throws on anything unknown, so it is a pass-through, not a substitution.
+    expect(src).toMatch(/createTransaction\(\s*\n?\s*asWalletType\(input\.walletType\)/);
+    expect(src).toMatch(/findSignerOrThrow\(asWalletType\(input\.walletType\)\)/);
     expect(src.match(/findSignerOrThrow\(\s*KnownOrdinalWalletType\./g) ?? []).toEqual([]);
 
     // A hardcoded KnownOrdinalWalletType literal in a builder call is a
@@ -75,13 +79,16 @@ describe('Honest wallet coverage (audit gate)', () => {
     // matches the literal (the Alby SW-bypass helpers are alby-only by
     // construction). Split the harness into `window.ordpoolSdkHarness.X`
     // sections and enforce per section.
-    const sections = src.split(/window\.ordpoolSdkHarness\./).slice(1);
-    // Sanity that the split found the assignment sections at all: the
-    // audited runOperation must be among them.
-    expect(sections.map(sec => (sec.match(/^(\w+)/) ?? [])[1])).toContain('runOperation');
+    // Sectioned by top-level function declaration, which is how the harness
+    // is assembled: one function per operation, named after it.
+    const sections = src.split(/\n(?=(?:async )?function )/).slice(1);
+    const sectionName = (sec: string) => (sec.match(/^(?:async )?function (\w+)/) ?? [])[1] ?? '(unnamed)';
+    // Sanity that the split found the sections at all: the audited
+    // runOperation must be among them.
+    expect(sections.map(sectionName)).toContain('runOperation');
     const violations: string[] = [];
     for (const section of sections) {
-      const name = (section.match(/^(\w+)/) ?? [])[1] ?? '(unnamed)';
+      const name = sectionName(section);
       const literalCalls = section.match(/createTransaction\(\s*\n?\s*KnownOrdinalWalletType\.(\w+)/g) ?? [];
       for (const call of literalCalls) {
         const literal = (call.match(/KnownOrdinalWalletType\.(\w+)/) ?? [])[1];
