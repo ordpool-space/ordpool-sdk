@@ -126,12 +126,48 @@ export declare function getTxStatus(txid: string): Promise<{
  * `ordpool-parser` Cat21ParserService consumes: `locktime`, `weight`,
  * `fee`, and `status.block_hash`.
  */
+/**
+ * One input of an electrs (esplora) transaction. NOT the `bitcoin-cli` shape:
+ * esplora carries `prevout` / `scriptsig` / `witness` where the CLI carries
+ * `scriptSig`, and the two are easy to confuse because both are called a vin.
+ *
+ * Captured from the live regtest electrs rather than transcribed. Partial by
+ * design: an unread field is absent from the type rather than guessed at.
+ */
+export interface EsploraVin {
+    txid: string;
+    vout: number;
+    sequence: number;
+    is_coinbase: boolean;
+    scriptsig: string;
+    scriptsig_asm: string;
+    witness: string[];
+    /** `null` on a coinbase input, measured. */
+    prevout: EsploraVout | null;
+}
+/**
+ * One output of an electrs transaction.
+ *
+ * `value` is in SATS here, where `bitcoin-cli` reports BTC as a decimal on the
+ * same-named field. And the script fields are LOWERCASE `scriptpubkey*`, not
+ * the CLI's camelCase `scriptPubKey`: reading `scriptPubKey` off one of these
+ * yields `undefined`, which typed as `unknown[]` compiled and silently
+ * returned nothing.
+ */
+export interface EsploraVout {
+    value: number;
+    scriptpubkey: string;
+    scriptpubkey_asm: string;
+    scriptpubkey_type: string;
+    /** Absent for a script type electrs cannot render as an address. */
+    scriptpubkey_address?: string;
+}
 export interface EsploraTx {
     txid: string;
     version: number;
     locktime: number;
-    vin: unknown[];
-    vout: unknown[];
+    vin: EsploraVin[];
+    vout: EsploraVout[];
     size: number;
     weight: number;
     fee: number;
