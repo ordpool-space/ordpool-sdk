@@ -353,6 +353,28 @@ describe('Cat21MintOrchestrator.refreshUtxos', () => {
     expect(s.errorMessage).toMatch(/Could not price the funding coins/);
     expect(s.simulations).toEqual([]);
     expect(s.fundingRecommendation.status).toBe('insufficient');
+    // Reachability, not just presence: every consumer gates its banner on
+    // `state === 'error'`, so a reason written while the state stays `ready`
+    // is a message nobody can render and the screen falls through to
+    // "not enough Bitcoin, add funds" for a code or network fault.
+    expect(s.state).toBe('error');
+  });
+
+  it('a SUCCESSFUL recompute does not clear an error it did not write', async () => {
+    // mint()'s broadcast failure and loadUtxos's failure both write
+    // errorMessage. Clobbering one on the next fee-rate nudge leaves
+    // `state: 'error'` with nothing to render: no text, no CTA, no way out.
+    const o = new Cat21MintOrchestrator(deps());
+    await o.setWallet(wallet);
+
+    (o as unknown as { patch(n: Record<string, unknown>): void })
+      .patch({ state: 'error', errorMessage: 'user rejected the signature' });
+
+    o.setFeeRate(11);
+    // Let the recompute run to completion rather than racing its first
+    // emission: the clobber this pins happens in the FINAL patch.
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(o.getSnapshot().errorMessage).toBe('user rejected the signature');
   });
 
 });

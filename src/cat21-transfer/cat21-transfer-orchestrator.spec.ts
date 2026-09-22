@@ -165,6 +165,28 @@ describe('Cat21TransferOrchestrator (framework-agnostic)', () => {
     expect(o.getSnapshot().simulation).toBeNull();
   });
 
+  it('a failed recompute reports the reason AND reaches state error', async () => {
+    // Without both halves the page renders "not enough Bitcoin, add funds" for
+    // a code or network fault, and the user tops up an address that was never
+    // the problem. The message alone is unreachable: consumers gate on state.
+    // A scan that throws is NOT this case: selectFunding turns that into a
+    // `failed` bucket, which is a coin state rather than a crash. The recompute
+    // throws when the BUILDER cannot work from the params at all, which is what
+    // a wrong-network address looks like.
+    const o = new Cat21TransferOrchestrator(deps());
+    await o.setWallet({ ...wallet, paymentAddress: 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx' });
+    o.setCatUtxo(cat);
+    o.setRecipientAddress(ORDINALS_ADDR);
+    o.setFeeRate(10);
+    for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5));
+    const s = o.getSnapshot();
+    expect(s.errorMessage).toMatch(/Could not price the funding coins/);
+    // The builder's own words travel, not a generic placeholder.
+    expect(s.errorMessage).toMatch(/Unknown letter/);
+    expect(s.state).toBe('error');
+    expect(s.simulation).toBeNull();
+  });
+
   it('INSUFFICIENT: coin too small => no sim, transfer() refuses with the fee-rate message', async () => {
     const o = new Cat21TransferOrchestrator(deps({ getUtxos: async () => [coin('c', 300)] }));
     await o.setWallet(wallet);

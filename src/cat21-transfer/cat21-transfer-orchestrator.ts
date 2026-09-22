@@ -328,9 +328,19 @@ export class Cat21TransferOrchestrator {
         this.paramsFor(wallet, cat, recipient, feeRate),
         { utxos: this.utxosPort(), scan: this.deps.scan },
       );
-    } catch {
+    } catch (err) {
       if (seq !== this.recomputeSeq) return;
-      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      // Keep the REASON and make it REACHABLE. An empty recommendation renders
+      // as a disabled control and the page then says "not enough Bitcoin, add
+      // funds" for what is a code or network fault, so the user tops up an
+      // address that was never the problem. Consumers gate their banner on
+      // `state === 'error'`, so the message has to travel with the state.
+      this.patch({ simulation: null,
+        fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [],
+        fundingRequirementSats: 0, fundingPreferredSats: 0,
+        errorMessage: `Could not price the funding coins: ${errMsg(err)}`,
+        state: 'error',
+      });
       return;
     }
     if (seq !== this.recomputeSeq) return; // a newer input superseded this run

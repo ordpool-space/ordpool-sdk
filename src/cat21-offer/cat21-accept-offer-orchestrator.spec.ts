@@ -205,3 +205,36 @@ describe('Cat21AcceptOfferOrchestrator (framework-agnostic)', () => {
     expect(o.getSnapshot().state).toBe('error');
   });
 });
+
+describe('setWallet identity is the full context, not one address', () => {
+  // Two wallets restored from one seed report the SAME ordinals address with a
+  // different type and a different ordinalsPublicKey, and that pubkey is the
+  // taproot internal key for input 0, the input that hands over the cat.
+  const xverse = {
+    type: KnownOrdinalWalletType.xverse,
+    ordinalsAddress: 'bc1pshared',
+    ordinalsPublicKey: 'aa'.repeat(32),
+  };
+  const cat21wallet = {
+    ...xverse,
+    type: KnownOrdinalWalletType.cat21wallet,
+    ordinalsPublicKey: 'bb'.repeat(32),
+  };
+
+  it('resets the form when a DIFFERENT wallet reports the same ordinals address', () => {
+    const o = new Cat21AcceptOfferOrchestrator(deps());
+    o.setWallet(xverse);
+    fillIntent(o);
+    expect(o.getSnapshot().expectedCatUtxo).not.toBeNull();
+    o.setWallet(cat21wallet);
+    expect(o.getSnapshot().expectedCatUtxo).toBeNull();
+  });
+
+  it('keeps the form on a genuine re-emission of the same wallet', () => {
+    const o = new Cat21AcceptOfferOrchestrator(deps());
+    o.setWallet(xverse);
+    fillIntent(o);
+    o.setWallet({ ...xverse });
+    expect(o.getSnapshot().expectedCatUtxo).not.toBeNull();
+  });
+});

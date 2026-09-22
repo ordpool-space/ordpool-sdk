@@ -378,7 +378,17 @@ export class Cat21MintOrchestrator {
       simulations: recomputeError ? [] : this.rowsFrom(candidateFees),
       fundingRecommendation, candidateFees,
       fundingRequirementSats, fundingPreferredSats,
-      errorMessage: recomputeError,
+      // Keeping the reason is not enough on its own: every consumer gates its
+      // banner on `state === 'error'`, so a message written while the state
+      // stays `ready` is unreachable and the screen falls through to "not
+      // enough Bitcoin, add funds" for what is a code or network fault.
+      ...(recomputeError
+        ? { errorMessage: recomputeError, state: 'error' as const }
+        // And a SUCCESSFUL recompute must not clear a message it did not
+        // write. `mint()`'s broadcast failure and `loadUtxos`'s failure both
+        // land on this field, and clobbering one leaves `state: 'error'` with
+        // nothing to render: a dead end with no text and no CTA.
+        : this.snap.state === 'error' ? {} : { errorMessage: null }),
     });
   }
 

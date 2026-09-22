@@ -3,6 +3,7 @@ import { BroadcastOutcome } from '../cat21-core/ports.js';
 import { CatOutpoint } from '../cat21-share/cat-outpoint.js';
 import { Network } from '../network.js';
 import { PaymentAddress } from '../wallet/address-types.js';
+import { walletIdentity } from '../wallet/wallet-identity.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { validateCat21BuyOfferPsbt } from './cat21-offer.helper.js';
 import { Cat21OfferValidation } from './cat21-offer.types.js';
@@ -70,7 +71,8 @@ export class Cat21AcceptOfferOrchestrator {
   static readonly MAX_PASTED_OFFER_BYTES = MAX_PASTED_OFFER_BYTES;
 
   private wallet: AcceptOfferWalletContext | null = null;
-  private lastWalletAddress: string | null = null;
+  /** Full identity, not one address: see `walletIdentity`. */
+  private lastWalletIdentity: string | null = null;
   private humanUiOptOut = false;
   private snap: AcceptOfferSnapshot = {
     state: 'idle',
@@ -98,19 +100,29 @@ export class Cat21AcceptOfferOrchestrator {
     return () => this.listeners.delete(listener);
   }
 
-  /** Connect / swap the seller wallet. Auto-resets the form on address change. */
+  /**
+   * Connect / swap the seller wallet. Auto-resets the form on a wallet change.
+   *
+   * Identity is the FULL context, not one address. Two wallets restored from
+   * one seed report the SAME ordinals address with a different `type` and a
+   * different `ordinalsPublicKey`, and that pubkey is the taproot internal key
+   * for input 0 — the input that hands over the cat. Comparing the address
+   * alone would keep the previous wallet's expected cat, payout address and
+   * floor in the form while a DIFFERENT wallet is asked to sign the accept.
+   */
   setWallet(wallet: AcceptOfferWalletContext | null): void {
     this.wallet = wallet;
+    const identity = wallet ? walletIdentity(wallet) : null;
     if (!wallet) {
-      if (this.lastWalletAddress !== null) this.resetFormFields();
-      this.lastWalletAddress = null;
+      if (this.lastWalletIdentity !== null) this.resetFormFields();
+      this.lastWalletIdentity = null;
       return;
     }
-    if (this.lastWalletAddress === null || this.lastWalletAddress === wallet.ordinalsAddress) {
-      this.lastWalletAddress = wallet.ordinalsAddress;
+    if (this.lastWalletIdentity === null || this.lastWalletIdentity === identity) {
+      this.lastWalletIdentity = identity;
       return;
     }
-    this.lastWalletAddress = wallet.ordinalsAddress;
+    this.lastWalletIdentity = identity;
     this.resetFormFields();
   }
 
