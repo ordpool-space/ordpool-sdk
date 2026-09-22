@@ -224,8 +224,13 @@ async function approveWizzSignPopup(opts) {
     // all six specs then failed with "approval popup did not appear". textContent
     // is not the accessible name, so the next attempt must measure the NAME, or
     // use locator('button', { hasText }) which matches on text.
+    // Count the candidate LOCATORS rather than describing the element and
+    // inferring one. 94b5e2a inferred getByRole from this line's `text` field
+    // and all six specs failed: textContent is not the accessible name.
+    const byRole = await approval.getByRole('button', { name: /^Sign$/ }).count().catch(() => -1);
+    const byText = await approval.locator('button', { hasText: /^Sign$/ }).count().catch(() => -1);
     // eslint-disable-next-line no-console
-    console.log(`[wizz:sign-popup] ${JSON.stringify(await found.jsonValue())}`);
+    console.log(`[wizz:sign-popup] ${JSON.stringify({ ...(await found.jsonValue()), byRole, byText })}`);
     await approval.evaluate(() => {
         const isSignButton = (el) => /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test((el.textContent || '').trim());
         const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
