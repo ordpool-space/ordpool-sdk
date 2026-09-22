@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 
 /**
@@ -111,10 +111,14 @@ test('unisatConnector.connect via the harness page returns the BIP-84 mainnet ad
     approval = await waitForApprovalPopup({
       context,
       knownPages,
-      isApproval: async (p) => {
-        await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
-        return true;
-      },
+      // Anchored on the CONTROL this test is about to click, with the URL as a
+      // cheap pre-filter. A URL-only gate matches while the popup is still a
+      // boot spinner, because the route is a hash, and the click then spends
+      // its own budget waiting for something that has not mounted.
+      isApproval: approvalGate({
+        url: /notification\.html#\/approval/,
+        control: (p) => p.getByText(/^Connect$/).first(),
+      }),
     });
   } catch {
     await shot(harness, '02a-no-approval');
