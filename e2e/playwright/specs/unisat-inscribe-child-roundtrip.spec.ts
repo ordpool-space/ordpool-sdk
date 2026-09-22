@@ -16,7 +16,7 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 
 /**
@@ -82,10 +82,14 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    isApproval: async (p) => {
-      await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
-      return true;
-    },
+    // Anchored on the CONTROL this helper clicks, with the URL as a cheap
+    // pre-filter. A URL-only gate matches while the popup is still a boot
+    // spinner, because the route is a hash, and the click then spends its own
+    // budget waiting for something that has not mounted.
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByText(/^Connect$/).first(),
+    }),
   });
   await approval.getByText(/^Connect$/).first().click();
 }

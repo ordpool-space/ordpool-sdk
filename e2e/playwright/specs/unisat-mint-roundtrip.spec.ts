@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 
 /**
@@ -59,10 +59,12 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    isApproval: async (p) => {
-      await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
-      return true;
-    },
+    // Anchored on the CONTROL this helper clicks, with the URL as a cheap
+    // pre-filter: a hash route matches while the popup is still a boot spinner.
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByText(/^Connect$/).first(),
+    }),
   });
   // Unisat uses styled div, not <button> — match by text.
   await approval.getByText(/^Connect$/).first().click();

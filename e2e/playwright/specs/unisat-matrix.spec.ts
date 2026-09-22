@@ -3,7 +3,7 @@ import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 
 /**
@@ -82,10 +82,12 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     approval = await waitForApprovalPopup({
       context: ctx,
       knownPages,
-      isApproval: async (p) => {
-        await p.waitForURL(/notification\.html#\/approval/, { timeout: 60_000 });
-        return true;
-      },
+      // Anchored on the CONTROL this helper clicks, with the URL as a cheap
+      // pre-filter: a hash route matches while the popup is still a boot spinner.
+      isApproval: approvalGate({
+        url: /notification\.html#\/approval/,
+        control: (p) => p.getByText(/^Connect$/).first(),
+      }),
     });
   } catch {
     throw new Error('unisat connection-request popup never appeared');
