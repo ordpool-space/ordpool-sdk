@@ -244,3 +244,20 @@ describe('Cat21CreateOfferOrchestrator wallet re-emission', () => {
     expect(fetches).toBe(2);
   });
 });
+
+describe('setSelectedFundingUtxo is free when the selection does not change', () => {
+  it('a consumer re-driving it from a snapshot stream does NOT loop', async () => {
+    // The setter recomputes, so a consumer tap that reconciles its selection
+    // on every emission would patch, emit, re-enter and never settle. Measured
+    // on the mint orchestrator at 800+ emissions per second before the guard
+    // existed, with the symptom a funding picker that never rendered.
+    const o = new Cat21CreateOfferOrchestrator(deps());
+    let emissions = 0;
+    o.subscribe(() => {
+      emissions++;
+      if (emissions < 200) o.setSelectedFundingUtxo(o.getSnapshot().selectedFundingUtxo);
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(emissions).toBeLessThan(50);
+  }, 15_000);
+});
