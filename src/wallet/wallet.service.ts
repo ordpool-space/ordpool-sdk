@@ -2,7 +2,6 @@ import {
   BehaviorSubject,
   concat,
   defer,
-  merge,
   distinctUntilChanged,
   from,
   map,
@@ -228,8 +227,19 @@ export class WalletService {
     this.rescanWallets$.next();
   }
 
-  wallets$ = merge(this.rescanWallets$.pipe(startWith(undefined)))
+  /**
+   * The two wallet buckets, detected once per detection window and SHARED.
+   *
+   * Every subscriber must see the same answer, and a second subscriber must
+   * not start a second sweep: detection is a property of the page, not of the
+   * subscriber, and an independent sweep per consumer both costs a poll train
+   * each and leaves `rescanWallets()` reaching only whoever was subscribed at
+   * the time. `refCount` lets the sweep restart for a page that dropped every
+   * subscriber and then picks the service up again.
+   */
+  wallets$ = this.rescanWallets$
     .pipe(
+      startWith(undefined),
       switchMap(() =>
         timer(0, WalletService.DETECTION_POLL_MS).pipe(
           take(
@@ -241,12 +251,20 @@ export class WalletService {
           // Stop once the answer has held still for SETTLE_MS. `scan` carries
           // the previous bucket key and the run length, so a late injection
           // re-opens the count instead of arriving after the stream closed.
+          // `scan` emits only after folding the first value in, so the seed's
+          // key is the only part of it a downstream operator ever reads.
           scan(
-            (acc, buckets) => {
-              const key = walletBucketKey(buckets);
-              return { buckets, key, stable: key === acc.key ? acc.stable + 1 : 0 };
-            },
-            { buckets: undefined as unknown as ReturnType<WalletService['getInstalledWallets']>, key: '', stable: -1 },
+            (acc, buckets) => ({
+              ...buckets,
+              key: walletBucketKey(buckets),
+              stable: walletBucketKey(buckets) === acc.key ? acc.stable + 1 : 0,
+            }),
+            {
+              installedWallets: [],
+              notInstalledWallets: [],
+              key: '',
+              stable: -1,
+            } as ReturnType<WalletService['getInstalledWallets']> & { key: string; stable: number },
           ),
           // Settling early is only safe once SOMETHING has been detected.
           // An empty set is exactly the answer a late injection changes, and
@@ -254,13 +272,12 @@ export class WalletService {
           // so an empty sweep keeps asking until the ceiling.
           takeWhile(
             (acc) =>
-              acc.buckets === undefined ||
-              acc.buckets.installedWallets.length === 0 ||
+              acc.installedWallets.length === 0 ||
               acc.stable <
                 WalletService.DETECTION_SETTLE_MS / WalletService.DETECTION_POLL_MS,
             true,
           ),
-          map((acc) => acc.buckets),
+          map(({ installedWallets, notInstalledWallets }) => ({ installedWallets, notInstalledWallets })),
         ),
       ),
       // Drop wallets that cannot work on DESKTOP (Phantom, Binance): their
@@ -291,7 +308,8 @@ export class WalletService {
       // cheap type-membership of both buckets rather than JSON-stringify
       // the buckets (which would serialise ~40 KB of logo strings per
       // check, up to 3x per subscription).
-      distinctUntilChanged((prev, curr) => walletBucketKey(prev) === walletBucketKey(curr))
+      distinctUntilChanged((prev, curr) => walletBucketKey(prev) === walletBucketKey(curr)),
+      shareReplay({ bufferSize: 1, refCount: true }),
     );
 
   // Static derivation from the network. Kept as a boolean field (read by
