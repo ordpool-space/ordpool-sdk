@@ -198,10 +198,13 @@ export async function approveWizzSignPopup(opts: {
     context: opts.context,
     knownPages: opts.knownPages,
     timeoutMs: popupTimeoutMs,
-    isApproval: async (p) => {
-      await p.waitForURL(/notification\.html#\/approval/, { timeout: popupTimeoutMs });
-      return true;
-    },
+    // Anchored on the Sign button; the plain-string NAME form is the one that
+    // matches this control, measured rather than inferred.
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByRole('button', { name: 'Sign' }),
+      timeoutMs: popupTimeoutMs,
+    }),
   });
   await opts.onScreenshot?.(approval, 'sign-approval');
 
@@ -240,25 +243,12 @@ export async function approveWizzSignPopup(opts: {
   // all six specs then failed with "approval popup did not appear". textContent
   // is not the accessible name, so the next attempt must measure the NAME, or
   // use locator('button', { hasText }) which matches on text.
-  // Count the candidate LOCATORS rather than describing the element and
-  // inferring one. 94b5e2a inferred getByRole from this line's `text` field
-  // and all six specs failed: textContent is not the accessible name.
-  const byRole = await approval.getByRole('button', { name: /^Sign$/ }).count().catch(() => -1);
-  const byText = await approval.locator('button', { hasText: /^Sign$/ }).count().catch(() => -1);
-  // byRole 0 AND byText 0 while the in-page scan finds the button means the
-  // matchers are not the question. These separate "wrong matcher" from "not in
-  // the main frame": anyButton counts every button Playwright can see at all.
-  const anyButton = await approval.locator('button').count().catch(() => -1);
-  const looseText = await approval.getByText(/Sign/).count().catch(() => -1);
-  const frames = approval.frames().length;
-  // frames 1 and anyButton 6 ruled out the frame. The anchored regexes fail
-  // against a textContent of "Sign " with a trailing space, so these are the
-  // whitespace-tolerant candidates. Whichever is exactly 1 becomes the anchor.
-  const roleLoose = await approval.getByRole('button', { name: /^\s*Sign\s*$/ }).count().catch(() => -1);
-  const roleStr = await approval.getByRole('button', { name: 'Sign' }).count().catch(() => -1);
-  const btnHasText = await approval.locator('button').filter({ hasText: /^\s*Sign\s*$/ }).count().catch(() => -1);
+  // One check, not a description: does the anchor the gate above uses still
+  // match exactly one control? A future Wizz release that renames the button
+  // shows up here as 0 instead of as a 120s gate timeout.
+  const anchor = await approval.getByRole('button', { name: 'Sign' }).count().catch(() => -1);
   // eslint-disable-next-line no-console
-  console.log(`[wizz:sign-popup] ${JSON.stringify({ ...(await found.jsonValue()), byRole, byText, anyButton, looseText, frames, roleLoose, roleStr, btnHasText })}`);
+  console.log(`[wizz:sign-popup] anchor=${anchor} ${JSON.stringify(await found.jsonValue())}`);
 
   await approval.evaluate(() => {
     const isSignButton = (el: Element) => /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test((el.textContent || '').trim());

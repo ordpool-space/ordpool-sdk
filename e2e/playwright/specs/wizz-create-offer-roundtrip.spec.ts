@@ -116,10 +116,14 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
     context: ctx,
     knownPages,
     timeoutMs: 120_000,
-    isApproval: async (p) => {
-      await p.waitForURL(/notification\.html#\/approval/, { timeout: 120_000 });
-      return true;
-    },
+    // Anchored on the Sign button. The NAME form is measured, not inferred:
+    // getByRole with a regex counts 0 against this control, the plain string
+    // counts 1.
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByRole('button', { name: 'Sign' }),
+      timeoutMs: 120_000,
+    }),
   });
   await shot(approval, tag);
   await approval.waitForFunction(() => {
