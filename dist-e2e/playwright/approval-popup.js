@@ -183,13 +183,10 @@ async function approveWizzSignPopup(opts) {
         context: opts.context,
         knownPages: opts.knownPages,
         timeoutMs: popupTimeoutMs,
-        // Wizz renders Sign as an Ant Design <button> with no testid, measured in
-        // a matrix run. Role+name matches the button, not a wrapper.
-        isApproval: approvalGate({
-            url: /notification\.html#\/approval/,
-            control: (p) => p.getByRole('button', { name: /^Sign$/ }),
-            timeoutMs: popupTimeoutMs,
-        }),
+        isApproval: async (p) => {
+            await p.waitForURL(/notification\.html#\/approval/, { timeout: popupTimeoutMs });
+            return true;
+        },
     });
     await opts.onScreenshot?.(approval, 'sign-approval');
     // Describe, read, then click: the popup auto-closes on the click, so a
@@ -220,8 +217,13 @@ async function approveWizzSignPopup(opts) {
         };
     };
     const found = await approval.waitForFunction(describeSign, undefined, { timeout: opts.signTimeoutMs ?? 60_000, polling: 250 });
-    // Reported so these gates can be anchored on the real element: Wizz strips
-    // data-testid, so no spec has a locator to copy.
+    // Reported so these gates can be anchored on the real element. Wizz strips
+    // data-testid. The six Wizz SIGN gates stay URL-only until a locator is
+    // verified against a real run: 94b5e2a anchored them on
+    // getByRole('button', { name: /^Sign$/ }) from this line's `text` field and
+    // all six specs then failed with "approval popup did not appear". textContent
+    // is not the accessible name, so the next attempt must measure the NAME, or
+    // use locator('button', { hasText }) which matches on text.
     // eslint-disable-next-line no-console
     console.log(`[wizz:sign-popup] ${JSON.stringify(await found.jsonValue())}`);
     await approval.evaluate(() => {
