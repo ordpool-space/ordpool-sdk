@@ -43,7 +43,13 @@ async function readSelected(card: SelectableCard): Promise<boolean | undefined> 
     if (v !== null) return v === 'true' || v === '';
   }
   const cls = await card.getAttribute('class').catch(() => null);
-  if (cls !== null) return /\b(selected|active|checked)\b/.test(cls);
+  // An EMPTY class is the absence of a marker, not a report of "not
+  // selected". Reading it as false makes this helper claim a state it never
+  // observed, which is the instrument-lies failure it exists to prevent, and
+  // it spends the full click budget on every healthy run. UniSat's
+  // address-type cards are exactly this shape: `class=""`, with selection
+  // carried by an inline background colour that no standard marker exposes.
+  if (cls !== null && cls.trim() !== '') return /\b(selected|active|checked)\b/.test(cls);
   return undefined;
 }
 

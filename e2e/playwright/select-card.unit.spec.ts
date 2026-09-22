@@ -40,3 +40,31 @@ it('at the cap it reports what the last read said, not an assumption', async () 
   const c = { click: async () => undefined, getAttribute: async (n: string) => (n === 'aria-checked' ? 'false' : null) };
   expect(await selectCard(c, { settleMs: 1, maxClicks: 3 })).toEqual({ clicks: 3, observable: true, selected: false });
 });
+
+describe('selectCard — an unreadable marker is reported as unreadable', () => {
+  it('treats an EMPTY class as no marker, so it clicks once and says so', async () => {
+    // UniSat's address-type cards carry `class=""` and express selection
+    // through an inline background colour. Reading the empty string as
+    // "not selected" burned the whole click budget on every healthy run and
+    // printed a diagnostic that contradicted the passing specs around it.
+    let clicks = 0;
+    const card = {
+      click: async () => { clicks++; },
+      getAttribute: async (n: string) => (n === 'class' ? '' : null),
+    };
+    const result = await selectCard(card, { settleMs: 0 });
+    expect(clicks).toBe(1);
+    expect(result).toEqual({ clicks: 1, observable: false, selected: undefined });
+  });
+
+  it('a whitespace-only class is equally unreadable', async () => {
+    let clicks = 0;
+    const card = {
+      click: async () => { clicks++; },
+      getAttribute: async (n: string) => (n === 'class' ? '   ' : null),
+    };
+    const result = await selectCard(card, { settleMs: 0 });
+    expect(clicks).toBe(1);
+    expect(result.observable).toBe(false);
+  });
+});
