@@ -210,7 +210,7 @@ async function approveWizzSignPopup(opts) {
         },
     });
     await opts.onScreenshot?.(approval, 'sign-approval');
-    await approval.waitForFunction(() => {
+    const found = await approval.waitForFunction(() => {
         const isSignButton = (el) => {
             const text = (el.textContent || '').trim();
             // Optional leading spinner glyph; rejects "Signed" and similar.
@@ -226,8 +226,24 @@ async function approveWizzSignPopup(opts) {
         if (parseFloat(style.opacity) < 0.7)
             return null;
         candidate.click();
-        return { text: candidate.textContent };
+        // Reported so the element can be ANCHORED on later. This gate is still
+        // URL-only, which is racy: a hash route matches while the popup is a boot
+        // spinner. Wizz strips data-testid, so there is no stable locator to copy
+        // from the specs, and inventing one would pass whenever the popup boots
+        // fast and fail at random later. Describing what this scan actually finds,
+        // on the GREEN path, is the evidence that decides it.
+        return {
+            text: candidate.textContent,
+            tag: candidate.tagName,
+            cls: candidate.className,
+            testid: candidate.getAttribute('data-testid'),
+            role: candidate.getAttribute('role'),
+            parentTag: candidate.parentElement?.tagName ?? null,
+            parentCls: candidate.parentElement?.className ?? null,
+        };
     }, undefined, { timeout: opts.signTimeoutMs ?? 60_000, polling: 250 });
+    // eslint-disable-next-line no-console
+    console.log(`[wizz:sign-popup] clicked ${JSON.stringify(await found.jsonValue())}`);
     // The popup auto-closes once the wallet processes the click, so this is
     // best-effort by design.
     await opts.onScreenshot?.(approval, 'after-sign-click').catch(() => undefined);
