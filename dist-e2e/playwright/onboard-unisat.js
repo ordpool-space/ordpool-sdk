@@ -1,10 +1,31 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.dismissUnisatUpdateNag = dismissUnisatUpdateNag;
 exports.onboardUnisat = onboardUnisat;
 const test_1 = require("@playwright/test");
 const is_visible_within_1 = require("./is-visible-within");
 const select_card_1 = require("./select-card");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
+/**
+ * Dismiss UniSat's "a new version is available" modal.
+ *
+ * The pinned extension asks UniSat's server whether a newer build exists, so
+ * the modal appears on the first dashboard open as soon as upstream ships a
+ * release past the pin, and it is layered ABOVE the compatibility notice.
+ * Playwright then reports the notice checkbox as visible, enabled and stable
+ * while `.row-container` from `.popover-container` intercepts every click, so
+ * the failure names the checkbox and not the thing covering it.
+ *
+ * The modal carries no data-testid, so it is anchored on the one string only
+ * it contains; "Skip" alone would also match the notice below it.
+ */
+async function dismissUnisatUpdateNag(page) {
+    const modal = page.locator('.popover-container').filter({ hasText: 'Go to update' });
+    if (!(await (0, is_visible_within_1.isVisibleWithin)(modal, 2_000)))
+        return;
+    await modal.getByText('Skip', { exact: true }).click({ timeout: 5_000 }).catch(() => undefined);
+    await modal.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
+}
 /**
  * Drive UniSat onboarding from the BIP-39 test seed to the home tab.
  * Shared by the e2e specs AND the local wallet-runner (matches
@@ -62,6 +83,7 @@ async function onboardUnisat(page, extensionId, opts = {}) {
     // UI). Nothing is swallowed by doing so: the `tab-home` assertion below is
     // what proves onboarding finished, so a notice that genuinely blocked would
     // still fail there, naming the screen rather than a checkbox.
+    await dismissUnisatUpdateNag(page);
     const noticeCheckbox = page.getByTestId('notice-checkbox-1');
     if (await (0, is_visible_within_1.isVisibleWithin)(noticeCheckbox, 5_000)) {
         await noticeCheckbox.click({ timeout: 5_000 }).catch(() => undefined);
