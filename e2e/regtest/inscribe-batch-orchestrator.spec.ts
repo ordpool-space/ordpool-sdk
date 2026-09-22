@@ -333,8 +333,38 @@ describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
       ],
     });
 
-    const commit = btc.Transaction.fromRaw(hex.decode(rpc('getrawtransaction', result.commitTxId)));
-    const reveal = btc.Transaction.fromRaw(hex.decode(rpc('getrawtransaction', result.revealTxId)));
+    const commitRaw = rpc('getrawtransaction', result.commitTxId);
+    const revealRaw = rpc('getrawtransaction', result.revealTxId);
+    const commit = btc.Transaction.fromRaw(hex.decode(commitRaw));
+    const reveal = btc.Transaction.fromRaw(hex.decode(revealRaw));
+
+    // This assertion has failed once in eight otherwise identical runs, by
+    // exactly 1 vB on the commit, and a bare number cannot say why. Two
+    // hypotheses were measured and REFUTED: scure emits 70/71/72-byte DER
+    // signatures where Core grinds low-R, but 71 and 72 round to the same
+    // vsize; and the preview itself is stable at one value across 64 funding
+    // txids, with and without normalising the dummy signature. So the
+    // difference is in the broadcast transaction, and the next occurrence has
+    // to carry its own evidence rather than be reproduced afterwards.
+    const witnessShape = (tx: btc.Transaction) =>
+      Array.from({ length: tx.inputsLength }, (_, i) =>
+        (tx.getInput(i).finalScriptWitness ?? []).map((w) => w.length).join('/'));
+    if (commit.vsize !== preview.commitVsize || reveal.vsize !== preview.revealVsize) {
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify({
+        why: 'preview/broadcast vsize mismatch',
+        commit: {
+          previewVsize: preview.commitVsize, actualVsize: commit.vsize,
+          actualWeight: commit.weight, inputs: commit.inputsLength, outputs: commit.outputsLength,
+          witness: witnessShape(commit), raw: commitRaw,
+        },
+        reveal: {
+          previewVsize: preview.revealVsize, actualVsize: reveal.vsize,
+          actualWeight: reveal.weight, inputs: reveal.inputsLength, outputs: reveal.outputsLength,
+          witness: witnessShape(reveal), raw: revealRaw,
+        },
+      }, null, 2));
+    }
     expect(commit.vsize).toBe(preview.commitVsize);
     expect(reveal.vsize).toBe(preview.revealVsize);
     // The commit output funds the reveal: its fee plus every postage.
