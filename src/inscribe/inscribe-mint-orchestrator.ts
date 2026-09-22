@@ -442,6 +442,24 @@ function batchArgs(
 /** Deterministic dummy x-only pubkey — only sizes the envelope (all 32-byte keys equal). */
 const DUMMY_PUBKEY_XONLY = new Uint8Array(32).fill(0x02);
 
+/**
+ * Whether two funding selections name the same coin.
+ *
+ * `setSelectedUtxo` recomputes, so re-applying the SAME selection would patch
+ * and recompute for an answer that cannot differ. A consumer that re-drives
+ * the setter from a stream the recompute itself feeds then loops without
+ * bound: patch, emit, set, recompute, emit. Comparing the outpoint makes the
+ * no-change call free and the loop impossible.
+ *
+ * The object identity is deliberately NOT part of this. A refreshed candidate
+ * for the same outpoint carries newer annotations, and the live one is
+ * `resolvedFundingUtxo`, which consumers render from.
+ */
+function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.txid === b.txid && a.vout === b.vout;
+}
+
 export class InscribeMintOrchestrator {
   private wallet: InscribeWalletContext | null = null;
   private utxos: TxnOutput[] = [];
@@ -574,6 +592,7 @@ export class InscribeMintOrchestrator {
    * never reach it.
    */
   setSelectedUtxo(utxo: TxnOutput | null): void {
+    if (sameSelection(this.snap.selectedUtxo, utxo)) return;
     this.patch({ selectedUtxo: utxo });
     void this.recompute();
   }

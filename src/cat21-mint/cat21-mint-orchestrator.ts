@@ -137,6 +137,24 @@ const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUt
   candidates: [],
 };
 
+/**
+ * Whether two funding selections name the same coin.
+ *
+ * `setSelectedUtxo` recomputes, so re-applying the SAME selection would patch
+ * and recompute for an answer that cannot differ. A consumer that re-drives
+ * the setter from a stream the recompute itself feeds then loops without
+ * bound: patch, emit, set, recompute, emit. Comparing the outpoint makes the
+ * no-change call free and the loop impossible.
+ *
+ * The object identity is deliberately NOT part of this. A refreshed candidate
+ * for the same outpoint carries newer annotations, and the live one is
+ * `resolvedFundingUtxo`, which consumers render from.
+ */
+function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.txid === b.txid && a.vout === b.vout;
+}
+
 export class Cat21MintOrchestrator {
   private wallet: MintWalletContext | null = null;
   private utxos: TxnOutput[] = [];
@@ -277,6 +295,7 @@ export class Cat21MintOrchestrator {
    * never reach it.
    */
   setSelectedUtxo(utxo: TxnOutput | null): void {
+    if (sameSelection(this.snap.selectedUtxo, utxo)) return;
     this.patch({ selectedUtxo: utxo });
     void this.recompute();
   }

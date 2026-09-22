@@ -428,3 +428,36 @@ describe('Cat21MintOrchestrator.refreshUtxos', () => {
   });
 
 });
+
+describe('setSelectedUtxo is free when the selection does not change', () => {
+  it('a consumer re-driving the setter from a snapshot stream does NOT loop', async () => {
+    // A consumer tap that reconciles its selection on every emission calls the
+    // setter again with the value already in the snapshot. Because the setter
+    // recomputes, a patch there would emit, re-enter the tap and never settle:
+    // measured at 800+ emissions in one second before the guard existed. This
+    // is the shape ordpool's paymentOutputs$ tap has, and its lane failed with
+    // the funding picker never rendering.
+    const o = new Cat21MintOrchestrator(deps());
+    await o.setWallet(wallet);
+    let emissions = 0;
+    o.subscribe(() => {
+      emissions++;
+      if (emissions < 200) o.setSelectedUtxo(o.getSnapshot().selectedUtxo);
+    });
+    o.setFeeRate(10);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(emissions).toBeLessThan(50);
+  }, 15_000);
+
+  it('a DIFFERENT outpoint still patches and recomputes', async () => {
+    const o = new Cat21MintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    let emissions = 0;
+    o.subscribe(() => { emissions++; });
+    const before = emissions;
+    o.setSelectedUtxo(coin('c', 100_000));
+    expect(emissions).toBeGreaterThan(before);
+    expect(o.getSnapshot().selectedUtxo?.value).toBe(100_000);
+  }, 15_000);
+});
