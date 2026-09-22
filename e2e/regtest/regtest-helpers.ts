@@ -5,6 +5,8 @@
 // and `REGTEST_FUNDED_ADDR` / `REGTEST_FUNDED_WIF` set in env.
 
 import { execFile, execFileSync } from 'node:child_process';
+
+import type { RpcAddressInfo, RpcRawTransaction, RpcUnspent } from './rpc-types';
 import { randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
 
@@ -65,6 +67,33 @@ export function rpc(...args: string[]): string {
      '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args],
     { encoding: 'utf8' },
   ).trim();
+}
+
+/**
+ * `rpc()` plus `JSON.parse`, with the response TYPED at the boundary instead of
+ * cast at every call site. The caller names the shape once; a drifting field is
+ * then a compile error rather than an `unknown` nobody checked.
+ *
+ * Typed readers for the four shapes this family actually parses are below; use
+ * those in preference to naming a shape inline.
+ */
+export function rpcJson<T>(...args: string[]): T {
+  return JSON.parse(rpc(...args)) as T;
+}
+
+/** `getrawtransaction <txid> true`, typed. */
+export function rpcRawTransaction(txid: string): RpcRawTransaction {
+  return rpcJson<RpcRawTransaction>('getrawtransaction', txid, 'true');
+}
+
+/** `listunspent <minconf>` on the funded regtest wallet, typed. */
+export function rpcListUnspent(minConf = 0): RpcUnspent[] {
+  return rpcJson<RpcUnspent[]>(RPC_WALLET_ARG, 'listunspent', String(minConf));
+}
+
+/** `getaddressinfo <address>` on the funded regtest wallet, typed. */
+export function rpcAddressInfo(address: string): RpcAddressInfo {
+  return rpcJson<RpcAddressInfo>(RPC_WALLET_ARG, 'getaddressinfo', address);
 }
 
 /** Mine N blocks to a throwaway address. Returns the new tip height. */

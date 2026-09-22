@@ -1,3 +1,4 @@
+import type { RpcAddressInfo, RpcRawTransaction, RpcUnspent } from './rpc-types';
 import * as btc from '@scure/btc-signer';
 export declare const ORD_STOCK_URL: string;
 export interface FundedAccount {
@@ -12,6 +13,21 @@ export declare function getFundedAccount(): FundedAccount;
  * colons don't need extra escaping.
  */
 export declare function rpc(...args: string[]): string;
+/**
+ * `rpc()` plus `JSON.parse`, with the response TYPED at the boundary instead of
+ * cast at every call site. The caller names the shape once; a drifting field is
+ * then a compile error rather than an `unknown` nobody checked.
+ *
+ * Typed readers for the four shapes this family actually parses are below; use
+ * those in preference to naming a shape inline.
+ */
+export declare function rpcJson<T>(...args: string[]): T;
+/** `getrawtransaction <txid> true`, typed. */
+export declare function rpcRawTransaction(txid: string): RpcRawTransaction;
+/** `listunspent <minconf>` on the funded regtest wallet, typed. */
+export declare function rpcListUnspent(minConf?: number): RpcUnspent[];
+/** `getaddressinfo <address>` on the funded regtest wallet, typed. */
+export declare function rpcAddressInfo(address: string): RpcAddressInfo;
 /** Mine N blocks to a throwaway address. Returns the new tip height. */
 export declare function mineBlocks(n: number): number;
 /**

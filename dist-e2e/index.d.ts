@@ -14,6 +14,7 @@ export * from './playwright/wallet-test-vectors';
 export * from './playwright/approval-popup';
 export * from './playwright/click-until-effect';
 export * from './playwright/select-card';
+export * from './regtest/rpc-types';
 export * from './playwright/is-visible-within';
 export * from './playwright/wallet-rejection';
 export * from './playwright/wait-helpers';

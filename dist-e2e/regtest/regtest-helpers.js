@@ -41,6 +41,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ORD_STOCK_URL = void 0;
 exports.getFundedAccount = getFundedAccount;
 exports.rpc = rpc;
+exports.rpcJson = rpcJson;
+exports.rpcRawTransaction = rpcRawTransaction;
+exports.rpcListUnspent = rpcListUnspent;
+exports.rpcAddressInfo = rpcAddressInfo;
 exports.mineBlocks = mineBlocks;
 exports.fundWithFreshCoinbase = fundWithFreshCoinbase;
 exports.mineBlockWithRawTxs = mineBlockWithRawTxs;
@@ -140,6 +144,29 @@ function getFundedAccount() {
 function rpc(...args) {
     return (0, node_child_process_1.execFileSync)('docker', ['exec', BITCOIND_CONTAINER, 'bitcoin-cli',
         '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', ...args], { encoding: 'utf8' }).trim();
+}
+/**
+ * `rpc()` plus `JSON.parse`, with the response TYPED at the boundary instead of
+ * cast at every call site. The caller names the shape once; a drifting field is
+ * then a compile error rather than an `unknown` nobody checked.
+ *
+ * Typed readers for the four shapes this family actually parses are below; use
+ * those in preference to naming a shape inline.
+ */
+function rpcJson(...args) {
+    return JSON.parse(rpc(...args));
+}
+/** `getrawtransaction <txid> true`, typed. */
+function rpcRawTransaction(txid) {
+    return rpcJson('getrawtransaction', txid, 'true');
+}
+/** `listunspent <minconf>` on the funded regtest wallet, typed. */
+function rpcListUnspent(minConf = 0) {
+    return rpcJson(RPC_WALLET_ARG, 'listunspent', String(minConf));
+}
+/** `getaddressinfo <address>` on the funded regtest wallet, typed. */
+function rpcAddressInfo(address) {
+    return rpcJson(RPC_WALLET_ARG, 'getaddressinfo', address);
 }
 /** Mine N blocks to a throwaway address. Returns the new tip height. */
 function mineBlocks(n) {
