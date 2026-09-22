@@ -150,6 +150,9 @@ function inscribeFundingTarget(params: InscribeCoreParams): { target: number | n
       ephemeralPubkeyXonly: new Uint8Array(32).fill(0x02),
       tip: params.tip,
       walletType: params.walletType,
+      // Measured with the floor the real build uses, so the target and the
+      // transaction that has to meet it agree on when change survives.
+      changeDustLimitSats: changeDustFloor(params.paymentAddress),
       network: params.network,
     });
     return { target: sim.fundingRequirementSats, error: null };
@@ -210,6 +213,13 @@ function inscribeCandidateFees(
         ephemeralPubkeyXonly: new Uint8Array(32).fill(0x02),
         tip: params.tip,
         walletType: params.walletType,
+        // The PER-ADDRESS floor, the same one the real build passes
+        // (`inscription.service.helper` and `inscribe-mint-orchestrator`).
+        // Omitted, the commit falls back to the postage value, and across the
+        // band between that and the address's own floor the grid folds the
+        // leftover into the fee and reports an over-pay while the signed
+        // commit emits it as change.
+        changeDustLimitSats: changeDustFloor(params.paymentAddress),
         network: params.network,
       });
       return {

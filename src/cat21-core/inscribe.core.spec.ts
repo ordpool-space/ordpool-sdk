@@ -36,6 +36,39 @@ const scanPort = (verdicts: Record<string, 'clean' | 'has-assets'> = {}): Conten
 const broadcastPort = (): BroadcastPort => ({ broadcast: async () => ({ txid: 'x', channel: 'mempool' }) });
 
 describe('inscribe.core — simulateInscribe', () => {
+  it('the picker grid prices commit change against the PER-ADDRESS dust floor', async () => {
+    // The real commit is built with getMinimumUtxoSize(paymentAddress)
+    // (inscription.service.helper, inscribe-mint-orchestrator). Omitting it
+    // here falls back to the postage value, and between that and the payer's
+    // own floor the grid reports an over-pay on a coin whose change the signed
+    // commit actually emits. bc1q is 294, postage is 546.
+    //
+    // Two points rather than one, so the band itself is pinned: a leftover
+    // BELOW 294 must still fold into the fee, and one inside [294, 546) must
+    // not. A flat-546 fallback folds both.
+    const rowFor = async (value: number) => {
+      const sim = await simulateInscribe(
+        params(),
+        { utxos: utxosPort([coin('c', value)]), scan: scanPort() },
+      );
+      return sim.candidateFees[0];
+    };
+
+    const probe = await simulateInscribe(
+      params(),
+      { utxos: utxosPort([coin('c', 200_000)]), scan: scanPort() },
+    );
+    const target = probe.fundingRequirementSats;
+    if (target === null) throw new Error('the probe did not report a funding requirement');
+
+    const belowFloor = await rowFor(target + 200);
+    const insideBand = await rowFor(target + 400);
+
+    expect(belowFloor.absorbedSubDustSats).toBeGreaterThan(0);
+    expect(insideBand.absorbedSubDustSats).toBe(0);
+  });
+
+
   it('AUTO: a clean covering coin => ready with a positive funding requirement', async () => {
     const clean = coin('c', 200_000);
     const sim = await simulateInscribe(params(), { utxos: utxosPort([clean]), scan: scanPort() });
