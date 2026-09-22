@@ -71,7 +71,7 @@ export interface MintCoreParams {
  * consumer renders the status instead of re-deriving the distinction from the
  * recommendation, which is how two surfaces drift apart.
  */
-export type MintStatus = 'ready' | 'asset-notice' | 'expert-required' | 'insufficient';
+export type MintStatus = 'ready' | 'asset-notice' | 'expert-required' | 'scanning' | 'insufficient';
 
 export interface MintSimulationResult {
   status: MintStatus;

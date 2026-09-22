@@ -101,8 +101,16 @@ export interface CreateOfferSnapshot {
   errorMessage: string | null;
 }
 
+/**
+ * The recommendation before any answer exists.
+ *
+ * `scanning`, never `insufficient`: "nothing covers" is a MEASURED verdict and
+ * this is the absence of one. A consumer reading the placeholder as a verdict
+ * tells the user to add funds while the scan that would have found their coin
+ * is still running.
+ */
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'insufficient',
+  status: 'scanning',
   recommended: null,
   candidates: [],
 };

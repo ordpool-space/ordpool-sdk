@@ -131,7 +131,22 @@ export interface MintSnapshot {
   successTxId: string | null;
 }
 
+/**
+ * The recommendation before any answer exists.
+ *
+ * `scanning`, never `insufficient`: "nothing covers" is a MEASURED verdict and
+ * this is the absence of one. A consumer reading the placeholder as a verdict
+ * tells the user to add funds while the scan that would have found their coin
+ * is still running.
+ */
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
+  status: 'scanning',
+  recommended: null,
+  candidates: [],
+};
+
+/** The funding set was READ and holds nothing that can cover the action. */
+const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'insufficient',
   recommended: null,
   candidates: [],
@@ -172,7 +187,7 @@ export class Cat21MintOrchestrator {
     fundingRequirementSats: 0,
     fundingPreferredSats: 0,
     resolvedFundingUtxo: null,
-    resolvedFundingStatus: null,
+    resolvedFundingStatus: 'scanning',
     errorMessage: null,
     successTxId: null,
   };
@@ -391,8 +406,26 @@ export class Cat21MintOrchestrator {
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
     if (!wallet || !feeRate || this.utxos.length === 0) {
-      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      // An EMPTY funding set is a measured verdict: the set was read and holds
+      // nothing. A missing wallet or fee rate is the absence of one, because
+      // no read has happened. Collapsing the two tells a user to add funds
+      // before anything has looked at their wallet.
+      const measuredEmpty = !!wallet && !!feeRate && this.utxos.length === 0;
+      this.patch({
+        simulations: [], candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0,
+        fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION,
+        resolvedFundingUtxo: null,
+        resolvedFundingStatus: measuredEmpty ? 'insufficient' : 'scanning',
+      });
       return;
+    }
+    // The answer on the snapshot is now STALE, and a consumer gating a CTA has
+    // to know that before it re-enables a button against the previous coin.
+    // The scan runs inside `simulateMint`, so this window is as long as the
+    // content scanner takes; `state` stays `ready` throughout it, which is why
+    // `state` is the wrong thing to gate on.
+    if (this.snap.resolvedFundingStatus !== 'scanning') {
+      this.patch({ resolvedFundingStatus: 'scanning' });
     }
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);
     // Safe-auto recommendation: delegate to mint.core's `simulateMint` (the

@@ -164,7 +164,7 @@ describe('InscribeMintOrchestrator (framework-agnostic)', () => {
     expect(s.feeRate).toBeNull();
     expect(s.content).toBeNull();
     expect(s.simulations).toEqual([]);
-    expect(s.fundingRecommendation.status).toBe('insufficient');
+    expect(s.fundingRecommendation.status).toBe('scanning'); // reset() clears the inputs, so there is no verdict to report
     expect(s.state).toBe('ready');
   });
 

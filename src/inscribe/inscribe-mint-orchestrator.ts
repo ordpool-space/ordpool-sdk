@@ -293,7 +293,7 @@ export interface InscribeOrchestratorDeps {
 
 /** Everything a consumer template needs, emitted on every state change. */
 /** Mirrors mint.core's three outcomes for the resolved funding answer. */
-export type InscribeFundingStatus = 'ready' | 'expert-required' | 'insufficient';
+export type InscribeFundingStatus = 'ready' | 'expert-required' | 'scanning' | 'insufficient';
 
 export interface InscribeSnapshot {
   state: InscribeMintState;
@@ -345,7 +345,22 @@ export interface InscribeSnapshot {
 const UNEXPECTED_FAILURE_MESSAGE =
   'Something went wrong while preparing this inscription. Nothing has been sent. Please try again, and report it if it keeps happening.';
 
+/**
+ * The recommendation before any answer exists.
+ *
+ * `scanning`, never `insufficient`: "nothing covers" is a MEASURED verdict and
+ * this is the absence of one. A consumer reading the placeholder as a verdict
+ * tells the user to add funds while the scan that would have found their coin
+ * is still running.
+ */
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
+  status: 'scanning',
+  recommended: null,
+  candidates: [],
+};
+
+/** The funding set was READ and holds nothing that can cover the action. */
+const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'insufficient',
   recommended: null,
   candidates: [],
@@ -484,7 +499,7 @@ export class InscribeMintOrchestrator {
     simulations: [],
     fundingRecommendation: EMPTY_RECOMMENDATION,
     resolvedFundingUtxo: null,
-    resolvedFundingStatus: null,
+    resolvedFundingStatus: 'scanning',
     errorMessage: null,
     userMessage: null,
     successResult: null,
@@ -807,7 +822,16 @@ export class InscribeMintOrchestrator {
       this.patch({ compression: null });
     }
     if (!wallet || !feeRate || !ready || this.utxos.length === 0) {
-      this.patch({ simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
+      // An EMPTY funding set is a measured verdict: the set was read and holds
+      // nothing. A missing wallet, rate or content is the absence of one,
+      // because no read has happened yet.
+      const measuredEmpty = !!wallet && !!feeRate && !!ready && this.utxos.length === 0;
+      this.patch({
+        simulations: [],
+        fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION,
+        resolvedFundingUtxo: null,
+        resolvedFundingStatus: measuredEmpty ? 'insufficient' : 'scanning',
+      });
       return;
     }
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);

@@ -66,7 +66,7 @@ export interface CreateOfferCoreParams {
  * consumer renders the status instead of re-deriving the distinction from the
  * recommendation, which is how two surfaces drift apart.
  */
-export type CreateOfferStatus = 'ready' | 'asset-notice' | 'expert-required' | 'insufficient';
+export type CreateOfferStatus = 'ready' | 'asset-notice' | 'expert-required' | 'scanning' | 'insufficient';
 
 export interface CreateOfferSimulationResult {
   status: CreateOfferStatus;

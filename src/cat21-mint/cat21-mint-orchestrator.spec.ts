@@ -65,7 +65,7 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
   it('starts idle with an empty recommendation', () => {
     const o = new Cat21MintOrchestrator(deps());
     expect(o.getSnapshot().state).toBe('idle');
-    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('scanning');
   });
 
   it('setWallet fetches UTXOs and reaches ready', async () => {
@@ -78,7 +78,7 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     const o = new Cat21MintOrchestrator(deps());
     await o.setWallet(wallet);
     o.setFeeRate(10);
-    const s = await waitFor(o, (s) => s.fundingRecommendation.status !== 'insufficient');
+    const s = await waitFor(o, (s) => s.fundingRecommendation.status !== 'scanning');
     expect(s.fundingRecommendation.status).toBe('auto');
     expect(s.fundingRecommendation.recommended?.txid).toBe(coin('c', 100_000).txid);
     expect(s.simulations).toHaveLength(1);
@@ -155,7 +155,7 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     );
     await o.setWallet(wallet);
     o.setFeeRate(10);
-    const s = await waitFor(o, (s) => s.fundingRecommendation.status !== 'insufficient');
+    const s = await waitFor(o, (s) => s.fundingRecommendation.status !== 'scanning');
     expect(s.fundingRecommendation.status).toBe('expert-required');
     await expect(o.mint()).rejects.toThrow(/Select a funding UTXO/);
   });
@@ -189,7 +189,7 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     const s = o.getSnapshot();
     expect(s.state).toBe('idle');
     expect(s.simulations).toEqual([]);
-    expect(s.fundingRecommendation.status).toBe('insufficient');
+    expect(s.fundingRecommendation.status).toBe('scanning');
   });
 
   it('reset() with no wallet connected returns to idle', () => {
@@ -245,7 +245,7 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     await o.setWallet(wallet);
     o.setFeeRate(10);
     await flush();
-    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient'); // MEASURED: a recompute ran and no coin covers
     await expect(o.mint()).rejects.toThrow('No UTXO selected');
   });
 
@@ -258,7 +258,7 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     const s = o.getSnapshot();
     expect(s.feeRate).toBeNull();
     expect(s.simulations).toEqual([]);
-    expect(s.fundingRecommendation.status).toBe('insufficient');
+    expect(s.fundingRecommendation.status).toBe('scanning');
     expect(s.state).toBe('ready');
   });
 });
@@ -277,12 +277,12 @@ describe('Cat21MintOrchestrator.refreshUtxos', () => {
     // Nothing to fund with, and no fee rate will change that: this is the
     // stuck-disabled state a user sees after connecting too early.
     await waitFor(o, (s) => s.state === 'ready');
-    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient'); // MEASURED: the set was read and is empty
 
     // The coin has since confirmed. Re-reading the set is the only thing that
     // recovers it, and it must keep the fee rate the user already chose.
     await o.refreshUtxos();
-    const after = await waitFor(o, (s) => s.fundingRecommendation.status !== 'insufficient');
+    const after = await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
     expect(after.fundingRecommendation.status).toBe('auto');
     expect(after.fundingRecommendation.recommended?.txid).toBe(coin('c', 100_000).txid);
     expect(o.getSnapshot().feeRate).toBe(10);
@@ -352,7 +352,7 @@ describe('Cat21MintOrchestrator.refreshUtxos', () => {
     const s = await waitFor(o, (s) => s.errorMessage !== null);
     expect(s.errorMessage).toMatch(/Could not price the funding coins/);
     expect(s.simulations).toEqual([]);
-    expect(s.fundingRecommendation.status).toBe('insufficient');
+    expect(s.fundingRecommendation.status).toBe('scanning');
     // Reachability, not just presence: every consumer gates its banner on
     // `state === 'error'`, so a reason written while the state stays `ready`
     // is a message nobody can render and the screen falls through to
@@ -459,5 +459,58 @@ describe('setSelectedUtxo is free when the selection does not change', () => {
     o.setSelectedUtxo(coin('c', 100_000));
     expect(emissions).toBeGreaterThan(before);
     expect(o.getSnapshot().selectedUtxo?.value).toBe(100_000);
+  }, 15_000);
+});
+
+describe('the snapshot says SCANNING rather than claiming a verdict it has not measured', () => {
+  it('reports scanning while the content scan is in flight, and never insufficient', async () => {
+    // Before this, the window read state 'ready' with the EMPTY placeholder's
+    // 'insufficient' showing through, so a consumer gating on the
+    // recommendation told the user nothing covers while the scan that would
+    // find their coin was still running. `state` is the wrong thing to gate
+    // on: loadUtxos patches 'ready' BEFORE awaiting the recompute.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => { release = r; });
+    let gated = false;
+    const o = new Cat21MintOrchestrator(deps({
+      scan: { classify: async () => { if (gated) await gate; return 'clean'; } },
+    }));
+    await o.setWallet(wallet);
+
+    // Land a FIRST answer, so the in-flight marker has something to overwrite.
+    // Asserting it on the first recompute proves nothing: the initial snapshot
+    // is already 'scanning', so the window and the initial value coincide and
+    // removing the marker leaves the assertion green.
+    o.setFeeRate(10);
+    const settled = await waitFor(o, (s) => s.resolvedFundingStatus === 'ready');
+    expect(settled.fundingRecommendation.status).toBe('auto');
+
+    // Now a SECOND recompute, with the scan held open.
+    gated = true;
+    o.setFeeRate(25);
+    await flush();
+    const during = o.getSnapshot();
+    expect(during.resolvedFundingStatus).toBe('scanning');
+    expect(during.fundingRecommendation.status).not.toBe('insufficient');
+
+    release();
+    const after = await waitFor(o, (s) => s.resolvedFundingStatus !== 'scanning');
+    expect(after.resolvedFundingStatus).toBe('ready');
+    expect(after.fundingRecommendation.status).toBe('auto');
+  }, 15_000);
+
+  it('a READ but empty funding set is insufficient, an unread one is scanning', async () => {
+    // The distinction the whole change exists for: "nothing covers" is a
+    // measured verdict, "no answer yet" is the absence of one.
+    const unread = new Cat21MintOrchestrator(deps());
+    expect(unread.getSnapshot().fundingRecommendation.status).toBe('scanning');
+    expect(unread.getSnapshot().resolvedFundingStatus).toBe('scanning');
+
+    const empty = new Cat21MintOrchestrator(deps({ getUtxos: async () => [] }));
+    await empty.setWallet(wallet);
+    empty.setFeeRate(10);
+    await flush();
+    expect(empty.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+    expect(empty.getSnapshot().resolvedFundingStatus).toBe('insufficient');
   }, 15_000);
 });

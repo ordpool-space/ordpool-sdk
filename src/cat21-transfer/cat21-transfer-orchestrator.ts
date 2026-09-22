@@ -111,7 +111,22 @@ export interface TransferSnapshot {
   successTxId: string | null;
 }
 
+/**
+ * The recommendation before any answer exists.
+ *
+ * `scanning`, never `insufficient`: "nothing covers" is a MEASURED verdict and
+ * this is the absence of one. A consumer reading the placeholder as a verdict
+ * tells the user to add funds while the scan that would have found their coin
+ * is still running.
+ */
 const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
+  status: 'scanning',
+  recommended: null,
+  candidates: [],
+};
+
+/** The funding set was READ and holds nothing that can cover the action. */
+const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
   status: 'insufficient',
   recommended: null,
   candidates: [],
@@ -343,7 +358,12 @@ export class Cat21TransferOrchestrator {
     const cat = this.snap.catUtxo;
     const recipient = this.snap.recipientAddress;
     if (!wallet || !feeRate || !cat || !recipient || this.utxos.length === 0) {
-      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      // An EMPTY funding set is a measured verdict: the set was read and holds
+      // nothing. A missing input is the absence of one, because no read has
+      // happened yet. Collapsing the two tells a user to add funds before
+      // anything has looked at their wallet.
+      const measuredEmpty = !!wallet && !!feeRate && !!cat && !!recipient && this.utxos.length === 0;
+      this.patch({ simulation: null, fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     let sim: TransferSimulationResult;
