@@ -494,3 +494,50 @@ describe('InscribeMintOrchestrator wallet re-emission', () => {
     expect(fetches).toBe(2);
   });
 });
+
+describe('setSelectedUtxo is free when the selection does not change', () => {
+  it('a consumer re-driving it from a snapshot stream does NOT loop', async () => {
+    // The setter recomputes, so a consumer tap that reconciles its selection on
+    // every emission would patch, emit, re-enter and never settle. Measured on
+    // the mint orchestrator at 800+ emissions per second, with the symptom a
+    // funding picker that never rendered because the page never stopped
+    // changing. ordpool has this tap on its inscribe surface too, at
+    // inscribe-mint.component.ts:311.
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent(content);
+    let emissions = 0;
+    o.subscribe(() => {
+      emissions++;
+      if (emissions < 200) o.setSelectedUtxo(o.getSnapshot().selectedUtxo);
+    });
+    o.setFeeRate(10);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(emissions).toBeLessThan(50);
+  }, 15_000);
+
+  it('the SAME outpoint keeps the first object, a DIFFERENT one replaces it', async () => {
+    // The guard compares outpoints, never object identity, and that is the
+    // half a consumer feels: re-applying a refreshed row for the same coin is
+    // a no-op, so `selectedUtxo` keeps what it had and the LIVE annotated coin
+    // is `resolvedFundingUtxo`. Nothing asserted this before; the three
+    // sibling specs all set distinct coins, which is exactly the fixture that
+    // never enters the branch.
+    const first = coin('c', 100_000);
+    const refreshed = { ...first, status: { confirmed: true } };
+    const other = coin('d', 90_000);
+    const o = new InscribeMintOrchestrator(deps({ getUtxos: async () => [first, other] }));
+    await o.setWallet(wallet);
+    o.setContent(content);
+    o.setFeeRate(10);
+
+    o.setSelectedUtxo(first);
+    expect(o.getSnapshot().selectedUtxo).toBe(first);
+
+    o.setSelectedUtxo(refreshed);
+    expect(o.getSnapshot().selectedUtxo).toBe(first); // same outpoint, not replaced
+
+    o.setSelectedUtxo(other);
+    expect(o.getSnapshot().selectedUtxo).toBe(other); // different outpoint, replaced
+  }, 15_000);
+});
