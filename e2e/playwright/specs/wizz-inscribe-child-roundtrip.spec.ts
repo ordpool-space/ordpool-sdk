@@ -106,10 +106,14 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
     context: ctx,
     knownPages,
     timeoutMs: 120_000,
-    isApproval: async (p) => {
-      await p.waitForURL(/notification\.html#\/approval/, { timeout: 120_000 });
-      return true;
-    },
+    // Anchored on the real control: Wizz renders Sign as an Ant Design
+    // <button>, measured in a matrix run (ant-btn ant-btn-primary, no testid).
+    // Role+name matches the button itself, not a wrapper.
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByRole('button', { name: /^Sign$/ }),
+      timeoutMs: 120_000,
+    }),
   });
   await shot(approval, tag);
   await approval.waitForFunction(() => {
