@@ -3,6 +3,7 @@ import { hex } from '@scure/base';
 
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
 import { MintCoreParams, simulateMint, MintStatus } from '../cat21-core/mint.core.js';
+import { DroppedSelection } from '../cat21-core/select-funding.js';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
@@ -127,6 +128,17 @@ export interface MintSnapshot {
    */
   resolvedFundingUtxo: CoreFundingUtxo | null;
   resolvedFundingStatus: MintStatus | null;
+  /**
+   * Set when the coin the user PICKED is not the coin that will be spent,
+   * with the reason: `gone` (no longer among the candidates) or
+   * `below-requirement` (still there, no longer covers at this rate).
+   *
+   * `selectedUtxo` records what was asked for and is cleared only by
+   * `setWallet` and `reset`, so without this a consumer renders the resolved
+   * coin, is correct about the spend, and silently moves the user onto a
+   * different coin than the one they chose.
+   */
+  droppedSelection: DroppedSelection | null;
   errorMessage: string | null;
   successTxId: string | null;
 }
@@ -188,6 +200,7 @@ export class Cat21MintOrchestrator {
     fundingPreferredSats: 0,
     resolvedFundingUtxo: null,
     resolvedFundingStatus: 'scanning',
+    droppedSelection: null,
     errorMessage: null,
     successTxId: null,
   };
@@ -416,6 +429,7 @@ export class Cat21MintOrchestrator {
         fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION,
         resolvedFundingUtxo: null,
         resolvedFundingStatus: measuredEmpty ? 'insufficient' : 'scanning',
+        droppedSelection: null,
       });
       return;
     }
@@ -438,6 +452,7 @@ export class Cat21MintOrchestrator {
     let fundingPreferredSats = 0;
     let resolvedFundingUtxo: CoreFundingUtxo | null = null;
     let resolvedFundingStatus: MintStatus | null = null;
+    let droppedSelection: DroppedSelection | null = null;
     try {
       const mintSim = await simulateMint(this.mintParams(wallet, paymentPublicKey, feeRate), {
         utxos: this.utxosPort(),
@@ -449,6 +464,7 @@ export class Cat21MintOrchestrator {
       fundingPreferredSats = mintSim.fundingPreferredSats;
       resolvedFundingUtxo = mintSim.fundingUtxo;
       resolvedFundingStatus = mintSim.status;
+      droppedSelection = mintSim.droppedSelection;
     } catch (err) {
       fundingRecommendation = EMPTY_RECOMMENDATION;
       // Keep the REASON. An empty recommendation renders as a disabled control,
@@ -466,7 +482,7 @@ export class Cat21MintOrchestrator {
       simulations: recomputeError ? [] : this.rowsFrom(candidateFees),
       fundingRecommendation, candidateFees,
       fundingRequirementSats, fundingPreferredSats,
-      resolvedFundingUtxo, resolvedFundingStatus,
+      resolvedFundingUtxo, resolvedFundingStatus, droppedSelection,
       // Keeping the reason is not enough on its own: every consumer gates its
       // banner on `state === 'error'`, so a message written while the state
       // stays `ready` is unreachable and the screen falls through to "not

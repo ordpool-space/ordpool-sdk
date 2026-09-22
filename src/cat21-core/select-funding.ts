@@ -101,18 +101,64 @@ export async function selectFunding<T extends FundingUtxo>(
  * a notice and not a wall. The UI still owes the user the notice; this only
  * decides whether a coin is available to spend.
  */
-export function resolveFundingPick<T extends AnnotatedFundingUtxo>(
+/**
+ * Why an explicit pick is NOT the coin that will be spent.
+ *
+ * `gone`: the outpoint is no longer among the candidates, so it was spent
+ * elsewhere or the set was re-read without it. `below-requirement`: it is
+ * still there but no longer covers the action, which is what raising the fee
+ * rate does to a tight coin.
+ *
+ * The two are different problems with different remedies, which is why this is
+ * a reason rather than a boolean: one needs another coin, the other needs a
+ * lower rate.
+ */
+export interface DroppedSelection {
+  txid: string;
+  vout: number;
+  reason: 'gone' | 'below-requirement';
+}
+
+/**
+ * The pick, and whether an explicit selection was silently replaced.
+ *
+ * A consumer that renders only the resolved coin is CORRECT about what gets
+ * spent and still moves the user onto a different coin than the one they
+ * chose, without saying so. Naming the drop is the SDK's job: a consumer
+ * comparing two outpoints to work it out is the consumer re-deriving funding
+ * policy, which the asset-safety rule forbids.
+ */
+export function describeFundingPick<T extends AnnotatedFundingUtxo>(
   recommendation: FundingRecommendation<T>,
   target: number,
   explicitSelection?: { txid: string; vout: number } | null,
-): T | null {
+): { pick: T | null; droppedSelection: DroppedSelection | null } {
   const stillPresent = explicitSelection
     ? recommendation.candidates.find(
         (c) => c.txid === explicitSelection.txid && c.vout === explicitSelection.vout,
       )
     : undefined;
-  if (stillPresent && stillPresent.value >= target) return stillPresent;
+  if (stillPresent && stillPresent.value >= target) {
+    return { pick: stillPresent, droppedSelection: null };
+  }
   const mayProceed =
     recommendation.status === 'auto' || recommendation.status === 'asset-notice';
-  return mayProceed ? recommendation.recommended : null;
+  const pick = mayProceed ? recommendation.recommended : null;
+  const droppedSelection: DroppedSelection | null = explicitSelection
+    ? {
+        txid: explicitSelection.txid,
+        vout: explicitSelection.vout,
+        reason: stillPresent ? 'below-requirement' : 'gone',
+      }
+    : null;
+  return { pick, droppedSelection };
+}
+
+/** The pick alone, for a caller that does not render the drop. */
+export function resolveFundingPick<T extends AnnotatedFundingUtxo>(
+  recommendation: FundingRecommendation<T>,
+  target: number,
+  explicitSelection?: { txid: string; vout: number } | null,
+): T | null {
+  return describeFundingPick(recommendation, target, explicitSelection).pick;
 }

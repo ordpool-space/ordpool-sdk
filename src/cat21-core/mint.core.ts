@@ -25,7 +25,7 @@ import {
   SignPort,
   UtxosPort,
 } from './ports.js';
-import { resolveFundingPick, selectFunding } from './select-funding.js';
+import { DroppedSelection, describeFundingPick, selectFunding } from './select-funding.js';
 
 
 /**
@@ -75,6 +75,12 @@ export type MintStatus = 'ready' | 'asset-notice' | 'expert-required' | 'scannin
 
 export interface MintSimulationResult {
   status: MintStatus;
+  /**
+   * Set when an explicit pick was silently replaced: the coin the user chose
+   * is gone, or no longer covers the action at this rate. `null` when the
+   * resolved coin IS the chosen one, or when nothing was chosen.
+   */
+  droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   fundingUtxo: CoreFundingUtxo | null;
   vsize: number | null;
@@ -108,6 +114,7 @@ export interface MintSimulationResult {
 
 interface MintPlan {
   status: MintStatus;
+  droppedSelection: DroppedSelection | null;
   requirementSats: number;
   preferredSats: number;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
@@ -165,6 +172,7 @@ async function planMint(
   const empty = recommendFunding<CoreFundingUtxo & AnnotatedFundingUtxo>([], 0);
   if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
     return {
+      droppedSelection: null,
       status: 'insufficient', recommendation: empty,
       // Not measurable on this path: the targets come from a real build, and
       // there is either no fee rate or no coin to build against. 0 says
@@ -186,6 +194,7 @@ async function planMint(
   const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
   if (!largest || largest.value < fixedOutputs) {
     return {
+      droppedSelection: null,
       status: 'insufficient', recommendation: empty,
       // Not measurable on this path: the targets come from a real build, and
       // there is either no fee rate or no coin to build against. 0 says
@@ -231,9 +240,10 @@ async function planMint(
     feeBudgetFor: (candidate) => candidate.value - fixedOutputs,
     feeRatePerVbyte: params.feeRatePerVbyte,
   });
-  const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
+  const { pick, droppedSelection } = describeFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
+      droppedSelection,
       status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
       recommendation,
       requirementSats: target,
@@ -260,6 +270,7 @@ async function planMint(
     // Past measurement, so the targets are known and worth reporting: a caller
     // seeing `insufficient` here can compare them against the coin it offered.
     return {
+      droppedSelection: null,
       status: 'insufficient', recommendation,
       requirementSats: target, preferredSats: preferredTarget,
       pick: null, built: null, vsize: null, buildFeeSats: null, candidateFees,
@@ -278,6 +289,7 @@ async function planMint(
   // and they all return above this with pick === null.
   return {
     status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
+    droppedSelection,
     recommendation,
     requirementSats: target,
     preferredSats: preferredTarget,
@@ -301,6 +313,7 @@ export async function simulateMint(
   const plan = await planMint(params, ports);
   return {
     status: plan.status,
+    droppedSelection: plan.droppedSelection,
     recommendation: plan.recommendation,
     fundingUtxo: plan.pick,
     vsize: plan.vsize,

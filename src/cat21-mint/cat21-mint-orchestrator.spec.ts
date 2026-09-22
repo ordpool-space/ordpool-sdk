@@ -514,3 +514,48 @@ describe('the snapshot says SCANNING rather than claiming a verdict it has not m
     expect(empty.getSnapshot().resolvedFundingStatus).toBe('insufficient');
   }, 15_000);
 });
+
+describe('a pick that is silently replaced is NAMED, not just overridden', () => {
+  it('reports gone when the chosen coin left the candidate set', async () => {
+    // selectedUtxo records what the user asked for and is cleared only by
+    // setWallet and reset, so a consumer rendering resolvedFundingUtxo is
+    // correct about the spend and still moves the user onto another coin
+    // without saying so. The reason matters: a vanished coin needs another
+    // pick, a coin that no longer covers needs a lower fee rate.
+    const picked = coin('a', 60_000);
+    const other = coin('b', 90_000);
+    let call = 0;
+    const o = new Cat21MintOrchestrator(deps({
+      getUtxos: async () => (call++ === 0 ? [picked, other] : [other]),
+    }));
+    await o.setWallet(wallet);
+    o.setFeeRate(10);
+    await waitFor(o, (s) => s.resolvedFundingStatus === 'ready');
+
+    o.setSelectedUtxo(picked);
+    const held = await waitFor(o, (s) => s.resolvedFundingUtxo?.txid === picked.txid);
+    expect(held.droppedSelection).toBeNull();
+
+    await o.refreshUtxos();
+    const after = await waitFor(o, (s) => s.droppedSelection !== null);
+    expect(after.droppedSelection).toEqual({ txid: picked.txid, vout: 0, reason: 'gone' });
+    expect(after.resolvedFundingUtxo?.txid).toBe(other.txid);
+    expect(after.selectedUtxo?.txid).toBe(picked.txid); // what was ASKED for, unchanged
+  }, 15_000);
+
+  it('reports below-requirement when the chosen coin stops covering at a higher rate', async () => {
+    const tight = coin('e', 2_000);
+    const big = coin('f', 500_000);
+    const o = new Cat21MintOrchestrator(deps({ getUtxos: async () => [tight, big] }));
+    await o.setWallet(wallet);
+    o.setFeeRate(1);
+    await waitFor(o, (s) => s.resolvedFundingStatus === 'ready');
+
+    o.setSelectedUtxo(tight);
+    await waitFor(o, (s) => s.resolvedFundingUtxo?.txid === tight.txid);
+
+    o.setFeeRate(400);
+    const after = await waitFor(o, (s) => s.droppedSelection !== null);
+    expect(after.droppedSelection).toEqual({ txid: tight.txid, vout: 0, reason: 'below-requirement' });
+  }, 15_000);
+});
