@@ -19,6 +19,14 @@ export interface WalletIdentityFields {
   ordinalsAddress?: string;
   paymentAddress?: string;
   paymentPublicKey?: string;
+  /**
+   * Load-bearing, not cosmetic: a transfer signs the CAT INPUT with this key
+   * (`hex.decode(wallet.ordinalsPublicKey)`), and an inscribe with parents
+   * needs it to resolve them. A wallet re-reporting the same addresses with a
+   * resolved or re-encoded ordinals key is a DIFFERENT wallet context, and
+   * omitting it here would keep the stale key for the input that spends a cat.
+   */
+  ordinalsPublicKey?: string;
 }
 
 export function walletIdentity(w: WalletIdentityFields | null | undefined): string {
@@ -27,7 +35,7 @@ export function walletIdentity(w: WalletIdentityFields | null | undefined): stri
   // makes two different tuples collide, and while no bech32 or base58 address
   // contains one, an identity comparison should not rest on the charset of its
   // inputs.
-  return JSON.stringify([w.type ?? '', w.ordinalsAddress ?? '', w.paymentAddress ?? '', w.paymentPublicKey ?? '']);
+  return JSON.stringify([w.type ?? '', w.ordinalsAddress ?? '', w.paymentAddress ?? '', w.paymentPublicKey ?? '', w.ordinalsPublicKey ?? '']);
 }
 
 /** True when the two describe the same connected wallet. */

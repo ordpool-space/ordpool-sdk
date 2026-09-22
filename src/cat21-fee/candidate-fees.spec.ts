@@ -148,3 +148,31 @@ describe('resolveCandidateFees', () => {
     expect(poor.finalFeeSats).toBeNull();
   });
 });
+
+describe('a builder throw is carried, not swallowed', () => {
+  const candidate = { txid: 'a'.repeat(64), vout: 0, value: 50_000 };
+
+  it('reports the builder message on the row and still yields ONE unfundable row', () => {
+    const rows = resolveCandidateFees([candidate], {
+      feeRatePerVbyte: 10,
+      feeBudgetFor: () => 50_000,
+      simulate: () => { throw new Error('missing transactionHex for a legacy input'); },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].finalFeeSats).toBeNull();
+    expect(rows[0].unavailableReason).toContain('missing transactionHex');
+  });
+
+  it('leaves unavailableReason null when the coin was priced normally', () => {
+    const rows = resolveCandidateFees([candidate], {
+      feeRatePerVbyte: 10,
+      feeBudgetFor: () => 50_000,
+      simulate: (_c: typeof candidate, feeSats: number) => ({
+        vsize: 150,
+        finalFeeSats: feeSats,
+        absorbedSubDustSats: 0,
+      }),
+    });
+    expect(rows[0].unavailableReason ?? null).toBeNull();
+  });
+});

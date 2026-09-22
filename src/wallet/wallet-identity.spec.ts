@@ -39,3 +39,28 @@ describe('sameWallet', () => {
     expect(sameWallet(a, b)).toBe(false);
   });
 });
+
+describe('walletIdentity covers the ordinals public key', () => {
+  // A transfer signs the CAT INPUT with this key. A wallet re-reporting the
+  // same addresses with a resolved or re-encoded ordinals key must NOT be
+  // treated as a re-emission, or the stale key signs the input spending a cat.
+  const base = {
+    type: 'xverse',
+    ordinalsAddress: 'bc1pord',
+    paymentAddress: 'bc1qpay',
+    paymentPublicKey: '02aa',
+    ordinalsPublicKey: 'bb'.repeat(32),
+  };
+
+  it('treats a changed ordinalsPublicKey as a DIFFERENT wallet', () => {
+    expect(sameWallet(base, { ...base, ordinalsPublicKey: 'cc'.repeat(32) })).toBe(false);
+  });
+
+  it('treats an absent-then-filled ordinalsPublicKey as a DIFFERENT wallet', () => {
+    expect(sameWallet({ ...base, ordinalsPublicKey: undefined }, base)).toBe(false);
+  });
+
+  it('still treats an unchanged full tuple as the same wallet', () => {
+    expect(sameWallet(base, { ...base })).toBe(true);
+  });
+});

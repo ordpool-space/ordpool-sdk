@@ -48,6 +48,14 @@ export interface CandidateFeeRow {
    * fold is deliberate behaviour, not a fault.
    */
   absorbedSubDustSats: number | null;
+  /**
+   * Why the BUILDER refused this coin, verbatim, or null when it was simply
+   * priced. `finalFeeSats: null` alone cannot distinguish "does not cover at
+   * this rate" (lower the rate and it appears) from "the builder threw"
+   * (no rate will ever help), and a consumer that conflates them prints an
+   * instruction the user cannot act on.
+   */
+  unavailableReason?: string | null;
 }
 
 /**
@@ -121,13 +129,21 @@ export function resolveCandidateFees<C extends FundingUtxo>(
     // to explain it. The CHOSEN coin's build is a separate call and still
     // throws, so a defect on the coin actually being spent still surfaces.
     let resolved: CatTxFeeSimulation | null = null;
+    let unavailableReason: string | null = null;
     try {
       resolved = resolveCatTxFee({
         simulate: (feeSats) => args.simulate(candidate, feeSats),
         feeRatePerVbyte: args.feeRatePerVbyte,
         feeBudgetSats: args.feeBudgetFor(candidate),
       });
-    } catch {
+    } catch (err) {
+      // One unbuildable coin is ONE unfundable row, never a failed pool, so the
+      // throw does not propagate. But it is NOT swallowed: `resolveCatTxFee`
+      // expresses "cannot fund at this rate" as a typed null and throws only
+      // for a real fault, so a caught throw and a null mean different things
+      // and the row has to carry which. Without the reason a consumer tells the
+      // user to lower the fee rate for a coin no rate will ever satisfy.
+      unavailableReason = err instanceof Error ? err.message : String(err);
       resolved = null;
     }
     return {
@@ -136,6 +152,7 @@ export function resolveCandidateFees<C extends FundingUtxo>(
       finalFeeSats: resolved ? resolved.finalFeeSats : null,
       vsize: resolved ? resolved.vsize : null,
       absorbedSubDustSats: resolved ? resolved.absorbedSubDustSats ?? null : null,
+      unavailableReason,
     };
   });
 }
