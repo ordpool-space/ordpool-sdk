@@ -251,8 +251,14 @@ export async function approveWizzSignPopup(opts: {
   const anyButton = await approval.locator('button').count().catch(() => -1);
   const looseText = await approval.getByText(/Sign/).count().catch(() => -1);
   const frames = approval.frames().length;
+  // frames 1 and anyButton 6 ruled out the frame. The anchored regexes fail
+  // against a textContent of "Sign " with a trailing space, so these are the
+  // whitespace-tolerant candidates. Whichever is exactly 1 becomes the anchor.
+  const roleLoose = await approval.getByRole('button', { name: /^\s*Sign\s*$/ }).count().catch(() => -1);
+  const roleStr = await approval.getByRole('button', { name: 'Sign' }).count().catch(() => -1);
+  const btnHasText = await approval.locator('button').filter({ hasText: /^\s*Sign\s*$/ }).count().catch(() => -1);
   // eslint-disable-next-line no-console
-  console.log(`[wizz:sign-popup] ${JSON.stringify({ ...(await found.jsonValue()), byRole, byText, anyButton, looseText, frames })}`);
+  console.log(`[wizz:sign-popup] ${JSON.stringify({ ...(await found.jsonValue()), byRole, byText, anyButton, looseText, frames, roleLoose, roleStr, btnHasText })}`);
 
   await approval.evaluate(() => {
     const isSignButton = (el: Element) => /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test((el.textContent || '').trim());
