@@ -344,3 +344,48 @@ describe('mint.core — a caller sizing a coin needs BOTH targets', () => {
     expect(sim.fundingUtxo?.value).toBe(clears);
   });
 });
+
+describe('the asset verdict is about the COIN, not the wallet topology', () => {
+  const dirty = coin('d', 100_000);
+  const utxos = utxosPort([dirty]);
+  const scan = scanPort({ [op(dirty)]: 'has-assets' });
+
+  it('an explicit pick of an asset coin reports asset-notice on BOTH topologies', async () => {
+    // Measured before this: the same user action answered 'asset-notice' on a
+    // separate-payment-address wallet and 'ready' on a one-address one,
+    // because the verdict read the recommendation's topology-shaped status.
+    // A consumer gating its notice on the status therefore hid the warning on
+    // unisat, wizz, okx, binance and alby, which is where the SDK is strictest.
+    for (const topology of ['separate-payment-address', 'one-address-for-everything'] as const) {
+      const sim = await simulateMint(
+        params({ fundingTopology: topology, selectedFundingUtxo: dirty }),
+        { utxos, scan },
+      );
+      expect(sim.fundingUtxo?.txid).toBe(dirty.txid);
+      expect(sim.status).toBe('asset-notice');
+    }
+  });
+
+  it('asset-notice EXECUTES rather than blocking', async () => {
+    // The money-path rule calls this an enabled CTA with a visible notice. The
+    // guard used to demand 'ready', so the separate-address auto-pick, the one
+    // topology the rule says to proceed on, could never be executed at all.
+    const sign = signPort();
+    const broadcast = broadcastPort();
+    const out = await executeMint(
+      params({ fundingTopology: 'separate-payment-address' }),
+      { utxos, scan, sign: sign.port, broadcast: broadcast.port },
+    );
+    expect(out.txid).toBe('mint-txid');
+    expect(broadcast.calls).toHaveLength(1);
+  });
+
+  it('a CLEAN pick still reports ready', async () => {
+    const clean = coin('c', 100_000);
+    const sim = await simulateMint(
+      params({ fundingTopology: 'one-address-for-everything' }),
+      { utxos: utxosPort([clean]), scan: scanPort() },
+    );
+    expect(sim.status).toBe('ready');
+  });
+});

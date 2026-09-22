@@ -261,8 +261,19 @@ async function planOffer(
       requirementSats: target, preferredSats: preferredTarget, candidateFees,
     };
   }
+  // The verdict is about the coin that WILL be spent, so it reads the pick's
+  // own content bucket rather than the recommendation's topology-shaped
+  // status. Reading the recommendation made the same user action answer
+  // differently per wallet: an explicit "use anyway" pick of an asset coin
+  // reported 'asset-notice' on a separate-payment-address wallet and 'ready'
+  // on a one-address one, so a consumer gating its notice on the status hid
+  // the warning exactly where the SDK was strictest.
+  //
+  // 'asset-notice' is an ENABLED state with a warning, never a block. The
+  // blocking answers are 'expert-required', 'insufficient' and 'scanning',
+  // and they all return above this with pick === null.
   return {
-    status: recommendation.status === 'asset-notice' ? 'asset-notice' : 'ready',
+    status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
     recommendation,
     pick,
     vsize: resolved.vsize,
@@ -306,9 +317,18 @@ export async function createOffer(
   ports: { utxos: UtxosPort; scan: ContentScanPort; signOffer: OfferCreateSignPort },
 ): Promise<CreateOfferArtifact> {
   const plan = await planOffer(params, ports);
-  if (plan.status !== 'ready' || !plan.pick || plan.feeSats == null || plan.changeSats == null) {
+  // 'asset-notice' EXECUTES. It means a coin will be spent and it carries
+  // assets, which the money-path rule calls an enabled CTA with a visible
+  // notice, not a block. The blocking answers are 'expert-required',
+  // 'insufficient' and 'scanning', and all three arrive with pick === null.
+  // Requiring 'ready' here refused the separate-payment-address auto-pick,
+  // the one topology where the rule says to proceed.
+  const proceeds = plan.status === 'ready' || plan.status === 'asset-notice';
+  if (!proceeds || !plan.pick || plan.feeSats == null || plan.changeSats == null) {
     throw new Error(
-      plan.status === 'expert-required'
+      plan.status === 'scanning'
+        ? 'Still checking what the funding coins hold. Try again in a moment.'
+        : plan.status === 'expert-required'
         ? 'Select a funding UTXO (the available coins carry assets)'
         : 'Insufficient funds for buy-offer at the current price + fee rate',
     );

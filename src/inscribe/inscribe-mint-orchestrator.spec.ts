@@ -116,7 +116,11 @@ describe('InscribeMintOrchestrator (framework-agnostic)', () => {
     o.setSelectedUtxo(dirty);
     const picked = await waitFor(o, (s) => s.resolvedFundingUtxo != null);
     expect(picked.resolvedFundingUtxo?.txid).toBe(dirty.txid);
-    expect(picked.resolvedFundingStatus).toBe('ready');
+    // 'asset-notice', not 'ready': the pick is honoured AND the coin still
+    // carries an asset. Reporting 'ready' threw the warning away at the moment
+    // the user chose the risky coin, which is when it matters most. It is an
+    // ENABLED state, so the CTA stays live and executeInscribe proceeds.
+    expect(picked.resolvedFundingStatus).toBe('asset-notice');
   });
 
   it('mint() guards: no wallet / no feeRate / no UTXO / no content', async () => {

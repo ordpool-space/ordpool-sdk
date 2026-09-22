@@ -293,7 +293,7 @@ export interface InscribeOrchestratorDeps {
 
 /** Everything a consumer template needs, emitted on every state change. */
 /** Mirrors mint.core's three outcomes for the resolved funding answer. */
-export type InscribeFundingStatus = 'ready' | 'expert-required' | 'scanning' | 'insufficient';
+export type InscribeFundingStatus = 'ready' | 'asset-notice' | 'expert-required' | 'scanning' | 'insufficient';
 
 export interface InscribeSnapshot {
   state: InscribeMintState;
@@ -929,9 +929,14 @@ export class InscribeMintOrchestrator {
     const resolvedFundingUtxo = target === null
       ? null
       : resolveFundingPick(fundingRecommendation, target, this.snap.selectedUtxo);
+    // The verdict reads the PICK's own content bucket. Hardcoding 'ready' for
+    // any pick threw the asset warning away: an explicit "use anyway" choice
+    // of an inscription-bearing coin reported clean. 'asset-notice' is an
+    // ENABLED state with a warning, never a block.
     const resolvedFundingStatus: InscribeFundingStatus = resolvedFundingUtxo
-      ? 'ready'
-      : fundingRecommendation.status === 'insufficient' ? 'insufficient' : 'expert-required';
+      ? (resolvedFundingUtxo.bucket === 'clean' ? 'ready' : 'asset-notice')
+      : fundingRecommendation.status === 'insufficient' ? 'insufficient'
+      : fundingRecommendation.status === 'scanning' ? 'scanning' : 'expert-required';
     this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus });
   }
 
@@ -1012,9 +1017,14 @@ export class InscribeMintOrchestrator {
     const resolvedFundingUtxo = target === null
       ? null
       : resolveFundingPick(fundingRecommendation, target, this.snap.selectedUtxo);
+    // The verdict reads the PICK's own content bucket. Hardcoding 'ready' for
+    // any pick threw the asset warning away: an explicit "use anyway" choice
+    // of an inscription-bearing coin reported clean. 'asset-notice' is an
+    // ENABLED state with a warning, never a block.
     const resolvedFundingStatus: InscribeFundingStatus = resolvedFundingUtxo
-      ? 'ready'
-      : fundingRecommendation.status === 'insufficient' ? 'insufficient' : 'expert-required';
+      ? (resolvedFundingUtxo.bucket === 'clean' ? 'ready' : 'asset-notice')
+      : fundingRecommendation.status === 'insufficient' ? 'insufficient'
+      : fundingRecommendation.status === 'scanning' ? 'scanning' : 'expert-required';
     this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus });
   }
 

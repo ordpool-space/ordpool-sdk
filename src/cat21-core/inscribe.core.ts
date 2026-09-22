@@ -53,7 +53,7 @@ export interface InscribeCoreParams
  * consumer renders the status instead of re-deriving the distinction from the
  * recommendation, which is how two surfaces drift apart.
  */
-export type InscribeStatus = 'ready' | 'asset-notice' | 'expert-required' | 'insufficient';
+export type InscribeStatus = 'ready' | 'asset-notice' | 'expert-required' | 'scanning' | 'insufficient';
 
 export interface InscribeSimulation {
   status: InscribeStatus;
@@ -273,8 +273,12 @@ async function planInscribe(
       candidateFees,
     };
   }
+  // Reads the PICK's content bucket, not the recommendation's topology-shaped
+  // status, so the same user action answers the same way on every wallet.
+  // 'asset-notice' is an ENABLED state with a warning; the blocking answers
+  // return above with pick === null.
   return {
-    status: recommendation.status === 'asset-notice' ? 'asset-notice' : 'ready',
+    status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
     recommendation,
     pick,
     fundingRequirementSats: target,
@@ -321,9 +325,18 @@ export async function executeInscribe(
   },
 ): Promise<InscribeAndBroadcastResult> {
   const plan = await planInscribe(params, ports);
-  if (plan.status !== 'ready' || !plan.pick) {
+  // 'asset-notice' EXECUTES. It means a coin will be spent and it carries
+  // assets, which the money-path rule calls an enabled CTA with a visible
+  // notice, not a block. The blocking answers are 'expert-required',
+  // 'insufficient' and 'scanning', and all three arrive with pick === null.
+  // Requiring 'ready' here refused the separate-payment-address auto-pick,
+  // the one topology where the rule says to proceed.
+  const proceeds = plan.status === 'ready' || plan.status === 'asset-notice';
+  if (!proceeds || !plan.pick) {
     throw new Error(
-      plan.status === 'expert-required'
+      plan.status === 'scanning'
+        ? 'Still checking what the funding coins hold. Try again in a moment.'
+        : plan.status === 'expert-required'
         ? 'Select a funding UTXO (the available coins carry assets)'
         : 'Insufficient funds for inscribe at the current fee rate',
     );
