@@ -21,6 +21,7 @@
  */
 
 import { describe, expect, it } from '@jest/globals';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
@@ -327,6 +328,61 @@ describe('buildInscribeCommitPsbt + buildInscribeRevealTx — round-trip', () =>
       network: NETWORK,
     });
 
+    expect(result.changeSats).toBe(0);
+  });
+});
+
+describe('buildInscribeCommitPsbt derives its change floor from the change address', () => {
+  const NETWORK = Network.Mainnet;
+  const scureNetwork = toScureNetwork(NETWORK);
+  // Every production caller passes changeDustLimitSats explicitly, so the
+  // DEFAULT is the branch nothing reaches. That is precisely why it needs its
+  // own test: it is what a new caller gets, and it used to be the postage
+  // value, which is not the floor the signed commit enforces.
+  const commitWithLeftover = (leftoverSats: number, changeDustLimitSats?: number) => {
+    const ephemeralPubkey = deriveRevealPubkeyXonly(new Uint8Array(32).fill(0x44));
+    const envelope = buildInscriptionEnvelope({
+      revealPubkeyXonly: ephemeralPubkey,
+      contentType: 'text/plain',
+      body: new TextEncoder().encode('hello'),
+    });
+    const revealFeeReserveSats = 2_000;
+    const commitFeeSats = 1_000;
+    const value = INSCRIBE_POSTAGE_SATS + revealFeeReserveSats + commitFeeSats + leftoverSats;
+    const { fundingInput, fundingAddress } = makeFundingUtxo(scureNetwork, value);
+    return {
+      fundingAddress,
+      result: buildInscribeCommitPsbt({
+        fundingInput,
+        senderChangeAddress: fundingAddress,
+        envelopeScript: envelope,
+        ephemeralPubkeyXonly: ephemeralPubkey,
+        commitFeeSats,
+        revealFeeReserveSats,
+        network: NETWORK,
+        ...(changeDustLimitSats === undefined ? {} : { changeDustLimitSats }),
+      }),
+    };
+  };
+
+  it('emits a leftover that clears the address floor but not the postage value', () => {
+    const { fundingAddress, result } = commitWithLeftover(400);
+    const floor = getMinimumUtxoSize(fundingAddress);
+    expect(floor).toBeLessThan(400);
+    expect(INSCRIBE_POSTAGE_SATS).toBeGreaterThan(400);
+    expect(result.changeSats).toBe(400);
+  });
+
+  it('absorbs a leftover below the address floor', () => {
+    const { fundingAddress, result } = commitWithLeftover(
+      getMinimumUtxoSize(makeFundingUtxo(scureNetwork, 1).fundingAddress) - 1,
+    );
+    expect(getMinimumUtxoSize(fundingAddress)).toBeGreaterThan(0);
+    expect(result.changeSats).toBe(0);
+  });
+
+  it('an explicit limit still wins over the derived one', () => {
+    const { result } = commitWithLeftover(400, 10_000);
     expect(result.changeSats).toBe(0);
   });
 });

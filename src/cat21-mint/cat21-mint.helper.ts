@@ -3,6 +3,7 @@ import * as btc from '@scure/btc-signer';
 import { CAT21_LOCK_TIME, assertCat21LockTime } from '../cat21-protocol/cat21-lock-time.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
 import { Cat21PreparedInput, addCat21Input } from '../cat21-script/prepare-cat21-input.js';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { resolveCat21MintInputSequence } from '../cat21-protocol/cat21-sequence.js';
@@ -148,7 +149,18 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
   // Change calculation. The dust threshold is the smaller of (a) the
   // builder default 546 and (b) the caller-supplied per-address-type
   // floor (cat21.space passes `getMinimumUtxoSize(paymentAddress)`).
-  const changeDustLimit = args.changeDustLimitSats ?? CAT21_MINT_CHANGE_DUST_LIMIT_SATS;
+  // DERIVED from the address the change actually goes to, so a caller that
+  // omits the argument gets the right floor rather than a flat one. An
+  // optional parameter whose default is wrong is a defect: it priced a picker
+  // grid against 546 while the signed transaction used 294 or 330, so the grid
+  // reported an over-pay on change the transaction emitted. The constant
+  // survives only for an address this build cannot parse.
+  let changeDustLimit: number;
+  try {
+    changeDustLimit = args.changeDustLimitSats ?? getMinimumUtxoSize(args.destinations.senderChangeAddress);
+  } catch {
+    changeDustLimit = CAT21_MINT_CHANGE_DUST_LIMIT_SATS;
+  }
   const required = postageSats + tipValueSats + args.feeSats;
   const changeRaw = args.fundingInput.value - required;
   if (changeRaw < 0) {

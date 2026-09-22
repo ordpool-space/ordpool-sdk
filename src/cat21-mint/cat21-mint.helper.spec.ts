@@ -1,4 +1,5 @@
 import { hex } from '@scure/base';
+import { getMinimumUtxoSize } from '../cat21-script/address-format.js';
 import * as btc from '@scure/btc-signer';
 import { describe, expect, it } from '@jest/globals';
 
@@ -92,12 +93,32 @@ describe('buildCat21MintPsbt', () => {
     expect(tx.outputsLength).toBe(2);
   });
 
-  it('absorbs sub-dust change into the miner fee', () => {
-    // 50_000 - 546 postage - 49_000 fee = 454 change → sub-dust → absorbed
-    const result = buildCat21MintPsbt(makeBaseArgs({ feeSats: 49_000 }));
+  it('absorbs sub-dust change into the miner fee, at the CHANGE ADDRESS floor', () => {
+    // The floor is the one the change address actually enforces, derived by
+    // the builder rather than a flat 546. Computed from the fixture instead of
+    // written as a literal, so the case stays sub-dust if CHANGE_ADDR's type
+    // ever changes: a literal would silently become an above-dust case and the
+    // test would then assert absorption of change that is emitted.
+    const floor = getMinimumUtxoSize(CHANGE_ADDR);
+    const feeSats = 50_000 - CAT21_MINT_POSTAGE_SATS - (floor - 1);
+    const result = buildCat21MintPsbt(makeBaseArgs({ feeSats }));
     const tx = btc.Transaction.fromPSBT(result.psbt);
     expect(tx.outputsLength).toBe(1);
     expect(result.changeSats).toBe(0);
+    expect(result.finalFeeSats).toBe(feeSats + (floor - 1));
+  });
+
+  it('emits change that clears the CHANGE ADDRESS floor but not a flat 546', () => {
+    // The band the derived floor exists for. A bc1q payer's floor is 294, so a
+    // 400-sat leftover is real change; the flat 546 default absorbed it and a
+    // picker grid then reported an over-pay the transaction never made.
+    const floor = getMinimumUtxoSize(CHANGE_ADDR);
+    expect(floor).toBeLessThan(546);
+    const feeSats = 50_000 - CAT21_MINT_POSTAGE_SATS - 400;
+    const result = buildCat21MintPsbt(makeBaseArgs({ feeSats }));
+    expect(btc.Transaction.fromPSBT(result.psbt).outputsLength).toBe(2);
+    expect(result.changeSats).toBe(400);
+    expect(result.finalFeeSats).toBe(feeSats);
   });
 
   it('throws on insufficient funding', () => {
