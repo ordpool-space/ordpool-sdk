@@ -3,6 +3,7 @@ import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { changeDustFloor } from '../cat21-script/address-format.js';
+import { CAT21_MINT_POSTAGE_SATS } from '../cat21-mint/cat21-mint.helper.js';
 import { Network } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { BroadcastPort, ContentScanPort, CoreFundingUtxo, SignPort, UtxosPort } from './ports.js';
@@ -44,6 +45,47 @@ const broadcastPort = () => {
 };
 
 describe('mint.core — simulateMint', () => {
+  it('the picker grid prices change against the PER-ADDRESS dust floor, not a flat 546', async () => {
+    // The grid is built here; the signed transaction is built by
+    // cat21.service.helper, which passes getMinimumUtxoSize(paymentAddress).
+    // A flat 546 here puts the two out of step across the band
+    // [per-address floor, 546): the grid folds the leftover into the fee and
+    // flags an over-pay while the broadcast transaction emits it as change.
+    // bc1q is 294, so the band is 252 sats wide on any segwit payer.
+    const LEFTOVER = 400; // inside [294, 546): kept by bc1q, dust to P2PKH.
+
+    // Measure the coin size that leaves exactly LEFTOVER, rather than assuming
+    // a vsize. The probe emits change under either floor, so its fee is the
+    // same fee the band coin pays.
+    const probeRow = async (paymentAddress: string, value: number) => {
+      const sim = await simulateMint(
+        params({ paymentAddress }),
+        { utxos: utxosPort([coin('c', value)]), scan: scanPort() },
+      );
+      const row = sim.candidateFees[0];
+      const fee = row.finalFeeSats;
+      if (fee === null) throw new Error(`coin ${value} did not price on ${paymentAddress}`);
+      return { fee, absorbed: row.absorbedSubDustSats };
+    };
+
+    const segwitProbe = await probeRow(PAYMENT_ADDR, 100_000);
+    expect(segwitProbe.absorbed).toBe(0);
+    const segwitBandCoin = segwitProbe.fee + CAT21_MINT_POSTAGE_SATS + LEFTOVER;
+
+    const segwitBand = await probeRow(PAYMENT_ADDR, segwitBandCoin);
+    expect(segwitBand.absorbed).toBe(0);
+    expect(segwitBand.fee).toBe(segwitProbe.fee);
+
+    // Control: a P2PKH payer's own floor IS 546, so the same leftover is dust
+    // there. That is what makes this a per-address floor and not a lowered one.
+    const legacyProbe = await probeRow(LEGACY_PAYMENT_ADDR, 100_000);
+    const legacyBandCoin = legacyProbe.fee + CAT21_MINT_POSTAGE_SATS + LEFTOVER;
+    const legacyBand = await probeRow(LEGACY_PAYMENT_ADDR, legacyBandCoin);
+    expect(legacyBand.absorbed).toBe(LEFTOVER);
+    expect(changeDustFloor(LEGACY_PAYMENT_ADDR)).toBe(546);
+    expect(changeDustFloor(PAYMENT_ADDR)).toBe(294);
+  });
+
   it('AUTO: a clean covering coin => ready with a positive fee', async () => {
     const clean = coin('c', 100_000);
     const sim = await simulateMint(params(), { utxos: utxosPort([clean]), scan: scanPort() });

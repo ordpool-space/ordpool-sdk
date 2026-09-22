@@ -148,6 +148,13 @@ function buildMint(
       tip: params.tip ? { address: params.tip.address, valueSats: params.tip.valueSats } : undefined,
     },
     feeSats,
+    // The PER-ADDRESS floor, the same one the broadcast path passes. Omitting
+    // it falls back to the flat 546, and the picker grid would then price a
+    // coin differently from the transaction that gets signed: in the band
+    // [per-address floor, 546) the grid folds the leftover into the fee and
+    // warns about an over-pay, while the real tx emits that change. bc1q is
+    // 294 and bc1p 330, so the band is real on every segwit payment address.
+    changeDustLimitSats: changeDustFloor(params.paymentAddress),
   });
 }
 
