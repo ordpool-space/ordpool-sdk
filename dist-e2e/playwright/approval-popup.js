@@ -1,7 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.ApprovalPopupTimeoutError = void 0;
 exports.approvalGate = approvalGate;
 exports.waitForApprovalPopup = waitForApprovalPopup;
+exports.waitForOptionalApprovalPopup = waitForOptionalApprovalPopup;
 exports.closeLeftoverExtensionPages = closeLeftoverExtensionPages;
 exports.approveWizzSignPopup = approveWizzSignPopup;
 exports.clickApprovalButton = clickApprovalButton;
@@ -25,6 +27,14 @@ function approvalGate(opts) {
         return true;
     };
 }
+/** Rejection of `waitForApprovalPopup` when no page matched within its timeout. */
+class ApprovalPopupTimeoutError extends Error {
+    constructor(timeoutMs) {
+        super(`approval popup did not appear within ${timeoutMs}ms`);
+        this.name = 'ApprovalPopupTimeoutError';
+    }
+}
+exports.ApprovalPopupTimeoutError = ApprovalPopupTimeoutError;
 /**
  * Wait for a wallet-extension approval popup to open in the given
  * browser context, identified by a caller-supplied predicate.
@@ -109,7 +119,7 @@ async function waitForApprovalPopup(opts) {
             }
         };
         const onPage = (p) => void tryPage(p);
-        const timer = setTimeout(() => finishErr(new Error(`approval popup did not appear within ${timeoutMs}ms`)), timeoutMs);
+        const timer = setTimeout(() => finishErr(new ApprovalPopupTimeoutError(timeoutMs)), timeoutMs);
         const cleanup = () => {
             clearTimeout(timer);
             context.off('page', onPage);
@@ -118,6 +128,23 @@ async function waitForApprovalPopup(opts) {
         for (const p of context.pages())
             void tryPage(p);
     });
+}
+/**
+ * For a popup the wallet MAY show, such as a permission renewal after a reload:
+ * the popup, or `null` when none appeared within `timeoutMs`.
+ *
+ * Only the timeout means "not shown". Any other rejection still throws, so a
+ * broken context does not read as a wallet that simply did not ask.
+ */
+async function waitForOptionalApprovalPopup(opts) {
+    try {
+        return await waitForApprovalPopup(opts);
+    }
+    catch (e) {
+        if (e instanceof ApprovalPopupTimeoutError)
+            return null;
+        throw e;
+    }
 }
 /**
  * Close every chrome-extension page in the context except those

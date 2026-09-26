@@ -9,6 +9,10 @@ export declare function approvalGate(opts: {
     control: (page: Page) => Locator;
     timeoutMs?: number;
 }): (page: Page) => Promise<boolean>;
+/** Rejection of `waitForApprovalPopup` when no page matched within its timeout. */
+export declare class ApprovalPopupTimeoutError extends Error {
+    constructor(timeoutMs: number);
+}
 /**
  * Wait for a wallet-extension approval popup to open in the given
  * browser context, identified by a caller-supplied predicate.
@@ -49,6 +53,14 @@ export declare function waitForApprovalPopup(opts: {
     isApproval: (p: Page) => boolean | Promise<boolean>;
     timeoutMs?: number;
 }): Promise<Page>;
+/**
+ * For a popup the wallet MAY show, such as a permission renewal after a reload:
+ * the popup, or `null` when none appeared within `timeoutMs`.
+ *
+ * Only the timeout means "not shown". Any other rejection still throws, so a
+ * broken context does not read as a wallet that simply did not ask.
+ */
+export declare function waitForOptionalApprovalPopup(opts: Parameters<typeof waitForApprovalPopup>[0]): Promise<Page | null>;
 /**
  * Close every chrome-extension page in the context except those
  * in `keep`. Defensive — wallets like Xverse, OKX, Phantom, Alby

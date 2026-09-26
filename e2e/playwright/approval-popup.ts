@@ -20,6 +20,14 @@ export function approvalGate(opts: {
   };
 }
 
+/** Rejection of `waitForApprovalPopup` when no page matched within its timeout. */
+export class ApprovalPopupTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`approval popup did not appear within ${timeoutMs}ms`);
+    this.name = 'ApprovalPopupTimeoutError';
+  }
+}
+
 /**
  * Wait for a wallet-extension approval popup to open in the given
  * browser context, identified by a caller-supplied predicate.
@@ -111,7 +119,7 @@ export async function waitForApprovalPopup(opts: {
     const onPage = (p: Page) => void tryPage(p);
 
     const timer = setTimeout(
-      () => finishErr(new Error(`approval popup did not appear within ${timeoutMs}ms`)),
+      () => finishErr(new ApprovalPopupTimeoutError(timeoutMs)),
       timeoutMs,
     );
 
@@ -125,6 +133,24 @@ export async function waitForApprovalPopup(opts: {
   });
 }
 
+
+/**
+ * For a popup the wallet MAY show, such as a permission renewal after a reload:
+ * the popup, or `null` when none appeared within `timeoutMs`.
+ *
+ * Only the timeout means "not shown". Any other rejection still throws, so a
+ * broken context does not read as a wallet that simply did not ask.
+ */
+export async function waitForOptionalApprovalPopup(
+  opts: Parameters<typeof waitForApprovalPopup>[0],
+): Promise<Page | null> {
+  try {
+    return await waitForApprovalPopup(opts);
+  } catch (e) {
+    if (e instanceof ApprovalPopupTimeoutError) return null;
+    throw e;
+  }
+}
 
 /**
  * Close every chrome-extension page in the context except those
