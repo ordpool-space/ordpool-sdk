@@ -545,3 +545,36 @@ describe('setSelectedUtxo is free when the selection does not change', () => {
     expect(o.getSnapshot().selectedUtxo).toBe(other); // different outpoint, replaced
   }, 15_000);
 });
+
+const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+
+describe('InscribeMintOrchestrator: an empty wallet reads insufficient without a fee rate', () => {
+  it('connect an empty wallet and set nothing else: insufficient, not scanning', async () => {
+    // setWallet nulls the fee rate, so right after connect there is none. An
+    // empty set covers nothing at any rate, so the verdict must not wait for
+    // one: ordpool renders its fund-this-address panel on 'insufficient', and
+    // a 'scanning' here left every regtest spec waiting for a panel that never
+    // appeared.
+    const o = new InscribeMintOrchestrator(deps({ getUtxos: async () => [] }));
+    await o.setWallet(wallet);
+    await flush();
+    expect(o.getSnapshot().feeRate).toBeNull();
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+  });
+
+  it('an unread set is not empty: scanning until the read completes', async () => {
+    let release: (u: never[]) => void = () => undefined;
+    const o = new InscribeMintOrchestrator(deps({ getUtxos: () => new Promise((r) => { release = r; }) }));
+    const connecting = o.setWallet(wallet);
+    await flush();
+    // A fee-rate change while the read is pending recomputes against a set
+    // that is still `[]` only because nothing has been read into it yet.
+    o.setFeeRate(10);
+    await flush();
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('scanning');
+    release([]);
+    await connecting;
+    await flush();
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+  });
+});

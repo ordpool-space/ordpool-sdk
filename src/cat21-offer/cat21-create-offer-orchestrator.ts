@@ -108,6 +108,13 @@ const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUt
   candidates: [],
 };
 
+/** The funding set was READ and holds nothing. */
+const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
+  status: 'insufficient',
+  recommended: null,
+  candidates: [],
+};
+
 /**
  * Same coin? `setSelectedFundingUtxo` recomputes, so re-applying an unchanged
  * selection would loop a consumer that re-drives it from the snapshot.
@@ -121,6 +128,8 @@ function sameSelection(a: { txid: string; vout: number } | null, b: { txid: stri
 export class Cat21CreateOfferOrchestrator {
   private wallet: CreateOfferWalletContext | null = null;
   private utxos: TxnOutput[] = [];
+  /** True once `utxos` holds a completed read. An unread set is also `[]`, and only a read one can be called empty. */
+  private utxosRead = false;
   // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
   // recompute whose captured seq is stale drops its result instead of
   // overwriting a newer snapshot (the plain-class replacement for switchMap).
@@ -191,6 +200,7 @@ export class Cat21CreateOfferOrchestrator {
     }
     if (!wallet) {
       this.utxos = [];
+      this.utxosRead = false;
       this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
@@ -210,9 +220,11 @@ export class Cat21CreateOfferOrchestrator {
       // the moment a tx confirms. A consumer wiring its own fetch would otherwise
       // double-count a funding row and show a doubled balance.
       this.utxos = dedupeUtxosByOutpoint(await this.deps.getUtxos(wallet.paymentAddress));
+      this.utxosRead = true;
       this.patch({ state: 'ready' });
     } catch (err) {
       this.utxos = [];
+      this.utxosRead = false;
       this.patch({ state: 'error', errorMessage: `Failed to load UTXOs: ${errMsg(err)}` });
       return;
     }
@@ -295,7 +307,9 @@ export class Cat21CreateOfferOrchestrator {
     const seq = ++this.recomputeSeq;
     const params = this.params();
     if (!params) {
-      this.patch({ simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      // Read-and-empty is a verdict whatever inputs are still missing.
+      const measuredEmpty = this.utxosRead && this.utxos.length === 0;
+      this.patch({ simulation: null, fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
     try {

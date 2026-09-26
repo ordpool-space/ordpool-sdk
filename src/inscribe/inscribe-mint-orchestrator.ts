@@ -464,6 +464,8 @@ function sameSelection(a: { txid: string; vout: number } | null, b: { txid: stri
 export class InscribeMintOrchestrator {
   private wallet: InscribeWalletContext | null = null;
   private utxos: TxnOutput[] = [];
+  /** True once `utxos` holds a completed read. An unread set is also `[]`, and only a read one can be called empty. */
+  private utxosRead = false;
   // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
   // recompute whose captured seq is stale drops its result instead of
   // overwriting a newer snapshot (the plain-class replacement for switchMap).
@@ -546,6 +548,7 @@ export class InscribeMintOrchestrator {
     }
     if (!wallet) {
       this.utxos = [];
+      this.utxosRead = false;
       this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
       return;
     }
@@ -565,9 +568,11 @@ export class InscribeMintOrchestrator {
       // the moment a tx confirms. A consumer wiring its own fetch would otherwise
       // double-count a funding row and show a doubled balance.
       this.utxos = dedupeUtxosByOutpoint(await this.deps.getUtxos(wallet.paymentAddress));
+      this.utxosRead = true;
       this.patch({ state: 'ready' });
     } catch (err) {
       this.utxos = [];
+      this.utxosRead = false;
       const message = `Failed to load UTXOs: ${errMsg(err)}`;
       this.patch({ state: 'error', errorMessage: message, userMessage: message });
       return;
@@ -809,7 +814,7 @@ export class InscribeMintOrchestrator {
     }
     if (!wallet || !feeRate || !ready || this.utxos.length === 0) {
       // Read-and-empty is a verdict; missing wallet, rate or content is none.
-      const measuredEmpty = !!wallet && !!feeRate && !!ready && this.utxos.length === 0;
+      const measuredEmpty = this.utxosRead && this.utxos.length === 0;
       this.patch({
         simulations: [],
         fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION,

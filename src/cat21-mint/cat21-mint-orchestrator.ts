@@ -171,6 +171,8 @@ function sameSelection(a: { txid: string; vout: number } | null, b: { txid: stri
 export class Cat21MintOrchestrator {
   private wallet: MintWalletContext | null = null;
   private utxos: TxnOutput[] = [];
+  /** True once `utxos` holds a completed read. An unread set is also `[]`, and only a read one can be called empty. */
+  private utxosRead = false;
   // Monotonic guard: a setter/wallet-change bumps this; an in-flight async
   // recompute whose captured seq is stale drops its result instead of
   // overwriting a newer snapshot (the plain-class replacement for switchMap).
@@ -263,6 +265,7 @@ export class Cat21MintOrchestrator {
     this.patch({ feeRate: null, selectedUtxo: null, errorMessage: null, successTxId: null });
     if (!wallet) {
       this.utxos = [];
+      this.utxosRead = false;
       this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
       return;
     }
@@ -282,9 +285,11 @@ export class Cat21MintOrchestrator {
       // the moment a tx confirms. A consumer wiring its own fetch would otherwise
       // double-count a funding row and show a doubled balance.
       this.utxos = dedupeUtxosByOutpoint(await this.deps.getUtxos(wallet.paymentAddress));
+      this.utxosRead = true;
       this.patch({ state: 'ready' });
     } catch (err) {
       this.utxos = [];
+      this.utxosRead = false;
       this.patch({ state: 'error', errorMessage: `Failed to load UTXOs: ${errMsg(err)}` });
       return;
     }
@@ -406,7 +411,7 @@ export class Cat21MintOrchestrator {
     const feeRate = this.snap.feeRate;
     if (!wallet || !feeRate || this.utxos.length === 0) {
       // Read-and-empty is a verdict; missing wallet or fee rate is no verdict.
-      const measuredEmpty = !!wallet && !!feeRate && this.utxos.length === 0;
+      const measuredEmpty = this.utxosRead && this.utxos.length === 0;
       this.patch({
         simulations: [], candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0,
         fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION,
