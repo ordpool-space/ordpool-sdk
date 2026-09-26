@@ -261,3 +261,12 @@ describe('setSelectedFundingUtxo is free when the selection does not change', ()
     expect(emissions).toBeLessThan(50);
   }, 15_000);
 });
+
+describe('Cat21CreateOfferOrchestrator: the fee rate survives a wallet connect', () => {
+  it('a fee rate set before connect is still set after it', async () => {
+    const o = new Cat21CreateOfferOrchestrator(deps());
+    o.setFeeRate(10);
+    await o.setWallet(wallet);
+    expect(o.getSnapshot().feeRate).toBe(10);
+  });
+});

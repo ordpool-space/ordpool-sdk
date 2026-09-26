@@ -257,12 +257,15 @@ export class Cat21MintOrchestrator {
    *
    * To re-read the UTXO set for the wallet already connected, call
    * `refreshUtxos()`. This method deliberately no longer doubles as that.
+   *
+   * The fee rate is kept: it is a network property, and a consumer that set
+   * it before the connect would otherwise hold a funded wallet with no verdict.
    */
   async setWallet(wallet: MintWalletContext | null): Promise<void> {
     if (sameWallet(this.wallet, wallet)) return;
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
-    this.patch({ feeRate: null, selectedUtxo: null, errorMessage: null, successTxId: null });
+    this.patch({ selectedUtxo: null, errorMessage: null, successTxId: null });
     if (!wallet) {
       this.utxos = [];
       this.utxosRead = false;

@@ -203,7 +203,7 @@ export class Cat21TransferOrchestrator {
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     {
       this.patch({
-        catUtxo: null, recipientAddress: null, feeRate: null, selectedFundingUtxo: null,
+        catUtxo: null, recipientAddress: null, selectedFundingUtxo: null,
         targetPostageSats: null, errorMessage: null, successTxId: null,
       });
     }

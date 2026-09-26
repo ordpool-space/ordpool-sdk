@@ -550,11 +550,9 @@ const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
 describe('InscribeMintOrchestrator: an empty wallet reads insufficient without a fee rate', () => {
   it('connect an empty wallet and set nothing else: insufficient, not scanning', async () => {
-    // setWallet nulls the fee rate, so right after connect there is none. An
-    // empty set covers nothing at any rate, so the verdict must not wait for
-    // one: ordpool renders its fund-this-address panel on 'insufficient', and
-    // a 'scanning' here left every regtest spec waiting for a panel that never
-    // appeared.
+    // No fee rate has been set. An empty set covers nothing at any rate, so
+    // the verdict must not wait for one: ordpool renders its
+    // fund-this-address panel on 'insufficient'.
     const o = new InscribeMintOrchestrator(deps({ getUtxos: async () => [] }));
     await o.setWallet(wallet);
     await flush();
@@ -576,5 +574,19 @@ describe('InscribeMintOrchestrator: an empty wallet reads insufficient without a
     await connecting;
     await flush();
     expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+  });
+});
+
+describe('InscribeMintOrchestrator: the fee rate survives a wallet connect', () => {
+  it('fee rate set before connect, funded wallet: auto once content is set', async () => {
+    // ordpool sets the fee rate once, from the fee estimate at page load, and
+    // the user connects afterwards. The rate is a network property, so a
+    // connect must not drop it and leave a funded wallet without a verdict.
+    const o = new InscribeMintOrchestrator(deps());
+    o.setFeeRate(10);
+    await o.setWallet(wallet);
+    o.setContent(content);
+    await waitFor(o, (s) => s.fundingRecommendation.status === 'auto');
+    expect(o.getSnapshot().feeRate).toBe(10);
   });
 });

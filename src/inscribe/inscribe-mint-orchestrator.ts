@@ -544,7 +544,7 @@ export class InscribeMintOrchestrator {
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     {
-      this.patch({ feeRate: null, selectedUtxo: null, content: null, batch: null, errorMessage: null, userMessage: null, successResult: null, compression: null, padding: null, parents: null });
+      this.patch({ selectedUtxo: null, content: null, batch: null, errorMessage: null, userMessage: null, successResult: null, compression: null, padding: null, parents: null });
     }
     if (!wallet) {
       this.utxos = [];

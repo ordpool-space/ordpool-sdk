@@ -195,7 +195,7 @@ export class Cat21CreateOfferOrchestrator {
     {
       this.patch({
         targetCat: null, priceSats: null, sellerPaymentAddress: null, buyerReceiveAddress: wallet?.ordinalsAddress ?? null,
-        feeRate: null, selectedFundingUtxo: null, bid: null, errorMessage: null,
+        selectedFundingUtxo: null, bid: null, errorMessage: null,
       });
     }
     if (!wallet) {

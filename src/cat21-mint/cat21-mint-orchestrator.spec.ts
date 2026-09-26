@@ -210,13 +210,13 @@ describe('Cat21MintOrchestrator (framework-agnostic)', () => {
     expect(o.getSnapshot().errorMessage).toBeTruthy();
   });
 
-  it('a genuine wallet change resets fee + selection', async () => {
+  it('a genuine wallet change resets the selection and keeps the fee rate', async () => {
     const o = new Cat21MintOrchestrator(deps());
     await o.setWallet(wallet);
     o.setFeeRate(10);
     o.setSelectedUtxo(coin('c', 100_000));
     await o.setWallet({ ...wallet, ordinalsAddress: btc.p2tr(hex.decode('0'.repeat(63) + '2'), undefined, btc.NETWORK).address! });
-    expect(o.getSnapshot().feeRate).toBeNull();
+    expect(o.getSnapshot().feeRate).toBe(10);
     expect(o.getSnapshot().selectedUtxo).toBeNull();
   });
 
@@ -562,11 +562,9 @@ describe('a pick that is silently replaced is NAMED, not just overridden', () =>
 
 describe('Cat21MintOrchestrator: an empty wallet reads insufficient without a fee rate', () => {
   it('connect an empty wallet and set nothing else: insufficient, not scanning', async () => {
-    // setWallet nulls the fee rate, so right after connect there is none. An
-    // empty set covers nothing at any rate, so the verdict must not wait for
-    // one: ordpool renders its fund-this-address panel on 'insufficient', and
-    // a 'scanning' here left every regtest spec waiting for a panel that never
-    // appeared.
+    // No fee rate has been set. An empty set covers nothing at any rate, so
+    // the verdict must not wait for one: ordpool renders its
+    // fund-this-address panel on 'insufficient'.
     const o = new Cat21MintOrchestrator(deps({ getUtxos: async () => [] }));
     await o.setWallet(wallet);
     await flush();
@@ -588,5 +586,19 @@ describe('Cat21MintOrchestrator: an empty wallet reads insufficient without a fe
     await connecting;
     await flush();
     expect(o.getSnapshot().fundingRecommendation.status).toBe('insufficient');
+  });
+});
+
+describe('Cat21MintOrchestrator: the fee rate survives a wallet connect', () => {
+  it('fee rate set before connect, funded wallet: auto, not scanning', async () => {
+    // ordpool sets the fee rate once, from the fee estimate at page load, and
+    // the user connects afterwards. The rate is a network property, so a
+    // connect must not drop it and leave a funded wallet without a verdict.
+    const o = new Cat21MintOrchestrator(deps());
+    o.setFeeRate(10);
+    await o.setWallet(wallet);
+    await flush();
+    expect(o.getSnapshot().feeRate).toBe(10);
+    expect(o.getSnapshot().fundingRecommendation.status).toBe('auto');
   });
 });
