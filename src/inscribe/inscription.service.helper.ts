@@ -47,6 +47,7 @@ import {
 } from './inscription-child-reveal.helper.js';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper.js';
 import { failInscribe } from './inscribe-errors.js';
+import { vsizeWithMaxSignatures } from '../cat21-fee/compute-psbt-vsize.helper.js';
 
 /**
  * Layer-4 orchestration entry: ties the envelope encoder + per-
@@ -984,7 +985,7 @@ export function createChildInscribeTransactions(
         const tx = btc.Transaction.fromPSBT(commit.commitPsbt);
         tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
         tx.finalize();
-        return { vsize: tx.vsize, finalFeeSats: commitFeeBudget - commit.changeSats };
+        return { vsize: vsizeWithMaxSignatures(tx), finalFeeSats: commitFeeBudget - commit.changeSats };
       },
     });
     if (!resolvedCommit) {

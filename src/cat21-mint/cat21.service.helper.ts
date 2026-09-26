@@ -18,6 +18,7 @@ export {
   toXOnly,
 } from '../cat21-script/address-format.js';
 import { getDummyKeypair, getDummyLegacyTransaction } from '../cat21-fee/dummy-keypair.js';
+import { vsizeWithMaxSignatures } from '../cat21-fee/compute-psbt-vsize.helper.js';
 export { getDummyKeypair, getDummyLegacyTransaction };
 
 /**
@@ -113,5 +114,5 @@ export function simulateMintTransaction(
   );
   result.tx.signIdx(dummyPrivateKey, 0, [btc.SigHash.DEFAULT, btc.SigHash.ALL]);
   result.tx.finalize();
-  return { ...result, vsize: result.tx.vsize };
+  return { ...result, vsize: vsizeWithMaxSignatures(result.tx) };
 }

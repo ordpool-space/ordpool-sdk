@@ -49,6 +49,42 @@ export interface ComputePsbtVsizeArgs {
   nonSignableInputs?: readonly number[];
 }
 
+/** Longest DER ECDSA signature plus sighash byte a real signer can emit. */
+const MAX_ECDSA_SIG_BYTES = 72;
+
+/**
+ * `tx.vsize` with every ECDSA signature counted at 72 bytes.
+ *
+ * A DER signature is 70 to 72 bytes depending on r and s, so a dummy
+ * signature's length depends on the message, and the wallet that really signs
+ * emits its own (Core grinds low-R; `@scure` does not). Where the weight sits
+ * on a `ceil(weight / 4)` boundary one byte moves the vsize, so a preview
+ * measured on the dummy can under-state the broadcast tx. Counting the maximum
+ * makes the measurement independent of the dummy and an upper bound on any real
+ * signature. Covers P2WPKH, P2SH-P2WPKH (witness bytes, weight 1) and P2PKH
+ * (scriptSig bytes, weight 4). Schnorr signatures are fixed-length and untouched.
+ */
+export function vsizeWithMaxSignatures(tx: btc.Transaction): number {
+  let extraWeight = 0;
+  for (let i = 0; i < tx.inputsLength; i++) {
+    const input = tx.getInput(i);
+    const w = input.finalScriptWitness;
+    if (w && w.length === 2 && w[1].length === 33 && w[0].length < MAX_ECDSA_SIG_BYTES) {
+      extraWeight += MAX_ECDSA_SIG_BYTES - w[0].length;
+      continue;
+    }
+    if (!w && input.finalScriptSig) {
+      const ops = btc.Script.decode(input.finalScriptSig);
+      const sig = ops[0];
+      if (ops.length === 2 && sig instanceof Uint8Array && ops[1] instanceof Uint8Array
+        && ops[1].length === 33 && sig.length < MAX_ECDSA_SIG_BYTES) {
+        extraWeight += 4 * (MAX_ECDSA_SIG_BYTES - sig.length);
+      }
+    }
+  }
+  return extraWeight === 0 ? tx.vsize : Math.ceil((tx.weight + extraWeight) / 4);
+}
+
 /**
  * Return `tx.vsize` for a freshly-built PSBT by dummy-signing every
  * signable input and attaching a fake witness to any `nonSignableInputs`.
@@ -71,5 +107,5 @@ export function computePsbtVsize(args: ComputePsbtVsizeArgs): number {
       tx.finalizeIdx(i);
     }
   }
-  return tx.vsize;
+  return vsizeWithMaxSignatures(tx);
 }

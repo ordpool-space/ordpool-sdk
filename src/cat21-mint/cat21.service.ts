@@ -197,9 +197,10 @@ export class Cat21Service {
    * candidate tx's vsize during fee resolution (`resolveCatTxFee`).
    *
    * The dummy key is the SDK's well-known fixed key (`getDummyKeypair`);
-   * the signature is structurally valid (correct DER length, correct
-   * sighash byte) so `tx.vsize` matches what a real-signed tx would
-   * have. Only used in simulation paths; never broadcast.
+   * the signature is structurally valid, but its DER length (70 to 72)
+   * depends on the message, so read the size through
+   * `vsizeWithMaxSignatures`, not `tx.vsize`. Simulation only; never
+   * broadcast.
    */
   dummySignAndFinalize(psbtBytes: Uint8Array): btc.Transaction {
     const tx = btc.Transaction.fromPSBT(psbtBytes);

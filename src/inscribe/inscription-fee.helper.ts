@@ -10,6 +10,7 @@ import type { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { buildInscribeCommitPsbt, resolveInscribePostage, type InscribeCommitArgs, type InscribeCommitResult } from './inscription-commit.helper.js';
 import { buildInscriptionEnvelope, type OrdEnvelopeField } from './inscription-envelope.js';
 import { buildInscribeRevealTx, deriveRevealPubkeyXonly } from './inscription-reveal.helper.js';
+import { vsizeWithMaxSignatures } from '../cat21-fee/compute-psbt-vsize.helper.js';
 
 /**
  * Layer-3 fee simulation for the inscribe commit + reveal pair.
@@ -296,7 +297,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
       const realisedFee = commitFeeBudget - commit.changeSats;
       // Whatever the realised fee exceeds the requested one by is change that
       // fell below the dust floor and was folded in rather than emitted.
-      return { vsize: tx.vsize, finalFeeSats: realisedFee, absorbedSubDustSats: realisedFee - feeSats };
+      return { vsize: vsizeWithMaxSignatures(tx), finalFeeSats: realisedFee, absorbedSubDustSats: realisedFee - feeSats };
     },
   });
   if (!resolvedCommit) {
