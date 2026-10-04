@@ -15,7 +15,8 @@ import {
 import { simulateInscribeFees } from '../inscribe/inscription-fee.helper.js';
 import { prepareInscribeFundingInput } from '../inscribe/inscription-input-adapter.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
-import { BroadcastPort, ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
+import { ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
+import type { InscribeBroadcastTransport } from '../inscribe/inscribe-package-broadcast.js';
 import { resolveFundingPick, selectFunding } from './select-funding.js';
 
 /**
@@ -27,7 +28,7 @@ import { resolveFundingPick, selectFunding } from './select-funding.js';
  * core selects it) and the transport (injected as ports).
  */
 export interface InscribeCoreParams
-  extends Omit<InscribeAndBroadcastArgs, 'paymentOutput' | 'broadcast' | 'promptForSignedPsbt'> {
+  extends Omit<InscribeAndBroadcastArgs, 'paymentOutput' | 'transport' | 'promptForSignedPsbt'> {
   /** Expert-mode explicit funding pick; omitted ⇒ the safe auto coin. */
   selectedFundingUtxo?: CoreFundingUtxo | null;
   /**
@@ -304,8 +305,8 @@ export async function simulateInscribe(
 
 /**
  * Execute an inscribe end-to-end: safe-auto funding selection, then the
- * existing commit+reveal engine (build commit → sign → broadcast commit → build
- * reveal → sign → broadcast reveal). Throws when only asset coins cover
+ * commit+reveal engine (build both, collect the wallet's signature, validate
+ * the pair and send it as one package). Throws when only asset coins cover
  * (`expert-required`) or nothing covers. `promptForSignedPsbt` is the
  * watch-only signing bridge (Promise form; adapted internally).
  */
@@ -314,7 +315,8 @@ export async function executeInscribe(
   ports: {
     utxos: UtxosPort;
     scan: ContentScanPort;
-    broadcast: BroadcastPort;
+    /** Where the signed commit and reveal go, validated and sent together. */
+    transport: InscribeBroadcastTransport;
     promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Promise<string>;
   },
 ): Promise<InscribeAndBroadcastResult> {
@@ -344,7 +346,7 @@ export async function executeInscribe(
         status: { confirmed: true },
         transactionHex: plan.pick.transactionHex,
       },
-      broadcast: (txHex) => from(ports.broadcast.broadcast(txHex).then((r) => r.txid)),
+      transport: ports.transport,
       promptForSignedPsbt: prompt ? (unsigned) => from(prompt(unsigned)) : undefined,
     }),
   );

@@ -2,10 +2,11 @@
  * `inscribeChildAndBroadcast` orchestrator spec (Pipeline A).
  *
  * Pins the ORCHESTRATOR's composition: build the commit + child-reveal
- * PSBTs, sign the commit funding input, broadcast the commit, sign the
- * reveal's PARENT input at the ordinals address, broadcast the reveal,
- * thread the txids. The signer is mocked (its real signing is proven
- * end-to-end against real ord in `e2e/regtest/inscribe-child-roundtrip`).
+ * PSBTs, sign the commit funding input, sign the reveal's PARENT input at
+ * the ordinals address, and only then send both as one package, threading
+ * the txids of the signed bytes. The signer is mocked, but it signs for real
+ * with the test keys (its wallet-side signing is proven end-to-end against
+ * real ord in `e2e/regtest/inscribe-child-roundtrip`).
  */
 import { describe, expect, it, jest, beforeEach } from '@jest/globals';
 import { secp256k1, schnorr } from '@noble/curves/secp256k1';
@@ -19,14 +20,13 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 jest.mock('../wallet/signers', () => ({ findSignerOrThrow: jest.fn() }));
 import { findSignerOrThrow } from '../wallet/signers/index.js';
 import { inscribeChildAndBroadcast } from './inscribe-child-orchestrator.js';
+import { recordingInscribeTransport, type RecordingInscribeTransport } from '../testing/inscribe-transport.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);
 const PAYMENT_PRIV = new Uint8Array(32).fill(0xab);
 const PARENT_PRIV = new Uint8Array(32).fill(0xef);
 const PARENT_ID = 'b'.repeat(64) + 'i0';
-const COMMIT_TXID = 'c'.repeat(64);
-const REVEAL_TXID = 'e'.repeat(64);
 
 const mockedFind = findSignerOrThrow as jest.MockedFunction<typeof findSignerOrThrow>;
 
@@ -54,18 +54,30 @@ function recipientAddress() {
 describe('inscribeChildAndBroadcast orchestrator', () => {
   let signSingleFundingInput: jest.Mock;
   let signChildRevealParentInputs: jest.Mock;
-  const broadcasts: string[] = [];
+  let transport: RecordingInscribeTransport;
+  // What the mocked signers handed over, to compare with what was sent.
+  let signedCommitHex: string;
+  let signedRevealHex: string;
 
   beforeEach(() => {
-    broadcasts.length = 0;
-    // Each signer method uses the broadcast callback the orchestrator hands
-    // it, then resolves the txid — exactly how the real signers behave.
-    signSingleFundingInput = jest.fn((input: any) =>
-      input.broadcast(`commit-hex`).pipe(map(() => ({ txId: COMMIT_TXID }))),
-    );
-    signChildRevealParentInputs = jest.fn((input: any) =>
-      input.broadcast(`reveal-hex`).pipe(map(() => ({ txId: REVEAL_TXID }))),
-    );
+    transport = recordingInscribeTransport();
+    // Each signer method signs with the test key, then hands the wire hex to
+    // the broadcast callback the orchestrator gave it, exactly as the real
+    // signers do.
+    signSingleFundingInput = jest.fn((input: any) => {
+      const tx = btc.Transaction.fromPSBT(input.psbtBytes);
+      tx.signIdx(PAYMENT_PRIV, 0);
+      tx.finalize();
+      signedCommitHex = tx.hex;
+      return input.broadcast(tx.hex).pipe(map((txId) => ({ txId })));
+    });
+    signChildRevealParentInputs = jest.fn((input: any) => {
+      const tx = btc.Transaction.fromPSBT(input.finalizePsbtBytes, { allowUnknownInputs: true });
+      tx.signIdx(PARENT_PRIV, 0);
+      tx.finalize();
+      signedRevealHex = tx.hex;
+      return input.broadcast(tx.hex).pipe(map((txId) => ({ txId })));
+    });
     mockedFind.mockReturnValue({
       providerId: KnownOrdinalWalletType.xverse,
       signSingleFundingInput,
@@ -88,7 +100,7 @@ describe('inscribeChildAndBroadcast orchestrator', () => {
       parentInscriptionId: PARENT_ID,
       parentUtxo: parent,
       network: NETWORK,
-      broadcast: (txHex: string) => { broadcasts.push(txHex); return of(txHex); },
+      transport,
     }));
   }
 
@@ -126,19 +138,25 @@ describe('inscribeChildAndBroadcast orchestrator', () => {
     expect(fullPsbt.getInput(1).tapScriptSig!.length).toBe(1);
   });
 
-  it('broadcasts commit then reveal, and threads the txids into the result', async () => {
+  it('sends commit and reveal together only after both are signed, and threads their txids into the result', async () => {
     const result = await run();
-    expect(broadcasts).toEqual(['commit-hex', 'reveal-hex']);
-    expect(result.commitTxId).toBe(COMMIT_TXID);
-    expect(result.revealTxId).toBe(REVEAL_TXID);
-    expect(result.childInscriptionId).toBe(`${REVEAL_TXID}i0`);
+    expect(transport.calls).toEqual(['testPackage', 'submitPackage']);
+    expect(transport.submitted).toEqual([signedCommitHex, signedRevealHex]);
+    const commitTx = btc.Transaction.fromRaw(hex.decode(signedCommitHex));
+    const revealTx = btc.Transaction.fromRaw(hex.decode(signedRevealHex), { allowUnknownInputs: true });
+    expect(result.commitTxId).toBe(commitTx.id);
+    expect(result.revealTxId).toBe(revealTx.id);
+    expect(result.childInscriptionId).toBe(`${revealTx.id}i0`);
+    // The reveal spends the commit it was sent with.
+    expect(hex.encode(revealTx.getInput(1).txid!)).toBe(commitTx.id);
     expect(result.commitAddress.startsWith('bc1p')).toBe(true);
     expect(result.ephemeral.privKey.length).toBe(32);
     expect(result.fees.totalFeeSats).toBeGreaterThan(0);
   });
 
-  it('fires onCommitSigned with the signed commit hex before broadcast', async () => {
+  it('fires onCommitSigned with the signed commit hex before anything is sent', async () => {
     const seen: string[] = [];
+    const sentWhenSigned: number[] = [];
     const { paymentPublicKey, paymentAddress } = paymentContext();
     await firstValueFrom(inscribeChildAndBroadcast({
       walletType: KnownOrdinalWalletType.xverse,
@@ -151,10 +169,12 @@ describe('inscribeChildAndBroadcast orchestrator', () => {
       parentInscriptionId: PARENT_ID,
       parentUtxo: parentUtxo(),
       network: NETWORK,
-      broadcast: (txHex: string) => of(txHex),
-      onCommitSigned: (h) => seen.push(h),
+      transport,
+      onCommitSigned: (h) => { seen.push(h); sentWhenSigned.push(transport.calls.length); },
     }));
-    expect(seen).toEqual(['commit-hex']);
+    expect(seen).toEqual([signedCommitHex]);
+    // Nothing had reached the transport when the hook fired.
+    expect(sentWhenSigned).toEqual([0]);
   });
 
   it('propagates a builder error (insufficient funds) as an error observable', async () => {
@@ -170,7 +190,8 @@ describe('inscribeChildAndBroadcast orchestrator', () => {
       parentInscriptionId: PARENT_ID,
       parentUtxo: parentUtxo(),
       network: NETWORK,
-      broadcast: (txHex: string) => of(txHex),
+      transport,
     }))).rejects.toThrow(/Insufficient funds for child inscribe/);
+    expect(transport.calls).toEqual([]);
   });
 });

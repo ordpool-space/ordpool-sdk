@@ -16,7 +16,8 @@ import * as btc from '@scure/btc-signer';
 
 const execFileAsync = promisify(execFile);
 
-const ELECTRS_URL =
+/** Base URL of the regtest electrs (Esplora REST), as the specs and helpers reach it. */
+export const ELECTRS_URL =
   process.env.REGTEST_ELECTRS_URL ??
   `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
 const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';

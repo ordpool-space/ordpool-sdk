@@ -33,6 +33,7 @@ import { SimulateInscribeFeesArgs, SimulateInscribeFeesResult, simulateInscribeF
 import type { InscriptionPropertiesInput } from './inscription-properties.js';
 import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
 import { prepareInscribeFundingInput } from './inscription-input-adapter.js';
+import type { InscribeBroadcastTransport } from './inscribe-package-broadcast.js';
 import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos.js';
 import {
   InscribeAndBroadcastResult,
@@ -276,8 +277,11 @@ export interface InscribeOrchestratorDeps {
    * caller who forgot rather than expressing anything about agents.
    */
   fundingTopology?: FundingTopologySetting;
-  /** Broadcast a signed tx hex; resolves to the txid. Called for commit AND reveal. */
-  broadcast(signedTxHex: string): Promise<string>;
+  /**
+   * Where the signed commit and reveal go, validated and sent as one package.
+   * Usually `esploraInscribeTransport([<your electrs /api base>])`.
+   */
+  transport: InscribeBroadcastTransport;
   network: Network;
   /**
    * The hosted `wasm/brotli_wasm_bg.wasm` (URL) or its bytes. Needed for
@@ -696,7 +700,7 @@ export class InscribeMintOrchestrator {
           paddingUtxo: ready.paddingUtxo,
           commitFeeRatePerVbyte: ready.commitFeeRatePerVbyte,
           network: this.deps.network,
-          broadcast: (txHex: string) => from(this.deps.broadcast(txHex)),
+          transport: this.deps.transport,
           promptForSignedPsbt: promptForSignedPsbt
             ? (unsigned) => from(promptForSignedPsbt(unsigned))
             : undefined,
@@ -734,21 +738,21 @@ export class InscribeMintOrchestrator {
       let ready = await this.resolveBatchCompression(batch, this.recomputeSeq);
       ready = await this.resolveBatchParents(ready, wallet, this.recomputeSeq);
       const args = batchArgs(ready, wallet, feeRate, this.deps.network, selected);
-      // The commit is broadcast first; once it is out, the wallet is asked
-      // for the reveal's own inputs. Marking the step there works for every
-      // wallet, including those that sign without a prompt callback.
-      let broadcasts = 0;
+      // Once the commit is signed the wallet is asked for the reveal's own
+      // inputs; nothing is sent until both are signed. Marking the step on the
+      // signed commit works for every wallet, including those that sign
+      // without a prompt callback.
       const result = await firstValueFrom(
         inscribeBatchAndBroadcast({
           ...args,
           walletType: wallet.type,
           parents: args.parents.length > 0 ? args.parents : undefined,
-          broadcast: (txHex: string) => from(this.deps.broadcast(txHex).then((txId) => {
-            if (++broadcasts === 1 && prompts === 2) {
+          transport: this.deps.transport,
+          onCommitSigned: () => {
+            if (prompts === 2) {
               this.patch({ signing: { step: 2, of: 2, what: revealSignatureKind(batch) } });
             }
-            return txId;
-          })),
+          },
           promptForSignedPsbt: promptForSignedPsbt
             ? (unsigned) => from(promptForSignedPsbt(unsigned))
             : undefined,

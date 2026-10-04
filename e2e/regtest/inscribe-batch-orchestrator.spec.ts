@@ -24,7 +24,8 @@ import {
   type InscribeSigningStep,
   type InscribeSnapshot,
 } from '../../src/inscribe/inscribe-mint-orchestrator';
-import { ORD_STOCK_URL } from './regtest-helpers';
+import { ELECTRS_URL, ORD_STOCK_URL } from './regtest-helpers';
+import { esploraInscribeTransport } from '../../src/inscribe/inscribe-package-broadcast';
 import { Network, toScureNetwork } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import { createInscribeTransactions } from '../../src/inscribe/inscription.service.helper';
@@ -92,7 +93,7 @@ async function runBatchWith(
     // The funding-safety scan is the consumer's own IO; this spec is about the
     // batch wiring, so the coin is declared clean.
     scan: { classify: async () => 'clean' },
-    broadcast: (txHex: string) => postTx(txHex),
+    transport: esploraInscribeTransport([ELECTRS_URL]),
     network: Network.Regtest,
     ordBaseUrl: extra.ordBaseUrl,
   };

@@ -5,6 +5,7 @@ import { schnorr } from '@noble/curves/secp256k1';
 import { Network } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { recordingInscribeTransport } from '../testing/inscribe-transport.js';
 import {
   InscribeContent,
   InscribeMintOrchestrator,
@@ -45,7 +46,7 @@ const coin = (id: string, value: number): TxnOutput => ({
 const deps = (over: Partial<InscribeOrchestratorDeps> = {}): InscribeOrchestratorDeps => ({
   getUtxos: async () => [coin('c', 100_000)],
   scan: { classify: async () => 'clean' },
-  broadcast: async () => 'broadcast-txid',
+  transport: recordingInscribeTransport(),
   network: Network.Mainnet,
   ...over,
 });

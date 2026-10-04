@@ -4,8 +4,9 @@
  * Pins the fan-out contract:
  *
  *  - POSTs `[commitHex, revealHex]` to every endpoint in parallel.
- *  - `ok: true` iff ANY endpoint reports 2xx.
- *  - `ok: false` when all endpoints reject.
+ *  - `ok: true` iff ANY endpoint reports `package_msg: "success"`.
+ *  - `ok: false` when all endpoints reject, including an HTTP 200 whose
+ *    `package_msg` says only part of the package went in.
  *  - Network errors and timeouts are absorbed into per-endpoint
  *    `{ ok: false, status: -1 }` rows, never thrown.
  *  - Oversized packages fail closed without hitting the network.
@@ -23,6 +24,26 @@ import {
 
 const COMMIT_HEX = '02000000000101aa'; // shape-only, fan-out doesn't decode
 const REVEAL_HEX = '02000000000101bb';
+
+// Bodies ordpool-electrs returns for POST /txs/package, as bitcoind v30.2
+// produced them on regtest for a parent P and a child C paying no fee. Both
+// come back with HTTP 200; only the first means both are in the mempool.
+const PACKAGE_SUCCESS = JSON.stringify({
+  package_msg: 'success',
+  'tx-results': {
+    '47a8833f061a7f1c003061659ab721561da5eda9e341e68f57fd76d6081826fd': { txid: '34958184fcdfa5bffd0eec0d2fa83c738b108e441744fe771e8c64f5ce74188b', vsize: 154 },
+    '1d4ec63c1237eca1bd222f8fe4f4befe2e700bc96752f758a084478c42fed8e6': { txid: 'e71ff0ced3838ace36e87e616831ee041de911920dfafc58800abbdffbfdda74', vsize: 111 },
+  },
+  'replaced-transactions': [],
+});
+const PACKAGE_PARENT_ONLY = JSON.stringify({
+  package_msg: 'transaction failed',
+  'tx-results': {
+    '47a8833f061a7f1c003061659ab721561da5eda9e341e68f57fd76d6081826fd': { txid: '34958184fcdfa5bffd0eec0d2fa83c738b108e441744fe771e8c64f5ce74188b', vsize: 154, fees: { base: 0.000031 } },
+    '1d4ec63c1237eca1bd222f8fe4f4befe2e700bc96752f758a084478c42fed8e6': { txid: 'e71ff0ced3838ace36e87e616831ee041de911920dfafc58800abbdffbfdda74', error: 'min relay fee not met, 0 < 12' },
+  },
+  'replaced-transactions': [],
+});
 
 function stubFetch(
   responses: Record<string, { status: number; body: string } | Error>,
@@ -46,7 +67,7 @@ describe('broadcastInscribePackage', () => {
       calls.push(String(url));
       expect(init?.method).toBe('POST');
       expect(init?.body).toBe(JSON.stringify([COMMIT_HEX, REVEAL_HEX]));
-      return { ok: true, status: 200, text: async () => 'txid_a' } as Response;
+      return { ok: true, status: 200, text: async () => PACKAGE_SUCCESS } as Response;
     }) as unknown as typeof fetch;
 
     const result = await broadcastInscribePackage(
@@ -65,7 +86,7 @@ describe('broadcastInscribePackage', () => {
 
   it('returns ok=true when any endpoint accepts (even if others reject)', async () => {
     const fetchImpl = stubFetch({
-      'https://good.example/txs/package': { status: 200, body: 'commit_txid_xyz' },
+      'https://good.example/txs/package': { status: 200, body: PACKAGE_SUCCESS },
       'https://bad.example/txs/package': { status: 400, body: 'bad-txns-inputs-missingorspent' },
     });
 
@@ -84,10 +105,26 @@ describe('broadcastInscribePackage', () => {
     const bad = result.endpointResults.find(r => r.endpoint.includes('bad'))!;
     expect(good.ok).toBe(true);
     expect(good.status).toBe(200);
-    expect(good.body).toBe('commit_txid_xyz');
+    expect(good.body).toBe(PACKAGE_SUCCESS);
     expect(bad.ok).toBe(false);
     expect(bad.status).toBe(400);
     expect(bad.body).toBe('bad-txns-inputs-missingorspent');
+  });
+
+  it('returns ok=false on HTTP 200 when package_msg says only the parent went in', async () => {
+    const fetchImpl = stubFetch({
+      'https://api.example/txs/package': { status: 200, body: PACKAGE_PARENT_ONLY },
+    });
+
+    const result = await broadcastInscribePackage(
+      { commitHex: COMMIT_HEX, revealHex: REVEAL_HEX },
+      { fetchImpl, endpoints: ['https://api.example'] },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.endpointResults[0].status).toBe(200);
+    expect(result.endpointResults[0].ok).toBe(false);
+    expect(result.endpointResults[0].body).toBe(PACKAGE_PARENT_ONLY);
   });
 
   it('returns ok=false when ALL endpoints reject', async () => {
@@ -107,7 +144,7 @@ describe('broadcastInscribePackage', () => {
 
   it('absorbs network errors into per-endpoint { ok: false, status: -1 } rows (never throws)', async () => {
     const fetchImpl = stubFetch({
-      'https://reachable.example/txs/package': { status: 200, body: 'commit_txid' },
+      'https://reachable.example/txs/package': { status: 200, body: PACKAGE_SUCCESS },
       'https://unreachable.example/txs/package': new Error('ECONNREFUSED'),
     });
 
@@ -130,7 +167,7 @@ describe('broadcastInscribePackage', () => {
     const calls: string[] = [];
     const fetchImpl = (async (url: unknown) => {
       calls.push(String(url));
-      return { ok: true, status: 200, text: async () => 'ok' } as Response;
+      return { ok: true, status: 200, text: async () => PACKAGE_SUCCESS } as Response;
     }) as unknown as typeof fetch;
 
     await broadcastInscribePackage(
@@ -167,7 +204,7 @@ describe('broadcastInscribePackage', () => {
 
   it('forwards packageWeight at the exact limit (boundary) to the network', async () => {
     const fetchImpl = stubFetch({
-      'https://api.example/txs/package': { status: 200, body: 'txid_x' },
+      'https://api.example/txs/package': { status: 200, body: PACKAGE_SUCCESS },
     });
 
     const result = await broadcastInscribePackage(

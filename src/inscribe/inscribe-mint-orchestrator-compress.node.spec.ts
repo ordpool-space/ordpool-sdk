@@ -19,6 +19,7 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import { compressLikeOrd } from './inscribe-compression.helper.js';
 import { createInscribeTransactions } from './inscription.service.helper.js';
+import { recordingInscribeTransport } from '../testing/inscribe-transport.js';
 import {
   InscribeContent,
   InscribeMintOrchestrator,
@@ -72,7 +73,7 @@ const utxo: TxnOutput = { txid: 'c'.repeat(64), vout: 0, value: 200_000, status:
 const deps = (over: Partial<InscribeOrchestratorDeps> = {}): InscribeOrchestratorDeps => ({
   getUtxos: async () => [utxo],
   scan: { classify: async () => 'clean' },
-  broadcast: async () => 'broadcast-txid',
+  transport: recordingInscribeTransport(),
   network: Network.Mainnet,
   brotliWasm: WASM,
   ...over,

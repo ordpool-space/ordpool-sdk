@@ -4,8 +4,9 @@ import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
-import { BroadcastPort, ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
+import { ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
 import { InscribeCoreParams, executeInscribe, simulateInscribe } from './inscribe.core.js';
+import { recordingInscribeTransport } from '../testing/inscribe-transport.js';
 
 // Plain NODE unit test — no jsdom.
 
@@ -33,7 +34,6 @@ const utxosPort = (coins: CoreFundingUtxo[]): UtxosPort => ({ spendableUtxos: as
 const scanPort = (verdicts: Record<string, 'clean' | 'has-assets'> = {}): ContentScanPort => ({
   classify: async (outpoint) => verdicts[outpoint] ?? 'clean',
 });
-const broadcastPort = (): BroadcastPort => ({ broadcast: async () => ({ txid: 'x', channel: 'mempool' }) });
 
 describe('inscribe.core — simulateInscribe', () => {
   it('the picker grid prices commit change against the PER-ADDRESS dust floor', async () => {
@@ -115,7 +115,7 @@ describe('inscribe.core — executeInscribe', () => {
       executeInscribe(params(), {
         utxos: utxosPort([asset]),
         scan: scanPort({ [op(asset)]: 'has-assets' }),
-        broadcast: broadcastPort(),
+        transport: recordingInscribeTransport(),
       }),
     ).rejects.toThrow(/Select a funding UTXO/);
   });
@@ -128,7 +128,7 @@ describe('inscribe.core — executeInscribe', () => {
     await executeInscribe(params({ walletType: KnownOrdinalWalletType.xpub, paymentPublicKey: ORDINALS_PUB, paymentAddress: RECIPIENT_ADDR }), {
       utxos: utxosPort([coin('c', 200_000)]),
       scan: scanPort(),
-      broadcast: broadcastPort(),
+      transport: recordingInscribeTransport(),
       promptForSignedPsbt: prompt,
     }).catch(() => undefined);
     expect(prompt).toHaveBeenCalledTimes(1);

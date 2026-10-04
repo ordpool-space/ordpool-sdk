@@ -14,6 +14,7 @@ import { Network, toScureNetwork } from '../network.js';
 
 import { createInscribeTransactions } from './inscription.service.helper.js';
 import type { CreateInscribeTransactionsArgs } from './inscription.service.helper.js';
+import { recordingInscribeTransport } from '../testing/inscribe-transport.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);
@@ -136,7 +137,8 @@ describe('satSource', () => {
     const { base64 } = await import('@scure/base');
     const { firstValueFrom, of } = await import('rxjs');
     const handed: string[][] = [];
-    const broadcasts: string[] = [];
+    const transport = recordingInscribeTransport();
+    const broadcasts = transport.submitted;
     const result = await firstValueFrom(inscribeAndBroadcast({
       walletType: KnownOrdinalWalletType.xpub,
       paymentOutput: { txid: 'd'.repeat(64), vout: 0, value: 100_000, status: { confirmed: true } },
@@ -148,7 +150,7 @@ describe('satSource', () => {
       satSource: source(20_000, 5_000),
       feeRatePerVbyte: 3,
       network: NETWORK,
-      broadcast: (txHex: string) => { broadcasts.push(txHex); return of(btc.Transaction.fromRaw(hex.decode(txHex)).id); },
+      transport,
       promptForSignedPsbt: (unsigned: { base64: string }) => {
         const psbt = btc.Transaction.fromPSBT(base64.decode(unsigned.base64));
         // What the wallet is handed: the sat's UTXO at 0, the funding at 1.
@@ -204,7 +206,8 @@ describe('paddingUtxo', () => {
     const { base64 } = await import('@scure/base');
     const { firstValueFrom, of } = await import('rxjs');
     const handed: string[][] = [];
-    const broadcasts: string[] = [];
+    const transport = recordingInscribeTransport();
+    const broadcasts = transport.submitted;
     const result = await firstValueFrom(inscribeAndBroadcast({
       walletType: KnownOrdinalWalletType.xpub,
       paymentOutput: { txid: 'd'.repeat(64), vout: 0, value: 100_000, status: { confirmed: true } },
@@ -217,7 +220,7 @@ describe('paddingUtxo', () => {
       paddingUtxo: pad,
       feeRatePerVbyte: 3,
       network: NETWORK,
-      broadcast: (txHex: string) => { broadcasts.push(txHex); return of(btc.Transaction.fromRaw(hex.decode(txHex)).id); },
+      transport,
       promptForSignedPsbt: (unsigned: { base64: string }) => {
         const psbt = btc.Transaction.fromPSBT(base64.decode(unsigned.base64));
         handed.push([0, 1].map(i => hex.encode(psbt.getInput(i).txid!)));

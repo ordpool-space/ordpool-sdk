@@ -1,33 +1,27 @@
 /**
  * Inscribe broadcast helper.
  *
- * Phase-1 strategy (per the locked-in design decisions in
- * `OSS-INSCRIBERS.md`):
+ * The inscribe orchestrators do not use this: they go through
+ * `broadcastCommitAndReveal` (`inscribe-package-broadcast.ts`), which
+ * validates the pair with `testmempoolaccept` first and recovers a
+ * commit that lands alone. This is the bare submission step, kept for
+ * callers that already hold a signed pair.
  *
- *  - The inscribe pipeline produces a (commit, reveal) tx pair. The
- *    two MUST land atomically: a confirmed commit without a known
- *    reveal stalls the wallet's recovery flow; a reveal that
- *    references an un-broadcast commit is rejected with
- *    `missing-inputs`.
- *  - Bitcoin Core v28+ exposes `submitpackage` (BIP-331) for atomic
- *    1-parent-1-child submission. ordpool-electrs already speaks
- *    `POST /txs/package` (`rest.rs:1544`); we POST the pair there.
- *  - We do NOT trust a single endpoint. Phase 1 fans out the package
- *    to BOTH our own electrs (`ord.ordpool.space` / `api.ordpool.space`)
- *    and blockstream's `/txs/package` in PARALLEL. The first 2xx
- *    wins; the second response is logged but does not influence the
- *    return. "Our job is done" the moment one endpoint reports
- *    acceptance.
- *  - Per `OSS-INSCRIBERS.md` Q1+Q2: no journal, no retry. If both
- *    endpoints reject the package, this call surfaces a final error;
- *    recovery is the caller's responsibility using the returned bearer
- *    ephemeral key (`result.ephemeral.privKey`) and the reveal bytes.
- *  - `testmempoolaccept` is intentionally NOT pre-flighted. The
- *    real submission IS the test; pre-flighting doubles request
- *    volume for no benefit (acceptance has the same edge cases
- *    either way, and a successful pre-flight does not guarantee
- *    a successful broadcast moments later when mempool state
- *    changes).
+ *  - `submitpackage` is NOT atomic. Core keeps every transaction that
+ *    passes on its own ("If any transaction passes, it will be accepted
+ *    to mempool", `bitcoin-cli help submitpackage`, v30.2), and electrs
+ *    returns that result as HTTP 200 with `package_msg: "transaction
+ *    failed"`. So acceptance here means `package_msg === "success"`,
+ *    never the HTTP status. ordpool-electrs serves the route at
+ *    `POST /txs/package` (`rest.rs:1544`).
+ *  - The package goes to every endpoint in parallel (by default our
+ *    electrs at `api.ordpool.space` and blockstream's). It counts as
+ *    sent when one endpoint reports success; the others are kept for
+ *    diagnostics.
+ *  - No retry here. If no endpoint reports success, recovering a commit
+ *    that may have landed alone is the caller's job, with the ephemeral
+ *    key and the reveal bytes; `broadcastCommitAndReveal` does exactly
+ *    that.
  *
  * No Slipstream branch yet. Standard-weight inscriptions
  * (≤350 KB body → reveal stays under MAX_STANDARD_TX_WEIGHT)
@@ -86,9 +80,8 @@ export interface InscribePackageBroadcastOptions {
 
 export interface InscribePackageBroadcastResult {
   /**
-   * True iff AT LEAST one endpoint reported HTTP 2xx. Per the Phase-1
-   * design ("our job is done when at least one endpoint accepts"),
-   * this is the only field consumers need to branch on.
+   * True iff at least one endpoint reported `package_msg: "success"`,
+   * i.e. both transactions are in its mempool.
    */
   ok: boolean;
   /**
@@ -115,10 +108,9 @@ export interface InscribePackageBroadcastResult {
  *  - Body: JSON array of hex strings, parent first then child:
  *    `[commitHex, revealHex]`. Matches ordpool-electrs's parser at
  *    `rest.rs:1544` and the BIP-331 `submitpackage` shape Core uses.
- *  - 2xx response → accepted. Body is implementation-specific
- *    (electrs returns the parent txid; Core's mempool returns a
- *    structured JSON object). We don't parse it — acceptance is
- *    the signal, body is for diagnostics.
+ *  - Accepted only when the 2xx body is Core's `submitpackage` object
+ *    with `package_msg: "success"`. A 2xx carrying any other
+ *    `package_msg` means at most part of the package went in.
  *  - Non-2xx → rejected. Body is the error text for diagnostics.
  *
  * The function never aborts the slow endpoint when the fast one
@@ -195,7 +187,7 @@ async function postPackage(
     const text = await response.text();
     return {
       endpoint: url,
-      ok: response.ok,
+      ok: response.ok && packageSucceeded(text),
       status: response.status,
       body: text,
     };
@@ -209,5 +201,14 @@ async function postPackage(
   } finally {
     clearTimeout(timeoutId);
     outerSignal?.removeEventListener('abort', onOuterAbort);
+  }
+}
+
+/** Whether a `/txs/package` body says both transactions are in the mempool. */
+function packageSucceeded(body: string): boolean {
+  try {
+    return (JSON.parse(body) as { package_msg?: unknown }).package_msg === 'success';
+  } catch {
+    return false;
   }
 }

@@ -68,6 +68,16 @@ pinning the wire-tx bytes plus an orchestrator spec for build to broadcast.
 
 Why: a caller could pass an array missing an input index, the wallet signed what was listed, auto-finalizing wallets emitted a partially-finalized PSBT, and broadcast failed at electrs with `mandatory-script-verify-flag-failed` AFTER the user clicked Sign.
 
+## RULE: An inscribe sends its commit and reveal only as a validated pair
+
+- Every orchestrator collects ALL wallet signatures first (the signers' `broadcast` callback only keeps the bytes, `holdSigned` in `inscribe/inscribe-signed-pair.ts`). Parent and satpoint batches included: cancelling the second prompt leaves nothing on the network.
+- Then `broadcastCommitAndReveal` (`inscribe/inscribe-package-broadcast.ts`): `testmempoolaccept` over the pair, and only if both are `allowed: true` (null is a refusal), `submitpackage`. A commit refused as `txn-already-in-mempool` means an earlier attempt got it out: check and send the reveal alone.
+- `submitpackage` is NOT atomic: Core keeps every transaction that passes on its own, and electrs answers HTTP 200 with `package_msg: "transaction failed"`. Success is `package_msg === "success"`, never the status.
+- A commit that may be out without its reveal: resend the signed reveal, then throw `InscribeRevealPendingError` carrying the reveal hex and the ephemeral key. That error is the only place the key leaves the SDK on a failure.
+- `transport` is a required argument. There is no sequential fallback: sending the commit alone is how funds get stuck.
+
+Ref: `e2e/regtest/inscribe-package-broadcast.spec.ts` against bitcoind v30.2: without the dry run, a refused reveal leaves the commit in the mempool alone (mutation-checked).
+
 ## RULE: A cat UTXO's size is set once at mint and preserved afterwards
 
 <!-- long-rule: one row per operation, and each row is a different money path -->

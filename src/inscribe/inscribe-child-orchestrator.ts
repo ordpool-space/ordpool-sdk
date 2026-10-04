@@ -13,6 +13,8 @@ import {
 import { ChildRevealParent } from './inscription-child-reveal.helper.js';
 import { OrdEnvelopeField } from './inscription-envelope.js';
 import type { InscriptionContentEncoding } from './inscribe-compression.helper.js';
+import type { InscribeBroadcastTransport } from './inscribe-package-broadcast.js';
+import { holdSigned, sendPair } from './inscribe-signed-pair.js';
 
 /**
  * Public orchestrator for the ord parent/child (provenance) inscribe.
@@ -21,10 +23,12 @@ import type { InscriptionContentEncoding } from './inscribe-compression.helper.j
  *   1. `createChildInscribeTransactions` — commit PSBT + a CHILD reveal
  *      PSBT (parent input unsigned, commit input ephemeral-finalized).
  *   2. `signSingleFundingInput` — the wallet signs the commit's funding
- *      input; broadcast the commit.
+ *      input. Nothing is sent yet.
  *   3. `signChildRevealParentInputs` — the wallet signs the reveal's
  *      PARENT input (index 0, the ordinals key that owns the parent);
- *      the commit input (index 1) is already witnessed; broadcast.
+ *      the commit input (index 1) is already witnessed.
+ *   4. `broadcastCommitAndReveal` — validate the pair, then send it as a
+ *      package. Cancelling step 3 therefore leaves nothing on the network.
  *
  * The parent inscription is spent (proving control) and returned to the
  * wallet, and the child is created with the `parent` tag — which is what
@@ -67,8 +71,9 @@ export interface InscribeChildAndBroadcastArgs {
    */
   parentUtxo: ChildRevealParent;
   network: Network;
-  broadcast(txHex: string): Observable<string>;
-  /** Fired with the wallet-signed commit hex before broadcast. */
+  /** Where the signed pair goes; see `InscribeAndBroadcastArgs.transport`. */
+  transport: InscribeBroadcastTransport;
+  /** Fired with the wallet-signed commit hex, before anything is sent. */
   onCommitSigned?(signedCommitHex: string): void;
   promptForSignedPsbt?(unsigned: { base64: string; hex: string }): Observable<string>;
 }
@@ -120,23 +125,18 @@ export function inscribeChildAndBroadcast(
     }
 
     const signer = findSignerOrThrow(args.walletType);
-
-    const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
-      if (args.onCommitSigned) {
-        try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
-      }
-      return args.broadcast(signedCommitHex);
-    };
+    const commit = holdSigned(args.onCommitSigned);
+    const reveal = holdSigned();
 
     return signer.signSingleFundingInput({
       psbtBytes: built.commitPsbt,
       paymentAddress: args.paymentAddress,
       paymentPublicKey: hex.encode(args.paymentPublicKey),
       network: args.network,
-      broadcast: captureAndBroadcast,
+      broadcast: commit.broadcast,
       promptForSignedPsbt: args.promptForSignedPsbt,
     }).pipe(
-      switchMap(({ txId: commitTxId }) =>
+      switchMap(() =>
         signer.signChildRevealParentInputs({
           // Wallet signs input 0 on the BARE PSBT (no envelope tap-leaf);
           // its signature is merged into the full PSBT to finalize.
@@ -149,19 +149,12 @@ export function inscribeChildAndBroadcast(
           // wallet-side address (see SignChildRevealParentInputsArgs).
           ordinalsPublicKey: hex.encode(args.parentUtxo.utxo.tapInternalKey),
           network: args.network,
-          broadcast: args.broadcast,
+          broadcast: reveal.broadcast,
           promptForSignedPsbt: args.promptForSignedPsbt,
-        }).pipe(
-          map(({ txId: revealTxId }) => ({
-            commitTxId,
-            revealTxId,
-            childInscriptionId: `${revealTxId}i0`,
-            commitAddress: built.commitAddress,
-            ephemeral: built.ephemeral,
-            fees: built.fees,
-          })),
-        ),
+        }),
       ),
+      switchMap(() => sendPair(args.transport, built, commit.take(), reveal.take())),
+      map((result) => ({ ...result, childInscriptionId: `${result.revealTxId}i0` })),
     );
   });
 }

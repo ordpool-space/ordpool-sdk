@@ -18,6 +18,7 @@ jest.mock('./inscribe-orchestrator', () => ({
 import { Network } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
+import { recordingInscribeTransport } from '../testing/inscribe-transport.js';
 import {
   InscribeContent,
   InscribeMintOrchestrator,
@@ -45,7 +46,7 @@ const coin = (value: number): TxnOutput => ({ txid: 'c'.repeat(64), vout: 0, sta
 const deps = (over: Partial<InscribeOrchestratorDeps> = {}): InscribeOrchestratorDeps => ({
   getUtxos: async () => [coin(100_000)],
   scan: { classify: async () => 'clean' },
-  broadcast: async () => 'broadcast-txid',
+  transport: recordingInscribeTransport(),
   network: Network.Mainnet,
   ...over,
 });
@@ -133,15 +134,15 @@ describe('InscribeMintOrchestrator — sign + broadcast (inscribeAndBroadcast mo
 describe('InscribeMintOrchestrator — a batch with parents announces both signatures', () => {
   beforeEach(() => mockInscribeBatchAndBroadcast.mockReset());
 
-  it('says "commit" first, then the reveal\'s parent inputs once the commit is out', async () => {
+  it('says "commit" first, then the reveal\'s parent inputs once the commit is signed', async () => {
     const parentKey = new Uint8Array(32).fill(0xef);
     const p2tr = btc.p2tr(schnorr.getPublicKey(parentKey), undefined, btc.NETWORK, true);
-    // The real orchestrator broadcasts the commit, then the reveal; mimic that.
+    // The real orchestrator fires onCommitSigned once the commit is signed,
+    // then asks the wallet for the reveal's own inputs; mimic that.
     mockInscribeBatchAndBroadcast.mockImplementation((args: {
-      broadcast: (hex: string) => { toPromise?: unknown };
+      onCommitSigned?: (hex: string) => void;
     }) => defer(async () => {
-      await firstValueFrom(args.broadcast('commit-hex') as never);
-      await firstValueFrom(args.broadcast('reveal-hex') as never);
+      args.onCommitSigned?.('commit-hex');
       return result;
     }));
 

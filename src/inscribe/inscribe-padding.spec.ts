@@ -14,6 +14,7 @@ import { Network } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import { selectPaddingUtxo } from './padding-utxo.js';
+import { recordingInscribeTransport } from '../testing/inscribe-transport.js';
 import {
   InscribeContent,
   InscribeMintOrchestrator,
@@ -116,7 +117,7 @@ describe('InscribeMintOrchestrator: sourcing the padding coin', () => {
   const deps = (over: Partial<InscribeOrchestratorDeps> = {}): InscribeOrchestratorDeps => ({
     getUtxos: async () => [coin('a', 100_000), coin('c', 250)],
     scan: { classify: async () => 'clean' },
-    broadcast: async () => 'txid',
+    transport: recordingInscribeTransport(),
     network: Network.Mainnet,
     ...over,
   });
@@ -223,7 +224,7 @@ describe('InscribeMintOrchestrator: resolving batch parents by id', () => {
   const baseDeps: InscribeOrchestratorDeps = {
     getUtxos: async () => [coin('a', 100_000)],
     scan: { classify: async () => 'clean' },
-    broadcast: async () => 'txid',
+    transport: recordingInscribeTransport(),
     network: Network.Mainnet,
   };
 
@@ -263,7 +264,7 @@ describe('InscribeMintOrchestrator: the person-facing failure text', () => {
   const deps: InscribeOrchestratorDeps = {
     getUtxos: async () => [coin('d', 150), coin('e', 20)],
     scan: { classify: async () => 'clean' },
-    broadcast: async () => 'txid',
+    transport: recordingInscribeTransport(),
     network: Network.Mainnet,
   };
 
@@ -318,7 +319,7 @@ describe('InscribeMintOrchestrator: a superseded recompute', () => {
           return 'clean';
         },
       },
-      broadcast: async () => 'txid',
+      transport: recordingInscribeTransport(),
       network: Network.Mainnet,
     });
     await o.setWallet(wallet);
@@ -346,7 +347,7 @@ describe('InscribeMintOrchestrator: a defect is not a message for the person', (
   const deps: InscribeOrchestratorDeps = {
     getUtxos: async () => [coin('a', 100_000)],
     scan: { classify: async () => 'clean' },
-    broadcast: async () => 'txid',
+    transport: recordingInscribeTransport(),
     network: Network.Mainnet,
   };
 

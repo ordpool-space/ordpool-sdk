@@ -17,14 +17,15 @@ import {
   type InscribeOrchestratorDeps,
   type InscribeSnapshot,
 } from '../../src/inscribe/inscribe-mint-orchestrator';
+import { esploraInscribeTransport } from '../../src/inscribe/inscribe-package-broadcast';
 import { Network } from '../../src/network';
 import { KnownOrdinalWalletType } from '../../src/wallet/wallet.service.types';
 import {
+  ELECTRS_URL,
   fundUninscribed,
   getStockOrdOutput,
   getStockOrdOutputInscriptions,
   mineBlocks,
-  postTx,
   rpc,
   waitForElectrsSync,
   waitForOrdStockReady,
@@ -138,7 +139,7 @@ describe('a sat below the dust floor of its coin, padded by a coin the SDK sourc
         { ...paddingCoin, status: { confirmed: true } },
       ],
       scan: { classify: async () => 'clean' },
-      broadcast: (txHex: string) => postTx(txHex),
+      transport: esploraInscribeTransport([ELECTRS_URL]),
       network: Network.Regtest,
     };
     const o = new InscribeMintOrchestrator(deps);

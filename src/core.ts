@@ -208,6 +208,7 @@ export * from './inscribe/inscription-input-adapter.js';
 export * from './inscribe/inscription-fee.helper.js';
 export * from './inscribe/inscription.service.helper.js';
 export * from './inscribe/inscribe-broadcast.helper.js';
+export * from './inscribe/inscribe-package-broadcast.js';
 export * from './inscribe/inscribe-orchestrator.js';
 // --- inscribe framework-agnostic mint orchestrator (subscribe-based). ---
 export * from './inscribe/inscribe-mint-orchestrator.js';

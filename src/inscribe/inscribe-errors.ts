@@ -40,7 +40,12 @@ export type InscribeErrorCode =
   | 'batch-duplicate-satpoint'
   | 'batch-postage-not-allowed'
   | 'batch-sat-offset-not-allowed'
-  | 'unsupported-payment-address';
+  | 'unsupported-payment-address'
+  // Broadcast of the commit + reveal pair (`broadcastCommitAndReveal`).
+  | 'package-check-unavailable'
+  | 'package-rejected'
+  | 'package-not-accepted'
+  | 'reveal-pending';
 
 export class InscribeInputError extends Error {
   readonly code: InscribeErrorCode;
@@ -60,6 +65,44 @@ export class InscribeInputError extends Error {
     this.code = code;
     this.userMessage = userMessage;
     this.details = details;
+  }
+}
+
+/**
+ * The commit may have reached a mempool but the reveal did not, after retries.
+ *
+ * The commit output can only be spent with the ephemeral key, so this error is
+ * the one place the SDK hands that key out: `revealHex` is the fully signed
+ * reveal and can be rebroadcast as it is; `ephemeral` lets a recovery tool spend
+ * the commit output another way. Persist both until the reveal confirms.
+ */
+export class InscribeRevealPendingError extends InscribeInputError {
+  readonly commitTxId: string;
+  readonly revealTxId: string;
+  readonly commitAddress: string;
+  readonly revealHex: string;
+  readonly ephemeral: { privKey: Uint8Array; pubkeyXonly: Uint8Array };
+
+  constructor(recovery: {
+    commitTxId: string;
+    revealTxId: string;
+    commitAddress: string;
+    revealHex: string;
+    ephemeral: { privKey: Uint8Array; pubkeyXonly: Uint8Array };
+    reason: string;
+  }) {
+    super(
+      'reveal-pending',
+      `commit ${recovery.commitTxId} may be in a mempool, reveal ${recovery.revealTxId} is not: ${recovery.reason}`,
+      'Your payment may already be on its way, but the inscription transaction was not accepted. Nothing is lost while the signed transaction is kept: keep this page open and send it again.',
+      { commitTxId: recovery.commitTxId, revealTxId: recovery.revealTxId, reason: recovery.reason },
+    );
+    this.name = 'InscribeRevealPendingError';
+    this.commitTxId = recovery.commitTxId;
+    this.revealTxId = recovery.revealTxId;
+    this.commitAddress = recovery.commitAddress;
+    this.revealHex = recovery.revealHex;
+    this.ephemeral = recovery.ephemeral;
   }
 }
 

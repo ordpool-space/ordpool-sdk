@@ -38,7 +38,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ORD_STOCK_URL = void 0;
+exports.ORD_STOCK_URL = exports.ELECTRS_URL = void 0;
 exports.getFundedAccount = getFundedAccount;
 exports.rpc = rpc;
 exports.rpcJson = rpcJson;
@@ -106,7 +106,8 @@ const bip32_1 = require("@scure/bip32");
 const base_1 = require("@scure/base");
 const btc = __importStar(require("@scure/btc-signer"));
 const execFileAsync = (0, node_util_1.promisify)(node_child_process_1.execFile);
-const ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
+/** Base URL of the regtest electrs (Esplora REST), as the specs and helpers reach it. */
+exports.ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
     `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
 const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 // Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
@@ -213,7 +214,7 @@ function mineBlockWithRawTxs(rawTxHexes) {
 async function waitForElectrsSync(targetHeight, timeoutMs = 15_000) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const tipText = await fetch(`${ELECTRS_URL}/blocks/tip/height`).then(r => r.text()).catch(() => '0');
+        const tipText = await fetch(`${exports.ELECTRS_URL}/blocks/tip/height`).then(r => r.text()).catch(() => '0');
         if (Number(tipText) >= targetHeight)
             return;
         await new Promise(r => setTimeout(r, 200));
@@ -263,7 +264,7 @@ async function waitForAddressTxIndexed(address, expectedTxid, timeoutMs = 15_000
     await waitForUtxoMatching(address, u => u.txid === expectedTxid, `txid=${expectedTxid}`, timeoutMs);
 }
 async function getUtxos(address) {
-    const res = await fetch(`${ELECTRS_URL}/address/${address}/utxo`);
+    const res = await fetch(`${exports.ELECTRS_URL}/address/${address}/utxo`);
     if (!res.ok)
         throw new Error(`utxo fetch failed: ${res.status} ${await res.text()}`);
     const utxos = (await res.json());
@@ -282,7 +283,7 @@ async function getUtxos(address) {
     return [...byOutpoint.values()];
 }
 async function getTxHex(txid) {
-    const res = await fetch(`${ELECTRS_URL}/tx/${txid}/hex`);
+    const res = await fetch(`${exports.ELECTRS_URL}/tx/${txid}/hex`);
     if (!res.ok)
         throw new Error(`tx hex fetch failed: ${res.status} ${await res.text()}`);
     return (await res.text()).trim();
@@ -321,7 +322,7 @@ async function fundCommonSats(paymentAddress, amountBtc) {
     await waitForOrdSync(tip);
 }
 async function postTx(hexPayload) {
-    const res = await fetch(`${ELECTRS_URL}/tx`, {
+    const res = await fetch(`${exports.ELECTRS_URL}/tx`, {
         method: 'POST',
         body: hexPayload,
     });
@@ -331,7 +332,7 @@ async function postTx(hexPayload) {
     return body;
 }
 async function getTxStatus(txid) {
-    const res = await fetch(`${ELECTRS_URL}/tx/${txid}/status`);
+    const res = await fetch(`${exports.ELECTRS_URL}/tx/${txid}/status`);
     if (!res.ok)
         throw new Error(`tx status fetch failed: ${res.status}`);
     return res.json();
@@ -371,7 +372,7 @@ async function waitForTxConfirmed(txid, timeoutMs = 15_000) {
         `last status: ${lastSeen ? JSON.stringify(lastSeen.status) : 'not-found'}`);
 }
 async function getTx(txid) {
-    const res = await fetch(`${ELECTRS_URL}/tx/${txid}`);
+    const res = await fetch(`${exports.ELECTRS_URL}/tx/${txid}`);
     if (!res.ok)
         throw new Error(`tx fetch failed: ${res.status} ${await res.text()}`);
     return res.json();

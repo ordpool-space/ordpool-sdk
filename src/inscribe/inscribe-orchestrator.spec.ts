@@ -20,6 +20,7 @@ import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 
 import { encodeCborDeterministic } from './inscription-cbor.js';
 import { inscribeAndBroadcast, inscribeBatchAndBroadcast } from './inscribe-orchestrator.js';
+import { recordingInscribeTransport } from '../testing/inscribe-transport.js';
 
 const NETWORK = Network.Mainnet;
 const scureNetwork = toScureNetwork(NETWORK);
@@ -70,12 +71,8 @@ describe('inscribeAndBroadcast orchestrator', () => {
       return of(base64.encode(psbt.toPSBT(0)));
     };
 
-    const broadcasts: string[] = [];
-    const broadcast = jest.fn((txHex: string) => {
-      broadcasts.push(txHex);
-      const id = btc.Transaction.fromRaw(hex.decode(txHex)).id;
-      return of(id);
-    });
+    const transport = recordingInscribeTransport();
+    const broadcasts = transport.submitted;
 
     let capturedSignedCommit: string | undefined;
     const result = await firstValueFrom(inscribeAndBroadcast({
@@ -88,7 +85,7 @@ describe('inscribeAndBroadcast orchestrator', () => {
       contentType: 'text/plain',
       feeRatePerVbyte: 5,
       network: NETWORK,
-      broadcast,
+      transport,
       promptForSignedPsbt,
       onCommitSigned: (hex) => { capturedSignedCommit = hex; },
     }));
@@ -127,11 +124,8 @@ describe('inscribeAndBroadcast orchestrator', () => {
       return of(base64.encode(psbt.toPSBT(0)));
     };
 
-    const broadcasts: string[] = [];
-    const broadcast = jest.fn((txHex: string) => {
-      broadcasts.push(txHex);
-      return of(btc.Transaction.fromRaw(hex.decode(txHex)).id);
-    });
+    const transport = recordingInscribeTransport();
+    const broadcasts = transport.submitted;
 
     const result = await firstValueFrom(inscribeAndBroadcast({
       walletType: KnownOrdinalWalletType.xpub,
@@ -149,7 +143,7 @@ describe('inscribeAndBroadcast orchestrator', () => {
       metadata,
       note: 'ordpool.space',
       network: NETWORK,
-      broadcast,
+      transport,
       promptForSignedPsbt,
     }));
 
@@ -170,7 +164,7 @@ describe('inscribeAndBroadcast orchestrator', () => {
   it('throws "Insufficient funds for inscribe" when funding < requirement (no signer call)', async () => {
     const { paymentPublicKey, paymentAddress } = paymentContext();
 
-    const broadcast = jest.fn(() => of('0'.repeat(64)));
+    const transport = recordingInscribeTransport();
     const promptForSignedPsbt = jest.fn(() => of(''));
 
     await expect(firstValueFrom(inscribeAndBroadcast({
@@ -183,11 +177,11 @@ describe('inscribeAndBroadcast orchestrator', () => {
       contentType: 'text/plain',
       feeRatePerVbyte: 8,
       network: NETWORK,
-      broadcast,
+      transport,
       promptForSignedPsbt,
     }))).rejects.toThrow(/Insufficient funds for inscribe/);
 
-    expect(broadcast).not.toHaveBeenCalled();
+    expect(transport.calls).toEqual([]);
     expect(promptForSignedPsbt).not.toHaveBeenCalled();
   });
 
@@ -204,7 +198,7 @@ describe('inscribeAndBroadcast orchestrator', () => {
       contentType: 'text/plain',
       feeRatePerVbyte: 5,
       network: NETWORK,
-      broadcast: () => of('0'.repeat(64)),
+      transport: recordingInscribeTransport(),
     }))).rejects.toThrow(/No signer registered/);
   });
 });
@@ -218,11 +212,8 @@ describe('inscribeBatchAndBroadcast orchestrator', () => {
       psbt.finalize();
       return of(base64.encode(psbt.toPSBT(0)));
     };
-    const broadcasts: string[] = [];
-    const broadcast = jest.fn((txHex: string) => {
-      broadcasts.push(txHex);
-      return of(btc.Transaction.fromRaw(hex.decode(txHex)).id);
-    });
+    const transport = recordingInscribeTransport();
+    const broadcasts = transport.submitted;
     const bodies = ['first', 'second'].map(s => new TextEncoder().encode(s));
 
     const result = await firstValueFrom(inscribeBatchAndBroadcast({
@@ -235,7 +226,7 @@ describe('inscribeBatchAndBroadcast orchestrator', () => {
       recipientAddress: recipientAddress(),
       feeRatePerVbyte: 5,
       network: NETWORK,
-      broadcast,
+      transport,
       promptForSignedPsbt,
     }));
 
@@ -281,11 +272,8 @@ describe('inscribeBatchAndBroadcast with parents', () => {
       }
       return of(base64.encode(psbt.toPSBT(0)));
     };
-    const broadcasts: string[] = [];
-    const broadcast = jest.fn((txHex: string) => {
-      broadcasts.push(txHex);
-      return of(btc.Transaction.fromRaw(hex.decode(txHex), { allowUnknownInputs: true }).id);
-    });
+    const transport = recordingInscribeTransport();
+    const broadcasts = transport.submitted;
 
     const result = await firstValueFrom(inscribeBatchAndBroadcast({
       mode: 'shared-output',
@@ -299,7 +287,7 @@ describe('inscribeBatchAndBroadcast with parents', () => {
       recipientAddress: recipientAddress(),
       feeRatePerVbyte: 5,
       network: NETWORK,
-      broadcast,
+      transport,
       promptForSignedPsbt,
     }));
 
@@ -323,11 +311,8 @@ describe('inscribeBatchAndBroadcast with parents', () => {
       }
       return of(base64.encode(psbt.toPSBT(0)));
     };
-    const broadcasts: string[] = [];
-    const broadcast = jest.fn((txHex: string) => {
-      broadcasts.push(txHex);
-      return of(btc.Transaction.fromRaw(hex.decode(txHex), { allowUnknownInputs: true }).id);
-    });
+    const transport = recordingInscribeTransport();
+    const broadcasts = transport.submitted;
     const utxoOf = (n: number, value: number) => ({ ...parentAt(n, value).utxo });
 
     const result = await firstValueFrom(inscribeBatchAndBroadcast({
@@ -343,7 +328,7 @@ describe('inscribeBatchAndBroadcast with parents', () => {
       recipientAddress: recipientAddress(),
       feeRatePerVbyte: 5,
       network: NETWORK,
-      broadcast,
+      transport,
       promptForSignedPsbt,
     }));
 
@@ -367,7 +352,7 @@ describe('inscribeBatchAndBroadcast with parents', () => {
       recipientAddress: recipientAddress(),
       feeRatePerVbyte: 5,
       network: NETWORK,
-      broadcast: () => of('x'),
+      transport: recordingInscribeTransport(),
     }))).rejects.toThrow('every parent and satpoint UTXO must sit at the same ordinals address');
   });
 });

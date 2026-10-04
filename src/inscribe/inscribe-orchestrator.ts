@@ -22,12 +22,14 @@ import type {
   CreateBatchInscribeTransactionsResult,
 } from './inscription-batch.helper.js';
 import { OrdEnvelopeField } from './inscription-envelope.js';
+import type { InscribeBroadcastTransport } from './inscribe-package-broadcast.js';
+import { holdSigned, sendPair } from './inscribe-signed-pair.js';
 
 /**
  * Public orchestrator for the inscribe operation. Build commit +
  * reveal, ask the user's wallet to sign the commit's funding input
- * via the operation-named `signSingleFundingInput`, broadcast both
- * txs in sequence, return the ephemeral key + txids.
+ * via the operation-named `signSingleFundingInput`, then send both
+ * txs together, return the ephemeral key + txids.
  *
  * # Why one entry point, no signingMap
  *
@@ -49,15 +51,13 @@ import { OrdEnvelopeField } from './inscription-envelope.js';
  *
  * # Broadcast model
  *
- * Default: sequential. Sign commit → broadcast commit → broadcast
- * reveal. Each broadcast goes through the same `broadcast` callback
- * the consumer supplies (typically `electrs POST /tx`).
- *
- * For atomic submitpackage broadcast, see `broadcastInscribePackage`
- * in `inscribe-broadcast.helper.ts` — the consumer can capture the
- * signed commit hex from this orchestrator's `onCommitSigned`
- * callback and POST both hexes to `/txs/package` instead. The
- * orchestrator itself stays simple.
+ * Every signature is collected first: the signers' `broadcast` callback
+ * only keeps the signed bytes. Nothing is sent until the commit AND the
+ * reveal are signed, and then `broadcastCommitAndReveal` validates the
+ * pair with `testmempoolaccept` before submitting it as a package. A
+ * commit can therefore never go out ahead of a reveal that is refused,
+ * or ahead of a second wallet prompt the user cancels.
+ * See `inscribe-package-broadcast.ts`.
  */
 export interface InscribeAndBroadcastArgs {
   walletType: KnownOrdinalWalletType;
@@ -172,16 +172,15 @@ export interface InscribeAndBroadcastArgs {
   minimalTagPush?: boolean;
   network: Network;
   /**
-   * Broadcasts a wire-format tx hex; returns the resulting txid.
-   * Called twice: once with the wallet-signed commit, then with the
-   * ephemeral-key-signed reveal. Same callback for both — the
-   * consumer typically wires this to electrs POST /tx.
+   * Where the signed pair goes. Required: there is no sequential
+   * fallback, because sending the commit alone is how funds get stuck.
+   * Usually `esploraInscribeTransport([<your electrs /api base>])`.
    */
-  broadcast(txHex: string): Observable<string>;
+  transport: InscribeBroadcastTransport;
   /**
    * Optional hook fired when the wallet-signed commit hex is in hand,
-   * BEFORE broadcast. Useful for consumers that want to swap in a
-   * package broadcast or persist the signed bytes for retry.
+   * before anything is sent (for example to advance a "step 2 of 2"
+   * indicator). It cannot change the flow.
    */
   onCommitSigned?(signedCommitHex: string): void;
   /**
@@ -265,19 +264,14 @@ function signMultiInputCommitAndBroadcast(
   args: SignAndBroadcastArgs & { satSource?: InscribeSatSource; paddingUtxo?: TxnOutput },
 ): Observable<InscribeAndBroadcastResult> {
   const signer = findSignerOrThrow(args.walletType);
-  const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
-    if (args.onCommitSigned) {
-      try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
-    }
-    return args.broadcast(signedCommitHex);
-  };
+  const commit = holdSigned(args.onCommitSigned);
   const signedCommit = args.paddingUtxo !== undefined
     ? signer.signPaddedSatCommit({
       psbtBytes: built.commitPsbt,
       paymentAddress: args.paymentAddress,
       ordinalsAddress: args.satSource?.address,
       network: args.network,
-      broadcast: captureAndBroadcast,
+      broadcast: commit.broadcast,
       promptForSignedPsbt: args.promptForSignedPsbt,
     })
     : signer.signTransfer({
@@ -286,31 +280,21 @@ function signMultiInputCommitAndBroadcast(
       paymentAddress: args.paymentAddress,
       fundingInputCount: 1,
       network: args.network,
-      broadcast: captureAndBroadcast,
+      broadcast: commit.broadcast,
       promptForSignedPsbt: args.promptForSignedPsbt,
     });
   return signedCommit.pipe(
-    switchMap(({ txId: commitTxId }) =>
-      args.broadcast(built.revealHex).pipe(
-        map((revealTxId) => ({
-          commitTxId,
-          revealTxId,
-          commitAddress: built.commitAddress,
-          ephemeral: built.ephemeral,
-          fees: built.fees,
-        })),
-      ),
-    ),
+    switchMap(() => sendPair(args.transport, built, commit.take(), built.revealHex)),
   );
 }
 
 /** The funding, signing and broadcast inputs every inscribe orchestrator shares. */
 type SignAndBroadcastArgs = Pick<InscribeAndBroadcastArgs,
-  'walletType' | 'paymentPublicKey' | 'paymentAddress' | 'network' | 'broadcast'
+  'walletType' | 'paymentPublicKey' | 'paymentAddress' | 'network' | 'transport'
   | 'onCommitSigned' | 'promptForSignedPsbt'>;
 
 /**
- * Sign the commit's single funding input, broadcast it, then broadcast the
+ * Sign the commit's single funding input, then send it together with the
  * already-signed reveal. The same for one inscription and for a batch: both
  * have one commit input at `paymentAddress`.
  */
@@ -319,17 +303,7 @@ function signAndBroadcast(
   args: SignAndBroadcastArgs,
 ): Observable<InscribeAndBroadcastResult> {
   const signer = findSignerOrThrow(args.walletType);
-
-  // The signer's broadcast callback is invoked with the signed
-  // commit wire-tx hex. We intercept to (a) fire the consumer's
-  // onCommitSigned hook, (b) actually broadcast via the consumer's
-  // broadcast callback.
-  const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
-    if (args.onCommitSigned) {
-      try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
-    }
-    return args.broadcast(signedCommitHex);
-  };
+  const commit = holdSigned(args.onCommitSigned);
 
   return signer.signSingleFundingInput({
     psbtBytes: built.commitPsbt,
@@ -341,20 +315,10 @@ function signAndBroadcast(
     // unchanged. See src/wallet/network-address-shim.ts.
     paymentPublicKey: hex.encode(args.paymentPublicKey),
     network: args.network,
-    broadcast: captureAndBroadcast,
+    broadcast: commit.broadcast,
     promptForSignedPsbt: args.promptForSignedPsbt,
   }).pipe(
-    switchMap(({ txId: commitTxId }) =>
-      args.broadcast(built.revealHex).pipe(
-        map((revealTxId) => ({
-          commitTxId,
-          revealTxId,
-          commitAddress: built.commitAddress,
-          ephemeral: built.ephemeral,
-          fees: built.fees,
-        })),
-      ),
-    ),
+    switchMap(() => sendPair(args.transport, built, commit.take(), built.revealHex)),
   );
 }
 
@@ -377,7 +341,7 @@ export interface InscribeBatchAndBroadcastResult extends InscribeAndBroadcastRes
 /**
  * Public orchestrator for a batch inscribe (`ord wallet batch`): build the
  * batch commit and reveal, have the wallet sign the commit's single funding
- * input via `signSingleFundingInput`, broadcast commit then reveal. Same
+ * input via `signSingleFundingInput`, send commit and reveal together. Same
  * signing topology, bearer-key semantics and broadcast model as
  * {@link inscribeAndBroadcast}.
  */
@@ -402,9 +366,10 @@ export function inscribeBatchAndBroadcast(
 
 /**
  * The path for a batch whose reveal spends wallet UTXOs (parents, satpoint
- * UTXOs): sign and broadcast the commit, then have the wallet sign those
- * reveal inputs 0..N-1 on the bare reveal PSBT; the signatures are merged
- * into the full reveal, which then broadcasts.
+ * UTXOs): sign the commit, then have the wallet sign those reveal inputs
+ * 0..N-1 on the bare reveal PSBT; the signatures are merged into the full
+ * reveal. Only then are both sent, so cancelling the second prompt leaves
+ * nothing on the network.
  */
 function inscribeBatchWithWalletInputs(
   args: InscribeBatchAndBroadcastArgs & { parents: ReadonlyArray<BatchParent> },
@@ -436,22 +401,18 @@ function inscribeBatchWithWalletInputs(
     }
 
     const signer = findSignerOrThrow(args.walletType);
-    const captureAndBroadcast = (signedCommitHex: string): Observable<string> => {
-      if (args.onCommitSigned) {
-        try { args.onCommitSigned(signedCommitHex); } catch { /* swallow */ }
-      }
-      return args.broadcast(signedCommitHex);
-    };
+    const commit = holdSigned(args.onCommitSigned);
+    const reveal = holdSigned();
 
     return signer.signSingleFundingInput({
       psbtBytes: built.commitPsbt,
       paymentAddress: args.paymentAddress,
       paymentPublicKey: hex.encode(args.paymentPublicKey),
       network: args.network,
-      broadcast: captureAndBroadcast,
+      broadcast: commit.broadcast,
       promptForSignedPsbt: args.promptForSignedPsbt,
     }).pipe(
-      switchMap(({ txId: commitTxId }) =>
+      switchMap(() =>
         signer.signChildRevealParentInputs({
           psbtBytes: built.revealPsbtForWallet,
           finalizePsbtBytes: built.revealPsbt,
@@ -461,19 +422,12 @@ function inscribeBatchWithWalletInputs(
           ordinalsPublicKey: hex.encode(first.tapInternalKey),
           walletInputCount: built.walletInputCount,
           network: args.network,
-          broadcast: args.broadcast,
+          broadcast: reveal.broadcast,
           promptForSignedPsbt: args.promptForSignedPsbt,
-        }).pipe(
-          map(({ txId: revealTxId }) => ({
-            commitTxId,
-            revealTxId,
-            commitAddress: built.commitAddress,
-            ephemeral: built.ephemeral,
-            fees: built.fees,
-            inscriptions: built.inscriptions,
-          })),
-        ),
+        }),
       ),
+      switchMap(() => sendPair(args.transport, built, commit.take(), reveal.take())),
+      map((result) => ({ ...result, inscriptions: built.inscriptions })),
     );
   });
 }
