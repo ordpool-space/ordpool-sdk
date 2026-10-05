@@ -93,6 +93,10 @@ describe('inscribe package broadcast on regtest (bitcoind behind electrs)', () =
     const { pair } = await signedInscribe('valid');
     await broadcastCommitAndReveal(transport, pair);
     expect([inMempool(pair.commitTxId), inMempool(pair.revealTxId)]).toEqual([true, true]);
+    // electrs serves both at once, not only after its next mempool sync: a page
+    // links to the reveal the moment the package is in.
+    const lookups = await Promise.all([pair.commitTxId, pair.revealTxId].map(async (txid) => (await fetch(`${ELECTRS_URL}/tx/${txid}`)).status));
+    expect(lookups).toEqual([200, 200]);
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
   });
