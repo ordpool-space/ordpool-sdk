@@ -1,0 +1,6 @@
+{
+  "upstream": [
+    { "glob": "upstream/**", "reason": "mempool upstream, kept byte-identical for merges" },
+    { "glob": "vanished/**", "reason": "probe: a scope entry that matches nothing" }
+  ]
+}

@@ -10,7 +10,7 @@ module.exports = {
   // is the node-only counterpart: a spec that needs a runtime global jsdom
   // doesn't implement (e.g. `CompressionStream` / `DecompressionStream` for
   // native gzip) and so must run under node.
-  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/', '\\.node\\.spec\\.ts$'],
+  testPathIgnorePatterns: ['/node_modules/', '/dist/', '/e2e/', '/RESCUE/', '\\.node\\.spec\\.ts$', '/check-test-kinds\\.selftest/'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // Transform every node_modules file except snapshots — sats-connect
   // v4 ships ESM-only. Same rationale as jest.config.node.js.

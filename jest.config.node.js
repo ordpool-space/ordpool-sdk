@@ -23,6 +23,8 @@ module.exports = {
     '/e2e/(?!.*\\.unit\\.spec\\.ts$)',
     '/RESCUE/',
     '\\.browser\\.spec\\.ts$',
+    // probes of scripts/check-test-kinds.mjs: fixtures for the checker, never run
+    '/check-test-kinds\\.selftest/',
   ],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // Transform every node_modules file except snapshots — sats-connect
