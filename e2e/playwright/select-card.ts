@@ -25,7 +25,7 @@
  * the wallet lands on the wrong address type.
  */
 export interface SelectableCard {
-  click: (opts?: { timeout?: number }) => Promise<void>;
+  click: () => Promise<void>;
   getAttribute: (name: string) => Promise<string | null>;
 }
 
@@ -59,18 +59,24 @@ async function readSelected(card: SelectableCard): Promise<boolean | undefined> 
   return undefined;
 }
 
+/**
+ * Probe: how long after a click the selected marker is read. A card may carry
+ * no marker at all (UniSat), so there is no state to wait on; long enough for
+ * the re-render after the click, short enough to re-click a swallowed one.
+ */
+export const CARD_SELECT_PROBE_MS = 400;
+
 export async function selectCard(
   card: SelectableCard,
-  opts: { maxClicks?: number; settleMs?: number } = {},
+  opts: { maxClicks?: number } = {},
 ): Promise<SelectCardResult> {
   const maxClicks = opts.maxClicks ?? 3;
-  const settleMs = opts.settleMs ?? 400;
 
   let selected: boolean | undefined;
   let observable = true;
   for (let clicks = 1; clicks <= maxClicks; clicks++) {
     await card.click();
-    await new Promise((r) => setTimeout(r, settleMs));
+    await new Promise((r) => setTimeout(r, CARD_SELECT_PROBE_MS));
     selected = await readSelected(card);
     if (selected === undefined) {
       // No marker to read. Keep clicking anyway: selecting a card is

@@ -101,7 +101,7 @@ test.beforeAll(async () => {
 
   let [worker] = context.serviceWorkers();
   if (!worker) {
-    worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+    worker = await context.waitForEvent('serviceworker');
   }
   extensionId = worker.url().split('/')[2];
 });
@@ -126,14 +126,13 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
       return text.includes('restore') && text.includes('create');
     },
     undefined,
-    { timeout: 30_000 },
   );
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
   // ─── Phase 2: click "Restore an existing wallet" ───
   const restoreButton = page.getByText(/restore an existing wallet|restore.*wallet/i).first();
-  await expect(restoreButton).toBeVisible({ timeout: 10_000 });
+  await expect(restoreButton).toBeVisible();
   await restoreButton.click();
   await shot(page, '02-after-restore-click');
 
@@ -141,19 +140,19 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // Renders ToS + Privacy Policy links plus an "Authorize data
   // collection" toggle that defaults ON (Mixpanel-bound — flagged
   // by the v2.3.2 audit). Toggle it off, then Accept.
-  await expect(page.getByText(/legal/i).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/legal/i).first()).toBeVisible();
 
   // The data-collection toggle is a custom-styled switch; click
   // the parent label to flip it. Best-effort: find the row whose
   // text contains "Authorize data collection" and click it.
   const dataCollectionRow = page.getByText(/authorize data collection/i).first();
-  if (await dataCollectionRow.isVisible({ timeout: 3_000 }).catch(() => false)) {
+  if (await dataCollectionRow.isVisible().catch(() => false)) {
     await dataCollectionRow.click();
     await shot(page, '03a-data-collection-off');
   }
 
   const acceptButton = page.getByRole('button', { name: /^accept$/i }).first();
-  await expect(acceptButton).toBeVisible({ timeout: 10_000 });
+  await expect(acceptButton).toBeVisible();
   await acceptButton.click();
   await shot(page, '03b-after-accept');
 
@@ -162,7 +161,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // Create and Restore flows. Two fields: "Create password" + "Confirm
   // password". Continue button is disabled until both match.
   const passwordInputs = page.locator('input[type="password"]');
-  await expect(passwordInputs.first()).toBeVisible({ timeout: 15_000 });
+  await expect(passwordInputs.first()).toBeVisible();
   const pwCount = await passwordInputs.count();
   for (let i = 0; i < pwCount; i++) {
     await passwordInputs.nth(i).fill(TEST_PASSWORD);
@@ -170,7 +169,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   await shot(page, '04-password-typed');
 
   const continueAfterPassword = page.getByRole('button', { name: /continue|next|confirm|done|create/i }).first();
-  await expect(continueAfterPassword).toBeEnabled({ timeout: 10_000 });
+  await expect(continueAfterPassword).toBeEnabled();
   await continueAfterPassword.click();
   await shot(page, '05-after-password-submit');
 
@@ -182,7 +181,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // same BIP-39 seed). We pick "Xverse" so the derived addresses
   // come out as the standard BIP-84 (payment) and BIP-86 (ordinals)
   // we assert against below.
-  await expect(page.getByText(/restore your wallet|what wallet are you importing/i).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/restore your wallet|what wallet are you importing/i).first()).toBeVisible();
   await page.getByText(/^xverse$/i).first().click();
   await shot(page, '06-after-source-wallet-pick');
 
@@ -194,10 +193,10 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // makes Xverse split into all 12 boxes via its paste handler.
   // Sequential .fill() per box doesn't trigger that handler and
   // leaves the last box disabled.
-  await expect(page.getByText(/enter seed phrase/i).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText(/enter seed phrase/i).first()).toBeVisible();
 
   const inputs = page.locator('input[type="password"]');
-  await expect(inputs.first()).toBeVisible({ timeout: 10_000 });
+  await expect(inputs.first()).toBeVisible();
   const count = await inputs.count();
   if (count < 12) {
     await shot(page, '06b-mnemonic-input-mismatch');
@@ -216,7 +215,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   await shot(page, '06b-mnemonic-typed');
 
   const continueAfterMnemonic = page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first();
-  await expect(continueAfterMnemonic).toBeEnabled({ timeout: 15_000 });
+  await expect(continueAfterMnemonic).toBeEnabled();
   await continueAfterMnemonic.click();
   await shot(page, '07-after-mnemonic-submit');
 
@@ -236,13 +235,12 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
           || /bc1[qp][a-z0-9]{20,}/.test(document.body.innerText || '');
     },
     undefined,
-    { timeout: 90_000 },
   );
   await shot(page, '07-after-scan');
 
   // If the picker is up, drill into Wallet 1 and Confirm.
   const restorePicker = page.getByText(/select a wallet to restore|we found funds/i).first();
-  if (await restorePicker.isVisible({ timeout: 1_000 }).catch(() => false)) {
+  if (await restorePicker.isVisible().catch(() => false)) {
     await shot(page, '07a-wallet-picker');
     const seeAccounts = page.getByRole('button', { name: /see accounts/i }).first();
     await seeAccounts.click();
@@ -252,7 +250,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
     // getByRole with a regex sometimes targets a stale or off-screen
     // element; getByText('Confirm', exact) is unambiguous here.
     const commit = page.getByText('Confirm', { exact: true }).first();
-    await expect(commit).toBeVisible({ timeout: 15_000 });
+    await expect(commit).toBeVisible();
     // Wait for the button to actually be enabled, not just visible.
     // Xverse uses `pointer-events: none` + opacity for the disabled
     // look, which Playwright's isEnabled() may not catch.
@@ -264,13 +262,12 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
         return !c.hasAttribute('disabled') && getComputedStyle(c).pointerEvents !== 'none';
       },
       undefined,
-      { timeout: 10_000 },
     );
     await commit.click();
     // Wait for the picker text to be gone before screenshotting
     // (confirms the click advanced the screen).
     await expect(page.getByText(/select a wallet to restore|we found funds/i).first())
-      .toBeHidden({ timeout: 15_000 });
+      .toBeHidden();
     await shot(page, '07c-after-wallet-confirm');
   }
 
@@ -280,14 +277,14 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // SegWit (BIP-84) is what our expected address derivation uses
   // and is selected by default — just click Continue.
   const addressTypePicker = page.getByText(/preferred address type/i).first();
-  if (await addressTypePicker.isVisible({ timeout: 10_000 }).catch(() => false)) {
+  if (await addressTypePicker.isVisible().catch(() => false)) {
     await shot(page, '07d-address-type-picker');
     const continueBtn = page.getByText('Continue', { exact: true }).first();
-    await expect(continueBtn).toBeVisible({ timeout: 10_000 });
+    await expect(continueBtn).toBeVisible();
     await continueBtn.click();
     // Wait for the picker to unmount before screenshotting.
     await expect(page.getByText(/preferred address type/i).first())
-      .toBeHidden({ timeout: 15_000 });
+      .toBeHidden();
     await shot(page, '07e-after-address-type-continue');
   }
 
@@ -296,7 +293,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // with a "Close this tab" button. The actual dashboard with the
   // derived addresses lives in popup.html (the toolbar dropdown),
   // not in this page.
-  await expect(page.getByText(/wallet restored/i).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/wallet restored/i).first()).toBeVisible();
   await shot(page, '08-wallet-restored');
 
   // ─── Phase 9: open popup.html, capture the dashboard, expect to see "Account 1" ───
@@ -326,10 +323,10 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // Dismiss marketing modal if present so the dashboard text is
   // readable in the screenshot artifact.
   const notNow = popup.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible({ timeout: 5_000 }).catch(() => false)) {
+  if (await notNow.isVisible().catch(() => false)) {
     await notNow.click();
     // Wait for the modal to unmount.
-    await expect(notNow).toBeHidden({ timeout: 10_000 });
+    await expect(notNow).toBeHidden();
   }
 
   await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09-popup-dashboard.png'), fullPage: true });
@@ -337,7 +334,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // Proof-of-onboarding: the dashboard renders "Account 1" header.
   // If the wallet hadn't committed, popup.html would show the
   // pre-onboarding state (welcome / unlock prompt).
-  await expect(popup.getByText(/account 1/i).first()).toBeVisible({ timeout: 15_000 });
+  await expect(popup.getByText(/account 1/i).first()).toBeVisible();
 
   // eslint-disable-next-line no-console
   console.log(`[xverse:onboard] popup renders dashboard ("Account 1") — wallet committed.`);

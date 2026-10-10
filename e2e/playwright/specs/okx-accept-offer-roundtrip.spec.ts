@@ -19,6 +19,8 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
+import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { Network, toScureNetwork } from '../../../src/network';
@@ -81,7 +83,7 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByText('Connect account').first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -97,17 +99,10 @@ async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void>
   // heading. Heading strings change between OKX releases, and a 500ms
   // poll against a wall-clock deadline makes the verdict depend on how
   // busy the runner is. Both are defects in the test.
-  const approval = await waitForApprovalByConfirmButton({ context: ctx, label: `OKX ${tag} sign popup` });
+  const approval = await waitForApprovalByConfirmButton({ context: ctx });
   await shot(approval, `${tag}-sign-approval`);
 
-  const promoModalText = approval.getByText('Asset transfer pending');
-  if (await promoModalText.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
-    if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await closeBtn.click({ force: true }).catch(() => undefined);
-    }
-    await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
-  }
+  await dismissOkxAssetTransferPromo(approval);
   await shot(approval, `${tag}-post-modal-dismiss`);
   await approval.getByText('Confirm', { exact: true }).first().click()
     .catch(() => undefined); // close-race: OKX may finish the sign and shut the popup mid-click
@@ -133,19 +128,10 @@ test.beforeAll(async () => {
   });
   await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    /* fall back below */
-  }
-  test.setTimeout(240_000);
-  if (!onboardPage) onboardPage = await context.newPage();
+  onboardPage = await extensionOnboardingPage(context, extensionId);
   await onboardOkx(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
@@ -159,7 +145,6 @@ test.afterAll(async () => {
 // SDK scopes signPsbt to the wallet's own input via toSignInputs. The "OKX
 // cannot render a not-owned input" note was wrong.
 test('accept a CAT-21 buy offer on regtest via OKX (seller): mint, buyer builds PSBT, OKX signs input 0, assert via electrs', async () => {
-  test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
   const harness = await context.newPage();
@@ -167,7 +152,6 @@ test('accept a CAT-21 buy offer on regtest via OKX (seller): mint, buyer builds 
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

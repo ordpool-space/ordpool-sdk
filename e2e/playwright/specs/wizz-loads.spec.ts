@@ -44,7 +44,7 @@ test.beforeAll(async () => {
 
   let [worker] = context.serviceWorkers();
   if (!worker) {
-    worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+    worker = await context.waitForEvent('serviceworker');
   }
   extensionId = worker.url().split('/')[2];
   console.log(`[wizz] service worker URL = ${worker.url()}`);
@@ -75,9 +75,9 @@ test('Wizz loads in Chromium with a service worker registered; navigates to its 
   await page.goto(`chrome-extension://${extensionId}/temp.html`, {
     waitUntil: 'domcontentloaded',
   });
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {
-    console.log('[wizz] networkidle timed out, continuing with whatever rendered');
-  });
+  // Wait until the extension rendered something (React mount, route
+  // resolution). What it renders is unknown here, so the signal is body text.
+  await page.waitForFunction(() => (document.body.innerText || '').trim().length > 0);
 
   const finalUrl = page.url();
   const title = await page.title();
@@ -95,14 +95,12 @@ test('Wizz loads in Chromium with a service worker registered; navigates to its 
     bodyHtml,
   );
 
-  // Poll for non-empty body text — React mount can race against
-  // networkidle (same pattern that flaked the original unisat-loads
-  // and was fixed by c5c65d2).
+  // Non-empty text is the readiness signal: React mounts after the
+  // document loads, so an immediate innerText read can see an empty body.
   await expect(page.locator('body')).toBeVisible();
   await page.waitForFunction(
     () => (document.body.innerText || '').trim().length > 0,
     undefined,
-    { timeout: 10_000 },
   );
   const visibleText = await page.locator('body').innerText().catch(() => '');
   console.log(`[wizz] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);

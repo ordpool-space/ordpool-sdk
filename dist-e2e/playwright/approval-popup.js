@@ -1,9 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ApprovalPopupTimeoutError = void 0;
+exports.CONFIRM_EFFECT_PROBE_MS = exports.POPUP_AFTER_CLICK_PROBE_MS = void 0;
 exports.approvalGate = approvalGate;
 exports.waitForApprovalPopup = waitForApprovalPopup;
-exports.waitForOptionalApprovalPopup = waitForOptionalApprovalPopup;
+exports.raceApprovalPopup = raceApprovalPopup;
 exports.closeLeftoverExtensionPages = closeLeftoverExtensionPages;
 exports.approveWizzSignPopup = approveWizzSignPopup;
 exports.clickApprovalButton = clickApprovalButton;
@@ -11,30 +11,84 @@ exports.clickApprovalAndRequireClose = clickApprovalAndRequireClose;
 exports.clickUntilApprovalPopup = clickUntilApprovalPopup;
 exports.waitForApprovalByConfirmButton = waitForApprovalByConfirmButton;
 exports.waitForPageShowing = waitForPageShowing;
-const click_until_effect_1 = require("./click-until-effect");
+exports.clickConfirmUntilClosed = clickConfirmUntilClosed;
+const e2e_timeout_1 = require("../e2e-timeout");
+const click_until_effect_core_1 = require("./click-until-effect-core");
 /**
  * `isApproval` anchored on the control the caller is about to use. `url` only
- * narrows; `control` decides. Both share one budget.
+ * narrows; `control` decides. Both waits run under the runner config's
+ * timeouts (`navigationTimeout` / `actionTimeout`, unset meaning the test
+ * timeout).
  */
 function approvalGate(opts) {
-    const budgetMs = opts.timeoutMs ?? 60_000;
     return async (page) => {
-        const deadline = Date.now() + budgetMs;
         if (opts.url)
-            await page.waitForURL(opts.url, { timeout: budgetMs });
-        const remaining = Math.max(1_000, deadline - Date.now());
-        await opts.control(page).waitFor({ state: 'visible', timeout: remaining });
+            await page.waitForURL(opts.url);
+        await opts.control(page).waitFor({ state: 'visible' });
         return true;
     };
 }
-/** Rejection of `waitForApprovalPopup` when no page matched within its timeout. */
-class ApprovalPopupTimeoutError extends Error {
-    constructor(timeoutMs) {
-        super(`approval popup did not appear within ${timeoutMs}ms`);
-        this.name = 'ApprovalPopupTimeoutError';
+function startApprovalPopupSearch(opts) {
+    const { context, knownPages, isApproval } = opts;
+    let settled = false;
+    let resolveFound = () => undefined;
+    let rejectFound = () => undefined;
+    const found = new Promise((resolve, reject) => {
+        resolveFound = resolve;
+        rejectFound = reject;
+    });
+    const tryPage = async (p) => {
+        if (settled || knownPages.has(p))
+            return;
+        try {
+            const res = await isApproval(p);
+            if (res !== true)
+                return;
+            // A CLOSING popup still satisfies "the confirm button is visible":
+            // the DOM is alive while the window goes away. Handing that page back
+            // means the caller's `click()` waits for the element to be visible,
+            // enabled AND STABLE, never gets stable because the page is dying, and
+            // fails with "Target page, context or browser has been closed". The
+            // observed shape is a fast failure in specs that approve twice in
+            // quick succession.
+            //
+            // So require the page to answer a round-trip before returning it. A
+            // page that is going away cannot, and the search continues for the one
+            // that is actually live. This is a liveness check rather than a delay:
+            // nothing is waited out, the page either responds or it does not.
+            await p.title();
+            if (p.isClosed())
+                return;
+            if (settled)
+                return;
+            settled = true;
+            cancel();
+            resolveFound(p);
+        }
+        catch {
+            // isApproval rejected (the page closed, or its own wait gave up), or the
+            // liveness probe failed because the page went away. Don't abort the
+            // search: another page may still match.
+        }
+    };
+    const onPage = (p) => void tryPage(p);
+    const cancel = () => {
+        settled = true;
+        context.off('page', onPage);
+    };
+    try {
+        context.on('page', onPage);
+        for (const p of context.pages())
+            void tryPage(p);
     }
+    catch (e) {
+        // A context that cannot be read (disposed, closed) is not a context
+        // without a popup: report it rather than waiting on it.
+        cancel();
+        rejectFound(e);
+    }
+    return { found, cancel };
 }
-exports.ApprovalPopupTimeoutError = ApprovalPopupTimeoutError;
 /**
  * Wait for a wallet-extension approval popup to open in the given
  * browser context, identified by a caller-supplied predicate.
@@ -60,91 +114,71 @@ exports.ApprovalPopupTimeoutError = ApprovalPopupTimeoutError;
  * matches the instant the window exists while the app is still booting, and
  * the caller's click then spends its budget on a control that never mounted.
  *
- * `isApproval` may throw (e.g. its internal timeout fires) — the
- * helper swallows the throw and keeps waiting on the OTHER pages,
- * which is the right behaviour: one page failing the match shouldn't
- * abort the search.
+ * `isApproval` may throw (the page closes under it, or a wait inside it gives
+ * up). The helper swallows that throw and keeps waiting on the OTHER pages,
+ * which is the right behaviour: one page failing the match shouldn't abort
+ * the search.
  *
- * The outer `timeoutMs` is the deadline beyond which we reject. It
- * is NOT a poll interval — it's a hard rejection timer enforced via
- * a single setTimeout.
+ * There is no deadline of its own. The waits inside `isApproval` run under the
+ * runner config's timeouts and the search as a whole under the test timeout,
+ * whose report names the pending wait.
  */
 async function waitForApprovalPopup(opts) {
-    const { context, knownPages, isApproval } = opts;
-    const timeoutMs = opts.timeoutMs ?? 60_000;
-    return new Promise((resolve, reject) => {
-        let settled = false;
-        const finishOk = (p) => {
-            if (settled)
-                return;
-            settled = true;
-            cleanup();
-            resolve(p);
-        };
-        const finishErr = (err) => {
-            if (settled)
-                return;
-            settled = true;
-            cleanup();
-            reject(err);
-        };
-        const tryPage = async (p) => {
-            if (settled || knownPages.has(p))
-                return;
-            try {
-                const res = await isApproval(p);
-                if (res !== true)
-                    return;
-                // A CLOSING popup still satisfies "the confirm button is visible":
-                // the DOM is alive while the window goes away. Handing that page back
-                // means the caller's `click()` waits for the element to be visible,
-                // enabled AND STABLE, never gets stable because the page is dying, and
-                // fails with "Target page, context or browser has been closed". The
-                // observed shape is a fast failure in specs that approve twice in
-                // quick succession, passing on retry.
-                //
-                // So require the page to answer a round-trip before returning it. A
-                // page that is going away cannot, and the search continues for the one
-                // that is actually live. This is a liveness check rather than a delay:
-                // nothing is waited out, the page either responds or it does not.
-                await p.title();
-                if (p.isClosed())
-                    return;
-                finishOk(p);
-            }
-            catch {
-                // isApproval rejected (e.g. internal timeout), or the liveness probe
-                // failed because the page went away. Don't abort the search — another
-                // page may still match.
-            }
-        };
-        const onPage = (p) => void tryPage(p);
-        const timer = setTimeout(() => finishErr(new ApprovalPopupTimeoutError(timeoutMs)), timeoutMs);
-        const cleanup = () => {
-            clearTimeout(timer);
-            context.off('page', onPage);
-        };
-        context.on('page', onPage);
-        for (const p of context.pages())
-            void tryPage(p);
-    });
+    return startApprovalPopupSearch(opts).found;
 }
 /**
- * For a popup the wallet MAY show, such as a permission renewal after a reload:
- * the popup, or `null` when none appeared within `timeoutMs`.
+ * For a popup the wallet MAY show, such as a connect approval that an already
+ * connected wallet skips: race "the popup appears" against an app state that
+ * exists only when no popup is coming, and say which happened first.
  *
- * Only the timeout means "not shown". Any other rejection still throws, so a
- * broken context does not read as a wallet that simply did not ask.
+ * `noPopupState` must be EXCLUSIVE to the no-popup path, e.g. the connected
+ * wallet's address rendered by the app, which only appears once the connect
+ * resolved without asking. A state that also appears while the popup is
+ * pending (a spinner, the page shell) wins the race on every run and hides the
+ * popup.
+ *
+ *     const race = await raceApprovalPopup({
+ *       context, knownPages, isApproval,
+ *       noPopupState: page.getByTestId('wallet-connected-address'),
+ *     });
+ *     if (race.outcome === 'popup') await approve(race.page);
+ *
+ * Both sides wait on states under the runner config's timeouts; nothing here
+ * hopes for an absence. The loser is cleaned up: the popup search stops
+ * listening, and a later rejection of the losing `waitFor` (when its page
+ * closes at teardown) is absorbed here because the race was already decided.
+ * A rejection BEFORE either side won (the app page closed, the context broke)
+ * rejects the race.
  */
-async function waitForOptionalApprovalPopup(opts) {
-    try {
-        return await waitForApprovalPopup(opts);
-    }
-    catch (e) {
-        if (e instanceof ApprovalPopupTimeoutError)
-            return null;
-        throw e;
-    }
+async function raceApprovalPopup(opts) {
+    const search = startApprovalPopupSearch(opts);
+    return new Promise((resolve, reject) => {
+        let decided = false;
+        const decide = (result) => {
+            if (decided)
+                return;
+            decided = true;
+            search.cancel();
+            resolve(result);
+        };
+        const fail = (e) => {
+            if (decided)
+                return;
+            decided = true;
+            search.cancel();
+            reject(e);
+        };
+        search.found.then((page) => decide({ outcome: 'popup', page }), fail);
+        let noPopup;
+        try {
+            noPopup = opts.noPopupState.waitFor({ state: 'visible' });
+        }
+        catch (e) {
+            fail(e);
+            return;
+        }
+        noPopup.then(() => decide({ outcome: 'no-popup' }), fail);
+    });
 }
 /**
  * Close every chrome-extension page in the context except those
@@ -205,17 +239,14 @@ async function closeLeftoverExtensionPages(context, keep) {
  * the post-click call is best-effort because the popup auto-closes.
  */
 async function approveWizzSignPopup(opts) {
-    const popupTimeoutMs = opts.popupTimeoutMs ?? 120_000;
     const approval = await waitForApprovalPopup({
         context: opts.context,
         knownPages: opts.knownPages,
-        timeoutMs: popupTimeoutMs,
         // Anchored on the Sign button; the plain-string NAME form is the one that
         // matches this control, measured rather than inferred.
         isApproval: approvalGate({
             url: /notification\.html#\/approval/,
             control: (p) => p.getByRole('button', { name: 'Sign' }),
-            timeoutMs: popupTimeoutMs,
         }),
     });
     await opts.onScreenshot?.(approval, 'sign-approval');
@@ -246,7 +277,7 @@ async function approveWizzSignPopup(opts) {
             parentCls: candidate.parentElement?.className ?? null,
         };
     };
-    const found = await approval.waitForFunction(describeSign, undefined, { timeout: opts.signTimeoutMs ?? 60_000, polling: 250 });
+    const found = await approval.waitForFunction(describeSign, undefined, { polling: 250 });
     // Reported so these gates can be anchored on the real element. Wizz strips
     // data-testid. The six Wizz SIGN gates stay URL-only until a locator is
     // verified against a real run: 94b5e2a anchored them on
@@ -256,7 +287,7 @@ async function approveWizzSignPopup(opts) {
     // use locator('button', { hasText }) which matches on text.
     // One check, not a description: does the anchor the gate above uses still
     // match exactly one control? A future Wizz release that renames the button
-    // shows up here as 0 instead of as a 120s gate timeout.
+    // shows up here as 0 instead of as a gate that waits out the test timeout.
     const anchor = await approval.getByRole('button', { name: 'Sign' }).count().catch(() => -1);
     // eslint-disable-next-line no-console
     console.log(`[wizz:sign-popup] anchor=${anchor} ${JSON.stringify(await found.jsonValue())}`);
@@ -285,14 +316,15 @@ async function approveWizzSignPopup(opts) {
  * message about the thing that actually matters. Any other error still throws.
  */
 /**
- * How long a target-closed click error is allowed to wait for the close to be
- * observable. The close and the click's rejection race; this only covers the
- * gap between them.
+ * Probe: how long a target-closed click error waits for the close to become
+ * observable. Long enough to cover the gap between the click's rejection and
+ * the page's close event, short enough that a click which never landed still
+ * fails at the click.
  */
 const CLOSE_GRACE_MS = 2_000;
-async function clickApprovalButton(button, page, timeoutMs = 15_000) {
+async function clickApprovalButton(button, page) {
     try {
-        await button.click({ timeout: timeoutMs });
+        await button.click();
     }
     catch (e) {
         const message = e.message ?? '';
@@ -334,8 +366,11 @@ async function clickApprovalButton(button, page, timeoutMs = 15_000) {
  */
 async function clickApprovalAndRequireClose(button, page, opts = {}) {
     const label = opts.label ?? 'approval popup';
-    await clickApprovalButton(button, page, opts.clickTimeoutMs ?? 15_000);
-    const deadline = Date.now() + (opts.closeTimeoutMs ?? 20_000);
+    await clickApprovalButton(button, page);
+    // A poll on the page handle, not a Playwright wait, so it stops at the
+    // global bound (`e2eTimeoutMs`) rather than polling past the test's end.
+    const boundMs = (0, e2e_timeout_1.e2eTimeoutMs)();
+    const deadline = Date.now() + boundMs;
     while (!page.isClosed()) {
         if (Date.now() > deadline) {
             const visible = await button.isVisible().catch(() => false);
@@ -343,7 +378,7 @@ async function clickApprovalAndRequireClose(button, page, opts = {}) {
             const diagnosis = visible && enabled
                 ? 'the button is STILL VISIBLE AND ENABLED, which is the swallowed-click signature'
                 : 'the button is gone or disabled, so the click registered and the wallet did not finish';
-            throw new Error(`${label}: clicked the confirm button and the popup never closed. ` +
+            throw new Error(`${label}: clicked the confirm button and the popup did not close within ${boundMs}ms. ` +
                 `After the click, ${diagnosis} (visible=${visible} enabled=${enabled}).`);
         }
         await new Promise((r) => setTimeout(r, 100));
@@ -353,7 +388,7 @@ async function clickApprovalAndRequireClose(button, page, opts = {}) {
  * Click a page control until the wallet's approval popup appears.
  *
  * `waitForApprovalPopup` answers "did a popup show up", and when the answer is
- * no after 60s it cannot say whether the wallet failed to wake or the CLICK
+ * no it cannot say whether the wallet failed to wake or the CLICK
  * that should have asked it never registered. Those have opposite fixes, and a
  * swallowed click is the likelier of the two on a control whose enabled state
  * comes from data that settles after first paint — which every funding-gated
@@ -368,29 +403,49 @@ async function clickApprovalAndRequireClose(button, page, opts = {}) {
  *
  * Returns the popup and the number of clicks it took. Assert `clicks === 1` on
  * a lane you believe is clean and a swallowed click becomes a named failure
- * instead of a 60-second timeout blamed on the wallet.
+ * instead of a test timeout blamed on the wallet.
  *
  * For an SDK-driven approval — the harness calls the orchestrator and the
  * wallet pops up on its own — there is no trigger to re-click, so use
  * `waitForApprovalPopup` directly. This is for a PAGE-driven trigger only.
  */
+/**
+ * Probe: how long ONE click gets to produce the popup before the trigger is
+ * inspected for a swallowed click. Long enough for a cold extension service
+ * worker to open its window, short enough to re-click within the test.
+ */
+exports.POPUP_AFTER_CLICK_PROBE_MS = 20_000;
 async function clickUntilApprovalPopup(trigger, opts) {
     let found = null;
     const effect = {
+        // With `timeout`, the probe after a click: no popup within it is an
+        // expected answer that sends the trigger back for inspection. Without,
+        // the trigger reacted and the popup gets the rest of the test.
         waitFor: async ({ timeout }) => {
-            found = await waitForApprovalPopup({
-                context: opts.context,
-                knownPages: opts.knownPages,
-                isApproval: opts.isApproval,
-                timeoutMs: timeout,
+            const search = startApprovalPopupSearch(opts);
+            if (timeout === undefined) {
+                found = await search.found;
+                return;
+            }
+            let timer;
+            const expired = new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    search.cancel();
+                    reject(new Error(`approval popup did not appear within the ${timeout}ms probe`));
+                }, timeout);
             });
+            try {
+                found = await Promise.race([search.found, expired]);
+            }
+            finally {
+                clearTimeout(timer);
+            }
         },
     };
-    const { clicks } = await (0, click_until_effect_1.clickUntilEffect)(trigger, effect, {
-        settleMs: opts.settleMs ?? 20_000,
+    const { clicks } = await (0, click_until_effect_core_1.clickUntilEffectWithProbe)(trigger, effect, {
         maxClicks: opts.maxClicks ?? 3,
         label: opts.label ?? 'approval trigger',
-    });
+    }, exports.POPUP_AFTER_CLICK_PROBE_MS);
     if (!found)
         throw new Error(`${opts.label ?? 'approval trigger'}: popup resolved without a page`);
     return { page: found, clicks };
@@ -398,14 +453,14 @@ async function clickUntilApprovalPopup(trigger, opts) {
 /**
  * Wait for the extension page that is offering a CONFIRM BUTTON.
  *
- * Replaces a pattern that was hand-copied across most wallet specs: poll every
- * extension page's body text every 500ms against a list of headings, until a
- * deadline. That shape has two defects, and neither is a property of the wallet.
+ * The alternative, polling every extension page's body text against a list of
+ * headings until a deadline, has two defects, and neither is a property of the
+ * wallet.
  *
- * It makes the result depend on MACHINE SPEED. One such spec passed in 5.4
- * seconds on an idle runner and timed out at 120 on a loaded one, with
- * identical code and extension. A test whose verdict moves with CPU contention
- * is a bad test, not an unlucky one.
+ * It makes the result depend on MACHINE SPEED. Such a poll passed in 5.4
+ * seconds on an idle runner and ran out at 120 on a loaded one, with identical
+ * code and extension. A test whose verdict moves with CPU contention is a bad
+ * test, not an unlucky one.
  *
  * And it couples the spec to the wallet's COPY. Wallets rename headings between
  * releases, so a rename reads as a broken flow.
@@ -415,49 +470,26 @@ async function clickUntilApprovalPopup(trigger, opts) {
  * driven by Playwright's own event-based waiting rather than a busy loop. The
  * search covers pages that are ALREADY open as well as ones that appear, which
  * matters for wallets that reuse one notification page across approvals.
+ *
+ * When nothing matches, the test timeout reports, and its call log names the
+ * pending `getByText` wait. A page that never painted, or a stale page the
+ * wallet reuses without re-rendering, both show up there as the same pending
+ * wait; the trace's page list separates them.
  */
 async function waitForApprovalByConfirmButton(opts) {
     const buttonText = opts.buttonText ?? /^(Confirm|Sign|Approve)$/;
-    const timeoutMs = opts.timeoutMs ?? 60_000;
-    const label = opts.label ?? 'approval';
-    // Which extension pages existed BEFORE we started waiting. A blank page that
-    // was already open is a stale one the wallet is reusing and never
-    // re-rendering; a blank page that appeared while we waited is one the wallet
-    // opened fresh and never painted. Same symptom, different cause, and only
-    // this distinction separates them.
-    const preexisting = new Set(opts.context.pages().filter((p) => p.url().startsWith('chrome-extension://')));
-    try {
-        return await waitForApprovalPopup({
-            context: opts.context,
-            // Empty on purpose: a wallet may serve this approval from the SAME page
-            // it used for an earlier one, and a populated set would skip it.
-            knownPages: new Set(),
-            timeoutMs,
-            isApproval: async (p) => {
-                if (!p.url().startsWith('chrome-extension://'))
-                    return false;
-                await p.getByText(buttonText, { exact: true }).first()
-                    .waitFor({ state: 'visible', timeout: timeoutMs });
-                return true;
-            },
-        });
-    }
-    catch (e) {
-        const seen = await Promise.all(opts.context.pages()
-            .filter((p) => p.url().startsWith('chrome-extension://'))
-            .map(async (p) => {
-            const text = await p.locator('body').innerText().catch(() => '<unreadable>');
-            const age = preexisting.has(p) ? 'ALREADY-OPEN' : 'opened-while-waiting';
-            return `${p.url().slice(0, 60)} [${age}] => ${text.trim().split('\n')[0]?.slice(0, 80) || '<empty>'}`;
-        }));
-        throw new Error(`${label}: no extension page offered a confirm button within ${timeoutMs}ms (${e.message})\n` +
-            `Extension pages at timeout (${seen.length}):\n` +
-            (seen.length ? seen.map((l) => `  - ${l}`).join('\n') : '  <none>') +
-            '\nA page shown as <empty> never painted. ALREADY-OPEN means the wallet is reusing a ' +
-            'stale page and not re-rendering it, so closing leftovers before the request is the fix; ' +
-            'opened-while-waiting means the wallet opened a fresh page and failed to render it, which ' +
-            'is the wallet\'s own defect. A page with text is neither: the matcher does not know it.');
-    }
+    return waitForApprovalPopup({
+        context: opts.context,
+        // Empty on purpose: a wallet may serve this approval from the SAME page
+        // it used for an earlier one, and a populated set would skip it.
+        knownPages: new Set(),
+        isApproval: async (p) => {
+            if (!p.url().startsWith('chrome-extension://'))
+                return false;
+            await p.getByText(buttonText, { exact: true }).first().waitFor({ state: 'visible' });
+            return true;
+        },
+    });
 }
 /**
  * Resolve to the page currently SHOWING `text`, across pages that are already
@@ -465,32 +497,83 @@ async function waitForApprovalByConfirmButton(opts) {
  *
  * Extension onboarding hands a step to an unpredictable page: a wallet may
  * continue in the tab you have, or open a fresh one, and which it does varies
- * by version. The specs handled that by polling every page's innerText every
- * 500ms until a deadline, then continuing on the original page if nothing
- * matched. So on a slow machine the search could expire before the wallet
- * painted, and the flow would carry on against the WRONG page and fail later
- * somewhere unrelated.
+ * by version. Polling every page's innerText until a deadline and then
+ * continuing on the original page lets a slow machine expire the search before
+ * the wallet painted, so the flow carries on against the WRONG page and fails
+ * later somewhere unrelated.
  *
  * This waits on Playwright's event-driven text matching instead, so it returns
  * the moment the text appears rather than on the next tick of a timer, and it
- * throws rather than silently yielding null. A caller that genuinely treats the
- * step as optional can still `.catch(() => null)`, but it has to say so.
+ * never yields a page that did not show the text. A step that may not come is
+ * raced against the state that means it is not coming (`raceApprovalPopup`),
+ * never caught.
  */
 async function waitForPageShowing(opts) {
-    const timeoutMs = opts.timeoutMs ?? 30_000;
-    try {
-        return await waitForApprovalPopup({
-            context: opts.context,
-            knownPages: new Set(),
-            timeoutMs,
-            isApproval: async (p) => {
-                await p.getByText(opts.text).first().waitFor({ state: 'visible', timeout: timeoutMs });
-                return true;
-            },
+    return waitForApprovalPopup({
+        context: opts.context,
+        knownPages: new Set(),
+        isApproval: async (p) => {
+            await p.getByText(opts.text).first().waitFor({ state: 'visible' });
+            return true;
+        },
+    });
+}
+/**
+ * Probe: how long one confirm click gets to take effect (the popup closes, the
+ * caller's `resolved` settles, or the confirm button goes away) before it
+ * counts as absorbed and is sent again. Xverse absorbs a dispatch that lands
+ * before its handlers attach; long enough for an accepted click to sign and
+ * close the popup on a loaded runner.
+ */
+exports.CONFIRM_EFFECT_PROBE_MS = 15_000;
+/**
+ * Click a wallet popup's confirm button until the approval took effect: the
+ * popup closed, `resolved` (the dapp-side call waiting on the signature)
+ * settled, or the button went away. Each click gets `CONFIRM_EFFECT_PROBE_MS`;
+ * a click that changed none of the three within it was absorbed and is sent
+ * again, up to `maxClicks`. Returns the clicks sent, so a caller can log or
+ * assert that one was enough.
+ *
+ * The click is forced and its own error only logged: the popup closing under
+ * the click is the success shape, and the three effects above, not the click's
+ * promise, say whether it landed. The caller's await on `resolved` (or on the
+ * signed transaction) is what fails when nothing was ever signed.
+ */
+async function clickConfirmUntilClosed(confirm, popup, opts = {}) {
+    const maxClicks = opts.maxClicks ?? 4;
+    const label = opts.label ?? 'confirm';
+    let settled = false;
+    opts.resolved?.then(() => { settled = true; }, () => { settled = true; });
+    let clicks = 0;
+    while (clicks < maxClicks && !popup.isClosed() && !settled) {
+        await confirm.click({ force: true }).catch((e) => {
+            // eslint-disable-next-line no-console
+            console.log(`[${label}] confirm click ${clicks + 1}: ${e.message.split('\n')[0]}`);
         });
+        clicks++;
+        const tookEffect = await new Promise((resolve) => {
+            if (popup.isClosed() || settled) {
+                resolve(true);
+                return;
+            }
+            let done = false;
+            const finish = (effect) => {
+                if (done)
+                    return;
+                done = true;
+                clearTimeout(timer);
+                popup.off('close', onClose);
+                resolve(effect);
+            };
+            const onClose = () => finish(true);
+            const timer = setTimeout(() => finish(false), exports.CONFIRM_EFFECT_PROBE_MS);
+            popup.once('close', onClose);
+            opts.resolved?.then(() => finish(true), () => finish(true));
+            confirm.waitFor({ state: 'hidden', timeout: exports.CONFIRM_EFFECT_PROBE_MS }).then(() => finish(true), () => undefined);
+        });
+        if (tookEffect)
+            break;
     }
-    catch (e) {
-        throw new Error(`${opts.label ?? 'page'}: no page showed ${opts.text} within ${timeoutMs}ms (${e.message})`);
-    }
+    return { clicks };
 }
 //# sourceMappingURL=approval-popup.js.map

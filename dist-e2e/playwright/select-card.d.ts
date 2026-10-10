@@ -25,9 +25,7 @@
  * the wallet lands on the wrong address type.
  */
 export interface SelectableCard {
-    click: (opts?: {
-        timeout?: number;
-    }) => Promise<void>;
+    click: () => Promise<void>;
     getAttribute: (name: string) => Promise<string | null>;
 }
 export interface SelectCardResult {
@@ -41,8 +39,13 @@ export interface SelectCardResult {
      */
     selected: boolean | undefined;
 }
+/**
+ * Probe: how long after a click the selected marker is read. A card may carry
+ * no marker at all (UniSat), so there is no state to wait on; long enough for
+ * the re-render after the click, short enough to re-click a swallowed one.
+ */
+export declare const CARD_SELECT_PROBE_MS = 400;
 export declare function selectCard(card: SelectableCard, opts?: {
     maxClicks?: number;
-    settleMs?: number;
 }): Promise<SelectCardResult>;
 //# sourceMappingURL=select-card.d.ts.map

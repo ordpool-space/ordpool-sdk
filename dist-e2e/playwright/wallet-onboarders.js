@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardableWallets = exports.walletOnboarders = void 0;
+exports.extensionOnboardingPage = extensionOnboardingPage;
 const onboard_xverse_1 = require("./onboard-xverse");
 const onboard_unisat_1 = require("./onboard-unisat");
 const onboard_leather_1 = require("./onboard-leather");
@@ -55,4 +56,34 @@ exports.walletOnboarders = {
 };
 /** Wallet names with a reusable onboarder (every wallet the E2E supports). */
 exports.onboardableWallets = Object.keys(exports.walletOnboarders);
+/**
+ * Probe: how long a freshly installed extension gets to open its own
+ * onboarding tab. OKX and Phantom open one on install in some releases and not
+ * in others, so no tab is an expected answer; long enough for the install-time
+ * tab to appear, after which a new blank page is the onboarding page and the
+ * onboarder navigates it.
+ */
+const INSTALL_TAB_PROBE_MS = 15_000;
+/**
+ * The page to onboard a freshly installed extension on: the tab the extension
+ * opened itself (its `chrome-extension://<id>/...` onboarding), or a new blank
+ * page when it opened none within the probe. Other tabs (a vendor's marketing
+ * page) are ignored by the URL filter.
+ *
+ * Only the probe running out means "no tab"; any other failure (the context
+ * closed) is thrown.
+ */
+async function extensionOnboardingPage(context, extensionId) {
+    try {
+        return await context.waitForEvent('page', {
+            predicate: (p) => p.url().startsWith(`chrome-extension://${extensionId}`),
+            timeout: INSTALL_TAB_PROBE_MS,
+        });
+    }
+    catch (e) {
+        if (e.name !== 'TimeoutError')
+            throw e;
+        return context.newPage();
+    }
+}
 //# sourceMappingURL=wallet-onboarders.js.map

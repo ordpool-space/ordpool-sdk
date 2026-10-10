@@ -100,11 +100,10 @@ test.beforeAll(async () => {
   await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
-  test.setTimeout(180_000);
   await onboardWizz(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
@@ -120,14 +119,12 @@ test.afterAll(async () => {
 // likely matcher misses, not silent wallet rejects. Anchor on the URL
 // (same pattern as wizz-sdk-handshake) and click "Sign".
 test('mint a cat21 on regtest via Wizz: build PSBT in SDK, sign in popup (mainnet wallet, regtest PSBT), broadcast via local electrs', async () => {
-  test.setTimeout(300_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 
@@ -153,7 +150,7 @@ test('mint a cat21 on regtest via Wizz: build PSBT in SDK, sign in popup (mainne
   const newTip = mineBlocks(1);
   await waitForElectrsSync(newTip);
 
-  const utxo = await waitForUtxoAt(regtest.paymentAddress, Math.round(FUND_AMOUNT_BTC * 1e8), 30_000);
+  const utxo = await waitForUtxoAt(regtest.paymentAddress, Math.round(FUND_AMOUNT_BTC * 1e8));
   console.log(`[wizz-mint] using UTXO ${utxo.txid}:${utxo.vout} value=${utxo.value}`);
 
   const signKnownPages = new Set(context.pages());

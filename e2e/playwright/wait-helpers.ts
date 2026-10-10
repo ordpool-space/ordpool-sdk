@@ -1,6 +1,7 @@
 import type { BrowserContext, Worker } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { e2eTimeoutMs } from '../e2e-timeout';
 
 /**
  * Wait until a Chromium persistent-context's `SingletonLock` (and
@@ -9,20 +10,19 @@ import * as path from 'node:path';
  * the directory before that beat ends races with the OS and leaves
  * stale lock files that prevent re-launch.
  *
- * Event-driven via fs.watch — fires on the deletion event. The
- * `timeoutMs` argument is the deadline, not a poll interval; the
- * Promise rejects if no deletion arrives in that window.
+ * A filesystem poll, not a Playwright wait, so it stops at the global
+ * bound (`e2eTimeoutMs`) and rejects if the lock files are still there.
  */
 export async function waitForSingletonLockGone(
   userDataDir: string,
-  timeoutMs: number = 30_000,
 ): Promise<void> {
+  const timeoutMs = e2eTimeoutMs();
   const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
   const stillThere = () => lockFiles.some(f => fs.existsSync(path.join(userDataDir, f)));
 
   // Poll rather than fs.watch: fs.watch has a check-then-watch race (a lock
   // removed between the initial stillThere() and arming the watcher is missed,
-  // and the caller then eats the full timeout) and silently drops events on
+  // and the caller then eats the full bound) and silently drops events on
   // some platforms. A 100ms poll has no such gap.
   const deadline = Date.now() + timeoutMs;
   while (stillThere()) {
@@ -44,11 +44,9 @@ export async function waitForSingletonLockGone(
  */
 export async function waitForServiceWorkerReady(
   context: BrowserContext,
-  options: { ignoreWorker?: Worker; timeoutMs?: number } | number = {},
+  options: { ignoreWorker?: Worker } = {},
 ): Promise<Worker> {
-  const opts = typeof options === 'number' ? { timeoutMs: options } : options;
-  const ignoreWorker = opts.ignoreWorker;
-  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const ignoreWorker = options.ignoreWorker;
   // Two parallel observation paths converge on the same outcome:
   //
   //   (a) Playwright's `serviceworker` event fires when a new SW
@@ -61,17 +59,16 @@ export async function waitForServiceWorkerReady(
   //       browser but no fresh `serviceworker` event surfaces).
   //
   // Promise.any returns the first fulfilled value; AggregateError
-  // only if BOTH paths exhaust their independent timeouts. The
+  // only if BOTH paths give up: the event path under the runner
+  // config's action timeout, the probe loop at the global bound
+  // (`e2eTimeoutMs`), because it is not a Playwright wait. The
   // `ignoreWorker` option lets callers pin out a known-dead reference
   // — e.g. the SW that hosted chrome.runtime.reload() and is gone.
   const isFresh = (w: Worker) => !ignoreWorker || w !== ignoreWorker;
   return Promise.any([
-    context.waitForEvent('serviceworker', {
-      timeout: timeoutMs,
-      predicate: isFresh,
-    }),
+    context.waitForEvent('serviceworker', { predicate: isFresh }),
     (async () => {
-      const deadline = Date.now() + timeoutMs;
+      const deadline = Date.now() + e2eTimeoutMs();
       while (Date.now() < deadline) {
         const w = context.serviceWorkers().find(isFresh);
         if (w) {
@@ -101,11 +98,11 @@ export async function waitForChromeStorageKey(opts: {
   keyContains: string;
   /** Optional: caller-supplied predicate on the resolved value. */
   matchValue?: (value: unknown) => boolean;
-  timeoutMs?: number;
 }): Promise<void> {
   const { context, keyContains } = opts;
   const matchValue = opts.matchValue;
-  const timeoutMs = opts.timeoutMs ?? 30_000;
+  // A service-worker poll, not a Playwright wait: it stops at the global bound.
+  const timeoutMs = e2eTimeoutMs();
 
   const deadline = Date.now() + timeoutMs;
   // Re-fetch the SW reference on every iteration — chrome.runtime.reload()

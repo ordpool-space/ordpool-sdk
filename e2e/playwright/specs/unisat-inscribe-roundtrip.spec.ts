@@ -68,11 +68,10 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByTestId('sign-psbt-button')
-        .waitFor({ state: 'visible', timeout: 90_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -100,7 +99,7 @@ test.beforeAll(async () => {
   await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -113,14 +112,12 @@ test.afterAll(async () => {
 });
 
 test('inscribe an artifact on regtest via Unisat: build commit+reveal in SDK, sign commit in popup, broadcast both via local electrs, verify via ordpool-parser', async () => {
-  test.setTimeout(360_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
 
   const connectKnownPages = new Set(context.pages());

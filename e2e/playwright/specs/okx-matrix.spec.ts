@@ -1,5 +1,6 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -66,7 +67,7 @@ async function approveOkxPopup(ctx: BrowserContext, knownPages: Set<Page>): Prom
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -93,17 +94,10 @@ test.beforeAll(async () => {
   });
   await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch { /* fall through */ }
-  test.setTimeout(240_000);
-  if (!onboardPage) onboardPage = await context.newPage();
+  onboardPage = await extensionOnboardingPage(context, extensionId);
   await onboardOkx(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
@@ -114,14 +108,12 @@ test.afterAll(async () => {
 
 for (const variant of VARIANTS) {
   test(`SDK returns the right address for OKX ${variant.label}`, async () => {
-    test.setTimeout(120_000);
 
     const harness = await context.newPage();
     await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
     await harness.waitForFunction(
       () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
       undefined,
-      { timeout: 15_000 },
     );
 
     const knownPages = new Set(context.pages());

@@ -2,12 +2,12 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.isVisibleWithin = isVisibleWithin;
 /**
- * Resolves `true` if the element becomes visible within `timeoutMs`, `false` if
+ * Resolves `true` if the element becomes visible within `probeMs`, `false` if
  * it does not. Never throws for absence.
  */
-async function isVisibleWithin(locator, timeoutMs) {
+async function isVisibleWithin(locator, probeMs) {
     try {
-        await locator.waitFor({ state: 'visible', timeout: timeoutMs });
+        await locator.waitFor({ state: 'visible', timeout: probeMs });
         return true;
     }
     catch {

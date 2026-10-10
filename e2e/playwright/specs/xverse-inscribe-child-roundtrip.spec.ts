@@ -17,7 +17,7 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup } from '../approval-popup';
+import { waitForApprovalPopup, clickConfirmUntilClosed } from '../approval-popup';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 
 /**
@@ -76,13 +76,12 @@ async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 120_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       // The legacy signTransaction popup reads "Review transaction"; the
       // modern signPsbt popup may head with "Sign transaction" / "Sign
       // PSBT" / "Confirm transaction". Match any of them.
-      await p.getByText(/(review|sign|confirm)\b.*\b(transaction|psbt)/i).first().waitFor({ state: 'visible', timeout: 120_000 });
+      await p.getByText(/(review|sign|confirm)\b.*\b(transaction|psbt)/i).first().waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -95,20 +94,12 @@ async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>
       const style = getComputedStyle(b);
       return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
     });
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
   knownPages.add(approval);
   // Click the confirm/sign button; the popup closing signals the sign
   // completed. Retry a few times — Xverse's button sometimes needs a
   // second dispatch.
-  for (let attempt = 0; attempt < 4 && !approval.isClosed(); attempt++) {
-    await approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first().click({ force: true }).catch(() => undefined);
-    const closed = await new Promise<boolean>((res) => {
-      if (approval.isClosed()) return res(true);
-      const t = setTimeout(() => res(false), 15_000);
-      approval.once('close', () => { clearTimeout(t); res(true); });
-    });
-    if (closed) break;
-  }
+  await clickConfirmUntilClosed(approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), approval);
 }
 
 async function fundPaymentAddress(paymentAddress: string): Promise<{ txid: string; vout: number; value: number }> {
@@ -143,7 +134,7 @@ test.beforeAll(async () => {
     args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox', '--disable-dev-shm-usage'],
   });
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 });
 
@@ -164,7 +155,6 @@ test.afterAll(async () => {
 // because the seed dir is regtest-active, so `signPsbt` (no per-request
 // network) targets regtest.
 test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
-  test.setTimeout(600_000);
 
   // ── Unlock ──
   const primer = await context.newPage();
@@ -173,17 +163,17 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
   await primer.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
   if (/unlock/i.test(await primer.locator('body').innerText())) {
     await primer.locator('input[type="password"]').first().fill(TEST_PASSWORD);
     await primer.getByRole('button', { name: /^unlock$/i }).first().click();
     await primer.waitForFunction(() => {
       const t = (document.body.innerText || '').toLowerCase();
       return t.includes('account 1') || t.includes('not now') || t.includes('send');
-    }, undefined, { timeout: 30_000, polling: 250 });
+    }, undefined, { polling: 250 });
   }
   const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+  if (await notNow.isVisible().catch(() => false)) {
     await notNow.click({ force: true }).catch(() => undefined);
   }
 
@@ -192,16 +182,16 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
   // eslint-disable-next-line no-console
   harness.on('console', (m) => console.log(`[H] ${m.text()}`));
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
-  await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined, { timeout: 15_000 });
+  await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined);
 
-  const connectPagePromise = context.waitForEvent('page', { timeout: 60_000 });
+  const connectPagePromise = context.waitForEvent('page');
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
   const approvalConnect = await connectPagePromise;
   await approvalConnect.waitForLoadState('domcontentloaded');
   await approvalConnect.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { timeout: 60_000, polling: 500 });
+  }, undefined, { polling: 500 });
   await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
   const wallet = await connectResultPromise;
   await approvalConnect.close().catch(() => undefined);

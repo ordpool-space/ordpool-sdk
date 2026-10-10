@@ -46,5 +46,5 @@ describe('wallet detection keeps asking until the answer settles', () => {
     expect(buckets.installedWallets.map((w) => w.type)).toContain(
       KnownOrdinalWalletType.unisat,
     );
-  }, 20_000);
+  });
 });

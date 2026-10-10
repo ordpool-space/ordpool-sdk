@@ -61,7 +61,7 @@ describe('wasm brotli encoder (Chrome/Edge fallback)', () => {
     expect(big.length).toBeGreaterThan(350_000);
     const out = await compressBrotliWasm(big, WASM);
     expect(new Uint8Array(brotliDecompressSync(Buffer.from(out)))).toEqual(big);
-  }, 30_000);
+  });
 
   it('returns a plain Uint8Array', async () => {
     const out = await compressBrotliWasm(enc('hi'), WASM);

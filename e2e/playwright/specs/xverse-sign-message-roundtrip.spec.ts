@@ -46,11 +46,10 @@ async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 120_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByRole('button', { name: /^(sign message|sign|confirm|approve)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 120_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -63,7 +62,7 @@ async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page
       const style = getComputedStyle(b);
       return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
     });
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
   await approval.getByRole('button', { name: /^(sign message|sign|confirm|approve)$/i }).first()
     .click({ force: true });
 }
@@ -83,7 +82,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   // Fresh mainnet onboarding (no primeAndSwitchToRegtest): leaves Xverse on
@@ -96,14 +95,13 @@ test.afterAll(async () => {
 });
 
 test('sign a BIP-322 message via Xverse: real extension signs, SDK verifies', async () => {
-  test.setTimeout(240_000);
 
   // Dismiss any post-onboard promo ("Not now") so it can't overlay the popups.
   const primer = await context.newPage();
   await primer.setViewportSize({ width: 400, height: 800 });
   await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
   const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible({ timeout: 3_000 }).catch(() => false)) {
+  if (await notNow.isVisible().catch(() => false)) {
     await notNow.click({ force: true }).catch(() => undefined);
   }
   await shot(primer, '00-dashboard-ready');
@@ -113,20 +111,19 @@ test('sign a BIP-322 message via Xverse: real extension signs, SDK verifies', as
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 
   // Connect on MAINNET so the ordinals address is a bc1p taproot address the
   // verifier supports.
-  const connectPagePromise = context.waitForEvent('page', { timeout: 60_000 });
+  const connectPagePromise = context.waitForEvent('page');
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('mainnet'));
   const approvalConnect = await connectPagePromise;
   await approvalConnect.waitForLoadState('domcontentloaded');
   await approvalConnect.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { timeout: 60_000, polling: 500 });
+  }, undefined, { polling: 500 });
   await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
   const wallet = await connectResultPromise;
   // Close the connect popup so Xverse opens a fresh tab for the sign step

@@ -59,7 +59,7 @@ export declare function fundWithFreshCoinbase(address: string): number;
  */
 export declare function mineBlockWithRawTxs(rawTxHexes: string[]): number;
 /** Wait until electrs has indexed up to (at least) the given height. */
-export declare function waitForElectrsSync(targetHeight: number, timeoutMs?: number): Promise<void>;
+export declare function waitForElectrsSync(targetHeight: number): Promise<void>;
 /**
  * Wait for a UTXO matching `predicate` to appear at `address`.
  * `waitForElectrsSync` only guarantees the block tip is at the
@@ -74,9 +74,9 @@ export declare function waitForElectrsSync(targetHeight: number, timeoutMs?: num
  * `txid=abc… value=100_000_000`). It surfaces in the timeout
  * error so the failure tells you which UTXO didn't show up.
  */
-export declare function waitForUtxoMatching(address: string, predicate: (u: ElectrsUtxo) => boolean, description: string, timeoutMs?: number): Promise<ElectrsUtxo>;
+export declare function waitForUtxoMatching(address: string, predicate: (u: ElectrsUtxo) => boolean, description: string): Promise<ElectrsUtxo>;
 /** Common case: poll for a UTXO of exactly `expectedSats`. */
-export declare function waitForUtxoAt(address: string, expectedSats: number, timeoutMs?: number): Promise<ElectrsUtxo>;
+export declare function waitForUtxoAt(address: string, expectedSats: number): Promise<ElectrsUtxo>;
 /**
  * Wait until electrs's address-history index lists `expectedTxid`
  * against `address` (in either the spending or receiving slot).
@@ -86,7 +86,7 @@ export declare function waitForUtxoAt(address: string, expectedSats: number, tim
  * the sender's view is reliably up-to-date from the same
  * electrs.
  */
-export declare function waitForAddressTxIndexed(address: string, expectedTxid: string, timeoutMs?: number): Promise<void>;
+export declare function waitForAddressTxIndexed(address: string, expectedTxid: string): Promise<void>;
 export interface ElectrsUtxo {
     txid: string;
     vout: number;
@@ -199,7 +199,7 @@ export interface EsploraTx {
  * Polls every 200ms by default. Returns the EsploraTx once the
  * confirmation is observable; throws if the deadline is reached.
  */
-export declare function waitForTxConfirmed(txid: string, timeoutMs?: number): Promise<EsploraTx>;
+export declare function waitForTxConfirmed(txid: string): Promise<EsploraTx>;
 export declare function getTx(txid: string): Promise<EsploraTx>;
 /**
  * Throws unless every signed input in `tx` commits to all outputs
@@ -228,14 +228,14 @@ export declare function catInscriptionId(mintTxid: string): string;
  * file has no healthcheck because the slim runtime image lacks wget/curl,
  * so the test bootstrap polls here.
  */
-export declare function waitForOrdReady(timeoutMs?: number): Promise<void>;
+export declare function waitForOrdReady(): Promise<void>;
 /**
  * Block until ord has indexed up to (at least) `targetHeight`. ord's
  * indexer is one step behind electrs/bitcoind — it sees the new block
  * via ZMQ or polling and runs its CAT-21 filter on every tx. Without
  * this gate the cat-state assertions race the indexer.
  */
-export declare function waitForOrdSync(targetHeight: number, timeoutMs?: number): Promise<void>;
+export declare function waitForOrdSync(targetHeight: number): Promise<void>;
 export interface OrdInscription {
     /** Address currently holding the inscription (the "owner"). */
     address: string;
@@ -274,7 +274,7 @@ export declare function getOrdInscription(inscriptionId: string): Promise<OrdIns
  * Use this after each broadcast + confirm step in the multi-step spec
  * to assert the cat actually moved where the SDK said it would.
  */
-export declare function waitForCatAtAddress(inscriptionId: string, expectedAddress: string, timeoutMs?: number): Promise<OrdInscription>;
+export declare function waitForCatAtAddress(inscriptionId: string, expectedAddress: string): Promise<OrdInscription>;
 /**
  * Invoke ord's CLI inside the regtest container. Returns stdout
  * trimmed. Errors bubble up via execFileSync's non-zero-exit throw.
@@ -329,7 +329,7 @@ export declare function ordWalletSend(recipientAddress: string, inscriptionId: s
  * Polls through the same `--no-sync` path the later command uses, so what this
  * observes is exactly what that command will see.
  */
-export declare function waitForOrdWalletCardinal(walletName: string, minSats: number, timeoutMs?: number): Promise<void>;
+export declare function waitForOrdWalletCardinal(walletName: string, minSats: number): Promise<void>;
 export interface OrdAddressResponse {
     address: string;
 }
@@ -368,13 +368,13 @@ export declare function inscriptionId(txid: string, index?: number): string;
  * Poll stock ord's HTTP server until it answers `/status` with a
  * 2xx. Same warm-up rationale as `waitForOrdReady`.
  */
-export declare function waitForOrdStockReady(timeoutMs?: number): Promise<void>;
+export declare function waitForOrdStockReady(): Promise<void>;
 /**
  * Block until stock ord has indexed up to (at least) `targetHeight`.
  * ord's indexer lags bitcoind by a few hundred ms; without this gate
  * the inscription-lookup assertions race the indexer.
  */
-export declare function waitForOrdStockSync(targetHeight: number, timeoutMs?: number): Promise<void>;
+export declare function waitForOrdStockSync(targetHeight: number): Promise<void>;
 export interface StockOrdInscription {
     /** Address currently holding the inscription. */
     address: string;
@@ -618,11 +618,16 @@ export declare function getStockOrdContent(id: string): Promise<{
     contentType: string | null;
 }>;
 /**
+ * Poll stock ord until the inscription's satpoint becomes `expectedSatpoint`,
+ * the `<txid>:<vout>:<offset>` it moved to. Stops at the global bound.
+ */
+export declare function waitForOrdStockSatpoint(id: string, expectedSatpoint: string): Promise<StockOrdInscription>;
+/**
  * Poll until stock ord serves the inscription. ord indexes inscriptions
  * one or two blocks after the reveal lands; this helper hides the
  * polling boilerplate.
  */
-export declare function waitForOrdStockInscription(id: string, timeoutMs?: number): Promise<StockOrdInscription>;
+export declare function waitForOrdStockInscription(id: string): Promise<StockOrdInscription>;
 export declare function ordStockCli(...args: string[]): string;
 /**
  * Same invocation, without blocking the event loop.

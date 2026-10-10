@@ -131,7 +131,7 @@ export default async function globalSetup(): Promise<void> {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   const extensionId = worker.url().split('/')[2];
 
   try {
@@ -153,7 +153,7 @@ export default async function globalSetup(): Promise<void> {
     // writes from primeAndSwitchToRegtest. Without this gate, the
     // cloned user-data-dir misses the last few writes and the wallet
     // appears un-onboarded to specs launched from the clone.
-    await waitForChromeStorageKey({ context, keyContains: 'walletState', timeoutMs: 30_000 });
+    await waitForChromeStorageKey({ context, keyContains: 'walletState' });
   } finally {
     await context.close();
   }

@@ -68,7 +68,7 @@ describe('makeWatchOnlyTestAccount', () => {
       rpc('-rpcwallet=ordpool-e2e', 'sendtoaddress', account.addressAt(0), '0.02');
       await waitForElectrsSync(mineBlocks(1));
       funded = await waitForUtxoAt(account.addressAt(0), FUND_SATS);
-    }, 120_000);
+    });
 
     it('produces a signature bitcoind accepts for the key that owns the coin', async () => {
       const scureNetwork = toScureNetwork(Network.Regtest);
@@ -101,6 +101,6 @@ describe('makeWatchOnlyTestAccount', () => {
       await waitForTxConfirmed(txid);
       const landed = await waitForUtxoAt(account.addressAt(1), funded.value - FEE_SATS);
       expect(landed.txid).toBe(txid);
-    }, 180_000);
+    });
   });
 });

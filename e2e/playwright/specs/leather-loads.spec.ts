@@ -52,7 +52,7 @@ test.beforeAll(async () => {
 
   let [worker] = context.serviceWorkers();
   if (!worker) {
-    worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+    worker = await context.waitForEvent('serviceworker');
   }
   extensionId = worker.url().split('/')[2];
   console.log(`[leather] service worker URL = ${worker.url()}`);
@@ -85,9 +85,9 @@ test('Leather loads in Chromium with a service worker registered; navigates to i
     waitUntil: 'domcontentloaded',
   });
 
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {
-    console.log('[leather] networkidle timed out, continuing with whatever rendered');
-  });
+  // Wait until the extension rendered something (React mount, route
+  // resolution). What it renders is unknown here, so the signal is body text.
+  await page.waitForFunction(() => (document.body.innerText || '').trim().length > 0);
 
   const finalUrl = page.url();
   const title = await page.title();
@@ -105,14 +105,12 @@ test('Leather loads in Chromium with a service worker registered; navigates to i
     bodyHtml,
   );
 
-  // Poll for non-empty text — React mount races against an
-  // immediate innerText read after networkidle. Same flake-prone
-  // pattern as the original unisat-loads (fixed in c5c65d2).
+  // Non-empty text is the readiness signal: React mounts after the
+  // document loads, so an immediate innerText read can see an empty body.
   await expect(page.locator('body')).toBeVisible();
   await page.waitForFunction(
     () => (document.body.innerText || '').trim().length > 0,
     undefined,
-    { timeout: 10_000 },
   );
   const visibleText = await page.locator('body').innerText().catch(() => '');
   console.log(`[leather] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);

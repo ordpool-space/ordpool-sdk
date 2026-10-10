@@ -67,7 +67,7 @@ describe('compressGzip / decompressGzip: byte-exact round-trip', () => {
     expect(compressed.length).toBeLessThan(big.length);
     const back = await decompressGzip(compressed);
     expect(back).toEqual(big);
-  }, 30_000);
+  });
 
   it('double-compressing already-gzip data still round-trips (no corruption)', async () => {
     const once = await compressGzip(enc('hello '.repeat(100)));

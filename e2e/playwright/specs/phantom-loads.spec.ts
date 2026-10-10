@@ -44,7 +44,7 @@ test.beforeAll(async () => {
 
   let [worker] = context.serviceWorkers();
   if (!worker) {
-    worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+    worker = await context.waitForEvent('serviceworker');
   }
   extensionId = worker.url().split('/')[2];
   console.log(`[phantom] service worker URL = ${worker.url()}`);
@@ -81,9 +81,9 @@ test('Phantom loads in Chromium with a service worker registered (popup navigati
     await page.goto(`chrome-extension://${extensionId}/popup.html`, {
       waitUntil: 'domcontentloaded',
     });
-    await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {
-      console.log('[phantom] networkidle timed out, continuing with whatever rendered');
-    });
+    // Wait until the extension rendered something (React mount, route
+    // resolution). What it renders is unknown here, so the signal is body text.
+    await page.waitForFunction(() => (document.body.innerText || '').trim().length > 0);
     console.log(`[phantom] navigated URL = ${page.url()}`);
     console.log(`[phantom] page title    = ${await page.title()}`);
     await page.screenshot({
@@ -98,7 +98,6 @@ test('Phantom loads in Chromium with a service worker registered (popup navigati
     await page.waitForFunction(
       () => (document.body.innerText || '').trim().length > 0,
       undefined,
-      { timeout: 10_000 },
     );
     const visibleText = await page.locator('body').innerText();
     console.log(`[phantom] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);

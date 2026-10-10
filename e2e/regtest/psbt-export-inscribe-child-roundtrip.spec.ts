@@ -46,6 +46,7 @@ import {
   waitForOrdStockInscription,
   waitForTxConfirmed,
   waitForUtxoAt,
+  waitForOrdStockSatpoint,
 } from './regtest-helpers';
 
 const FUND_AMOUNT_SATS = 100_000_000; // 1 BTC per funding UTXO
@@ -101,23 +102,10 @@ async function signAndBroadcastCommitViaSigner(commitPsbt: Uint8Array, paymentAd
   await waitForTxConfirmed(txid);
 }
 
-/** Poll stock ord until the inscription's satpoint becomes `expectedSatpoint`. */
-async function waitForOrdStockSatpoint(id: string, expectedSatpoint: string, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  let last = '';
-  while (Date.now() < deadline) {
-    const insc = await getStockOrdInscription(id);
-    last = insc.satpoint ?? '';
-    if (insc.satpoint === expectedSatpoint) return insc;
-    await new Promise(r => setTimeout(r, 300));
-  }
-  throw new Error(`stock ord: ${id} still at ${last}, expected ${expectedSatpoint}`);
-}
-
 describe('psbt-export signer CHILD-INSCRIBE roundtrip on regtest (external offline wallet via bitcoin-cli walletprocesspsbt)', () => {
 
   it('external wallet signs the reveal parent input on the bare PSBT; signChildRevealParentInputs merges + broadcasts; ord links the child, parent returns home', async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     // Post-jubilee (regtest jubilee height 110), matching mainnet.
     await waitForElectrsSync(mineBlocks(20));
 
@@ -232,5 +220,5 @@ describe('psbt-export signer CHILD-INSCRIBE roundtrip on regtest (external offli
     const parentReturnUtxo = await waitForUtxoAt(home.address, 546);
     expect(parentReturnUtxo.txid).toBe(childRevealTxid);
     expect(parentReturnUtxo.vout).toBe(0);
-  }, 300_000);
+  });
 });

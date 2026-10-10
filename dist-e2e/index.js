@@ -47,7 +47,6 @@ __exportStar(require("./playwright/approval-popup"), exports);
 __exportStar(require("./playwright/click-until-effect"), exports);
 __exportStar(require("./playwright/select-card"), exports);
 __exportStar(require("./regtest/rpc-types"), exports);
-__exportStar(require("./playwright/is-visible-within"), exports);
 __exportStar(require("./playwright/wallet-rejection"), exports);
 __exportStar(require("./playwright/wait-helpers"), exports);
 __exportStar(require("./playwright/browser-error-guard"), exports);
@@ -55,4 +54,7 @@ __exportStar(require("./playwright/radix-checkbox"), exports);
 __exportStar(require("./playwright/cat21wallet-sign-popup"), exports);
 __exportStar(require("./regtest/dirty-coin-placement"), exports);
 __exportStar(require("./regtest/regtest-helpers"), exports);
+__exportStar(require("./e2e-timeout"), exports);
+__exportStar(require("./playwright/workaround-wait-for-timeout"), exports);
+__exportStar(require("./playwright/okx-sign-popup"), exports);
 //# sourceMappingURL=index.js.map

@@ -22,6 +22,5 @@ import { type Page, type Locator } from '@playwright/test';
  */
 export declare function clickRadixCheckbox(page: Page | Locator, options?: {
     nth?: number;
-    timeoutMs?: number;
 }): Promise<void>;
 //# sourceMappingURL=radix-checkbox.d.ts.map

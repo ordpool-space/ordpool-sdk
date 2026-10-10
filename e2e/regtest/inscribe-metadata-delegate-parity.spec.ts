@@ -64,9 +64,9 @@ function fields(args: Partial<CreateInscribeTransactionsArgs>): OrdEnvelopeField
 
 describe('inscribe metadata and delegate → byte-parity with stock ord', () => {
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(ORD_WALLET);
-  }, 240_000);
+  });
 
   it('--cbor-metadata: the same CBOR bytes produce the same envelope', async () => {
     const body = new TextEncoder().encode('parity: cbor metadata');
@@ -81,7 +81,7 @@ describe('inscribe metadata and delegate → byte-parity with stock ord', () => 
     await waitForOrdStockSync(mineBlocks(1));
 
     expect(sdkEnvelope(body, TXT, fields({ metadata: cbor }))).toBe(ordEnvelope(reveal));
-  }, 120_000);
+  });
 
   // Each fixture isolates one way a generic JSON-to-CBOR converter differs
   // from ord's serde_json(preserve_order) + ciborium. ord is the authority for
@@ -122,12 +122,12 @@ describe('inscribe metadata and delegate → byte-parity with stock ord', () => 
     await waitForOrdStockSync(mineBlocks(1));
 
     expect(sdkEnvelope(undefined, undefined, fields({ delegate: delegateId }))).toBe(ordEnvelope(reveal));
-  }, 120_000);
+  });
 });
 
 describe('SDK delegate-only inscription on chain', () => {
   it('broadcasts with no body, and stock ord serves the delegate\'s content for it', async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     const wallet = `${ORD_WALLET}-sdk`;
     await fundOrdStockWallet(wallet);
     const content = new TextEncoder().encode('content an SDK delegate points at');
@@ -163,7 +163,7 @@ describe('SDK delegate-only inscription on chain', () => {
     expect(insc.content_type).toBeNull();
     expect(insc.effective_content_type).toBe('text/plain;charset=utf-8');
     expect((await getStockOrdContent(id)).bytes).toEqual(content);
-  }, 240_000);
+  });
 });
 
 /** `ord wallet inscribe --delegate <ID>` with no --file, which the shared helper cannot express. */

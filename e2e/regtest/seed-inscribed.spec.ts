@@ -18,7 +18,7 @@ import {
 
 beforeAll(async () => {
   await waitForOrdStockReady();
-}, 180_000);
+});
 
 describe('seedInscribedCoin', () => {
   it('seeds a coin stock ord really reports as inscribed, at the address asked for', async () => {
@@ -31,7 +31,7 @@ describe('seedInscribedCoin', () => {
     const output = await getStockOrdOutput(`${coin.txid}:${coin.vout}`);
     expect(output.inscriptions).toContain(coin.inscriptionId);
     expect(output.address).toBe(address);
-  }, 300_000);
+  });
 
   it('is big enough to be a funding candidate, which is what makes the guard answer', async () => {
     const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'bech32').trim();
@@ -41,12 +41,12 @@ describe('seedInscribedCoin', () => {
     // guard spec built on it would pass without the guard ever being asked.
     expect(coin.value).toBeGreaterThanOrEqual(2_000_000);
     expect((await getStockOrdOutput(`${coin.txid}:${coin.vout}`)).value).toBe(coin.value);
-  }, 300_000);
+  });
 
   it('honours a smaller postage when a caller wants one', async () => {
     const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'bech32').trim();
     const coin = await seedInscribedCoin({ address, postageSats: 30_000 });
     expect(coin.value).toBeGreaterThanOrEqual(30_000);
     expect(coin.value).toBeLessThan(2_000_000);
-  }, 300_000);
+  });
 });

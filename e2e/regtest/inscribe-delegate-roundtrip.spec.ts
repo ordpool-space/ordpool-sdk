@@ -63,8 +63,8 @@ describe('inscribe → delegate + metadata roundtrip on regtest (stock ord)', ()
   const scureRegtest = toScureNetwork(Network.Regtest);
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
-  }, 90_000);
+    await waitForOrdStockReady();
+  });
 
   /**
    * Fund a fresh SegWit input, build the inscribe pair for `extra`
@@ -155,7 +155,7 @@ describe('inscribe → delegate + metadata roundtrip on regtest (stock ord)', ()
       expect(content.bytes[i]).toBe(targetBody[i]);
     }
     expect(new TextDecoder().decode(content.bytes)).toBe(targetText);
-  }, 300_000);
+  });
 
   it('CBOR metadata round-trips on chain: parser surfaces the same object from the reveal witness', async () => {
     const metadataValue = {
@@ -175,5 +175,5 @@ describe('inscribe → delegate + metadata roundtrip on regtest (stock ord)', ()
     const parsed = InscriptionParserService.parse({ txid: inscribed.revealTxid, vin: [{ witness }] });
     expect(parsed.length).toBe(1);
     expect(parsed[0].getMetadata()).toEqual(metadataValue);
-  }, 240_000);
+  });
 });

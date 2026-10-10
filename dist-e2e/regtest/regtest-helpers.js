@@ -87,6 +87,7 @@ exports.ordStockWalletReceive = ordStockWalletReceive;
 exports.ordStockWalletOutputs = ordStockWalletOutputs;
 exports.fundUninscribed = fundUninscribed;
 exports.getStockOrdContent = getStockOrdContent;
+exports.waitForOrdStockSatpoint = waitForOrdStockSatpoint;
 exports.waitForOrdStockInscription = waitForOrdStockInscription;
 exports.ordStockCli = ordStockCli;
 exports.ordStockCliAsync = ordStockCliAsync;
@@ -100,6 +101,7 @@ exports.makeWatchOnlyTestAccount = makeWatchOnlyTestAccount;
 exports.seedListedCat = seedListedCat;
 exports.seedDirtyCoin = seedDirtyCoin;
 const node_child_process_1 = require("node:child_process");
+const e2e_timeout_1 = require("../e2e-timeout");
 const node_crypto_1 = require("node:crypto");
 const node_util_1 = require("node:util");
 const bip32_1 = require("@scure/bip32");
@@ -211,7 +213,8 @@ function mineBlockWithRawTxs(rawTxHexes) {
     return Number(rpc('getblockcount'));
 }
 /** Wait until electrs has indexed up to (at least) the given height. */
-async function waitForElectrsSync(targetHeight, timeoutMs = 15_000) {
+async function waitForElectrsSync(targetHeight) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const tipText = await fetch(`${exports.ELECTRS_URL}/blocks/tip/height`).then(r => r.text()).catch(() => '0');
@@ -235,7 +238,8 @@ async function waitForElectrsSync(targetHeight, timeoutMs = 15_000) {
  * `txid=abc… value=100_000_000`). It surfaces in the timeout
  * error so the failure tells you which UTXO didn't show up.
  */
-async function waitForUtxoMatching(address, predicate, description, timeoutMs = 15_000) {
+async function waitForUtxoMatching(address, predicate, description) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     let lastUtxos = [];
     while (Date.now() < deadline) {
@@ -248,8 +252,8 @@ async function waitForUtxoMatching(address, predicate, description, timeoutMs = 
     throw new Error(`UTXO matching "${description}" at ${address} didn't appear within ${timeoutMs}ms; got ${JSON.stringify(lastUtxos)}`);
 }
 /** Common case: poll for a UTXO of exactly `expectedSats`. */
-async function waitForUtxoAt(address, expectedSats, timeoutMs = 15_000) {
-    return waitForUtxoMatching(address, u => u.value === expectedSats, `value=${expectedSats}`, timeoutMs);
+async function waitForUtxoAt(address, expectedSats) {
+    return waitForUtxoMatching(address, u => u.value === expectedSats, `value=${expectedSats}`);
 }
 /**
  * Wait until electrs's address-history index lists `expectedTxid`
@@ -260,8 +264,8 @@ async function waitForUtxoAt(address, expectedSats, timeoutMs = 15_000) {
  * the sender's view is reliably up-to-date from the same
  * electrs.
  */
-async function waitForAddressTxIndexed(address, expectedTxid, timeoutMs = 15_000) {
-    await waitForUtxoMatching(address, u => u.txid === expectedTxid, `txid=${expectedTxid}`, timeoutMs);
+async function waitForAddressTxIndexed(address, expectedTxid) {
+    await waitForUtxoMatching(address, u => u.txid === expectedTxid, `txid=${expectedTxid}`);
 }
 async function getUtxos(address) {
     const res = await fetch(`${exports.ELECTRS_URL}/address/${address}/utxo`);
@@ -356,7 +360,8 @@ async function getTxStatus(txid) {
  * Polls every 200ms by default. Returns the EsploraTx once the
  * confirmation is observable; throws if the deadline is reached.
  */
-async function waitForTxConfirmed(txid, timeoutMs = 15_000) {
+async function waitForTxConfirmed(txid) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     let lastSeen;
     while (Date.now() < deadline) {
@@ -418,7 +423,8 @@ function catInscriptionId(mintTxid) {
  * file has no healthcheck because the slim runtime image lacks wget/curl,
  * so the test bootstrap polls here.
  */
-async function waitForOrdReady(timeoutMs = 60_000) {
+async function waitForOrdReady() {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const ok = await fetch(`${ORD_URL}/status`).then(r => r.ok).catch(() => false);
@@ -434,7 +440,8 @@ async function waitForOrdReady(timeoutMs = 60_000) {
  * via ZMQ or polling and runs its CAT-21 filter on every tx. Without
  * this gate the cat-state assertions race the indexer.
  */
-async function waitForOrdSync(targetHeight, timeoutMs = 30_000) {
+async function waitForOrdSync(targetHeight) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const status = await fetch(`${ORD_URL}/status`, {
@@ -468,7 +475,8 @@ async function getOrdInscription(inscriptionId) {
  * Use this after each broadcast + confirm step in the multi-step spec
  * to assert the cat actually moved where the SDK said it would.
  */
-async function waitForCatAtAddress(inscriptionId, expectedAddress, timeoutMs = 30_000) {
+async function waitForCatAtAddress(inscriptionId, expectedAddress) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     let lastSeen;
     while (Date.now() < deadline) {
@@ -559,7 +567,8 @@ function ordWalletSend(recipientAddress, inscriptionId, feeRateSatPerVb, postage
  * Polls through the same `--no-sync` path the later command uses, so what this
  * observes is exactly what that command will see.
  */
-async function waitForOrdWalletCardinal(walletName, minSats, timeoutMs = 60_000) {
+async function waitForOrdWalletCardinal(walletName, minSats) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     let lastSeen = '<never read>';
     while (Date.now() < deadline) {
@@ -722,7 +731,8 @@ function inscriptionId(txid, index = 0) {
  * Poll stock ord's HTTP server until it answers `/status` with a
  * 2xx. Same warm-up rationale as `waitForOrdReady`.
  */
-async function waitForOrdStockReady(timeoutMs = 60_000) {
+async function waitForOrdStockReady() {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const ok = await fetch(`${exports.ORD_STOCK_URL}/status`).then(r => r.ok).catch(() => false);
@@ -737,7 +747,8 @@ async function waitForOrdStockReady(timeoutMs = 60_000) {
  * ord's indexer lags bitcoind by a few hundred ms; without this gate
  * the inscription-lookup assertions race the indexer.
  */
-async function waitForOrdStockSync(targetHeight, timeoutMs = 30_000) {
+async function waitForOrdStockSync(targetHeight) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
         const status = await fetch(`${exports.ORD_STOCK_URL}/status`, {
@@ -1182,11 +1193,31 @@ async function getStockOrdContent(id) {
     return { bytes: buf, contentType: res.headers.get('content-type') };
 }
 /**
+ * Poll stock ord until the inscription's satpoint becomes `expectedSatpoint`,
+ * the `<txid>:<vout>:<offset>` it moved to. Stops at the global bound.
+ */
+async function waitForOrdStockSatpoint(id, expectedSatpoint) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
+    const deadline = Date.now() + timeoutMs;
+    let last = '<never read>';
+    while (Date.now() < deadline) {
+        const insc = await getStockOrdInscription(id).catch(() => undefined);
+        if (insc) {
+            last = insc.satpoint ?? '';
+            if (insc.satpoint === expectedSatpoint)
+                return insc;
+        }
+        await new Promise(r => setTimeout(r, 300));
+    }
+    throw new Error(`stock ord: ${id} still at ${last} after ${timeoutMs}ms, expected ${expectedSatpoint}`);
+}
+/**
  * Poll until stock ord serves the inscription. ord indexes inscriptions
  * one or two blocks after the reveal lands; this helper hides the
  * polling boilerplate.
  */
-async function waitForOrdStockInscription(id, timeoutMs = 30_000) {
+async function waitForOrdStockInscription(id) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     let lastError;
     while (Date.now() < deadline) {

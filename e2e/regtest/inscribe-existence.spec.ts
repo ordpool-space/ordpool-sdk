@@ -23,12 +23,12 @@ describe('checkInscriptionsExist → live stock ord', () => {
   let existing: string;
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(ORD_WALLET);
     writeOrdStockFile('/tmp/existence.txt', new TextEncoder().encode('I exist'));
     existing = `${ordStockWalletInscribe(ORD_WALLET, '/tmp/existence.txt', 5).reveal}i0`;
     await waitForOrdStockSync(mineBlocks(1));
-  }, 240_000);
+  });
 
   it('an inscription ord indexed exists; a well-formed id it never saw is missing; a malformed one is invalid', async () => {
     const neverInscribed = `${'00'.repeat(32)}i0`;
@@ -36,10 +36,10 @@ describe('checkInscriptionsExist → live stock ord', () => {
     expect(r.get(existing)).toBe('exists');
     expect(r.get(neverInscribed)).toBe('missing');
     expect(r.get('not-an-id')).toBe('invalid');
-  }, 60_000);
+  });
 
   it('an unreachable ord is unknown, not missing', async () => {
-    const r = await checkInscriptionsExist([existing], { ordBaseUrl: 'http://127.0.0.1:9', timeoutMs: 2_000 });
+    const r = await checkInscriptionsExist([existing], { ordBaseUrl: 'http://127.0.0.1:9' });
     expect(r.get(existing)).toBe('unknown');
-  }, 30_000);
+  });
 });

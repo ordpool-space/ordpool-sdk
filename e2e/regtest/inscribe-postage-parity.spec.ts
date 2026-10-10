@@ -66,7 +66,7 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
   let utxo: { txid: string; vout: number; value: number };
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(ORD_WALLET);
 
     // A real funded P2WPKH input for the SDK side. We only BUILD the SDK
@@ -78,7 +78,7 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
     await waitForElectrsSync(t2);
     const u = await waitForUtxoAt(fundingAddr, 100_000_000);
     utxo = { txid: u.txid, vout: u.vout, value: u.value };
-  }, 240_000);
+  });
 
   it.each([546, 3000, 10_000, 30_000])(
     'postage %i sats: reveal output, reveal vsize and commit output all match ord',
@@ -153,7 +153,7 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
       if (Math.ceil(ordReveal.vsize * rate) !== Math.round(ordReveal.vsize * rate)) discriminating++;
     }
     expect(discriminating).toBeGreaterThan(0);
-  }, 300_000);
+  });
 
   it('--commit-fee-rate: the commit pays its own rate, the reveal keeps --fee-rate, and the commit output matches ord', async () => {
     const body = new TextEncoder().encode('parity: commit fee rate');
@@ -192,7 +192,7 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
     // signature while the reported vsize comes from another, so the two can
     // differ by one vbyte: the fee is within 2 sats of 2 x vsize.
     expect(Math.abs(sdk.fees.commitFeeSats - 2 * sdk.fees.commitVsize)).toBeLessThanOrEqual(2);
-  }, 180_000);
+  });
 
   it('a reveal over MAX_STANDARD_TX_WEIGHT is refused like ord refuses it, and built with noLimit (--no-limit)', async () => {
     // Roughly one weight unit per witness byte, so 401 000 body bytes put the
@@ -223,7 +223,7 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
       .toThrow(`reveal transaction weight greater than 400000 (MAX_STANDARD_TX_WEIGHT): ${ordWeight}`);
     const built = createInscribeTransactions({ ...args, noLimit: true });
     expect(btc.Transaction.fromRaw(hex.decode(built.revealHex)).weight).toBe(ordWeight);
-  }, 300_000);
+  });
 
   it('--destination to a P2WPKH address: same output script, value, reveal vsize and commit output as ord', async () => {
     // A non-taproot destination changes the reveal's output size, so this
@@ -257,5 +257,5 @@ describe('inscribe postage → parity with `ord wallet inscribe --postage`', () 
     expect(Number(sdkReveal.getOutput(0).amount)).toBe(Math.round(ordRevealTx.vout[0].value * 1e8));
     expect(sdk.fees.revealVsize).toBe(ordRevealTx.vsize);
     expect(sdk.fees.commitOutputValueSats).toBe(decode(ord.commit).vout[0]);
-  }, 180_000);
+  });
 });

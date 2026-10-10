@@ -6,7 +6,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages, clickConfirmUntilClosed } from '../approval-popup';
 import { installContextErrorGuard } from '../browser-error-guard';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 
@@ -98,7 +98,7 @@ test.beforeAll(async () => {
   // harness page); wallet-extension pages are outside it.
   errorGuard = installContextErrorGuard(context);
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 });
 
@@ -115,11 +115,6 @@ test.afterAll(async () => {
 });
 
 test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popup, broadcast via local electrs, verify via parser', async () => {
-  // The full roundtrip walks several Xverse popups (connect-
-  // approval + sign-approval) plus bitcoind RPC + electrs polling.
-  // Bump beyond the suite-default 60s.
-  test.setTimeout(300_000);
-
   // ─── Unlock + dashboard ready ───────────────────────────────────
   const primer = await context.newPage();
   await primer.setViewportSize({ width: 400, height: 800 });
@@ -127,17 +122,17 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   await primer.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
   if (/unlock/i.test(await primer.locator('body').innerText())) {
     await primer.locator('input[type="password"]').first().fill(TEST_PASSWORD);
     await primer.getByRole('button', { name: /^unlock$/i }).first().click();
     await primer.waitForFunction(() => {
       const t = (document.body.innerText || '').toLowerCase();
       return t.includes('account 1') || t.includes('not now') || t.includes('zest') || t.includes('send');
-    }, undefined, { timeout: 30_000, polling: 250 });
+    }, undefined, { polling: 250 });
   }
   const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+  if (await notNow.isVisible().catch(() => false)) {
     await notNow.click({ force: true }).catch(() => undefined);
   }
   await shot(primer, '01-dashboard-ready');
@@ -145,16 +140,16 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // ─── Get the wallet's bcrt1 addresses via the SDK harness ──────
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
-  await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined, { timeout: 15_000 });
+  await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined);
 
-  const connectPagePromise = context.waitForEvent('page', { timeout: 60_000 });
+  const connectPagePromise = context.waitForEvent('page');
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
   const approvalConnect = await connectPagePromise;
   await approvalConnect.waitForLoadState('domcontentloaded');
   await approvalConnect.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { timeout: 60_000, polling: 500 });
+  }, undefined, { polling: 500 });
   await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
   const wallet = await connectResultPromise;
   // Xverse leaves the connect popup tab open after approval; in CI
@@ -205,22 +200,16 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // transaction" text — the loading-spinner state must finish
   // first. Plain waitForEvent('page') can race against earlier
   // events that fired during connect.
-  let approvalSign: Page;
-  try {
-    approvalSign = await waitForApprovalPopup({
-      context,
-      knownPages: knownPagesAtStart,
-      timeoutMs: 120_000,
-      isApproval: async (p) => {
-        if (!p.url().startsWith('chrome-extension://')) return false;
-        await p.getByText(/review transaction/i).first()
-          .waitFor({ state: 'visible', timeout: 120_000 });
-        return true;
-      },
-    });
-  } catch {
-    throw new Error('Xverse sign popup never rendered Review transaction within 120s');
-  }
+  const approvalSign = await waitForApprovalPopup({
+    context,
+    knownPages: knownPagesAtStart,
+    isApproval: async (p) => {
+      if (!p.url().startsWith('chrome-extension://')) return false;
+      await p.getByText(/review transaction/i).first()
+        .waitFor({ state: 'visible' });
+      return true;
+    },
+  });
   await shot(approvalSign, '02-sign-approval');
   // Wait until Confirm is enabled (Xverse renders the button
   // immediately but its React onClick is hooked up only after
@@ -233,7 +222,7 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
       const style = getComputedStyle(b);
       return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
     });
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
 
   // Confirm-binding gate: wait for the React onClick to be attached
   // by checking that the button is interactive (no `disabled` attr,
@@ -241,37 +230,14 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // waitForFunction above already gates `disabled` + pointer-events;
   // pin the visibility of "Confirm" once more as an explicit barrier
   // so the next click can't land in the pre-binding window.
-  await expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeEnabled({ timeout: 30_000 });
+  await expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeEnabled();
 
-  // Click Confirm with a retry loop. Either the click lands and
-  // Xverse closes the popup itself (success), or Xverse signs and
-  // the harness's signedHexPromise resolves (also success), so
-  // both page-close-error AND signedHexPromise-completion count as
-  // wins. Each attempt awaits a Promise.race(signed, page-close)
-  // so we never sleep blindly.
-  let signResolved = false;
-  signedHexPromise.then(() => { signResolved = true; }).catch(() => undefined);
-  for (let attempt = 0; attempt < 3 && !signResolved; attempt++) {
-    if (approvalSign.isClosed()) break;
-    await approvalSign.getByRole('button', { name: /^confirm$/i }).first()
-      .click({ force: true })
-      .catch((e) => {
-        // eslint-disable-next-line no-console
-        console.log(`[mint] confirm-click attempt ${attempt} closed the popup: ${(e as Error).message}`);
-      });
-    // Race three observables: signedHexPromise resolves (sign
-    // succeeded), the popup's `close` event fires (Xverse closed it
-    // post-sign), OR the Confirm button disappears (screen
-    // transitioned away). Whichever wins, exit the attempt loop or
-    // retry. expect.toBeHidden carries its own deadline so the race
-    // can't hang indefinitely if the click was silently swallowed.
-    const closePromise = new Promise<void>((res) => approvalSign.once('close', () => res()));
-    await Promise.race([
-      signedHexPromise.then(() => undefined).catch(() => undefined),
-      closePromise,
-      expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeHidden({ timeout: 30_000 }),
-    ]).catch(() => undefined);
-  }
+  // Click Confirm until it took effect: Xverse closes the popup itself,
+  // or signs and the harness's signedHexPromise resolves, or the screen
+  // moves on. A click that did none of those is sent again.
+  await clickConfirmUntilClosed(approvalSign.getByRole('button', { name: /^confirm$/i }).first(), approvalSign, {
+    resolved: signedHexPromise, maxClicks: 3, label: 'mint',
+  });
   const signed = await signedHexPromise;
   // eslint-disable-next-line no-console
   console.log(`[mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);

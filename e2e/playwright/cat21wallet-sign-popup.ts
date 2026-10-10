@@ -22,7 +22,7 @@ export async function approveCat21WalletConnectPopup(
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p
         .getByTestId('get-addresses-approve-button')
-        .waitFor({ state: 'visible', timeout: 60_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -75,14 +75,13 @@ export async function approveCat21WalletSignPopup(
   const approval = await waitForApprovalPopup({
     context,
     knownPages,
-    timeoutMs: 90_000,
     isApproval: async p => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       if (requireSignPsbtUrl && !p.url().includes('sign-psbt')) return false;
       await p
         .getByRole('button', { name: /^(confirm|sign|approve)$/i })
         .first()
-        .waitFor({ state: 'visible', timeout: 90_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -101,11 +100,11 @@ export async function approveCat21WalletSignPopup(
     await expect(
       approval.getByTestId('psbt-signer-card'),
       'psbt-signer-card must render in the sign popup',
-    ).toBeVisible({ timeout: 15_000 });
+    ).toBeVisible();
   }
 
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
-  await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
+  await expect(confirmBtn).toBeVisible();
   // noWaitAfter skips POST-click auto-wait for navigation but does NOT
   // protect the click dispatch itself: if the popup tears down between
   // Playwright's "performing click action" and the mouseup, click()

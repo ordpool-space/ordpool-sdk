@@ -94,5 +94,5 @@ describe('the batch commit preview does not depend on the dummy signature', () =
       seen.add(sim.commitVsize);
     }
     expect([...seen]).toEqual([153]);
-  }, 60_000);
+  });
 });

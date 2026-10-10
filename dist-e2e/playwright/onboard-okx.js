@@ -2,9 +2,30 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardOkx = onboardOkx;
 const test_1 = require("@playwright/test");
+const e2e_timeout_1 = require("../e2e-timeout");
 const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 const cdp_click_1 = require("./cdp-click");
+/**
+ * Probe: how long to look for the page a step moves to. OKX opens "Secure your
+ * wallet" and its welcome gate on a NEW page in some releases and in place in
+ * others; long enough for a new page to paint, after which the step is taken
+ * to be on the current page.
+ */
+const OKX_STEP_PAGE_PROBE_MS = 30_000;
+/**
+ * Probe: how long an optional step (the Next button, the password form) gets
+ * to render. Some OKX releases skip it; long enough for the iframe to render
+ * it on a loaded runner.
+ */
+const OKX_OPTIONAL_STEP_PROBE_MS = 10_000;
+/**
+ * Probes: how long the "Start your Web3 journey" button gets, first on the
+ * page and then inside its iframe. Where it renders differs by release, and
+ * some releases go straight to the dashboard.
+ */
+const OKX_START_BUTTON_PROBE_MS = 5_000;
+const OKX_START_BUTTON_IFRAME_PROBE_MS = 3_000;
 /**
  * Drive OKX v4.1.0 onboarding from welcome to dashboard. Multi-page,
  * multi-iframe flow (CI iterations 22-31, 2026-05-31):
@@ -34,9 +55,9 @@ async function onboardOkx(page, extensionId, opts = {}) {
     await page.waitForFunction(() => {
         const wrapper = document.querySelector('[class*="_affix_"]');
         return !!wrapper && getComputedStyle(wrapper).opacity === '1';
-    }, undefined, { timeout: 60_000, polling: 250 });
+    }, undefined, { polling: 250 });
     const importBtn = page.getByTestId('onboard-page-import-wallet-button');
-    await (0, test_1.expect)(importBtn).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(importBtn).toBeVisible();
     const cdp = await page.context().newCDPSession(page);
     await (0, cdp_click_1.cdpClick)(page, importBtn, 'the OKX import-wallet button');
     await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
@@ -51,13 +72,13 @@ async function onboardOkx(page, extensionId, opts = {}) {
         });
     }
     const seedOption = page.getByText('Seed phrase or private key', { exact: true });
-    await (0, test_1.expect)(seedOption).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(seedOption).toBeVisible();
     await (0, cdp_click_1.cdpClick)(page, seedOption, 'the OKX seed-phrase option');
     // Seed form inside #ui-ses-iframe.
     const seedFrame = page.frameLocator('#ui-ses-iframe');
-    await (0, test_1.expect)(seedFrame.locator('text="My seed phrase has"').first()).toBeVisible({ timeout: 30_000 });
+    await (0, test_1.expect)(seedFrame.locator('text="My seed phrase has"').first()).toBeVisible();
     const mnemonicInputs = seedFrame.locator('input');
-    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible();
     const inputCount = await mnemonicInputs.count();
     if (inputCount >= 12) {
         for (let i = 0; i < mnemonicWords.length; i++) {
@@ -68,11 +89,11 @@ async function onboardOkx(page, extensionId, opts = {}) {
         await mnemonicInputs.first().fill(mnemonic);
     }
     const confirmAfterMnemonic = seedFrame.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
-    await (0, test_1.expect)(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
+    await (0, test_1.expect)(confirmAfterMnemonic).toBeEnabled();
     await confirmAfterMnemonic.click();
     // "Secure your wallet" opens on a NEW page.
     const ctx = page.context();
-    const secureDeadline = Date.now() + 30_000;
+    const secureDeadline = Date.now() + OKX_STEP_PAGE_PROBE_MS;
     let securePage = null;
     while (Date.now() < secureDeadline) {
         for (const p of ctx.pages()) {
@@ -90,22 +111,22 @@ async function onboardOkx(page, extensionId, opts = {}) {
         page = securePage;
     const secureFrame = page.frameLocator('#ui-ses-iframe');
     const nextBtn = secureFrame.getByRole('button', { name: /^next$/i }).first();
-    if (await (0, is_visible_within_1.isVisibleWithin)(nextBtn, 10_000)) {
-        await (0, test_1.expect)(nextBtn).toBeEnabled({ timeout: 10_000 });
+    if (await (0, is_visible_within_1.isVisibleWithin)(nextBtn, OKX_OPTIONAL_STEP_PROBE_MS)) {
+        await (0, test_1.expect)(nextBtn).toBeEnabled();
         await nextBtn.click();
     }
     const pwInputs = secureFrame.locator('input[type="password"]');
-    if (await (0, is_visible_within_1.isVisibleWithin)(pwInputs.first(), 10_000)) {
+    if (await (0, is_visible_within_1.isVisibleWithin)(pwInputs.first(), OKX_OPTIONAL_STEP_PROBE_MS)) {
         const pwCount = await pwInputs.count();
         for (let i = 0; i < pwCount; i++) {
             await pwInputs.nth(i).fill(password);
         }
         const pwContinue = secureFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
-        await (0, test_1.expect)(pwContinue).toBeEnabled({ timeout: 10_000 });
+        await (0, test_1.expect)(pwContinue).toBeEnabled();
         await pwContinue.click();
     }
     // "Welcome to OKX Wallet" completion gate.
-    const welcomeDeadline = Date.now() + 30_000;
+    const welcomeDeadline = Date.now() + OKX_STEP_PAGE_PROBE_MS;
     let welcomePage = null;
     while (Date.now() < welcomeDeadline) {
         for (const p of ctx.pages()) {
@@ -122,18 +143,21 @@ async function onboardOkx(page, extensionId, opts = {}) {
     if (welcomePage) {
         page = welcomePage;
         const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
-        if (await (0, is_visible_within_1.isVisibleWithin)(startBtn, 5_000)) {
+        if (await (0, is_visible_within_1.isVisibleWithin)(startBtn, OKX_START_BUTTON_PROBE_MS)) {
             await startBtn.click().catch(() => undefined);
         }
         else {
             const fr = page.frameLocator('#ui-ses-iframe');
             const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
-            if (await (0, is_visible_within_1.isVisibleWithin)(frStart, 3_000)) {
+            if (await (0, is_visible_within_1.isVisibleWithin)(frStart, OKX_START_BUTTON_IFRAME_PROBE_MS)) {
                 await frStart.click().catch(() => undefined);
             }
         }
     }
-    const dashDeadline = Date.now() + 60_000;
+    // A Node loop over every page's text, not a Playwright wait, so it stops at
+    // the global bound.
+    const dashBoundMs = (0, e2e_timeout_1.e2eTimeoutMs)();
+    const dashDeadline = Date.now() + dashBoundMs;
     let dashed = false;
     while (Date.now() < dashDeadline) {
         for (const p of ctx.pages()) {
@@ -151,7 +175,7 @@ async function onboardOkx(page, extensionId, opts = {}) {
         await new Promise(r => setTimeout(r, 500));
     }
     if (!dashed)
-        throw new Error('OKX dashboard markers not found on any context page within 60s');
+        throw new Error(`OKX dashboard markers not found on any context page within ${dashBoundMs}ms`);
     return page;
 }
 //# sourceMappingURL=onboard-okx.js.map

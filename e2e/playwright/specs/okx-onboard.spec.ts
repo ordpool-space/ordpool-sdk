@@ -8,6 +8,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { cdpClick } from '../cdp-click';
+import { e2eTimeoutMs } from '../../e2e-timeout';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import { waitForPageShowing } from '../approval-popup';
 
 /**
@@ -60,7 +62,7 @@ test.beforeAll(async () => {
     ],
   });
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   // OKX auto-opens its onboarding in a separate tab on install
@@ -68,12 +70,7 @@ test.beforeAll(async () => {
   // sibling marketing tab was open at https://www.okx.com/...).
   // The chrome-extension://<id>/* tab is the real onboarding; ignore
   // the marketing tab via the URL filter.
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch { /* fall back to manual newPage in test body */ }
+  onboardPage = await extensionOnboardingPage(context, extensionId);
 });
 
 test.afterAll(async () => {
@@ -81,14 +78,10 @@ test.afterAll(async () => {
 });
 
 test('restores a wallet from the BIP-39 test seed and reaches a screen mentioning send/receive/balance/account/bitcoin', async () => {
-  test.setTimeout(180_000);
 
-  // eslint-disable-next-line prefer-const
-  let page: Page;
-  if (onboardPage) {
-    page = onboardPage;
-  } else {
-    page = await context.newPage();
+  let page: Page = onboardPage ?? await context.newPage();
+  // A blank page means OKX opened no onboarding tab of its own.
+  if (page.url() === 'about:blank') {
     await page.setViewportSize({ width: 400, height: 800 });
     await page.goto(`chrome-extension://${extensionId}/popup-init.html`, { waitUntil: 'domcontentloaded' });
   }
@@ -103,9 +96,9 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await page.waitForFunction(() => {
     const wrapper = document.querySelector('[class*="_affix_"]') as HTMLElement | null;
     return !!wrapper && getComputedStyle(wrapper).opacity === '1';
-  }, undefined, { timeout: 60_000, polling: 250 });
+  }, undefined, { polling: 250 });
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
-  await expect(importBtn).toBeVisible({ timeout: 10_000 });
+  await expect(importBtn).toBeVisible();
   // OKX absorbs every mouse-based click strategy (CI 26645369070..
   // 26664331512). Try a hover-then-CDP-click sequence with a
   // micro-movement to mimic real cursor jitter — some anti-bot
@@ -123,7 +116,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // and OKX's anti-bot only filters trusted-but-suspicious mouse
   // events, not direct .click() calls.
   const stillOnWelcome = await page.locator('text="Your portal to Web3"')
-    .isVisible({ timeout: 3_000 }).catch(() => false);
+    .isVisible().catch(() => false);
   if (stillOnWelcome) {
     await page.evaluate(() => {
       const btn = document.querySelector('[data-testid="onboard-page-import-wallet-button"]') as HTMLElement | null;
@@ -136,7 +129,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // Pick "Seed phrase or private key" — also via CDP (OKX absorbs
   // regular Playwright clicks the same way the welcome button does).
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
-  await expect(seedOption).toBeVisible({ timeout: 15_000 });
+  await expect(seedOption).toBeVisible();
   await cdpClick(page, seedOption, 'the OKX seed-phrase option');
   // OKX renders the 12-input seed-phrase form inside an iframe
   // (#ui-ses-iframe-container). body.innerText on the page returns
@@ -145,14 +138,14 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // directly via frameLocator. Confirmed via CI 26715938855 dump.
   const seedFrame = page.frameLocator('#ui-ses-iframe');
   await expect(seedFrame.locator('text="My seed phrase has"').first())
-    .toBeVisible({ timeout: 30_000 });
+    .toBeVisible();
   await shot(page, '03-seed-option-picked');
   await dumpHtml(page, '03-seed-option-picked');
 
   // 12 numbered inputs inside the iframe. Try plain `input` since
   // the boxes may be untyped.
   const mnemonicInputs = seedFrame.locator('input');
-  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
+  await expect(mnemonicInputs.first()).toBeVisible();
   const inputCount = await mnemonicInputs.count();
   if (inputCount >= 12) {
     for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
@@ -165,7 +158,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await dumpHtml(page, '04-mnemonic-filled');
 
   const confirmAfterMnemonic = seedFrame.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
-  await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
+  await expect(confirmAfterMnemonic).toBeEnabled();
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
@@ -173,26 +166,21 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // trace, guid 1cb3b9dd). Switch to whichever page now shows it.
   // Event-driven rather than a 500ms poll: on a slow machine the old loop could
   // expire before OKX painted this step and the flow would continue against the
-  // wrong page, failing later somewhere unrelated. Optional by design, so the
-  // catch is explicit.
-  const securePage = await waitForPageShowing({
-    context, text: /Secure your wallet/i, timeoutMs: 30_000, label: 'okx secure-wallet step',
-  }).catch(() => null);
-  if (securePage) {
-    page = securePage;
-  }
+  // wrong page, failing later somewhere unrelated. The search covers the
+  // current page too, so a step rendered in place resolves to it.
+  page = await waitForPageShowing({ context, text: /Secure your wallet/i });
   // The Secure-your-wallet UI also runs inside #ui-ses-iframe — same
   // pattern as the seed-phrase page.
   const secureFrame = page.frameLocator('#ui-ses-iframe');
   const nextBtn = secureFrame.getByRole('button', { name: /^next$/i }).first();
-  if (await nextBtn.isVisible({ timeout: 10_000 }).catch(() => false)) {
-    await expect(nextBtn).toBeEnabled({ timeout: 10_000 });
+  if (await nextBtn.isVisible().catch(() => false)) {
+    await expect(nextBtn).toBeEnabled();
     await nextBtn.click();
     await shot(page, '05b-after-secure-next');
   } else {
     // Fallback: try the page level in case OKX changed the embed.
     const pageNext = page.getByRole('button', { name: /^next$/i }).first();
-    if (await pageNext.isVisible({ timeout: 3_000 }).catch(() => false)) {
+    if (await pageNext.isVisible().catch(() => false)) {
       await pageNext.click();
       await shot(page, '05b-after-secure-next');
     }
@@ -200,48 +188,41 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
 
   // Password form in the secure-frame iframe.
   const pwInputs = secureFrame.locator('input[type="password"]');
-  if (await pwInputs.first().isVisible({ timeout: 10_000 }).catch(() => false)) {
+  if (await pwInputs.first().isVisible().catch(() => false)) {
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++) {
       await pwInputs.nth(i).fill(TEST_PASSWORD);
     }
     await shot(page, '06-password-typed');
     const pwContinue = secureFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
-    await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+    await expect(pwContinue).toBeEnabled();
     await pwContinue.click();
     await shot(page, '07-after-password-submit');
   }
 
   // OKX final screen: "Welcome to OKX Wallet — Let's explore Web3"
   // with a "Start your Web3 journey" button. Click through.
-  const welcomeDeadline = Date.now() + 30_000;
-  let welcomePage: Page | null = null;
-  while (Date.now() < welcomeDeadline) {
-    for (const p of context.pages()) {
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/Welcome to OKX Wallet|Start your Web3 journey/i.test(text)) { welcomePage = p; break; }
-    }
-    if (welcomePage) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (welcomePage) {
-    page = welcomePage;
-    // Try clicking the Start button (may also be in an iframe).
-    const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
-    if (await startBtn.isVisible({ timeout: 5_000 }).catch(() => false)) {
-      await startBtn.click().catch(() => undefined);
-    } else {
-      const fr = page.frameLocator('#ui-ses-iframe');
-      const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
-      if (await frStart.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        await frStart.click().catch(() => undefined);
-      }
+  // The search covers the current page too, so a gate rendered in place
+  // resolves to it.
+  page = await waitForPageShowing({ context, text: /Welcome to OKX Wallet|Start your Web3 journey/i });
+  // Try clicking the Start button (may also be in an iframe).
+  const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
+  if (await startBtn.isVisible().catch(() => false)) {
+    await startBtn.click().catch(() => undefined);
+  } else {
+    const fr = page.frameLocator('#ui-ses-iframe');
+    const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
+    if (await frStart.isVisible().catch(() => false)) {
+      await frStart.click().catch(() => undefined);
     }
   }
 
   // Dashboard wait: any of the OKX dashboard markers OR the welcome
   // screen counts as success (the welcome IS the onboarded state).
-  const dashDeadline = Date.now() + 60_000;
+  // A Node loop over every page's text, not a Playwright wait, so it stops at
+  // the global bound.
+  const dashBoundMs = e2eTimeoutMs();
+  const dashDeadline = Date.now() + dashBoundMs;
   let dashed = false;
   while (Date.now() < dashDeadline) {
     for (const p of context.pages()) {
@@ -262,7 +243,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
     if (dashed) break;
     await new Promise(r => setTimeout(r, 500));
   }
-  if (!dashed) throw new Error('OKX dashboard markers not found on any context page within 60s');
+  if (!dashed) throw new Error(`OKX dashboard markers not found on any context page within ${dashBoundMs}ms`);
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');
 

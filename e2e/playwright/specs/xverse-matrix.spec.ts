@@ -65,17 +65,17 @@ async function unlockWallet(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
   if (/unlock/i.test(await page.locator('body').innerText())) {
     await page.locator('input[type="password"]').first().fill(TEST_PASSWORD);
     await page.getByRole('button', { name: /^unlock$/i }).first().click();
     await page.waitForFunction(() => {
       const t = (document.body.innerText || '').toLowerCase();
       return t.includes('account 1') || t.includes('not now') || t.includes('zest') || t.includes('send');
-    }, undefined, { timeout: 30_000, polling: 250 });
+    }, undefined, { polling: 250 });
   }
   const notNow = page.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+  if (await notNow.isVisible().catch(() => false)) {
     await notNow.click({ force: true }).catch(() => undefined);
   }
 }
@@ -91,7 +91,7 @@ async function approveSatsConnectInline(context: BrowserContext, knownPages: Set
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -112,7 +112,6 @@ test.beforeAll(async () => {
 
 for (const variant of VARIANTS) {
   test(`SDK returns the right paymentAddress for ${variant.network} + ${variant.paymentType}`, async () => {
-    test.setTimeout(120_000);
 
     const workingDir = `${SEED_USER_DATA_DIR}.matrix-${variant.network}-${variant.paymentType}-${process.pid}-${Date.now()}`;
     fs.cpSync(SEED_USER_DATA_DIR, workingDir, { recursive: true });
@@ -137,7 +136,7 @@ for (const variant of VARIANTS) {
         ],
       });
       let [w] = mutator.serviceWorkers();
-      if (!w) w = await mutator.waitForEvent('serviceworker', { timeout: 30_000 });
+      if (!w) w = await mutator.waitForEvent('serviceworker');
       const xid = w.url().split('/')[2];
       // Open popup; wait for the unlock screen to render (proves
       // Xverse's React app + redux-persist have fully booted).
@@ -149,13 +148,13 @@ for (const variant of VARIANTS) {
       await primer.waitForFunction(() => {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes('unlock') || t.includes('account 1');
-      }, undefined, { timeout: 30_000, polling: 250 });
+      }, undefined, { polling: 250 });
       await primer.close();
       // Gate on Xverse's redux-persist debounced save reaching
       // chrome.storage.local (walletState becomes a present key)
       // before we write the variant on top of it. Without the gate
       // the wallet boot-time save races ours and clobbers the variant.
-      await waitForChromeStorageKey({ context: mutator, keyContains: 'walletState', timeoutMs: 30_000 });
+      await waitForChromeStorageKey({ context: mutator, keyContains: 'walletState' });
       // Write the variant from the SW context. applyXverseVariant
       // returns a Phase-1 read-back so we can log it post-reload.
       const phase1Diag = await applyXverseVariant(mutator, variant);
@@ -192,7 +191,7 @@ for (const variant of VARIANTS) {
     });
     try {
       let [worker] = context.serviceWorkers();
-      if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+      if (!worker) worker = await context.waitForEvent('serviceworker');
       const extensionId = worker.url().split('/')[2];
 
       // Diagnostic: read storage from SW BEFORE opening popup, so we
@@ -243,7 +242,7 @@ for (const variant of VARIANTS) {
       // Drive the SDK harness for the address.
       const harness = await context.newPage();
       await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
-      await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined, { timeout: 15_000 });
+      await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined);
 
       const networkArg = variant.network === 'bitcoin-mainnet' ? 'mainnet'
         : variant.network === 'bitcoin-testnet4' ? 'testnet4'

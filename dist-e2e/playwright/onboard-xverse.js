@@ -6,6 +6,30 @@ exports.overrideRegtestElectrsUrl = overrideRegtestElectrsUrl;
 const test_1 = require("@playwright/test");
 const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
+/**
+ * Probe: how long the screen gets to move on after one click on Confirm or
+ * Continue. Xverse absorbs a click that lands before its handlers attach, the
+ * expected miss that sends the loop round again; long enough for an accepted
+ * click to re-render the screen.
+ */
+const XVERSE_TRANSITION_PROBE_MS = 5_000;
+/**
+ * Probe: how long one navigation gets to hydrate before it is re-navigated. A
+ * slow service worker leaves a shell that never hydrates and only a fresh
+ * navigation recovers, so the expected miss is a dead page, not a slow one;
+ * long enough for a healthy hydration under three concurrent regtest lanes.
+ */
+const XVERSE_HYDRATE_PROBE_MS = 20_000;
+/**
+ * Probe: how long the optional "Authorize data collection" row gets to
+ * render on the legal screen. Some releases drop it.
+ */
+const XVERSE_DATA_COLLECTION_PROBE_MS = 3_000;
+/**
+ * Probe: how long the optional "Not now" promo prompt gets on the first popup
+ * open. It is shown only for some campaigns.
+ */
+const XVERSE_NOT_NOW_PROBE_MS = 1_500;
 async function nextPostMnemonicState(page) {
     const handle = await page.waitForFunction(() => {
         const t = (document.body.innerText || '').toLowerCase();
@@ -16,7 +40,7 @@ async function nextPostMnemonicState(page) {
         if (t.includes('select a wallet to restore') || t.includes('we found funds'))
             return 'picker';
         return false;
-    }, undefined, { timeout: 120_000, polling: 250 });
+    }, undefined, { polling: 250 });
     return handle.jsonValue();
 }
 async function clickAndAwaitTransition(page, buttonText, sentinelGoneRegex, attempts = 3) {
@@ -38,11 +62,11 @@ async function clickAndAwaitTransition(page, buttonText, sentinelGoneRegex, atte
                     return false;
                 return true;
             });
-        }, buttonText, { timeout: 30_000, polling: 250 });
+        }, buttonText, { polling: 250 });
         const btn = page.getByRole('button', { name: buttonText, exact: true }).first();
-        await (0, test_1.expect)(btn).toBeVisible({ timeout: 5_000 });
+        await (0, test_1.expect)(btn).toBeVisible();
         await btn.click();
-        const transitioned = await page.waitForFunction((re) => !(new RegExp(re, 'i')).test(document.body.innerText || ''), sentinelGoneRegex.source, { timeout: 5_000, polling: 250 }).then(() => true).catch(() => false);
+        const transitioned = await page.waitForFunction((re) => !(new RegExp(re, 'i')).test(document.body.innerText || ''), sentinelGoneRegex.source, { timeout: XVERSE_TRANSITION_PROBE_MS, polling: 250 }).then(() => true).catch(() => false);
         if (transitioned)
             return;
     }
@@ -57,17 +81,15 @@ async function clickAndAwaitTransition(page, buttonText, sentinelGoneRegex, atte
  * shell that never hydrates, and no ceiling rescues it: the wait is not racing
  * a slow render, it is watching a dead page. Re-navigating re-triggers the
  * extension's bootstrap, which is what actually recovers it. Raising the
- * ceiling only makes the failure take longer to report, which is how this wait
- * already went from 30 s to 60 s and still timed out under three concurrent
- * regtest lanes.
+ * ceiling only makes the failure take longer to report: a single 60 s wait
+ * still timed out under three concurrent regtest lanes.
  *
- * Each attempt gets a short window; the budget is the product, so the total
- * patience is higher than the old single wait while a stuck shell is retried
- * rather than watched.
+ * Each attempt gets a short window (`XVERSE_HYDRATE_PROBE_MS`), and a stuck
+ * shell is retried rather than watched.
  */
 async function gotoAndHydrate(page, url, ready, opts) {
     const attempts = opts.attempts ?? 4;
-    const perAttemptMs = opts.perAttemptMs ?? 20_000;
+    const perAttemptMs = XVERSE_HYDRATE_PROBE_MS;
     for (let attempt = 1; attempt <= attempts; attempt++) {
         await page.goto(url, { waitUntil: 'domcontentloaded' });
         const hydrated = await page
@@ -92,22 +114,22 @@ async function onboardXverse(context, extensionId, opts = {}) {
         return t.includes('restore') && t.includes('create');
     }, { what: 'onboarding page' });
     await page.getByText(/restore an existing wallet|restore.*wallet/i).first().click();
-    await (0, test_1.expect)(page.getByText(/legal/i).first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(page.getByText(/legal/i).first()).toBeVisible();
     const dc = page.getByText(/authorize data collection/i).first();
-    if (await (0, is_visible_within_1.isVisibleWithin)(dc, 3_000))
+    if (await (0, is_visible_within_1.isVisibleWithin)(dc, XVERSE_DATA_COLLECTION_PROBE_MS))
         await dc.click();
     await page.getByRole('button', { name: /^accept$/i }).first().click();
     const pws = page.locator('input[type="password"]');
-    await (0, test_1.expect)(pws.first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(pws.first()).toBeVisible();
     const pwCount = await pws.count();
     for (let i = 0; i < pwCount; i++)
         await pws.nth(i).fill(password);
     await page.getByRole('button', { name: /continue|next|confirm|done|create/i }).first().click();
-    await (0, test_1.expect)(page.getByText(/restore your wallet|what wallet are you importing/i).first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(page.getByText(/restore your wallet|what wallet are you importing/i).first()).toBeVisible();
     await page.getByText(/^xverse$/i).first().click();
-    await (0, test_1.expect)(page.getByText(/enter seed phrase/i).first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(page.getByText(/enter seed phrase/i).first()).toBeVisible();
     const seedInputs = page.locator('input[type="password"]');
-    await (0, test_1.expect)(seedInputs.first()).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(seedInputs.first()).toBeVisible();
     await seedInputs.first().click();
     await seedInputs.first().pressSequentially(mnemonic, { delay: 25 });
     await page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first().click();
@@ -137,11 +159,11 @@ async function primeAndSwitchToRegtest(context, extensionId) {
         return t.includes('account 1') || t.includes('not now') || t.includes('zest');
     }, { what: 'popup' });
     const notNow = primer.getByText('Not now', { exact: true }).first();
-    if (await (0, is_visible_within_1.isVisibleWithin)(notNow, 1_500)) {
+    if (await (0, is_visible_within_1.isVisibleWithin)(notNow, XVERSE_NOT_NOW_PROBE_MS)) {
         await notNow.click({ force: true }).catch(() => undefined);
     }
     await primer.goto(`chrome-extension://${extensionId}/popup.html#/settings/change-network`, { waitUntil: 'domcontentloaded' });
-    await primer.waitForFunction(() => /testnet mode/i.test(document.body.innerText || ''), undefined, { timeout: 15_000 });
+    await primer.waitForFunction(() => /testnet mode/i.test(document.body.innerText || ''));
     // Toggle Testnet mode via a DOM-relative locator (no coordinate clicks —
     // E2E_BEST_PRACTICES). Scope the switch to the settings row that holds the
     // "Testnet mode" label so we never flip an unrelated control; fall back to the
@@ -153,17 +175,17 @@ async function primeAndSwitchToRegtest(context, extensionId) {
         .first();
     const pageSwitch = primer.locator('[role="switch"], [role="checkbox"], input[type="checkbox"]').first();
     const testnetToggle = (await rowSwitch.count()) > 0 ? rowSwitch : pageSwitch;
-    await (0, test_1.expect)(testnetToggle).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(testnetToggle).toBeVisible();
     await testnetToggle.click({ force: true });
     await primer.waitForFunction(() => {
         const txt = document.body.innerText || '';
         return /testnet/i.test(txt) && /BITCOIN[\s\S]{0,80}testnet/i.test(txt);
-    }, undefined, { timeout: 10_000, polling: 250 });
+    }, undefined, { polling: 250 });
     await primer.getByText('Regtest', { exact: true }).first().click({ force: true });
     // Verify the switch actually took. A failed network switch must surface HERE,
     // not downstream as a mystery zero-balance — throw a clear error if the popup
     // never reflects BITCOIN → Regtest.
-    await primer.waitForFunction(() => /BITCOIN[\s\S]{0,40}\bRegtest\b/.test(document.body.innerText || ''), undefined, { timeout: 10_000, polling: 250 }).catch(() => {
+    await primer.waitForFunction(() => /BITCOIN[\s\S]{0,40}\bRegtest\b/.test(document.body.innerText || ''), undefined, { polling: 250 }).catch(() => {
         throw new Error('Xverse Regtest switch not verified: popup never showed BITCOIN → Regtest');
     });
 }

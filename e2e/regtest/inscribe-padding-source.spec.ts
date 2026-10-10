@@ -120,7 +120,7 @@ beforeAll(async () => {
   await waitForOrdStockSync(tip);
   const small = await waitForUtxoAt(payment.fundingAddr, PADDING_COIN_SATS);
   paddingCoin = { txid: small.txid, vout: small.vout, value: small.value };
-}, 300_000);
+});
 
 afterAll(() => {
   // Release the lock, so a locked coin cannot starve a later spec's selection.
@@ -192,5 +192,5 @@ describe('a sat below the dust floor of its coin, padded by a coin the SDK sourc
     // coin's first sat, which is what an unpadded or misaligned commit gives.
     const insc = await waitForOrdStockInscription(`${result.revealTxId}i0`);
     expect(insc.sat).toBe(chosenSat);
-  }, 420_000);
+  });
 });

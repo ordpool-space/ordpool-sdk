@@ -70,13 +70,11 @@ test.beforeAll(async () => {
   await context.route('**/configs.wizz.cash/**', route => route.abort());
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
-  // The onboard helper runs the same flow as wizz-onboard.spec.ts;
-  // override the test timeout because of the multi-step traversal.
-  test.setTimeout(180_000);
+  // The onboard helper runs the same flow as wizz-onboard.spec.ts.
   await onboardWizz(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
@@ -86,7 +84,6 @@ test.afterAll(async () => {
 });
 
 test('wizzConnector.connect via the harness page returns the BIP-84 mainnet address for the test seed', async () => {
-  test.setTimeout(180_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
@@ -94,7 +91,6 @@ test('wizzConnector.connect via the harness page returns the BIP-84 mainnet addr
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 
@@ -130,7 +126,7 @@ test('wizzConnector.connect via the harness page returns the BIP-84 mainnet addr
   // Wizz inherits Unisat's connect-approval shape — "Connect" is
   // a styled <div> rather than a <button>. Match by exact text.
   const consentBtn = approval.getByText(/^Connect$/).first();
-  await expect(consentBtn).toBeVisible({ timeout: 10_000 });
+  await expect(consentBtn).toBeVisible();
   await consentBtn.click();
   await shot(approval, '02b-after-approve');
 

@@ -23,11 +23,11 @@ import { expect, type Page, type Locator } from '@playwright/test';
  */
 export async function clickRadixCheckbox(
   page: Page | Locator,
-  options: { nth?: number; timeoutMs?: number } = {},
+  options: { nth?: number } = {},
 ): Promise<void> {
-  const { nth = 0, timeoutMs = 5_000 } = options;
+  const { nth = 0 } = options;
   const checkbox = page.getByRole('checkbox').nth(nth);
-  await expect(checkbox).toBeVisible({ timeout: 10_000 });
+  await expect(checkbox).toBeVisible();
   await checkbox.click();
-  await expect(checkbox).toHaveAttribute('data-state', 'checked', { timeout: timeoutMs });
+  await expect(checkbox).toHaveAttribute('data-state', 'checked');
 }

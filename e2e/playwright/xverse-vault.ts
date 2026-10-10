@@ -74,7 +74,7 @@ interface PlaywrightWorkerLike {
 }
 interface PlaywrightContextLike {
   serviceWorkers: () => readonly PlaywrightWorkerLike[];
-  waitForEvent: (event: 'serviceworker', opts?: { timeout?: number }) => Promise<PlaywrightWorkerLike>;
+  waitForEvent: (event: 'serviceworker') => Promise<PlaywrightWorkerLike>;
 }
 
 export async function applyXverseVariant(
@@ -82,7 +82,7 @@ export async function applyXverseVariant(
   variant: XverseVariant,
 ): Promise<{ phase1Legacy: string; storageKeys: string[] }> {
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
 
   const diag = await worker.evaluate(async ({ network, paymentType }) => {
     type ChromeBridge = {

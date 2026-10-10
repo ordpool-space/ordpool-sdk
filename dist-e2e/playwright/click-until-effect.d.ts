@@ -44,8 +44,6 @@
 export interface ClickUntilEffectOptions {
     /** Total clicks allowed, including the first. */
     maxClicks?: number;
-    /** How long one click gets to produce the effect. */
-    settleMs?: number;
     /** Name used in the failure message. Defaults to the control's selector. */
     label?: string;
     /**
@@ -68,17 +66,27 @@ export interface ClickableControl {
     isVisible(): Promise<boolean>;
     isEnabled(): Promise<boolean>;
 }
-/** The part of a `Locator` used to observe the effect. */
+/**
+ * The part of a `Locator` used to observe the effect. Called with `timeout`
+ * for the probe after a click, and without it once the control has reacted,
+ * when the effect gets the runner config's own bound.
+ */
 export interface EffectLocator {
     waitFor(options: {
         state: 'visible';
-        timeout: number;
+        timeout?: number;
     }): Promise<void>;
 }
 export interface ClickUntilEffectResult {
     /** Clicks actually sent. More than 1 means a click was swallowed. */
     clicks: number;
 }
+/**
+ * Probe: how long one click gets to produce the effect before the control is
+ * inspected for a swallowed click. Long enough for a render after a click on a
+ * loaded CI runner, short enough to re-click within the test.
+ */
+export declare const EFFECT_AFTER_CLICK_PROBE_MS = 5000;
 /**
  * Click `control` until `effect` is visible. Returns how many clicks it took,
  * so a caller can log or assert that a surface needed only one.

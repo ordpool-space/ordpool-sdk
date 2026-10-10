@@ -9,7 +9,8 @@ import {
   waitForApprovalPopup,
   closeLeftoverExtensionPages,
 } from '../approval-popup';
-import { isVisibleWithin } from '../is-visible-within';
+import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardOkx } from '../onboard-okx';
@@ -41,7 +42,7 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     knownPages,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText('Connect account').first().waitFor({ state: 'visible', timeout: 60_000 });
+      await p.getByText('Connect account').first().waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -70,26 +71,18 @@ async function approveSignMessagePopup(ctx: BrowserContext, label: string): Prom
   // An EMPTY knownPages is deliberate: OKX serves signing from the same
   // notification page it used for connect, so a set carrying that page would
   // make the helper skip the very page the popup lives on.
-  const approval = await waitForApprovalByConfirmButton({
-    context: ctx,
-    label: `OKX ${label} signing popup`,
-  });
+  const approval = await waitForApprovalByConfirmButton({ context: ctx });
 
   await shot(approval, `02a-sign-message-approval-${label}`);
 
-  const promo = approval.getByText('Asset transfer pending');
-  if (await isVisibleWithin(promo, 2_000)) {
-    const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
-    await closeBtn.click({ force: true }).catch(() => undefined);
-    await promo.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
-  }
+  await dismissOkxAssetTransferPromo(approval);
   // OKX closes this popup on accepting the click, so the close IS the proof the
   // click landed. Requiring it names the outcome here instead of letting a lost
   // click surface later as a harness wait that times out with several suspects.
   await clickApprovalAndRequireClose(
     approval.getByText(/^(Confirm|Sign|Approve)$/, { exact: true }).first(),
     approval,
-    { clickTimeoutMs: 45_000, closeTimeoutMs: 30_000, label: `OKX ${label} signing popup` },
+    { label: `OKX ${label} signing popup` },
   );
 }
 
@@ -111,7 +104,7 @@ test.beforeAll(async () => {
 
   await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   // OKX auto-opens its own onboarding tab on install; reuse it. Creating a
@@ -119,16 +112,7 @@ test.beforeAll(async () => {
   // closes the context (all-attempts onboarding failure). Fall back to a new
   // page only if the auto-opened tab never appears.
   let onboardPage: Page | undefined;
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    /* fall back below */
-  }
-  test.setTimeout(240_000);
-  if (!onboardPage) onboardPage = await context.newPage();
+  onboardPage = await extensionOnboardingPage(context, extensionId);
   await onboardOkx(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
@@ -138,14 +122,12 @@ test.afterAll(async () => {
 });
 
 test('sign a BIP-322 message via OKX: real extension signs, SDK verifies', async () => {
-  test.setTimeout(180_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

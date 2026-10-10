@@ -73,7 +73,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 });
 
@@ -86,7 +86,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
 
   // ─── Phase 1: welcome screen → "Use existing key" ───
-  await expect(page.getByTestId('sign-in-link')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('sign-in-link')).toBeVisible();
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
   await page.getByTestId('sign-in-link').click();
@@ -99,7 +99,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // per-word fill.
   let mnemonicEntered = false;
   const textarea = page.locator('textarea').first();
-  if (await textarea.isVisible({ timeout: 10_000 }).catch(() => false)) {
+  if (await textarea.isVisible().catch(() => false)) {
     await textarea.fill(TEST_MNEMONIC);
     mnemonicEntered = true;
     await shot(page, '03-mnemonic-textarea-filled');
@@ -124,8 +124,8 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
 
   // Continue button — Cat21 Wallet typically labels it "Continue" or "Sign in".
   const continueBtn = page.getByRole('button', { name: /continue|sign in|restore|confirm/i }).first();
-  await expect(continueBtn).toBeVisible({ timeout: 10_000 });
-  await expect(continueBtn).toBeEnabled({ timeout: 10_000 });
+  await expect(continueBtn).toBeVisible();
+  await expect(continueBtn).toBeEnabled();
   await continueBtn.click();
   await shot(page, '04-after-mnemonic-submit');
   await dumpHtml(page, '04-after-mnemonic-submit');
@@ -142,13 +142,13 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // OnboardingSelectors enum in the bundle (used by both the
   // create-new-wallet and use-existing-key flows).
   const pwInput = page.getByTestId('set-or-enter-password-input');
-  await expect(pwInput).toBeVisible({ timeout: 15_000 });
+  await expect(pwInput).toBeVisible();
   await pwInput.click();
   await pwInput.pressSequentially(TEST_PASSWORD, { delay: 15 });
   await shot(page, '05-password-typed');
 
   const confirmBtn = page.getByTestId('set-password-btn');
-  await expect(confirmBtn).toBeEnabled({ timeout: 10_000 });
+  await expect(confirmBtn).toBeEnabled();
   await confirmBtn.click();
   await shot(page, '06-after-password-submit');
   await dumpHtml(page, '06-after-password-submit');
@@ -160,7 +160,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('bitcoin');
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
   await shot(page, '07-dashboard');
 
   // eslint-disable-next-line no-console

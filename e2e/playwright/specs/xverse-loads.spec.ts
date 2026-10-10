@@ -44,7 +44,7 @@ test.beforeAll(async () => {
   // Wait for it so we can read back its ID.
   let [worker] = context.serviceWorkers();
   if (!worker) {
-    worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+    worker = await context.waitForEvent('serviceworker');
   }
   // chrome-extension://<id>/<path>
   extensionId = worker.url().split('/')[2];
@@ -83,11 +83,9 @@ test('Xverse loads in Chromium with a service worker registered; navigates to it
     waitUntil: 'domcontentloaded',
   });
 
-  // Give the extension a moment to settle (React mount, route
-  // resolution, etc.). We don't know what it renders yet.
-  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {
-    console.log('[xverse] networkidle timed out, continuing with whatever rendered');
-  });
+  // Wait until the extension rendered something (React mount, route
+  // resolution). What it renders is unknown here, so the signal is body text.
+  await page.waitForFunction(() => (document.body.innerText || '').trim().length > 0);
 
   const finalUrl = page.url();
   const title = await page.title();
@@ -107,15 +105,12 @@ test('Xverse loads in Chromium with a service worker registered; navigates to it
     bodyHtml,
   );
 
-  // Body should at least exist and contain SOMETHING. Poll for
-  // non-empty text — React mount can race against an immediate
-  // innerText read after networkidle (same race that flaked
-  // unisat-loads on CI 26379589137 and is fixed there).
+  // Non-empty text is the readiness signal: React mounts after the
+  // document loads, so an immediate innerText read can see an empty body.
   await expect(page.locator('body')).toBeVisible();
   await page.waitForFunction(
     () => (document.body.innerText || '').trim().length > 0,
     undefined,
-    { timeout: 10_000 },
   );
   const visibleText = await page.locator('body').innerText().catch(() => '');
   console.log(`[xverse] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);

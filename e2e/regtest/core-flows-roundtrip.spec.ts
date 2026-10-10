@@ -109,7 +109,7 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     broadcast = {
       broadcast: async (hex) => ({ txid: await postTx(hex), channel: 'mempool' }),
     };
-  }, 60_000);
+  });
 
   it('executeMint: real select → fee → build → sign → broadcast → cat21-ord confirms the cat', async () => {
     const out = await executeMint(
@@ -134,7 +134,7 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     const insc = await waitForCatAtAddress(`${out.txid}i0`, ordinalsAddress);
     expect(insc.address).toBe(ordinalsAddress);
     mintTxid = out.txid;
-  }, 90_000);
+  });
 
   it('executeTransfer: moves the minted cat; cat21-ord confirms it at the recipient', async () => {
     // Recipient = a distinct taproot address (not our own), so "moved" is real.
@@ -163,7 +163,7 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     // The ORIGINAL cat (<mintTxid>i0) is now at the new recipient — it moved.
     const insc = await waitForCatAtAddress(`${mintTxid}i0`, recipientAddress);
     expect(insc.address).toBe(recipientAddress);
-  }, 90_000);
+  });
 
   // The shared gate for the change-headroom fix (a9ffd7e): on a REAL chain, a
   // wallet holding a dust-cliff coin (covers the mint but is too tight to emit

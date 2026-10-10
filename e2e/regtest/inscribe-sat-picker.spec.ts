@@ -95,7 +95,7 @@ beforeAll(async () => {
   await waitForElectrsSync(tip2);
   await waitForOrdStockSync(tip2);
   ourTaprootCoin = { txid: txid2, vout: 0, value: 50_000_000 };
-}, 240_000);
+});
 
 describe('findRareSatsInOutputs → live ord with a sat index', () => {
   it('finds the block-first sat and agrees with ord on its rarity and its place', async () => {
@@ -115,7 +115,7 @@ describe('findRareSatsInOutputs → live ord with a sat index', () => {
     const ordSat = await getStockOrdSat(found!.sat);
     expect(found!.rarity).toBe(ordSat.rarity);
     expect(ordSat.rarity).not.toBe('common');
-  }, 120_000);
+  });
 
   it('a coin of mid-block sats is scanned and reports none, and ord agrees', async () => {
     const rows = await findRareSatsInOutputs([commonCoin], { ordBaseUrl: ORD_STOCK_URL });
@@ -126,7 +126,7 @@ describe('findRareSatsInOutputs → live ord with a sat index', () => {
     const { sat_ranges } = await getStockOrdOutput(`${commonCoin.txid}:${commonCoin.vout}`);
     const firstRarity = (await getStockOrdSat(sat_ranges[0][0])).rarity;
     expect(firstRarity).toBe('common');
-  }, 120_000);
+  });
 
   it('reports the coin\'s address, which is the dust floor the padding rule uses', async () => {
     const rows = await findRareSatsInOutputs([boundaryCoin], { ordBaseUrl: ORD_STOCK_URL });
@@ -139,7 +139,7 @@ describe('findRareSatsInOutputs → live ord with a sat index', () => {
     const at1 = satPaddingRequirement(1, address!);
     expect(at1.needsPadding).toBe(true);
     expect(at1.shortfallSats).toBe(at1.dustLimitSats - 1);
-  }, 120_000);
+  });
 
   it('the sat source it builds carries the script the chain itself holds for that coin', async () => {
     const rows = await findRareSatsInOutputs([ourTaprootCoin], { ordBaseUrl: ORD_STOCK_URL });
@@ -163,14 +163,13 @@ describe('findRareSatsInOutputs → live ord with a sat index', () => {
     expect(Array.from(source!.tapInternalKey)).toEqual(Array.from(ownXonly));
     expect(hex.encode(source!.scriptPubKey.slice(2))).not.toBe(hex.encode(ownXonly));
     expect(source!.offset).toBe(rows[0].rareSat!.offset);
-  }, 120_000);
+  });
 
   it('an unreachable ord leaves every coin unknown, never "holds nothing"', async () => {
     const rows = await findRareSatsInOutputs([boundaryCoin, commonCoin], {
       ordBaseUrl: 'http://127.0.0.1:1',
-      timeoutMs: 2_000,
-    });
+      });
     expect(rows.map(r => r.status)).toEqual(['unknown', 'unknown']);
     expect(rows.map(r => r.rareSat)).toEqual([null, null]);
-  }, 60_000);
+  });
 });

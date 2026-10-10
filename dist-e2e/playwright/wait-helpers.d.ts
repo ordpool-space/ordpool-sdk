@@ -6,11 +6,10 @@ import type { BrowserContext, Worker } from '@playwright/test';
  * the directory before that beat ends races with the OS and leaves
  * stale lock files that prevent re-launch.
  *
- * Event-driven via fs.watch — fires on the deletion event. The
- * `timeoutMs` argument is the deadline, not a poll interval; the
- * Promise rejects if no deletion arrives in that window.
+ * A filesystem poll, not a Playwright wait, so it stops at the global
+ * bound (`e2eTimeoutMs`) and rejects if the lock files are still there.
  */
-export declare function waitForSingletonLockGone(userDataDir: string, timeoutMs?: number): Promise<void>;
+export declare function waitForSingletonLockGone(userDataDir: string): Promise<void>;
 /**
  * Wait for a context's service worker to be responsive after a
  * `chrome.runtime.reload()`. The OLD worker reference is dead post-
@@ -22,8 +21,7 @@ export declare function waitForSingletonLockGone(userDataDir: string, timeoutMs?
  */
 export declare function waitForServiceWorkerReady(context: BrowserContext, options?: {
     ignoreWorker?: Worker;
-    timeoutMs?: number;
-} | number): Promise<Worker>;
+}): Promise<Worker>;
 /**
  * Wait until a key matching `keyContains` is observable in the
  * extension's `chrome.storage.local`. Used to gate on async writes
@@ -38,6 +36,5 @@ export declare function waitForChromeStorageKey(opts: {
     keyContains: string;
     /** Optional: caller-supplied predicate on the resolved value. */
     matchValue?: (value: unknown) => boolean;
-    timeoutMs?: number;
 }): Promise<void>;
 //# sourceMappingURL=wait-helpers.d.ts.map

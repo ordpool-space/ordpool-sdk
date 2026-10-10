@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { installAlbyAutoApprove } from '../alby-auto-approve';
+import { AlbyAutoApproveHandle, installAlbyAutoApprove } from '../alby-auto-approve';
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from '../wallet-test-vectors';
 
 
@@ -59,8 +59,23 @@ test.beforeAll(async () => {
     ],
   });
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
+});
+
+/** The auto-approver of the running test, for the failure report below. */
+let albyApprover: AlbyAutoApproveHandle | undefined;
+
+test.afterEach(async ({}, testInfo) => {
+  if (!albyApprover || testInfo.status === testInfo.expectedStatus) return;
+  // eslint-disable-next-line no-console
+  console.log(
+    `[alby-onboard] auto-approver clicked ${albyApprover.approved()} popup(s); extension pages it considered:\n` +
+      (albyApprover.seen().length ? albyApprover.seen().map((l) => `  - ${l}`).join('\n') : '  <none>') +
+      '\nZero approvals with pages listed means a permission popup appeared and its button ' +
+      'did not match the label regex. Zero approvals with none listed means no popup was ever ' +
+      'opened, so the call is stuck before the permission step.',
+  );
 });
 
 test.afterAll(async () => {
@@ -68,7 +83,6 @@ test.afterAll(async () => {
 });
 
 test('restores a wallet from the BIP-39 test seed via SW-message envelope and derives the expected mainnet Taproot address', async () => {
-  test.setTimeout(180_000);
 
   const seedPage = await context.newPage();
   // Block window.close so options.html survives Alby's React
@@ -87,7 +101,7 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
     () => typeof (globalThis as { chrome?: { runtime?: { sendMessage?: unknown } } })
       .chrome?.runtime?.sendMessage === 'function',
     undefined,
-    { timeout: 15_000, polling: 100 },
+    { polling: 100 },
   );
   await shot(seedPage, '00-options');
 
@@ -138,11 +152,12 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
   const probePage = await context.newPage();
   await probePage.goto('http://localhost:4500/', { waitUntil: 'domcontentloaded' });
 
-  // Bounded, and it says what it saw. Unbounded this hangs on a permission
-  // popup that was never approved (a renamed button label, or one Alby served
-  // from a page the listener missed) until the whole test budget expires, and
-  // the only evidence is "target closed after 3 minutes".
-  const derive = probePage.evaluate(async () => {
+  // When the call hangs on a permission popup that was never approved (a
+  // renamed button label, or one Alby served from a page the listener missed),
+  // the test timeout ends it and the afterEach hook prints what the
+  // auto-approver saw.
+  albyApprover = approver;
+  const address = await probePage.evaluate(async () => {
     interface WebBtc { enable?(): Promise<void>; getAddress(): Promise<{ address: string } | string> }
     interface AlbyApi { enable(): Promise<void>; webbtc: WebBtc }
     const alby = (window as unknown as { alby: AlbyApi }).alby;
@@ -151,17 +166,6 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
     const res = await alby.webbtc.getAddress();
     return typeof res === 'string' ? res : res.address;
   });
-  const address = await Promise.race([
-    derive,
-    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(
-      'alby.webbtc.getAddress() did not return within 90s. ' +
-      `Auto-approver clicked ${approver.approved()} popup(s); extension pages it considered:\n` +
-      (approver.seen().length ? approver.seen().map((l) => `  - ${l}`).join('\n') : '  <none>') +
-      '\nZero approvals with pages listed means a permission popup appeared and its button ' +
-      'did not match the label regex. Zero approvals with none listed means no popup was ever ' +
-      'opened, so the call is stuck before the permission step.',
-    )), 90_000)),
-  ]);
   // eslint-disable-next-line no-console
   console.log(`[alby-onboard] derived address = ${address}`);
 

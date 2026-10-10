@@ -103,7 +103,7 @@ test.beforeAll(async () => {
     ],
   });
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
   const onboardPage = await context.newPage();
   await onboardCat21Wallet(onboardPage, extensionId);
@@ -115,7 +115,6 @@ test.afterAll(async () => {
 });
 
 test('accept a CAT-21 buy offer on regtest via Cat21 Wallet: mint, buyer builds PSBT, wallet signs input 0', async () => {
-  test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
   const harness = await context.newPage();
@@ -123,7 +122,6 @@ test('accept a CAT-21 buy offer on regtest via Cat21 Wallet: mint, buyer builds 
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

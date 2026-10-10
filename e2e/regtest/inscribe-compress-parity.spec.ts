@@ -86,11 +86,11 @@ function mixedJson(rows: number): string {
 
 describe('inscribe --compress → byte-parity with stock ord', () => {
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(ORD_WALLET);
     // The builder compresses properties synchronously, so the wasm must be loaded.
     await loadBrotliWasm(WASM);
-  }, 240_000);
+  });
 
   // [label, file extension, the content type ord assigns that extension, body, ord compresses it?]
   it.each<[string, string, string, Uint8Array, boolean]>([
@@ -127,7 +127,7 @@ describe('inscribe --compress → byte-parity with stock ord', () => {
         ids.push(`${reveal}i0`);
         await waitForOrdStockSync(mineBlocks(1));
       }
-    }, 240_000);
+    });
 
     async function compareGallery(gallery: string[], title: string, expectCompressedProperties: boolean): Promise<void> {
       const body = enc(`parity: compressed gallery of ${gallery.length}`);
@@ -153,11 +153,11 @@ describe('inscribe --compress → byte-parity with stock ord', () => {
       // Eight entries of one id: the packed form repeats the same 32-byte
       // txid eight times, which brotli shrinks well below the plain forms.
       await compareGallery(Array(8).fill(ids[0]), 'eight of one', true);
-    }, 180_000);
+    });
 
     it('compressed properties lose: ord and the SDK both ship them uncompressed', async () => {
       await compareGallery(ids, 'three distinct', false);
-    }, 180_000);
+    });
 
     it('properties that compress over 30:1 are refused by ord and by the SDK alike', () => {
       const gallery = Array(200).fill(ids[0]);
@@ -172,6 +172,6 @@ describe('inscribe --compress → byte-parity with stock ord', () => {
       }
       expect(ordError).toContain('property compression over 30:1');
       expect(() => fields({ gallery, compressProperties: true })).toThrow('property compression over 30:1');
-    }, 180_000);
+    });
   });
 });

@@ -46,5 +46,5 @@ describe('wallets$ runs ONE detection sweep for all subscribers', () => {
     const [a, b] = await Promise.all([first, second]);
     expect(a).toBe(b); // the same object, so the same sweep produced both
     expect(reads.count).toBeLessThanOrEqual(2);
-  }, 20_000);
+  });
 });

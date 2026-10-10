@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { onboardPhantom } from '../onboard-phantom';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 
 /**
  * Iteration 5 — full cat21 mint roundtrip with the real Phantom
@@ -66,19 +67,10 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
-  let onboardPage: Page;
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    onboardPage = await context.newPage();
-  }
-  test.setTimeout(240_000);
+  const onboardPage = await extensionOnboardingPage(context, extensionId);
   await onboardPhantom(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded').catch(() => undefined);
   // Unlock the wallet via runtime.sendMessage({method:'unlockExtension'})
@@ -178,14 +170,12 @@ test.afterAll(async () => {
 // the SW handlers, this test flips red and we know to rewrite
 // the spec as a full mint roundtrip.
 test('phantom v26.16: phantomConnector.connect rejects (SW has no btc_* handlers); mint flow has no entry point', async () => {
-  test.setTimeout(180_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   // Reload to force Phantom's content script to re-evaluate against
   // the now-unlocked SW. See phantom-sdk-handshake for rationale.
@@ -193,7 +183,6 @@ test('phantom v26.16: phantomConnector.connect rejects (SW has no btc_* handlers
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   const phantomVisible = await harness.evaluate(() => {
     const p = (window as unknown as { phantom?: { bitcoin?: unknown } }).phantom;

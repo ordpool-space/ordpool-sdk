@@ -38,6 +38,7 @@ exports.waitForServiceWorkerReady = waitForServiceWorkerReady;
 exports.waitForChromeStorageKey = waitForChromeStorageKey;
 const fs = __importStar(require("node:fs"));
 const path = __importStar(require("node:path"));
+const e2e_timeout_1 = require("../e2e-timeout");
 /**
  * Wait until a Chromium persistent-context's `SingletonLock` (and
  * friends) are gone from the user-data-dir. After `context.close()`,
@@ -45,16 +46,16 @@ const path = __importStar(require("node:path"));
  * the directory before that beat ends races with the OS and leaves
  * stale lock files that prevent re-launch.
  *
- * Event-driven via fs.watch — fires on the deletion event. The
- * `timeoutMs` argument is the deadline, not a poll interval; the
- * Promise rejects if no deletion arrives in that window.
+ * A filesystem poll, not a Playwright wait, so it stops at the global
+ * bound (`e2eTimeoutMs`) and rejects if the lock files are still there.
  */
-async function waitForSingletonLockGone(userDataDir, timeoutMs = 30_000) {
+async function waitForSingletonLockGone(userDataDir) {
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const lockFiles = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
     const stillThere = () => lockFiles.some(f => fs.existsSync(path.join(userDataDir, f)));
     // Poll rather than fs.watch: fs.watch has a check-then-watch race (a lock
     // removed between the initial stillThere() and arming the watcher is missed,
-    // and the caller then eats the full timeout) and silently drops events on
+    // and the caller then eats the full bound) and silently drops events on
     // some platforms. A 100ms poll has no such gap.
     const deadline = Date.now() + timeoutMs;
     while (stillThere()) {
@@ -74,9 +75,7 @@ async function waitForSingletonLockGone(userDataDir, timeoutMs = 30_000) {
  * the event loop can flush in between checks.
  */
 async function waitForServiceWorkerReady(context, options = {}) {
-    const opts = typeof options === 'number' ? { timeoutMs: options } : options;
-    const ignoreWorker = opts.ignoreWorker;
-    const timeoutMs = opts.timeoutMs ?? 30_000;
+    const ignoreWorker = options.ignoreWorker;
     // Two parallel observation paths converge on the same outcome:
     //
     //   (a) Playwright's `serviceworker` event fires when a new SW
@@ -89,17 +88,16 @@ async function waitForServiceWorkerReady(context, options = {}) {
     //       browser but no fresh `serviceworker` event surfaces).
     //
     // Promise.any returns the first fulfilled value; AggregateError
-    // only if BOTH paths exhaust their independent timeouts. The
+    // only if BOTH paths give up: the event path under the runner
+    // config's action timeout, the probe loop at the global bound
+    // (`e2eTimeoutMs`), because it is not a Playwright wait. The
     // `ignoreWorker` option lets callers pin out a known-dead reference
     // — e.g. the SW that hosted chrome.runtime.reload() and is gone.
     const isFresh = (w) => !ignoreWorker || w !== ignoreWorker;
     return Promise.any([
-        context.waitForEvent('serviceworker', {
-            timeout: timeoutMs,
-            predicate: isFresh,
-        }),
+        context.waitForEvent('serviceworker', { predicate: isFresh }),
         (async () => {
-            const deadline = Date.now() + timeoutMs;
+            const deadline = Date.now() + (0, e2e_timeout_1.e2eTimeoutMs)();
             while (Date.now() < deadline) {
                 const w = context.serviceWorkers().find(isFresh);
                 if (w) {
@@ -126,7 +124,8 @@ async function waitForServiceWorkerReady(context, options = {}) {
 async function waitForChromeStorageKey(opts) {
     const { context, keyContains } = opts;
     const matchValue = opts.matchValue;
-    const timeoutMs = opts.timeoutMs ?? 30_000;
+    // A service-worker poll, not a Playwright wait: it stops at the global bound.
+    const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     // Re-fetch the SW reference on every iteration — chrome.runtime.reload()
     // may have invalidated whichever worker was current at call time.

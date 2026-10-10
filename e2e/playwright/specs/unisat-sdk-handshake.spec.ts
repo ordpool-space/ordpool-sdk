@@ -71,7 +71,7 @@ test.beforeAll(async () => {
   await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -93,7 +93,6 @@ test('unisatConnector.connect via the harness page returns the BIP-84 mainnet ad
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 
@@ -134,7 +133,7 @@ test('unisatConnector.connect via the harness page returns the BIP-84 mainnet ad
   // (with a clickable wrapper), not a <button>, so getByRole('button')
   // doesn't see it. Match by exact text instead.
   const consentBtn = approval.getByText(/^Connect$/).first();
-  await expect(consentBtn).toBeVisible({ timeout: 10_000 });
+  await expect(consentBtn).toBeVisible();
   await consentBtn.click();
   await shot(approval, '02b-after-approve');
 

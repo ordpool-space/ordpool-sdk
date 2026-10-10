@@ -27,4 +27,12 @@ export declare function onboardPhantom(page: Page, extensionId: string, opts?: {
     password?: string;
     mnemonicWords?: string;
 }): Promise<void>;
+/**
+ * Best-effort press of Phantom's "Get Started" on the onboarding completion
+ * screen, then a short probe for the screen going away. The button resists
+ * every click strategy tried (CDP, pointer events, programmatic, Tab+Enter),
+ * so staying on the completion screen is the expected outcome; callers
+ * navigate to popup.html afterwards.
+ */
+export declare function pressPhantomGetStarted(page: Page): Promise<void>;
 //# sourceMappingURL=onboard-phantom.d.ts.map

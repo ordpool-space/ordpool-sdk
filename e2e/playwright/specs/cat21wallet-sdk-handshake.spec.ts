@@ -64,7 +64,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -83,7 +83,6 @@ test('cat21walletConnector.connect via the harness page returns the BIP-84 / BIP
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 
@@ -105,7 +104,7 @@ test('cat21walletConnector.connect via the harness page returns the BIP-84 / BIP
       isApproval: async (p) => {
         if (!p.url().startsWith('chrome-extension://')) return false;
         await p.getByTestId('get-addresses-approve-button')
-          .waitFor({ state: 'visible', timeout: 60_000 });
+          .waitFor({ state: 'visible' });
         return true;
       },
     });

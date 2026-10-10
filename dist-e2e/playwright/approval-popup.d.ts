@@ -1,17 +1,20 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test';
-import { ClickableControl } from './click-until-effect';
+import type { ClickableControl } from './click-until-effect';
 /**
  * `isApproval` anchored on the control the caller is about to use. `url` only
- * narrows; `control` decides. Both share one budget.
+ * narrows; `control` decides. Both waits run under the runner config's
+ * timeouts (`navigationTimeout` / `actionTimeout`, unset meaning the test
+ * timeout).
  */
 export declare function approvalGate(opts: {
     url?: RegExp;
     control: (page: Page) => Locator;
-    timeoutMs?: number;
 }): (page: Page) => Promise<boolean>;
-/** Rejection of `waitForApprovalPopup` when no page matched within its timeout. */
-export declare class ApprovalPopupTimeoutError extends Error {
-    constructor(timeoutMs: number);
+/** The arguments every popup search takes. */
+export interface ApprovalPopupSearch {
+    context: BrowserContext;
+    knownPages: Set<Page>;
+    isApproval: (p: Page) => boolean | Promise<boolean>;
 }
 /**
  * Wait for a wallet-extension approval popup to open in the given
@@ -38,29 +41,56 @@ export declare class ApprovalPopupTimeoutError extends Error {
  * matches the instant the window exists while the app is still booting, and
  * the caller's click then spends its budget on a control that never mounted.
  *
- * `isApproval` may throw (e.g. its internal timeout fires) — the
- * helper swallows the throw and keeps waiting on the OTHER pages,
- * which is the right behaviour: one page failing the match shouldn't
- * abort the search.
+ * `isApproval` may throw (the page closes under it, or a wait inside it gives
+ * up). The helper swallows that throw and keeps waiting on the OTHER pages,
+ * which is the right behaviour: one page failing the match shouldn't abort
+ * the search.
  *
- * The outer `timeoutMs` is the deadline beyond which we reject. It
- * is NOT a poll interval — it's a hard rejection timer enforced via
- * a single setTimeout.
+ * There is no deadline of its own. The waits inside `isApproval` run under the
+ * runner config's timeouts and the search as a whole under the test timeout,
+ * whose report names the pending wait.
  */
-export declare function waitForApprovalPopup(opts: {
-    context: BrowserContext;
-    knownPages: Set<Page>;
-    isApproval: (p: Page) => boolean | Promise<boolean>;
-    timeoutMs?: number;
-}): Promise<Page>;
+export declare function waitForApprovalPopup(opts: ApprovalPopupSearch): Promise<Page>;
+/** What `raceApprovalPopup` observed first. */
+export type ApprovalPopupRace = {
+    outcome: 'popup';
+    page: Page;
+} | {
+    outcome: 'no-popup';
+};
+/** The part of a Playwright `Locator` the no-popup state needs. */
+export interface AwaitableState {
+    waitFor(options: {
+        state: 'visible';
+    }): Promise<void>;
+}
 /**
- * For a popup the wallet MAY show, such as a permission renewal after a reload:
- * the popup, or `null` when none appeared within `timeoutMs`.
+ * For a popup the wallet MAY show, such as a connect approval that an already
+ * connected wallet skips: race "the popup appears" against an app state that
+ * exists only when no popup is coming, and say which happened first.
  *
- * Only the timeout means "not shown". Any other rejection still throws, so a
- * broken context does not read as a wallet that simply did not ask.
+ * `noPopupState` must be EXCLUSIVE to the no-popup path, e.g. the connected
+ * wallet's address rendered by the app, which only appears once the connect
+ * resolved without asking. A state that also appears while the popup is
+ * pending (a spinner, the page shell) wins the race on every run and hides the
+ * popup.
+ *
+ *     const race = await raceApprovalPopup({
+ *       context, knownPages, isApproval,
+ *       noPopupState: page.getByTestId('wallet-connected-address'),
+ *     });
+ *     if (race.outcome === 'popup') await approve(race.page);
+ *
+ * Both sides wait on states under the runner config's timeouts; nothing here
+ * hopes for an absence. The loser is cleaned up: the popup search stops
+ * listening, and a later rejection of the losing `waitFor` (when its page
+ * closes at teardown) is absorbed here because the race was already decided.
+ * A rejection BEFORE either side won (the app page closed, the context broke)
+ * rejects the race.
  */
-export declare function waitForOptionalApprovalPopup(opts: Parameters<typeof waitForApprovalPopup>[0]): Promise<Page | null>;
+export declare function raceApprovalPopup(opts: ApprovalPopupSearch & {
+    noPopupState: AwaitableState;
+}): Promise<ApprovalPopupRace>;
 /**
  * Close every chrome-extension page in the context except those
  * in `keep`. Defensive — wallets like Xverse, OKX, Phantom, Alby
@@ -100,19 +130,13 @@ export declare function closeLeftoverExtensionPages(context: BrowserContext, kee
 export declare function approveWizzSignPopup(opts: {
     context: BrowserContext;
     knownPages: Set<Page>;
-    /** Wait for the popup itself. Default 120s. */
-    popupTimeoutMs?: number;
-    /** Wait for the Sign button to become clickable. Default 60s. */
-    signTimeoutMs?: number;
     onScreenshot?: (page: Page, name: string) => Promise<void>;
 }): Promise<void>;
 export declare function clickApprovalButton(button: {
-    click: (opts?: {
-        timeout?: number;
-    }) => Promise<void>;
+    click: () => Promise<void>;
 }, page: {
     isClosed: () => boolean;
-}, timeoutMs?: number): Promise<void>;
+}): Promise<void>;
 /**
  * Click an approval button and require the popup to actually close.
  *
@@ -134,23 +158,19 @@ export declare function clickApprovalButton(button: {
  *     wallet is stuck or slow on its own side
  */
 export declare function clickApprovalAndRequireClose(button: {
-    click: (opts?: {
-        timeout?: number;
-    }) => Promise<void>;
+    click: () => Promise<void>;
     isVisible: () => Promise<boolean>;
     isEnabled: () => Promise<boolean>;
 }, page: {
     isClosed: () => boolean;
 }, opts?: {
-    clickTimeoutMs?: number;
-    closeTimeoutMs?: number;
     label?: string;
 }): Promise<void>;
 /**
  * Click a page control until the wallet's approval popup appears.
  *
  * `waitForApprovalPopup` answers "did a popup show up", and when the answer is
- * no after 60s it cannot say whether the wallet failed to wake or the CLICK
+ * no it cannot say whether the wallet failed to wake or the CLICK
  * that should have asked it never registered. Those have opposite fixes, and a
  * swallowed click is the likelier of the two on a control whose enabled state
  * comes from data that settles after first paint — which every funding-gated
@@ -165,18 +185,19 @@ export declare function clickApprovalAndRequireClose(button: {
  *
  * Returns the popup and the number of clicks it took. Assert `clicks === 1` on
  * a lane you believe is clean and a swallowed click becomes a named failure
- * instead of a 60-second timeout blamed on the wallet.
+ * instead of a test timeout blamed on the wallet.
  *
  * For an SDK-driven approval — the harness calls the orchestrator and the
  * wallet pops up on its own — there is no trigger to re-click, so use
  * `waitForApprovalPopup` directly. This is for a PAGE-driven trigger only.
  */
-export declare function clickUntilApprovalPopup(trigger: ClickableControl, opts: {
-    context: BrowserContext;
-    knownPages: Set<Page>;
-    isApproval: (p: Page) => boolean | Promise<boolean>;
-    /** How long ONE click gets to produce the popup. */
-    settleMs?: number;
+/**
+ * Probe: how long ONE click gets to produce the popup before the trigger is
+ * inspected for a swallowed click. Long enough for a cold extension service
+ * worker to open its window, short enough to re-click within the test.
+ */
+export declare const POPUP_AFTER_CLICK_PROBE_MS = 20000;
+export declare function clickUntilApprovalPopup(trigger: ClickableControl, opts: ApprovalPopupSearch & {
     maxClicks?: number;
     label?: string;
 }): Promise<{
@@ -186,14 +207,14 @@ export declare function clickUntilApprovalPopup(trigger: ClickableControl, opts:
 /**
  * Wait for the extension page that is offering a CONFIRM BUTTON.
  *
- * Replaces a pattern that was hand-copied across most wallet specs: poll every
- * extension page's body text every 500ms against a list of headings, until a
- * deadline. That shape has two defects, and neither is a property of the wallet.
+ * The alternative, polling every extension page's body text against a list of
+ * headings until a deadline, has two defects, and neither is a property of the
+ * wallet.
  *
- * It makes the result depend on MACHINE SPEED. One such spec passed in 5.4
- * seconds on an idle runner and timed out at 120 on a loaded one, with
- * identical code and extension. A test whose verdict moves with CPU contention
- * is a bad test, not an unlucky one.
+ * It makes the result depend on MACHINE SPEED. Such a poll passed in 5.4
+ * seconds on an idle runner and ran out at 120 on a loaded one, with identical
+ * code and extension. A test whose verdict moves with CPU contention is a bad
+ * test, not an unlucky one.
  *
  * And it couples the spec to the wallet's COPY. Wallets rename headings between
  * releases, so a rename reads as a broken flow.
@@ -203,14 +224,16 @@ export declare function clickUntilApprovalPopup(trigger: ClickableControl, opts:
  * driven by Playwright's own event-based waiting rather than a busy loop. The
  * search covers pages that are ALREADY open as well as ones that appear, which
  * matters for wallets that reuse one notification page across approvals.
+ *
+ * When nothing matches, the test timeout reports, and its call log names the
+ * pending `getByText` wait. A page that never painted, or a stale page the
+ * wallet reuses without re-rendering, both show up there as the same pending
+ * wait; the trace's page list separates them.
  */
 export declare function waitForApprovalByConfirmButton(opts: {
     context: BrowserContext;
     /** What the confirm control says. Default covers the common wallet verbs. */
     buttonText?: RegExp;
-    timeoutMs?: number;
-    /** Named in the failure message, e.g. 'mint' or 'listing-message'. */
-    label?: string;
 }): Promise<Page>;
 /**
  * Resolve to the page currently SHOWING `text`, across pages that are already
@@ -218,21 +241,63 @@ export declare function waitForApprovalByConfirmButton(opts: {
  *
  * Extension onboarding hands a step to an unpredictable page: a wallet may
  * continue in the tab you have, or open a fresh one, and which it does varies
- * by version. The specs handled that by polling every page's innerText every
- * 500ms until a deadline, then continuing on the original page if nothing
- * matched. So on a slow machine the search could expire before the wallet
- * painted, and the flow would carry on against the WRONG page and fail later
- * somewhere unrelated.
+ * by version. Polling every page's innerText until a deadline and then
+ * continuing on the original page lets a slow machine expire the search before
+ * the wallet painted, so the flow carries on against the WRONG page and fails
+ * later somewhere unrelated.
  *
  * This waits on Playwright's event-driven text matching instead, so it returns
  * the moment the text appears rather than on the next tick of a timer, and it
- * throws rather than silently yielding null. A caller that genuinely treats the
- * step as optional can still `.catch(() => null)`, but it has to say so.
+ * never yields a page that did not show the text. A step that may not come is
+ * raced against the state that means it is not coming (`raceApprovalPopup`),
+ * never caught.
  */
 export declare function waitForPageShowing(opts: {
     context: BrowserContext;
     text: RegExp;
-    timeoutMs?: number;
-    label?: string;
 }): Promise<Page>;
+/**
+ * Probe: how long one confirm click gets to take effect (the popup closes, the
+ * caller's `resolved` settles, or the confirm button goes away) before it
+ * counts as absorbed and is sent again. Xverse absorbs a dispatch that lands
+ * before its handlers attach; long enough for an accepted click to sign and
+ * close the popup on a loaded runner.
+ */
+export declare const CONFIRM_EFFECT_PROBE_MS = 15000;
+/** The part of a Playwright `Locator` the confirm button needs. */
+export interface ConfirmButton {
+    click(options: {
+        force: true;
+    }): Promise<void>;
+    waitFor(options: {
+        state: 'hidden';
+        timeout: number;
+    }): Promise<void>;
+}
+/** The part of a Playwright `Page` the popup needs. */
+export interface ClosablePopup {
+    isClosed(): boolean;
+    once(event: 'close', listener: () => void): unknown;
+    off(event: 'close', listener: () => void): unknown;
+}
+/**
+ * Click a wallet popup's confirm button until the approval took effect: the
+ * popup closed, `resolved` (the dapp-side call waiting on the signature)
+ * settled, or the button went away. Each click gets `CONFIRM_EFFECT_PROBE_MS`;
+ * a click that changed none of the three within it was absorbed and is sent
+ * again, up to `maxClicks`. Returns the clicks sent, so a caller can log or
+ * assert that one was enough.
+ *
+ * The click is forced and its own error only logged: the popup closing under
+ * the click is the success shape, and the three effects above, not the click's
+ * promise, say whether it landed. The caller's await on `resolved` (or on the
+ * signed transaction) is what fails when nothing was ever signed.
+ */
+export declare function clickConfirmUntilClosed(confirm: ConfirmButton, popup: ClosablePopup, opts?: {
+    resolved?: Promise<unknown>;
+    maxClicks?: number;
+    label?: string;
+}): Promise<{
+    clicks: number;
+}>;
 //# sourceMappingURL=approval-popup.d.ts.map

@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { onboardPhantom } from '../onboard-phantom';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import { PASSWORD_BY_WALLET } from '../wallet-test-vectors';
 
 /**
@@ -71,19 +72,10 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
-  let onboardPage: Page;
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    onboardPage = await context.newPage();
-  }
-  test.setTimeout(180_000);
+  const onboardPage = await extensionOnboardingPage(context, extensionId);
   await onboardPhantom(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded').catch(() => undefined);
   // Phantom's "You're good to go!" gate refused every click strategy.
@@ -313,14 +305,12 @@ test.afterAll(async () => {
 // flips red and we know to rewrite it against whatever real
 // addresses they return.
 test('phantom v26.16: detect succeeds (post self-registration) but phantomConnector.connect rejects because the SW has no btc_* handlers', async () => {
-  test.setTimeout(180_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   // Reload to force Phantom's content script to re-evaluate against
   // the now-unlocked SW.
@@ -328,7 +318,6 @@ test('phantom v26.16: detect succeeds (post self-registration) but phantomConnec
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   // Iter 64 finding: btc_requestAccounts via SW returns "not
   // permitted" — the harness URL isn't an authorized dApp. The

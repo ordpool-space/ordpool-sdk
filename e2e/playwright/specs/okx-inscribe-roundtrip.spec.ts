@@ -13,7 +13,8 @@ import {
   postTx,
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
-import { isVisibleWithin } from '../is-visible-within';
+import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
@@ -47,7 +48,7 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByText('Connect account').first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -64,22 +65,15 @@ async function approveSignPopup(ctx: BrowserContext): Promise<void> {
   // heading. Heading strings change between OKX releases, and a 500ms
   // poll against a wall-clock deadline makes the verdict depend on how
   // busy the runner is. Both are defects in the test.
-  const approval = await waitForApprovalByConfirmButton({ context: ctx, label: `OKX sign popup` });
+  const approval = await waitForApprovalByConfirmButton({ context: ctx });
   await shot(approval, 'sign-approval');
 
-  const promoModalText = approval.getByText('Asset transfer pending');
-  if (await isVisibleWithin(promoModalText, 2_000)) {
-    const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
-    if (await isVisibleWithin(closeBtn, 2_000)) {
-      await closeBtn.click({ force: true }).catch(() => undefined);
-    }
-    await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
-  }
+  await dismissOkxAssetTransferPromo(approval);
 
   // Fallback for the rare case OKX shows an interactive sign popup: wait for
   // Confirm to become actionable, then click. OKX usually auto-signs for the
   // connected dApp, so this is seldom reached.
-  await approval.getByText('Confirm', { exact: true }).first().click({ timeout: 60_000 })
+  await approval.getByText('Confirm', { exact: true }).first().click()
     .catch(() => undefined); // close-race: OKX may finish the sign and shut the popup mid-click
 }
 
@@ -103,19 +97,10 @@ test.beforeAll(async () => {
   });
   await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    /* fall back below */
-  }
-  test.setTimeout(240_000);
-  if (!onboardPage) onboardPage = await context.newPage();
+  onboardPage = await extensionOnboardingPage(context, extensionId);
   await onboardOkx(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
@@ -129,14 +114,12 @@ test.afterAll(async () => {
 // Confirm on this version. The reveal is ephemeral-key-signed, so this is a
 // single OKX sign. The old "Confirm never enables for regtest" note was wrong.
 test('inscribe an artifact on regtest via OKX: build commit+reveal in SDK, sign commit in popup (BIP-86 Taproot, regtest PSBT), broadcast both via local electrs', async () => {
-  test.setTimeout(360_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
 
   const connectKnownPages = new Set(context.pages());

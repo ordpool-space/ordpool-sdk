@@ -118,11 +118,10 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByTestId('sign-psbt-button')
-        .waitFor({ state: 'visible', timeout: 90_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -151,7 +150,7 @@ test.beforeAll(async () => {
   await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -166,7 +165,6 @@ test.afterAll(async () => {
 });
 
 test('transfer a cat21 on regtest via Unisat (Taproot mode): mint via popup, transfer via popup, assert via electrs + parser', async () => {
-  test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
   const harness = await context.newPage();
@@ -176,7 +174,6 @@ test('transfer a cat21 on regtest via Unisat (Taproot mode): mint via popup, tra
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

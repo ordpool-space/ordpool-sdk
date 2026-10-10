@@ -19,7 +19,7 @@ import {
 
 beforeAll(async () => {
   await waitForOrdStockReady();
-}, 120_000);
+});
 
 describe('seedRareSatCoin', () => {
   it('seeds a coin whose first sat ord itself calls notable', async () => {
@@ -34,7 +34,7 @@ describe('seedRareSatCoin', () => {
     const output = await getStockOrdOutput(`${coin.txid}:${coin.vout}`);
     expect(output.sat_ranges[0][0]).toBe(coin.sat);
     expect(output.value).toBe(coin.value);
-  }, 180_000);
+  });
 
   it('seeds to the address asked for, so it lands in the wallet under test', async () => {
     const address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress').trim();
@@ -43,12 +43,12 @@ describe('seedRareSatCoin', () => {
     expect(coin.address).toBe(address);
     expect((await getStockOrdOutput(`${coin.txid}:${coin.vout}`)).address).toBe(address);
     expect(coin.rarity).not.toBe('common');
-  }, 180_000);
+  });
 
   it('two seeds are separate coins carrying different sats', async () => {
     const a = await seedRareSatCoin();
     const b = await seedRareSatCoin();
     expect(`${a.txid}:${a.vout}`).not.toBe(`${b.txid}:${b.vout}`);
     expect(a.sat).not.toBe(b.sat);
-  }, 240_000);
+  });
 });

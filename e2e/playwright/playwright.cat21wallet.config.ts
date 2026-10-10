@@ -1,5 +1,19 @@
 import { defineConfig } from '@playwright/test';
 import * as path from 'node:path';
+import { E2E_TIMEOUT_ENV } from '../e2e-timeout';
+
+/**
+ * The one timeout of this config (TESTING.md). It bounds the test, every
+ * assertion and, with `actionTimeout` / `navigationTimeout` left unset, every
+ * action and navigation, so any single wait may take as long as the test. The
+ * SDK's polling helpers read the same value through ORDPOOL_E2E_TIMEOUT_MS.
+ *
+ * Sized for the slowest wallet roundtrip (onboard, connect, sign, mine and wait
+ * for electrs and ord). A spec that needs longer is a defect in the app or the
+ * harness, fixed there, never a per-spec bound.
+ */
+const TIMEOUT_MS = 600_000;
+process.env[E2E_TIMEOUT_ENV] = String(TIMEOUT_MS);
 
 /**
  * Cat21 Wallet-only Playwright config — runs the three transfer /
@@ -19,17 +33,15 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: 600_000,
+  timeout: TIMEOUT_MS,
   expect: {
-    timeout: 20_000,
+    timeout: TIMEOUT_MS,
   },
   use: {
     headless: false,
     screenshot: 'on',
     video: 'retain-on-failure',
     trace: 'retain-on-failure',
-    actionTimeout: 15_000,
-    navigationTimeout: 20_000,
   },
   outputDir: path.resolve(__dirname, '../../test-results'),
   webServer: {
@@ -37,6 +49,6 @@ export default defineConfig({
     cwd: __dirname,
     port: 4500,
     reuseExistingServer: true,
-    timeout: 15_000,
+    timeout: TIMEOUT_MS,
   },
 });

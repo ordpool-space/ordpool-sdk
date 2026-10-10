@@ -95,7 +95,7 @@ describe('cat UTXO size preservation at non-546 sizes (offer ord-parity + transf
     tip = mineBlocks(1);
     await waitForElectrsSync(tip);
     await waitForOrdSync(tip);
-  }, 120_000);
+  });
 
   /**
    * Mint a cat onto a UTXO of exactly `valueSats` via a raw nLockTime=21
@@ -288,7 +288,7 @@ describe('cat UTXO size preservation at non-546 sizes (offer ord-parity + transf
     const moved = await waitForCatAtAddress(cat.inscriptionId, recipientAddr);
     expect(moved.address).toBe(recipientAddr);
     expect(moved.value).toBe(9_000);
-  }, 120_000);
+  });
 
   it('GROW rescues a SUB-DUST cat mined out-of-band (relay-rejected) back to a relay-standard 546', async () => {
     // 1) Build a nLockTime=21 tx whose output 0 is 100 sats — BELOW the dust
@@ -370,5 +370,5 @@ describe('cat UTXO size preservation at non-546 sizes (offer ord-parity + transf
     expect(rescued.address).toBe(recipientAddr);
     expect(rescued.value).toBe(546);
     expect(rescued.number).toBe(subDustCat.number);
-  }, 120_000);
+  });
 });

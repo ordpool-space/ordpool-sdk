@@ -107,7 +107,6 @@ test.beforeAll(async () => {
 
 for (const variant of VARIANTS) {
   test(`SDK returns the right address for Unisat ${variant.label}`, async () => {
-    test.setTimeout(120_000);
 
     const context = await chromium.launchPersistentContext('', {
       headless: false,
@@ -122,7 +121,7 @@ for (const variant of VARIANTS) {
     try {
       await installUnisatOfflineRoutes(context);
       let [worker] = context.serviceWorkers();
-      if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+      if (!worker) worker = await context.waitForEvent('serviceworker');
       const extensionId = worker.url().split('/')[2];
 
       const onboardPage = await context.newPage();
@@ -134,7 +133,6 @@ for (const variant of VARIANTS) {
       await harness.waitForFunction(
         () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
         undefined,
-        { timeout: 15_000 },
       );
 
       const knownPages = new Set(context.pages());

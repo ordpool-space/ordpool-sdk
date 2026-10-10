@@ -1,12 +1,37 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.dismissUnisatUpdateNag = dismissUnisatUpdateNag;
+exports.dismissUnisatNotice = dismissUnisatNotice;
 exports.onboardUnisat = onboardUnisat;
 exports.waitForUnisatInstallTabBooted = waitForUnisatInstallTabBooted;
 const test_1 = require("@playwright/test");
 const is_visible_within_1 = require("./is-visible-within");
 const select_card_1 = require("./select-card");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
+/**
+ * Probe: how long UniSat's update modal gets to appear. It shows only when
+ * upstream has shipped past the pinned build, so absence is the common answer;
+ * long enough for the server check behind it to answer on the first open.
+ */
+const UNISAT_UPDATE_NAG_PROBE_MS = 2_000;
+/**
+ * Probe: how long one best-effort dismissal step (a click, the modal or notice
+ * going away) gets. These dismissals tolerate a miss; the `tab-home` assertion
+ * is what proves onboarding finished.
+ */
+const UNISAT_DISMISS_STEP_PROBE_MS = 5_000;
+/**
+ * Probe: how long an onboarding step that only some address types or
+ * releases show (the address-type card, the compatibility notice) gets to
+ * render.
+ */
+const UNISAT_OPTIONAL_STEP_PROBE_MS = 5_000;
+/**
+ * Probe: how long the address-type Continue button gets to render. Absent
+ * when UniSat skips the picker; it renders after the mnemonic import settles,
+ * which takes longer than the other optional steps.
+ */
+const UNISAT_ADDRESS_TYPE_CONTINUE_PROBE_MS = 10_000;
 /**
  * Dismiss UniSat's "a new version is available" modal.
  *
@@ -22,10 +47,32 @@ const wallet_test_vectors_1 = require("./wallet-test-vectors");
  */
 async function dismissUnisatUpdateNag(page) {
     const modal = page.locator('.popover-container').filter({ hasText: 'Go to update' });
-    if (!(await (0, is_visible_within_1.isVisibleWithin)(modal, 2_000)))
+    if (!(await (0, is_visible_within_1.isVisibleWithin)(modal, UNISAT_UPDATE_NAG_PROBE_MS)))
         return;
-    await modal.getByText('Skip', { exact: true }).click({ timeout: 5_000 }).catch(() => undefined);
-    await modal.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => undefined);
+    await modal.getByText('Skip', { exact: true }).click({ timeout: UNISAT_DISMISS_STEP_PROBE_MS }).catch(() => undefined);
+    await modal.waitFor({ state: 'hidden', timeout: UNISAT_DISMISS_STEP_PROBE_MS }).catch(() => undefined);
+}
+/**
+ * Dismiss the compatibility notice UniSat shows for SOME address types (nested
+ * segwit and taproot) and not for others. Returns whether it was there.
+ *
+ * Best effort on purpose: the notice does not stand between the wallet and its
+ * home screen, and its checkbox is an Ant-Design control whose input refuses a
+ * direct click (`pointer-events` suppressed on the hidden box, the same quirk
+ * the wizz helper documents for its fork of this UI). The caller's `tab-home`
+ * assertion is what proves onboarding finished, so a notice that genuinely
+ * blocked still fails there, naming the screen rather than a checkbox.
+ */
+async function dismissUnisatNotice(page) {
+    const noticeCheckbox = page.getByTestId('notice-checkbox-1');
+    if (!(await (0, is_visible_within_1.isVisibleWithin)(noticeCheckbox, UNISAT_OPTIONAL_STEP_PROBE_MS)))
+        return false;
+    await noticeCheckbox.click({ timeout: UNISAT_DISMISS_STEP_PROBE_MS }).catch(() => undefined);
+    const noticeOk = page.getByTestId('notice-ok-button');
+    if (await noticeOk.isEnabled().catch(() => false)) {
+        await noticeOk.click({ timeout: UNISAT_DISMISS_STEP_PROBE_MS }).catch(() => undefined);
+    }
+    return true;
 }
 /**
  * Drive UniSat onboarding from the BIP-39 test seed to the home tab.
@@ -41,22 +88,22 @@ async function onboardUnisat(page, extensionId, opts = {}) {
     const words = opts.mnemonicWords ?? wallet_test_vectors_1.TEST_MNEMONIC_WORDS;
     await page.setViewportSize({ width: 400, height: 800 });
     await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-    await (0, test_1.expect)(page.getByTestId('welcome-title')).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(page.getByTestId('welcome-title')).toBeVisible();
     await page.getByTestId('import-wallet-button').click();
-    await (0, test_1.expect)(page.getByTestId('create-password-input')).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(page.getByTestId('create-password-input')).toBeVisible();
     await page.getByTestId('create-password-input').fill(password);
     await page.getByTestId('create-password-confirm-input').fill(password);
     await page.getByTestId('create-password-continue-button').click();
-    await (0, test_1.expect)(page.getByTestId('restore-wallet-type-option-0')).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(page.getByTestId('restore-wallet-type-option-0')).toBeVisible();
     await page.getByTestId('restore-wallet-type-option-0').click();
-    await (0, test_1.expect)(page.getByTestId('mnemonic-import-word-0')).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(page.getByTestId('mnemonic-import-word-0')).toBeVisible();
     for (let i = 0; i < words.length; i++) {
         await page.getByTestId(`mnemonic-import-word-${i}`).fill(words[i]);
     }
     await page.getByTestId('mnemonic-import-continue-button').click();
     if (opts.addressTypeIndex !== undefined) {
         const card = page.getByTestId(`address-type-card-${opts.addressTypeIndex}`);
-        if (await (0, is_visible_within_1.isVisibleWithin)(card, 5_000)) {
+        if (await (0, is_visible_within_1.isVisibleWithin)(card, UNISAT_OPTIONAL_STEP_PROBE_MS)) {
             // A swallowed click here does not fail: onboarding continues with the
             // DEFAULT card selected and the wallet ends up on the wrong address
             // type, which surfaces much later as a spec asserting a bc1p address
@@ -70,30 +117,14 @@ async function onboardUnisat(page, extensionId, opts = {}) {
         }
     }
     const addressTypeContinue = page.getByTestId('address-type-continue-button');
-    if (await (0, is_visible_within_1.isVisibleWithin)(addressTypeContinue, 10_000)) {
+    if (await (0, is_visible_within_1.isVisibleWithin)(addressTypeContinue, UNISAT_ADDRESS_TYPE_CONTINUE_PROBE_MS)) {
         await addressTypeContinue.click();
     }
-    // Unisat shows an acknowledgement notice for SOME address types (nested
-    // segwit and taproot) and none for others, so this branch runs on some runs
-    // and not others.
-    //
-    // Dismissing it is BEST EFFORT on purpose: the notice does not stand between
-    // the wallet and its home screen, and its checkbox is an Ant-Design control
-    // whose input refuses a direct click (`pointer-events` suppressed on the
-    // hidden box — the same quirk the wizz helper documents for its fork of this
-    // UI). Nothing is swallowed by doing so: the `tab-home` assertion below is
-    // what proves onboarding finished, so a notice that genuinely blocked would
-    // still fail there, naming the screen rather than a checkbox.
+    // The update modal is layered above the compatibility notice and swallows
+    // every click meant for it, so it goes first.
     await dismissUnisatUpdateNag(page);
-    const noticeCheckbox = page.getByTestId('notice-checkbox-1');
-    if (await (0, is_visible_within_1.isVisibleWithin)(noticeCheckbox, 5_000)) {
-        await noticeCheckbox.click({ timeout: 5_000 }).catch(() => undefined);
-        const noticeOk = page.getByTestId('notice-ok-button');
-        if (await noticeOk.isEnabled().catch(() => false)) {
-            await noticeOk.click({ timeout: 5_000 }).catch(() => undefined);
-        }
-    }
-    await (0, test_1.expect)(page.getByTestId('tab-home')).toBeVisible({ timeout: 30_000 });
+    await dismissUnisatNotice(page);
+    await (0, test_1.expect)(page.getByTestId('tab-home')).toBeVisible();
     await waitForUnisatInstallTabBooted(page, extensionId);
 }
 /**

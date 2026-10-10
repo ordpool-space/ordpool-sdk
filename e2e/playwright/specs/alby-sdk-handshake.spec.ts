@@ -60,7 +60,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   seedPage = await context.newPage();
@@ -82,10 +82,9 @@ test.beforeAll(async () => {
     () => typeof (globalThis as { chrome?: { runtime?: { sendMessage?: unknown } } })
       .chrome?.runtime?.sendMessage === 'function',
     undefined,
-    { timeout: 15_000, polling: 100 },
+    { polling: 100 },
   );
 
-  test.setTimeout(180_000);
   await seedAlbyAccount(seedPage, { bitcoinNetwork: 'bitcoin' });
   await shot(seedPage, '00-after-seed');
 });
@@ -95,7 +94,6 @@ test.afterAll(async () => {
 });
 
 test('albyConnector.connect via the harness page returns the BIP-86 mainnet Taproot address for the test seed', async () => {
-  test.setTimeout(180_000);
 
   // alby.enable() opens a permission popup; auto-click any Alby
   // chrome-extension popup that has a Connect / Confirm button.
@@ -105,15 +103,15 @@ test('albyConnector.connect via the harness page returns the BIP-86 mainnet Tapr
   context.on('page', async (popup) => {
     const idx = ++popupCount;
     try {
-      await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+      await popup.waitForLoadState('domcontentloaded');
       if (!popup.url().startsWith('chrome-extension://')) return;
       await shot(popup, `popup-${idx}-loaded`).catch(() => undefined);
       const btn = popup.locator('button', { hasText: /^(connect|allow|confirm|approve)$/i }).first();
-      await btn.waitFor({ state: 'visible', timeout: 15_000 });
+      await btn.waitFor({ state: 'visible' });
       // trial:true waits for full actionability (Alby's regtest error
       // toast stops intercepting the pointer) instead of a blind timeout.
-      await btn.click({ trial: true, timeout: 15_000 });
-      await btn.click({ timeout: 5_000 });
+      await btn.click({ trial: true });
+      await btn.click();
       // eslint-disable-next-line no-console
       console.log(`[alby-handshake] auto-clicked popup #${idx}`);
     } catch (e) {
@@ -127,7 +125,6 @@ test('albyConnector.connect via the harness page returns the BIP-86 mainnet Tapr
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

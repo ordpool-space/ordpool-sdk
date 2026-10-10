@@ -1,4 +1,21 @@
+/**
+ * @test-kind unit
+ * Real:   selectCard
+ * Faked:  the clock (jest fake timers), the card (click/getAttribute) (shape: @playwright/test Locator)
+ * Proves: clicks stop at the reported selection and an unreadable marker is reported as unobservable, never as selected
+ */
 import { selectCard } from './select-card';
+
+// The marker is read a fixed probe after each click; fake timers run those
+// probes without spending real time.
+beforeEach(() => jest.useFakeTimers());
+afterEach(() => jest.useRealTimers());
+
+/** Run every pending probe timer, then hand back the result. */
+async function settled<T>(result: Promise<T>): Promise<T> {
+  await jest.runAllTimersAsync();
+  return result;
+}
 
 const card = (attrs: Record<string, string | null>, selectsOnClick = 0) => {
   let clicks = 0;
@@ -12,13 +29,13 @@ const card = (attrs: Record<string, string | null>, selectsOnClick = 0) => {
 describe('selectCard', () => {
   it('stops at one click when the card reports selected', async () => {
     const c = card({ 'aria-checked': 'false' }, 1);
-    const r = await selectCard(c, { settleMs: 1 });
+    const r = await settled(selectCard(c));
     expect(r).toEqual({ clicks: 1, observable: true, selected: true });
   });
 
   it('re-clicks a swallowed selection until the card reports selected', async () => {
     const c = card({ 'aria-checked': 'false' }, 2);
-    const r = await selectCard(c, { settleMs: 1 });
+    const r = await settled(selectCard(c));
     expect(r).toEqual({ clicks: 2, observable: true, selected: true });
     expect(c.clicks).toBe(2);
   });
@@ -29,20 +46,20 @@ describe('selectCard', () => {
     // still needs the retry, so the budget is spent and `selected` stays
     // undefined rather than being claimed.
     const c = card({}, 99);
-    const r = await selectCard(c, { settleMs: 1 });
+    const r = await settled(selectCard(c));
     expect(r).toEqual({ clicks: 3, observable: false, selected: undefined });
     expect(c.clicks).toBe(3);
   });
 
   it('reads a class-based marker when no aria attribute exists', async () => {
     const c = { click: async () => undefined, getAttribute: async (n: string) => (n === 'class' ? 'card selected' : null) };
-    expect(await selectCard(c, { settleMs: 1 })).toEqual({ clicks: 1, observable: true, selected: true });
+    expect(await settled(selectCard(c))).toEqual({ clicks: 1, observable: true, selected: true });
   });
 });
 
 it('at the cap it reports what the last read said, not an assumption', async () => {
   const c = { click: async () => undefined, getAttribute: async (n: string) => (n === 'aria-checked' ? 'false' : null) };
-  expect(await selectCard(c, { settleMs: 1, maxClicks: 3 })).toEqual({ clicks: 3, observable: true, selected: false });
+  expect(await settled(selectCard(c, { maxClicks: 3 }))).toEqual({ clicks: 3, observable: true, selected: false });
 });
 
 describe('selectCard — an unreadable marker still gets the full retry', () => {
@@ -57,7 +74,7 @@ describe('selectCard — an unreadable marker still gets the full retry', () => 
       click: async () => { clicks++; },
       getAttribute: async (n: string) => (n === 'class' ? '' : null),
     };
-    const result = await selectCard(card, { settleMs: 0 });
+    const result = await settled(selectCard(card));
     expect(clicks).toBe(3);
     expect(result).toEqual({ clicks: 3, observable: false, selected: undefined });
   });
@@ -68,7 +85,7 @@ describe('selectCard — an unreadable marker still gets the full retry', () => 
       click: async () => { clicks++; },
       getAttribute: async () => null,
     };
-    const result = await selectCard(card, { settleMs: 0 });
+    const result = await settled(selectCard(card));
     expect(clicks).toBe(3);
     expect(result.observable).toBe(false);
     expect(result.selected).toBeUndefined();
@@ -81,7 +98,7 @@ describe('selectCard — an unreadable marker still gets the full retry', () => 
       getAttribute: async (n: string) =>
         n === 'aria-selected' ? (clicks >= 2 ? 'true' : 'false') : null,
     };
-    const result = await selectCard(card, { settleMs: 0 });
+    const result = await settled(selectCard(card));
     expect(result).toEqual({ clicks: 2, observable: true, selected: true });
   });
 });

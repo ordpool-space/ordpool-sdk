@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.CARD_SELECT_PROBE_MS = void 0;
 exports.selectCard = selectCard;
 const SELECTED_MARKERS = ['aria-checked', 'aria-selected', 'data-selected', 'data-active'];
 async function readSelected(card) {
@@ -19,14 +20,19 @@ async function readSelected(card) {
         return /\b(selected|active|checked)\b/.test(cls);
     return undefined;
 }
+/**
+ * Probe: how long after a click the selected marker is read. A card may carry
+ * no marker at all (UniSat), so there is no state to wait on; long enough for
+ * the re-render after the click, short enough to re-click a swallowed one.
+ */
+exports.CARD_SELECT_PROBE_MS = 400;
 async function selectCard(card, opts = {}) {
     const maxClicks = opts.maxClicks ?? 3;
-    const settleMs = opts.settleMs ?? 400;
     let selected;
     let observable = true;
     for (let clicks = 1; clicks <= maxClicks; clicks++) {
         await card.click();
-        await new Promise((r) => setTimeout(r, settleMs));
+        await new Promise((r) => setTimeout(r, exports.CARD_SELECT_PROBE_MS));
         selected = await readSelected(card);
         if (selected === undefined) {
             // No marker to read. Keep clicking anyway: selecting a card is

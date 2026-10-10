@@ -93,7 +93,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   seedPage = await context.newPage();
@@ -124,9 +124,8 @@ test.beforeAll(async () => {
     () => typeof (globalThis as { chrome?: { runtime?: { sendMessage?: unknown } } })
       .chrome?.runtime?.sendMessage === 'function',
     undefined,
-    { timeout: 15_000, polling: 100 },
+    { polling: 100 },
   );
-  test.setTimeout(240_000);
 
   await seedAlbyAccount(seedPage);
 
@@ -140,7 +139,6 @@ test.afterAll(async () => {
 });
 
 test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Taproot PSBT, broadcast via local electrs', async () => {
-  test.setTimeout(300_000);
 
   // alby.enable() opens a permission popup that a real user clicks.
   // In CI, install a page listener that auto-confirms any newly
@@ -157,7 +155,7 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
     });
     const idx = ++popupCount;
     try {
-      await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+      await popup.waitForLoadState('domcontentloaded');
       if (!popup.url().startsWith('chrome-extension://')) return;
       await shot(popup, `popup-${idx}-loaded`).catch(() => undefined);
       // Iter 97 screenshots showed a transient error toast ("API
@@ -177,12 +175,12 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
       // eslint-disable-next-line no-console
       console.log(`[alby-mint] popup #${idx} buttons: ${labels.join(' | ')}`);
       const connect = popup.locator('button', { hasText: /^(connect|allow|confirm|approve|sign)$/i }).first();
-      await connect.waitFor({ state: 'visible', timeout: 15_000 });
+      await connect.waitFor({ state: 'visible' });
       // trial:true = full actionability (visible, stable, enabled,
       // RECEIVES EVENTS): resolves the moment the toast stops
       // intercepting the pointer, instead of a blind timeout.
-      await connect.click({ trial: true, timeout: 15_000 });
-      await connect.click({ timeout: 5_000 });
+      await connect.click({ trial: true });
+      await connect.click();
       // eslint-disable-next-line no-console
       console.log(`[alby-mint] clicked Connect on popup #${idx}: ${popup.url().slice(0, 80)}`);
       await shot(popup, `popup-${idx}-after-click`).catch(() => undefined);
@@ -198,7 +196,6 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

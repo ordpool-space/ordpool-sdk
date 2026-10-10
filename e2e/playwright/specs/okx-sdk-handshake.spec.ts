@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { waitForApprovalPopup } from '../approval-popup';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
@@ -58,21 +59,12 @@ test.beforeAll(async () => {
 
   await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   // Prefer the auto-opened chrome-extension onboarding tab; fall back
   // to manual newPage if OKX didn't auto-open one.
-  let onboardPage: Page;
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    onboardPage = await context.newPage();
-  }
-  test.setTimeout(180_000);
+  const onboardPage = await extensionOnboardingPage(context, extensionId);
   const dashboard = await onboardOkx(onboardPage, extensionId);
   await shot(dashboard, '00-onboarded');
 });
@@ -82,14 +74,12 @@ test.afterAll(async () => {
 });
 
 test('okxConnector.connect via the harness page returns the BIP-86 mainnet Taproot address for the test seed', async () => {
-  test.setTimeout(180_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
 
   const knownPages = new Set(context.pages());
@@ -104,7 +94,7 @@ test('okxConnector.connect via the harness page returns the BIP-86 mainnet Tapro
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });

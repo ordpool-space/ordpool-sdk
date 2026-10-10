@@ -50,11 +50,8 @@ const EXPECTED = [
   'fail/spec-timeout-jest-arg.spec.ts  spec-timeout',
   'fail/spec-timeout-named-key.spec.ts  spec-timeout',
   'fail/spec-timeout-literal-key.spec.ts  spec-timeout',
-  'fail/spec-timeout-positional.spec.ts  spec-timeout',
   'fail/optional-wait-optional-popup.spec.ts  optional-wait',
-  // isVisibleWithin always takes a timeout, so it breaks two bullets at once
   'fail/optional-wait-is-visible-within.spec.ts  optional-wait',
-  'fail/optional-wait-is-visible-within.spec.ts  spec-timeout',
   // a swallowed wait is both a swallowed failure and a wait that hopes nothing happens
   'fail/optional-wait-catch.spec.ts  optional-wait',
   'fail/optional-wait-catch.spec.ts  swallowed-catch',
@@ -117,8 +114,9 @@ const repo = run(['--report', REPO]);
 if (repo.status !== 0) problems.push(`--report over the repo exited ${repo.status}`);
 if (repo.stdout.includes('check-test-kinds.selftest')) problems.push('a run on the repo reported files inside check-test-kinds.selftest/');
 
-// 6. POSITIONAL_TIMEOUT_ARGS matches the SDK's own helper signatures, and no
-//    exported e2e helper takes a positional timeout the table does not list.
+// 6. No exported e2e helper takes a timeout parameter: the bound is the runner
+//    config's, read through e2eTimeoutMs. POSITIONAL_TIMEOUT_ARGS, empty, still
+//    has to match the signatures of whatever it lists.
 const e2eFiles = [];
 const walkTs = (dir) => {
   for (const name of readdirSync(dir)) {
@@ -135,6 +133,11 @@ for (const file of e2eFiles) {
   for (const m of code.matchAll(/export\s+(?:async\s+)?function\s+([\w$]+)\s*(?:<[^>(]*>)?\s*\(/g)) {
     const { args } = callArgs(code, m.index + m[0].length - 1);
     signatures.set(m[1], args.map((a) => code.slice(a.start, a.end).trim().split(/[\s=:?]/)[0]));
+    // An options object declared inline carries its bound as a member.
+    for (const a of args) {
+      const member = /\b(\w*[tT]imeout\w*)\??\s*:/.exec(code.slice(a.start, a.end));
+      if (member) problems.push(`${m[1]} takes a timeout option \`${member[1]}\`; e2e helpers read the one global bound (e2eTimeoutMs) instead`);
+    }
   }
 }
 for (const [helper, index] of Object.entries(POSITIONAL_TIMEOUT_ARGS)) {
@@ -144,7 +147,7 @@ for (const [helper, index] of Object.entries(POSITIONAL_TIMEOUT_ARGS)) {
 }
 for (const [helper, params] of signatures) {
   const at = params.findIndex((p) => /timeout/i.test(p));
-  if (at !== -1 && POSITIONAL_TIMEOUT_ARGS[helper] !== at) problems.push(`${helper} takes a positional timeout at ${at}; add it to POSITIONAL_TIMEOUT_ARGS`);
+  if (at !== -1) problems.push(`${helper} takes a timeout parameter at ${at}; e2e helpers read the one global bound (e2eTimeoutMs) instead`);
 }
 
 if (problems.length) {

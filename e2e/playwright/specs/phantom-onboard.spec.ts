@@ -8,6 +8,8 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { cdpClick } from '../cdp-click';
+import { pressPhantomGetStarted } from '../onboard-phantom';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import { waitForPageShowing } from '../approval-popup';
 
 /**
@@ -57,19 +59,14 @@ test.beforeAll(async () => {
     ],
   });
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   // Phantom may auto-open its onboarding in a new tab — wait briefly
   // for any chrome-extension page (CI 26597193687 showed popup.html
   // doesn't render the Help link / actual CTA at all on the first
   // visit; the real onboarding likely lives in an auto-opened tab).
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch { /* fall back to manual newPage in test body */ }
+  onboardPage = await extensionOnboardingPage(context, extensionId);
 });
 
 test.afterAll(async () => {
@@ -77,13 +74,10 @@ test.afterAll(async () => {
 });
 
 test('restores a wallet from the BIP-39 test seed and reaches a screen mentioning send/receive/balance/account/bitcoin', async () => {
-  test.setTimeout(180_000);
 
-  let page: Page;
-  if (onboardPage) {
-    page = onboardPage;
-  } else {
-    page = await context.newPage();
+  let page: Page = onboardPage ?? await context.newPage();
+  // A blank page means Phantom opened no onboarding tab of its own.
+  if (page.url() === 'about:blank') {
     await page.setViewportSize({ width: 400, height: 800 });
     await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
   }
@@ -95,7 +89,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // so we don't hit the help-text paragraph that also contains
   // "import" / "wallet".
   const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
-  await expect(importBtn).toBeVisible({ timeout: 30_000 });
+  await expect(importBtn).toBeVisible();
   // Phantom's onClick handler ignores every Playwright API call up
   // through page.mouse.move+down+up (CI 26621231674..26650482318).
   // Drop to raw CDP Input.dispatchMouseEvent — one layer below
@@ -112,7 +106,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   //   - Connect Hardware Wallet
   // Use the same CDP click for this one.
   const recoveryBtn = page.getByRole('button', { name: /Import Recovery Phrase/i });
-  await expect(recoveryBtn).toBeVisible({ timeout: 20_000 });
+  await expect(recoveryBtn).toBeVisible();
   await cdpClick(page, recoveryBtn, 'the "Import Recovery Phrase" button');
   await shot(page, '03-recovery-phrase-picked');
   await dumpHtml(page, '03-recovery-phrase-picked');
@@ -121,7 +115,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // labels 1, 2, 3, ... (accessibility tree from CI 26664331512).
   // Use any <input> rather than restricting by type attribute.
   const mnemonicInputs = page.locator('input, textarea');
-  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
+  await expect(mnemonicInputs.first()).toBeVisible();
   const inputCount = await mnemonicInputs.count();
   if (inputCount >= 12) {
     for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
@@ -135,7 +129,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
 
   // Phantom's "Import Wallet" responds to regular Playwright clicks.
   const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
-  await expect(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
+  await expect(confirmAfterMnemonic).toBeEnabled();
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
@@ -154,14 +148,9 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   };
   // Event-driven rather than a 500ms poll, for the same reason as okx's secure
   // step: expiring before the wallet paints made the flow continue against the
-  // wrong page. Optional by design, so the catch is explicit.
-  const newPage = await waitForPageShowing({
-    context, text: /We found .* accounts? with activity/i, timeoutMs: 60_000,
-    label: 'phantom accounts-found step',
-  }).catch(() => null);
-  if (newPage) {
-    page = newPage;
-  }
+  // wrong page. The search covers the current page too, so a result rendered
+  // in place resolves to it.
+  page = await waitForPageShowing({ context, text: /We found .* accounts? with activity/i });
 
   // Phantom "Import Accounts — We found N accounts with activity"
   // result screen. Continue is rendered as a styled div that's
@@ -182,7 +171,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
     if ((candidate as HTMLElement).hasAttribute('disabled')) return false;
     if (parseFloat(style.opacity) < 0.7) return false;
     return true;
-  }, undefined, { timeout: 45_000, polling: 500 });
+  }, undefined, { polling: 500 });
   const importAccountsContinue = page.getByText('Continue', { exact: true }).first();
   const newCdp = await page.context().newCDPSession(page);
   await cdpClick(page, importAccountsContinue, 'the import-accounts Continue button');
@@ -192,26 +181,16 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // CI 26713625161 trace revealed: after Continue on Import Accounts
   // Phantom opens YET ANOTHER page (page #3) for "Create a password".
   // Switch page reference to whichever now shows that text.
-  const createPwDeadline = Date.now() + 60_000;
-  let pwPage: Page | null = null;
-  while (Date.now() < createPwDeadline) {
-    for (const p of context.pages()) {
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/Create a password/i.test(text)) { pwPage = p; break; }
-    }
-    if (pwPage) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (pwPage) {
-    page = pwPage;
-  }
+  // The search covers the current page too, so a screen rendered in place
+  // resolves to it.
+  page = await waitForPageShowing({ context, text: /Create a password/i });
 
   // Phantom "Create a password" screen:
   //  - Password / Confirm Password inputs
   //  - "I agree to the Terms of Service" checkbox
   //  - Continue button (disabled until form valid)
   const pwInputs = page.locator('input[type="password"]');
-  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
+  await expect(pwInputs.first()).toBeVisible();
   await pwInputs.nth(0).fill(TEST_PASSWORD);
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   await shot(page, '06-password-typed');
@@ -222,14 +201,14 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // reports "state did not change". Fire a native .click() via JS —
   // React's onChange picks it up and toggles aria-checked.
   await page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"]')
-    .first().waitFor({ state: 'attached', timeout: 10_000 });
+    .first().waitFor({ state: 'attached' });
   await page.evaluate(() => {
     const cb = document.querySelector('[data-testid="onboarding-form-terms-of-service-checkbox"]') as HTMLInputElement | null;
     cb?.click();
   });
   await expect(
     page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"][aria-checked="true"]'),
-  ).toBeAttached({ timeout: 5_000 });
+  ).toBeAttached();
 
   // Wait for Continue to be enabled, then CDP-click.
   await page.waitForFunction(() => {
@@ -240,7 +219,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
     if ((candidate as HTMLElement).hasAttribute('disabled')) return false;
     if (parseFloat(getComputedStyle(candidate).opacity) < 0.7) return false;
     return true;
-  }, undefined, { timeout: 30_000, polling: 500 });
+  }, undefined, { polling: 500 });
   const pwContinue = page.getByText('Continue', { exact: true }).first();
   await cdpClick(page, pwContinue, 'the password Continue button');
   await shot(page, '07-after-password-submit');
@@ -258,38 +237,9 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
       || t.includes('send')
       || t.includes('receive')
       || t.includes('balance');
-  }, undefined, { timeout: 60_000, polling: 500 });
-  // Click "Get Started" — Phantom's onboarding completion gate. Try a
-  // pointerdown+pointerup CDP sequence (some Phantom buttons listen
-  // for pointer events, not click).
-  const gsLocator = page.getByText('Get Started', { exact: true }).first();
-  if (await gsLocator.isVisible({ timeout: 5_000 }).catch(() => false)) {
-    await page.bringToFront();
-    const gsBox = await gsLocator.boundingBox();
-    if (gsBox) {
-      const cdp = await page.context().newCDPSession(page);
-      const x = gsBox.x + gsBox.width / 2; const y = gsBox.y + gsBox.height / 2;
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-      // Also pump pointer events via JS (covers pointer-event listeners).
-      await page.evaluate(({ x, y }) => {
-        const el = document.elementFromPoint(x, y);
-        if (el) {
-          const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, pointerType: 'mouse', pointerId: 1, isPrimary: true } as PointerEventInit;
-          el.dispatchEvent(new PointerEvent('pointerdown', opts));
-          el.dispatchEvent(new PointerEvent('pointerup', opts));
-          el.dispatchEvent(new MouseEvent('mousedown', opts));
-          el.dispatchEvent(new MouseEvent('mouseup', opts));
-          el.dispatchEvent(new MouseEvent('click', opts));
-        }
-      }, { x, y });
-    }
-  }
-  await page.waitForFunction(
-    () => !/You're good to go/i.test(document.body.innerText || ''),
-    undefined, { timeout: 10_000, polling: 300 },
-  ).catch(() => undefined);
+  }, undefined, { polling: 500 });
+  // Phantom's onboarding completion gate.
+  await pressPhantomGetStarted(page);
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');
 

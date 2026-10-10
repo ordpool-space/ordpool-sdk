@@ -14,7 +14,7 @@ import { Locator, Page } from '@playwright/test';
  *
  * `boundingBox()` returns null for an element that is not laid out, so the
  * click was SILENTLY SKIPPED and the next `waitForFunction` then burned its
- * full ceiling waiting for a screen that could never arrive. The failure
+ * whole bound waiting for a screen that could never arrive. The failure
  * surfaced a minute later against an unrelated condition, and in a suite it
  * took sibling specs down with it through a failed `beforeAll`, none of which
  * pointed at the click that never happened.
@@ -22,7 +22,7 @@ import { Locator, Page } from '@playwright/test';
  * Here the step either happens or fails naming the control.
  */
 export async function cdpClick(page: Page, locator: Locator, what: string): Promise<void> {
-  await locator.waitFor({ state: 'visible', timeout: 15_000 });
+  await locator.waitFor({ state: 'visible' });
   const box = await locator.boundingBox();
   if (box === null) {
     throw new Error(`cdpClick: ${what} is visible but has no layout box, so the click cannot be dispatched`);

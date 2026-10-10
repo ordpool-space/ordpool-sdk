@@ -1,3 +1,5 @@
+import { clickUntilEffectWithProbe } from './click-until-effect-core';
+
 /**
  * Click a control whose enabled state is computed from data that settles after
  * first paint, and confirm the effect actually happened.
@@ -44,8 +46,6 @@
 export interface ClickUntilEffectOptions {
   /** Total clicks allowed, including the first. */
   maxClicks?: number;
-  /** How long one click gets to produce the effect. */
-  settleMs?: number;
   /** Name used in the failure message. Defaults to the control's selector. */
   label?: string;
   /**
@@ -70,15 +70,26 @@ export interface ClickableControl {
   isEnabled(): Promise<boolean>;
 }
 
-/** The part of a `Locator` used to observe the effect. */
+/**
+ * The part of a `Locator` used to observe the effect. Called with `timeout`
+ * for the probe after a click, and without it once the control has reacted,
+ * when the effect gets the runner config's own bound.
+ */
 export interface EffectLocator {
-  waitFor(options: { state: 'visible'; timeout: number }): Promise<void>;
+  waitFor(options: { state: 'visible'; timeout?: number }): Promise<void>;
 }
 
 export interface ClickUntilEffectResult {
   /** Clicks actually sent. More than 1 means a click was swallowed. */
   clicks: number;
 }
+
+/**
+ * Probe: how long one click gets to produce the effect before the control is
+ * inspected for a swallowed click. Long enough for a render after a click on a
+ * loaded CI runner, short enough to re-click within the test.
+ */
+export const EFFECT_AFTER_CLICK_PROBE_MS = 5_000;
 
 /**
  * Click `control` until `effect` is visible. Returns how many clicks it took,
@@ -89,56 +100,5 @@ export async function clickUntilEffect(
   effect: EffectLocator,
   options: ClickUntilEffectOptions = {},
 ): Promise<ClickUntilEffectResult> {
-  const maxClicks = options.maxClicks ?? 3;
-  const settleMs = options.settleMs ?? 5_000;
-  const label = options.label ?? String(control);
-
-  let clicks = 0;
-  let lastState = 'not observed';
-
-  while (clicks < maxClicks) {
-    await control.click();
-    clicks++;
-
-    try {
-      await effect.waitFor({ state: 'visible', timeout: settleMs });
-      return { clicks };
-    } catch {
-      // The effect has not appeared yet. Whether that means the click was
-      // swallowed or merely that the work is slow is answered by the control.
-      let preClick: boolean;
-      if (options.stillPreClick) {
-        preClick = await options.stillPreClick().catch(() => false);
-        lastState = `stillPreClick=${preClick}`;
-      } else {
-        const visible = await control.isVisible().catch(() => false);
-        const enabled = visible ? await control.isEnabled().catch(() => false) : false;
-        preClick = visible && enabled;
-        lastState = `visible=${visible} enabled=${enabled}`;
-      }
-
-      if (preClick) continue;
-
-      // The control reacted, so the click registered. Give the effect the rest
-      // of the budget rather than sending a second one, and say which of the two
-      // hypotheses held if it still never arrives.
-      try {
-        await effect.waitFor({ state: 'visible', timeout: settleMs });
-        return { clicks };
-      } catch {
-        throw new Error(
-          `clickUntilEffect: ${label} reacted to the click (${lastState}) and the effect never became ` +
-            'visible. The click registered; the effect itself never arrived, so the defect is downstream ' +
-            'of the control rather than a swallowed click.',
-        );
-      }
-    }
-  }
-
-  throw new Error(
-    `clickUntilEffect: ${label} was clicked ${clicks} time(s) and the effect never became visible ` +
-      `(control after the last click: ${lastState}). ` +
-      'A control still in its pre-click state after a click is the swallowed-click signature; ' +
-      'one that reacted means the click registered and the effect itself never arrived.',
-  );
+  return clickUntilEffectWithProbe(control, effect, options, EFFECT_AFTER_CLICK_PROBE_MS);
 }

@@ -95,9 +95,9 @@ function offsetInsideFirstRange(ranges: ReadonlyArray<readonly [number, number]>
 
 describe('inscribe onto a chosen sat → parity with `ord wallet inscribe --satpoint` / `--sat`', () => {
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(ORD_WALLET);
-  }, 240_000);
+  });
 
   it.each([1_000, 50_000])('offset %i: padding and commit outputs match ord, and ord indexes the SDK inscription on that sat', async (offset) => {
     // ---- ord ----
@@ -193,7 +193,7 @@ describe('inscribe onto a chosen sat → parity with `ord wallet inscribe --satp
     await waitForElectrsSync(tip);
     await waitForOrdStockSync(tip);
     expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wanted);
-  }, 240_000);
+  });
 });
 
 describe('inscribe onto a sat in a separate UTXO (satSource)', () => {
@@ -240,9 +240,9 @@ describe('inscribe onto a sat in a separate UTXO (satSource)', () => {
   const SOURCE_WALLET = `${ORD_WALLET}-source`;
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(SOURCE_WALLET);
-  }, 240_000);
+  });
 
   it('offset 5000 in a 20000-sat UTXO: same commit output as ord, padding and remainder back to the owner, inscription on that sat', async () => {
     // ---- ord: a 20000-sat UTXO in its wallet, inscribed at offset 5000 ----
@@ -275,7 +275,7 @@ describe('inscribe onto a sat in a separate UTXO (satSource)', () => {
 
     await signAndBroadcast(built);
     expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
-  }, 300_000);
+  });
 
   it('a remainder below dust goes into the inscription\'s postage instead of the miner', async () => {
     const f = await fundUninscribed();
@@ -295,7 +295,7 @@ describe('inscribe onto a sat in a separate UTXO (satSource)', () => {
     const insc = await waitForOrdStockInscription(`${built.revealTxid}i0`);
     expect(insc.sat).toBe(wantedSat);
     expect(insc.value).toBe(546 + 100);
-  }, 300_000);
+  });
 
   it('a satSource smaller than the commit output: the funding tops it up, and the inscription still lands on its first sat', async () => {
     const source = await ownerUtxo(600);
@@ -306,7 +306,7 @@ describe('inscribe onto a sat in a separate UTXO (satSource)', () => {
       .toBe(built.fees.commitOutputValueSats - 600 + built.fees.commitFeeSats);
     await signAndBroadcast(built);
     expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
-  }, 300_000);
+  });
 });
 
 describe('inscribe onto a sat less than a dust limit into its UTXO (paddingUtxo)', () => {
@@ -316,11 +316,11 @@ describe('inscribe onto a sat less than a dust limit into its UTXO (paddingUtxo)
   const owner = btc.p2tr(ownerXonly, undefined, scureRegtest, true);
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(PAD_WALLET);
     // A small second cardinal UTXO, which ord pads with.
     await sendFromCleanFunderCoin({ [ordStockWalletReceive(PAD_WALLET)]: '0.00001000' });
-  }, 240_000);
+  });
 
   /** A second payment UTXO at the funding address, for the SDK to pad with. */
   async function paddingUtxoAt(address: string, sats: number) {
@@ -382,7 +382,7 @@ describe('inscribe onto a sat less than a dust limit into its UTXO (paddingUtxo)
     await waitForElectrsSync(tip);
     await waitForOrdStockSync(tip);
     expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
-  }, 300_000);
+  });
 
   it('offset 100 in a satSource: padding input first, the padding back to the sat\'s owner, inscription on that sat', async () => {
     const sourceTxid = await sendFromCleanFunderCoin({ [owner.address!]: '0.00020000' });
@@ -423,5 +423,5 @@ describe('inscribe onto a sat less than a dust limit into its UTXO (paddingUtxo)
     await waitForElectrsSync(tip);
     await waitForOrdStockSync(tip);
     expect((await waitForOrdStockInscription(`${built.revealTxid}i0`)).sat).toBe(wantedSat);
-  }, 300_000);
+  });
 });

@@ -57,15 +57,10 @@ async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
-    // The sign-message approval renders a different control from Unisat's PSBT
-    // popups, which carry sign-psbt-button; a BIP-322 message approval has no
-    // such testid, so this anchors on the same text the click below uses.
     isApproval: approvalGate({
       url: /notification\.html#\/approval/,
       control: (p) => p.getByText(/^(Sign|Confirm|Approve)$/).first(),
-      timeoutMs: 90_000,
-    }),
+      }),
   });
   await shot(approval, '02a-sign-message-approval');
   // Unisat renders actions as styled divs, not <button>. Match by text.
@@ -83,7 +78,7 @@ test.beforeAll(async () => {
   await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -97,14 +92,12 @@ test.afterAll(async () => {
 });
 
 test('sign a BIP-322 message via Unisat (Taproot mode): real extension signs, SDK verifies', async () => {
-  test.setTimeout(180_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

@@ -55,7 +55,6 @@ describe('waitForApprovalPopup liveness guard', () => {
       context: stubContext([live]) as never,
       knownPages: new Set(),
       isApproval: approveAnything,
-      timeoutMs: 1_000,
     });
     expect(page).toBe(live as never);
   });
@@ -68,7 +67,6 @@ describe('waitForApprovalPopup liveness guard', () => {
       context: stubContext([dyingPage(), live]) as never,
       knownPages: new Set(),
       isApproval: approveAnything,
-      timeoutMs: 1_000,
     });
     expect(page).toBe(live as never);
   });
@@ -79,19 +77,26 @@ describe('waitForApprovalPopup liveness guard', () => {
       context: stubContext([closedPage(), live]) as never,
       knownPages: new Set(),
       isApproval: approveAnything,
-      timeoutMs: 1_000,
     });
     expect(page).toBe(live as never);
   });
 
-  it('times out rather than returning a dying page when there is no live one', async () => {
-    // Fails toward "no approval appeared", which a caller can act on, instead
-    // of toward a page that dies mid-click with a confusing message.
-    await expect(waitForApprovalPopup({
-      context: stubContext([dyingPage()]) as never,
+  it('waits past a dying page for a live one that opens later, rather than returning the dying one', async () => {
+    // Without a live page there is nothing to return, and the search keeps
+    // waiting under the test timeout; with one arriving later, that one wins.
+    const listeners: ((p: unknown) => void)[] = [];
+    const late = livePage('opens after the dying one');
+    const context = {
+      pages: () => [dyingPage()],
+      on: (_event: string, fn: (p: unknown) => void) => { listeners.push(fn); },
+      off: () => undefined,
+    };
+    const found = waitForApprovalPopup({
+      context: context as never,
       knownPages: new Set(),
       isApproval: approveAnything,
-      timeoutMs: 300,
-    })).rejects.toThrow(/did not appear/);
+    });
+    listeners.forEach((fn) => fn(late));
+    expect(await found).toBe(late as never);
   });
 });

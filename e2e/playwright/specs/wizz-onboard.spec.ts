@@ -66,7 +66,7 @@ test.beforeAll(async () => {
   await context.route('**/configs.wizz.cash/**', route => route.abort());
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 });
 
@@ -75,17 +75,12 @@ test.afterAll(async () => {
 });
 
 test('restores a wallet from the BIP-39 test seed and reaches a screen mentioning send/receive/balance/account/bitcoin', async () => {
-  // Wizz's onboard is slow (multi-step + an address-derivation scan
-  // on Step 3). The default 60s test timeout (playwright.config.ts)
-  // is not enough to traverse every phase AND wait for the scan.
-  test.setTimeout(180_000);
-
   const page = await context.newPage();
   await page.setViewportSize({ width: 400, height: 800 });
   await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
 
   // ─── Phase 1: welcome screen ───
-  await expect(page.getByText('I already have a wallet', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('I already have a wallet', { exact: true })).toBeVisible();
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
@@ -98,7 +93,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   //              password-before-mnemonic order; verified via CI
   //              26413717806 screenshot 02-after-import-click.png) ───
   const pwInputs = page.locator('input[type="password"]');
-  await expect(pwInputs.first()).toBeVisible({ timeout: 15_000 });
+  await expect(pwInputs.first()).toBeVisible();
   // Two fields: Password + Confirm Password. Fill both with the
   // same value so the Continue button enables.
   const pwCount = await pwInputs.count();
@@ -108,7 +103,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await shot(page, '03-password-typed');
 
   const pwContinue = page.getByRole('button', { name: /^continue$/i }).first();
-  await expect(pwContinue).toBeEnabled({ timeout: 10_000 });
+  await expect(pwContinue).toBeEnabled();
   await pwContinue.click();
   await shot(page, '04-after-password-submit');
   await dumpHtml(page, '04-after-password-submit');
@@ -120,7 +115,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // the text node isn't the click target. Use force:true to let
   // the click bubble to whichever ancestor has the onClick handler.
   const sourceWizz = page.getByText('Wizz Wallet', { exact: true }).first();
-  await expect(sourceWizz).toBeVisible({ timeout: 10_000 });
+  await expect(sourceWizz).toBeVisible();
   await sourceWizz.click({ force: true });
   await shot(page, '05-source-wallet-picked');
   await dumpHtml(page, '05-source-wallet-picked');
@@ -128,7 +123,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // ─── Phase 5: mnemonic entry ───
   // Probably 12 per-word inputs (Unisat-style grid).
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
+  await expect(mnemonicInputs.first()).toBeVisible();
   const mnemonicCount = await mnemonicInputs.count();
   if (mnemonicCount >= 12) {
     for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
@@ -136,7 +131,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
     }
   } else {
     const textarea = page.locator('textarea').first();
-    if (await textarea.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    if (await textarea.isVisible().catch(() => false)) {
       await textarea.fill(TEST_MNEMONIC);
     } else {
       throw new Error(`Mnemonic input shape not recognized — got ${mnemonicCount} input(s), no textarea`);
@@ -145,7 +140,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await shot(page, '06-mnemonic-filled');
 
   const mnemonicContinue = page.getByRole('button', { name: /^continue$/i }).first();
-  await expect(mnemonicContinue).toBeEnabled({ timeout: 10_000 });
+  await expect(mnemonicContinue).toBeEnabled();
   await mnemonicContinue.click();
   await shot(page, '07-after-mnemonic-continue');
   await dumpHtml(page, '07-after-mnemonic-continue');
@@ -162,7 +157,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // this click the wallet ends up at a different derivation, which
   // changes every downstream address. Hard-assert visibility.
   const nativeSegwitRow = page.getByText('Native Segwit (P2WPKH)', { exact: true }).first();
-  await expect(nativeSegwitRow).toBeVisible({ timeout: 10_000 });
+  await expect(nativeSegwitRow).toBeVisible();
   await nativeSegwitRow.click({ force: true });
   await shot(page, '08b-native-segwit-picked');
 
@@ -181,7 +176,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // view before clicking. One click should be enough; the wallet
   // populates addresses synchronously after the mnemonic step.
   const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-  await expect(continueBtn).toBeVisible({ timeout: 10_000 });
+  await expect(continueBtn).toBeVisible();
   await continueBtn.scrollIntoViewIfNeeded();
   await shot(page, '08c-before-continue-click');
   // The address-type row above re-renders on selection, so this button can be
@@ -201,15 +196,15 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // three must be ticked before the modal's OK button enables.
   // CI 26435485136 confirmed via screenshot test-failed-2.png +
   // DOM dump 08e-after-continue-html (3 .ant-checkbox-input + OK).
-  await expect(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('Security Tips', { exact: true })).toBeVisible();
   await shot(page, '08e-security-tips-modal');
   // Click the LABEL not the hidden input — Ant-Design's input has
   // pointer-events suppressed and `.check()` no longer flips state in
   // recent Wizz builds (iter 49 regression). The .ant-checkbox-wrapper
   // <label> is the visible click target.
   const checkboxes = page.locator('label.ant-checkbox-wrapper');
-  await expect(checkboxes).toHaveCount(3, { timeout: 5_000 });
-  await expect(checkboxes.first()).toBeVisible({ timeout: 5_000 });
+  await expect(checkboxes).toHaveCount(3);
+  await expect(checkboxes.first()).toBeVisible();
   const cbCount = await checkboxes.count();
   for (let i = 0; i < cbCount; i++) {
     await checkboxes.nth(i).click();
@@ -217,18 +212,18 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await shot(page, '08f-checkboxes-checked');
 
   const okBtn = page.getByRole('button', { name: /^ok$/i });
-  await expect(okBtn).toBeEnabled({ timeout: 5_000 });
+  await expect(okBtn).toBeEnabled();
   await okBtn.click();
   await shot(page, '08g-after-ok-click');
   // Wait for the modal to actually unmount before the dashboard wait.
-  await expect(page.getByText('Security Tips', { exact: true })).toBeHidden({ timeout: 10_000 });
+  await expect(page.getByText('Security Tips', { exact: true })).toBeHidden();
   await dumpHtml(page, '08h-after-ok-html');
 
   // ─── Phase 7: dashboard ───
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('receive') || t.includes('send') || t.includes('balance') || t.includes('account');
-  }, undefined, { timeout: 60_000, polling: 500 });
+  }, undefined, { polling: 500 });
   await shot(page, '09-dashboard');
 
   // eslint-disable-next-line no-console

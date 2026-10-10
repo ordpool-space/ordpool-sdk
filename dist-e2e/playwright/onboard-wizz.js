@@ -17,22 +17,22 @@ async function onboardWizz(page, extensionId, opts = {}) {
     const addressTypeRowLabel = opts.addressTypeRowLabel ?? 'Native Segwit (P2WPKH)';
     await page.setViewportSize({ width: 400, height: 800 });
     await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-    await (0, test_1.expect)(page.getByText('I already have a wallet', { exact: true })).toBeVisible({ timeout: 30_000 });
+    await (0, test_1.expect)(page.getByText('I already have a wallet', { exact: true })).toBeVisible();
     await page.getByText('I already have a wallet', { exact: true }).click();
     const pwInputs = page.locator('input[type="password"]');
-    await (0, test_1.expect)(pwInputs.first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(pwInputs.first()).toBeVisible();
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++)
         await pwInputs.nth(i).fill(password);
     await (0, click_until_effect_1.clickUntilEffect)(page.getByRole('button', { name: /^continue$/i }).first(), page.getByText('Wizz Wallet', { exact: true }).first(), { label: 'wizz onboarding: continue after password' });
-    await (0, test_1.expect)(page.getByText('Wizz Wallet', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(page.getByText('Wizz Wallet', { exact: true }).first()).toBeVisible();
     await page.getByText('Wizz Wallet', { exact: true }).first().click({ force: true });
     const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
-    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible();
     for (let i = 0; i < words.length; i++)
         await mnemonicInputs.nth(i).fill(words[i]);
     await (0, click_until_effect_1.clickUntilEffect)(page.getByRole('button', { name: /^continue$/i }).first(), page.getByText(addressTypeRowLabel, { exact: true }).first(), { label: 'wizz onboarding: continue after mnemonic' });
-    await (0, test_1.expect)(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible();
     await page.getByText(addressTypeRowLabel, { exact: true }).first().click({ force: true });
     const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
     await continueBtn.scrollIntoViewIfNeeded();
@@ -42,9 +42,9 @@ async function onboardWizz(page, extensionId, opts = {}) {
     await (0, click_until_effect_1.clickUntilEffect)(continueBtn, page.getByText('Security Tips', { exact: true }), {
         label: 'wizz onboarding: continue after address type',
     });
-    await (0, test_1.expect)(page.getByText('Security Tips', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(page.getByText('Security Tips', { exact: true })).toBeVisible();
     const checkboxes = page.locator('label.ant-checkbox-wrapper');
-    await (0, test_1.expect)(checkboxes).toHaveCount(3, { timeout: 10_000 });
+    await (0, test_1.expect)(checkboxes).toHaveCount(3);
     const cbCount = await checkboxes.count();
     for (let i = 0; i < cbCount; i++)
         await checkboxes.nth(i).click();
@@ -52,6 +52,6 @@ async function onboardWizz(page, extensionId, opts = {}) {
     await page.waitForFunction(() => {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes('receive') || t.includes('send') || t.includes('balance');
-    }, undefined, { timeout: 60_000, polling: 500 });
+    }, undefined, { polling: 500 });
 }
 //# sourceMappingURL=onboard-wizz.js.map

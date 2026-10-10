@@ -105,15 +105,10 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 120_000,
-    // Anchored on the Sign button. The NAME form is measured, not inferred:
-    // getByRole with a regex counts 0 against this control, the plain string
-    // counts 1.
     isApproval: approvalGate({
       url: /notification\.html#\/approval/,
       control: (p) => p.getByRole('button', { name: 'Sign' }),
-      timeoutMs: 120_000,
-    }),
+      }),
   });
   await shot(approval, tag);
   await approval.waitForFunction(() => {
@@ -129,7 +124,7 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
     if (parseFloat(style.opacity) < 0.7) return null;
     candidate.click();
     return true;
-  }, undefined, { timeout: 60_000, polling: 250 });
+  }, undefined, { polling: 250 });
   await shot(approval, `${tag}-after-sign-click`).catch(() => undefined);
   knownPages.add(approval);
 }
@@ -168,7 +163,7 @@ test.beforeAll(async () => {
   await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -188,7 +183,6 @@ test.afterAll(async () => {
 // bcrt1p taproot address, so `formatOptionsToSignInputs` matches every
 // toSignInput.address against the one active account address and signs.
 test('inscribe a parent then a child via Wizz: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
-  test.setTimeout(600_000);
 
   const harness = await context.newPage();
   // DIAGNOSTIC: surface the harness page's console (the inscribe-child op
@@ -200,7 +194,6 @@ test('inscribe a parent then a child via Wizz: wallet signs the Taproot reveal p
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
 
   const connectKnownPages = new Set(context.pages());

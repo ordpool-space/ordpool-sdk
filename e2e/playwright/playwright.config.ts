@@ -1,5 +1,19 @@
 import { defineConfig } from '@playwright/test';
 import * as path from 'node:path';
+import { E2E_TIMEOUT_ENV } from '../e2e-timeout';
+
+/**
+ * The one timeout of this config (TESTING.md). It bounds the test, every
+ * assertion and, with `actionTimeout` / `navigationTimeout` left unset, every
+ * action and navigation, so any single wait may take as long as the test. The
+ * SDK's polling helpers read the same value through ORDPOOL_E2E_TIMEOUT_MS.
+ *
+ * Sized for the slowest wallet roundtrip (onboard, connect, sign, mine and wait
+ * for electrs and ord). A spec that needs longer is a defect in the app or the
+ * harness, fixed there, never a per-spec bound.
+ */
+const TIMEOUT_MS = 600_000;
+process.env[E2E_TIMEOUT_ENV] = String(TIMEOUT_MS);
 
 /**
  * Playwright config for the Xverse-extension E2E suite.
@@ -20,17 +34,15 @@ export default defineConfig({
   // a seed path moved under a consumer. A cell that needs a retry is an open
   // question, and the lane should say so on the first run.
   retries: 0,
-  timeout: 60_000,
+  timeout: TIMEOUT_MS,
   expect: {
-    timeout: 20_000,
+    timeout: TIMEOUT_MS,
   },
   use: {
     headless: false,              // chromium extensions require headed mode
     screenshot: 'on',             // every test, including passing ones, so CI artifacts show progress
     video: 'retain-on-failure',
     trace: 'retain-on-failure',
-    actionTimeout: 15_000,
-    navigationTimeout: 20_000,
   },
   outputDir: path.resolve(__dirname, '../../test-results'),
   reporter: [
@@ -48,6 +60,6 @@ export default defineConfig({
     cwd: __dirname,
     port: 4500,
     reuseExistingServer: !process.env.CI,
-    timeout: 15_000,
+    timeout: TIMEOUT_MS,
   },
 });

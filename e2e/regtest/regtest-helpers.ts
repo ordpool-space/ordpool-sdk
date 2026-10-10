@@ -6,6 +6,7 @@
 
 import { execFile, execFileSync } from 'node:child_process';
 
+import { e2eTimeoutMs } from '../e2e-timeout';
 import type { RpcAddressInfo, RpcRawTransaction, RpcUnspent } from './rpc-types';
 import { randomBytes } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -142,7 +143,8 @@ export function mineBlockWithRawTxs(rawTxHexes: string[]): number {
 }
 
 /** Wait until electrs has indexed up to (at least) the given height. */
-export async function waitForElectrsSync(targetHeight: number, timeoutMs = 15_000): Promise<void> {
+export async function waitForElectrsSync(targetHeight: number): Promise<void> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const tipText = await fetch(`${ELECTRS_URL}/blocks/tip/height`).then(r => r.text()).catch(() => '0');
@@ -170,8 +172,8 @@ export async function waitForUtxoMatching(
   address: string,
   predicate: (u: ElectrsUtxo) => boolean,
   description: string,
-  timeoutMs = 15_000,
 ): Promise<ElectrsUtxo> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   let lastUtxos: ElectrsUtxo[] = [];
   while (Date.now() < deadline) {
@@ -189,13 +191,11 @@ export async function waitForUtxoMatching(
 export async function waitForUtxoAt(
   address: string,
   expectedSats: number,
-  timeoutMs = 15_000,
 ): Promise<ElectrsUtxo> {
   return waitForUtxoMatching(
     address,
     u => u.value === expectedSats,
     `value=${expectedSats}`,
-    timeoutMs,
   );
 }
 
@@ -211,13 +211,11 @@ export async function waitForUtxoAt(
 export async function waitForAddressTxIndexed(
   address: string,
   expectedTxid: string,
-  timeoutMs = 15_000,
 ): Promise<void> {
   await waitForUtxoMatching(
     address,
     u => u.txid === expectedTxid,
     `txid=${expectedTxid}`,
-    timeoutMs,
   );
 }
 
@@ -389,8 +387,8 @@ export interface EsploraTx {
  */
 export async function waitForTxConfirmed(
   txid: string,
-  timeoutMs = 15_000,
 ): Promise<EsploraTx> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   let lastSeen: EsploraTx | undefined;
   while (Date.now() < deadline) {
@@ -457,7 +455,8 @@ export function catInscriptionId(mintTxid: string): string {
  * file has no healthcheck because the slim runtime image lacks wget/curl,
  * so the test bootstrap polls here.
  */
-export async function waitForOrdReady(timeoutMs = 60_000): Promise<void> {
+export async function waitForOrdReady(): Promise<void> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const ok = await fetch(`${ORD_URL}/status`).then(r => r.ok).catch(() => false);
@@ -473,7 +472,8 @@ export async function waitForOrdReady(timeoutMs = 60_000): Promise<void> {
  * via ZMQ or polling and runs its CAT-21 filter on every tx. Without
  * this gate the cat-state assertions race the indexer.
  */
-export async function waitForOrdSync(targetHeight: number, timeoutMs = 30_000): Promise<void> {
+export async function waitForOrdSync(targetHeight: number): Promise<void> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const status = await fetch(`${ORD_URL}/status`, {
@@ -536,8 +536,8 @@ export async function getOrdInscription(inscriptionId: string): Promise<OrdInscr
 export async function waitForCatAtAddress(
   inscriptionId: string,
   expectedAddress: string,
-  timeoutMs = 30_000,
 ): Promise<OrdInscription> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   let lastSeen: OrdInscription | undefined;
   while (Date.now() < deadline) {
@@ -686,8 +686,8 @@ export function ordWalletSend(
 export async function waitForOrdWalletCardinal(
   walletName: string,
   minSats: number,
-  timeoutMs = 60_000,
 ): Promise<void> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   let lastSeen = '<never read>';
   while (Date.now() < deadline) {
@@ -879,7 +879,8 @@ export function inscriptionId(txid: string, index = 0): string {
  * Poll stock ord's HTTP server until it answers `/status` with a
  * 2xx. Same warm-up rationale as `waitForOrdReady`.
  */
-export async function waitForOrdStockReady(timeoutMs = 60_000): Promise<void> {
+export async function waitForOrdStockReady(): Promise<void> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const ok = await fetch(`${ORD_STOCK_URL}/status`).then(r => r.ok).catch(() => false);
@@ -894,7 +895,8 @@ export async function waitForOrdStockReady(timeoutMs = 60_000): Promise<void> {
  * ord's indexer lags bitcoind by a few hundred ms; without this gate
  * the inscription-lookup assertions race the indexer.
  */
-export async function waitForOrdStockSync(targetHeight: number, timeoutMs = 30_000): Promise<void> {
+export async function waitForOrdStockSync(targetHeight: number): Promise<void> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const status = await fetch(`${ORD_STOCK_URL}/status`, {
@@ -1508,14 +1510,36 @@ export async function getStockOrdContent(
 }
 
 /**
+ * Poll stock ord until the inscription's satpoint becomes `expectedSatpoint`,
+ * the `<txid>:<vout>:<offset>` it moved to. Stops at the global bound.
+ */
+export async function waitForOrdStockSatpoint(
+  id: string,
+  expectedSatpoint: string,
+): Promise<StockOrdInscription> {
+  const timeoutMs = e2eTimeoutMs();
+  const deadline = Date.now() + timeoutMs;
+  let last = '<never read>';
+  while (Date.now() < deadline) {
+    const insc = await getStockOrdInscription(id).catch(() => undefined);
+    if (insc) {
+      last = insc.satpoint ?? '';
+      if (insc.satpoint === expectedSatpoint) return insc;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  throw new Error(`stock ord: ${id} still at ${last} after ${timeoutMs}ms, expected ${expectedSatpoint}`);
+}
+
+/**
  * Poll until stock ord serves the inscription. ord indexes inscriptions
  * one or two blocks after the reveal lands; this helper hides the
  * polling boilerplate.
  */
 export async function waitForOrdStockInscription(
   id: string,
-  timeoutMs = 30_000,
 ): Promise<StockOrdInscription> {
+  const timeoutMs = e2eTimeoutMs();
   const deadline = Date.now() + timeoutMs;
   let lastError: unknown;
   while (Date.now() < deadline) {

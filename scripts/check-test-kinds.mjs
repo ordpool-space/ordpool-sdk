@@ -51,26 +51,15 @@ export const REAL_HOSTS = [
 
 /**
  * SDK wait helpers that take their bound as a positional argument, with the
- * argument's index. A spec passing anything there sets a timeout. The
- * selftest checks this table against the helpers' signatures in `e2e/`.
+ * argument's index. A spec passing anything there sets a timeout.
+ *
+ * Empty: no `ordpool-sdk/e2e` helper takes a timeout. Playwright-side waits
+ * run under the runner config's timeouts, and the polling helpers stop at the
+ * one global bound (`e2eTimeoutMs`, set by the runner config). The selftest
+ * fails on any exported e2e helper with a timeout parameter, so an entry here
+ * exists only for a helper that is a defect waiting to be removed.
  */
-export const POSITIONAL_TIMEOUT_ARGS = {
-  waitForUtxoMatching: 3,
-  waitForUtxoAt: 2,
-  waitForTxConfirmed: 1,
-  clickApprovalButton: 2,
-  waitForElectrsSync: 1,
-  waitForOrdReady: 0,
-  waitForOrdSync: 1,
-  waitForOrdStockReady: 0,
-  waitForOrdStockSync: 1,
-  waitForOrdStockInscription: 1,
-  waitForAddressTxIndexed: 2,
-  waitForCatAtAddress: 2,
-  waitForOrdWalletCardinal: 2,
-  waitForSingletonLockGone: 1,
-  isVisibleWithin: 1,
-};
+export const POSITIONAL_TIMEOUT_ARGS = {};
 
 /**
  * The one sanctioned wait for time (`ordpool-sdk/e2e`). Its reason names what

@@ -519,7 +519,7 @@ describe('setSelectedUtxo is free when the selection does not change', () => {
     o.setFeeRate(10);
     await new Promise((r) => setTimeout(r, 300));
     expect(emissions).toBeLessThan(50);
-  }, 15_000);
+  });
 
   it('the SAME outpoint keeps the first object, a DIFFERENT one replaces it', async () => {
     // The guard compares outpoints, never object identity, and that is the
@@ -544,7 +544,7 @@ describe('setSelectedUtxo is free when the selection does not change', () => {
 
     o.setSelectedUtxo(other);
     expect(o.getSnapshot().selectedUtxo).toBe(other); // different outpoint, replaced
-  }, 15_000);
+  });
 });
 
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));

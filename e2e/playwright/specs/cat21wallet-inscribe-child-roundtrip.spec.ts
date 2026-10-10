@@ -119,7 +119,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -132,14 +132,12 @@ test.afterAll(async () => {
 });
 
 test('inscribe a parent then a child via Cat21 Wallet: wallet signs the reveal parent input, parent returns to the wallet, child links to it', async () => {
-  test.setTimeout(600_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
 
   // ── Connect on mainnet; derive regtest equivalents inline ──

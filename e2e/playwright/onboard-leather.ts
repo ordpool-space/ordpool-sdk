@@ -21,17 +21,17 @@ export async function onboardLeather(
   const mnemonic = opts.mnemonic ?? TEST_MNEMONIC;
 
   await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-  await expect(page.getByTestId('sign-in-link')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('sign-in-link')).toBeVisible();
   await page.getByTestId('sign-in-link').click();
 
   const inputs = page.locator('input[type="text"], input[type="password"]');
-  await expect(inputs.first()).toBeVisible({ timeout: 15_000 });
+  await expect(inputs.first()).toBeVisible();
   const words = mnemonic.split(' ');
   for (let i = 0; i < words.length; i++) await inputs.nth(i).fill(words[i]);
   await page.getByRole('button', { name: /continue|sign in|restore|confirm/i }).first().click();
 
   const pwInput = page.getByTestId('set-or-enter-password-input');
-  await expect(pwInput).toBeVisible({ timeout: 15_000 });
+  await expect(pwInput).toBeVisible();
   await pwInput.click();
   await pwInput.pressSequentially(password, { delay: 15 });
   await page.getByTestId('set-password-btn').click();
@@ -39,5 +39,5 @@ export async function onboardLeather(
   await page.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('send') || t.includes('receive') || t.includes('balance') || t.includes('bitcoin');
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
 }

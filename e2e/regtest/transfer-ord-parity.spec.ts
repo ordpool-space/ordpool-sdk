@@ -137,7 +137,7 @@ describe('transfer byte-parity vs live `ord wallet send`', () => {
     const spk = hex.decode(catOut.scriptPubKey.hex);
     catScript = spk;
     cardinal = { txid: cardinalUtxo.txid, vout: cardinalUtxo.vout, value: cardinalUtxo.value, script: spk };
-  }, 180_000);
+  });
 
   it('SDK transfer == `ord wallet send --postage 10000` on every field but locktime + change addr', () => {
     // Recipient: a fresh taproot address (match ord's all-taproot fee model).
@@ -241,5 +241,5 @@ describe('transfer byte-parity vs live `ord wallet send`', () => {
     // the sole intentional structural diff: locktime.
     expect(ordTx.lockTime).toBe(0);
     expect(sdkTx.lockTime).toBe(21);
-  }, 120_000);
+  });
 });

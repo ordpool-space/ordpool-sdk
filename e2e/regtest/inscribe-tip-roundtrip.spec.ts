@@ -73,8 +73,8 @@ describe('inscribe → tip output → ord-indexing roundtrip on regtest', () => 
   beforeAll(async () => {
     // Bail early with a useful message if the `ord-stock` profile isn't
     // running — the rest of the spec is wasted setup otherwise.
-    await waitForOrdStockReady(60_000);
-  }, 90_000);
+    await waitForOrdStockReady();
+  });
 
   it.each(TIP_CASES)('mint with $label produces a valid tx, lands at ord with content roundtrip', async ({ label, tipSats }) => {
     // Fresh keys per case so the tip + recipient addresses don't

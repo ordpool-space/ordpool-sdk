@@ -22,7 +22,7 @@ import {
 
 beforeAll(async () => {
   await waitForOrdReady();
-}, 180_000);
+});
 
 /** A fresh address the seller "owns", standing in for their ordinals identity. */
 const freshAddress = (type: 'bech32' | 'bech32m' = 'bech32m'): string =>
@@ -46,7 +46,7 @@ describe('seedListedCat', () => {
     const indexed = await waitForCatAtAddress(cat.inscriptionId, owner);
     expect(indexed.address).toBe(owner);
     expect(indexed.value).toBe(546);
-  }, 300_000);
+  });
 
   it('honours a non-546 size, which is what a size-preserving offer must be tested against', async () => {
     // A 546-only fixture is how an offer builder that hardcoded 546 stayed
@@ -56,7 +56,7 @@ describe('seedListedCat', () => {
 
     expect(cat.value).toBe(9_000);
     expect((await waitForCatAtAddress(cat.inscriptionId, owner)).value).toBe(9_000);
-  }, 300_000);
+  });
 
   it('gives each call a distinct cat, so a spec can hold a seller and a decoy', async () => {
     const [a, b] = [freshAddress(), freshAddress()];
@@ -68,7 +68,7 @@ describe('seedListedCat', () => {
     expect(first.catNumber).not.toBe(second.catNumber);
     expect((await waitForCatAtAddress(first.inscriptionId, a)).address).toBe(a);
     expect((await waitForCatAtAddress(second.inscriptionId, b)).address).toBe(b);
-  }, 420_000);
+  });
 
   it('the owner address is genuinely the caller\'s, not one the helper picked', async () => {
     // The load-bearing property for an offer spec: O is chosen by the caller,
@@ -82,5 +82,5 @@ describe('seedListedCat', () => {
     expect(wallet.ismine).toBe(true);
     expect(cat.sellerOrdinalsAddress).toBe(owner);
     mineBlocks(1);
-  }, 300_000);
+  });
 });

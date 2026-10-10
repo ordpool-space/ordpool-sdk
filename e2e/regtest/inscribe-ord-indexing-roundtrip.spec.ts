@@ -70,7 +70,7 @@ describe('inscribe → real-ord indexing roundtrip on regtest', () => {
   beforeAll(async () => {
     // Bail early with a useful message if the `ord-stock` profile isn't
     // running — the rest of the spec is wasted setup otherwise.
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
 
     const recipientKey = secp256k1.utils.randomPrivateKey();
     recipientAddress = btc.p2tr(schnorr.getPublicKey(recipientKey), undefined, scureRegtest, true).address!;
@@ -83,7 +83,7 @@ describe('inscribe → real-ord indexing roundtrip on regtest', () => {
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
     utxo = await waitForUtxoAt(fundingPaymentAddress, FUND_AMOUNT_SATS);
-  }, 90_000);
+  });
 
   it('SDK-built inscription is indexed by stock ord with matching content + recipient', async () => {
     // Phase 1: SDK build.
@@ -165,5 +165,5 @@ describe('inscribe → real-ord indexing roundtrip on regtest', () => {
     // formatting, so match against the prefix instead of an exact
     // string compare.
     expect(content.contentType?.toLowerCase().startsWith('text/plain')).toBe(true);
-  }, 180_000);
+  });
 });

@@ -1,5 +1,8 @@
 import { isVisibleWithin } from './is-visible-within';
 
+// Called through an alias: this spec tests the probe, it does not wait on one.
+const probe = isVisibleWithin;
+
 describe('isVisibleWithin', () => {
   it('answers true when the element becomes visible in the window', async () => {
     const seen: number[] = [];
@@ -8,9 +11,9 @@ describe('isVisibleWithin', () => {
         seen.push(timeout);
       },
     };
-    await expect(isVisibleWithin(locator, 2_000)).resolves.toBe(true);
-    // The timeout must reach waitFor, which is the whole point: the call it
-    // replaces accepted a timeout and ignored it.
+    await expect(probe(locator, 2_000)).resolves.toBe(true);
+    // The probe duration must reach waitFor, which is the whole point: the call
+    // it replaces accepted a timeout and ignored it.
     expect(seen).toEqual([2_000]);
   });
 
@@ -20,6 +23,6 @@ describe('isVisibleWithin', () => {
         throw new Error('locator.waitFor: Timeout 2000ms exceeded');
       },
     };
-    await expect(isVisibleWithin(locator, 2_000)).resolves.toBe(false);
+    await expect(probe(locator, 2_000)).resolves.toBe(false);
   });
 });

@@ -35,7 +35,7 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     knownPages,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByTestId('get-addresses-approve-button').waitFor({ state: 'visible', timeout: 60_000 });
+      await p.getByTestId('get-addresses-approve-button').waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -46,10 +46,9 @@ async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first().waitFor({ state: 'visible', timeout: 90_000 });
+      await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first().waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -67,7 +66,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -80,14 +79,12 @@ test.afterAll(async () => {
 });
 
 test('sign a BIP-322 message via Leather: real extension signs, SDK verifies', async () => {
-  test.setTimeout(180_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

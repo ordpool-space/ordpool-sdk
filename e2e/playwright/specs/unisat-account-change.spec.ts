@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { approvalGate, waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, raceApprovalPopup, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
@@ -64,7 +64,7 @@ test.beforeAll(async () => {
   await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -77,7 +77,6 @@ test.afterAll(async () => {
 });
 
 test('onAccountChange fires when window.unisat.switchNetwork("testnet") is called; reconnect returns the testnet address', async () => {
-  test.setTimeout(120_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
@@ -85,7 +84,6 @@ test('onAccountChange fires when window.unisat.switchNetwork("testnet") is calle
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 
@@ -131,27 +129,18 @@ test('onAccountChange fires when window.unisat.switchNetwork("testnet") is calle
 
   // Race the popup against the call resolving. If the call resolves
   // first (no popup needed), there's nothing to click. If a popup
-  // appears, approve it.
-  const popupOrCallSettled = await Promise.race([
-    waitForApprovalPopup({
-      context,
-      knownPages: switchKnownPages,
-      // 20_000, not 10_000: the original spent 10s on the URL and then a
-      // SECOND 10s on the control below, so the popup had 20s of tolerance in
-      // total. approvalGate shares one budget between the two, and halving it
-      // here would not fail loudly: this gate sits in a Promise.race whose
-      // catch takes the "no popup was needed" branch, after which the probe
-      // await below hangs to the test timeout instead.
-      isApproval: approvalGate({
-        url: /notification\.html#\/approval/,
-        control: (p) => p.getByText(/^(Confirm|Connect|Switch( Network)?)$/).first(),
-        timeoutMs: 20_000,
-      }),
-    }).then(p => ({ kind: 'popup' as const, page: p })),
-    switchCallPromise.then(() => ({ kind: 'settled' as const })),
-  ]).catch(() => ({ kind: 'settled' as const }));
+  // appears, approve it. A call that rejects before either fails here.
+  const popupOrCallSettled = await raceApprovalPopup({
+    context,
+    knownPages: switchKnownPages,
+    isApproval: approvalGate({
+      url: /notification\.html#\/approval/,
+      control: (p) => p.getByText(/^(Confirm|Connect|Switch( Network)?)$/).first(),
+    }),
+    noPopupState: { waitFor: () => switchCallPromise.then(() => undefined) },
+  });
 
-  if (popupOrCallSettled.kind === 'popup') {
+  if (popupOrCallSettled.outcome === 'popup') {
     await shot(popupOrCallSettled.page, '03a-switch-approval');
     // Unisat's switch-network approval also renders Connect/Confirm
     // as styled <div>s. Match by text — `Confirm`, `Connect`,
@@ -159,7 +148,7 @@ test('onAccountChange fires when window.unisat.switchNetwork("testnet") is calle
     // (the network-switch dialog was relabeled "Switch Network"
     // around Unisat v1.7.x — see screenshot 03a-switch-approval).
     const confirmBtn = popupOrCallSettled.page.getByText(/^(Confirm|Connect|Switch( Network)?)$/).first();
-    await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
+    await expect(confirmBtn).toBeVisible();
     await confirmBtn.click();
     await shot(popupOrCallSettled.page, '03b-switch-approved');
     await switchCallPromise; // settle now

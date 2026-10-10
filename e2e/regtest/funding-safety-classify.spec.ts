@@ -69,7 +69,7 @@ describe('funding-safety classification vs real ord (regtest)', () => {
     const p2wpkh = btc.p2wpkh(secp256k1.getPublicKey(priv, true), regtestNetwork);
     address = p2wpkh.address as string;
     script = p2wpkh.script;
-  }, 240_000);
+  });
 
   /** Fund `address` with `btcAmount` and return the confirmed, indexed UTXO. */
   async function fundOwn(btcAmount: string, expectSats: number) {
@@ -129,7 +129,7 @@ describe('funding-safety classification vs real ord (regtest)', () => {
       catIds: [],
       rareSat: null,
     });
-  }, 300_000);
+  });
 
   it('a coin really carrying an inscription is refused, by inscription id', async () => {
     const coin = await seedInscribedCoin({ address });
@@ -137,7 +137,7 @@ describe('funding-safety classification vs real ord (regtest)', () => {
 
     expect(c.clean).toBe(false);
     expect(c.inscriptionIds).toContain(coin.inscriptionId);
-  }, 600_000);
+  });
 
   it('a coin really carrying a rune is refused, keyed by the rune ord spells', async () => {
     const coin = await seedRuneCoin({ address });
@@ -148,7 +148,7 @@ describe('funding-safety classification vs real ord (regtest)', () => {
     // Keyed by the SPACED name, exactly as ord emits it: the shape the SDK's
     // rune readout indexes by.
     expect(Object.keys(c.runes as object)).toContain(coin.runeName);
-  }, 600_000);
+  });
 
   it('a coin really carrying a notable sat is refused, with the sat ord named', async () => {
     const coin = await seedRareSatCoin({ address });
@@ -158,7 +158,7 @@ describe('funding-safety classification vs real ord (regtest)', () => {
     expect(c.rareSat).not.toBeNull();
     expect(c.rareSat?.sat).toBe(String(coin.sat));
     expect(c.rareSat?.rarity).toBe(coin.rarity);
-  }, 600_000);
+  });
 
   it('a coin really carrying a cat is refused, and the cat id is a STRING from cat21-ord', async () => {
     // Raw nLockTime=21 mint: cat21-ord indexes any lockTime=21 output as a cat.
@@ -193,5 +193,5 @@ describe('funding-safety classification vs real ord (regtest)', () => {
     expect(typeof c.catIds[0]).toBe('string');
     // A cat sits at offset 0, so the classifier can name the sat it rides.
     expect(typeof c.catSat).toBe('number');
-  }, 600_000);
+  });
 });

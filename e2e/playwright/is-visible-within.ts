@@ -1,10 +1,15 @@
 /**
- * "Is this element visible within N ms?", for the OPTIONAL dialog case.
+ * "Is this element visible within N ms?", for an optional step INSIDE an SDK
+ * helper (a wallet's onboarding screen that some releases skip). Not part of
+ * the `ordpool-sdk/e2e` surface: a probe like this lives only inside an SDK
+ * helper, with its duration a named constant that says why (TESTING.md). A
+ * spec races the event against the state that means it is not coming instead
+ * (`raceApprovalPopup`).
  *
  * `locator.isVisible({ timeout })` does not do this. Playwright's own types say
- * so — the option is declared and marked `@deprecated This option is ignored`,
+ * so (the option is declared and marked `@deprecated This option is ignored`,
  * with "does not wait for the element to become visible and returns
- * immediately" — but it still TYPECHECKS, so the call compiles, reads as a
+ * immediately"), but it still TYPECHECKS, so the call compiles, reads as a
  * wait, and answers instantly.
  *
  * The damage is specific to the pattern it is always written in: dismiss a
@@ -23,12 +28,12 @@ export interface WaitableLocator {
 }
 
 /**
- * Resolves `true` if the element becomes visible within `timeoutMs`, `false` if
+ * Resolves `true` if the element becomes visible within `probeMs`, `false` if
  * it does not. Never throws for absence.
  */
-export async function isVisibleWithin(locator: WaitableLocator, timeoutMs: number): Promise<boolean> {
+export async function isVisibleWithin(locator: WaitableLocator, probeMs: number): Promise<boolean> {
   try {
-    await locator.waitFor({ state: 'visible', timeout: timeoutMs });
+    await locator.waitFor({ state: 'visible', timeout: probeMs });
     return true;
   } catch {
     return false;

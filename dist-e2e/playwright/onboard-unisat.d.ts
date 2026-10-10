@@ -14,6 +14,18 @@ import { Page } from '@playwright/test';
  */
 export declare function dismissUnisatUpdateNag(page: Page): Promise<void>;
 /**
+ * Dismiss the compatibility notice UniSat shows for SOME address types (nested
+ * segwit and taproot) and not for others. Returns whether it was there.
+ *
+ * Best effort on purpose: the notice does not stand between the wallet and its
+ * home screen, and its checkbox is an Ant-Design control whose input refuses a
+ * direct click (`pointer-events` suppressed on the hidden box, the same quirk
+ * the wizz helper documents for its fork of this UI). The caller's `tab-home`
+ * assertion is what proves onboarding finished, so a notice that genuinely
+ * blocked still fails there, naming the screen rather than a checkbox.
+ */
+export declare function dismissUnisatNotice(page: Page): Promise<boolean>;
+/**
  * Drive UniSat onboarding from the BIP-39 test seed to the home tab.
  * Shared by the e2e specs AND the local wallet-runner (matches
  * onboard-okx.ts / onboard-phantom.ts / onboard-cat21wallet.ts).

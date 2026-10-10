@@ -259,7 +259,7 @@ describe('setSelectedFundingUtxo is free when the selection does not change', ()
     });
     await new Promise((r) => setTimeout(r, 300));
     expect(emissions).toBeLessThan(50);
-  }, 15_000);
+  });
 });
 
 describe('Cat21CreateOfferOrchestrator: the fee rate survives a wallet connect', () => {

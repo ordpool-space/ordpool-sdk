@@ -5,8 +5,9 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
+import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
-import { isVisibleWithin } from '../is-visible-within';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
@@ -54,7 +55,7 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByText('Connect account').first()
-        .waitFor({ state: 'visible', timeout: 60_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -77,7 +78,7 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   // heading. Heading strings change between OKX releases, and a 500ms
   // poll against a wall-clock deadline makes the verdict depend on how
   // busy the runner is. Both are defects in the test.
-  const approval = await waitForApprovalByConfirmButton({ context: ctx, label: `OKX sign popup` });
+  const approval = await waitForApprovalByConfirmButton({ context: ctx });
   await shot(approval, '03a-sign-approval');
 
   // OKX's sign popup may open with an "Asset transfer pending" promo
@@ -85,17 +86,7 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   // Dismiss via the modal's X icon (close button) if visible, then
   // click Confirm. Trace from CI 26830193081 confirmed this is the
   // blocker on iter 38.
-  const promoModalText = approval.getByText('Asset transfer pending');
-  if (await isVisibleWithin(promoModalText, 2_000)) {
-    // The X close button has aria-label or is the trailing icon button
-    // inside the modal header. Try a few selectors.
-    const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
-    if (await isVisibleWithin(closeBtn, 2_000)) {
-      await closeBtn.click({ force: true }).catch(() => undefined);
-    }
-    // Wait for the modal to disappear (Confirm becomes enabled).
-    await promoModalText.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
-  }
+  await dismissOkxAssetTransferPromo(approval);
 
   await shot(approval, '03b-post-modal-dismiss');
   // OKX renders the sign popup with a Confirm button that may sit behind a
@@ -106,7 +97,7 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
   try {
     // OKX closes this popup on accepting the click; a 'target closed' error
     // there is the SUCCESS shape, not a failure. See clickApprovalButton.
-    await clickApprovalButton(confirmBtn, approval, 45_000);
+    await clickApprovalButton(confirmBtn, approval);
   } catch {
     await shot(approval, '03c-confirm-stuck');
     // eslint-disable-next-line no-console
@@ -136,19 +127,10 @@ test.beforeAll(async () => {
   });
   await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    /* fall back below */
-  }
-  test.setTimeout(240_000);
-  if (!onboardPage) onboardPage = await context.newPage();
+  onboardPage = await extensionOnboardingPage(context, extensionId);
   await onboardOkx(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
@@ -166,14 +148,12 @@ test.afterAll(async () => {
 // polls every extension page and playwright.config retries=2 covers residual
 // bridge-timing flake; a real regression still fails all attempts.
 test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 Taproot, regtest PSBT), broadcast via local electrs', async () => {
-  test.setTimeout(300_000);
 
   const harness = await context.newPage();
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

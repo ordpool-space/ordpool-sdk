@@ -1,3 +1,12 @@
+/**
+ * The one timeout of this config (TESTING.md): every test and hook, and, through
+ * ORDPOOL_E2E_TIMEOUT_MS, the bound of the e2e helpers whose unit specs run
+ * here on fake timers. Sized for the slowest unit spec; one that needs longer
+ * is a defect in that spec, never a per-spec bound.
+ */
+const TIMEOUT_MS = 60_000;
+process.env.ORDPOOL_E2E_TIMEOUT_MS = String(TIMEOUT_MS);
+
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
   preset: 'ts-jest',
@@ -37,4 +46,6 @@ module.exports = {
 
   // A run matching zero tests is a broken filter, not a pass.
   passWithNoTests: false,
+
+  testTimeout: TIMEOUT_MS,
 };

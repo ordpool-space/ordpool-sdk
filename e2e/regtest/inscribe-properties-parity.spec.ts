@@ -71,12 +71,12 @@ describe('inscribe properties → byte-parity with stock ord', () => {
   let galleryB: string;
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(ORD_WALLET);
 
     galleryA = await ordInscribePlain('gallery-a');
     galleryB = await ordInscribePlain('gallery-b');
-  }, 240_000);
+  });
 
   it('a TITLE is byte-identical to `ord wallet inscribe --title`', async () => {
     const body = new TextEncoder().encode('parity: title only');
@@ -88,7 +88,7 @@ describe('inscribe properties → byte-parity with stock ord', () => {
 
     const sdk = sdkEnvelopePostPubkey(body, packInscriptionProperties({ title: 'My Piece' }));
     expect(sdk).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 
   it('an EMPTY title is still written, as `ord wallet inscribe --title ""` does', async () => {
     const body = new TextEncoder().encode('parity: empty title');
@@ -98,7 +98,7 @@ describe('inscribe properties → byte-parity with stock ord', () => {
 
     const sdk = sdkEnvelopePostPubkey(body, packInscriptionProperties({ title: '' }));
     expect(sdk).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 
   it('a ONE-ITEM gallery is byte-identical to `ord wallet inscribe --gallery`', async () => {
     const body = new TextEncoder().encode('parity: one gallery item');
@@ -110,7 +110,7 @@ describe('inscribe properties → byte-parity with stock ord', () => {
 
     const sdk = sdkEnvelopePostPubkey(body, packInscriptionProperties({ gallery: [galleryA] }));
     expect(sdk).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 
   it('a TWO-ITEM gallery matches, which is where the packed txid table shows up', async () => {
     // Two items means a 64-byte txid string under key 2 and two item maps
@@ -129,7 +129,7 @@ describe('inscribe properties → byte-parity with stock ord', () => {
       packInscriptionProperties({ gallery: [galleryA, galleryB] }),
     );
     expect(sdk).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 
   it('a gallery AND a title together match, so the key order is right', async () => {
     const body = new TextEncoder().encode('parity: gallery and title');
@@ -145,7 +145,7 @@ describe('inscribe properties → byte-parity with stock ord', () => {
       packInscriptionProperties({ gallery: [galleryA], title: 'Both At Once' }),
     );
     expect(sdk).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 
   it('no gallery and no title emits NO properties tag at all, as ord does', async () => {
     const body = new TextEncoder().encode('parity: nothing');
@@ -155,7 +155,7 @@ describe('inscribe properties → byte-parity with stock ord', () => {
 
     expect(packInscriptionProperties({})).toBeUndefined();
     expect(sdkEnvelopePostPubkey(body, undefined)).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
   it('the TYPED gallery/title inputs, through the real field synthesis, match ord', async () => {
     // The tests above call the packer directly. Consumers never do: they pass
     // { gallery, title } and synthesizeEnvelopeFields builds the envelope.
@@ -180,5 +180,5 @@ describe('inscribe properties → byte-parity with stock ord', () => {
       fields,
     });
     expect(hex.encode(env).slice(68)).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 });

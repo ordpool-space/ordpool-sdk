@@ -6,8 +6,7 @@
 
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 
-import { isVisibleWithin } from '../is-visible-within';
-import { dismissUnisatUpdateNag } from '../onboard-unisat';
+import { dismissUnisatNotice, dismissUnisatUpdateNag } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -88,7 +87,7 @@ test.beforeAll(async () => {
 
   let [worker] = context.serviceWorkers();
   if (!worker) {
-    worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+    worker = await context.waitForEvent('serviceworker');
   }
   extensionId = worker.url().split('/')[2];
 });
@@ -105,7 +104,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   });
 
   // ─── Phase 1: welcome screen ───
-  await expect(page.getByTestId('welcome-title')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('welcome-title')).toBeVisible();
   await shot(page, '01-welcome');
   await dumpHtml(page, '01-welcome');
 
@@ -116,7 +115,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // ─── Phase 3: create password (twice) ───
   // Unisat asks for the wallet password BEFORE the mnemonic in the
   // import flow (CI screenshot 26366884942 / 02-after-import-click).
-  await expect(page.getByTestId('create-password-input')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('create-password-input')).toBeVisible();
   await page.getByTestId('create-password-input').fill(TEST_PASSWORD);
   await page.getByTestId('create-password-confirm-input').fill(TEST_PASSWORD);
   await shot(page, '03-password-typed');
@@ -131,13 +130,13 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // value=0 is the UniSat Wallet entry, which gives BIP-84 native
   // segwit by default — matches our address assertion in iter 3.
   // (Source: ui.js T0=[{value:0,name:"UniSat Wallet",...}, ...].)
-  await expect(page.getByTestId('restore-wallet-type-option-0')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId('restore-wallet-type-option-0')).toBeVisible();
   await page.getByTestId('restore-wallet-type-option-0').click();
   await shot(page, '05-source-wallet-picked');
 
   // ─── Phase 5: fill the 12 mnemonic-word inputs ───
   // data-testid="mnemonic-import-word-0" through "...-11".
-  await expect(page.getByTestId('mnemonic-import-word-0')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('mnemonic-import-word-0')).toBeVisible();
   for (let i = 0; i < TEST_MNEMONIC_WORDS.length; i++) {
     await page.getByTestId(`mnemonic-import-word-${i}`).fill(TEST_MNEMONIC_WORDS[i]);
   }
@@ -153,7 +152,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // — if Unisat ever removes this screen, the spec needs an update,
   // not a silent skip.
   const addressTypeContinue = page.getByTestId('address-type-continue-button');
-  await expect(addressTypeContinue).toBeVisible({ timeout: 15_000 });
+  await expect(addressTypeContinue).toBeVisible();
   await shot(page, '08-address-type-picker');
   await addressTypeContinue.click();
   await shot(page, '09-after-address-type-continue');
@@ -166,21 +165,13 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // naming the screen.
   await dismissUnisatUpdateNag(page);
 
-  const noticeCheckbox = page.getByTestId('notice-checkbox-1');
-  if (await isVisibleWithin(noticeCheckbox, 5_000)) {
-    await noticeCheckbox.click({ timeout: 5_000 }).catch(() => undefined);
-    const noticeOk = page.getByTestId('notice-ok-button');
-    if (await noticeOk.isEnabled().catch(() => false)) {
-      await noticeOk.click({ timeout: 5_000 }).catch(() => undefined);
-    }
-    await shot(page, '10-notice-dismissed');
-  }
+  if (await dismissUnisatNotice(page)) await shot(page, '10-notice-dismissed');
 
   // ─── Phase 8: dashboard rendered ───
   // tab-home is the home tab on Unisat's bottom navigation. Its
   // presence proves the onboarding committed and the wallet is
   // unlocked.
-  await expect(page.getByTestId('tab-home')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('tab-home')).toBeVisible();
   await shot(page, '11-dashboard');
 
   // eslint-disable-next-line no-console

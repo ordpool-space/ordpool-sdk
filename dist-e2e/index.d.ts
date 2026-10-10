@@ -17,7 +17,6 @@ export * from './playwright/approval-popup';
 export * from './playwright/click-until-effect';
 export * from './playwright/select-card';
 export * from './regtest/rpc-types';
-export * from './playwright/is-visible-within';
 export * from './playwright/wallet-rejection';
 export * from './playwright/wait-helpers';
 export * from './playwright/browser-error-guard';
@@ -25,4 +24,7 @@ export * from './playwright/radix-checkbox';
 export * from './playwright/cat21wallet-sign-popup';
 export * from './regtest/dirty-coin-placement';
 export * from './regtest/regtest-helpers';
+export * from './e2e-timeout';
+export * from './playwright/workaround-wait-for-timeout';
+export * from './playwright/okx-sign-popup';
 //# sourceMappingURL=index.d.ts.map

@@ -24,6 +24,20 @@ export interface AlbyAutoApproveHandle {
   seen: () => string[];
 }
 
+/**
+ * Probe: how long one click on the approval button gets to land. A click that
+ * Alby absorbs before hydration is the expected miss here, and the loop
+ * clicks again.
+ */
+const ALBY_CLICK_PROBE_MS = 2_000;
+
+/**
+ * Probe: how long the popup gets to close after one click. An accepted
+ * approval closes it well within this; a click absorbed before hydration
+ * leaves it open, the expected miss that sends the loop round again.
+ */
+const ALBY_CLOSE_PROBE_MS = 1_500;
+
 export function installAlbyAutoApprove(
   context: BrowserContext,
   opts: { labels?: RegExp } = {},
@@ -34,16 +48,16 @@ export function installAlbyAutoApprove(
 
   const handle = async (popup: Page) => {
     try {
-      await popup.waitForLoadState('domcontentloaded', { timeout: 10_000 });
+      await popup.waitForLoadState('domcontentloaded');
       if (!popup.url().startsWith('chrome-extension://')) return;
       const first = await popup.locator('body').innerText().catch(() => '<unreadable>');
       seen.push(`${popup.url().slice(0, 60)} => ${first.trim().split('\n')[0]?.slice(0, 60) || '<empty>'}`);
       const btn = popup.locator('button', { hasText: labels }).first();
-      await btn.waitFor({ state: 'visible', timeout: 15_000 });
-      await btn.click({ trial: true, timeout: 15_000 });
+      await btn.waitFor({ state: 'visible' });
+      await btn.click({ trial: true });
       for (let attempt = 0; attempt < 8 && !popup.isClosed(); attempt++) {
-        await btn.click({ timeout: 2_000 }).catch(() => undefined);
-        await popup.waitForEvent('close', { timeout: 1_500 }).catch(() => undefined);
+        await btn.click({ timeout: ALBY_CLICK_PROBE_MS }).catch(() => undefined);
+        await popup.waitForEvent('close', { timeout: ALBY_CLOSE_PROBE_MS }).catch(() => undefined);
       }
       approved += 1;
     } catch {

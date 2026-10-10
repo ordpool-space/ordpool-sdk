@@ -74,7 +74,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   seedPage = await context.newPage();
@@ -96,9 +96,8 @@ test.beforeAll(async () => {
     () => typeof (globalThis as { chrome?: { runtime?: { sendMessage?: unknown } } })
       .chrome?.runtime?.sendMessage === 'function',
     undefined,
-    { timeout: 15_000, polling: 100 },
+    { polling: 100 },
   );
-  test.setTimeout(240_000);
 
   await seedAlbyAccount(seedPage);
   await shot(seedPage, '00-after-seed').catch(() => undefined);
@@ -111,7 +110,6 @@ test.afterAll(async () => {
 });
 
 test('inscribe an artifact on regtest via Alby: build commit+reveal in SDK, sign commit in the REAL popup, broadcast both via local electrs, verify via ordpool-parser', async () => {
-  test.setTimeout(360_000);
 
   // Auto-click any extension popup so alby.enable() goes through.
   installAlbyAutoApprove(context);
@@ -121,7 +119,6 @@ test('inscribe an artifact on regtest via Alby: build commit+reveal in SDK, sign
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
 
   const connectInfo = await harness.evaluate(async () => {

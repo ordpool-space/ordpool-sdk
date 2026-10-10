@@ -64,8 +64,8 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
   const scureRegtest = toScureNetwork(Network.Regtest);
 
   beforeAll(async () => {
-    await waitForOrdReady(60_000);
-  }, 90_000);
+    await waitForOrdReady();
+  });
 
   it('nLockTime=21 lands a cat at the inscription recipient + note tag round-trips via parser', async () => {
     const recipientKey = secp256k1.utils.randomPrivateKey();
@@ -159,8 +159,8 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
     await waitForOrdSync(revealTip);
     const catAId = catInscriptionId(commitTxid);   // <commitTxid>i0
     const catBId = catInscriptionId(revealTxid);   // <revealTxid>i0
-    const catA = await waitForCatAtAddress(catAId, recipientAddress, 30_000);
-    const catB = await waitForCatAtAddress(catBId, recipientAddress, 30_000);
+    const catA = await waitForCatAtAddress(catAId, recipientAddress);
+    const catB = await waitForCatAtAddress(catBId, recipientAddress);
     expect(catA.address).toBe(recipientAddress);
     expect(catB.address).toBe(recipientAddress);
     // Same UTXO: ord's `output` field is `<txid>:<vout>`. Both cats
@@ -215,7 +215,7 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
     const noteHex = Array.from(new TextEncoder().encode(NOTE))
       .map(b => b.toString(16).padStart(2, '0')).join('');
     expect(allWitnessHex).toContain(noteHex);
-  }, 240_000);
+  });
 
   // Full inscribe -> broadcast -> parse round-trip for a COMPRESSED body,
   // parametrized over the codec so both gzip (native) and brotli (the wasm
@@ -298,8 +298,8 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
 
     // Phase 7: both cats (commit + reveal) land at the reveal's first sat.
     await waitForOrdSync(revealTip);
-    const catA = await waitForCatAtAddress(catInscriptionId(commitTxid), recipientAddress, 30_000);
-    const catB = await waitForCatAtAddress(catInscriptionId(revealTxid), recipientAddress, 30_000);
+    const catA = await waitForCatAtAddress(catInscriptionId(commitTxid), recipientAddress);
+    const catB = await waitForCatAtAddress(catInscriptionId(revealTxid), recipientAddress);
     const expectedSatpoint = `${revealTxid}:0:0`;
     expect(catA.satpoint).toBe(expectedSatpoint);
     expect(catB.satpoint).toBe(expectedSatpoint);
@@ -318,7 +318,7 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
       original: COMPRESSIBLE_HTML, compressed, encoding: 'gzip',
       tagHex: '0109' + '04' + '677a6970', decode: gunzipSync,
     });
-  }, 240_000);
+  });
 
   it('brotli body via the WASM encoder round-trips on chain (content_encoding: br tag)', async () => {
     // ord's encoder compiled to wasm (loaded here from the package's own
@@ -333,5 +333,5 @@ describe('inscribe day-one features roundtrip on regtest (cat + note + gzip)', (
       original: COMPRESSIBLE_HTML, compressed, encoding: 'br',
       tagHex: '0109' + '02' + '6272', decode: brotliDecompressSync,
     });
-  }, 240_000);
+  });
 });

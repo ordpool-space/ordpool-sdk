@@ -22,7 +22,7 @@ async function approveCat21WalletConnectPopup(context, knownPages) {
                 return false;
             await p
                 .getByTestId('get-addresses-approve-button')
-                .waitFor({ state: 'visible', timeout: 60_000 });
+                .waitFor({ state: 'visible' });
             return true;
         },
     });
@@ -50,7 +50,6 @@ async function approveCat21WalletSignPopup(args) {
     const approval = await (0, approval_popup_1.waitForApprovalPopup)({
         context,
         knownPages,
-        timeoutMs: 90_000,
         isApproval: async (p) => {
             if (!p.url().startsWith('chrome-extension://'))
                 return false;
@@ -59,7 +58,7 @@ async function approveCat21WalletSignPopup(args) {
             await p
                 .getByRole('button', { name: /^(confirm|sign|approve)$/i })
                 .first()
-                .waitFor({ state: 'visible', timeout: 90_000 });
+                .waitFor({ state: 'visible' });
             return true;
         },
     });
@@ -72,10 +71,10 @@ async function approveCat21WalletSignPopup(args) {
         for (const idx of expected) {
             (0, test_1.expect)(url, `sign popup URL must carry signAtIndex=${idx}`).toContain(`signAtIndex=${idx}`);
         }
-        await (0, test_1.expect)(approval.getByTestId('psbt-signer-card'), 'psbt-signer-card must render in the sign popup').toBeVisible({ timeout: 15_000 });
+        await (0, test_1.expect)(approval.getByTestId('psbt-signer-card'), 'psbt-signer-card must render in the sign popup').toBeVisible();
     }
     const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
-    await (0, test_1.expect)(confirmBtn).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(confirmBtn).toBeVisible();
     // noWaitAfter skips POST-click auto-wait for navigation but does NOT
     // protect the click dispatch itself: if the popup tears down between
     // Playwright's "performing click action" and the mouseup, click()

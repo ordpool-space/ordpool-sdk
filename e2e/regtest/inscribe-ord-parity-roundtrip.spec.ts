@@ -76,8 +76,8 @@ function sdkEnvelopePostPubkey(
 describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
-    await waitForOrdReady(60_000);
+    await waitForOrdStockReady();
+    await waitForOrdReady();
     // Fund ord's OWN wallet so its `wallet inscribe` has a UTXO to spend.
     // Mining 101 to it also puts the tip well past the regtest jubilee
     // (110), so the blessing test reflects mainnet (always post-jubilee).
@@ -86,7 +86,7 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
     const tip = Number(rpc('getblockcount'));
     await waitForElectrsSync(tip);
     await waitForOrdSync(tip);
-  }, 180_000);
+  });
 
   it('SDK envelope is byte-identical to `ord wallet inscribe` (plain text)', async () => {
     const body = new TextEncoder().encode('parity: plain text body');
@@ -95,7 +95,7 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
     await waitForOrdSync(mineBlocks(1));
 
     expect(sdkEnvelopePostPubkey(TXT_CONTENT_TYPE, body)).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 
   it('SDK envelope is byte-identical to ord for a plain HTML inscription, the cubes shape', async () => {
     // The shape cubes actually mints: one HTML inscription, no compression,
@@ -111,7 +111,7 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
     await waitForOrdSync(mineBlocks(1));
 
     expect(sdkEnvelopePostPubkey(HTML_CONTENT_TYPE, body)).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 
   it('SDK envelope is byte-identical to ord WITH a metaprotocol tag (multi-tag order + encoding)', async () => {
     const body = new TextEncoder().encode('parity: with metaprotocol');
@@ -123,7 +123,7 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
       { tag: ORD_TAGS.metaprotocol, value: new TextEncoder().encode('brc-20') },
     ]);
     expect(sdk).toBe(ordEnvelopePostPubkey(reveal));
-  }, 120_000);
+  });
 
   it('an SDK-built inscription is BLESSED by stock ord (not cursed/vindicated)', async () => {
     const recipientKey = secp256k1.utils.randomPrivateKey();
@@ -164,7 +164,7 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
     expect(insc.number).toBeGreaterThanOrEqual(0);
     expect(insc.charms ?? []).not.toContain('cursed');
     expect(insc.charms ?? []).not.toContain('vindicated');
-  }, 180_000);
+  });
 
   it('minimalTagPush:true makes stock ord stamp the `vindicated` charm', async () => {
     // Same inscription, only `minimalTagPush: true`. The pushnum tag form
@@ -210,5 +210,5 @@ describe('inscribe → byte-parity + blessing-parity with stock ord', () => {
     expect(insc.charms ?? []).toContain('vindicated');
     expect(insc.charms ?? []).not.toContain('cursed');
     expect(insc.number).toBeGreaterThanOrEqual(0);
-  }, 180_000);
+  });
 });

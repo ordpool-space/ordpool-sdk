@@ -32,7 +32,7 @@ beforeAll(async () => {
   await waitForOrdStockReady();
   address = rpc('-rpcwallet=ordpool-e2e', 'getnewaddress', '', 'bech32m').trim();
   coin = await seedRuneCoin({ address });
-}, 900_000);
+});
 
 describe('seedRuneCoin', () => {
   it('etches a rune and seeds a coin ord really reports as carrying it', async () => {
@@ -42,7 +42,7 @@ describe('seedRuneCoin', () => {
     expect(entry).toBeDefined();
     expect(entry?.amount).toBe(coin.amount);
     expect(entry?.divisibility).toBe(coin.divisibility);
-  }, 120_000);
+  });
 
   it('reports a real etching transaction, not the all-zero txid', () => {
     expect(coin.etchingTxid).toMatch(/^[0-9a-f]{64}$/);

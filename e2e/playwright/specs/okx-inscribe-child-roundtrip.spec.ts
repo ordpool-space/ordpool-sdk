@@ -7,6 +7,8 @@ import * as btc from '@scure/btc-signer';
 import { InscriptionParserService } from 'ordpool-parser';
 
 import { Network, toScureNetwork } from '../../../src/network';
+import { dismissOkxAssetTransferPromo, waitForOkxSignHeadingToClear } from '../okx-sign-popup';
+import { extensionOnboardingPage } from '../wallet-onboarders';
 import {
   waitForElectrsSync,
   waitForUtxoAt,
@@ -98,7 +100,7 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, d
       knownPages,
       isApproval: async (p) => {
         if (!p.url().startsWith('chrome-extension://')) return false;
-        await p.getByText('Connect account').first().waitFor({ state: 'visible', timeout: 60_000 });
+        await p.getByText('Connect account').first().waitFor({ state: 'visible' });
         return true;
       },
     }),
@@ -133,7 +135,7 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
   // If the operation completes first, there was no popup to approve and this
   // returns. If NEITHER happens the helper throws, which is the real failure.
   const raced = await Promise.race([
-    waitForApprovalByConfirmButton({ context: ctx, label: `OKX ${tag} sign popup`, timeoutMs: 120_000 })
+    waitForApprovalByConfirmButton({ context: ctx })
       .then((page) => ({ page })),
     (async (): Promise<{ page: Page | null }> => {
       while (!isDone?.()) await new Promise((r) => setTimeout(r, 250));
@@ -144,14 +146,7 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
   const approval = raced.page;
   await shot(approval, tag);
 
-  const promo = approval.getByText('Asset transfer pending');
-  if (await promo.isVisible({ timeout: 2_000 }).catch(() => false)) {
-    const closeBtn = approval.locator('button:has(svg), [aria-label="close" i], [aria-label="Close" i]').first();
-    if (await closeBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      await closeBtn.click({ force: true }).catch(() => undefined);
-    }
-    await promo.waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => undefined);
-  }
+  await dismissOkxAssetTransferPromo(approval);
 
   // Close-race guard: OKX may complete the sign and shut the popup while the
   // click is in flight ("guid not bound" / target-closed). The sign already
@@ -162,30 +157,7 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
   // disabled control would have passed silently and left the real failure to
   // surface somewhere unrelated.
   await clickApprovalButton(approval.getByText('Confirm', { exact: true }).first(), approval);
-  // Wait for this request's heading to disappear so a later call can't
-  // re-detect the request we just confirmed. Poll from the Node side
-  // (isClosed-guarded innerText), NOT page.waitForFunction: OKX CLOSES the
-  // sign popup the instant it finishes a sign (especially the final reveal),
-  // and a page-side waitForFunction installs a polling handle whose disposal
-  // races that close. Playwright then throws an uncatchable, empty-stack
-  // "Object with guid ... was not bound in the connection" through the
-  // connection's error channel, NOT as this promise's rejection, so the
-  // .catch below never sees it (the deterministic child-spec failure). A
-  // Node-side loop leaves no page-side handle to dispose, and exits early on
-  // the popup closing or the operation completing.
-  const headingDeadline = Date.now() + 30_000;
-  while (Date.now() < headingDeadline) {
-    if (isDone?.()) return;
-    if (approval.isClosed()) return; // popup gone => sign done, heading cleared
-    let text = '';
-    try {
-      text = await approval.locator('body').innerText({ timeout: 2_000 }).catch(() => '');
-    } catch {
-      return; // page closed mid-read => sign done
-    }
-    if (!/Signature request|Confirm Trade/i.test(text)) return;
-    await new Promise((r) => setTimeout(r, 500));
-  }
+  await waitForOkxSignHeadingToClear(approval, isDone);
 }
 
 async function fundPaymentAddress(paymentAddress: string): Promise<{ txid: string; vout: number; value: number }> {
@@ -219,7 +191,7 @@ test.beforeAll(async () => {
 
   await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   // OKX auto-opens its onboarding page on extension load; adopt it if it
@@ -227,16 +199,7 @@ test.beforeAll(async () => {
   // OKX onboarding (iframe seed form + "Secure your wallet" new page)
   // runs well past the default per-test timeout.
   let onboardPage: Page | undefined;
-  try {
-    onboardPage = await context.waitForEvent('page', {
-      predicate: p => p.url().startsWith(`chrome-extension://${extensionId}`),
-      timeout: 15_000,
-    });
-  } catch {
-    /* fall back below */
-  }
-  test.setTimeout(240_000);
-  if (!onboardPage) onboardPage = await context.newPage();
+  onboardPage = await extensionOnboardingPage(context, extensionId);
   await onboardOkx(onboardPage, extensionId);
   await shot(onboardPage, '00-onboarded');
 });
@@ -256,7 +219,6 @@ test.afterAll(async () => {
 // complete and produce a valid child inscription (ordpool-parser confirms the
 // parent link).
 test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
-  test.setTimeout(600_000);
 
   const harness = await context.newPage();
   // Forward the harness page's console so the [child] commit/reveal-sign
@@ -267,7 +229,6 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
 
   // Extension-readiness gate. On some CI runs the OKX content script injects
@@ -280,7 +241,6 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
     () => typeof (window as unknown as { okxwallet?: { bitcoin?: { connect?: unknown } } })
       .okxwallet?.bitcoin?.connect === 'function',
     undefined,
-    { timeout: 45_000 },
   );
 
   const connectKnownPages = new Set(context.pages());
@@ -362,8 +322,7 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   let commitSignedFlag = false;
   const commitSigned = harness.waitForEvent('console', {
     predicate: (m) => m.text().includes('[child] commit-signed'),
-    timeout: 120_000,
-  }).then(() => { commitSignedFlag = true; }).catch(() => undefined);
+    }).then(() => { commitSignedFlag = true; }).catch(() => undefined);
   const childPromise = harness.evaluate(
     (args) => window.ordpoolSdkHarness.runOperation(args),
     {

@@ -68,9 +68,9 @@ const scure = toScureNetwork(net);
 describe('funding safety end to end: an asset-bearing coin is never auto-spent', () => {
 
   beforeAll(async () => {
-    await waitForOrdReady(60_000);
-    await waitForOrdStockReady(60_000);
-  }, 180_000);
+    await waitForOrdReady();
+    await waitForOrdStockReady();
+  });
 
   it.each<DirtyCoinAsset>(['inscription', 'cat', 'rune', 'rareSat'])(
     'a coin carrying a %s is scanned, refused, and still unspent after a real mint',

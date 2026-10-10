@@ -48,14 +48,14 @@ describe('inscribe with a parent → parity with `ord wallet inscribe --parent`'
   let parentId: string;
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(ORD_WALLET);
 
     writeOrdStockFile('/tmp/parity-parent.txt', new TextEncoder().encode('the parent'));
     const { reveal } = ordStockWalletInscribe(ORD_WALLET, '/tmp/parity-parent.txt', 5);
     parentId = `${reveal}i0`;
     await waitForOrdStockSync(mineBlocks(1));
-  }, 240_000);
+  });
 
   it('the child envelope, parent tag included, is byte-identical to ord', async () => {
     const body = new TextEncoder().encode('parity: a child');
@@ -79,7 +79,7 @@ describe('inscribe with a parent → parity with `ord wallet inscribe --parent`'
     })).slice(68);
 
     expect(sdkEnvelope).toBe(ordEnvelope);
-  }, 120_000);
+  });
 
   it('ord spends the parent at input 0 and the envelope at input 1, parent back at output 0', async () => {
     // Pins the topology the SDK's child reveal must match. If ord ever
@@ -96,5 +96,5 @@ describe('inscribe with a parent → parity with `ord wallet inscribe --parent`'
     expect(t.vin[0].txinwitness).toHaveLength(1); // parent: key path
     expect(t.vin[1].txinwitness).toHaveLength(3); // envelope: sig, script, control block
     expect(t.vout).toHaveLength(2);
-  }, 120_000);
+  });
 });

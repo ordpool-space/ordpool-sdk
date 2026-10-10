@@ -91,7 +91,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   // Confirm the cloned context boots with the seeded vault keys
@@ -131,23 +131,23 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   await primer.waitForFunction(() => {
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { timeout: 30_000, polling: 250 });
+  }, undefined, { polling: 250 });
   await shot(primer, '00a-primer-locked');
 
   if (/unlock/i.test(await primer.locator('body').innerText())) {
     const pwInput = primer.locator('input[type="password"]').first();
-    await expect(pwInput).toBeVisible({ timeout: 5_000 });
+    await expect(pwInput).toBeVisible();
     await pwInput.fill('TestPassword123!');
     await primer.getByRole('button', { name: /^unlock$/i }).first().click();
     await primer.waitForFunction(() => {
       const t = (document.body.innerText || '').toLowerCase();
       return t.includes('account 1') || t.includes('not now') || t.includes('zest');
-    }, undefined, { timeout: 30_000, polling: 250 });
+    }, undefined, { polling: 250 });
   }
   await shot(primer, '00b-primer-unlocked');
 
   const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible({ timeout: 1_500 }).catch(() => false)) {
+  if (await notNow.isVisible().catch(() => false)) {
     await notNow.click({ force: true }).catch(() => undefined);
   }
   await shot(primer, '00c-primer-dashboard');
@@ -162,7 +162,7 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   }
 
   // Wait for the SDK harness bundle to run + set its ready flag.
-  await page.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined, { timeout: 15_000 });
+  await page.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined);
   await shot(page, '01-harness-loaded');
 
   // sats-connect's getAddress triggers Xverse to open its approval
@@ -173,7 +173,7 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   // Settings → Networks panel. Ask the SDK to connect on Regtest;
   // our toBitcoinNetworkType maps Network.Regtest to the literal
   // string "Regtest" which Xverse's mismatch-check accepts.
-  const approvalPage: Promise<Page> = context.waitForEvent('page', { timeout: 60_000 });
+  const approvalPage: Promise<Page> = context.waitForEvent('page');
   const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
 
   const approval = await approvalPage;
@@ -193,14 +193,14 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
     await approval.waitForFunction(() => {
       const t = (document.body.innerText || '').toLowerCase();
       return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-    }, undefined, { timeout: 60_000, polling: 500 });
+    }, undefined, { polling: 500 });
   } finally {
     snapshots.forEach(clearTimeout);
   }
   await shot(approval, '02b-approval-with-consent');
 
   const consentBtn = approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first();
-  await expect(consentBtn).toBeVisible({ timeout: 5_000 });
+  await expect(consentBtn).toBeVisible();
   await consentBtn.click();
   await shot(approval, '02b-after-approve');
 

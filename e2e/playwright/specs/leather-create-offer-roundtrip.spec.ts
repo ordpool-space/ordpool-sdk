@@ -94,7 +94,7 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     knownPages,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByTestId('get-addresses-approve-button').waitFor({ state: 'visible', timeout: 60_000 });
+      await p.getByTestId('get-addresses-approve-button').waitFor({ state: 'visible' });
       return true;
     },
   });
@@ -111,20 +111,19 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 90_000,
     isApproval: async (p) => {
       if (!p.url().startsWith('chrome-extension://')) return false;
       await p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first()
-        .waitFor({ state: 'visible', timeout: 90_000 });
+        .waitFor({ state: 'visible' });
       return true;
     },
   });
   await shot(approval, tag);
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
-  await expect(confirmBtn).toBeVisible({ timeout: 10_000 });
+  await expect(confirmBtn).toBeVisible();
   knownPages.add(approval);
   try {
-    await confirmBtn.click({ timeout: 10_000 });
+    await confirmBtn.click();
   } catch (e) {
     // Leather closes the sign popup the instant it accepts the click, so the
     // click can race that close. The click registered before the close; a
@@ -154,7 +153,7 @@ test.beforeAll(async () => {
   });
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -167,7 +166,6 @@ test.afterAll(async () => {
 });
 
 test('build + sign a CAT-21 buy-offer on regtest via Leather (buyer): seller raw-key mints, Leather signs buyer input 1, seller signs input 0', async () => {
-  test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
   const harness = await context.newPage();
@@ -175,7 +173,6 @@ test('build + sign a CAT-21 buy-offer on regtest via Leather (buyer): seller raw
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

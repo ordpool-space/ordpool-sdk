@@ -97,7 +97,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
   let galleryItem: string;
 
   beforeAll(async () => {
-    await waitForOrdStockReady(60_000);
+    await waitForOrdStockReady();
     await fundOrdStockWallet(ORD_WALLET);
 
     // A gallery item that exists, since ord refuses references to missing ones.
@@ -114,7 +114,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
     await waitForElectrsSync(tip);
     const u = await waitForUtxoAt(fundingAddr, 100_000_000);
     utxo = { txid: u.txid, vout: u.vout, value: u.value };
-  }, 240_000);
+  });
 
   it.each<[BatchInscribeMode, number]>([
     ['separate-outputs', 546],
@@ -245,7 +245,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
       network: Network.Regtest,
     });
     expect(hex.encode(sdk.commit.envelopeScript).slice(68)).toBe(ordEnvelopes(ord.reveal, 0));
-  }, 180_000);
+  });
 
   it.each<BatchInscribeMode>(['separate-outputs', 'shared-output', 'same-sat'])(
     '%s: an SDK batch broadcasts, and stock ord indexes every inscription where the SDK says it lands',
@@ -357,7 +357,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
     expect(sdk.fees.commitOutputValueSats).toBe(sats(ordCommit)[0]);
     expect(sdk.inscriptions.map(l => `${ord.reveal}:${l.vout}:${l.offset}`))
       .toEqual(ord.inscriptions.map(i => i.location));
-  }, 240_000);
+  });
 
   it('an SDK batch spending two parents broadcasts; stock ord links every child to both parents and returns both', async () => {
     // The parents' owner: a key we control, signing the parent inputs.
@@ -442,7 +442,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
       expect(after.address).toBe(owner.address!);
       expect(after.value).toBe(parent.utxo.value);
     }
-  }, 300_000);
+  });
 
   it('satpoints: ord and the SDK spend the same three UTXOs; tapscript, reveal outputs, reveal vsize, commit output and locations match', async () => {
     // Three cardinal UTXOs of three sizes in ord's wallet, one per inscription.
@@ -502,7 +502,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
     expect(sdk.inscriptions.map(l => `${ord.reveal}:${l.vout}:${l.offset}`))
       .toEqual(ord.inscriptions.map(i => i.location));
     expect(sdk.walletInputCount).toBe(3);
-  }, 240_000);
+  });
 
   it('satpoints: an SDK batch on UTXOs we own broadcasts, and stock ord puts each inscription on the first sat of its UTXO', async () => {
     const ownerKey = schnorr.utils.randomPrivateKey();
@@ -552,7 +552,7 @@ describe('batch inscribe → parity with `ord wallet batch`', () => {
       expect(insc.sat).toBe(firstSats[location.index]);
       expect(insc.value).toBe(values[location.index]);
     }
-  }, 300_000);
+  });
 });
 
 /** Sign an SDK commit with the funder wallet (walletprocesspsbt) and broadcast it. */

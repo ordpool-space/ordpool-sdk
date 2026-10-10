@@ -447,7 +447,7 @@ describe('setSelectedUtxo is free when the selection does not change', () => {
     o.setFeeRate(10);
     await new Promise((r) => setTimeout(r, 300));
     expect(emissions).toBeLessThan(50);
-  }, 15_000);
+  });
 
   it('a DIFFERENT outpoint still patches and recomputes', async () => {
     const o = new Cat21MintOrchestrator(deps());
@@ -459,7 +459,7 @@ describe('setSelectedUtxo is free when the selection does not change', () => {
     o.setSelectedUtxo(coin('c', 100_000));
     expect(emissions).toBeGreaterThan(before);
     expect(o.getSnapshot().selectedUtxo?.value).toBe(100_000);
-  }, 15_000);
+  });
 });
 
 describe('the snapshot says SCANNING rather than claiming a verdict it has not measured', () => {
@@ -497,7 +497,7 @@ describe('the snapshot says SCANNING rather than claiming a verdict it has not m
     const after = await waitFor(o, (s) => s.resolvedFundingStatus !== 'scanning');
     expect(after.resolvedFundingStatus).toBe('ready');
     expect(after.fundingRecommendation.status).toBe('auto');
-  }, 15_000);
+  });
 
   it('a READ but empty funding set is insufficient, an unread one is scanning', async () => {
     // The distinction the whole change exists for: "nothing covers" is a
@@ -512,7 +512,7 @@ describe('the snapshot says SCANNING rather than claiming a verdict it has not m
     await flush();
     expect(empty.getSnapshot().fundingRecommendation.status).toBe('insufficient');
     expect(empty.getSnapshot().resolvedFundingStatus).toBe('insufficient');
-  }, 15_000);
+  });
 });
 
 describe('a pick that is silently replaced is NAMED, not just overridden', () => {
@@ -541,7 +541,7 @@ describe('a pick that is silently replaced is NAMED, not just overridden', () =>
     expect(after.droppedSelection).toEqual({ txid: picked.txid, vout: 0, reason: 'gone' });
     expect(after.resolvedFundingUtxo?.txid).toBe(other.txid);
     expect(after.selectedUtxo?.txid).toBe(picked.txid); // what was ASKED for, unchanged
-  }, 15_000);
+  });
 
   it('reports below-requirement when the chosen coin stops covering at a higher rate', async () => {
     const tight = coin('e', 2_000);
@@ -557,7 +557,7 @@ describe('a pick that is silently replaced is NAMED, not just overridden', () =>
     o.setFeeRate(400);
     const after = await waitFor(o, (s) => s.droppedSelection !== null);
     expect(after.droppedSelection).toEqual({ txid: tight.txid, vout: 0, reason: 'below-requirement' });
-  }, 15_000);
+  });
 });
 
 describe('Cat21MintOrchestrator: an empty wallet reads insufficient without a fee rate', () => {

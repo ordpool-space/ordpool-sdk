@@ -139,7 +139,7 @@ async function runBatchWith(
 
 beforeAll(async () => {
   await waitForOrdStockReady();
-}, 120_000);
+});
 
 describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
   it('separate-outputs: every inscription lands on its own output, where the snapshot said', async () => {
@@ -170,7 +170,7 @@ describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
       expect(Array.from(content.bytes)).toEqual(Array.from(bodies[i]));
       expect(content.contentType).toBe('text/plain;charset=utf-8');
     }
-  }, 300_000);
+  });
 
   it('shared-output: all of them ride one output, one postage apart, as ord reads it', async () => {
     const bodies = ['shared a', 'shared b'].map(enc);
@@ -190,7 +190,7 @@ describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
     // One output holding every postage together.
     const first = await waitForOrdStockInscription(`${result.revealTxId}i0`);
     expect(first.value).toBe(postageSats * bodies.length);
-  }, 300_000);
+  });
 
   it('with a parent, the wallet signs twice and ord links every child to it', async () => {
     // The parent's home is the Core wallet's own taproot address, so the same
@@ -260,7 +260,7 @@ describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
     expect(parentAfter.value).toBe(parentBefore.value);
     // The reveal returns each parent at the same index it was spent from.
     expect(parentAfter.satpoint).toBe(`${result.revealTxId}:0:0`);
-  }, 420_000);
+  });
 
   it('parentIds: the orchestrator finds the parent itself and the batch still links', async () => {
     const home = newWalletTaproot();
@@ -323,7 +323,7 @@ describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
     const parentAfter = await getStockOrdInscription(parentId);
     expect(parentAfter.address).toBe(home.address);
     expect(parentAfter.satpoint).toBe(`${result.revealTxId}:0:0`);
-  }, 420_000);
+  });
 
   it('the preview priced what the wallet actually spent', async () => {
     const { result, preview } = await runBatch({
@@ -355,5 +355,5 @@ describe('InscribeMintOrchestrator.setBatch → live commit + reveal', () => {
     expect(reveal.vsize).toBe(preview.revealVsize);
     // The commit output funds the reveal: its fee plus every postage.
     expect(Number(commit.getOutput(0).amount)).toBe(preview.revealFeeSats + preview.postageSats);
-  }, 300_000);
+  });
 });

@@ -115,15 +115,10 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   const approval = await waitForApprovalPopup({
     context: ctx,
     knownPages,
-    timeoutMs: 120_000,
-    // Anchored on the Sign button. The NAME form is measured, not inferred:
-    // getByRole with a regex counts 0 against this control, the plain string
-    // counts 1.
     isApproval: approvalGate({
       url: /notification\.html#\/approval/,
       control: (p) => p.getByRole('button', { name: 'Sign' }),
-      timeoutMs: 120_000,
-    }),
+      }),
   });
   await shot(approval, tag);
   await approval.waitForFunction(() => {
@@ -139,7 +134,7 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
     if (parseFloat(style.opacity) < 0.7) return null;
     candidate.click();
     return true;
-  }, undefined, { timeout: 60_000, polling: 250 });
+  }, undefined, { polling: 250 });
   await shot(approval, `${tag}-after-sign-click`).catch(() => undefined);
   knownPages.add(approval);
 }
@@ -167,7 +162,7 @@ test.beforeAll(async () => {
   await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
-  if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+  if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
 
   const onboardPage = await context.newPage();
@@ -180,7 +175,6 @@ test.afterAll(async () => {
 });
 
 test('build + sign a CAT-21 buy-offer on regtest via Wizz (Taproot mode, BUYER): seller raw-key mints, Wizz signs buyer input, seller signs input 0', async () => {
-  test.setTimeout(600_000);
   const regtestNetwork = toScureNetwork(Network.Regtest);
 
   const harness = await context.newPage();
@@ -190,7 +184,6 @@ test('build + sign a CAT-21 buy-offer on regtest via Wizz (Taproot mode, BUYER):
   await harness.waitForFunction(
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
-    { timeout: 15_000 },
   );
   await shot(harness, '01-harness-loaded');
 

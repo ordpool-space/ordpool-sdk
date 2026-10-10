@@ -1,10 +1,30 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardPhantom = onboardPhantom;
+exports.pressPhantomGetStarted = pressPhantomGetStarted;
 const test_1 = require("@playwright/test");
 const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 const cdp_click_1 = require("./cdp-click");
+/**
+ * Probe: how long to look for the page a step moves to. Phantom replaces the
+ * tab for the import result and again for "Create a password" in some
+ * releases and renders in place in others; long enough for the account scan
+ * behind the import result to finish on a loaded runner, after which the step
+ * is taken to be on the current page.
+ */
+const PHANTOM_STEP_PAGE_PROBE_MS = 60_000;
+/**
+ * Probe: how long the best-effort "Get Started" button gets to render on the
+ * completion screen. Some releases go straight to the wallet instead.
+ */
+const PHANTOM_GET_STARTED_PROBE_MS = 5_000;
+/**
+ * Probe: how long the completion screen gets to go away after the Get Started
+ * volley. It usually stays (the button resists every click strategy), which is
+ * the expected answer, and the caller navigates to popup.html itself.
+ */
+const PHANTOM_COMPLETION_LEAVE_PROBE_MS = 10_000;
 /**
  * Drive Phantom v26 onboarding from welcome to the "You're good to go"
  * completion screen. Multi-page flow (CI iterations 22-30, 2026-05-31):
@@ -38,13 +58,13 @@ async function onboardPhantom(page, extensionId, opts = {}) {
         await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
     }
     const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
-    await (0, test_1.expect)(importBtn).toBeVisible({ timeout: 30_000 });
+    await (0, test_1.expect)(importBtn).toBeVisible();
     await (0, cdp_click_1.cdpClick)(page, importBtn, 'the "I Already Have a Wallet" button');
     const recoveryBtn = page.getByRole('button', { name: /Import Recovery Phrase/i });
-    await (0, test_1.expect)(recoveryBtn).toBeVisible({ timeout: 20_000 });
+    await (0, test_1.expect)(recoveryBtn).toBeVisible();
     await (0, cdp_click_1.cdpClick)(page, recoveryBtn, 'the "Import Recovery Phrase" button');
     const mnemonicInputs = page.locator('input, textarea');
-    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible();
     const inputCount = await mnemonicInputs.count();
     if (inputCount >= 12) {
         for (let i = 0; i < mnemonicWords.length; i++) {
@@ -55,11 +75,11 @@ async function onboardPhantom(page, extensionId, opts = {}) {
         await mnemonicInputs.first().fill(mnemonic);
     }
     const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
-    await (0, test_1.expect)(confirmAfterMnemonic).toBeEnabled({ timeout: 15_000 });
+    await (0, test_1.expect)(confirmAfterMnemonic).toBeEnabled();
     await confirmAfterMnemonic.click();
     // Wait for the result state; Phantom may replace the page.
     const ctx = page.context();
-    const deadline = Date.now() + 60_000;
+    const deadline = Date.now() + PHANTOM_STEP_PAGE_PROBE_MS;
     while (Date.now() < deadline) {
         for (const p of ctx.pages()) {
             const text = await p.locator('body').innerText().catch(() => '');
@@ -84,11 +104,11 @@ async function onboardPhantom(page, extensionId, opts = {}) {
         if (parseFloat(getComputedStyle(candidate).opacity) < 0.7)
             return false;
         return true;
-    }, undefined, { timeout: 45_000, polling: 500 });
+    }, undefined, { polling: 500 });
     const importAccountsContinue = page.getByText('Continue', { exact: true }).first();
     await (0, cdp_click_1.cdpClick)(page, importAccountsContinue, 'the import-accounts Continue button');
     // Create a password screen opens on yet another page.
-    const createPwDeadline = Date.now() + 60_000;
+    const createPwDeadline = Date.now() + PHANTOM_STEP_PAGE_PROBE_MS;
     let pwPage = null;
     while (Date.now() < createPwDeadline) {
         for (const p of ctx.pages()) {
@@ -105,17 +125,17 @@ async function onboardPhantom(page, extensionId, opts = {}) {
     if (pwPage)
         page = pwPage;
     const pwInputs = page.locator('input[type="password"]');
-    await (0, test_1.expect)(pwInputs.first()).toBeVisible({ timeout: 15_000 });
+    await (0, test_1.expect)(pwInputs.first()).toBeVisible();
     await pwInputs.nth(0).fill(password);
     await pwInputs.nth(1).fill(password);
     // Reach UI hidden checkbox — native .click() via JS.
     await page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"]')
-        .first().waitFor({ state: 'attached', timeout: 10_000 });
+        .first().waitFor({ state: 'attached' });
     await page.evaluate(() => {
         const cb = document.querySelector('[data-testid="onboarding-form-terms-of-service-checkbox"]');
         cb?.click();
     });
-    await (0, test_1.expect)(page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"][aria-checked="true"]')).toBeAttached({ timeout: 5_000 });
+    await (0, test_1.expect)(page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"][aria-checked="true"]')).toBeAttached();
     await page.waitForFunction(() => {
         const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
         const candidate = els.find(el => (el.textContent || '').trim() === 'Continue');
@@ -128,20 +148,30 @@ async function onboardPhantom(page, extensionId, opts = {}) {
         if (parseFloat(getComputedStyle(candidate).opacity) < 0.7)
             return false;
         return true;
-    }, undefined, { timeout: 30_000, polling: 500 });
+    }, undefined, { polling: 500 });
     const pwContinue = page.getByText('Continue', { exact: true }).first();
     await (0, cdp_click_1.cdpClick)(page, pwContinue, 'the password Continue button');
     await page.waitForFunction(() => {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes("you're good to go") || t.includes('get started')
             || t.includes('send') || t.includes('receive') || t.includes('balance');
-    }, undefined, { timeout: 60_000, polling: 500 });
+    }, undefined, { polling: 500 });
+    await pressPhantomGetStarted(page);
+}
+/**
+ * Best-effort press of Phantom's "Get Started" on the onboarding completion
+ * screen, then a short probe for the screen going away. The button resists
+ * every click strategy tried (CDP, pointer events, programmatic, Tab+Enter),
+ * so staying on the completion screen is the expected outcome; callers
+ * navigate to popup.html afterwards.
+ */
+async function pressPhantomGetStarted(page) {
     // Best-effort Get Started click: unlikely to land, harmless if not. This one
     // keeps its box guard ON PURPOSE, because skipping it is the documented
-    // behaviour rather than a silent failure. Every REQUIRED click above goes
-    // through cdpClick and fails naming itself instead.
+    // behaviour rather than a silent failure. Every REQUIRED onboarding click
+    // goes through cdpClick and fails naming itself instead.
     const gsLocator = page.getByText('Get Started', { exact: true }).first();
-    if (await (0, is_visible_within_1.isVisibleWithin)(gsLocator, 5_000)) {
+    if (await (0, is_visible_within_1.isVisibleWithin)(gsLocator, PHANTOM_GET_STARTED_PROBE_MS)) {
         await page.bringToFront();
         const gsBox = await gsLocator.boundingBox();
         if (gsBox) {
@@ -164,6 +194,6 @@ async function onboardPhantom(page, extensionId, opts = {}) {
             }, { x, y });
         }
     }
-    await page.waitForFunction(() => !/You're good to go/i.test(document.body.innerText || ''), undefined, { timeout: 10_000, polling: 300 }).catch(() => undefined);
+    await page.waitForFunction(() => !/You're good to go/i.test(document.body.innerText || ''), undefined, { timeout: PHANTOM_COMPLETION_LEAVE_PROBE_MS, polling: 300 }).catch(() => undefined);
 }
 //# sourceMappingURL=onboard-phantom.js.map

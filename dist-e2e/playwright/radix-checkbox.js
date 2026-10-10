@@ -24,10 +24,10 @@ const test_1 = require("@playwright/test");
  * waiting for whatever downstream gate would otherwise time out.
  */
 async function clickRadixCheckbox(page, options = {}) {
-    const { nth = 0, timeoutMs = 5_000 } = options;
+    const { nth = 0 } = options;
     const checkbox = page.getByRole('checkbox').nth(nth);
-    await (0, test_1.expect)(checkbox).toBeVisible({ timeout: 10_000 });
+    await (0, test_1.expect)(checkbox).toBeVisible();
     await checkbox.click();
-    await (0, test_1.expect)(checkbox).toHaveAttribute('data-state', 'checked', { timeout: timeoutMs });
+    await (0, test_1.expect)(checkbox).toHaveAttribute('data-state', 'checked');
 }
 //# sourceMappingURL=radix-checkbox.js.map
