@@ -13,6 +13,7 @@ import { isVisibleWithin } from '../is-visible-within';
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardOkx } from '../onboard-okx';
+import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
 /**
  * BIP-322 sign-message roundtrip with the real OKX extension. Promotes OKX's
@@ -108,6 +109,7 @@ test.beforeAll(async () => {
     ],
   });
 
+  await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];

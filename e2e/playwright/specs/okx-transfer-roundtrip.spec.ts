@@ -20,6 +20,7 @@ import {
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
+import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { Network, toScureNetwork } from '../../../src/network';
 
 /**
@@ -141,6 +142,7 @@ test.beforeAll(async () => {
       '--disable-blink-features=AutomationControlled',
     ],
   });
+  await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];

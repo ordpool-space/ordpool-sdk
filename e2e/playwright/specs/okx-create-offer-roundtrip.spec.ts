@@ -21,6 +21,7 @@ import {
 import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
 import { isVisibleWithin } from '../is-visible-within';
 import { onboardOkx } from '../onboard-okx';
+import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21MintPsbt } from '../../../src/cat21-mint/cat21-mint.helper';
 import { validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
@@ -134,6 +135,7 @@ test.beforeAll(async () => {
       '--disable-blink-features=AutomationControlled',
     ],
   });
+  await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];

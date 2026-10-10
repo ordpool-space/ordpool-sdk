@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 
 import { waitForApprovalPopup } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
+import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
 /**
  * Iteration 4 of the OKX E2E pipeline: matrix spec.
@@ -90,6 +91,7 @@ test.beforeAll(async () => {
       '--disable-blink-features=AutomationControlled',
     ],
   });
+  await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];

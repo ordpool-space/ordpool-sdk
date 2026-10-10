@@ -23,6 +23,7 @@ import {
   closeLeftoverExtensionPages,
 } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
+import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
 /**
  * OKX PARENT/CHILD inscribe on regtest.
@@ -216,6 +217,7 @@ test.beforeAll(async () => {
     ],
   });
 
+  await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];

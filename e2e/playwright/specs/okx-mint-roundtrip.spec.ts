@@ -8,6 +8,7 @@ import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks,
 import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
 import { isVisibleWithin } from '../is-visible-within';
 import { onboardOkx } from '../onboard-okx';
+import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
 /**
  * Iteration 5 — full cat21 mint roundtrip with the real OKX
@@ -133,6 +134,7 @@ test.beforeAll(async () => {
       '--disable-blink-features=AutomationControlled',
     ],
   });
+  await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
   extensionId = worker.url().split('/')[2];
