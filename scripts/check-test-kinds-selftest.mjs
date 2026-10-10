@@ -30,6 +30,8 @@ const EXPECTED = [
   'fail/header-missing-fakes.spec.ts  header-missing',
   'fail/e2e/chain/header-missing.chain.spec.ts  header-missing',
   'fail/header-incomplete.spec.ts  header-incomplete',
+  'fail/header-incomplete-empty-field.spec.ts  header-incomplete',
+  'fail/kind-mismatch-header-and-playwright.spec.ts  kind-mismatch',
   'fail/e2e/chain/kind-mismatch.chain.spec.ts  kind-mismatch',
   'fail/kind-mismatch-playwright.spec.ts  kind-mismatch',
   'fail/kind-location.chain.spec.ts  kind-location',

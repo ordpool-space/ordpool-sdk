@@ -523,10 +523,16 @@ function parseHeader(src, lexed) {
   return { start: c0.start, text: src.slice(c0.start, end) };
 }
 
+/**
+ * A header field's value: everything after `Name:` up to the next field or the
+ * end of the comment, so a value may continue on the following lines.
+ */
 function headerField(text, name) {
-  const m = new RegExp(`^[\\s*/]*${name}:[ \\t]*(.*)$`, 'm').exec(text);
+  const m = new RegExp(`^[\\s*/]*${name}:`, 'm').exec(text);
   if (!m) return null;
-  return m[1].replace(/\*\/\s*$/, '').trim();
+  const rest = text.slice(m.index + m[0].length);
+  const next = rest.search(/^[\s*/]*(Real|Faked|Proves):|@test-kind\b/m);
+  return (next === -1 ? rest : rest.slice(0, next)).replace(/\*\/\s*$/, '').replace(/^[ \t]*(\*|\/\/)/gm, '').trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -636,7 +642,9 @@ export function checkFile(file, src) {
 
   // A unit spec never drives a browser; a Playwright import makes it wallet or e2e.
   const playwright = /\bfrom\s+['"](@playwright\/test|playwright|playwright-core)['"]|\brequire\(\s*['"](@playwright\/test|playwright|playwright-core)['"]\s*\)/.exec(noComments);
-  if (kind === 'unit' && playwright) {
+  // A header already disagreeing with the name reports the same cause; one finding is enough.
+  const headerDisagrees = headerKind !== null && headerKind[1] !== kind;
+  if (kind === 'unit' && playwright && !headerDisagrees) {
     add(playwright.index, 'kind-mismatch', `imports ${playwright[1] ?? playwright[2]}, so it is not unit; name it .wallet.spec.ts or .e2e.spec.ts`);
   }
 
