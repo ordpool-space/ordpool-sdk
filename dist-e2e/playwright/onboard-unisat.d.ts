@@ -27,4 +27,20 @@ export declare function onboardUnisat(page: Page, extensionId: string, opts?: {
     password?: string;
     mnemonicWords?: string[];
 }): Promise<void>;
+/**
+ * Wait until the tab UniSat opens on install has booted.
+ *
+ * On a fresh install the background opens `index.html` in a new tab once its
+ * own initialisation is done, polling every second until it is. That tab boots
+ * through the root route, which rejects any pending approval when it is not
+ * the notification window (`BoostScreen`: `isNotification || rejectApproval()`),
+ * so the approval popup closes and the dapp gets 4001 "User rejected the
+ * request". The tab arrives on the wallet's schedule, not onboarding's: a
+ * connect request sent before it has booted is rejected by the wallet itself.
+ *
+ * Booted means the tab has left the root route for a screen (`#/main`, or
+ * `#/welcome` when it booted before the vault existed); the rejection runs
+ * once, on that boot.
+ */
+export declare function waitForUnisatInstallTabBooted(onboardPage: Page, extensionId: string): Promise<void>;
 //# sourceMappingURL=onboard-unisat.d.ts.map

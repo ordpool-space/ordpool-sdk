@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.dismissUnisatUpdateNag = dismissUnisatUpdateNag;
 exports.onboardUnisat = onboardUnisat;
+exports.waitForUnisatInstallTabBooted = waitForUnisatInstallTabBooted;
 const test_1 = require("@playwright/test");
 const is_visible_within_1 = require("./is-visible-within");
 const select_card_1 = require("./select-card");
@@ -93,5 +94,30 @@ async function onboardUnisat(page, extensionId, opts = {}) {
         }
     }
     await (0, test_1.expect)(page.getByTestId('tab-home')).toBeVisible({ timeout: 30_000 });
+    await waitForUnisatInstallTabBooted(page, extensionId);
+}
+/**
+ * Wait until the tab UniSat opens on install has booted.
+ *
+ * On a fresh install the background opens `index.html` in a new tab once its
+ * own initialisation is done, polling every second until it is. That tab boots
+ * through the root route, which rejects any pending approval when it is not
+ * the notification window (`BoostScreen`: `isNotification || rejectApproval()`),
+ * so the approval popup closes and the dapp gets 4001 "User rejected the
+ * request". The tab arrives on the wallet's schedule, not onboarding's: a
+ * connect request sent before it has booted is rejected by the wallet itself.
+ *
+ * Booted means the tab has left the root route for a screen (`#/main`, or
+ * `#/welcome` when it booted before the vault existed); the rejection runs
+ * once, on that boot.
+ */
+async function waitForUnisatInstallTabBooted(onboardPage, extensionId) {
+    const context = onboardPage.context();
+    const booted = new RegExp(`^chrome-extension://${extensionId}/index\\.html#/[a-z]`);
+    await test_1.expect
+        .poll(() => context.pages().some((p) => p !== onboardPage && booted.test(p.url())), {
+        message: 'UniSat install tab did not boot past its root route',
+    })
+        .toBe(true);
 }
 //# sourceMappingURL=onboard-unisat.js.map
