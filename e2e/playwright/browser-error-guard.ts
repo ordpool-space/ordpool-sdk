@@ -81,10 +81,6 @@ interface Expectation {
  * A test that provokes an error on purpose (a fulfilled 400, a cancelled
  * wallet popup) declares it with `expectBrowserError`, which asserts the
  * error happened and consumes only that error.
- *
- * Twin file lives at
- * ~/Work/ordpool/cat21-indexer/frontend/e2e/regtest/lib/browser-error-guard.ts;
- * keep them in step.
  */
 export function installContextErrorGuard(context: BrowserContext): BrowserErrorGuard {
   let errors: string[] = [];

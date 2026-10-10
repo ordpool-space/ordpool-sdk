@@ -15,20 +15,14 @@ const isWelcomePage = (url) => url.origin === 'https://web3.okx.com' && url.path
  * extension opens is answered locally with an empty document.
  *
  * That tab is `https://web3.okx.com/extension`, a full OKX marketing page. It
- * is a normal web page, so `installContextErrorGuard` watches it, and on the
- * CI runner it produced every browser error of the OKX lane (ordpool run
- * 38057580518, `cat21-mint-okx-regtest`, read from its trace): eight
- * `net::ERR_FAILED` console errors, each a fetch of `chrome-extension://invalid/`
- * by the page's own scripts, and `wss://jpushws.okx.com/` WebSocket handshakes
- * answered 502 and 503. The same page also loads contentmx.okcoin.com,
- * h.online-metrix.net, jpush.okx.com, wsdexpri.okx.com and
- * geolocation.onetrust.com. None of it is ours and none of it is regtest.
+ * is a normal web page, so `installContextErrorGuard` watches it, and its own
+ * scripts log `net::ERR_FAILED` (fetches of `chrome-extension://invalid/`) and
+ * failed `wss://jpushws.okx.com/` handshakes. It also loads
+ * contentmx.okcoin.com, h.online-metrix.net, jpush.okx.com, wsdexpri.okx.com
+ * and geolocation.onetrust.com. None of it is ours and none of it is regtest.
  * Onboarding and signing do not need the tab: every OKX step runs on the
- * extension's own `chrome-extension://` pages. `onboardOkx` scans the text of
- * every open page, and in that run its "Start your Web3 journey" scan matched
- * the marketing page, found no button there, and finished on the extension
- * page. With the document answered locally none of those requests is made and
- * the tab carries no text to match.
+ * extension's own `chrome-extension://` pages, and with the document answered
+ * locally the tab carries no text for `onboardOkx`'s page scan to match.
  *
  * Not shielded: the extension pages' own calls to wallet.okx.com,
  * static.okx.com and wsdexpri.okx.com. The sign popup reads
