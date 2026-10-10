@@ -4,8 +4,8 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { approvalGate, waitForApprovalPopup } from '../approval-popup';
-import { describeWalletRejection, REFUSED_WITH_DETAIL, WALLET_PROBE_TIMEOUT_CODE } from '../wallet-rejection';
 import { onboardWizz } from '../onboard-wizz';
+import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
 /**
  * Iteration 4 of the Wizz E2E pipeline: matrix spec across the
@@ -93,62 +93,8 @@ test.beforeAll(async () => {
   }
 });
 
-// P2WPKH passes intermittently (iters 59, 67, 79-retry); P2TR
-// historically failed because Wizz's Taproot derivation needs
-// data from configs.wizz.cash that the no-internet CI can't
-// fetch and that an aborted/empty response can't satisfy.
-//
-// Fix path (iter 86): replay a captured real configs.wizz.cash
-// response from a fixture file. When the fixture is present,
-// P2TR's route.fulfill serves the captured payload, Wizz's SW
-// derives Taproot locally from it, and the popup opens normally.
-//
-// Capture procedure (one-time, manual; do this from a connected
-// machine, NOT in CI):
-//   1. Launch Chromium with the Wizz extension loaded and DevTools
-//      open on the dashboard tab.
-//   2. Watch Network → filter by `configs.wizz.cash`.
-//   3. Onboard with the BIP-39 test seed
-//      (abandon × 11 + about), Taproot address type.
-//   4. Right-click each `configs.wizz.cash/*` request → "Copy
-//      response". Concatenate into a single JSON object keyed by
-//      pathname → body string, save as
-//      e2e/playwright/fixtures/wizz-configs-response.json
-//   5. Commit the fixture. The runtime check below picks it up
-//      and un-skips P2TR automatically — no further code change.
-//
-// If the fixture file is missing, P2TR stays skipped and the
-// pipeline doesn't regress.
-const WIZZ_CONFIGS_FIXTURE_PATH = path.resolve(
-  __dirname, '..', 'fixtures', 'wizz-configs-response.json',
-);
-const WIZZ_CONFIGS_FIXTURE: Record<string, string> | null = (() => {
-  try {
-    if (!fs.existsSync(WIZZ_CONFIGS_FIXTURE_PATH)) return null;
-    const raw = fs.readFileSync(WIZZ_CONFIGS_FIXTURE_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, string>;
-    if (typeof parsed !== 'object' || parsed === null) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-})();
-
 for (const variant of VARIANTS) {
-  const isP2TR = variant.label.startsWith('P2TR');
-  // P2TR has two modes depending on whether the captured-fixture
-  // replay is available:
-  //   - Fixture present → positive assertion that the wallet
-  //     returns variant.expectedAddress
-  //   - Fixture absent  → positive assertion that the wallet
-  //     rejects with the documented -32603 "Connection error"
-  // We never skip. The fixture-absent case pins Wizz's current
-  // network-dependent behaviour; when the fixture lands, the test
-  // automatically switches to the positive-address branch.
-  const expectFixtureGatedFailure = isP2TR && !WIZZ_CONFIGS_FIXTURE;
   test(`SDK returns the right address for Wizz ${variant.label}`, async () => {
-    test.setTimeout(180_000);
-
     const context = await chromium.launchPersistentContext('', {
       headless: false,
       args: [
@@ -159,68 +105,23 @@ for (const variant of VARIANTS) {
       ],
     });
 
-    // Variant-specific route handling for configs.wizz.cash:
-    //   - P2WPKH (BIP-84): abort. Derivation is local; the abort
-    //     just prevents the hung-fetch slowdown.
-    //   - P2TR (BIP-86): fulfill with captured fixture payload (see
-    //     WIZZ_CONFIGS_FIXTURE block above for capture procedure).
-    //     Taproot derivation reads what it needs from the replayed
-    //     response; popup dispatches normally.
-    if (variant.label.startsWith('P2WPKH') || (isP2TR && !WIZZ_CONFIGS_FIXTURE)) {
-      // P2WPKH derivation is local — abort the network request so
-      // it doesn't slow CI down. P2TR without the fixture: abort
-      // so the SW reaches its -32603 rejection FAST rather than
-      // hanging on a multi-minute network timeout.
-      await context.route('**/configs.wizz.cash/**', route => route.abort());
-    } else if (isP2TR && WIZZ_CONFIGS_FIXTURE) {
-      await context.route('**/configs.wizz.cash/**', route => {
-        // Match by the request's pathname (host-relative). If the
-        // fixture doesn't have an exact entry, ABORT — never serve a
-        // random other endpoint's body. The previous behaviour
-        // (`?? Object.values(...)[0] ?? ''`) silently served the FIRST
-        // fixture value for any unknown path, so a wizz release that
-        // added a new bootstrap request (`/api/settings`) would get
-        // back the body of `/api/networks` and derive an unpredictable
-        // address — with no way for the maintainer to tell whether
-        // wizz broke, the fixture aged out, or the fallback mis-served.
-        // Aborting drops the request cleanly; wizz's SW handles a
-        // network failure with a documented -32603 rejection or the
-        // captured fixture (whichever the test's `variant` expects).
-        const url = new URL(route.request().url());
-        const path = url.pathname + url.search;
-        const body = WIZZ_CONFIGS_FIXTURE[path] ?? WIZZ_CONFIGS_FIXTURE[url.pathname];
-        if (body === undefined) {
-          // eslint-disable-next-line no-console
-          console.log(`[wizz-matrix] no fixture for ${url.pathname}${url.search} — aborting`);
-          route.abort().catch(() => undefined);
-          return;
-        }
-        route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body,
-        }).catch(() => undefined);
-      });
-    }
+    // Both address types derive locally from the seed: P2TR needs nothing
+    // from configs.wizz.cash, which the helper aborts along with the rest of
+    // Wizz's own backends (the Taproot roundtrip specs connect the same way).
+    await installWizzOfflineRoutes(context);
 
     try {
       let [worker] = context.serviceWorkers();
-      if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
+      if (!worker) worker = await context.waitForEvent('serviceworker');
       const extensionId = worker.url().split('/')[2];
 
       const dashboardPage = await context.newPage();
       await onboardWizz(dashboardPage, extensionId, { addressTypeRowLabel: variant.rowLabel });
 
-      // Source-dive of wizz background.js byte 2285200: -32603
-      // "Connection error" fires from the per-tab session router when
-      // the harness tab's session.origin isn't set yet (tabCheckin
-      // hasn't landed) OR when it doesn't match the page-claimed
-      // origin. The dashboard tab holds a wizz-extension-origin
-      // session in the SW. wizz-mint passes because its beforeAll-to-
-      // test transition adds idle time for tabCheckin to complete on
-      // the harness tab. In matrix, the same flow lives in one fn —
-      // no gap. Close the dashboard tab before opening harness so the
-      // SW has no other live wizz session competing.
+      // The onboarding tab has done its job. Wizz keys dApp sessions by tab id
+      // and its own UI tabs connect on a separate port branch with no session,
+      // so closing it does not affect the harness tab's check-in (waited for
+      // below).
       await dashboardPage.close().catch(() => undefined);
 
       const harness = await context.newPage();
@@ -228,27 +129,34 @@ for (const variant of VARIANTS) {
       await harness.waitForFunction(
         () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
         undefined,
-        { timeout: 15_000 },
       );
 
       const variantTag = variant.rowLabel.replace(/[^a-z0-9]+/gi, '-');
-      // Wizz P2WPKH flakes with -32603 "Connection error" when the
-      // test races requestAccounts before the wallet's BTC handler
-      // is fully ready. wizz-mint doesn't see this because beforeAll
-      // adds an idle gap between dashboard-render and connect. In
-      // matrix the same flow happens within one test fn — no gap.
-      // Wait until a non-popup wizz method (getNetwork) returns
-      // before kicking off requestAccounts.
-      await harness.waitForFunction(async () => {
+      // Wizz's background answers every dApp request except `tabCheckin`,
+      // `keepAlive` and `getInjectWallets` with -32603 "Connection error,
+      // please try again" until this tab's session carries an origin, and
+      // only `tabCheckin` sets it (background.js 2.13.4, byte 2285230). The
+      // page provider sends `tabCheckin` once, from a 100 ms poll on
+      // `document.readyState === 'complete'`, so it can land after
+      // `ordpoolSdkHarnessReady`. Before it lands `requestAccounts` is refused;
+      // after it, `requestAccounts` opens the Connect approval. `getNetwork`
+      // passes the same guard and opens no popup, so it succeeding is the
+      // observable "checked in" state.
+      //
+      // expect.poll, not waitForFunction: waitForFunction does not await an
+      // async predicate, it fulfils on the returned Promise (always truthy)
+      // after one call, so it cannot wait on an async wallet answer.
+      await expect.poll(() => harness.evaluate(async () => {
         const w = (window as unknown as { wizz?: { getNetwork?: () => Promise<unknown> } }).wizz;
-        if (!w?.getNetwork) return false;
+        if (!w?.getNetwork) return 'no window.wizz.getNetwork';
         try {
           await w.getNetwork();
-          return true;
-        } catch {
-          return false;
+          return 'checked-in';
+        } catch (e) {
+          const err = e as { code?: unknown; message?: unknown };
+          return `getNetwork refused: ${String(err?.code)} ${String(err?.message)}`;
         }
-      }, undefined, { timeout: 20_000, polling: 250 });
+      }), { message: 'Wizz session for the harness tab never checked in' }).toBe('checked-in');
 
       // Diagnostic: surface whether the wizz provider is even on the
       // harness page. Previous iterations swallowed connectWizz
@@ -260,95 +168,33 @@ for (const variant of VARIANTS) {
       // eslint-disable-next-line no-console
       console.log(`[wizz-matrix:${variant.label}] window.wizz detected on harness = ${wizzVisible}`);
 
-      if (expectFixtureGatedFailure) {
-        // Probe window.wizz directly with a single call: the harness's
-        // connectWizz wrapper has a 6-attempt retry loop tuned for P2WPKH's
-        // tabCheckin race, which would multiply this expected-rejection cost
-        // by 6x and hit the test timeout.
-        //
-        // The probe races requestAccounts against a 30s in-page timer so a
-        // wallet that never answers ends the cell with a named failure instead
-        // of the test-level timeout. The timer resolves with
-        // WALLET_PROBE_TIMEOUT_CODE, which describeWalletRejection reads as
-        // `timedOut: true, refused: false`.
-        const outcome = await harness.evaluate(async (timeoutCode) => {
-          interface WizzApi { requestAccounts?(): Promise<unknown> }
-          const wizz = (window as unknown as { wizz?: WizzApi }).wizz;
-          if (!wizz?.requestAccounts) return { ok: true, info: 'no requestAccounts surface' };
-          const probe = wizz.requestAccounts().then(
-            (accs) => ({ ok: true, accs }),
-            (e) => {
-              const err = e as { code?: number; message?: string; toString?: () => string };
-              return {
-                ok: false,
-                code: err?.code,
-                err: err?.message ?? err?.toString?.() ?? JSON.stringify(err),
-              };
-            },
-          );
-          const timeoutSignal = new Promise<{ ok: false; code: string; err: string }>((resolve) => {
-            setTimeout(() => resolve({
-              ok: false,
-              code: timeoutCode,
-              err: 'wizz.requestAccounts did not settle within 30s',
-            }), 30_000);
-          });
-          return Promise.race([probe, timeoutSignal]);
-        }, WALLET_PROBE_TIMEOUT_CODE);
-        // eslint-disable-next-line no-console
-        console.log(`[wizz-matrix:${variant.label}] fixture-gated outcome = ${JSON.stringify(outcome).slice(0, 250)}`);
+      const knownPages = new Set(context.pages());
+      const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
+      // Race popup-wait against connectWizz. If connectWizz rejects
+      // fast (wallet returned an error without showing a popup), we
+      // see THAT error instead of the misleading "popup did not
+      // appear within 60s" timeout.
+      const info = await Promise.race([
+        resultPromise,
+        approveConnectPopup(context, knownPages, variantTag).then(() => resultPromise),
+      ]);
 
-        // WHAT THIS PINS: without the captured configs.wizz.cash payload the
-        // wallet hands out no P2TR account, and it says so with a real
-        // rejection carrying a numeric code and a message. It fails when the
-        // wallet resolves empty, returns undefined, hands out an account, or
-        // hangs: a hang is the wallet saying nothing, and our own timer's
-        // sentinel is not a refusal.
-        //
-        // WHAT IT DELIBERATELY DOES NOT PIN: which rejection. That taxonomy
-        // belongs to the wallet and changes between its releases; the same
-        // fixture-absent state has produced -32603 "Connection error" and
-        // 4001 "User rejected the request". Matching those strings would make
-        // a catalogue rather than an assertion.
-        //
-        // The positive path is proved by the P2WPKH cell in the same run: it
-        // asserts the exact expected address, so a broken SDK cannot leave this
-        // pair green.
-        const rejection = describeWalletRejection(outcome);
-        expect(
-          rejection.timedOut,
-          `wizz.requestAccounts hung: no answer within 30s for ${variant.label}. A hang is not a refusal.`,
-        ).toBe(false);
-        expect(rejection).toEqual(REFUSED_WITH_DETAIL);
-      } else {
-        const knownPages = new Set(context.pages());
-        const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
-        // Race popup-wait against connectWizz. If connectWizz rejects
-        // fast (wallet returned an error without showing a popup), we
-        // see THAT error instead of the misleading "popup did not
-        // appear within 60s" timeout.
-        const info = await Promise.race([
-          resultPromise,
-          approveConnectPopup(context, knownPages, variantTag).then(() => resultPromise),
-        ]);
+      // eslint-disable-next-line no-console
+      console.log(`[wizz-matrix:${variant.label}] address = ${info.paymentAddress}`);
+      await shot(harness, `${variant.rowLabel.replace(/[^a-z0-9]+/gi, '-')}-after-connect`);
 
-        // eslint-disable-next-line no-console
-        console.log(`[wizz-matrix:${variant.label}] address = ${info.paymentAddress}`);
-        await shot(harness, `${variant.rowLabel.replace(/[^a-z0-9]+/gi, '-')}-after-connect`);
-
-        expect(info.paymentAddress).toBe(variant.expectedAddress);
-        // Wizz's single-address contract (inherited from Unisat):
-        // ordinalsAddress mirrors paymentAddress.
-        expect(info.ordinalsAddress).toBe(variant.expectedAddress);
-        // The funding ruling's notice-vs-block decision is DERIVED from the
-        // wallet's own addresses (`isOneAddressWallet`), and every unit test of
-        // that decision ASSUMES the topology rather than establishing it. This
-        // is the only place a real wallet binary supplies the fact, so it is
-        // the one assertion that can catch a wallet changing its address model:
-        // one that collapsed to a single address would keep being merely
-        // noticed while its assets and its spending money share a lane.
-        expect(isOneAddressWallet(info)).toBe(true);
-      }
+      expect(info.paymentAddress).toBe(variant.expectedAddress);
+      // Wizz's single-address contract (inherited from Unisat):
+      // ordinalsAddress mirrors paymentAddress.
+      expect(info.ordinalsAddress).toBe(variant.expectedAddress);
+      // The funding ruling's notice-vs-block decision is DERIVED from the
+      // wallet's own addresses (`isOneAddressWallet`), and every unit test of
+      // that decision ASSUMES the topology rather than establishing it. This
+      // is the only place a real wallet binary supplies the fact, so it is
+      // the one assertion that can catch a wallet changing its address model:
+      // one that collapsed to a single address would keep being merely
+      // noticed while its assets and its spending money share a lane.
+      expect(isOneAddressWallet(info)).toBe(true);
     } finally {
       await context.close();
     }
