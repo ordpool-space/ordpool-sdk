@@ -21,6 +21,10 @@ class FakePage extends EventEmitter {
   requestFailed(method: string, url: string, errorText: string): void {
     this.emit('requestfailed', { method: () => method, url: () => url, failure: () => ({ errorText }) });
   }
+
+  response(status: number, method: string, url: string): void {
+    this.emit('response', { status: () => status, url: () => url, request: () => ({ method: () => method }) });
+  }
 }
 
 function setup(): { guard: ReturnType<typeof installContextErrorGuard>; openPage: (url: string) => FakePage } {
@@ -93,6 +97,20 @@ describe('installContextErrorGuard', () => {
       '[console.error] Failed to load resource: net::ERR_FAILED\n\n' +
       'Requests that failed on guarded pages:\n' +
       '  - net::ERR_FAILED GET chrome-extension://invalid/',
+    );
+  });
+
+  it('names the URL of a 4xx/5xx answer behind a bare "Failed to load resource"', () => {
+    const { guard, openPage } = setup();
+    const page = openPage(APP);
+    page.response(200, 'GET', 'http://localhost:4200/main.js');
+    page.response(404, 'GET', 'http://localhost:4500/favicon.ico');
+    page.consoleError('Failed to load resource: the server responded with a status of 404 (Not Found)');
+    expect(() => guard.assertClean()).toThrow(
+      'Browser surfaced 1 unexpected error(s):\n\n' +
+      '[console.error] Failed to load resource: the server responded with a status of 404 (Not Found)\n\n' +
+      'Requests that failed on guarded pages:\n' +
+      '  - HTTP 404 GET http://localhost:4500/favicon.ico',
     );
   });
 

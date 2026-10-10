@@ -64,6 +64,14 @@ function installContextErrorGuard(context) {
                 return;
             failedRequests.push(`${request.failure()?.errorText ?? 'failed'} ${request.method()} ${request.url()}`);
         });
+        // A 4xx/5xx is an answered request, not a failed one, yet Chromium logs it as
+        // "Failed to load resource: ... status of 404" without the URL. Record it here
+        // so the message names what answered with an error.
+        page.on('response', (response) => {
+            if (!isAppPage(page) || response.status() < 400)
+                return;
+            failedRequests.push(`HTTP ${response.status()} ${response.request().method()} ${response.url()}`);
+        });
     });
     const reset = () => {
         errors = [];

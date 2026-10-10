@@ -41,8 +41,8 @@ export interface BrowserErrorGuard {
     /**
      * Throws when an expected error did not appear or an unexpected one did.
      * The message lists every unexpected error, every missing expectation and
-     * every request that failed on a guarded page, so a bare
-     * `Failed to load resource: net::ERR_FAILED` names its URL. Clears the
+     * every request that failed or answered 4xx/5xx on a guarded page, so a
+     * bare `Failed to load resource: ...` names its URL. Clears the
      * guard's state either way.
      */
     assertClean(): void;

@@ -44,8 +44,8 @@ export interface BrowserErrorGuard {
   /**
    * Throws when an expected error did not appear or an unexpected one did.
    * The message lists every unexpected error, every missing expectation and
-   * every request that failed on a guarded page, so a bare
-   * `Failed to load resource: net::ERR_FAILED` names its URL. Clears the
+   * every request that failed or answered 4xx/5xx on a guarded page, so a
+   * bare `Failed to load resource: ...` names its URL. Clears the
    * guard's state either way.
    */
   assertClean(): void;
@@ -104,6 +104,13 @@ export function installContextErrorGuard(context: BrowserContext): BrowserErrorG
     page.on('requestfailed', (request) => {
       if (!isAppPage(page)) return;
       failedRequests.push(`${request.failure()?.errorText ?? 'failed'} ${request.method()} ${request.url()}`);
+    });
+    // A 4xx/5xx is an answered request, not a failed one, yet Chromium logs it as
+    // "Failed to load resource: ... status of 404" without the URL. Record it here
+    // so the message names what answered with an error.
+    page.on('response', (response) => {
+      if (!isAppPage(page) || response.status() < 400) return;
+      failedRequests.push(`HTTP ${response.status()} ${response.request().method()} ${response.url()}`);
     });
   });
 
