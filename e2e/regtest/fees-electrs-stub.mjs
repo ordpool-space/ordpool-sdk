@@ -278,9 +278,10 @@ const server = http.createServer((req, res) => {
   // query this to read the cats bundle on a UTXO. A spec that just minted a
   // cat registers the REAL number for its outpoint via /admin/output, so the
   // assertion + the backend validator check the actual cat (not a constant);
-  // any other outpoint falls back to the historical fixed body so unrelated
-  // /output probes still resolve. A full ord instance in the substrate would
-  // remove even the fallback.
+  // any other outpoint answers a fixed body. That body is not a clean coin to
+  // the SDK's classifier: `cats:[0]` reports cat #0 on the outpoint, and empty
+  // `sat_ranges` reads as not indexed. A funding scan wired here never
+  // auto-picks the coin; wire it to the real ords instead (e2e/README.md).
   const outputMatch = req.method === 'GET' && /^\/output\/([0-9a-f]{64}):(\d+)/i.exec(pathname);
   if (outputMatch) {
     const outpoint = `${outputMatch[1]}:${outputMatch[2]}`;

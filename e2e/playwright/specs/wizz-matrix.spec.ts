@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { approvalGate, waitForApprovalPopup } from '../approval-popup';
-import { describeWalletRejection, REFUSED_WITH_DETAIL } from '../wallet-rejection';
+import { describeWalletRejection, REFUSED_WITH_DETAIL, WALLET_PROBE_TIMEOUT_CODE } from '../wallet-rejection';
 import { onboardWizz } from '../onboard-wizz';
 
 /**
@@ -261,21 +261,17 @@ for (const variant of VARIANTS) {
       console.log(`[wizz-matrix:${variant.label}] window.wizz detected on harness = ${wizzVisible}`);
 
       if (expectFixtureGatedFailure) {
-        // Positive assertion that without the captured
-        // configs.wizz.cash payload, the wallet's per-tab session
-        // router rejects requestAccounts with -32603. Probe
-        // window.wizz directly with a single call — the harness's
-        // connectWizz wrapper has a 6-attempt retry loop tuned for
-        // P2WPKH's tabCheckin race that would multiply this
-        // expected-rejection cost by 6× and hit the test timeout.
-        // Race requestAccounts against a 30s in-page timeout. Wizz's
-        // SW intermittently HANGS on the first probe (observed iter
-        // 116: attempt 1 timed out at the test-level 3min, retry
-        // attempt rejected with -32603 in milliseconds). The hang
-        // and the -32603 are the same wallet-side signal — config
-        // payload missing — so a timeout-based fallback resolves
-        // the same positive assertion in either path.
-        const outcome = await harness.evaluate(async () => {
+        // Probe window.wizz directly with a single call: the harness's
+        // connectWizz wrapper has a 6-attempt retry loop tuned for P2WPKH's
+        // tabCheckin race, which would multiply this expected-rejection cost
+        // by 6x and hit the test timeout.
+        //
+        // The probe races requestAccounts against a 30s in-page timer so a
+        // wallet that never answers ends the cell with a named failure instead
+        // of the test-level timeout. The timer resolves with
+        // WALLET_PROBE_TIMEOUT_CODE, which describeWalletRejection reads as
+        // `timedOut: true, refused: false`.
+        const outcome = await harness.evaluate(async (timeoutCode) => {
           interface WizzApi { requestAccounts?(): Promise<unknown> }
           const wizz = (window as unknown as { wizz?: WizzApi }).wizz;
           if (!wizz?.requestAccounts) return { ok: true, info: 'no requestAccounts surface' };
@@ -290,35 +286,40 @@ for (const variant of VARIANTS) {
               };
             },
           );
-          const timeoutSignal = new Promise<{ ok: false; code: 'timeout'; err: string }>((resolve) => {
+          const timeoutSignal = new Promise<{ ok: false; code: string; err: string }>((resolve) => {
             setTimeout(() => resolve({
               ok: false,
-              code: 'timeout',
-              err: 'wizz.requestAccounts hung 30s — configs.wizz.cash route aborted, SW stuck waiting for session-init handshake',
+              code: timeoutCode,
+              err: 'wizz.requestAccounts did not settle within 30s',
             }), 30_000);
           });
           return Promise.race([probe, timeoutSignal]);
-        });
+        }, WALLET_PROBE_TIMEOUT_CODE);
         // eslint-disable-next-line no-console
         console.log(`[wizz-matrix:${variant.label}] fixture-gated outcome = ${JSON.stringify(outcome).slice(0, 250)}`);
 
         // WHAT THIS PINS: without the captured configs.wizz.cash payload the
         // wallet hands out no P2TR account, and it says so with a real
-        // rejection carrying a code and a message, rather than resolving empty,
-        // returning undefined, or hanging silently.
+        // rejection carrying a numeric code and a message. It fails when the
+        // wallet resolves empty, returns undefined, hands out an account, or
+        // hangs: a hang is the wallet saying nothing, and our own timer's
+        // sentinel is not a refusal.
         //
         // WHAT IT DELIBERATELY DOES NOT PIN: which rejection. That taxonomy
-        // belongs to the wallet, changes between its releases, and the same
-        // fixture-absent state has produced -32603 "Connection error", a 30s
-        // hang, and 4001 "User rejected the request". Matching those strings
-        // turned this cell red on outcomes that all mean the same thing here,
-        // and each red added another alternative, which makes a catalogue
-        // rather than an assertion.
+        // belongs to the wallet and changes between its releases; the same
+        // fixture-absent state has produced -32603 "Connection error" and
+        // 4001 "User rejected the request". Matching those strings would make
+        // a catalogue rather than an assertion.
         //
         // The positive path is proved by the P2WPKH cell in the same run: it
         // asserts the exact expected address, so a broken SDK cannot leave this
         // pair green.
-        expect(describeWalletRejection(outcome)).toEqual(REFUSED_WITH_DETAIL);
+        const rejection = describeWalletRejection(outcome);
+        expect(
+          rejection.timedOut,
+          `wizz.requestAccounts hung: no answer within 30s for ${variant.label}. A hang is not a refusal.`,
+        ).toBe(false);
+        expect(rejection).toEqual(REFUSED_WITH_DETAIL);
       } else {
         const knownPages = new Set(context.pages());
         const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectWizz());
