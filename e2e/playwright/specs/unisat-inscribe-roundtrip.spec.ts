@@ -14,6 +14,7 @@ import {
 } from '../../regtest/regtest-helpers';
 import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
+import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
 /**
  * Full inscribe roundtrip with the real Unisat extension. Same
@@ -96,6 +97,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });

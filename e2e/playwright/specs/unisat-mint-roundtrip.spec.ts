@@ -7,6 +7,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
+import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
 /**
  * Iteration 4 — full cat21 mint roundtrip with the real Unisat
@@ -105,6 +106,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });

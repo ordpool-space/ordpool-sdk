@@ -7,6 +7,7 @@ import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from 
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardUnisat } from '../onboard-unisat';
+import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
 /**
  * BIP-322 sign-message roundtrip with the real Unisat extension. Promotes
@@ -79,6 +80,7 @@ test.beforeAll(async () => {
     headless: false,
     args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox', '--disable-dev-shm-usage'],
   });
+  await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });

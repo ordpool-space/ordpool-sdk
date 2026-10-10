@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 
 import { approvalGate, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
+import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
 /**
  * Iteration 3 of the Unisat E2E pipeline: SDK ↔ Unisat handshake.
@@ -67,6 +68,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });

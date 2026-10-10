@@ -32,6 +32,7 @@ __exportStar(require("./playwright/onboard-unisat"), exports);
 __exportStar(require("./playwright/onboard-wizz"), exports);
 __exportStar(require("./playwright/wizz-offline-routes"), exports);
 __exportStar(require("./playwright/okx-offline-routes"), exports);
+__exportStar(require("./playwright/unisat-offline-routes"), exports);
 __exportStar(require("./playwright/alby-auto-approve"), exports);
 __exportStar(require("./playwright/onboard-leather"), exports);
 __exportStar(require("./playwright/cdp-click"), exports);

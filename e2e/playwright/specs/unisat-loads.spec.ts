@@ -1,6 +1,7 @@
 import { test, expect, chromium, BrowserContext } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
 /**
  * Iteration 1 of the Unisat E2E pipeline: prove that we can load
@@ -44,6 +45,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installUnisatOfflineRoutes(context);
 
   // Manifest V3: extension registers a service worker on install.
   // Wait for it so we can read back its ID.

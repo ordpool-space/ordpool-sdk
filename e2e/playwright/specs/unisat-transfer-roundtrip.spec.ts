@@ -21,6 +21,7 @@ import {
 } from '../../regtest/regtest-helpers';
 import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
+import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
 /**
  * Unisat CAT-21 TRANSFER roundtrip on regtest — full popup-driven path,
@@ -147,6 +148,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });

@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 
 import { approvalGate, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
+import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
 /**
  * Iteration 5 of the Unisat E2E pipeline: matrix spec across every
@@ -119,6 +120,7 @@ for (const variant of VARIANTS) {
     });
 
     try {
+      await installUnisatOfflineRoutes(context);
       let [worker] = context.serviceWorkers();
       if (!worker) worker = await context.waitForEvent('serviceworker', { timeout: 30_000 });
       const extensionId = worker.url().split('/')[2];

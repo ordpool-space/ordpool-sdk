@@ -8,6 +8,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 
 import { isVisibleWithin } from '../is-visible-within';
 import { dismissUnisatUpdateNag } from '../onboard-unisat';
+import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -83,6 +84,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installUnisatOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) {
