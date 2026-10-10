@@ -63,7 +63,8 @@ const EXPECTED = [
   'fail/workaround-without-reason-short.spec.ts  workaround-without-reason',
   'fail/workaround-without-reason-missing.spec.ts  workaround-without-reason',
   'fail/workaround-without-reason-variable.spec.ts  workaround-without-reason',
-  'fail/real-host.spec.ts  real-host',
+  'fail/e2e/real-host.e2e.spec.ts  real-host',
+  'fail/real-host-unit-fetch.spec.ts  real-host',
   'fail/sdk-module-mock.spec.ts  sdk-module-mock',
 ];
 

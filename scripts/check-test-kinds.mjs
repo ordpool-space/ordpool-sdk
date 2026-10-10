@@ -547,8 +547,14 @@ function lineOf(lineStarts, idx) {
   return lo + 1;
 }
 
+/**
+ * A production host as an ADDRESS: behind a scheme (`https://`, `http://`, `wss://`, `ws://`),
+ * optionally under a subdomain. The bare name as data (an inscription body that carries
+ * `<!--cubes.haushoppe.art-->`, a `minted_by: 'ordpool.space'` field) reaches nothing and is
+ * not reported.
+ */
 const HOST_RE = new RegExp(
-  `(?<![\\w-])(${[...REAL_HOSTS].sort((a, b) => b.length - a.length).map((h) => h.replace(/\./g, '\\.')).join('|')})(?![\\w-])`,
+  `(?:https?|wss?)://((?:[\\w-]+\\.)*(?:${[...REAL_HOSTS].sort((a, b) => b.length - a.length).map((h) => h.replace(/\./g, '\\.')).join('|')}))(?![\\w-])`,
   'gi',
 );
 
@@ -576,9 +582,20 @@ export function checkFile(file, src) {
       const first = args[0];
       if (first && /^\s*['"`]/.test(code.slice(first.start, first.end))) titles.push(first);
     }
+    // In a unit spec a production URL is often the subject (a function that rewrites
+    // ordinals.com links); only a URL handed to a request is a real system being reached.
+    // Every other kind and every runner config reaches what it names.
+    // Limit: a unit spec that keeps a production URL in a variable and requests it later
+    // is not seen; the strict form applies once the file carries its real kind suffix.
+    const unitOnlyRequests = !isConfig && kindFromName(file) === 'unit';
+    const REQUEST_CALLS = new Set(['fetch', 'get', 'post', 'put', 'request', 'goto', 'newPage', 'connect', 'WebSocket', 'EventSource']);
     for (const m of noComments.matchAll(HOST_RE)) {
       if (titles.some((t) => m.index >= t.start && m.index < t.end)) continue;
-      add(m.index, 'real-host', `names production host ${m[1]}; use regtest or a captured fixture`);
+      if (unitOnlyRequests) {
+        const call = enclosingCall(code, m.index);
+        if (!call || !REQUEST_CALLS.has(call.name)) continue;
+      }
+      add(m.index, 'real-host', `reaches production host ${m[1]}; use regtest or a captured fixture`);
     }
   }
 
