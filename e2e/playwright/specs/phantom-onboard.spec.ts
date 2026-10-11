@@ -133,24 +133,13 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
-  // CI 26693907192 revealed: Phantom shows a LOADING screen first
-  // ("Import Accounts / Finding Accounts with Activity" + spinner)
-  // then transitions to the result ("We found N accounts with
-  // activity" + Continue button). My previous switch fired on
-  // "Import Accounts" alone — that matched the loading state.
-  // Switch only when "We found" appears (the result-state marker).
-  const findResultPage = async () => {
-    for (const p of context.pages()) {
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/We found .* accounts? with activity/i.test(text)) return p;
-    }
-    return null;
-  };
-  // Event-driven rather than a 500ms poll, for the same reason as okx's secure
-  // step: expiring before the wallet paints made the flow continue against the
-  // wrong page. The search covers the current page too, so a result rendered
-  // in place resolves to it.
-  page = await waitForPageShowing({ context, text: /We found .* accounts? with activity/i });
+  // Phantom shows a loading screen first ("Import Accounts / Finding Accounts
+  // with Activity" and a spinner), then the result: "We found N accounts with
+  // activity" or "We found 1 account", depending on what its account scan
+  // returned. "We found" is the result-state marker; "Import Accounts" alone
+  // also matches the loading state. The search covers the current page too,
+  // so a result rendered in place resolves to it.
+  page = await waitForPageShowing({ context, text: /We found \d+ accounts?\b/i });
 
   // Phantom "Import Accounts — We found N accounts with activity"
   // result screen. Continue is rendered as a styled div that's

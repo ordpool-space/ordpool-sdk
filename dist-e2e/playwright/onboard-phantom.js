@@ -6,14 +6,7 @@ const test_1 = require("@playwright/test");
 const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 const cdp_click_1 = require("./cdp-click");
-/**
- * Probe: how long to look for the page a step moves to. Phantom replaces the
- * tab for the import result and again for "Create a password" in some
- * releases and renders in place in others; long enough for the account scan
- * behind the import result to finish on a loaded runner, after which the step
- * is taken to be on the current page.
- */
-const PHANTOM_STEP_PAGE_PROBE_MS = 60_000;
+const approval_popup_1 = require("./approval-popup");
 /**
  * Probe: how long the best-effort "Get Started" button gets to render on the
  * completion screen. Some releases go straight to the wallet instead.
@@ -77,21 +70,12 @@ async function onboardPhantom(page, extensionId, opts = {}) {
     const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
     await (0, test_1.expect)(confirmAfterMnemonic).toBeEnabled();
     await confirmAfterMnemonic.click();
-    // Wait for the result state; Phantom may replace the page.
+    // The import result, on whichever page shows it: Phantom replaces the tab
+    // for it in some releases and renders it in place in others. Its heading is
+    // "We found N accounts with activity" or "We found 1 account", depending on
+    // what Phantom's account scan returned.
     const ctx = page.context();
-    const deadline = Date.now() + PHANTOM_STEP_PAGE_PROBE_MS;
-    while (Date.now() < deadline) {
-        for (const p of ctx.pages()) {
-            const text = await p.locator('body').innerText().catch(() => '');
-            if (/We found .* accounts? with activity/i.test(text)) {
-                page = p;
-                break;
-            }
-        }
-        if (/We found .* accounts? with activity/i.test(await page.locator('body').innerText().catch(() => '')))
-            break;
-        await new Promise(r => setTimeout(r, 500));
-    }
+    page = await (0, approval_popup_1.waitForPageShowing)({ context: ctx, text: /We found \d+ accounts?\b/i });
     await page.waitForFunction(() => {
         const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
         const candidate = els.find(el => (el.textContent || '').trim() === 'Continue');
@@ -107,23 +91,8 @@ async function onboardPhantom(page, extensionId, opts = {}) {
     }, undefined, { polling: 500 });
     const importAccountsContinue = page.getByText('Continue', { exact: true }).first();
     await (0, cdp_click_1.cdpClick)(page, importAccountsContinue, 'the import-accounts Continue button');
-    // Create a password screen opens on yet another page.
-    const createPwDeadline = Date.now() + PHANTOM_STEP_PAGE_PROBE_MS;
-    let pwPage = null;
-    while (Date.now() < createPwDeadline) {
-        for (const p of ctx.pages()) {
-            const text = await p.locator('body').innerText().catch(() => '');
-            if (/Create a password/i.test(text)) {
-                pwPage = p;
-                break;
-            }
-        }
-        if (pwPage)
-            break;
-        await new Promise(r => setTimeout(r, 500));
-    }
-    if (pwPage)
-        page = pwPage;
+    // "Create a password", again on whichever page shows it.
+    page = await (0, approval_popup_1.waitForPageShowing)({ context: ctx, text: /Create a password/i });
     const pwInputs = page.locator('input[type="password"]');
     await (0, test_1.expect)(pwInputs.first()).toBeVisible();
     await pwInputs.nth(0).fill(password);

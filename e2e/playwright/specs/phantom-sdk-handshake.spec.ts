@@ -319,34 +319,13 @@ test('phantom v26.16: detect succeeds (post self-registration) but phantomConnec
     () => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true,
     undefined,
   );
-  // Iter 64 finding: btc_requestAccounts via SW returns "not
-  // permitted" — the harness URL isn't an authorized dApp. The
-  // sub-provider gating is permission-based. Poll for up to 30s
-  // with a millisecond-precision arrival log so we can confirm
-  // whether .bitcoin EVER appears or is permanently gated.
-  const phantomTimeline = await harness.evaluate(async () => {
-    const t0 = Date.now();
-    const log: Array<{ at: number; hasPhantom: boolean; hasBitcoin: boolean; hasSolana: boolean }> = [];
-    while (Date.now() - t0 < 30_000) {
-      const w = window as unknown as { phantom?: { bitcoin?: unknown; solana?: unknown } };
-      const p = w.phantom;
-      const entry = { at: Date.now() - t0, hasPhantom: !!p, hasBitcoin: !!p?.bitcoin, hasSolana: !!p?.solana };
-      const last = log[log.length - 1];
-      if (!last || last.hasPhantom !== entry.hasPhantom || last.hasBitcoin !== entry.hasBitcoin || last.hasSolana !== entry.hasSolana) {
-        log.push(entry);
-        if (entry.hasBitcoin) break;
-      }
-      await new Promise(r => setTimeout(r, 200));
-    }
-    return log;
-  });
-  console.log(`[phantom:sdk-handshake] phantomTimeline = ${JSON.stringify(phantomTimeline)}`);
-
-  // window.phantom.bitcoin DID appear (self-registration succeeded).
-  const lastSnapshot = phantomTimeline[phantomTimeline.length - 1];
-  expect(lastSnapshot).toBeDefined();
-  expect(lastSnapshot.hasPhantom).toBe(true);
-  expect(lastSnapshot.hasBitcoin).toBe(true);
+  // btc_requestAccounts via the SW answers "not permitted" for an unauthorised
+  // dApp, but the provider object itself self-registers on the page. Wait for
+  // `window.phantom.bitcoin` to exist.
+  await expect.poll(() => harness.evaluate(() => {
+    const p = (window as unknown as { phantom?: { bitcoin?: unknown } }).phantom;
+    return { hasPhantom: !!p, hasBitcoin: !!p?.bitcoin };
+  }), { message: 'window.phantom.bitcoin never registered on the harness page' }).toEqual({ hasPhantom: true, hasBitcoin: true });
 
   // Detection should pass via the SDK's own predicate.
   const detected = await harness.evaluate(() => window.ordpoolSdkHarness.detectPhantom());
