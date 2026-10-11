@@ -105,8 +105,10 @@ async function onboardOkx(page, extensionId, opts = {}) {
         await (0, test_1.expect)(pwContinue).toBeEnabled();
         await pwContinue.click();
     }
-    // "Welcome to OKX Wallet" completion gate, drawn in the page itself.
-    page = await (0, approval_popup_1.waitForPageShowing)({ context: ctx, text: /Welcome to OKX Wallet|Start your Web3 journey/i });
+    // The "Welcome to OKX Wallet" completion gate, drawn in the page itself, or
+    // the wallet home ("Account 01") when OKX skips the gate, which it does on
+    // some runs.
+    page = await (0, approval_popup_1.waitForPageShowing)({ context: ctx, text: /Welcome to OKX Wallet|Start your Web3 journey|Account 01/i });
     const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
     if (await (0, is_visible_within_1.isVisibleWithin)(startBtn, OKX_START_BUTTON_PROBE_MS)) {
         await startBtn.click().catch(() => undefined);

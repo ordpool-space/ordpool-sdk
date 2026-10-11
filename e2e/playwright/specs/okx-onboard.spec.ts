@@ -197,11 +197,11 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
     await shot(page, '07-after-password-submit');
   }
 
-  // OKX final screen: "Welcome to OKX Wallet — Let's explore Web3"
-  // with a "Start your Web3 journey" button. Click through.
-  // The search covers the current page too, so a gate rendered in place
-  // resolves to it.
-  page = await waitForPageShowing({ context, text: /Welcome to OKX Wallet|Start your Web3 journey/i });
+  // OKX final screen: "Welcome to OKX Wallet, Let's explore Web3" with a
+  // "Start your Web3 journey" button, or the wallet home ("Account 01") when
+  // OKX skips the gate, which it does on some runs. The search covers the
+  // current page too, so a screen rendered in place resolves to it.
+  page = await waitForPageShowing({ context, text: /Welcome to OKX Wallet|Start your Web3 journey|Account 01/i });
   // Try clicking the Start button (may also be in an iframe).
   const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
   if (await startBtn.isVisible().catch(() => false)) {
