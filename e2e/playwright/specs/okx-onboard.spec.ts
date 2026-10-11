@@ -99,30 +99,9 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   }, undefined, { polling: 250 });
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
   await expect(importBtn).toBeVisible();
-  // OKX absorbs every mouse-based click strategy (CI 26645369070..
-  // 26664331512). Try a hover-then-CDP-click sequence with a
-  // micro-movement to mimic real cursor jitter — some anti-bot
-  // checks require the mouse to have moved through multiple
-  // positions before the click registers.
-  const cdp = await page.context().newCDPSession(page);
+  // A real mouse click over CDP; the seed-phrase option appearing below is
+  // the proof it landed.
   await cdpClick(page, importBtn, 'the OKX import-wallet button');
-  // Fallback: also dispatch a Playwright force-click as a belt-and-
-  // suspenders in case the CDP click was absorbed by an overlay.
-  await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
-
-  // Belt-and-suspenders #2: if the screen still shows "Your portal
-  // to Web3" after 3s, fire HTMLElement.click() via page.evaluate as
-  // a programmatic native click. React listens for native MouseEvent
-  // and OKX's anti-bot only filters trusted-but-suspicious mouse
-  // events, not direct .click() calls.
-  const stillOnWelcome = await page.locator('text="Your portal to Web3"')
-    .isVisible().catch(() => false);
-  if (stillOnWelcome) {
-    await page.evaluate(() => {
-      const btn = document.querySelector('[data-testid="onboard-page-import-wallet-button"]') as HTMLElement | null;
-      btn?.click();
-    });
-  }
   await shot(page, '02-after-import-click');
   await dumpHtml(page, '02-after-import-click');
 
@@ -204,13 +183,13 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   page = await waitForPageShowing({ context, text: /Welcome to OKX Wallet|Start your Web3 journey|Account 01/i });
   // Try clicking the Start button (may also be in an iframe).
   const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
-  if (await startBtn.isVisible().catch(() => false)) {
-    await startBtn.click().catch(() => undefined);
+  if (await startBtn.isVisible()) {
+    await startBtn.click();
   } else {
     const fr = page.frameLocator('#ui-ses-iframe');
     const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
-    if (await frStart.isVisible().catch(() => false)) {
-      await frStart.click().catch(() => undefined);
+    if (await frStart.isVisible()) {
+      await frStart.click();
     }
   }
 

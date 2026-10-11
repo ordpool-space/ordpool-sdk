@@ -1,22 +1,8 @@
-import { expect, Page } from '@playwright/test';
-import { isVisibleWithin } from './is-visible-within';
+import { expect, Locator, Page } from '@playwright/test';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 import { cdpClick } from './cdp-click';
 import { waitForPageShowing } from './approval-popup';
-
-/**
- * Probe: how long the best-effort "Get Started" button gets to render on the
- * completion screen. Some releases go straight to the wallet instead.
- */
-const PHANTOM_GET_STARTED_PROBE_MS = 5_000;
-
-/**
- * Probe: how long the completion screen gets to go away after the Get Started
- * volley. It usually stays (the button resists every click strategy), which is
- * the expected answer, and the caller navigates to popup.html itself.
- */
-const PHANTOM_COMPLETION_LEAVE_PROBE_MS = 10_000;
 
 /**
  * Drive Phantom v26 onboarding from welcome to the "You're good to go"
@@ -33,14 +19,12 @@ const PHANTOM_COMPLETION_LEAVE_PROBE_MS = 10_000;
  *   - Continue (rendered as a styled <div>, not a real button) once
  *     Phantom finishes deriving account info (opacity gate).
  *   - YET another new page for "Create a password" — switch reference.
- *   - Password + Confirm Password fields; Reach UI custom-checkbox
- *     Terms (the <input> is visually hidden, dispatch native .click()
- *     via JS so React's onChange toggles aria-checked); Continue.
- *   - "You're good to go!" completion gate with a "Get Started" CTA.
- *     The button is bombproof against every click strategy tried
- *     (CDP / pointer / programmatic / Tab+Enter). We attempt one
- *     CDP+pointer-event volley and leave the wallet on the completion
- *     screen — callers can navigate to popup.html afterwards.
+ *   - Password + Confirm Password fields; the Reach UI custom-checkbox
+ *     Terms (`tickPhantomTerms`); Continue.
+ *   - "You're good to go!" completion screen with a "Get Started" CTA.
+ *     Onboarding is complete at this screen: the wallet is restored and
+ *     unlocked. This returns there; callers open popup.html themselves,
+ *     which does not depend on Get Started.
  */
 export async function onboardPhantom(
   page: Page,
@@ -104,16 +88,7 @@ export async function onboardPhantom(
   await pwInputs.nth(0).fill(password);
   await pwInputs.nth(1).fill(password);
 
-  // Reach UI hidden checkbox — native .click() via JS.
-  await page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"]')
-    .first().waitFor({ state: 'attached' });
-  await page.evaluate(() => {
-    const cb = document.querySelector('[data-testid="onboarding-form-terms-of-service-checkbox"]') as HTMLInputElement | null;
-    cb?.click();
-  });
-  await expect(
-    page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"][aria-checked="true"]'),
-  ).toBeAttached();
+  await tickPhantomTerms(page);
 
   await page.waitForFunction(() => {
     const els = Array.from(document.querySelectorAll('button, [role="button"], div'));
@@ -132,48 +107,28 @@ export async function onboardPhantom(
     return t.includes("you're good to go") || t.includes('get started')
       || t.includes('send') || t.includes('receive') || t.includes('balance');
   }, undefined, { polling: 500 });
-
-  await pressPhantomGetStarted(page);
 }
 
 /**
- * Best-effort press of Phantom's "Get Started" on the onboarding completion
- * screen, then a short probe for the screen going away. The button resists
- * every click strategy tried (CDP, pointer events, programmatic, Tab+Enter),
- * so staying on the completion screen is the expected outcome; callers
- * navigate to popup.html afterwards.
+ * Tick the Terms of Service box on Phantom's "Create a password" screen.
+ *
+ * The box is a Reach UI custom checkbox: the `<input>` is invisible and takes
+ * no pointer events, and the visible 22 px square is its container span, which
+ * is what a person clicks. The click is proven by the input's `aria-checked`.
  */
-export async function pressPhantomGetStarted(page: Page): Promise<void> {
-  // Best-effort Get Started click: unlikely to land, harmless if not. This one
-  // keeps its box guard ON PURPOSE, because skipping it is the documented
-  // behaviour rather than a silent failure. Every REQUIRED onboarding click
-  // goes through cdpClick and fails naming itself instead.
-  const gsLocator = page.getByText('Get Started', { exact: true }).first();
-  if (await isVisibleWithin(gsLocator, PHANTOM_GET_STARTED_PROBE_MS)) {
-    await page.bringToFront();
-    const gsBox = await gsLocator.boundingBox();
-    if (gsBox) {
-      const cdp2 = await page.context().newCDPSession(page);
-      const x = gsBox.x + gsBox.width / 2; const y = gsBox.y + gsBox.height / 2;
-      await cdp2.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
-      await cdp2.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 });
-      await cdp2.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 });
-      await page.evaluate(({ x, y }) => {
-        const el = document.elementFromPoint(x, y);
-        if (el) {
-          const opts = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, pointerType: 'mouse', pointerId: 1, isPrimary: true } as PointerEventInit;
-          el.dispatchEvent(new PointerEvent('pointerdown', opts));
-          el.dispatchEvent(new PointerEvent('pointerup', opts));
-          el.dispatchEvent(new MouseEvent('mousedown', opts));
-          el.dispatchEvent(new MouseEvent('mouseup', opts));
-          el.dispatchEvent(new MouseEvent('click', opts));
-        }
-      }, { x, y });
-    }
-  }
-  await page.waitForFunction(
-    () => !/You're good to go/i.test(document.body.innerText || ''),
-    undefined, { timeout: PHANTOM_COMPLETION_LEAVE_PROBE_MS, polling: 300 },
-  ).catch(() => undefined);
+export async function tickPhantomTerms(page: Page): Promise<void> {
+  const testId = 'onboarding-form-terms-of-service-checkbox';
+  await tickPhantomTermsControls({
+    box: page.locator('[data-reach-custom-checkbox-container]').filter({ has: page.getByTestId(testId) }),
+    checked: page.locator(`[data-testid="${testId}"][aria-checked="true"]`),
+  });
 }
 
+/** `tickPhantomTerms` on its two controls: the visible box, and the input once checked. */
+export async function tickPhantomTermsControls(c: {
+  box: Pick<Locator, 'click'>;
+  checked: Pick<Locator, 'waitFor'>;
+}): Promise<void> {
+  await c.box.click();
+  await c.checked.waitFor({ state: 'attached' });
+}

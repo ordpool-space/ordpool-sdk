@@ -5,6 +5,7 @@
 // MUST stay green-or-loudly-failing on every CI run.
 
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { cdpClick } from '../cdp-click';
 import { clickUntilEffect } from '../click-until-effect';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -111,13 +112,11 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
 
   // ─── Phase 4: source-wallet picker ───
   // Unisat-style "Choose a wallet you want to restore from" with
-  // Wizz Wallet at the top. The labels are non-interactive
-  // <div class="relative"> children of a tappable row container —
-  // the text node isn't the click target. Use force:true to let
-  // the click bubble to whichever ancestor has the onClick handler.
-  const sourceWizz = page.getByText('Wizz Wallet', { exact: true }).first();
-  await expect(sourceWizz).toBeVisible();
-  await sourceWizz.click({ force: true });
+  // Wizz Wallet at the top. Its button pulses (an endless scale
+  // animation), so it is never "stable" for a Playwright click; a real
+  // mouse click at its centre (cdpClick) lands, and the mnemonic form
+  // below is the proof.
+  await cdpClick(page, page.getByRole('button', { name: 'Wizz Wallet', exact: true }), 'the "Wizz Wallet" restore source');
   await shot(page, '05-source-wallet-picked');
   await dumpHtml(page, '05-source-wallet-picked');
 
@@ -159,7 +158,7 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   // changes every downstream address. Hard-assert visibility.
   const nativeSegwitRow = page.getByText('Native Segwit (P2WPKH)', { exact: true }).first();
   await expect(nativeSegwitRow).toBeVisible();
-  await nativeSegwitRow.click({ force: true });
+  await nativeSegwitRow.click();
   await shot(page, '08b-native-segwit-picked');
 
   // CI 26418861365 showed both 08c (post-click 1) and 08e (post-click 2)

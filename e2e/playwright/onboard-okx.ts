@@ -24,8 +24,8 @@ const OKX_START_BUTTON_IFRAME_PROBE_MS = 3_000;
 /**
  * Drive OKX v4.1.0 onboarding from welcome to dashboard. Multi-page,
  * multi-iframe flow (CI iterations 22-31, 2026-05-31):
- *   - Welcome: "Your portal to Web3" → Import wallet (CDP click +
- *     programmatic fallback; native click absorbed by anti-bot).
+ *   - Welcome: "Your portal to Web3" → Import wallet, a real mouse click
+ *     over CDP (`cdpClick`); the seed-phrase option appearing proves it.
  *   - "Seed phrase or private key" picker on the same page.
  *   - 12-box seed form opens in #ui-ses-iframe; Confirm.
  *   - "Secure your wallet" opens on a NEW page; Password preselected;
@@ -60,19 +60,7 @@ export async function onboardOkx(
 
   const importBtn = page.getByTestId('onboard-page-import-wallet-button');
   await expect(importBtn).toBeVisible();
-  const cdp = await page.context().newCDPSession(page);
   await cdpClick(page, importBtn, 'the OKX import-wallet button');
-  await importBtn.click({ force: true, delay: 100 }).catch(() => undefined);
-  // Deliberately INSTANT: this asks whether the click failed to navigate, so
-  // the answer is about the DOM as it stands now. Waiting would mean waiting
-  // for the old page to reappear, which is not a thing that happens.
-  const stillOnWelcome = await page.locator('text="Your portal to Web3"').isVisible().catch(() => false);
-  if (stillOnWelcome) {
-    await page.evaluate(() => {
-      const btn = document.querySelector('[data-testid="onboard-page-import-wallet-button"]') as HTMLElement | null;
-      btn?.click();
-    });
-  }
 
   const seedOption = page.getByText('Seed phrase or private key', { exact: true });
   await expect(seedOption).toBeVisible();
@@ -123,12 +111,12 @@ export async function onboardOkx(
   page = await waitForPageShowing({ context: ctx, text: /Welcome to OKX Wallet|Start your Web3 journey|Account 01/i });
   const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
   if (await isVisibleWithin(startBtn, OKX_START_BUTTON_PROBE_MS)) {
-    await startBtn.click().catch(() => undefined);
+    await startBtn.click();
   } else {
     const fr = page.frameLocator('#ui-ses-iframe');
     const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
     if (await isVisibleWithin(frStart, OKX_START_BUTTON_IFRAME_PROBE_MS)) {
-      await frStart.click().catch(() => undefined);
+      await frStart.click();
     }
   }
 

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.xverseRestorePickerWallet1 = xverseRestorePickerWallet1;
 exports.onboardXverse = onboardXverse;
+exports.dismissXversePromo = dismissXversePromo;
 exports.primeAndSwitchToRegtest = primeAndSwitchToRegtest;
 exports.overrideRegtestElectrsUrl = overrideRegtestElectrsUrl;
 const test_1 = require("@playwright/test");
@@ -164,6 +165,19 @@ async function onboardXverse(context, extensionId, opts = {}) {
         }
     }
 }
+/**
+ * Dismiss the feature announcement Xverse may show on the first popup open
+ * (the Spark, Xverse Cash or Starknet promo, each closed by "Not now"), so it
+ * cannot sit over the settings screen the caller opens next. Returns whether
+ * it was there. Clicked like a person would, then required to go away.
+ */
+async function dismissXversePromo(notNow) {
+    if (!(await (0, is_visible_within_1.isVisibleWithin)(notNow, XVERSE_NOT_NOW_PROBE_MS)))
+        return false;
+    await notNow.click();
+    await notNow.waitFor({ state: 'hidden' });
+    return true;
+}
 /** Switch a just-onboarded Xverse to Bitcoin Regtest (Testnet mode + Regtest). */
 async function primeAndSwitchToRegtest(context, extensionId) {
     const primer = await context.newPage();
@@ -172,10 +186,7 @@ async function primeAndSwitchToRegtest(context, extensionId) {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes('account 1') || t.includes('not now') || t.includes('zest');
     }, { what: 'popup' });
-    const notNow = primer.getByText('Not now', { exact: true }).first();
-    if (await (0, is_visible_within_1.isVisibleWithin)(notNow, XVERSE_NOT_NOW_PROBE_MS)) {
-        await notNow.click({ force: true }).catch(() => undefined);
-    }
+    await dismissXversePromo(primer.getByText('Not now', { exact: true }).first());
     await primer.goto(`chrome-extension://${extensionId}/popup.html#/settings/change-network`, { waitUntil: 'domcontentloaded' });
     await primer.waitForFunction(() => /testnet mode/i.test(document.body.innerText || ''));
     // Toggle Testnet mode via a DOM-relative locator (no coordinate clicks —
@@ -190,12 +201,12 @@ async function primeAndSwitchToRegtest(context, extensionId) {
     const pageSwitch = primer.locator('[role="switch"], [role="checkbox"], input[type="checkbox"]').first();
     const testnetToggle = (await rowSwitch.count()) > 0 ? rowSwitch : pageSwitch;
     await (0, test_1.expect)(testnetToggle).toBeVisible();
-    await testnetToggle.click({ force: true });
+    await testnetToggle.click();
     await primer.waitForFunction(() => {
         const txt = document.body.innerText || '';
         return /testnet/i.test(txt) && /BITCOIN[\s\S]{0,80}testnet/i.test(txt);
     }, undefined, { polling: 250 });
-    await primer.getByText('Regtest', { exact: true }).first().click({ force: true });
+    await primer.getByText('Regtest', { exact: true }).first().click();
     // Verify the switch actually took. A failed network switch must surface HERE,
     // not downstream as a mystery zero-balance — throw a clear error if the popup
     // never reflects BITCOIN → Regtest.

@@ -2,8 +2,8 @@ import { Page } from '@playwright/test';
 /**
  * Drive OKX v4.1.0 onboarding from welcome to dashboard. Multi-page,
  * multi-iframe flow (CI iterations 22-31, 2026-05-31):
- *   - Welcome: "Your portal to Web3" → Import wallet (CDP click +
- *     programmatic fallback; native click absorbed by anti-bot).
+ *   - Welcome: "Your portal to Web3" → Import wallet, a real mouse click
+ *     over CDP (`cdpClick`); the seed-phrase option appearing proves it.
  *   - "Seed phrase or private key" picker on the same page.
  *   - 12-box seed form opens in #ui-ses-iframe; Confirm.
  *   - "Secure your wallet" opens on a NEW page; Password preselected;

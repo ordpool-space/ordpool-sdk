@@ -1,4 +1,4 @@
-import { Page } from '@playwright/test';
+import { Locator, Page } from '@playwright/test';
 /**
  * Drive Phantom v26 onboarding from welcome to the "You're good to go"
  * completion screen. Multi-page flow (CI iterations 22-30, 2026-05-31):
@@ -14,25 +14,28 @@ import { Page } from '@playwright/test';
  *   - Continue (rendered as a styled <div>, not a real button) once
  *     Phantom finishes deriving account info (opacity gate).
  *   - YET another new page for "Create a password" — switch reference.
- *   - Password + Confirm Password fields; Reach UI custom-checkbox
- *     Terms (the <input> is visually hidden, dispatch native .click()
- *     via JS so React's onChange toggles aria-checked); Continue.
- *   - "You're good to go!" completion gate with a "Get Started" CTA.
- *     The button is bombproof against every click strategy tried
- *     (CDP / pointer / programmatic / Tab+Enter). We attempt one
- *     CDP+pointer-event volley and leave the wallet on the completion
- *     screen — callers can navigate to popup.html afterwards.
+ *   - Password + Confirm Password fields; the Reach UI custom-checkbox
+ *     Terms (`tickPhantomTerms`); Continue.
+ *   - "You're good to go!" completion screen with a "Get Started" CTA.
+ *     Onboarding is complete at this screen: the wallet is restored and
+ *     unlocked. This returns there; callers open popup.html themselves,
+ *     which does not depend on Get Started.
  */
 export declare function onboardPhantom(page: Page, extensionId: string, opts?: {
     password?: string;
     mnemonicWords?: string;
 }): Promise<void>;
 /**
- * Best-effort press of Phantom's "Get Started" on the onboarding completion
- * screen, then a short probe for the screen going away. The button resists
- * every click strategy tried (CDP, pointer events, programmatic, Tab+Enter),
- * so staying on the completion screen is the expected outcome; callers
- * navigate to popup.html afterwards.
+ * Tick the Terms of Service box on Phantom's "Create a password" screen.
+ *
+ * The box is a Reach UI custom checkbox: the `<input>` is invisible and takes
+ * no pointer events, and the visible 22 px square is its container span, which
+ * is what a person clicks. The click is proven by the input's `aria-checked`.
  */
-export declare function pressPhantomGetStarted(page: Page): Promise<void>;
+export declare function tickPhantomTerms(page: Page): Promise<void>;
+/** `tickPhantomTerms` on its two controls: the visible box, and the input once checked. */
+export declare function tickPhantomTermsControls(c: {
+    box: Pick<Locator, 'click'>;
+    checked: Pick<Locator, 'waitFor'>;
+}): Promise<void>;
 //# sourceMappingURL=onboard-phantom.d.ts.map

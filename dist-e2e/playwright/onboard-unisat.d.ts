@@ -1,30 +1,48 @@
-import { Page } from '@playwright/test';
+import { Locator, Page } from '@playwright/test';
+/** The part of a Playwright `Locator` a dismissal step needs. */
+export type DismissControl = Pick<Locator, 'click' | 'waitFor'>;
 /**
  * Dismiss UniSat's "a new version is available" modal.
  *
- * The pinned extension asks UniSat's server whether a newer build exists, so
- * the modal appears on the first dashboard open as soon as upstream ships a
- * release past the pin, and it is layered ABOVE the compatibility notice.
- * Playwright then reports the notice checkbox as visible, enabled and stable
- * while `.row-container` from `.popover-container` intercepts every click, so
- * the failure names the checkbox and not the thing covering it.
+ * UniSat asks its wallet API whether a newer build exists, and the modal
+ * appears on the first dashboard open whenever the answer is above the pinned
+ * build. `installUnisatOfflineRoutes` answers with the captured config
+ * (version 1.7.19 against the pinned 1.7.15), so under the shield it shows on
+ * every onboarding. It is layered ABOVE the compatibility notice: Playwright
+ * reports the notice checkbox as visible, enabled and stable while
+ * `.row-container` from `.popover-container` intercepts every click, so the
+ * failure would name the checkbox and not the thing covering it.
  *
  * The modal carries no data-testid, so it is anchored on the one string only
  * it contains; "Skip" alone would also match the notice below it.
  */
 export declare function dismissUnisatUpdateNag(page: Page): Promise<void>;
+/** The update modal's steps once it shows: Skip, then the modal is gone. */
+export declare function dismissUnisatUpdateNagControls(c: {
+    skip: DismissControl;
+    modal: DismissControl;
+}): Promise<void>;
 /**
- * Dismiss the compatibility notice UniSat shows for SOME address types (nested
- * segwit and taproot) and not for others. Returns whether it was there.
+ * Dismiss the "Compatibility Tips" notice ("Please be aware that: For Ordinals
+ * assets, Rare sats are not supported.") UniSat 1.7.15 shows over the home
+ * screen after onboarding. Returns whether it was there.
  *
- * Best effort on purpose: the notice does not stand between the wallet and its
- * home screen, and its checkbox is an Ant-Design control whose input refuses a
- * direct click (`pointer-events` suppressed on the hidden box, the same quirk
- * the wizz helper documents for its fork of this UI). The caller's `tab-home`
- * assertion is what proves onboarding finished, so a notice that genuinely
- * blocked still fails there, naming the screen rather than a checkbox.
+ * It showed on every onboarding of all four address types under
+ * `installUnisatOfflineRoutes`; the probe stays because what decides it is
+ * UniSat's, not ours.
  */
 export declare function dismissUnisatNotice(page: Page): Promise<boolean>;
+/**
+ * The notice's steps once it shows. OK counts down ("OK (3s)", "OK (2s)", ...)
+ * and ignores clicks until its label is plain "OK", so `okReady` is OK carrying
+ * exactly that label: the state in which it takes the click. Then the notice
+ * is gone, or this fails naming OK rather than a later click it would cover.
+ */
+export declare function dismissUnisatNoticeControls(c: {
+    checkbox: DismissControl;
+    okReady: DismissControl;
+    ok: DismissControl;
+}): Promise<void>;
 /**
  * Drive UniSat onboarding from the BIP-39 test seed to the home tab.
  * Shared by the e2e specs AND the local wallet-runner (matches

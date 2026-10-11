@@ -8,7 +8,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { cdpClick } from '../cdp-click';
-import { pressPhantomGetStarted } from '../onboard-phantom';
+import { tickPhantomTerms } from '../onboard-phantom';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { waitForPageShowing } from '../approval-popup';
 
@@ -184,20 +184,10 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await pwInputs.nth(1).fill(TEST_PASSWORD);
   await shot(page, '06-password-typed');
 
-  // Phantom uses Reach UI's `data-reach-custom-checkbox-input` — the
-  // <input> is visually hidden (pointer-events:none, opacity:0). A
-  // mouse click on the input is absorbed and Playwright `check()`
-  // reports "state did not change". Fire a native .click() via JS —
-  // React's onChange picks it up and toggles aria-checked.
-  await page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"]')
-    .first().waitFor({ state: 'attached' });
-  await page.evaluate(() => {
-    const cb = document.querySelector('[data-testid="onboarding-form-terms-of-service-checkbox"]') as HTMLInputElement | null;
-    cb?.click();
-  });
-  await expect(
-    page.locator('[data-testid="onboarding-form-terms-of-service-checkbox"][aria-checked="true"]'),
-  ).toBeAttached();
+  // Phantom uses Reach UI's custom checkbox: the <input> takes no pointer
+  // events, the visible square is its container, which tickPhantomTerms
+  // clicks and proves through aria-checked.
+  await tickPhantomTerms(page);
 
   // Wait for Continue to be enabled, then CDP-click.
   await page.waitForFunction(() => {
@@ -227,8 +217,6 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
       || t.includes('receive')
       || t.includes('balance');
   }, undefined, { polling: 500 });
-  // Phantom's onboarding completion gate.
-  await pressPhantomGetStarted(page);
   await shot(page, '08-dashboard');
   await dumpHtml(page, '08-dashboard');
 

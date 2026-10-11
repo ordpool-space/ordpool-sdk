@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardWizz = onboardWizz;
 const test_1 = require("@playwright/test");
+const cdp_click_1 = require("./cdp-click");
 const click_until_effect_1 = require("./click-until-effect");
 const onboard_unisat_1 = require("./onboard-unisat");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
@@ -26,15 +27,19 @@ async function onboardWizz(page, extensionId, opts = {}) {
     for (let i = 0; i < pwCount; i++)
         await pwInputs.nth(i).fill(password);
     await (0, click_until_effect_1.clickUntilEffect)(page.getByRole('button', { name: /^continue$/i }).first(), page.getByText('Wizz Wallet', { exact: true }).first(), { label: 'wizz onboarding: continue after password' });
-    await (0, test_1.expect)(page.getByText('Wizz Wallet', { exact: true }).first()).toBeVisible();
-    await page.getByText('Wizz Wallet', { exact: true }).first().click({ force: true });
+    // The "Wizz Wallet" source button pulses (`button-pulse`: an endless
+    // transform: scale(0.98 -> 1) animation, no reduced-motion variant), so it
+    // is never "stable" and a Playwright click waits on it until the bound. A
+    // real mouse click at its centre lands regardless of the scale, which is
+    // what `cdpClick` sends; the mnemonic form appearing is the proof it landed.
+    await (0, cdp_click_1.cdpClick)(page, page.getByRole('button', { name: 'Wizz Wallet', exact: true }), 'the "Wizz Wallet" restore source');
     const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
     await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible();
     for (let i = 0; i < words.length; i++)
         await mnemonicInputs.nth(i).fill(words[i]);
     await (0, click_until_effect_1.clickUntilEffect)(page.getByRole('button', { name: /^continue$/i }).first(), page.getByText(addressTypeRowLabel, { exact: true }).first(), { label: 'wizz onboarding: continue after mnemonic' });
     await (0, test_1.expect)(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible();
-    await page.getByText(addressTypeRowLabel, { exact: true }).first().click({ force: true });
+    await page.getByText(addressTypeRowLabel, { exact: true }).first().click();
     const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
     await continueBtn.scrollIntoViewIfNeeded();
     // The address-type row above re-renders on selection, so this button can be

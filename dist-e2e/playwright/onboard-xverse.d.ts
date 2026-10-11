@@ -12,6 +12,13 @@ export declare function onboardXverse(context: BrowserContext, extensionId: stri
     password?: string;
     mnemonic?: string;
 }): Promise<void>;
+/**
+ * Dismiss the feature announcement Xverse may show on the first popup open
+ * (the Spark, Xverse Cash or Starknet promo, each closed by "Not now"), so it
+ * cannot sit over the settings screen the caller opens next. Returns whether
+ * it was there. Clicked like a person would, then required to go away.
+ */
+export declare function dismissXversePromo(notNow: Pick<Locator, 'waitFor' | 'click'>): Promise<boolean>;
 /** Switch a just-onboarded Xverse to Bitcoin Regtest (Testnet mode + Regtest). */
 export declare function primeAndSwitchToRegtest(context: BrowserContext, extensionId: string): Promise<void>;
 /**

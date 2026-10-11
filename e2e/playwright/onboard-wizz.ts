@@ -1,4 +1,5 @@
 import { expect, Page } from '@playwright/test';
+import { cdpClick } from './cdp-click';
 import { clickUntilEffect } from './click-until-effect';
 import { waitForUnisatInstallTabBooted } from './onboard-unisat';
 
@@ -36,8 +37,12 @@ export async function onboardWizz(
     { label: 'wizz onboarding: continue after password' },
   );
 
-  await expect(page.getByText('Wizz Wallet', { exact: true }).first()).toBeVisible();
-  await page.getByText('Wizz Wallet', { exact: true }).first().click({ force: true });
+  // The "Wizz Wallet" source button pulses (`button-pulse`: an endless
+  // transform: scale(0.98 -> 1) animation, no reduced-motion variant), so it
+  // is never "stable" and a Playwright click waits on it until the bound. A
+  // real mouse click at its centre lands regardless of the scale, which is
+  // what `cdpClick` sends; the mnemonic form appearing is the proof it landed.
+  await cdpClick(page, page.getByRole('button', { name: 'Wizz Wallet', exact: true }), 'the "Wizz Wallet" restore source');
 
   const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
   await expect(mnemonicInputs.first()).toBeVisible();
@@ -49,7 +54,7 @@ export async function onboardWizz(
   );
 
   await expect(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible();
-  await page.getByText(addressTypeRowLabel, { exact: true }).first().click({ force: true });
+  await page.getByText(addressTypeRowLabel, { exact: true }).first().click();
   const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
   await continueBtn.scrollIntoViewIfNeeded();
   // The address-type row above re-renders on selection, so this button can be
