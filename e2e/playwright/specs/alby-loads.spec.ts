@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext } from '@playwright/test';
+import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -55,53 +55,49 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('Alby loads in Chromium with a service worker registered (popup navigation is best-effort artifact-gathering only)', async () => {
+test('Alby loads in Chromium with a service worker registered; its popup hands an unconfigured wallet over to welcome.html', async () => {
   expect(extensionId).toMatch(/^[a-p]{32}$/);
 
   const startupPages = context.pages();
   console.log(`[alby] startup pages: ${startupPages.map(p => p.url()).join(', ')}`);
   for (const [i, p] of startupPages.entries()) {
-    try {
-      await p.screenshot({
-        path: path.resolve(__dirname, `../../../test-results/alby-startup-page-${i}.png`),
-        fullPage: true,
-      });
-    } catch (e) {
-      console.log(`[alby] couldn't screenshot startup page ${i}: ${(e as Error).message}`);
-    }
-  }
-
-  // Alby's popup.html self-closes when opened in a regular tab —
-  // it expects to be embedded as a toolbar popup. SW detection +
-  // manifest read above are the load proof; the navigation block
-  // is best-effort artifact-gathering. Wrap in try/catch so a
-  // self-closing popup doesn't fail the test.
-  const page = await context.newPage();
-  try {
-    await page.goto(`chrome-extension://${extensionId}/popup.html`, {
-      waitUntil: 'domcontentloaded',
-    });
-    // Wait until the extension rendered something (React mount, route
-    // resolution). What it renders is unknown here, so the signal is body text.
-    await page.waitForFunction(() => (document.body.innerText || '').trim().length > 0);
-    console.log(`[alby] navigated URL = ${page.url()}`);
-    console.log(`[alby] page title    = ${await page.title()}`);
-    await page.screenshot({
-      path: path.resolve(__dirname, `../../../test-results/alby-index.png`),
+    await p.screenshot({
+      path: path.resolve(__dirname, `../../../test-results/alby-startup-page-${i}.png`),
       fullPage: true,
     });
-    const bodyHtml = await page.evaluate(() => document.body.innerHTML.slice(0, 4000));
-    fs.writeFileSync(
-      path.resolve(__dirname, `../../../test-results/alby-body-snippet.html`),
-      bodyHtml,
-    );
-    await page.waitForFunction(
-      () => (document.body.innerText || '').trim().length > 0,
-      undefined,
-    );
-    const visibleText = await page.locator('body').innerText();
-    console.log(`[alby] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);
-  } catch (e) {
-    console.log(`[alby] post-navigation step failed (popup may have self-closed): ${(e as Error).message}`);
   }
+
+  // Alby's popup.html asks the background for its status first. A wallet
+  // with no account (this one: nothing is onboarded here) gets
+  // `openPage('welcome.html')` and `window.close()` from the popup, so the
+  // popup tab closing and welcome.html rendering is the behaviour under test.
+  // The close is awaited before anything else touches the popup, because
+  // every later call on it would fail on a closed target.
+  const popup = await context.newPage();
+  const popupClosed = popup.waitForEvent('close');
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'commit' });
+  await popupClosed;
+
+  const welcomeUrl = new RegExp(`^chrome-extension://${extensionId}/welcome\\.html`);
+  await expect
+    .poll(() => context.pages().some((p) => welcomeUrl.test(p.url())), {
+      message: 'Alby opened no welcome.html after its popup closed',
+    })
+    .toBe(true);
+  const welcome = context.pages().find((p) => welcomeUrl.test(p.url())) as Page;
+  // Rendered means the React app mounted: the body carries text.
+  await expect(welcome.locator('body')).not.toHaveText(/^\s*$/);
+  console.log(`[alby] welcome URL   = ${welcome.url()}`);
+  console.log(`[alby] welcome title = ${await welcome.title()}`);
+  await welcome.screenshot({
+    path: path.resolve(__dirname, `../../../test-results/alby-index.png`),
+    fullPage: true,
+  });
+  const bodyHtml = await welcome.evaluate(() => document.body.innerHTML.slice(0, 4000));
+  fs.writeFileSync(
+    path.resolve(__dirname, `../../../test-results/alby-body-snippet.html`),
+    bodyHtml,
+  );
+  const visibleText = await welcome.locator('body').innerText();
+  console.log(`[alby] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);
 });
