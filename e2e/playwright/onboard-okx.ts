@@ -4,14 +4,7 @@ import { isVisibleWithin } from './is-visible-within';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 import { cdpClick } from './cdp-click';
-
-/**
- * Probe: how long to look for the page a step moves to. OKX opens "Secure your
- * wallet" and its welcome gate on a NEW page in some releases and in place in
- * others; long enough for a new page to paint, after which the step is taken
- * to be on the current page.
- */
-const OKX_STEP_PAGE_PROBE_MS = 30_000;
+import { waitForPageShowing } from './approval-popup';
 
 /**
  * Probe: how long an optional step (the Next button, the password form) gets
@@ -102,19 +95,10 @@ export async function onboardOkx(
   await expect(confirmAfterMnemonic).toBeEnabled();
   await confirmAfterMnemonic.click();
 
-  // "Secure your wallet" opens on a NEW page.
+  // "Secure your wallet" is drawn inside #ui-ses-iframe (the page body stays
+  // empty), on whichever extension page OKX routes to it.
   const ctx = page.context();
-  const secureDeadline = Date.now() + OKX_STEP_PAGE_PROBE_MS;
-  let securePage: Page | null = null;
-  while (Date.now() < secureDeadline) {
-    for (const p of ctx.pages()) {
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/Secure your wallet/i.test(text)) { securePage = p; break; }
-    }
-    if (securePage) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (securePage) page = securePage;
+  page = await waitForPageShowing({ context: ctx, text: /Secure your wallet/i, frame: '#ui-ses-iframe' });
   const secureFrame = page.frameLocator('#ui-ses-iframe');
   const nextBtn = secureFrame.getByRole('button', { name: /^next$/i }).first();
   if (await isVisibleWithin(nextBtn, OKX_OPTIONAL_STEP_PROBE_MS)) {
@@ -133,28 +117,16 @@ export async function onboardOkx(
     await pwContinue.click();
   }
 
-  // "Welcome to OKX Wallet" completion gate.
-  const welcomeDeadline = Date.now() + OKX_STEP_PAGE_PROBE_MS;
-  let welcomePage: Page | null = null;
-  while (Date.now() < welcomeDeadline) {
-    for (const p of ctx.pages()) {
-      const text = await p.locator('body').innerText().catch(() => '');
-      if (/Welcome to OKX Wallet|Start your Web3 journey/i.test(text)) { welcomePage = p; break; }
-    }
-    if (welcomePage) break;
-    await new Promise(r => setTimeout(r, 500));
-  }
-  if (welcomePage) {
-    page = welcomePage;
-    const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
-    if (await isVisibleWithin(startBtn, OKX_START_BUTTON_PROBE_MS)) {
-      await startBtn.click().catch(() => undefined);
-    } else {
-      const fr = page.frameLocator('#ui-ses-iframe');
-      const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
-      if (await isVisibleWithin(frStart, OKX_START_BUTTON_IFRAME_PROBE_MS)) {
-        await frStart.click().catch(() => undefined);
-      }
+  // "Welcome to OKX Wallet" completion gate, drawn in the page itself.
+  page = await waitForPageShowing({ context: ctx, text: /Welcome to OKX Wallet|Start your Web3 journey/i });
+  const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
+  if (await isVisibleWithin(startBtn, OKX_START_BUTTON_PROBE_MS)) {
+    await startBtn.click().catch(() => undefined);
+  } else {
+    const fr = page.frameLocator('#ui-ses-iframe');
+    const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
+    if (await isVisibleWithin(frStart, OKX_START_BUTTON_IFRAME_PROBE_MS)) {
+      await frStart.click().catch(() => undefined);
     }
   }
 

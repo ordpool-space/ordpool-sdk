@@ -6,13 +6,7 @@ const e2e_timeout_1 = require("../e2e-timeout");
 const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 const cdp_click_1 = require("./cdp-click");
-/**
- * Probe: how long to look for the page a step moves to. OKX opens "Secure your
- * wallet" and its welcome gate on a NEW page in some releases and in place in
- * others; long enough for a new page to paint, after which the step is taken
- * to be on the current page.
- */
-const OKX_STEP_PAGE_PROBE_MS = 30_000;
+const approval_popup_1 = require("./approval-popup");
 /**
  * Probe: how long an optional step (the Next button, the password form) gets
  * to render. Some OKX releases skip it; long enough for the iframe to render
@@ -91,24 +85,10 @@ async function onboardOkx(page, extensionId, opts = {}) {
     const confirmAfterMnemonic = seedFrame.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
     await (0, test_1.expect)(confirmAfterMnemonic).toBeEnabled();
     await confirmAfterMnemonic.click();
-    // "Secure your wallet" opens on a NEW page.
+    // "Secure your wallet" is drawn inside #ui-ses-iframe (the page body stays
+    // empty), on whichever extension page OKX routes to it.
     const ctx = page.context();
-    const secureDeadline = Date.now() + OKX_STEP_PAGE_PROBE_MS;
-    let securePage = null;
-    while (Date.now() < secureDeadline) {
-        for (const p of ctx.pages()) {
-            const text = await p.locator('body').innerText().catch(() => '');
-            if (/Secure your wallet/i.test(text)) {
-                securePage = p;
-                break;
-            }
-        }
-        if (securePage)
-            break;
-        await new Promise(r => setTimeout(r, 500));
-    }
-    if (securePage)
-        page = securePage;
+    page = await (0, approval_popup_1.waitForPageShowing)({ context: ctx, text: /Secure your wallet/i, frame: '#ui-ses-iframe' });
     const secureFrame = page.frameLocator('#ui-ses-iframe');
     const nextBtn = secureFrame.getByRole('button', { name: /^next$/i }).first();
     if (await (0, is_visible_within_1.isVisibleWithin)(nextBtn, OKX_OPTIONAL_STEP_PROBE_MS)) {
@@ -125,33 +105,17 @@ async function onboardOkx(page, extensionId, opts = {}) {
         await (0, test_1.expect)(pwContinue).toBeEnabled();
         await pwContinue.click();
     }
-    // "Welcome to OKX Wallet" completion gate.
-    const welcomeDeadline = Date.now() + OKX_STEP_PAGE_PROBE_MS;
-    let welcomePage = null;
-    while (Date.now() < welcomeDeadline) {
-        for (const p of ctx.pages()) {
-            const text = await p.locator('body').innerText().catch(() => '');
-            if (/Welcome to OKX Wallet|Start your Web3 journey/i.test(text)) {
-                welcomePage = p;
-                break;
-            }
-        }
-        if (welcomePage)
-            break;
-        await new Promise(r => setTimeout(r, 500));
+    // "Welcome to OKX Wallet" completion gate, drawn in the page itself.
+    page = await (0, approval_popup_1.waitForPageShowing)({ context: ctx, text: /Welcome to OKX Wallet|Start your Web3 journey/i });
+    const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
+    if (await (0, is_visible_within_1.isVisibleWithin)(startBtn, OKX_START_BUTTON_PROBE_MS)) {
+        await startBtn.click().catch(() => undefined);
     }
-    if (welcomePage) {
-        page = welcomePage;
-        const startBtn = page.getByRole('button', { name: /Start your Web3 journey/i }).first();
-        if (await (0, is_visible_within_1.isVisibleWithin)(startBtn, OKX_START_BUTTON_PROBE_MS)) {
-            await startBtn.click().catch(() => undefined);
-        }
-        else {
-            const fr = page.frameLocator('#ui-ses-iframe');
-            const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
-            if (await (0, is_visible_within_1.isVisibleWithin)(frStart, OKX_START_BUTTON_IFRAME_PROBE_MS)) {
-                await frStart.click().catch(() => undefined);
-            }
+    else {
+        const fr = page.frameLocator('#ui-ses-iframe');
+        const frStart = fr.getByRole('button', { name: /Start your Web3 journey/i }).first();
+        if (await (0, is_visible_within_1.isVisibleWithin)(frStart, OKX_START_BUTTON_IFRAME_PROBE_MS)) {
+            await frStart.click().catch(() => undefined);
         }
     }
     // A Node loop over every page's text, not a Playwright wait, so it stops at

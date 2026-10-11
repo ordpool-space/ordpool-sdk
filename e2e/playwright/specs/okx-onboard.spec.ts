@@ -162,13 +162,10 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await confirmAfterMnemonic.click();
   await shot(page, '05-after-mnemonic-submit');
 
-  // OKX "Secure your wallet" step opens on a NEW page (CI 26717287969
-  // trace, guid 1cb3b9dd). Switch to whichever page now shows it.
-  // Event-driven rather than a 500ms poll: on a slow machine the old loop could
-  // expire before OKX painted this step and the flow would continue against the
-  // wrong page, failing later somewhere unrelated. The search covers the
-  // current page too, so a step rendered in place resolves to it.
-  page = await waitForPageShowing({ context, text: /Secure your wallet/i });
+  // OKX "Secure your wallet" step: drawn inside #ui-ses-iframe (the page body
+  // stays empty), on whichever extension page OKX routes to it. The search
+  // covers the current page too, so a step rendered in place resolves to it.
+  page = await waitForPageShowing({ context, text: /Secure your wallet/i, frame: '#ui-ses-iframe' });
   // The Secure-your-wallet UI also runs inside #ui-ses-iframe — same
   // pattern as the seed-phrase page.
   const secureFrame = page.frameLocator('#ui-ses-iframe');
