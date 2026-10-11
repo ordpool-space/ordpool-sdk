@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 
 import { onboardPhantom } from '../onboard-phantom';
 import { extensionOnboardingPage } from '../wallet-onboarders';
+import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
 
 /**
  * Iteration 5 — full cat21 mint roundtrip with the real Phantom
@@ -65,6 +66,8 @@ test.beforeAll(async () => {
       `--unsafely-treat-insecure-origin-as-secure=http://localhost:4500`,
     ],
   });
+  // Phantom's vendor backends are aborted.
+  await installPhantomOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

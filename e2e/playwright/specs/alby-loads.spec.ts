@@ -1,6 +1,7 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { installAlbyOfflineRoutes } from '../alby-offline-routes';
 
 /**
  * Iteration 1 of the Alby E2E pipeline: prove that we can load
@@ -41,6 +42,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The seeded account's placeholder LNDHub is aborted, never looked up.
+  await installAlbyOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) {

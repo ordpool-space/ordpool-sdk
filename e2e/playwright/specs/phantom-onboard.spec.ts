@@ -11,6 +11,7 @@ import { cdpClick } from '../cdp-click';
 import { tickPhantomTerms } from '../onboard-phantom';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { waitForPageShowing } from '../approval-popup';
+import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
 
 /**
  * Iteration 2 of the OKX E2E pipeline: restore from the BIP-39 test
@@ -58,6 +59,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // Phantom's vendor backends are aborted.
+  await installPhantomOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];

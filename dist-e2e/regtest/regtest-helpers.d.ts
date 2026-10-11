@@ -2,6 +2,8 @@ import type { RpcAddressInfo, RpcRawTransaction, RpcUnspent } from './rpc-types'
 import * as btc from '@scure/btc-signer';
 /** Base URL of the regtest electrs (Esplora REST), as the specs and helpers reach it. */
 export declare const ELECTRS_URL: string;
+/** Base URL of the regtest cat21-ord (`--index-cat21`), as the specs and helpers reach it. */
+export declare const ORD_URL: string;
 export declare const ORD_STOCK_URL: string;
 export interface FundedAccount {
     address: string;

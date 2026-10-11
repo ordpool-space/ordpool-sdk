@@ -5,11 +5,11 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages, clickApprovalAndRequireClose } from '../approval-popup';
+import { closeLeftoverExtensionPages } from '../approval-popup';
 import { installContextErrorGuard } from '../browser-error-guard';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
-import { approveXverseConnect, unlockXverse } from '../xverse-popup';
+import { approveXverseConnect, approveXverseSignPopup, unlockXverse } from '../xverse-popup';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -161,45 +161,14 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
     recipientAddress: wallet.ordinalsAddress,
     feeSats: 1500,
   });
-  // Find the sign popup specifically by looking for "Review
-  // transaction" text — the loading-spinner state must finish
-  // first. Plain waitForEvent('page') can race against earlier
-  // events that fired during connect.
-  const approvalSign = await waitForApprovalPopup({
+  // The sign popup is the new page with Xverse's Confirm button; the helper
+  // clicks it once it takes clicks and requires the popup to close.
+  await approveXverseSignPopup({
     context,
     knownPages: knownPagesAtStart,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText(/review transaction/i).first()
-        .waitFor({ state: 'visible' });
-      return true;
-    },
+    label: 'Xverse mint sign popup',
+    onScreenshot: (p) => shot(p, '02-sign-approval'),
   });
-  await shot(approvalSign, '02-sign-approval');
-  // Wait until Confirm is enabled (Xverse renders the button
-  // immediately but its React onClick is hooked up only after
-  // the fee/details async-resolve).
-  await approvalSign.waitForFunction(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.some(b => {
-      if (!/^confirm$/i.test(b.textContent?.trim() ?? '')) return false;
-      if (b.hasAttribute('disabled')) return false;
-      const style = getComputedStyle(b);
-      return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
-    });
-  }, undefined, { polling: 250 });
-
-  // Confirm-binding gate: wait for the React onClick to be attached
-  // by checking that the button is interactive (no `disabled` attr,
-  // pointer-events not 'none', no in-flight spinner overlay). The
-  // waitForFunction above already gates `disabled` + pointer-events;
-  // pin the visibility of "Confirm" once more as an explicit barrier
-  // so the next click can't land in the pre-binding window.
-  await expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeEnabled();
-
-  // Xverse closes the popup when it accepts Confirm; the click requires
-  // that close and fails at the click, with a diagnosis, when it does not.
-  await clickApprovalAndRequireClose(approvalSign.getByRole('button', { name: /^confirm$/i }).first(), approvalSign, { label: 'Xverse mint sign popup' });
   const signed = await signedHexPromise;
   // eslint-disable-next-line no-console
   console.log(`[mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);

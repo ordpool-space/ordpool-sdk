@@ -12,10 +12,9 @@ import {
   mineBlocks,
   postTx,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, clickApprovalAndRequireClose } from '../approval-popup';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
-import { approveXverseConnect, unlockXverse } from '../xverse-popup';
+import { approveXverseConnect, approveXverseSignPopup, unlockXverse } from '../xverse-popup';
 
 /**
  * Full inscribe roundtrip with the real Xverse extension.
@@ -149,30 +148,14 @@ test('inscribe an artifact on regtest via xverse: build commit+reveal in SDK, si
     feeRatePerVbyte: 5,
   });
 
-  const approvalSign = await waitForApprovalPopup({
+  // The sign popup is the new page with Xverse's Confirm button; the helper
+  // clicks it once it takes clicks and requires the popup to close.
+  await approveXverseSignPopup({
     context,
     knownPages: knownPagesAtStart,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText(/review transaction/i).first()
-        .waitFor({ state: 'visible' });
-      return true;
-    },
+    label: 'Xverse inscribe sign popup',
+    onScreenshot: (p) => shot(p, '02-commit-sign-approval'),
   });
-  await shot(approvalSign, '02-commit-sign-approval');
-
-  await approvalSign.waitForFunction(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.some(b => {
-      if (!/^confirm$/i.test(b.textContent?.trim() ?? '')) return false;
-      if (b.hasAttribute('disabled')) return false;
-      const style = getComputedStyle(b);
-      return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
-    });
-  }, undefined, { polling: 250 });
-  await expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeEnabled();
-
-  await clickApprovalAndRequireClose(approvalSign.getByRole('button', { name: /^confirm$/i }).first(), approvalSign, { label: 'Xverse inscribe sign popup' });
   const signed = await signedPromise;
   // eslint-disable-next-line no-console
   console.log(`[inscribe] commit=${signed.commitTxid.slice(0, 12)}… reveal=${signed.revealTxid.slice(0, 12)}…`);

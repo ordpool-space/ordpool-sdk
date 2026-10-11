@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.UNISAT_WALLET_API = void 0;
+exports.UNISAT_PHISHING_LISTS = exports.UNISAT_WALLET_API = void 0;
 exports.decodeUnisatPsbt = decodeUnisatPsbt;
 exports.unisatOfflineAnswer = unisatOfflineAnswer;
 exports.installUnisatOfflineRoutes = installUnisatOfflineRoutes;
@@ -13,6 +13,14 @@ const base_1 = require("@scure/base");
  * switches to with the network.
  */
 exports.UNISAT_WALLET_API = /^https:\/\/wallet-api(-[a-z-]+)?\.unisat\.(space|io)\//;
+/**
+ * The phishing lists UniSat 1.7.15's service worker downloads: MetaMask's
+ * `eth-phishing-detect` config from GitHub (jsDelivr as the backup) and
+ * UniSat's own `phishing-detect` list. When every source fails the wallet
+ * keeps the lists it has (none, in a fresh profile) and retries an hour later;
+ * the connect and sign popups do not wait on them.
+ */
+exports.UNISAT_PHISHING_LISTS = /^https:\/\/(raw\.githubusercontent\.com\/(MetaMask\/eth-phishing-detect|unisat-wallet\/phishing-detect)\/|cdn\.jsdelivr\.net\/gh\/MetaMask\/eth-phishing-detect@)/;
 /** UniSat's per-address asset summary for an address holding nothing. */
 const ZERO_ASSET = {
     totalSatoshis: 0, btcSatoshis: 0, assetSatoshis: 0, inscriptionCount: 0,
@@ -171,7 +179,8 @@ function unisatOfflineAnswer(url, postData = null) {
  *
  * An endpoint with no captured answer is aborted, so a new dependency fails at
  * once and is listed by `recordWalletBackendRequests` rather than waiting on a
- * live server.
+ * live server. The phishing-list downloads (`UNISAT_PHISHING_LISTS`) are
+ * aborted as well.
  *
  * Install right after the context launches, before onboarding. The requests
  * the service worker sends while the extension starts, before this is
@@ -179,6 +188,7 @@ function unisatOfflineAnswer(url, postData = null) {
  * API unreachable, so none of them gates a popup.
  */
 async function installUnisatOfflineRoutes(context) {
+    await context.route(exports.UNISAT_PHISHING_LISTS, (route) => route.abort('failed'));
     await context.route(exports.UNISAT_WALLET_API, (route) => {
         const request = route.request();
         const answer = unisatOfflineAnswer(new URL(request.url()), request.postData());

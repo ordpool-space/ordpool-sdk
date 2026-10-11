@@ -38,7 +38,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ORD_STOCK_URL = exports.ELECTRS_URL = void 0;
+exports.ORD_STOCK_URL = exports.ORD_URL = exports.ELECTRS_URL = void 0;
 exports.getFundedAccount = getFundedAccount;
 exports.rpc = rpc;
 exports.rpcJson = rpcJson;
@@ -112,7 +112,8 @@ const execFileAsync = (0, node_util_1.promisify)(node_child_process_1.execFile);
 /** Base URL of the regtest electrs (Esplora REST), as the specs and helpers reach it. */
 exports.ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
     `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
-const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
+/** Base URL of the regtest cat21-ord (`--index-cat21`), as the specs and helpers reach it. */
+exports.ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 // Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
 // service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`
 // spec to verify a real upstream-ord recognises the SDK's inscriptions.
@@ -431,7 +432,7 @@ async function waitForOrdReady() {
     const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const ok = await fetch(`${ORD_URL}/status`).then(r => r.ok).catch(() => false);
+        const ok = await fetch(`${exports.ORD_URL}/status`).then(r => r.ok).catch(() => false);
         if (ok)
             return;
         await new Promise(r => setTimeout(r, 500));
@@ -448,7 +449,7 @@ async function waitForOrdSync(targetHeight) {
     const timeoutMs = (0, e2e_timeout_1.e2eTimeoutMs)();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-        const status = await fetch(`${ORD_URL}/status`, {
+        const status = await fetch(`${exports.ORD_URL}/status`, {
             headers: { Accept: 'application/json' },
         }).then(r => r.ok ? r.json() : null).catch(() => null);
         if (status && typeof status.height === 'number' && status.height >= targetHeight)
@@ -463,7 +464,7 @@ async function waitForOrdSync(targetHeight) {
  * caller passes through after asserting on shape.
  */
 async function getOrdInscription(inscriptionId) {
-    const res = await fetch(`${ORD_URL}/inscription/${inscriptionId}`, {
+    const res = await fetch(`${exports.ORD_URL}/inscription/${inscriptionId}`, {
         headers: { Accept: 'application/json' },
     });
     if (!res.ok) {

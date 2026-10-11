@@ -21,7 +21,8 @@ const execFileAsync = promisify(execFile);
 export const ELECTRS_URL =
   process.env.REGTEST_ELECTRS_URL ??
   `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
-const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
+/** Base URL of the regtest cat21-ord (`--index-cat21`), as the specs and helpers reach it. */
+export const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 // Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
 // service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`
 // spec to verify a real upstream-ord recognises the SDK's inscriptions.

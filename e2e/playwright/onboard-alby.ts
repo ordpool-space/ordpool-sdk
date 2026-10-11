@@ -1,5 +1,6 @@
 import { Page } from '@playwright/test';
 
+import { ALBY_LNDHUB_PLACEHOLDER_URL } from './alby-offline-routes';
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from './wallet-test-vectors';
 
 /**
@@ -17,7 +18,7 @@ export async function seedAlbyAccount(
   const mnemonic = opts.mnemonic ?? TEST_MNEMONIC;
   const bitcoinNetwork = opts.bitcoinNetwork ?? 'regtest';
 
-  const result = await page.evaluate(async ({ password, mnemonic, bitcoinNetwork }) => {
+  const result = await page.evaluate(async ({ password, mnemonic, bitcoinNetwork, lndhubUrl }) => {
     const c = (globalThis as unknown as { chrome: { runtime: {
       sendMessage: (msg: unknown) => Promise<unknown>;
     } } }).chrome;
@@ -28,13 +29,13 @@ export async function seedAlbyAccount(
     const addAccResp = await send('addAccount', {
       name: 'ordpool-e2e',
       connector: 'lndhub',
-      config: { url: 'https://example.invalid', login: 'x', password: 'x' },
+      config: { url: lndhubUrl, login: 'x', password: 'x' },
       bitcoinNetwork,
     }) as { data?: { accountId: string }; error?: string } | null;
     const accountId = addAccResp?.data?.accountId;
     const setMnemoResp = accountId ? await send('setMnemonic', { id: accountId, mnemonic }) : null;
     return { setPwResp, addAccResp, accountId, setMnemoResp };
-  }, { password, mnemonic, bitcoinNetwork });
+  }, { password, mnemonic, bitcoinNetwork, lndhubUrl: ALBY_LNDHUB_PLACEHOLDER_URL });
 
   if (!result.accountId) {
     throw new Error(`Alby addAccount failed: ${JSON.stringify(result.addAccResp)}`);

@@ -1,13 +1,15 @@
 /**
  * @test-kind unit
- * Real:   unlockXverseControls, approveXverseConnect and the popup search and close-requiring click beneath it
+ * Real:   unlockXverseControls, approveXverseConnect, approveXverseSignPopup and the popup search, style wait and
+ *         close-requiring click beneath them
  * Faked:  the clock (jest fake timers), the BrowserContext (pages/on/off) and the Xverse pages and controls
  *         (shapes: @playwright/test types)
- * Proves: the lock screen is answered only when Xverse shows it, the connect popup is the NEW page with the
- *         consent button, its click must close it, and a request that failed is reported as itself
+ * Proves: the lock screen is answered only when Xverse shows it, the connect and sign popups are the NEW page
+ *         with their button, a sign click waits until Confirm takes clicks, every click must close its popup,
+ *         and a request that failed is reported as itself
  */
 import { e2eTimeoutMs } from '../e2e-timeout';
-import { approveXverseConnect, unlockXverseControls, XVERSE_CONNECT_BUTTON } from './xverse-popup';
+import { approveXverseConnect, approveXverseSignPopup, unlockXverseControls, XVERSE_CONNECT_BUTTON, XVERSE_SIGN_BUTTON } from './xverse-popup';
 
 describe('unlockXverseControls', () => {
   function controls(locked: boolean) {
@@ -159,5 +161,94 @@ describe('approveXverseConnect', () => {
       await popup.whenClosed;
       throw new Error('User rejected the request');
     })).rejects.toThrow('User rejected the request');
+  });
+});
+
+/**
+ * A fake Xverse sign popup: an extension page whose Confirm button reports
+ * `pointer-events: none` for its first `busyReads` style reads, the way Xverse
+ * styles it while it resolves the fee.
+ */
+function fakeSignPopup(name: string, opts: { busyReads: number; closesOnClick: boolean; url?: string }) {
+  let closed = false;
+  let styleReads = 0;
+  const events: string[] = [];
+  const names: unknown[] = [];
+  const confirm = {
+    waitFor: async () => { events.push('visible'); },
+    evaluate: async () => {
+      styleReads += 1;
+      return { pointerEvents: styleReads <= opts.busyReads ? 'none' : 'auto', opacity: 1 };
+    },
+    click: async () => {
+      events.push(`click after ${styleReads} style reads`);
+      if (opts.closesOnClick) closed = true;
+    },
+    isVisible: async () => !closed,
+    isEnabled: async () => !closed,
+  };
+  return {
+    name,
+    events,
+    names,
+    url: () => opts.url ?? `chrome-extension://xverse/${name}.html`,
+    waitForURL: async (re: RegExp) => {
+      if (!re.test(opts.url ?? `chrome-extension://xverse/${name}.html`)) return new Promise<void>(() => undefined);
+    },
+    title: async () => name,
+    isClosed: () => closed,
+    getByRole: (_role: string, o: { name: unknown }) => {
+      names.push(o.name);
+      return { first: () => confirm };
+    },
+  };
+}
+
+describe('approveXverseSignPopup', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('clicks Confirm on the new popup only once it takes clicks, and returns that popup', async () => {
+    const earlier = fakeSignPopup('earlier', { busyReads: 0, closesOnClick: false });
+    const harness = fakeSignPopup('harness', { busyReads: 0, closesOnClick: false, url: 'http://localhost:4500/' });
+    const sign = fakeSignPopup('sign', { busyReads: 2, closesOnClick: true });
+    const ctx = fakeContext([earlier as never, harness as never]);
+    const shots: string[] = [];
+
+    const run = approveXverseSignPopup({
+      context: ctx as never,
+      knownPages: new Set([earlier as never]),
+      onScreenshot: async (p) => { shots.push((p as unknown as { name: string }).name); },
+    });
+    ctx.open(sign as never);
+    const popup = await run;
+
+    expect(popup).toBe(sign);
+    expect(shots).toEqual(['sign']);
+    expect(sign.events).toEqual(['visible', 'click after 3 style reads']);
+    expect(sign.names).toContain(XVERSE_SIGN_BUTTON);
+    expect(earlier.events).toEqual([]);
+    expect(harness.events).toEqual([]);
+  });
+
+  it('fails at the click when the popup stays open after Confirm', async () => {
+    jest.useFakeTimers();
+    const sign = fakeSignPopup('sign', { busyReads: 0, closesOnClick: false });
+    const ctx = fakeContext([sign as never]);
+    const run = approveXverseSignPopup({ context: ctx as never, knownPages: new Set(), label: 'Xverse mint sign popup' });
+    const assertion = expect(run).rejects.toThrow(/Xverse mint sign popup: clicked the confirm button and the popup did not close/);
+    await jest.advanceTimersByTimeAsync(e2eTimeoutMs() + 1_000);
+    await assertion;
+    expect(sign.events).toEqual(['visible', 'click after 1 style reads']);
+  });
+
+  it('never clicks a Confirm that keeps refusing clicks, and says so', async () => {
+    jest.useFakeTimers();
+    const sign = fakeSignPopup('sign', { busyReads: Number.MAX_SAFE_INTEGER, closesOnClick: true });
+    const ctx = fakeContext([sign as never]);
+    const run = approveXverseSignPopup({ context: ctx as never, knownPages: new Set() });
+    const assertion = expect(run).rejects.toThrow(/Xverse sign popup: the Confirm button never became clickable/);
+    await jest.advanceTimersByTimeAsync(e2eTimeoutMs() + 1_000);
+    await assertion;
+    expect(sign.events).toEqual(['visible']);
   });
 });

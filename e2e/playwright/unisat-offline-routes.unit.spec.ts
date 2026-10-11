@@ -1,4 +1,4 @@
-import { decodeUnisatPsbt, installUnisatOfflineRoutes, UNISAT_WALLET_API, unisatOfflineAnswer } from './unisat-offline-routes';
+import { decodeUnisatPsbt, installUnisatOfflineRoutes, UNISAT_PHISHING_LISTS, UNISAT_WALLET_API, unisatOfflineAnswer } from './unisat-offline-routes';
 
 // Two `POST /v5/tx/decode2` exchanges captured from wallet-api.unisat.space on
 // 2026-10-10, UniSat v1.7.15 signing for the unisat-* specs on regtest: the
@@ -107,9 +107,32 @@ describe('installUnisatOfflineRoutes', () => {
     const routes: { matcher: RegExp; handler: (route: unknown) => Promise<void> }[] = [];
     const context = { route: async (matcher: RegExp, handler: (route: unknown) => Promise<void>) => { routes.push({ matcher, handler }); } };
     await installUnisatOfflineRoutes(context as unknown as Parameters<typeof installUnisatOfflineRoutes>[0]);
-    expect(routes).toHaveLength(1);
-    return routes[0];
+    expect(routes.map((r) => r.matcher)).toEqual([UNISAT_PHISHING_LISTS, UNISAT_WALLET_API]);
+    return routes[1];
   }
+
+  it.each([
+    'https://raw.githubusercontent.com/MetaMask/eth-phishing-detect/refs/heads/main/src/config.json',
+    'https://cdn.jsdelivr.net/gh/MetaMask/eth-phishing-detect@main/src/config.json',
+    'https://raw.githubusercontent.com/unisat-wallet/phishing-detect/master/phishing_sites.json',
+  ])('aborts the phishing-list download %s', async (url) => {
+    const routes: { matcher: RegExp; handler: (route: unknown) => Promise<void> }[] = [];
+    const context = { route: async (matcher: RegExp, handler: (route: unknown) => Promise<void>) => { routes.push({ matcher, handler }); } };
+    await installUnisatOfflineRoutes(context as unknown as Parameters<typeof installUnisatOfflineRoutes>[0]);
+    const matching = routes.filter((r) => r.matcher.test(url));
+    expect(matching).toHaveLength(1);
+    const { route, calls } = fakeRoute(url);
+    await matching[0].handler(route);
+    expect(calls).toEqual({ aborted: 'failed' });
+  });
+
+  it.each([
+    'https://raw.githubusercontent.com/leather-io/extension/main/config/wallet-config.json',
+    'https://cdn.jsdelivr.net/npm/some-package@1/index.js',
+    'http://localhost:4500/',
+  ])('leaves %s to its own route', (url) => {
+    expect(UNISAT_PHISHING_LISTS.test(url)).toBe(false);
+  });
 
   it('fulfils an answered endpoint inside UniSat\'s { code, msg, data } envelope', async () => {
     const { handler } = await installed();

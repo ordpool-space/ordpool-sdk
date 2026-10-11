@@ -8,6 +8,7 @@ import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks,
 
 import { clickApprovalAndRequireClose } from '../approval-popup';
 import { seedAlbyAccount } from '../onboard-alby';
+import { installAlbyOfflineRoutes } from '../alby-offline-routes';
 
 /**
  * Iteration 1 — full cat21 mint roundtrip with the real Alby
@@ -92,6 +93,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The seeded account's placeholder LNDHub is aborted, never looked up.
+  await installAlbyOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

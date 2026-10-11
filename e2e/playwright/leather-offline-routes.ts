@@ -9,6 +9,20 @@ import { recommendedFeesFixture } from 'ordpool-sdk/testing';
 export const LEATHER_MEMPOOL_HOSTS = /^https:\/\/(leather\.)?mempool\.space\//;
 
 /**
+ * Every other vendor backend Leather 6.102.0 and Cat21 Wallet call, from the
+ * service worker and the pages, as recorded on the leather and cat21wallet
+ * lanes: Leather's own API (`api.leather.io`, `staging.api.leather.io`) and
+ * remote config (`raw.githubusercontent.com/leather-io/`), Hiro's Stacks API
+ * and BNS (`api.hiro.so`, `api.bnsv2.com`), the asset indexers (Best in Slot,
+ * Stampchain, Gamma, Bitflow), the price feeds (CoinGecko, Binance), the
+ * Chainalysis address screen, Sanity (announcements), LaunchDarkly (feature
+ * flags), Mixpanel and Sentry, and the avatar and favicon images
+ * (`avatar.vercel.sh`, `www.google.com/s2/favicons`).
+ */
+export const LEATHER_VENDOR_HOSTS =
+  /^https:\/\/(([a-z0-9-]+\.)*(leather\.io|hiro\.so|bnsv2\.com|bestinslot\.xyz|stampchain\.io|gamma\.io|bitflowapis\.finance|coingecko\.com|chainalysis\.com|sanity\.io|launchdarkly\.com|mixpanel\.com|sentry\.io)\/|api1\.binance\.com\/|avatar\.vercel\.sh\/|www\.google\.com\/s2\/favicons|raw\.githubusercontent\.com\/leather-io\/)/;
+
+/**
  * `GET leather.mempool.space/api/v1/prices`, captured on 2026-10-11T06:12:29Z.
  * Frozen like every captured answer: the wallet only renders it.
  */
@@ -41,13 +55,30 @@ export function leatherOfflineAnswer(url: URL): unknown | null {
 }
 
 /**
- * Keep the Leather family's mempool.space reads out of the test: each one is
- * answered locally (`leatherOfflineAnswer`) or aborted at once.
+ * Keep the Leather family's vendor backends out of the test: a mempool.space
+ * read is answered locally (`leatherOfflineAnswer`) or aborted, and every
+ * request to another vendor host (`LEATHER_VENDOR_HOSTS`) is aborted at once.
+ *
+ * None of the aborted hosts gates a flow the specs drive: the leather and
+ * cat21wallet lanes pass with every host except localhost unreachable. The
+ * wallets degrade without them (no Stacks balance, no BNS name, no fiat value,
+ * default feature flags, no announcements, no avatars). An aborted request
+ * fails at once instead of waiting on a live server, and a new dependency is
+ * listed by `recordWalletBackendRequests` rather than reaching a vendor.
  *
  * Install right after the context launches, before onboarding or the first
  * extension page. Routes cover the service worker as well as the pages.
+ *
+ * Not covered, seen in Chrome's net log on the leather and cat21wallet lanes
+ * with the network up: Leather's Sentry and Mixpanel POSTs, which reach their
+ * hosts although this route aborts the same URLs (why the route does not see
+ * them is unknown), and the mempool.space live-update WebSocket
+ * (`wss://leather.mempool.space/api/v1/ws`), which `context.routeWebSocket`
+ * does not intercept. Neither gates a flow: the lanes pass with them
+ * unreachable.
  */
 export async function installLeatherOfflineRoutes(context: BrowserContext): Promise<void> {
+  await context.route(LEATHER_VENDOR_HOSTS, (route: Route) => route.abort('failed'));
   await context.route(LEATHER_MEMPOOL_HOSTS, (route: Route) => {
     const answer = leatherOfflineAnswer(new URL(route.request().url()));
     return answer === null

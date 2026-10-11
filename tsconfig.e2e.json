@@ -20,7 +20,8 @@
     // writes no package.json there: the root one, without a `type`, already
     // makes these files CommonJS.
     "paths": {
-      "ordpool-sdk/testing": ["./dist/testing.d.ts"]
+      "ordpool-sdk/testing": ["./dist/testing.d.ts"],
+      "ordpool-sdk/network": ["./dist/network.d.ts"]
     }
   },
   "include": ["e2e/index.ts", "e2e/globals.d.ts"],

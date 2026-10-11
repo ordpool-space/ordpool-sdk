@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 
 import { AlbyAutoApproveHandle, installAlbyAutoApprove } from '../alby-auto-approve';
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from '../wallet-test-vectors';
+import { installAlbyOfflineRoutes, ALBY_LNDHUB_PLACEHOLDER_URL } from '../alby-offline-routes';
 
 
 /**
@@ -58,6 +59,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The seeded account's placeholder LNDHub is aborted, never looked up.
+  await installAlbyOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];
@@ -106,7 +109,7 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
   await shot(seedPage, '00-options');
 
   // Seed via internal SW actions in one page.evaluate.
-  const seed = await seedPage.evaluate(async ({ password, mnemonic }) => {
+  const seed = await seedPage.evaluate(async ({ password, mnemonic, lndhubUrl }) => {
     const c = (globalThis as unknown as { chrome: { runtime: {
       sendMessage: (msg: unknown) => Promise<unknown>;
     } } }).chrome;
@@ -123,7 +126,7 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
     const addAccResp = await send('addAccount', {
       name: 'ordpool-onboard',
       connector: 'lndhub',
-      config: { url: 'https://example.invalid', login: 'x', password: 'x' },
+      config: { url: lndhubUrl, login: 'x', password: 'x' },
       bitcoinNetwork: 'bitcoin',
     }) as { data?: { accountId?: string }; error?: string } | null;
     const accountId = addAccResp?.data?.accountId;
@@ -131,7 +134,7 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
       ? await send('setMnemonic', { id: accountId, mnemonic }) as { data?: { accountId?: string }; error?: string } | null
       : null;
     return { setPwResp, addAccResp, setMnemoResp, accountId };
-  }, { password: PASSWORD_BY_WALLET.alby, mnemonic: TEST_MNEMONIC });
+  }, { password: PASSWORD_BY_WALLET.alby, mnemonic: TEST_MNEMONIC, lndhubUrl: ALBY_LNDHUB_PLACEHOLDER_URL });
 
   // eslint-disable-next-line no-console
   console.log(`[alby-onboard] seed = ${JSON.stringify(seed)}`);

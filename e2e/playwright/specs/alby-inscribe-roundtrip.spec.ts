@@ -15,6 +15,7 @@ import {
 
 import { installAlbyAutoApprove } from '../alby-auto-approve';
 import { seedAlbyAccount } from '../onboard-alby';
+import { installAlbyOfflineRoutes } from '../alby-offline-routes';
 
 /**
  * Full inscribe roundtrip with the real Alby Browser Extension.
@@ -72,6 +73,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The seeded account's placeholder LNDHub is aborted, never looked up.
+  await installAlbyOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

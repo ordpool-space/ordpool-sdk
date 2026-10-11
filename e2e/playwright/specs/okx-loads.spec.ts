@@ -1,6 +1,7 @@
 import { test, expect, chromium, BrowserContext } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
 /**
  * Iteration 1 of the Okx E2E pipeline: prove that we can load
@@ -41,6 +42,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // OKX's vendor backends are answered locally or aborted.
+  await installOkxOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) {

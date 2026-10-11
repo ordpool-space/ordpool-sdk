@@ -18,13 +18,12 @@ import {
   assertAllInputsSighashAll,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, clickApprovalAndRequireClose } from '../approval-popup';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
-import { approveXverseConnect, unlockXverse } from '../xverse-popup';
+import { approveXverseConnect, approveXverseSignPopup, unlockXverse } from '../xverse-popup';
 
 /**
  * Xverse ACCEPT-OFFER roundtrip on regtest — Xverse is the SELLER.
@@ -105,35 +104,6 @@ function assertEveryInputSequence(tx: { vin: unknown[] }, expected: number, labe
   });
 }
 
-/**
- * Approve one Xverse "Review transaction" sign popup and wait for it to
- * close. Copied from `xverse-inscribe-child-roundtrip.spec.ts` — every
- * cat-flow operation drives Xverse's legacy `signTransaction` popup.
- */
-async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag: string): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText(/(review|sign|confirm)\b.*\b(transaction|psbt)/i).first().waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  await shot(approval, tag);
-  await approval.waitForFunction(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.some(b => {
-      if (!/^(confirm|sign|approve)$/i.test(b.textContent?.trim() ?? '')) return false;
-      if (b.hasAttribute('disabled')) return false;
-      const style = getComputedStyle(b);
-      return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
-    });
-  }, undefined, { polling: 250 });
-  knownPages.add(approval);
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), approval, { label: 'Xverse sign popup' });
-}
-
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh xverse.`);
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
@@ -206,7 +176,7 @@ test('accept a CAT-21 buy offer on regtest via Xverse (seller): mint, buyer buil
     recipientAddress: wallet.ordinalsAddress,
     feeSats: MINT_FEE_SATS,
   });
-  await approveXverseSignPopup(context, mintSignKnown, '01-mint-sign');
+  mintSignKnown.add(await approveXverseSignPopup({ context, knownPages: mintSignKnown, onScreenshot: (p) => shot(p, '01-mint-sign') }));
   const minted = await mintPromise;
   if (minted.kind !== 'mint') throw new Error('expected mint result');
   const mintTxid = await postTx(minted.txHex);
@@ -310,7 +280,7 @@ test('accept a CAT-21 buy offer on regtest via Xverse (seller): mint, buyer buil
     ordinalsAddress: wallet.ordinalsAddress,
     ordinalsPublicKey: ordinalsXOnlyHex,
   });
-  await approveXverseSignPopup(context, acceptSignKnown, '02-accept-sign');
+  acceptSignKnown.add(await approveXverseSignPopup({ context, knownPages: acceptSignKnown, onScreenshot: (p) => shot(p, '02-accept-sign') }));
   const accepted = await acceptPromise;
   if (accepted.kind !== 'acceptOffer') throw new Error('expected acceptOffer result');
 

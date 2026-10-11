@@ -10,6 +10,16 @@ import { hex } from '@scure/base';
  */
 export const UNISAT_WALLET_API = /^https:\/\/wallet-api(-[a-z-]+)?\.unisat\.(space|io)\//;
 
+/**
+ * The phishing lists UniSat 1.7.15's service worker downloads: MetaMask's
+ * `eth-phishing-detect` config from GitHub (jsDelivr as the backup) and
+ * UniSat's own `phishing-detect` list. When every source fails the wallet
+ * keeps the lists it has (none, in a fresh profile) and retries an hour later;
+ * the connect and sign popups do not wait on them.
+ */
+export const UNISAT_PHISHING_LISTS =
+  /^https:\/\/(raw\.githubusercontent\.com\/(MetaMask\/eth-phishing-detect|unisat-wallet\/phishing-detect)\/|cdn\.jsdelivr\.net\/gh\/MetaMask\/eth-phishing-detect@)/;
+
 /** UniSat's per-address asset summary for an address holding nothing. */
 const ZERO_ASSET = {
   totalSatoshis: 0, btcSatoshis: 0, assetSatoshis: 0, inscriptionCount: 0,
@@ -167,7 +177,8 @@ export function unisatOfflineAnswer(url: URL, postData: string | null = null): u
  *
  * An endpoint with no captured answer is aborted, so a new dependency fails at
  * once and is listed by `recordWalletBackendRequests` rather than waiting on a
- * live server.
+ * live server. The phishing-list downloads (`UNISAT_PHISHING_LISTS`) are
+ * aborted as well.
  *
  * Install right after the context launches, before onboarding. The requests
  * the service worker sends while the extension starts, before this is
@@ -175,6 +186,7 @@ export function unisatOfflineAnswer(url: URL, postData: string | null = null): u
  * API unreachable, so none of them gates a popup.
  */
 export async function installUnisatOfflineRoutes(context: BrowserContext): Promise<void> {
+  await context.route(UNISAT_PHISHING_LISTS, (route: Route) => route.abort('failed'));
   await context.route(UNISAT_WALLET_API, (route: Route) => {
     const request = route.request();
     const answer = unisatOfflineAnswer(new URL(request.url()), request.postData());

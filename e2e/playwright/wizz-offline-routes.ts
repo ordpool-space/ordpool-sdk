@@ -1,11 +1,16 @@
 import { BrowserContext, Route } from '@playwright/test';
 import { recommendedFeesFixture } from 'ordpool-sdk/testing';
 
+import { decodeUnisatPsbt } from './unisat-offline-routes';
+
 /**
  * The fee estimate Wizz 2.13.4 reads from its mempool client
  * (`getFeeRates` → `v1/fees/recommended` on `https://mempool.space/api/`).
  */
 export const WIZZ_RECOMMENDED_FEES_URL = /^https:\/\/mempool\.space\/api\/v1\/fees\/recommended(\?.*)?$/;
+
+/** The RGB++ APIs of the networks Wizz is not on, which it still asks for a token. */
+export const WIZZ_RGBPP_TEST_NETWORKS = /^https:\/\/api\.(testnet|signet)\.rgbpp\.io\//;
 
 /**
  * Make every Wizz popup hermetic: intercept the wallet's fleet of LIVE
@@ -25,7 +30,8 @@ export const WIZZ_RECOMMENDED_FEES_URL = /^https:\/\/mempool\.space\/api\/v1\/fe
  * Response shapes are reverse-engineered from the Wizz bundle (ui.js)
  * and verified against WizzWallet/elex-proxy `R::ok`; the unisat + rgbpp
  * envelopes are copied verbatim from real 200 responses captured in CI
- * traces. Canonical copy: consumers (e.g. cubes-frontend) import this
+ * traces. No request reaches a live server: the wizz lane passes with every
+ * host except localhost unreachable. Canonical copy: consumers (e.g. cubes-frontend) import this
  * from `ordpool-sdk/e2e` instead of keeping their own.
  */
 export async function installWizzOfflineRoutes(context: BrowserContext): Promise<void> {
@@ -95,6 +101,10 @@ export async function installWizzOfflineRoutes(context: BrowserContext): Promise
       ? okJson([])
       : okJson({ address: '', xudt: [] }));
   });
+  // The RGB++ testnet and signet APIs: Wizz requests an access token there
+  // (`POST /token/generate`) for networks it is not on. Nothing waits on the
+  // token; aborted.
+  await context.route(WIZZ_RGBPP_TEST_NETWORKS, route => route.abort('failed'));
 
   // wallet-api.unisat.io — the Unisat wallet API Wizz inherits. The balance
   // aggregates multi-assets + brc20 + inscriptions here; ALL of them flake
@@ -114,9 +124,16 @@ export async function installWizzOfflineRoutes(context: BrowserContext): Promise
     if (u.includes('/default/check-website')) {
       return route.fulfill(okJson({ code: 0, msg: 'ok', data: { isScammer: false, warning: '', allowQuickMultiSign: false } }));
     }
-    // tx/decode2 (per-input PSBT decode) has an input-specific shape we can't
-    // fabricate; leave it live (it answers reliably and isn't the balance gate).
-    if (u.includes('/tx/decode')) return route.continue();
+    // tx/decode2: the sign popup's PSBT analysis. Wizz sends UniSat's request
+    // (`POST /v5/tx/decode2`, body `{ psbtHex, website }`) to UniSat's API and
+    // reads UniSat's answer, so it is answered from the PSBT the way the UniSat
+    // shield answers it (`decodeUnisatPsbt`). On the wizz lane the server's
+    // answers matched it in every field except the two display values
+    // `decodeUnisatPsbt` documents (`feeRate`, `shouldWarnFeeRate`).
+    if (u.includes('/tx/decode2')) {
+      const { psbtHex } = JSON.parse(route.request().postData() || '{}') as { psbtHex?: string };
+      return psbtHex ? route.fulfill(okJson({ code: 0, msg: 'ok', data: decodeUnisatPsbt(psbtHex) })) : route.abort('failed');
+    }
     // brc20 lists, inscriptions, everything else: empty list.
     return route.fulfill(okJson({ code: 0, msg: 'ok', data: { list: [], total: 0 } }));
   });

@@ -18,14 +18,13 @@ import {
   assertAllInputsSighashAll,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, clickApprovalAndRequireClose } from '../approval-popup';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21MintPsbt } from '../../../src/cat21-mint/cat21-mint.helper';
 import { validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
-import { approveXverseConnect, unlockXverse } from '../xverse-popup';
+import { approveXverseConnect, approveXverseSignPopup, unlockXverse } from '../xverse-popup';
 
 /**
  * Xverse CREATE-OFFER roundtrip on regtest — Xverse is the BUYER.
@@ -102,35 +101,6 @@ function assertEveryInputSequence(tx: { vin: unknown[] }, expected: number, labe
     }
     expect(v.sequence, `${label}: vin[${i}].sequence`).toBe(expected);
   });
-}
-
-/**
- * Approve one Xverse "Review transaction" sign popup and wait for it to
- * close. Copied from `xverse-inscribe-child-roundtrip.spec.ts` — every
- * cat-flow operation drives Xverse's legacy `signTransaction` popup.
- */
-async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag: string): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText(/(review|sign|confirm)\b.*\b(transaction|psbt)/i).first().waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  await shot(approval, tag);
-  await approval.waitForFunction(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.some(b => {
-      if (!/^(confirm|sign|approve)$/i.test(b.textContent?.trim() ?? '')) return false;
-      if (b.hasAttribute('disabled')) return false;
-      const style = getComputedStyle(b);
-      return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
-    });
-  }, undefined, { polling: 250 });
-  knownPages.add(approval);
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), approval, { label: 'Xverse sign popup' });
 }
 
 test.beforeAll(async () => {
@@ -260,7 +230,7 @@ test('build + sign a CAT-21 buy-offer on regtest via Xverse (buyer): seller raw-
     feeSats: OFFER_FEE_SATS,
   });
   // Xverse (buyer) signs ONLY its funding input at index 1.
-  await approveXverseSignPopup(context, createSignKnown, '01-create-offer-sign');
+  createSignKnown.add(await approveXverseSignPopup({ context, knownPages: createSignKnown, onScreenshot: (p) => shot(p, '01-create-offer-sign') }));
   const created = await createPromise;
   if (created.kind !== 'createOffer') throw new Error('expected createOffer result');
 

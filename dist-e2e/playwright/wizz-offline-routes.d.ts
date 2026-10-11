@@ -4,6 +4,8 @@ import { BrowserContext } from '@playwright/test';
  * (`getFeeRates` → `v1/fees/recommended` on `https://mempool.space/api/`).
  */
 export declare const WIZZ_RECOMMENDED_FEES_URL: RegExp;
+/** The RGB++ APIs of the networks Wizz is not on, which it still asks for a token. */
+export declare const WIZZ_RGBPP_TEST_NETWORKS: RegExp;
 /**
  * Make every Wizz popup hermetic: intercept the wallet's fleet of LIVE
  * third-party backends and answer each with the truthful "empty" result.
@@ -22,7 +24,8 @@ export declare const WIZZ_RECOMMENDED_FEES_URL: RegExp;
  * Response shapes are reverse-engineered from the Wizz bundle (ui.js)
  * and verified against WizzWallet/elex-proxy `R::ok`; the unisat + rgbpp
  * envelopes are copied verbatim from real 200 responses captured in CI
- * traces. Canonical copy: consumers (e.g. cubes-frontend) import this
+ * traces. No request reaches a live server: the wizz lane passes with every
+ * host except localhost unreachable. Canonical copy: consumers (e.g. cubes-frontend) import this
  * from `ordpool-sdk/e2e` instead of keeping their own.
  */
 export declare function installWizzOfflineRoutes(context: BrowserContext): Promise<void>;

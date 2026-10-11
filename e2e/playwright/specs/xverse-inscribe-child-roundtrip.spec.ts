@@ -16,10 +16,9 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, clickApprovalAndRequireClose } from '../approval-popup';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
-import { approveXverseConnect, unlockXverse } from '../xverse-popup';
+import { approveXverseConnect, approveXverseSignPopup, unlockXverse } from '../xverse-popup';
 
 /**
  * Xverse PARENT/CHILD inscribe roundtrip on regtest — proof that the real
@@ -64,42 +63,6 @@ function bytesHex(b: Uint8Array): string {
 function xOnlyHex(pubHex: string): string {
   const s = pubHex.startsWith('0x') ? pubHex.slice(2) : pubHex;
   return s.length === 66 ? s.slice(2) : s;
-}
-
-/**
- * Approve one Xverse "Review transaction" sign popup and wait for it to
- * close (the close signals the sign completed). Registers the popup in
- * `knownPages` so a subsequent call catches the NEXT one (the child fires
- * two sequential popups: commit funding, then the reveal parent input).
- */
-async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag: string): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      // The legacy signTransaction popup reads "Review transaction"; the
-      // modern signPsbt popup may head with "Sign transaction" / "Sign
-      // PSBT" / "Confirm transaction". Match any of them.
-      await p.getByText(/(review|sign|confirm)\b.*\b(transaction|psbt)/i).first().waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  await shot(approval, tag);
-  await approval.waitForFunction(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.some(b => {
-      if (!/^(confirm|sign|approve)$/i.test(b.textContent?.trim() ?? '')) return false;
-      if (b.hasAttribute('disabled')) return false;
-      const style = getComputedStyle(b);
-      return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
-    });
-  }, undefined, { polling: 250 });
-  knownPages.add(approval);
-  // Click the confirm/sign button; the popup closing signals the sign
-  // completed. Retry a few times — Xverse's button sometimes needs a
-  // second dispatch.
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), approval, { label: 'Xverse sign popup' });
 }
 
 async function fundPaymentAddress(paymentAddress: string): Promise<{ txid: string; vout: number; value: number }> {
@@ -192,7 +155,7 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
     contentType: CONTENT_TYPE,
     feeRatePerVbyte: 5,
   });
-  await approveXverseSignPopup(context, parentSignKnown, '01-parent-commit-sign');
+  parentSignKnown.add(await approveXverseSignPopup({ context, knownPages: parentSignKnown, onScreenshot: (p) => shot(p, '01-parent-commit-sign') }));
   const parent = await parentPromise;
   if (parent.kind !== 'inscribe') throw new Error('expected inscribe result for parent');
 
@@ -248,12 +211,12 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
     },
     parentReturnAddress: ordinalsAddress,
   });
-  await approveXverseSignPopup(context, childSignKnown, '02-child-commit-sign');
+  childSignKnown.add(await approveXverseSignPopup({ context, knownPages: childSignKnown, onScreenshot: (p) => shot(p, '02-child-commit-sign') }));
   // Commit popup approved + closed → release the harness to fire the reveal
   // signPsbt request into an idle wallet (see the gate rationale above).
   await harness.evaluate(() =>
     (window as unknown as { __ordpoolRevealGate?: { open: () => void } }).__ordpoolRevealGate?.open());
-  await approveXverseSignPopup(context, childSignKnown, '03-child-reveal-parent-sign');
+  childSignKnown.add(await approveXverseSignPopup({ context, knownPages: childSignKnown, onScreenshot: (p) => shot(p, '03-child-reveal-parent-sign') }));
   const child = await childPromise;
   if (child.kind !== 'inscribe-child') throw new Error('expected inscribe-child result');
   expect(child.childInscriptionId).toBe(`${child.revealTxid}i0`);

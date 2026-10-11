@@ -11,6 +11,7 @@ import { cdpClick } from '../cdp-click';
 import { e2eTimeoutMs } from '../../e2e-timeout';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { waitForPageShowing } from '../approval-popup';
+import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
 /**
  * Iteration 2 of the OKX E2E pipeline: restore from the BIP-39 test
@@ -61,6 +62,8 @@ test.beforeAll(async () => {
       '--disable-blink-features=AutomationControlled',
     ],
   });
+  // OKX's vendor backends are answered locally or aborted.
+  await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];

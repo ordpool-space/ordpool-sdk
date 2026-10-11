@@ -18,11 +18,10 @@ import {
   assertAllInputsSighashAll,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, clickApprovalAndRequireClose } from '../approval-popup';
 import { Network, toScureNetwork } from '../../../src/network';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
-import { approveXverseConnect, unlockXverse } from '../xverse-popup';
+import { approveXverseConnect, approveXverseSignPopup, unlockXverse } from '../xverse-popup';
 
 /**
  * Xverse TRANSFER roundtrip on regtest — proof the real Xverse binary
@@ -120,39 +119,6 @@ function assertEveryInputSequence(tx: { vin: unknown[] }, expected: number, labe
   });
 }
 
-/**
- * Approve one Xverse "Review transaction" sign popup and wait for it to
- * close (the close signals the sign completed). Registers the popup in
- * `knownPages` so a subsequent call catches the NEXT one. Copied from
- * `xverse-inscribe-child-roundtrip.spec.ts`: every cat-flow operation
- * (mint, transfer) drives Xverse's legacy `signTransaction` popup, whose
- * head reads "Review transaction" (older) or "Sign transaction" / "Sign
- * PSBT" (newer) — match any of them.
- */
-async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag: string): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText(/(review|sign|confirm)\b.*\b(transaction|psbt)/i).first().waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  await shot(approval, tag);
-  await approval.waitForFunction(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.some(b => {
-      if (!/^(confirm|sign|approve)$/i.test(b.textContent?.trim() ?? '')) return false;
-      if (b.hasAttribute('disabled')) return false;
-      const style = getComputedStyle(b);
-      return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
-    });
-  }, undefined, { polling: 250 });
-  knownPages.add(approval);
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), approval, { label: 'Xverse sign popup' });
-}
-
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh xverse.`);
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
@@ -219,7 +185,7 @@ test('transfer a cat21 on regtest via Xverse: mint via popup, transfer via popup
     recipientAddress: wallet.ordinalsAddress,
     feeSats: MINT_FEE_SATS,
   });
-  await approveXverseSignPopup(context, mintSignKnown, '01-mint-sign');
+  mintSignKnown.add(await approveXverseSignPopup({ context, knownPages: mintSignKnown, onScreenshot: (p) => shot(p, '01-mint-sign') }));
   const minted = await mintPromise;
   if (minted.kind !== 'mint') throw new Error('expected mint result');
   const mintTxid = await postTx(minted.txHex);
@@ -296,7 +262,7 @@ test('transfer a cat21 on regtest via Xverse: mint via popup, transfer via popup
     senderChangeAddress: wallet.paymentAddress,
     feeSats: TRANSFER_FEE_SATS,
   });
-  await approveXverseSignPopup(context, transferSignKnown, '02-transfer-sign');
+  transferSignKnown.add(await approveXverseSignPopup({ context, knownPages: transferSignKnown, onScreenshot: (p) => shot(p, '02-transfer-sign') }));
   const transferred = await transferPromise;
   if (transferred.kind !== 'transfer') throw new Error('expected transfer result');
 

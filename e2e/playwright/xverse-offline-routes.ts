@@ -164,6 +164,12 @@ export function xverseOfflineAnswer(url: URL): unknown | null {
  *
  * Install right after the context launches, before onboarding or the first
  * extension page. Routes cover the service worker as well as the pages.
+ *
+ * Not covered, seen in Chrome's net log on the xverse lane with the network
+ * up: a few requests to `api-signet.xverse.app`, `api.testnet.hiro.so`, the
+ * Spark operators and Mixpanel reach their hosts although this route covers
+ * them, seconds into a context; why the route misses them is unknown. None
+ * gates a flow: the lane passes with every host except localhost unreachable.
  */
 export async function installXverseOfflineRoutes(context: BrowserContext): Promise<void> {
   await context.route(XVERSE_VENDOR_HOSTS, (route: Route) => {

@@ -1,14 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.XVERSE_CONNECT_BUTTON = void 0;
+exports.XVERSE_SIGN_BUTTON = exports.XVERSE_CONNECT_BUTTON = void 0;
 exports.unlockXverseControls = unlockXverseControls;
 exports.unlockXverse = unlockXverse;
 exports.unlockXversePage = unlockXversePage;
 exports.approveXverseConnect = approveXverseConnect;
+exports.approveXverseSignPopup = approveXverseSignPopup;
 const approval_popup_1 = require("./approval-popup");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 /** The consent button of Xverse 2.3.2's connect popup (sats-connect `getAddress`). */
 exports.XVERSE_CONNECT_BUTTON = /^(connect|approve|confirm|allow)$/i;
+/**
+ * The approve button of Xverse 2.3.2's transaction sign popup (sats-connect
+ * `signTransaction` / `signPsbt`, the popup headed "Review transaction").
+ */
+exports.XVERSE_SIGN_BUTTON = /^confirm$/i;
 /**
  * Unlock Xverse on a page showing its popup, if it asks, and return once the
  * home screen shows.
@@ -85,5 +91,34 @@ async function approveXverseConnect(context, request) {
     if (!result.ok)
         throw result.error;
     return result.value;
+}
+/**
+ * Approve the next transaction sign popup Xverse opens and require it to
+ * close. Returns the popup page, so a caller adds it to the `knownPages` of a
+ * following search (an inscribe asks twice in a row).
+ *
+ * The popup is the first page outside `knownPages` that shows the Confirm
+ * button (`XVERSE_SIGN_BUTTON`). Xverse renders that button while it still
+ * resolves the fee and the inputs, styled `pointer-events: none` until it
+ * takes clicks, so the click waits for `waitForStyleClickable` first; a click
+ * in that window lands on nothing. Xverse closes the popup when it accepts
+ * Confirm, so the click requires the close (`clickApprovalAndRequireClose`)
+ * and fails at the click, with a diagnosis, when it does not.
+ *
+ * Pass `onScreenshot` to capture the popup before the click.
+ */
+async function approveXverseSignPopup(opts) {
+    const label = opts.label ?? 'Xverse sign popup';
+    const confirm = (p) => p.getByRole('button', { name: exports.XVERSE_SIGN_BUTTON }).first();
+    const popup = await (0, approval_popup_1.waitForApprovalPopup)({
+        context: opts.context,
+        knownPages: opts.knownPages,
+        isApproval: (0, approval_popup_1.approvalGate)({ url: /^chrome-extension:\/\//, control: confirm }),
+    });
+    await opts.onScreenshot?.(popup);
+    const button = confirm(popup);
+    await (0, approval_popup_1.waitForStyleClickable)(button, { label: `${label}: the Confirm button` });
+    await (0, approval_popup_1.clickApprovalAndRequireClose)(button, popup, { label });
+    return popup;
 }
 //# sourceMappingURL=xverse-popup.js.map

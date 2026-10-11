@@ -1,9 +1,15 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test';
-import { approvalGate, clickApprovalAndRequireClose, waitForApprovalPopup } from './approval-popup';
+import { approvalGate, clickApprovalAndRequireClose, waitForApprovalPopup, waitForStyleClickable } from './approval-popup';
 import { PASSWORD_BY_WALLET } from './wallet-test-vectors';
 
 /** The consent button of Xverse 2.3.2's connect popup (sats-connect `getAddress`). */
 export const XVERSE_CONNECT_BUTTON = /^(connect|approve|confirm|allow)$/i;
+
+/**
+ * The approve button of Xverse 2.3.2's transaction sign popup (sats-connect
+ * `signTransaction` / `signPsbt`, the popup headed "Review transaction").
+ */
+export const XVERSE_SIGN_BUTTON = /^confirm$/i;
 
 /** The part of a Playwright `Locator` the unlock needs. */
 export interface XverseUnlockControls {
@@ -103,4 +109,39 @@ export async function approveXverseConnect<T>(
   const result = await outcome;
   if (!result.ok) throw result.error;
   return result.value;
+}
+
+/**
+ * Approve the next transaction sign popup Xverse opens and require it to
+ * close. Returns the popup page, so a caller adds it to the `knownPages` of a
+ * following search (an inscribe asks twice in a row).
+ *
+ * The popup is the first page outside `knownPages` that shows the Confirm
+ * button (`XVERSE_SIGN_BUTTON`). Xverse renders that button while it still
+ * resolves the fee and the inputs, styled `pointer-events: none` until it
+ * takes clicks, so the click waits for `waitForStyleClickable` first; a click
+ * in that window lands on nothing. Xverse closes the popup when it accepts
+ * Confirm, so the click requires the close (`clickApprovalAndRequireClose`)
+ * and fails at the click, with a diagnosis, when it does not.
+ *
+ * Pass `onScreenshot` to capture the popup before the click.
+ */
+export async function approveXverseSignPopup(opts: {
+  context: BrowserContext;
+  knownPages: Set<Page>;
+  label?: string;
+  onScreenshot?: (page: Page) => Promise<void>;
+}): Promise<Page> {
+  const label = opts.label ?? 'Xverse sign popup';
+  const confirm = (p: Page) => p.getByRole('button', { name: XVERSE_SIGN_BUTTON }).first();
+  const popup = await waitForApprovalPopup({
+    context: opts.context,
+    knownPages: opts.knownPages,
+    isApproval: approvalGate({ url: /^chrome-extension:\/\//, control: confirm }),
+  });
+  await opts.onScreenshot?.(popup);
+  const button = confirm(popup);
+  await waitForStyleClickable(button, { label: `${label}: the Confirm button` });
+  await clickApprovalAndRequireClose(button, popup, { label });
+  return popup;
 }

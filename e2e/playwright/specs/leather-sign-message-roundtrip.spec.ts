@@ -73,7 +73,7 @@ test.beforeAll(async () => {
     headless: false,
     args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox', '--disable-dev-shm-usage'],
   });
-  // The wallet's mempool.space reads are answered locally (captured answers).
+  // The wallet's vendor backends are answered locally or aborted.
   await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();

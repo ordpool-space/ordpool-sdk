@@ -7,6 +7,14 @@ import type { BrowserContext } from '@playwright/test';
  */
 export declare const UNISAT_WALLET_API: RegExp;
 /**
+ * The phishing lists UniSat 1.7.15's service worker downloads: MetaMask's
+ * `eth-phishing-detect` config from GitHub (jsDelivr as the backup) and
+ * UniSat's own `phishing-detect` list. When every source fails the wallet
+ * keeps the lists it has (none, in a fresh profile) and retries an hour later;
+ * the connect and sign popups do not wait on them.
+ */
+export declare const UNISAT_PHISHING_LISTS: RegExp;
+/**
  * `POST /v5/tx/decode2`, answered from the PSBT itself.
  *
  * With this request unanswered the sign popup never shows its Sign button, so
@@ -42,7 +50,8 @@ export declare function unisatOfflineAnswer(url: URL, postData?: string | null):
  *
  * An endpoint with no captured answer is aborted, so a new dependency fails at
  * once and is listed by `recordWalletBackendRequests` rather than waiting on a
- * live server.
+ * live server. The phishing-list downloads (`UNISAT_PHISHING_LISTS`) are
+ * aborted as well.
  *
  * Install right after the context launches, before onboarding. The requests
  * the service worker sends while the extension starts, before this is

@@ -1,6 +1,11 @@
 import type { BrowserContext, Locator, Page } from '@playwright/test';
 /** The consent button of Xverse 2.3.2's connect popup (sats-connect `getAddress`). */
 export declare const XVERSE_CONNECT_BUTTON: RegExp;
+/**
+ * The approve button of Xverse 2.3.2's transaction sign popup (sats-connect
+ * `signTransaction` / `signPsbt`, the popup headed "Review transaction").
+ */
+export declare const XVERSE_SIGN_BUTTON: RegExp;
 /** The part of a Playwright `Locator` the unlock needs. */
 export interface XverseUnlockControls {
     /** The lock screen's password field. */
@@ -52,4 +57,25 @@ export declare function unlockXversePage(page: Page, opts?: {
  * search's error, because it names the reason the popup never came.
  */
 export declare function approveXverseConnect<T>(context: BrowserContext, request: () => Promise<T>): Promise<T>;
+/**
+ * Approve the next transaction sign popup Xverse opens and require it to
+ * close. Returns the popup page, so a caller adds it to the `knownPages` of a
+ * following search (an inscribe asks twice in a row).
+ *
+ * The popup is the first page outside `knownPages` that shows the Confirm
+ * button (`XVERSE_SIGN_BUTTON`). Xverse renders that button while it still
+ * resolves the fee and the inputs, styled `pointer-events: none` until it
+ * takes clicks, so the click waits for `waitForStyleClickable` first; a click
+ * in that window lands on nothing. Xverse closes the popup when it accepts
+ * Confirm, so the click requires the close (`clickApprovalAndRequireClose`)
+ * and fails at the click, with a diagnosis, when it does not.
+ *
+ * Pass `onScreenshot` to capture the popup before the click.
+ */
+export declare function approveXverseSignPopup(opts: {
+    context: BrowserContext;
+    knownPages: Set<Page>;
+    label?: string;
+    onScreenshot?: (page: Page) => Promise<void>;
+}): Promise<Page>;
 //# sourceMappingURL=xverse-popup.d.ts.map
