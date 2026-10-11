@@ -1,4 +1,4 @@
-import { test, expect, chromium, Page } from '@playwright/test';
+import { test, expect, Page } from '@playwright/test';
 import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -8,6 +8,7 @@ import { waitForChromeStorageKey, waitForSingletonLockGone } from '../wait-helpe
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 import { approveXverseConnect, unlockXversePage } from '../xverse-popup';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Matrix coverage for every Xverse Network × Payment-Address-Type
@@ -89,14 +90,10 @@ for (const variant of VARIANTS) {
     // own startup writes default walletState AFTER ours, clobbering
     // the variant.
     {
-      const mutator = await chromium.launchPersistentContext(workingDir, {
-        headless: false,
-        args: [
-          `--disable-extensions-except=${EXT_PATH}`,
-          `--load-extension=${EXT_PATH}`,
-          '--no-sandbox',
-          '--disable-dev-shm-usage',
-        ],
+      const mutator = await launchWalletContext({
+        wallet: 'xverse',
+        extensionPath: EXT_PATH,
+        userDataDir: workingDir,
       });
       await installXverseOfflineRoutes(mutator);
       let [w] = mutator.serviceWorkers();
@@ -144,14 +141,10 @@ for (const variant of VARIANTS) {
 
     // Phase 2 — the actual test context, launched against the dir
     // with the variant baked in.
-    const context = await chromium.launchPersistentContext(workingDir, {
-      headless: false,
-      args: [
-        `--disable-extensions-except=${EXT_PATH}`,
-        `--load-extension=${EXT_PATH}`,
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-      ],
+    const context = await launchWalletContext({
+      wallet: 'xverse',
+      extensionPath: EXT_PATH,
+      userDataDir: workingDir,
     });
     await installXverseOfflineRoutes(context);
     try {

@@ -4,11 +4,12 @@
 // optionally cache a seeded user-data-dir for speed, but this file
 // MUST stay green-or-loudly-failing on every CI run.
 
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { installCat21WalletOrdRoutes } from '../cat21wallet-ord-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 2 of the Cat21 Wallet E2E pipeline: drive the onboarding
@@ -64,14 +65,9 @@ test.beforeAll(async () => {
     throw new Error(`Cat21 Wallet extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh cat21wallet.`);
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'cat21wallet',
+    extensionPath: EXT_PATH,
   });
   // The wallet's vendor backends are answered locally or aborted, and its
   // cat21-ord reads go to the regtest cat21-ord.

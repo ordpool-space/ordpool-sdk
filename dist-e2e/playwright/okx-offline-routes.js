@@ -19,8 +19,7 @@ const isWelcomePage = (url) => url.origin === 'https://web3.okx.com' && url.path
  * logos), the heartbeat failover hosts (`web3.okx.com`, `wallet.ouxyi.cash`,
  * `web3.ouchyi.bid`, `web3.chouyi.pink`) and its DNS-over-HTTPS lookups
  * (`www.okx-httpdns.com`, `www.okx-doh.com`, and the two IP addresses the
- * bundle hardcodes, `47.57.9.204` and `47.75.96.239`, which no DNS rule can
- * keep in).
+ * bundle hardcodes, `47.57.9.204` and `47.75.96.239`).
  */
 exports.OKX_VENDOR_HOSTS = /^https:\/\/(([a-z0-9-]+\.)*(okx\.com|okex\.org|coinall\.ltd|okx-httpdns\.com|okx-doh\.com|ouxyi\.cash|ouchyi\.bid|chouyi\.pink)|47\.57\.9\.204|47\.75\.96\.239)\//;
 const isVendorRequest = (url) => exports.OKX_VENDOR_HOSTS.test(url.href);
@@ -69,12 +68,12 @@ function okxOk(data) {
  * Install right after the context launches, before onboarding. A welcome tab
  * that is already open is reloaded so it picks up the local document.
  *
- * Not covered, seen in Chrome's net log on the okx lane with the network up:
- * part of OKX's telemetry POSTs to `wallet.okex.org` (`apmfe/.../envelope`,
- * `priapi/df/list`, `et/priapi/xweb`), which reach the host although this
- * route aborts the same URLs (why the route does not see them is unknown), and
- * the `wsdexpri.coinall.ltd` / `wsdexpri.okx.com` WebSockets, which routes do
- * not intercept. Neither gates a flow: the lane passes with them unreachable.
+ * What this route does not see fails at the launch rules
+ * (`launchWalletContext`): part of OKX's telemetry POSTs to `wallet.okex.org`
+ * (`apmfe/.../envelope`, `priapi/df/list`, `et/priapi/xweb`), which the route
+ * misses although it matches the same URLs (why is unknown), and the
+ * `wsdexpri.coinall.ltd` / `wsdexpri.okx.com` WebSockets, which routes do not
+ * intercept. Neither gates a flow.
  */
 async function installOkxOfflineRoutes(context) {
     await context.route(isVendorRequest, (route) => route.abort('failed'));

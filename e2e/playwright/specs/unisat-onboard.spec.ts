@@ -4,12 +4,13 @@
 // optionally cache a seeded user-data-dir for speed, but this file
 // MUST stay green-or-loudly-failing on every CI run.
 
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 
 import { dismissUnisatNotice, dismissUnisatUpdateNag } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 2 of the Unisat E2E pipeline: drive the actual
@@ -74,14 +75,9 @@ test.beforeAll(async () => {
     );
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'unisat',
+    extensionPath: EXT_PATH,
   });
   await installUnisatOfflineRoutes(context);
 

@@ -39,6 +39,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ORD_STOCK_URL = exports.ORD_URL = exports.ELECTRS_URL = void 0;
+exports.regtestServiceUrls = regtestServiceUrls;
 exports.getFundedAccount = getFundedAccount;
 exports.rpc = rpc;
 exports.rpcJson = rpcJson;
@@ -109,15 +110,26 @@ const bip32_1 = require("@scure/bip32");
 const base_1 = require("@scure/base");
 const btc = __importStar(require("@scure/btc-signer"));
 const execFileAsync = (0, node_util_1.promisify)(node_child_process_1.execFile);
+/**
+ * Where the regtest stack's services answer, read from `env`: the `REGTEST_*_URL`
+ * variables, else localhost on the compose file's host ports
+ * (`E2E_ELECTRS_HOST_PORT`, default 3010). One function, so the helpers that
+ * reach the services and the browser launch that must let them through
+ * (`launchWalletContext`) read the same answer.
+ */
+function regtestServiceUrls(env = process.env) {
+    return {
+        electrs: env.REGTEST_ELECTRS_URL ?? `http://localhost:${env.E2E_ELECTRS_HOST_PORT ?? 3010}`,
+        ord: env.REGTEST_ORD_URL ?? 'http://localhost:8080',
+        ordStock: env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081',
+    };
+}
 /** Base URL of the regtest electrs (Esplora REST), as the specs and helpers reach it. */
-exports.ELECTRS_URL = process.env.REGTEST_ELECTRS_URL ??
-    `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
+exports.ELECTRS_URL = regtestServiceUrls().electrs;
 /** Base URL of the regtest cat21-ord (`--index-cat21`), as the specs and helpers reach it. */
-exports.ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
-// Stock ord (no --index-cat21 flag) — see docker-compose.regtest.yml,
-// service `ord-stock`. Used by the `inscribe-ord-indexing-roundtrip`
-// spec to verify a real upstream-ord recognises the SDK's inscriptions.
-exports.ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
+exports.ORD_URL = regtestServiceUrls().ord;
+/** Base URL of the regtest stock ord. */
+exports.ORD_STOCK_URL = regtestServiceUrls().ordStock;
 // The bitcoind container name. Defaults to the SDK's own stack
 // (`ordpool-e2e-bitcoind`); consumer repos (cubes-frontend, ordpool)
 // stand up their own compose with a different name (e.g.

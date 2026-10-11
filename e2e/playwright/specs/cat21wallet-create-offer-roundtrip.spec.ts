@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -28,6 +28,7 @@ import { validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { installCat21WalletOrdRoutes } from '../cat21wallet-ord-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Cat21 Wallet CREATE-OFFER roundtrip on regtest — wallet is the BUYER.
@@ -96,14 +97,9 @@ test.beforeAll(async () => {
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'cat21wallet',
+    extensionPath: EXT_PATH,
   });
   // The wallet's vendor backends are answered locally or aborted, and its
   // cat21-ord reads go to the regtest cat21-ord.

@@ -12,9 +12,9 @@ import { Page } from '@playwright/test';
  *   - "Welcome to OKX Wallet — Let's explore Web3" gate; Start your
  *     Web3 journey button.
  *
- * Requires the context to be launched with
- * `--disable-blink-features=AutomationControlled` so navigator.webdriver
- * is hidden — without this the welcome-screen click is absorbed.
+ * Requires the context to be launched by `launchWalletContext({ wallet: 'okx' })`,
+ * which passes `--disable-blink-features=AutomationControlled` so navigator.webdriver
+ * is hidden; without it the welcome-screen click is absorbed.
  */
 export declare function onboardOkx(page: Page, extensionId: string, opts?: {
     password?: string;

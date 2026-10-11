@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -19,6 +19,7 @@ import {
 import { approvalGate, approveWizzSignPopup, clickApprovalAndRequireClose, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Wizz PARENT/CHILD inscribe roundtrip on regtest: proof that the real
@@ -132,14 +133,9 @@ test.beforeAll(async () => {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'wizz',
+    extensionPath: EXT_PATH,
   });
 
   // Hermetic Wizz: stub the wallet's third-party balance/asset backends

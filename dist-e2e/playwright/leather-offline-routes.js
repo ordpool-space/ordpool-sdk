@@ -70,13 +70,11 @@ function leatherOfflineAnswer(url) {
  * Install right after the context launches, before onboarding or the first
  * extension page. Routes cover the service worker as well as the pages.
  *
- * Not covered, seen in Chrome's net log on the leather and cat21wallet lanes
- * with the network up: Leather's Sentry and Mixpanel POSTs, which reach their
- * hosts although this route aborts the same URLs (why the route does not see
- * them is unknown), and the mempool.space live-update WebSocket
- * (`wss://leather.mempool.space/api/v1/ws`), which `context.routeWebSocket`
- * does not intercept. Neither gates a flow: the lanes pass with them
- * unreachable.
+ * What this route does not see fails at the launch rules
+ * (`launchWalletContext`): Leather's Sentry and Mixpanel POSTs, which the
+ * route misses although it matches the same URLs (why is unknown), and the
+ * mempool.space live-update WebSocket (`wss://leather.mempool.space/api/v1/ws`),
+ * which `context.routeWebSocket` does not intercept. Neither gates a flow.
  */
 async function installLeatherOfflineRoutes(context) {
     await context.route(exports.LEATHER_VENDOR_HOSTS, (route) => route.abort('failed'));

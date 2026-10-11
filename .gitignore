@@ -22,6 +22,7 @@
 /e2e/playwright/fixtures/sdk-harness.js
 /playwright-report/
 /test-results/
+/net-log/
 
 # System Files
 .DS_Store

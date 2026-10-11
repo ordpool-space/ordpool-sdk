@@ -1,7 +1,8 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 1 of the Phantom E2E pipeline: prove that we can load
@@ -33,14 +34,9 @@ test.beforeAll(async () => {
   manifestVersion = manifest.version;
   console.log(`[phantom] loading extension v${manifestVersion} from ${EXT_PATH}`);
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'phantom',
+    extensionPath: EXT_PATH,
   });
   // Phantom's vendor backends are aborted.
   await installPhantomOfflineRoutes(context);

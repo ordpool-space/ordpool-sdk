@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -23,6 +23,7 @@ import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import { onboardLeather } from '../onboard-leather';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Leather ACCEPT-OFFER roundtrip on regtest — Leather is the SELLER.
@@ -145,14 +146,9 @@ test.beforeAll(async () => {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'leather',
+    extensionPath: EXT_PATH,
   });
   // The wallet's vendor backends are answered locally or aborted.
   await installLeatherOfflineRoutes(context);

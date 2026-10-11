@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -8,6 +8,7 @@ import { buildListingMessage } from '../../../src/cat21-listing/build-listing-me
 import { Network } from '../../../src/network';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * BIP-322 sign-message roundtrip with the real Unisat extension. Promotes
@@ -77,9 +78,9 @@ test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) throw new Error(`Unisat extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh unisat.`);
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox', '--disable-dev-shm-usage'],
+  context = await launchWalletContext({
+    wallet: 'unisat',
+    extensionPath: EXT_PATH,
   });
   await installUnisatOfflineRoutes(context);
 

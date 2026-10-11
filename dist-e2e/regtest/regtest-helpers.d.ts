@@ -1,9 +1,31 @@
 import type { RpcAddressInfo, RpcRawTransaction, RpcUnspent } from './rpc-types';
 import * as btc from '@scure/btc-signer';
+/** The base URLs of the regtest stack's HTTP services. */
+export interface RegtestServiceUrls {
+    /** electrs (Esplora REST). */
+    electrs: string;
+    /** cat21-ord (`--index-cat21`). */
+    ord: string;
+    /**
+     * Stock ord (no `--index-cat21`), service `ord-stock` in
+     * docker-compose.regtest.yml. The `inscribe-ord-indexing-roundtrip` spec
+     * uses it to verify a real upstream ord recognises the SDK's inscriptions.
+     */
+    ordStock: string;
+}
+/**
+ * Where the regtest stack's services answer, read from `env`: the `REGTEST_*_URL`
+ * variables, else localhost on the compose file's host ports
+ * (`E2E_ELECTRS_HOST_PORT`, default 3010). One function, so the helpers that
+ * reach the services and the browser launch that must let them through
+ * (`launchWalletContext`) read the same answer.
+ */
+export declare function regtestServiceUrls(env?: NodeJS.ProcessEnv): RegtestServiceUrls;
 /** Base URL of the regtest electrs (Esplora REST), as the specs and helpers reach it. */
 export declare const ELECTRS_URL: string;
 /** Base URL of the regtest cat21-ord (`--index-cat21`), as the specs and helpers reach it. */
 export declare const ORD_URL: string;
+/** Base URL of the regtest stock ord. */
 export declare const ORD_STOCK_URL: string;
 export interface FundedAccount {
     address: string;

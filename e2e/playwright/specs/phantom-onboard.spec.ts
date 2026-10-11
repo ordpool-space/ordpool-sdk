@@ -4,7 +4,7 @@
 // optionally cache a seeded user-data-dir for speed, but this file
 // MUST stay green-or-loudly-failing on every CI run.
 
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { cdpClick } from '../cdp-click';
@@ -12,6 +12,7 @@ import { tickPhantomTerms } from '../onboard-phantom';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { waitForPageShowing } from '../approval-popup';
 import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 2 of the OKX E2E pipeline: restore from the BIP-39 test
@@ -50,14 +51,9 @@ test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
     throw new Error(`OKX extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh phantom.`);
   }
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'phantom',
+    extensionPath: EXT_PATH,
   });
   // Phantom's vendor backends are aborted.
   await installPhantomOfflineRoutes(context);

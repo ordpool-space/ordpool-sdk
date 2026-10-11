@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -26,6 +26,7 @@ import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * OKX cat21 ACCEPT-OFFER roundtrip on regtest — OKX is the SELLER.
@@ -123,15 +124,9 @@ test.beforeAll(async () => {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-blink-features=AutomationControlled',
-    ],
+  context = await launchWalletContext({
+    wallet: 'okx',
+    extensionPath: EXT_PATH,
   });
   await installOkxOfflineRoutes(context);
   let [worker] = context.serviceWorkers();

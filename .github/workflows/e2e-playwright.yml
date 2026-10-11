@@ -30,6 +30,7 @@ on:
       - 'e2e/docker-compose.*.yml'
       - 'e2e/regtest-bootstrap.sh'
       - 'e2e/build-pins.*'
+      - 'scripts/check-net-log.mjs'
       - '.github/workflows/e2e-playwright.yml'
       - 'src/**'
       - 'package*.json'
@@ -40,6 +41,7 @@ on:
       - 'e2e/docker-compose.*.yml'
       - 'e2e/regtest-bootstrap.sh'
       - 'e2e/build-pins.*'
+      - 'scripts/check-net-log.mjs'
       - '.github/workflows/e2e-playwright.yml'
       - 'src/**'
       - 'package*.json'
@@ -318,7 +320,17 @@ jobs:
           # global-setup.ts skips the ~25s Xverse seed onboarding in every
           # non-xverse shard (only xverse-*.spec.ts clone the seed).
           WALLET: ${{ matrix.wallet }}
+          # Every launchWalletContext writes Chrome's net log here, one file
+          # per browser context.
+          ORDPOOL_E2E_NET_LOG_DIR: ${{ github.workspace }}/net-log
         run: xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" npm run test:e2e:playwright -- ${{ matrix.wallet }}
+
+      # No test talks to a real system: fail the shard when any context's net
+      # log shows a connect, a datagram or a DNS lookup leaving the runner.
+      # Runs after a red spec too, so a failure's net log is read as well.
+      - name: Check the net logs (nothing leaves the runner)
+        if: ${{ !cancelled() }}
+        run: node scripts/check-net-log.mjs net-log
 
       - name: Stop regtest stack
         if: always()
@@ -332,6 +344,7 @@ jobs:
           path: |
             test-results/
             playwright-report/
+            net-log/
             e2e/extensions/${{ matrix.wallet }}/manifest.json
             e2e/extensions/xverse/manifest.json
           retention-days: 7

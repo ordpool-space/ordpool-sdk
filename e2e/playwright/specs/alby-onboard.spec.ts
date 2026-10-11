@@ -1,10 +1,11 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { AlbyAutoApproveHandle, installAlbyAutoApprove } from '../alby-auto-approve';
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from '../wallet-test-vectors';
 import { installAlbyOfflineRoutes, ALBY_LNDHUB_PLACEHOLDER_URL } from '../alby-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 
 /**
@@ -50,14 +51,9 @@ test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
     throw new Error(`Alby extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh alby.`);
   }
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'alby',
+    extensionPath: EXT_PATH,
   });
   // The seeded account's placeholder LNDHub is aborted, never looked up.
   await installAlbyOfflineRoutes(context);

@@ -1,8 +1,9 @@
-import { test, expect, chromium, BrowserContext } from '@playwright/test';
+import { test, expect, BrowserContext } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 1 of the Wizz E2E pipeline: prove that we can load
@@ -34,14 +35,9 @@ test.beforeAll(async () => {
   manifestVersion = manifest.version;
   console.log(`[wizz] loading extension v${manifestVersion} from ${EXT_PATH}`);
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'wizz',
+    extensionPath: EXT_PATH,
   });
   // Wizz's vendor backends go through the SDK shield from its first request on.
   await installWizzOfflineRoutes(context);

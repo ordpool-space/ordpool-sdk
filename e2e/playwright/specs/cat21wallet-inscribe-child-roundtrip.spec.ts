@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -21,6 +21,7 @@ import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { installCat21WalletOrdRoutes } from '../cat21wallet-ord-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Cat21 Wallet PARENT/CHILD inscribe roundtrip on regtest — full
@@ -110,14 +111,9 @@ test.beforeAll(async () => {
     throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'cat21wallet',
+    extensionPath: EXT_PATH,
   });
   // The wallet's vendor backends are answered locally or aborted, and its
   // cat21-ord reads go to the regtest cat21-ord.

@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -10,6 +10,7 @@ import { installContextErrorGuard } from '../browser-error-guard';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 import { approveXverseConnect, approveXverseSignPopup, unlockXverse } from '../xverse-popup';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -85,14 +86,10 @@ test.beforeAll(async () => {
     fs.rmSync(path.join(workingDir, stale), { force: true });
   }
 
-  context = await chromium.launchPersistentContext(workingDir, {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'xverse',
+    extensionPath: EXT_PATH,
+    userDataDir: workingDir,
   });
   await installXverseOfflineRoutes(context);
   // The browser-error guard covers every app page the context spawns (the

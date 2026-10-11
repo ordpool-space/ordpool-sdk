@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 import { approveXverseConnect, unlockXverse } from '../xverse-popup';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 3a — SDK ↔ Xverse handshake via sats-connect.
@@ -82,14 +83,10 @@ test.beforeAll(async () => {
     fs.rmSync(path.join(workingDir, stale), { force: true });
   }
 
-  context = await chromium.launchPersistentContext(workingDir, {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'xverse',
+    extensionPath: EXT_PATH,
+    userDataDir: workingDir,
   });
   await installXverseOfflineRoutes(context);
 

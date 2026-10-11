@@ -47,3 +47,5 @@ export * from './regtest/regtest-helpers';
 export * from './e2e-timeout';
 export * from './playwright/workaround-wait-for-timeout';
 export * from './playwright/okx-sign-popup';
+export * from './playwright/launch-wallet-context';
+export * from './playwright/net-log';

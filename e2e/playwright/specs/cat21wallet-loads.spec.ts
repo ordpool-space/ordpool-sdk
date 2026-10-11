@@ -1,8 +1,9 @@
-import { test, expect, chromium, BrowserContext } from '@playwright/test';
+import { test, expect, BrowserContext } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { installCat21WalletOrdRoutes } from '../cat21wallet-ord-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 1 of the Cat21 Wallet E2E pipeline.
@@ -43,14 +44,9 @@ test.beforeAll(async () => {
   manifestVersion = manifest.version;
   console.log(`[cat21wallet] loading extension v${manifestVersion} from ${EXT_PATH}`);
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'cat21wallet',
+    extensionPath: EXT_PATH,
   });
   // The wallet's vendor backends are answered locally or aborted, and its
   // cat21-ord reads go to the regtest cat21-ord.

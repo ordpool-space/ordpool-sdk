@@ -4,10 +4,11 @@
 // optionally cache a seeded user-data-dir for speed, but this file
 // MUST stay green-or-loudly-failing on every CI run.
 
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 2 of the Leather E2E pipeline: drive the onboarding
@@ -63,14 +64,9 @@ test.beforeAll(async () => {
     throw new Error(`Leather extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh leather.`);
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'leather',
+    extensionPath: EXT_PATH,
   });
   // The wallet's vendor backends are answered locally or aborted.
   await installLeatherOfflineRoutes(context);

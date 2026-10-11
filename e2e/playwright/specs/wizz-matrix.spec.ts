@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import { approvalGate, clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 4 of the Wizz E2E pipeline: matrix spec across the
@@ -96,14 +97,9 @@ test.beforeAll(async () => {
 
 for (const variant of VARIANTS) {
   test(`SDK returns the right address for Wizz ${variant.label}`, async () => {
-    const context = await chromium.launchPersistentContext('', {
-      headless: false,
-      args: [
-        `--disable-extensions-except=${EXT_PATH}`,
-        `--load-extension=${EXT_PATH}`,
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-      ],
+    const context = await launchWalletContext({
+      wallet: 'wizz',
+      extensionPath: EXT_PATH,
     });
 
     // Both address types derive locally from the seed: P2TR needs nothing

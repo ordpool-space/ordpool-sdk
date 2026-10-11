@@ -63,4 +63,6 @@ __exportStar(require("./regtest/regtest-helpers"), exports);
 __exportStar(require("./e2e-timeout"), exports);
 __exportStar(require("./playwright/workaround-wait-for-timeout"), exports);
 __exportStar(require("./playwright/okx-sign-popup"), exports);
+__exportStar(require("./playwright/launch-wallet-context"), exports);
+__exportStar(require("./playwright/net-log"), exports);
 //# sourceMappingURL=index.js.map

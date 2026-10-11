@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -9,6 +9,7 @@ import { Network } from '../../../src/network';
 import { onboardXverse } from '../onboard-xverse';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 import { approveXverseConnect, unlockXverse } from '../xverse-popup';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * BIP-322 sign-message roundtrip with the real Xverse extension. Promotes
@@ -67,14 +68,9 @@ test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) throw new Error(`Xverse extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh xverse.`);
   if (!fs.existsSync(path.resolve(__dirname, '../fixtures/sdk-harness.js'))) throw new Error('SDK harness bundle missing. Run `npm run e2e:harness:build`.');
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'xverse',
+    extensionPath: EXT_PATH,
   });
   await installXverseOfflineRoutes(context);
 

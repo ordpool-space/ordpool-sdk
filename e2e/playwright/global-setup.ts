@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import { waitForChromeStorageKey, waitForSingletonLockGone } from './wait-helpers';
 import { onboardXverse, primeAndSwitchToRegtest, overrideRegtestElectrsUrl } from './onboard-xverse';
 import { installXverseOfflineRoutes } from './xverse-offline-routes';
+import { launchWalletContext } from './launch-wallet-context';
 
 /**
  * Playwright globalSetup — runs ONCE before any spec.
@@ -121,14 +122,10 @@ export default async function globalSetup(): Promise<void> {
   console.log(`[globalSetup] onboarding Xverse + switching to Regtest…`);
   fs.rmSync(SEED_USER_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(SEED_USER_DATA_DIR, { recursive: true });
-  const context = await chromium.launchPersistentContext(SEED_USER_DATA_DIR, {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  const context = await launchWalletContext({
+    wallet: 'xverse',
+    extensionPath: EXT_PATH,
+    userDataDir: SEED_USER_DATA_DIR,
   });
   await installXverseOfflineRoutes(context);
 

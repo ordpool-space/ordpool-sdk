@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -6,6 +6,7 @@ import { onboardPhantom } from '../onboard-phantom';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { PASSWORD_BY_WALLET } from '../wallet-test-vectors';
 import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 3 of the Phantom E2E pipeline: SDK ↔ Phantom handshake.
@@ -53,13 +54,10 @@ test.beforeAll(async () => {
     '<!DOCTYPE html><html><head><title>ordpool-e2e-unlock</title></head><body>ordpool-e2e</body></html>',
   );
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
+  context = await launchWalletContext({
+    wallet: 'phantom',
+    extensionPath: EXT_PATH,
     args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
       // Treat the harness HTTP origin as secure. Iter 65 confirmed
       // Phantom injects .solana (chain-agnostic) but NEVER .bitcoin
       // on http://localhost:4500 — a 30s timeline poll showed

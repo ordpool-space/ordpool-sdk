@@ -4,7 +4,7 @@
 // optionally cache a seeded user-data-dir for speed, but this file
 // MUST stay green-or-loudly-failing on every CI run.
 
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import { cdpClick } from '../cdp-click';
 import { clickUntilEffect } from '../click-until-effect';
 import * as path from 'node:path';
@@ -12,6 +12,7 @@ import * as fs from 'node:fs';
 
 import { TEST_MNEMONIC, TEST_MNEMONIC_WORDS, PASSWORD_BY_WALLET } from '../wallet-test-vectors';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 2 of the Wizz E2E pipeline: drive the onboarding flow
@@ -53,14 +54,9 @@ test.beforeAll(async () => {
     throw new Error(`Wizz extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh wizz.`);
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'wizz',
+    extensionPath: EXT_PATH,
   });
 
   // Wizz's vendor backends (its remote config, indexers, mempool.space) are

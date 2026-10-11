@@ -1,4 +1,4 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
@@ -6,6 +6,7 @@ import * as fs from 'node:fs';
 import { clickApprovalAndRequireClose, approvalGate, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * Iteration 5 of the Unisat E2E pipeline: matrix spec across every
@@ -110,14 +111,9 @@ test.beforeAll(async () => {
 for (const variant of VARIANTS) {
   test(`SDK returns the right address for Unisat ${variant.label}`, async () => {
 
-    const context = await chromium.launchPersistentContext('', {
-      headless: false,
-      args: [
-        `--disable-extensions-except=${EXT_PATH}`,
-        `--load-extension=${EXT_PATH}`,
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-      ],
+    const context = await launchWalletContext({
+      wallet: 'unisat',
+      extensionPath: EXT_PATH,
     });
 
     try {

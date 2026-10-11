@@ -63,7 +63,7 @@ export interface XverseVariant {
  *    serialization). Kept in sync so the popup UI shows the right
  *    tile as selected.
  *
- * Caller contract: invoke immediately after `launchPersistentContext`
+ * Caller contract: invoke immediately after `launchWalletContext`
  * + service-worker readiness. The popup MUST NOT have been opened
  * yet; opening it boots redux-persist which then debounce-saves over
  * any later writes.

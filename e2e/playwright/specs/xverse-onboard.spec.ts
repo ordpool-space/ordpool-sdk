@@ -1,9 +1,10 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { dismissXversePromo, xverseRestorePickerWallet1 } from '../onboard-xverse';
 import { waitForStyleClickable } from '../approval-popup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
+import { launchWalletContext } from '../launch-wallet-context';
 
 /**
  * GOLD-STANDARD ONBOARD SPEC. Don't delete this file thinking the
@@ -92,14 +93,9 @@ test.beforeAll(async () => {
     );
   }
 
-  context = await chromium.launchPersistentContext('', {
-    headless: false,
-    args: [
-      `--disable-extensions-except=${EXT_PATH}`,
-      `--load-extension=${EXT_PATH}`,
-      '--no-sandbox',
-      '--disable-dev-shm-usage',
-    ],
+  context = await launchWalletContext({
+    wallet: 'xverse',
+    extensionPath: EXT_PATH,
   });
   await installXverseOfflineRoutes(context);
 
