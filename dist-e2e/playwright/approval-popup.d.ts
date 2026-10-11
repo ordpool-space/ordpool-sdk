@@ -107,29 +107,89 @@ export declare function raceApprovalPopup(opts: ApprovalPopupSearch & {
  */
 export declare function closeLeftoverExtensionPages(context: BrowserContext, keep: Iterable<Page>): Promise<void>;
 /**
- * Click Sign in a Wizz/Unisat-family approval popup, once the button is really
- * enabled.
+ * Below this computed opacity a control counts as faded out, the way an antd
+ * button shows its loading state.
+ */
+export declare const CLICKABLE_MIN_OPACITY = 0.7;
+/** What `waitForStyleClickable` reads from the control's computed style. */
+export interface PointerStyle {
+    pointerEvents: string;
+    opacity: number;
+}
+/** The part of a Playwright `Locator` the style wait needs. */
+export interface StyledControl {
+    evaluate(fn: (el: Element) => PointerStyle): Promise<PointerStyle>;
+}
+/**
+ * Wait until a control's computed style says it takes clicks: `pointerEvents`
+ * is not `none` and `opacity` is at least `CLICKABLE_MIN_OPACITY`. For a
+ * control whose busy state is styling only, which Playwright's actionability
+ * check (it reads the `disabled` attribute) cannot see. Throws past the global
+ * bound, naming the last style read.
+ */
+export declare function waitForStyleClickable(control: StyledControl, opts: {
+    label: string;
+}): Promise<void>;
+/**
+ * The acknowledgement button of Wizz 2.13.4's fee-rate warning, read off a
+ * regtest sign popup.
+ */
+export declare const WIZZ_FEE_WARNING_ACKNOWLEDGE = "I am aware of the above risks.";
+/**
+ * Click Sign in a Wizz approval popup once the button is really enabled, and
+ * require the popup to close. Returns the popup page, so a caller can add it to
+ * the `knownPages` of a following search.
  *
- * The predicate is deliberately LOOSE about the button's text. While the wallet
- * analyses the PSBT the button is disabled and covered by a spinner overlay, so
- * its `textContent` can be a spinner glyph plus whitespace around the word, and
- * a matcher pinned to exactly "Sign" never fires even after the button becomes
- * clickable. That failure is indistinguishable from a button that never enables:
- * both are a timeout. The regex therefore accepts an optional spinner character,
- * while still rejecting neighbouring text like "Signed".
+ * While Wizz analyses the PSBT, its Sign button (an antd button, no testid) is
+ * covered by a spinner and shown faded, so the click waits for
+ * `waitForStyleClickable` first.
  *
- * Enabledness is read from computed style (`pointerEvents`, `opacity`) rather
- * than a disabled attribute, and the click happens INSIDE the same
- * `page.evaluate` as the check, so the button cannot change state between the
- * two.
+ * When the PSBT's fee rate is more than 30% above the high-priority rate Wizz
+ * fetched, Wizz layers a modal warning over the Sign button ("The fee rate is
+ * over 30% higher than the mempool's high priority.") that a person
+ * acknowledges before Sign takes a click. Whether it shows depends on the fee
+ * rate the caller built with, so this handles both: the warning is
+ * acknowledged when it shows, and the Sign click goes through either way.
  *
- * Pass `onScreenshot` to capture the popup before the wait and after the click;
- * the post-click call is best-effort because the popup auto-closes.
+ * The button is addressed by `getByRole('button', { name: 'Sign' })`: the
+ * accessible NAME, which matched exactly one control on a real run (CI run
+ * 38106673762, `anchor=1`, a BUTTON with text "Sign "). `textContent` is not the
+ * name and is not used to locate it.
+ *
+ * Pass `onScreenshot` to capture the popup before the click.
  */
 export declare function approveWizzSignPopup(opts: {
     context: BrowserContext;
     knownPages: Set<Page>;
     onScreenshot?: (page: Page, name: string) => Promise<void>;
+}): Promise<Page>;
+/** The part of a Playwright `Locator` a warning's acknowledgement needs. */
+export interface AcknowledgeControl {
+    waitFor(options: {
+        state: 'visible';
+    }): Promise<void>;
+    click(): Promise<void>;
+}
+/**
+ * `clickApprovalAndRequireClose` for an approval button that a modal warning
+ * may cover, acknowledged through `acknowledge` when it shows.
+ *
+ * The approval click starts first. While the warning covers the button,
+ * Playwright holds the click (the warning intercepts pointer events) and sends
+ * it once the warning is acknowledged; without a warning it lands at once. The
+ * search for the warning ends when it shows, or when the popup closed because
+ * the approval landed without one: the state that means it is not coming.
+ * Acknowledging only dismisses the warning; the popup stays open for the
+ * approval.
+ *
+ * Both outcomes are captured as values and rethrown at the end, so neither can
+ * reject unobserved while the other is awaited. The approval's own failure wins,
+ * because it names which side stalled.
+ */
+export declare function clickApprovalPastWarning(button: Parameters<typeof clickApprovalAndRequireClose>[0], acknowledge: AcknowledgeControl, page: {
+    isClosed: () => boolean;
+}, opts: {
+    label: string;
 }): Promise<void>;
 export declare function clickApprovalButton(button: {
     click: () => Promise<void>;

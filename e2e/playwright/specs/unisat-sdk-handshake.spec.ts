@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { approvalGate, waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, approvalGate, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
@@ -134,7 +134,9 @@ test('unisatConnector.connect via the harness page returns the BIP-84 mainnet ad
   // doesn't see it. Match by exact text instead.
   const consentBtn = approval.getByText(/^Connect$/).first();
   await expect(consentBtn).toBeVisible();
-  await consentBtn.click();
+  // UniSat closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(consentBtn, approval, { label: 'UniSat connect popup' });
   await shot(approval, '02b-after-approve');
 
   const info = await resultPromise;

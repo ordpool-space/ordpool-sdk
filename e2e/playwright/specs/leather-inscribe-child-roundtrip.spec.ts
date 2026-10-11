@@ -16,7 +16,7 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { clickApprovalButton, waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardLeather } from '../onboard-leather';
 
 /**
@@ -83,7 +83,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       return true;
     },
   });
-  await approval.getByTestId('get-addresses-approve-button').click();
+  // Leather closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByTestId('get-addresses-approve-button'), approval, {
+    label: 'Leather connect popup',
+  });
 }
 
 /**
@@ -105,11 +109,9 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
   await shot(approval, tag);
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
   await expect(confirmBtn).toBeVisible();
-  // Leather closes this popup the instant it accepts the click, and the
-  // post-click bookkeeping then runs against a target that is already gone.
-  // The downstream assertions (the reveal broadcasting, the child linking to
-  // its parent) are what prove the click actually landed.
-  await clickApprovalButton(confirmBtn, approval);
+  // Leather closes the sign popup the moment it accepts the click, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(confirmBtn, approval, { label: `Leather sign popup ${tag}` });
   knownPages.add(approval);
 }
 

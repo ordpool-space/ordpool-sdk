@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
 
 /**
@@ -112,8 +112,11 @@ test('cat21walletConnector.connect via the harness page returns the BIP-84 / BIP
     throw new Error('cat21wallet get-addresses approval popup never appeared');
   }
   await shot(approval, '02a-approval');
-  await approval.getByTestId('get-addresses-approve-button').click();
-  await shot(approval, '02b-after-approve');
+  // The wallet closes the popup the moment it accepts the approval, so the
+  // close is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByTestId('get-addresses-approve-button'), approval, {
+    label: 'Cat21 Wallet connect popup',
+  });
 
   const info = await resultPromise;
   // eslint-disable-next-line no-console

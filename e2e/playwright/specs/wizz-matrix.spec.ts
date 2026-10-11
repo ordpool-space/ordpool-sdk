@@ -3,7 +3,7 @@ import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { approvalGate, waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
@@ -80,8 +80,9 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, v
   // eslint-disable-next-line no-console
   console.log(`[wizz-matrix:${variantTag}] approval URL = ${approval.url()}`);
   await approval.screenshot({ path: path.resolve(RESULTS_DIR, `wizz-matrix-${variantTag}-approval-rendered.png`), fullPage: true }).catch(() => undefined);
-  await approval.getByText(/^Connect$/).first().click();
-  await approval.screenshot({ path: path.resolve(RESULTS_DIR, `wizz-matrix-${variantTag}-after-approve.png`), fullPage: true }).catch(() => undefined);
+  // Wizz closes the popup the moment it accepts the approval, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^Connect$/).first(), approval, { label: `Wizz connect popup ${variantTag}` });
 }
 
 test.beforeAll(async () => {

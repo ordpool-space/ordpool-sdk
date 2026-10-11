@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
@@ -99,7 +99,11 @@ test('okxConnector.connect via the harness page returns the BIP-86 mainnet Tapro
     },
   });
   await shot(approval, '01-approval');
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
+  // OKX closes the popup the moment it accepts the approval, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first(), approval, {
+    label: 'OKX connect popup',
+  });
 
   const info = await resultPromise;
   // eslint-disable-next-line no-console

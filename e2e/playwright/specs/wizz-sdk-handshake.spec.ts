@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { approvalGate, waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
 
 /**
@@ -127,7 +127,9 @@ test('wizzConnector.connect via the harness page returns the BIP-84 mainnet addr
   // a styled <div> rather than a <button>. Match by exact text.
   const consentBtn = approval.getByText(/^Connect$/).first();
   await expect(consentBtn).toBeVisible();
-  await consentBtn.click();
+  // Wizz closes the popup the moment it accepts the approval, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(consentBtn, approval, { label: 'Wizz connect popup' });
   await shot(approval, '02b-after-approve');
 
   const info = await resultPromise;

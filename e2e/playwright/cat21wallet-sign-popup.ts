@@ -1,6 +1,6 @@
 import { expect, type BrowserContext, type Page } from '@playwright/test';
 
-import { waitForApprovalPopup } from './approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup } from './approval-popup';
 
 /**
  * Wait for the Cat21 Wallet's getAddresses approval popup to open
@@ -26,7 +26,11 @@ export async function approveCat21WalletConnectPopup(
       return true;
     },
   });
-  await approval.getByTestId('get-addresses-approve-button').click();
+  // The wallet closes the popup the moment it accepts the approval, so the
+  // close is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByTestId('get-addresses-approve-button'), approval, {
+    label: 'Cat21 Wallet connect popup',
+  });
 }
 
 interface ApproveCat21WalletSignPopupArgs {
@@ -52,15 +56,13 @@ interface ApproveCat21WalletSignPopupArgs {
 
 /**
  * Wait for the Cat21 Wallet's sign-PSBT popup to open in `context`,
- * optionally verify the URL and DOM content, and click the
- * Confirm/Sign/Approve button.
+ * optionally verify the URL and DOM content, click the
+ * Confirm/Sign/Approve button and require the popup to close.
  *
- * `{ noWaitAfter: true }` on the click — the wallet self-closes its
- * sign-psbt popup the moment the confirm dispatch reaches the SW.
- * Playwright's default click awaits post-click stability, and that
- * race surfaces as "Target page, context or browser has been closed"
- * when the popup tears down mid-click. The close IS the success
- * signal here.
+ * The wallet self-closes its sign-psbt popup the moment the confirm
+ * dispatch reaches the SW, so the close is the success signal, and
+ * `clickApprovalAndRequireClose` fails at this click when it does not
+ * come.
  *
  * After the click the approval page is added to `knownPages` so a
  * subsequent `waitForApprovalPopup` in the same spec doesn't
@@ -105,17 +107,6 @@ export async function approveCat21WalletSignPopup(
 
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
   await expect(confirmBtn).toBeVisible();
-  // noWaitAfter skips POST-click auto-wait for navigation but does NOT
-  // protect the click dispatch itself: if the popup tears down between
-  // Playwright's "performing click action" and the mouseup, click()
-  // throws "Target page, context or browser has been closed". Per the
-  // block comment above, that close IS the success signal, so we
-  // swallow only that specific error and re-throw everything else.
-  try {
-    await confirmBtn.click({ noWaitAfter: true });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    if (!/Target page, context or browser has been closed/.test(msg)) throw err;
-  }
+  await clickApprovalAndRequireClose(confirmBtn, approval, { label: 'Cat21 Wallet sign popup' });
   knownPages.add(approval);
 }

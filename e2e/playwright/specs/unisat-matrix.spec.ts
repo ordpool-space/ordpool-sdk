@@ -3,7 +3,7 @@ import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { approvalGate, waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, approvalGate, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
@@ -93,7 +93,9 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
   } catch {
     throw new Error('unisat connection-request popup never appeared');
   }
-  await approval.getByText(/^Connect$/).first().click();
+  // UniSat closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^Connect$/).first(), approval, { label: 'UniSat connect popup' });
 }
 
 test.beforeAll(async () => {

@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardLeather } from '../onboard-leather';
 
 /**
@@ -67,7 +67,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       return true;
     },
   });
-  await approval.getByTestId('get-addresses-approve-button').click();
+  // Leather closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByTestId('get-addresses-approve-button'), approval, {
+    label: 'Leather connect popup',
+  });
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
@@ -88,7 +92,9 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
   // Will tighten once we see the actual sign-popup DOM in CI.
   const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
   await expect(confirmBtn).toBeVisible();
-  await confirmBtn.click();
+  // Leather closes the sign popup the moment it accepts the click, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(confirmBtn, approval, { label: 'Leather sign popup' });
 }
 
 test.beforeAll(async () => {

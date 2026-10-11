@@ -3,7 +3,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardLeather } from '../onboard-leather';
@@ -39,7 +39,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       return true;
     },
   });
-  await approval.getByTestId('get-addresses-approve-button').click();
+  // Leather closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByTestId('get-addresses-approve-button'), approval, {
+    label: 'Leather connect popup',
+  });
 }
 
 async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
@@ -53,7 +57,11 @@ async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page
     },
   });
   await shot(approval, '02a-sign-message-approval');
-  await approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first().click();
+  // Leather closes the popup the moment it accepts the signature request, so the
+  // close is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), approval, {
+    label: 'Leather sign-message popup',
+  });
 }
 
 test.beforeAll(async () => {

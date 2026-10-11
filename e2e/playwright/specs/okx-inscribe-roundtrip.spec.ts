@@ -12,7 +12,7 @@ import {
   mineBlocks,
   postTx,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
 import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
@@ -52,7 +52,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       return true;
     },
   });
-  await approval.getByRole('button', { name: /^connect$/i }).first().click();
+  // OKX closes the popup the moment it accepts the approval, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
+    label: 'OKX connect popup',
+  });
 }
 
 async function approveSignPopup(ctx: BrowserContext): Promise<void> {
@@ -70,11 +74,11 @@ async function approveSignPopup(ctx: BrowserContext): Promise<void> {
 
   await dismissOkxAssetTransferPromo(approval);
 
-  // Fallback for the rare case OKX shows an interactive sign popup: wait for
-  // Confirm to become actionable, then click. OKX usually auto-signs for the
-  // connected dApp, so this is seldom reached.
-  await approval.getByText('Confirm', { exact: true }).first().click()
-    .catch(() => undefined); // close-race: OKX may finish the sign and shut the popup mid-click
+  // OKX closes the sign popup the moment it accepts the click, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText('Confirm', { exact: true }).first(), approval, {
+    label: 'OKX sign popup',
+  });
 }
 
 test.beforeAll(async () => {

@@ -46,7 +46,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       return true;
     },
   });
-  await approval.getByRole('button', { name: /^connect$/i }).first().click();
+  // OKX closes the popup the moment it accepts the approval, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
+    label: 'OKX connect popup',
+  });
 }
 
 /**

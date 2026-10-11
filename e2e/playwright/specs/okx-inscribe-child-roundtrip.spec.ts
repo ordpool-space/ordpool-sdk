@@ -19,7 +19,7 @@ import {
   getUtxos,
 } from '../../regtest/regtest-helpers';
 import {
-  clickApprovalButton,
+  clickApprovalAndRequireClose,
   waitForApprovalByConfirmButton,
   waitForApprovalPopup,
   closeLeftoverExtensionPages,
@@ -110,8 +110,11 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, d
     })(),
   ]);
   if (!approval) return; // auto-connected, no popup to approve
-  await approval.getByRole('button', { name: /^connect$/i }).first().click()
-    .catch(() => undefined); // popup closed as OKX auto-approved: fine
+  // OKX closes the popup the moment it accepts the approval, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
+    label: 'OKX connect popup',
+  });
 }
 
 /**
@@ -148,15 +151,11 @@ async function approveSignPopup(ctx: BrowserContext, tag: string, isDone?: () =>
 
   await dismissOkxAssetTransferPromo(approval);
 
-  // Close-race guard: OKX may complete the sign and shut the popup while the
-  // click is in flight ("guid not bound" / target-closed). The sign already
-  // succeeded in that case, so swallow the click error; the caller's
-  // operation-promise await settles the true outcome.
-  // Tolerate the popup dismissing itself, and ONLY that. The previous
-  // `.catch(() => undefined)` swallowed every error, so a wrong selector or a
-  // disabled control would have passed silently and left the real failure to
-  // surface somewhere unrelated.
-  await clickApprovalButton(approval.getByText('Confirm', { exact: true }).first(), approval);
+  // OKX closes the sign popup the moment it accepts the click, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText('Confirm', { exact: true }).first(), approval, {
+    label: `OKX sign popup ${tag}`,
+  });
   await waitForOkxSignHeadingToClear(approval, isDone);
 }
 

@@ -3,7 +3,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardUnisat } from '../onboard-unisat';
@@ -50,7 +50,9 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       control: (p) => p.getByText(/^Connect$/).first(),
     }),
   });
-  await approval.getByText(/^Connect$/).first().click();
+  // UniSat closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^Connect$/).first(), approval, { label: 'UniSat connect popup' });
 }
 
 async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
@@ -64,7 +66,11 @@ async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page
   });
   await shot(approval, '02a-sign-message-approval');
   // Unisat renders actions as styled divs, not <button>. Match by text.
-  await approval.getByText(/^(Sign|Confirm|Approve)$/).first().click();
+  // UniSat closes the popup the moment it accepts the signature request, so
+  // the close is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^(Sign|Confirm|Approve)$/).first(), approval, {
+    label: 'UniSat sign-message popup',
+  });
 }
 
 test.beforeAll(async () => {

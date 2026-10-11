@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { approvalGate, approveWizzSignPopup, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, approveWizzSignPopup, clickApprovalAndRequireClose, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
@@ -62,19 +62,19 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     }),
   });
   // Wizz inherits Unisat's connect-approval shape — Connect is a styled div.
-  await approval.getByText(/^Connect$/).first().click();
+  // Wizz closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^Connect$/).first(), approval, { label: 'Wizz connect popup' });
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
   // Shared with any consumer driving a Wizz sign popup, via `ordpool-sdk/e2e`.
-  // The loose Sign-text predicate and the click-inside-evaluate live there.
+  // The enabled-state wait, the click and the required close live there.
   await approveWizzSignPopup({
     context: ctx,
     knownPages,
     onScreenshot: (page, name) => shot(page, `03-${name}`),
   });
-  // eslint-disable-next-line no-console
-  console.log('[wizz-mint] clicked sign-button (popup may have closed)');
 }
 
 test.beforeAll(async () => {

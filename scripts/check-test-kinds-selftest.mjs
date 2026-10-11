@@ -44,6 +44,7 @@ const EXPECTED = [
   'fail/fixed-wait-sleep-in-test-generator-loop.spec.ts  fixed-wait',
   'fail/force-click.spec.ts  force-click',
   'fail/force-click-evaluate.spec.ts  force-click',
+  'fail/async-wait-predicate.spec.ts  async-wait-predicate',
   'fail/swallowed-catch.spec.ts  swallowed-catch',
   'fail/swallowed-catch-try.spec.ts  swallowed-catch',
   'fail/spec-timeout.spec.ts  spec-timeout',

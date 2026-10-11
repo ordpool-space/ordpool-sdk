@@ -5,7 +5,7 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
@@ -68,7 +68,9 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
     }),
   });
   // Unisat uses styled div, not <button> — match by text.
-  await approval.getByText(/^Connect$/).first().click();
+  // UniSat closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^Connect$/).first(), approval, { label: 'UniSat connect popup' });
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
@@ -85,7 +87,9 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Pro
     },
   });
   await shot(approval, '03a-sign-approval');
-  await approval.getByTestId('sign-psbt-button').click();
+  // UniSat closes the sign popup the moment it accepts the click, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByTestId('sign-psbt-button'), approval, { label: 'UniSat sign popup' });
 }
 
 test.beforeAll(async () => {

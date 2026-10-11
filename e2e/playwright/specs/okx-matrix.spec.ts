@@ -4,7 +4,7 @@ import { extensionOnboardingPage } from '../wallet-onboarders';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
@@ -71,7 +71,11 @@ async function approveOkxPopup(ctx: BrowserContext, knownPages: Set<Page>): Prom
       return true;
     },
   });
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
+  // OKX closes the popup the moment it accepts the approval, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first(), approval, {
+    label: 'OKX connect popup',
+  });
 }
 
 test.beforeAll(async () => {

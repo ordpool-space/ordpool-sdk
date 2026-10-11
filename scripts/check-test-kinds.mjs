@@ -81,6 +81,7 @@ export const RULE_IDS = [
   'fixed-wait',
   'workaround-without-reason',
   'force-click',
+  'async-wait-predicate',
   'swallowed-catch',
   'spec-timeout',
   'optional-wait',
@@ -729,6 +730,17 @@ export function checkFile(file, src) {
     if (close === -1) continue;
     const inner = noComments.slice(open, close);
     for (const c of inner.matchAll(/\.click\s*\(/g)) add(open + c.index, 'force-click', `a click dispatched through ${m[1]}() bypasses the user path`);
+  }
+
+  // async-wait-predicate: Playwright's waitForFunction does not await its
+  // predicate. An async one returns a Promise, which is truthy, so the wait ends
+  // after the first call whatever the predicate would have answered (observed on
+  // Playwright 1.60.0). `expect.poll(() => page.evaluate(async () => ...))`
+  // awaits each answer.
+  // Limit: a predicate passed by name (`waitForFunction(isReady)`) is not
+  // resolved to its declaration, so an async named function is not seen.
+  for (const m of code.matchAll(/\bwaitForFunction\s*\(\s*async\b/g)) {
+    add(m.index, 'async-wait-predicate', 'waitForFunction does not await an async predicate and returns after one call; use expect.poll(() => page.evaluate(async () => ...))');
   }
 
   // swallowed-catch

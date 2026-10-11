@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { approvalGate, raceApprovalPopup, waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, clickApprovalAndRequireClose, raceApprovalPopup, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 
@@ -102,7 +102,11 @@ test('onAccountChange fires when window.unisat.switchNetwork("testnet") is calle
     }),
   });
   await shot(connectApproval, '02a-connect-approval');
-  await connectApproval.getByText(/^Connect$/).first().click();
+  // UniSat closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(connectApproval.getByText(/^Connect$/).first(), connectApproval, {
+    label: 'UniSat connect popup',
+  });
 
   const initialInfo = await initialConnectPromise;
   // eslint-disable-next-line no-console
@@ -149,8 +153,8 @@ test('onAccountChange fires when window.unisat.switchNetwork("testnet") is calle
     // around Unisat v1.7.x — see screenshot 03a-switch-approval).
     const confirmBtn = popupOrCallSettled.page.getByText(/^(Confirm|Connect|Switch( Network)?)$/).first();
     await expect(confirmBtn).toBeVisible();
-    await confirmBtn.click();
-    await shot(popupOrCallSettled.page, '03b-switch-approved');
+    // UniSat closes the switch-network popup the moment it accepts the click.
+    await clickApprovalAndRequireClose(confirmBtn, popupOrCallSettled.page, { label: 'UniSat switch-network popup' });
     await switchCallPromise; // settle now
   }
 

@@ -2,6 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { clickApprovalAndRequireClose } from '../approval-popup';
 import { seedAlbyAccount } from '../onboard-alby';
 
 
@@ -111,7 +112,9 @@ test('albyConnector.connect via the harness page returns the BIP-86 mainnet Tapr
       // trial:true waits for full actionability (Alby's regtest error
       // toast stops intercepting the pointer) instead of a blind timeout.
       await btn.click({ trial: true });
-      await btn.click();
+      // Alby closes the prompt the moment it accepts the click, so the close
+      // is the proof the click landed.
+      await clickApprovalAndRequireClose(btn, popup, { label: `Alby popup #${idx}` });
       // eslint-disable-next-line no-console
       console.log(`[alby-handshake] auto-clicked popup #${idx}`);
     } catch (e) {

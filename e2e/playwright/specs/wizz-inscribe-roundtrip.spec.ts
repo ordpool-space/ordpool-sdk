@@ -12,7 +12,7 @@ import {
   mineBlocks,
   postTx,
 } from '../../regtest/regtest-helpers';
-import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, approveWizzSignPopup, clickApprovalAndRequireClose, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
@@ -51,34 +51,18 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       control: (p) => p.getByText(/^Connect$/).first(),
     }),
   });
-  await approval.getByText(/^Connect$/).first().click();
+  // Wizz closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^Connect$/).first(), approval, { label: 'Wizz connect popup' });
 }
 
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
+  // The enabled-state wait, the click and the required close live in the SDK.
+  await approveWizzSignPopup({
     context: ctx,
     knownPages,
-    isApproval: approvalGate({
-      url: /notification\.html#\/approval/,
-      control: (p) => p.getByRole('button', { name: 'Sign' }),
-      }),
+    onScreenshot: (page) => shot(page, 'sign-approval'),
   });
-  await shot(approval, 'sign-approval');
-  await approval.waitForFunction(() => {
-    const isSignButton = (el: Element) => {
-      const text = (el.textContent || '').trim();
-      return /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test(text);
-    };
-    const els = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], div'));
-    const candidate = els.find(isSignButton);
-    if (!candidate) return null;
-    const style = getComputedStyle(candidate);
-    if (style.pointerEvents === 'none') return null;
-    if (parseFloat(style.opacity) < 0.7) return null;
-    candidate.click();
-    return true;
-  }, undefined, { polling: 250 });
-  await shot(approval, 'after-sign-click').catch(() => undefined);
 }
 
 test.beforeAll(async () => {

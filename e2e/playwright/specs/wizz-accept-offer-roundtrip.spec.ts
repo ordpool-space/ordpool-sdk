@@ -19,7 +19,7 @@ import {
   assertAllInputsSighashAll,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
+import { approvalGate, approveWizzSignPopup, clickApprovalAndRequireClose, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
@@ -104,7 +104,9 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       control: (p) => p.getByText(/^Connect$/).first(),
     }),
   });
-  await approval.getByText(/^Connect$/).first().click();
+  // Wizz closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^Connect$/).first(), approval, { label: 'Wizz connect popup' });
 }
 
 /**
@@ -113,30 +115,12 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
  * then accept).
  */
 async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag: string): Promise<void> {
-  const approval = await waitForApprovalPopup({
+  // The enabled-state wait, the click and the required close live in the SDK.
+  const approval = await approveWizzSignPopup({
     context: ctx,
     knownPages,
-    isApproval: approvalGate({
-      url: /notification\.html#\/approval/,
-      control: (p) => p.getByRole('button', { name: 'Sign' }),
-      }),
+    onScreenshot: (page) => shot(page, tag),
   });
-  await shot(approval, tag);
-  await approval.waitForFunction(() => {
-    const isSignButton = (el: Element) => {
-      const text = (el.textContent || '').trim();
-      return /^\s*[⠀-⣿•●]?\s*Sign\s*$/i.test(text);
-    };
-    const els = Array.from(document.querySelectorAll<HTMLElement>('button, [role="button"], div'));
-    const candidate = els.find(isSignButton);
-    if (!candidate) return null;
-    const style = getComputedStyle(candidate);
-    if (style.pointerEvents === 'none') return null;
-    if (parseFloat(style.opacity) < 0.7) return null;
-    candidate.click();
-    return true;
-  }, undefined, { polling: 250 });
-  await shot(approval, `${tag}-after-sign-click`).catch(() => undefined);
   knownPages.add(approval);
 }
 

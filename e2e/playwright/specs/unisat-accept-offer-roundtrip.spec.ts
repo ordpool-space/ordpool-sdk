@@ -19,7 +19,7 @@ import {
   assertAllInputsSighashAll,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
@@ -107,7 +107,9 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       control: (p) => p.getByText(/^Connect$/).first(),
     }),
   });
-  await approval.getByText(/^Connect$/).first().click();
+  // UniSat closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByText(/^Connect$/).first(), approval, { label: 'UniSat connect popup' });
 }
 
 /**
@@ -127,7 +129,9 @@ async function approveSignPopup(ctx: BrowserContext, knownPages: Set<Page>, tag:
     },
   });
   await shot(approval, tag);
-  await approval.getByTestId('sign-psbt-button').click();
+  // UniSat closes the sign popup the moment it accepts the click, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByTestId('sign-psbt-button'), approval, { label: `UniSat sign popup ${tag}` });
   knownPages.add(approval);
 }
 

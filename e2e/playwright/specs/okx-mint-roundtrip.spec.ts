@@ -7,7 +7,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
 import { extensionOnboardingPage } from '../wallet-onboarders';
-import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalButton } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 
@@ -59,10 +59,14 @@ async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): 
       return true;
     },
   });
-  await approval.getByRole('button', { name: /^connect$/i }).first().click();
+  // OKX closes the popup the moment it accepts the approval, so the close is
+  // the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
+    label: 'OKX connect popup',
+  });
 }
 
-async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
+async function approveSignPopup(ctx: BrowserContext): Promise<void> {
   // OKX reuses the connect popup's Page for sign (CI iter 39 trace
   // confirmed) — waitForApprovalPopup's knownPages filter would skip
   // it. Poll every chrome-extension page for the sign-popup
@@ -90,21 +94,12 @@ async function approveSignPopup(ctx: BrowserContext): Promise<Page> {
 
   await shot(approval, '03b-post-modal-dismiss');
   // OKX renders the sign popup with a Confirm button that may sit behind a
-  // preview spinner. Wait for it to become actionable; if it never does,
-  // capture the stuck state and try a forced click (in case it is only
-  // visually disabled by an overlay, not a real `disabled` attribute).
-  const confirmBtn = approval.getByText('Confirm', { exact: true }).first();
-  try {
-    // OKX closes this popup on accepting the click; a 'target closed' error
-    // there is the SUCCESS shape, not a failure. See clickApprovalButton.
-    await clickApprovalButton(confirmBtn, approval);
-  } catch {
-    await shot(approval, '03c-confirm-stuck');
-    // eslint-disable-next-line no-console
-    console.log('[okx-mint:diag] Confirm not actionable in 45s; body=' +
-      (await approval.locator('body').innerText().catch(() => '')).slice(0, 400).replace(/\n/g, ' | '));
-    await confirmBtn.click({ force: true });
-  }
+  // preview spinner; the click waits for it to become actionable. OKX closes
+  // the popup the moment it accepts the click, so the close is the proof the
+  // click landed.
+  await clickApprovalAndRequireClose(approval.getByText('Confirm', { exact: true }).first(), approval, {
+    label: 'OKX sign popup',
+  });
 }
 
 test.beforeAll(async () => {

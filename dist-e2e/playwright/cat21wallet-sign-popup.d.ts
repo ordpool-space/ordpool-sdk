@@ -31,15 +31,13 @@ interface ApproveCat21WalletSignPopupArgs {
 }
 /**
  * Wait for the Cat21 Wallet's sign-PSBT popup to open in `context`,
- * optionally verify the URL and DOM content, and click the
- * Confirm/Sign/Approve button.
+ * optionally verify the URL and DOM content, click the
+ * Confirm/Sign/Approve button and require the popup to close.
  *
- * `{ noWaitAfter: true }` on the click — the wallet self-closes its
- * sign-psbt popup the moment the confirm dispatch reaches the SW.
- * Playwright's default click awaits post-click stability, and that
- * race surfaces as "Target page, context or browser has been closed"
- * when the popup tears down mid-click. The close IS the success
- * signal here.
+ * The wallet self-closes its sign-psbt popup the moment the confirm
+ * dispatch reaches the SW, so the close is the success signal, and
+ * `clickApprovalAndRequireClose` fails at this click when it does not
+ * come.
  *
  * After the click the approval page is added to `knownPages` so a
  * subsequent `waitForApprovalPopup` in the same spec doesn't

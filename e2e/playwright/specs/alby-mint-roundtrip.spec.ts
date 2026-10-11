@@ -6,6 +6,7 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 
+import { clickApprovalAndRequireClose } from '../approval-popup';
 import { seedAlbyAccount } from '../onboard-alby';
 
 /**
@@ -180,7 +181,9 @@ test('mint a cat21 on regtest via Alby: seed mnemonic via SW messages, sign Tapr
       // RECEIVES EVENTS): resolves the moment the toast stops
       // intercepting the pointer, instead of a blind timeout.
       await connect.click({ trial: true });
-      await connect.click();
+      // Alby closes the prompt the moment it accepts the click, so the close
+      // is the proof the click landed.
+      await clickApprovalAndRequireClose(connect, popup, { label: `Alby popup #${idx}` });
       // eslint-disable-next-line no-console
       console.log(`[alby-mint] clicked Connect on popup #${idx}: ${popup.url().slice(0, 80)}`);
       await shot(popup, `popup-${idx}-after-click`).catch(() => undefined);

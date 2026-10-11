@@ -2,7 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardLeather } from '../onboard-leather';
 
 /**
@@ -112,8 +112,11 @@ test('leatherConnector.connect via the harness page returns the BIP-84 / BIP-86 
     throw new Error('leather get-addresses approval popup never appeared');
   }
   await shot(approval, '02a-approval');
-  await approval.getByTestId('get-addresses-approve-button').click();
-  await shot(approval, '02b-after-approve');
+  // Leather closes the popup the moment it accepts the approval, so the close
+  // is the proof the click landed.
+  await clickApprovalAndRequireClose(approval.getByTestId('get-addresses-approve-button'), approval, {
+    label: 'Leather connect popup',
+  });
 
   const info = await resultPromise;
   // eslint-disable-next-line no-console
