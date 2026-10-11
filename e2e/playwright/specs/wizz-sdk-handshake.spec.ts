@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 
 import { approvalGate, clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
+import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
 /**
  * Iteration 3 of the Wizz E2E pipeline: SDK ↔ Wizz handshake.
@@ -63,11 +64,9 @@ test.beforeAll(async () => {
     ],
   });
 
-  // Wizz's dashboard fires GET https://configs.wizz.cash/extension/<v>
-  // on mount; CI has no outbound internet so the fetch hangs and blocks
-  // Wizz's requestAccounts handler. Abort the request at the browser
-  // layer so Wizz falls back to its default config immediately.
-  await context.route('**/configs.wizz.cash/**', route => route.abort());
+  // Wizz's vendor backends (its remote config, indexers, mempool.space) are
+  // answered by the SDK shield instead of the live hosts.
+  await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

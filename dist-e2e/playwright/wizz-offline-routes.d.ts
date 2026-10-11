@@ -1,5 +1,10 @@
 import { BrowserContext } from '@playwright/test';
 /**
+ * The fee estimate Wizz 2.13.4 reads from its mempool client
+ * (`getFeeRates` → `v1/fees/recommended` on `https://mempool.space/api/`).
+ */
+export declare const WIZZ_RECOMMENDED_FEES_URL: RegExp;
+/**
  * Make every Wizz popup hermetic: intercept the wallet's fleet of LIVE
  * third-party backends and answer each with the truthful "empty" result.
  *

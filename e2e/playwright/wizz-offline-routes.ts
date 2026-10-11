@@ -1,4 +1,11 @@
 import { BrowserContext, Route } from '@playwright/test';
+import { recommendedFeesFixture } from 'ordpool-sdk/testing';
+
+/**
+ * The fee estimate Wizz 2.13.4 reads from its mempool client
+ * (`getFeeRates` → `v1/fees/recommended` on `https://mempool.space/api/`).
+ */
+export const WIZZ_RECOMMENDED_FEES_URL = /^https:\/\/mempool\.space\/api\/v1\/fees\/recommended(\?.*)?$/;
 
 /**
  * Make every Wizz popup hermetic: intercept the wallet's fleet of LIVE
@@ -127,6 +134,11 @@ export async function installWizzOfflineRoutes(context: BrowserContext): Promise
   await context.route('**/mempool.space/api/address/*/txs**', route => route.fulfill(okJson([])));
   await context.route('**/mempool.space/api/v1/historical-price**', route =>
     route.fulfill(okJson({ prices: [], exchangeRates: {} })));
+  // The sign popup's risk list compares the PSBT's fee rate with this answer
+  // (over 1.3 x fastestFee, under 0.7 x hourFee, under minimumFee) and opens
+  // its warning modal on a hit, so a live answer makes the popup depend on
+  // mainnet's mempool of the day. Answered with the SDK's captured sample.
+  await context.route(WIZZ_RECOMMENDED_FEES_URL, route => route.fulfill(okJson(recommendedFeesFixture())));
 
   // Wizz marketplace aggregator — not needed for signing, 503s in CI.
   await context.route('**/mkt.wizz.cash/**', route => route.abort());

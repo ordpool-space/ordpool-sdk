@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { TEST_MNEMONIC, TEST_MNEMONIC_WORDS, PASSWORD_BY_WALLET } from '../wallet-test-vectors';
+import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 
 /**
  * Iteration 2 of the Wizz E2E pipeline: drive the onboarding flow
@@ -61,9 +62,9 @@ test.beforeAll(async () => {
     ],
   });
 
-  // Abort Wizz's outbound config fetch — CI has no internet and the
-  // request hangs.
-  await context.route('**/configs.wizz.cash/**', route => route.abort());
+  // Wizz's vendor backends (its remote config, indexers, mempool.space) are
+  // answered by the SDK shield instead of the live hosts.
+  await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

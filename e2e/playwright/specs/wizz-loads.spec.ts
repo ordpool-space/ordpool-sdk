@@ -2,6 +2,8 @@ import { test, expect, chromium, BrowserContext } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { installWizzOfflineRoutes } from '../wizz-offline-routes';
+
 /**
  * Iteration 1 of the Wizz E2E pipeline: prove that we can load
  * the published .crx into a headed Chromium in CI and read back
@@ -41,6 +43,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // Wizz's vendor backends go through the SDK shield from its first request on.
+  await installWizzOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) {
