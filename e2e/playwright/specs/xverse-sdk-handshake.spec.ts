@@ -2,6 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { SEED_USER_DATA_DIR } from '../global-setup';
+import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
  * Iteration 3a — SDK ↔ Xverse handshake via sats-connect.
@@ -89,6 +90,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installXverseOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

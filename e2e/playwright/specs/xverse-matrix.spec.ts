@@ -7,6 +7,7 @@ import { applyXverseVariant, XverseVariant } from '../xverse-vault';
 import { waitForApprovalPopup } from '../approval-popup';
 import { waitForChromeStorageKey, waitForSingletonLockGone } from '../wait-helpers';
 import { SEED_USER_DATA_DIR } from '../global-setup';
+import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
  * Matrix coverage for every Xverse Network × Payment-Address-Type
@@ -135,6 +136,7 @@ for (const variant of VARIANTS) {
           '--disable-dev-shm-usage',
         ],
       });
+      await installXverseOfflineRoutes(mutator);
       let [w] = mutator.serviceWorkers();
       if (!w) w = await mutator.waitForEvent('serviceworker');
       const xid = w.url().split('/')[2];
@@ -189,6 +191,7 @@ for (const variant of VARIANTS) {
         '--disable-dev-shm-usage',
       ],
     });
+    await installXverseOfflineRoutes(context);
     try {
       let [worker] = context.serviceWorkers();
       if (!worker) worker = await context.waitForEvent('serviceworker');

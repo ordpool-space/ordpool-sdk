@@ -21,6 +21,7 @@ import {
 import { waitForApprovalPopup, clickConfirmUntilClosed } from '../approval-popup';
 import { Network, toScureNetwork } from '../../../src/network';
 import { SEED_USER_DATA_DIR } from '../global-setup';
+import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
  * Xverse TRANSFER roundtrip on regtest — proof the real Xverse binary
@@ -173,6 +174,7 @@ test.beforeAll(async () => {
     headless: false,
     args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox', '--disable-dev-shm-usage'],
   });
+  await installXverseOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];

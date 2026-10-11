@@ -7,6 +7,7 @@ import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-p
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardXverse } from '../onboard-xverse';
+import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
  * BIP-322 sign-message roundtrip with the real Xverse extension. Promotes
@@ -80,6 +81,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installXverseOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

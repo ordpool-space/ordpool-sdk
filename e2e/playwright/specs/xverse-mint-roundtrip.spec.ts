@@ -8,6 +8,7 @@ import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks,
 import { waitForApprovalPopup, closeLeftoverExtensionPages, clickConfirmUntilClosed } from '../approval-popup';
 import { installContextErrorGuard } from '../browser-error-guard';
 import { SEED_USER_DATA_DIR } from '../global-setup';
+import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -93,6 +94,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installXverseOfflineRoutes(context);
   // The browser-error guard covers every app page the context spawns (the
   // harness page); wallet-extension pages are outside it.
   errorGuard = installContextErrorGuard(context);

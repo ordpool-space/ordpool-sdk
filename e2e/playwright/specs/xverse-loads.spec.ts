@@ -1,6 +1,7 @@
 import { test, expect, chromium, BrowserContext } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
  * Iteration 1 of the Xverse E2E pipeline: prove that we can load
@@ -39,6 +40,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installXverseOfflineRoutes(context);
 
   // Manifest V3: extension registers a service worker on install.
   // Wait for it so we can read back its ID.

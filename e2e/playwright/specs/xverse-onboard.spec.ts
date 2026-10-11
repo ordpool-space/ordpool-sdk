@@ -2,6 +2,7 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { xverseRestorePickerWallet1 } from '../onboard-xverse';
+import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
  * GOLD-STANDARD ONBOARD SPEC. Don't delete this file thinking the
@@ -99,6 +100,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installXverseOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) {

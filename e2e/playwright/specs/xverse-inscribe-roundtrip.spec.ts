@@ -14,6 +14,7 @@ import {
 } from '../../regtest/regtest-helpers';
 import { waitForApprovalPopup, clickConfirmUntilClosed } from '../approval-popup';
 import { SEED_USER_DATA_DIR } from '../global-setup';
+import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
  * Full inscribe roundtrip with the real Xverse extension.
@@ -98,6 +99,7 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  await installXverseOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];

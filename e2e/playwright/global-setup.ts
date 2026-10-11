@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 
 import { waitForChromeStorageKey, waitForSingletonLockGone } from './wait-helpers';
 import { onboardXverse, primeAndSwitchToRegtest, overrideRegtestElectrsUrl } from './onboard-xverse';
+import { installXverseOfflineRoutes } from './xverse-offline-routes';
 
 /**
  * Playwright globalSetup — runs ONCE before any spec.
@@ -129,6 +130,7 @@ export default async function globalSetup(): Promise<void> {
       '--disable-dev-shm-usage',
     ],
   });
+  await installXverseOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');
