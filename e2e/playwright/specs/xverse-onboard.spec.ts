@@ -1,6 +1,7 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { xverseRestorePickerWallet1 } from '../onboard-xverse';
 
 /**
  * GOLD-STANDARD ONBOARD SPEC. Don't delete this file thinking the
@@ -242,8 +243,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   const restorePicker = page.getByText(/select a wallet to restore|we found funds/i).first();
   if (await restorePicker.isVisible().catch(() => false)) {
     await shot(page, '07a-wallet-picker');
-    const seeAccounts = page.getByRole('button', { name: /see accounts/i }).first();
-    await seeAccounts.click();
+    await xverseRestorePickerWallet1(page).click();
     await shot(page, '07b-see-accounts-clicked');
 
     // Confirm button: target by visible text, exact match.

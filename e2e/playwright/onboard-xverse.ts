@@ -1,4 +1,4 @@
-import { expect, BrowserContext, Page } from '@playwright/test';
+import { expect, BrowserContext, Locator, Page } from '@playwright/test';
 import { isVisibleWithin } from './is-visible-within';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from './wallet-test-vectors';
@@ -48,6 +48,20 @@ async function nextPostMnemonicState(page: Page): Promise<PostMnemonicState> {
     return false;
   }, undefined, { polling: 250 });
   return handle.jsonValue() as Promise<PostMnemonicState>;
+}
+
+/**
+ * Wallet 1 on Xverse's "Select a wallet to restore" picker, in either form it
+ * takes. With account data from Xverse's backend the card offers "See
+ * accounts"; when that lookup fails ("We couldn't retrieve account data due to
+ * network issues") the card is a plain "Wallet 1 Account-based" button. Both
+ * restore the same first account, and the Confirm that follows is the same.
+ */
+export function xverseRestorePickerWallet1(page: Page): Locator {
+  return page
+    .getByRole('button', { name: /see accounts/i })
+    .or(page.getByRole('button', { name: /^Wallet 1\s*Account-based/i }))
+    .first();
 }
 
 async function clickAndAwaitTransition(page: Page, buttonText: string, sentinelGoneRegex: RegExp, attempts = 3): Promise<void> {
@@ -166,7 +180,7 @@ export async function onboardXverse(
     if (seen.has(state)) throw new Error(`stuck in post-mnemonic state: ${state}`);
     seen.add(state);
     if (state === 'picker') {
-      await page.getByRole('button', { name: /see accounts/i }).first().click();
+      await xverseRestorePickerWallet1(page).click();
       await clickAndAwaitTransition(page, 'Confirm', /select a wallet to restore|we found funds/i);
     } else if (state === 'address-type') {
       await clickAndAwaitTransition(page, 'Continue', /preferred address type/i);

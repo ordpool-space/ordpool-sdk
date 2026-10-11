@@ -1,5 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.xverseRestorePickerWallet1 = xverseRestorePickerWallet1;
 exports.onboardXverse = onboardXverse;
 exports.primeAndSwitchToRegtest = primeAndSwitchToRegtest;
 exports.overrideRegtestElectrsUrl = overrideRegtestElectrsUrl;
@@ -42,6 +43,19 @@ async function nextPostMnemonicState(page) {
         return false;
     }, undefined, { polling: 250 });
     return handle.jsonValue();
+}
+/**
+ * Wallet 1 on Xverse's "Select a wallet to restore" picker, in either form it
+ * takes. With account data from Xverse's backend the card offers "See
+ * accounts"; when that lookup fails ("We couldn't retrieve account data due to
+ * network issues") the card is a plain "Wallet 1 Account-based" button. Both
+ * restore the same first account, and the Confirm that follows is the same.
+ */
+function xverseRestorePickerWallet1(page) {
+    return page
+        .getByRole('button', { name: /see accounts/i })
+        .or(page.getByRole('button', { name: /^Wallet 1\s*Account-based/i }))
+        .first();
 }
 async function clickAndAwaitTransition(page, buttonText, sentinelGoneRegex, attempts = 3) {
     for (let i = 0; i < attempts; i++) {
@@ -142,7 +156,7 @@ async function onboardXverse(context, extensionId, opts = {}) {
             throw new Error(`stuck in post-mnemonic state: ${state}`);
         seen.add(state);
         if (state === 'picker') {
-            await page.getByRole('button', { name: /see accounts/i }).first().click();
+            await xverseRestorePickerWallet1(page).click();
             await clickAndAwaitTransition(page, 'Confirm', /select a wallet to restore|we found funds/i);
         }
         else if (state === 'address-type') {
