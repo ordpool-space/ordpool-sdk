@@ -1,6 +1,7 @@
-import { test, expect, chromium, BrowserContext } from '@playwright/test';
+import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
 
 /**
  * Iteration 1 of the Phantom E2E pipeline: prove that we can load
@@ -41,6 +42,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // Phantom's vendor backends are aborted.
+  await installPhantomOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) {
@@ -55,53 +58,55 @@ test.afterAll(async () => {
   await context?.close();
 });
 
-test('Phantom loads in Chromium with a service worker registered (popup navigation is best-effort artifact-gathering only)', async () => {
+test('Phantom loads in Chromium with a service worker registered; its popup hands an unonboarded wallet over to onboarding.html', async () => {
   expect(extensionId).toMatch(/^[a-p]{32}$/);
 
   const startupPages = context.pages();
   console.log(`[phantom] startup pages: ${startupPages.map(p => p.url()).join(', ')}`);
   for (const [i, p] of startupPages.entries()) {
-    try {
-      await p.screenshot({
-        path: path.resolve(__dirname, `../../../test-results/phantom-startup-page-${i}.png`),
-        fullPage: true,
-      });
-    } catch (e) {
-      console.log(`[phantom] couldn't screenshot startup page ${i}: ${(e as Error).message}`);
-    }
-  }
-
-  // Phantom's popup.html self-closes when opened in a regular tab
-  // — defensive against being rendered outside a toolbar-popup
-  // context. SW detection + manifest read above are the load
-  // proof; the navigation block is best-effort artifact-gathering.
-  // Wrap in try/catch so a self-closing popup doesn't fail the test.
-  const page = await context.newPage();
-  try {
-    await page.goto(`chrome-extension://${extensionId}/popup.html`, {
-      waitUntil: 'domcontentloaded',
-    });
-    // Wait until the extension rendered something (React mount, route
-    // resolution). What it renders is unknown here, so the signal is body text.
-    await page.waitForFunction(() => (document.body.innerText || '').trim().length > 0);
-    console.log(`[phantom] navigated URL = ${page.url()}`);
-    console.log(`[phantom] page title    = ${await page.title()}`);
-    await page.screenshot({
-      path: path.resolve(__dirname, `../../../test-results/phantom-index.png`),
+    await p.screenshot({
+      path: path.resolve(__dirname, `../../../test-results/phantom-startup-page-${i}.png`),
       fullPage: true,
     });
-    const bodyHtml = await page.evaluate(() => document.body.innerHTML.slice(0, 4000));
-    fs.writeFileSync(
-      path.resolve(__dirname, `../../../test-results/phantom-body-snippet.html`),
-      bodyHtml,
-    );
-    await page.waitForFunction(
-      () => (document.body.innerText || '').trim().length > 0,
-      undefined,
-    );
-    const visibleText = await page.locator('body').innerText();
-    console.log(`[phantom] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);
-  } catch (e) {
-    console.log(`[phantom] post-navigation step failed (popup may have self-closed): ${(e as Error).message}`);
   }
+
+  // Phantom 26.16.0's popup reads the extension's lock state first. For a
+  // wallet with no vault (this one: nothing is onboarded here) the state is
+  // "onboarding", and the popup's auth gate calls its `openOnboarding`:
+  // `tabs.create({ url: 'onboarding.html' })`, then `self.close()` (Popup.js
+  // and chunk-UFGVTFBO.js). So the popup tab closing and a NEW onboarding.html
+  // tab rendering is the behaviour under test. The close is awaited before
+  // anything else touches the popup, because every later call on it would fail
+  // on a closed target. Pages open before the popup are excluded, so an
+  // onboarding tab Phantom opened at install cannot stand in for this one.
+  const pagesBeforePopup = new Set(context.pages());
+  const popup = await context.newPage();
+  const popupClosed = popup.waitForEvent('close');
+  await popup.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'commit' });
+  await popupClosed;
+
+  const onboardingUrl = new RegExp(`^chrome-extension://${extensionId}/onboarding\\.html`);
+  const openedByPopup = (): Page | undefined =>
+    context.pages().find((p) => !pagesBeforePopup.has(p) && onboardingUrl.test(p.url()));
+  await expect
+    .poll(() => openedByPopup() !== undefined, {
+      message: 'Phantom opened no onboarding.html after its popup closed',
+    })
+    .toBe(true);
+  const onboarding = openedByPopup() as Page;
+  // Rendered means the React app mounted: the body carries text.
+  await expect(onboarding.locator('body')).not.toHaveText(/^\s*$/);
+  console.log(`[phantom] onboarding URL   = ${onboarding.url()}`);
+  console.log(`[phantom] onboarding title = ${await onboarding.title()}`);
+  await onboarding.screenshot({
+    path: path.resolve(__dirname, `../../../test-results/phantom-index.png`),
+    fullPage: true,
+  });
+  const bodyHtml = await onboarding.evaluate(() => document.body.innerHTML.slice(0, 4000));
+  fs.writeFileSync(
+    path.resolve(__dirname, `../../../test-results/phantom-body-snippet.html`),
+    bodyHtml,
+  );
+  const visibleText = await onboarding.locator('body').innerText();
+  console.log(`[phantom] visible body text (first 500 chars): ${visibleText.slice(0, 500)}`);
 });

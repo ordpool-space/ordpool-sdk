@@ -1,7 +1,8 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { xverseRestorePickerWallet1 } from '../onboard-xverse';
+import { dismissXversePromo, xverseRestorePickerWallet1 } from '../onboard-xverse';
+import { waitForStyleClickable } from '../approval-popup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 
 /**
@@ -145,14 +146,14 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   // by the v2.3.2 audit). Toggle it off, then Accept.
   await expect(page.getByText(/legal/i).first()).toBeVisible();
 
-  // The data-collection toggle is a custom-styled switch; click
-  // the parent label to flip it. Best-effort: find the row whose
-  // text contains "Authorize data collection" and click it.
+  // The data-collection toggle is a custom-styled switch; clicking its
+  // row ("Authorize data collection") flips it. Xverse 2.3.2's legal screen
+  // always renders the row, so it is required here: a release that drops it
+  // fails this step, which is what this spec is for.
   const dataCollectionRow = page.getByText(/authorize data collection/i).first();
-  if (await dataCollectionRow.isVisible().catch(() => false)) {
-    await dataCollectionRow.click();
-    await shot(page, '03a-data-collection-off');
-  }
+  await expect(dataCollectionRow).toBeVisible();
+  await dataCollectionRow.click();
+  await shot(page, '03a-data-collection-off');
 
   const acceptButton = page.getByRole('button', { name: /^accept$/i }).first();
   await expect(acceptButton).toBeVisible();
@@ -222,73 +223,52 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   await continueAfterMnemonic.click();
   await shot(page, '07-after-mnemonic-submit');
 
-  // ─── Phase 7: post-submit, wait for either the wallet-picker or the dashboard ───
-  // Xverse scans the chain after a restore. The abandon × 11 + about
-  // test seed has been used so widely that the scan finds multiple
-  // wallet derivations with historical activity and shows a picker
-  // (Wallet 1 / 3 accounts, Wallet 2 / 11 accounts). For seeds with
-  // no history, the scan goes straight to the dashboard. The scan
-  // can take >20s on a cold backend, so we poll up to 90s for either
-  // outcome and branch on what shows up.
-  await page.waitForFunction(
-    () => {
-      const text = (document.body.innerText || '').toLowerCase();
-      return text.includes('select a wallet to restore')
-          || text.includes('we found funds')
-          || /bc1[qp][a-z0-9]{20,}/.test(document.body.innerText || '');
-    },
-    undefined,
-  );
-  await shot(page, '07-after-scan');
+  // ─── Phase 7: post-submit, the screens Xverse shows before "Wallet restored" ───
+  // Xverse scans the chain after a restore. With the test seed's captured
+  // history (installXverseOfflineRoutes) the scan finds accounts in both
+  // derivations and shows the "Select a wallet to restore" picker; after it
+  // comes the preferred-address-type picker, then "Wallet restored". Each
+  // step waits for whichever of those screens is up and answers it, so the
+  // spec branches on the screen Xverse shows, never on a probe that hopes a
+  // screen is absent. A screen seen twice means the click did not advance it.
+  type RestoreScreen = 'picker' | 'address-type' | 'restored';
+  const seen: RestoreScreen[] = [];
+  for (;;) {
+    const screen: RestoreScreen = await page.waitForFunction((): RestoreScreen | false => {
+      const t = (document.body.innerText || '').toLowerCase();
+      if (t.includes('wallet restored')) return 'restored';
+      if (t.includes('preferred address type')) return 'address-type';
+      if (t.includes('select a wallet to restore') || t.includes('we found funds')) return 'picker';
+      return false;
+    }, undefined, { polling: 250 }).then((h) => h.jsonValue() as Promise<RestoreScreen>);
+    if (screen === 'restored') break;
+    if (seen.includes(screen)) throw new Error(`Xverse stayed on the ${screen} screen after it was answered`);
+    seen.push(screen);
 
-  // If the picker is up, drill into Wallet 1 and Confirm.
-  const restorePicker = page.getByText(/select a wallet to restore|we found funds/i).first();
-  if (await restorePicker.isVisible().catch(() => false)) {
-    await shot(page, '07a-wallet-picker');
-    await xverseRestorePickerWallet1(page).click();
-    await shot(page, '07b-see-accounts-clicked');
-
-    // Confirm button: target by visible text, exact match.
-    // getByRole with a regex sometimes targets a stale or off-screen
-    // element; getByText('Confirm', exact) is unambiguous here.
-    const commit = page.getByText('Confirm', { exact: true }).first();
-    await expect(commit).toBeVisible();
-    // Wait for the button to actually be enabled, not just visible.
-    // Xverse uses `pointer-events: none` + opacity for the disabled
-    // look, which Playwright's isEnabled() may not catch.
-    await page.waitForFunction(
-      () => {
-        const buttons = Array.from(document.querySelectorAll('button'));
-        const c = buttons.find(b => b.textContent?.trim() === 'Confirm');
-        if (!c) return false;
-        return !c.hasAttribute('disabled') && getComputedStyle(c).pointerEvents !== 'none';
-      },
-      undefined,
-    );
-    await commit.click();
-    // Wait for the picker text to be gone before screenshotting
-    // (confirms the click advanced the screen).
-    await expect(page.getByText(/select a wallet to restore|we found funds/i).first())
-      .toBeHidden();
-    await shot(page, '07c-after-wallet-confirm');
+    if (screen === 'picker') {
+      await shot(page, '07a-wallet-picker');
+      await xverseRestorePickerWallet1(page).click();
+      await shot(page, '07b-see-accounts-clicked');
+      // Xverse styles Confirm `pointer-events: none` until the accounts
+      // loaded; the click waits until it takes clicks.
+      const commit = page.getByRole('button', { name: 'Confirm', exact: true }).first();
+      await expect(commit).toBeVisible();
+      await waitForStyleClickable(commit, { label: 'Xverse restore picker: Confirm' });
+      await commit.click();
+      await expect(page.getByText(/select a wallet to restore|we found funds/i).first()).toBeHidden();
+      await shot(page, '07c-after-wallet-confirm');
+    } else {
+      // Native SegWit (BIP-84), the derivation the address assertions use, is
+      // preselected; Continue accepts it.
+      await shot(page, '07d-address-type-picker');
+      const continueBtn = page.getByText('Continue', { exact: true }).first();
+      await expect(continueBtn).toBeVisible();
+      await continueBtn.click();
+      await expect(page.getByText(/preferred address type/i).first()).toBeHidden();
+      await shot(page, '07e-after-address-type-continue');
+    }
   }
-
-  // ─── Phase 7d: preferred address-type picker ───
-  // After wallet-confirm, Xverse asks for the default payment
-  // address type (Native SegWit / Nested SegWit / etc). Native
-  // SegWit (BIP-84) is what our expected address derivation uses
-  // and is selected by default — just click Continue.
-  const addressTypePicker = page.getByText(/preferred address type/i).first();
-  if (await addressTypePicker.isVisible().catch(() => false)) {
-    await shot(page, '07d-address-type-picker');
-    const continueBtn = page.getByText('Continue', { exact: true }).first();
-    await expect(continueBtn).toBeVisible();
-    await continueBtn.click();
-    // Wait for the picker to unmount before screenshotting.
-    await expect(page.getByText(/preferred address type/i).first())
-      .toBeHidden();
-    await shot(page, '07e-after-address-type-continue');
-  }
+  expect(seen).toEqual(['picker', 'address-type']);
 
   // ─── Phase 8: "Wallet Restored" confirmation ───
   // options.html's onboarding finishes on a "Wallet Restored" screen
@@ -322,14 +302,9 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
   });
   await popup.waitForLoadState('domcontentloaded');
 
-  // Dismiss marketing modal if present so the dashboard text is
-  // readable in the screenshot artifact.
-  const notNow = popup.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible().catch(() => false)) {
-    await notNow.click();
-    // Wait for the modal to unmount.
-    await expect(notNow).toBeHidden();
-  }
+  // Dismiss the feature announcement Xverse may show on the first popup open,
+  // so the dashboard text is readable in the screenshot artifact.
+  await dismissXversePromo(popup.getByText('Not now', { exact: true }).first());
 
   await popup.screenshot({ path: path.resolve(RESULTS_DIR, 'onboard-09-popup-dashboard.png'), fullPage: true });
 
