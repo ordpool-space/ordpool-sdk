@@ -20,7 +20,11 @@ function installAlbyAutoApprove(context, opts = {}) {
     const handle = async (popup) => {
         try {
             await popup.waitForLoadState('domcontentloaded');
-            if (!popup.url().startsWith('chrome-extension://'))
+            // Alby draws every permission and confirm prompt on `prompt.html`. Any
+            // other page (the options tab left open by onboarding, the dapp) never
+            // shows an approval button, and waiting on it would only run out the
+            // per-wait bound.
+            if (!/^chrome-extension:\/\/[^/]+\/prompt\.html/.test(popup.url()))
                 return;
             const first = await popup.locator('body').innerText().catch(() => '<unreadable>');
             seen.push(`${popup.url().slice(0, 60)} => ${first.trim().split('\n')[0]?.slice(0, 60) || '<empty>'}`);
