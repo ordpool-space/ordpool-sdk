@@ -14,6 +14,7 @@ import {
 } from '../../regtest/regtest-helpers';
 import { clickApprovalAndRequireClose, waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardLeather } from '../onboard-leather';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Full inscribe roundtrip with the real Leather extension. Same
@@ -98,6 +99,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

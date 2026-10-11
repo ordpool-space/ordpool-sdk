@@ -1,6 +1,7 @@
 import { test, expect, chromium, BrowserContext } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Iteration 1 of the Cat21 Wallet E2E pipeline.
@@ -50,6 +51,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) {

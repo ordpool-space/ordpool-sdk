@@ -4,6 +4,7 @@ import * as fs from 'node:fs';
 
 import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Iteration 3 of the Cat21 Wallet E2E pipeline: SDK ↔ Cat21 Wallet handshake.
@@ -62,6 +63,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

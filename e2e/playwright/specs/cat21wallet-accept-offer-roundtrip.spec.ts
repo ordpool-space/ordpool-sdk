@@ -25,6 +25,7 @@ import { onboardCat21Wallet } from '../onboard-cat21wallet';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Cat21 Wallet ACCEPT-OFFER roundtrip on regtest — wallet is the SELLER.
@@ -102,6 +103,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');
   extensionId = worker.url().split('/')[2];

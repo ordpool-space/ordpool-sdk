@@ -19,6 +19,7 @@ export * from './playwright/okx-offline-routes';
 export * from './playwright/unisat-offline-routes';
 export * from './playwright/xverse-offline-routes';
 export * from './playwright/xverse-popup';
+export * from './playwright/leather-offline-routes';
 export * from './playwright/alby-auto-approve';
 export * from './playwright/onboard-leather';
 export * from './playwright/cdp-click';

@@ -7,6 +7,7 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Iteration 2 of the Leather E2E pipeline: drive the onboarding
@@ -71,6 +72,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

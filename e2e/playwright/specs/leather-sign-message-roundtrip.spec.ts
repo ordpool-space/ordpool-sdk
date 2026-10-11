@@ -7,6 +7,7 @@ import { clickApprovalAndRequireClose, waitForApprovalPopup, closeLeftoverExtens
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardLeather } from '../onboard-leather';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * BIP-322 sign-message roundtrip with the real Leather extension. Promotes
@@ -72,6 +73,8 @@ test.beforeAll(async () => {
     headless: false,
     args: [`--disable-extensions-except=${EXT_PATH}`, `--load-extension=${EXT_PATH}`, '--no-sandbox', '--disable-dev-shm-usage'],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

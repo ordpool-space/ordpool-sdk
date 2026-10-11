@@ -15,6 +15,7 @@ import {
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/cat21wallet');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
@@ -63,6 +64,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

@@ -22,6 +22,7 @@ import { clickApprovalAndRequireClose, waitForApprovalPopup, closeLeftoverExtens
 import { buildCat21BuyOfferPsbt, validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import { onboardLeather } from '../onboard-leather';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Leather ACCEPT-OFFER roundtrip on regtest — Leather is the SELLER.
@@ -153,6 +154,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

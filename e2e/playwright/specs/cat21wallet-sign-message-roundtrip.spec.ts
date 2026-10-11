@@ -8,6 +8,7 @@ import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Full BIP-322 sign-message roundtrip with the real Cat21 Wallet extension.
@@ -65,6 +66,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

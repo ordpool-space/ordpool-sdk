@@ -19,6 +19,7 @@ import {
 import { closeLeftoverExtensionPages } from '../approval-popup';
 import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Cat21 Wallet PARENT/CHILD inscribe roundtrip on regtest — full
@@ -117,6 +118,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');

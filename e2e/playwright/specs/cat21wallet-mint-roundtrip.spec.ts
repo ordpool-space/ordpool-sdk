@@ -8,6 +8,7 @@ import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks,
 import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { approveCat21WalletConnectPopup, approveCat21WalletSignPopup } from '../cat21wallet-sign-popup';
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
+import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 
 /**
  * Iteration 4 — full cat21 mint roundtrip with the real Cat21 Wallet
@@ -82,6 +83,8 @@ test.beforeAll(async () => {
       '--disable-dev-shm-usage',
     ],
   });
+  // The wallet's mempool.space reads are answered locally (captured answers).
+  await installLeatherOfflineRoutes(context);
 
   let [worker] = context.serviceWorkers();
   if (!worker) worker = await context.waitForEvent('serviceworker');
