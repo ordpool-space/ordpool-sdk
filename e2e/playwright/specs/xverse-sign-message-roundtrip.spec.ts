@@ -3,11 +3,12 @@ import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
+import { clickApprovalAndRequireClose, waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { buildListingMessage } from '../../../src/cat21-listing/build-listing-message';
 import { Network } from '../../../src/network';
 import { onboardXverse } from '../onboard-xverse';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
+import { approveXverseConnect, unlockXverse } from '../xverse-popup';
 
 /**
  * BIP-322 sign-message roundtrip with the real Xverse extension. Promotes
@@ -39,9 +40,9 @@ async function shot(p: Page, name: string): Promise<void> {
 
 /**
  * Xverse's sign-message popup renders the message plus a Sign / Confirm button.
- * Wait for that button to be present and enabled (Xverse hooks its React
- * onClick after an async detail-resolve, same as the sign-transaction popup),
- * then click it.
+ * Click it once Playwright finds it actionable (visible, enabled, stable) and
+ * require the popup to close, which is how Xverse answers an accepted
+ * signature.
  */
 async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
   const approval = await waitForApprovalPopup({
@@ -55,17 +56,11 @@ async function approveSignMessagePopup(ctx: BrowserContext, knownPages: Set<Page
     },
   });
   await shot(approval, '02a-sign-message-approval');
-  await approval.waitForFunction(() => {
-    const buttons = Array.from(document.querySelectorAll('button'));
-    return buttons.some(b => {
-      if (!/^(sign message|sign|confirm|approve)$/i.test(b.textContent?.trim() ?? '')) return false;
-      if (b.hasAttribute('disabled')) return false;
-      const style = getComputedStyle(b);
-      return style.pointerEvents !== 'none' && style.visibility !== 'hidden';
-    });
-  }, undefined, { polling: 250 });
-  await approval.getByRole('button', { name: /^(sign message|sign|confirm|approve)$/i }).first()
-    .click({ force: true });
+  await clickApprovalAndRequireClose(
+    approval.getByRole('button', { name: /^(sign message|sign|confirm|approve)$/i }).first(),
+    approval,
+    { label: 'Xverse sign-message popup' },
+  );
 }
 
 test.beforeAll(async () => {
@@ -98,14 +93,7 @@ test.afterAll(async () => {
 
 test('sign a BIP-322 message via Xverse: real extension signs, SDK verifies', async () => {
 
-  // Dismiss any post-onboard promo ("Not now") so it can't overlay the popups.
-  const primer = await context.newPage();
-  await primer.setViewportSize({ width: 400, height: 800 });
-  await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible().catch(() => false)) {
-    await notNow.click({ force: true }).catch(() => undefined);
-  }
+  const primer = await unlockXverse(context, extensionId);
   await shot(primer, '00-dashboard-ready');
 
   const harness = await context.newPage();
@@ -118,19 +106,7 @@ test('sign a BIP-322 message via Xverse: real extension signs, SDK verifies', as
 
   // Connect on MAINNET so the ordinals address is a bc1p taproot address the
   // verifier supports.
-  const connectPagePromise = context.waitForEvent('page');
-  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('mainnet'));
-  const approvalConnect = await connectPagePromise;
-  await approvalConnect.waitForLoadState('domcontentloaded');
-  await approvalConnect.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { polling: 500 });
-  await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
-  const wallet = await connectResultPromise;
-  // Close the connect popup so Xverse opens a fresh tab for the sign step
-  // (context.on('page') reliably catches a new tab, not a reused one).
-  await approvalConnect.close().catch(() => undefined);
+  const wallet = await approveXverseConnect(context, () => harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('mainnet')));
   console.log(`[xverse-sign-message] ordinals address = ${wallet.ordinalsAddress}`);
   expect(wallet.ordinalsAddress).toMatch(/^bc1p/);
 

@@ -16,9 +16,10 @@ import {
   postTx,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, clickConfirmUntilClosed } from '../approval-popup';
+import { waitForApprovalPopup, clickApprovalAndRequireClose } from '../approval-popup';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
+import { approveXverseConnect, unlockXverse } from '../xverse-popup';
 
 /**
  * Xverse PARENT/CHILD inscribe roundtrip on regtest — proof that the real
@@ -33,7 +34,6 @@ import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
-const TEST_PASSWORD = 'TestPassword123!';
 
 const FUND_AMOUNT_BTC = 0.001;
 const CAT21_POSTAGE_SATS = 546;
@@ -99,7 +99,7 @@ async function approveXverseSignPopup(ctx: BrowserContext, knownPages: Set<Page>
   // Click the confirm/sign button; the popup closing signals the sign
   // completed. Retry a few times — Xverse's button sometimes needs a
   // second dispatch.
-  await clickConfirmUntilClosed(approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), approval);
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), approval, { label: 'Xverse sign popup' });
 }
 
 async function fundPaymentAddress(paymentAddress: string): Promise<{ txid: string; vout: number; value: number }> {
@@ -158,25 +158,7 @@ test.afterAll(async () => {
 test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal parent input, parent returns to the wallet, child links to it', async () => {
 
   // ── Unlock ──
-  const primer = await context.newPage();
-  await primer.setViewportSize({ width: 400, height: 800 });
-  await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  await primer.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { polling: 250 });
-  if (/unlock/i.test(await primer.locator('body').innerText())) {
-    await primer.locator('input[type="password"]').first().fill(TEST_PASSWORD);
-    await primer.getByRole('button', { name: /^unlock$/i }).first().click();
-    await primer.waitForFunction(() => {
-      const t = (document.body.innerText || '').toLowerCase();
-      return t.includes('account 1') || t.includes('not now') || t.includes('send');
-    }, undefined, { polling: 250 });
-  }
-  const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible().catch(() => false)) {
-    await notNow.click({ force: true }).catch(() => undefined);
-  }
+  await unlockXverse(context, extensionId);
 
   // ── Connect ──
   const harness = await context.newPage();
@@ -185,17 +167,7 @@ test('inscribe a parent then a child via Xverse: wallet signs the Taproot reveal
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined);
 
-  const connectPagePromise = context.waitForEvent('page');
-  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
-  const approvalConnect = await connectPagePromise;
-  await approvalConnect.waitForLoadState('domcontentloaded');
-  await approvalConnect.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { polling: 500 });
-  await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
-  const wallet = await connectResultPromise;
-  await approvalConnect.close().catch(() => undefined);
+  const wallet = await approveXverseConnect(context, () => harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest')));
   expect(wallet.paymentAddress).toMatch(/^bcrt1q/);
   expect(wallet.ordinalsAddress).toMatch(/^bcrt1p/);
 

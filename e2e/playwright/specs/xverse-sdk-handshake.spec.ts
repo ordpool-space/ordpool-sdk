@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
+import { approveXverseConnect, unlockXverse } from '../xverse-popup';
 
 /**
  * Iteration 3a — SDK ↔ Xverse handshake via sats-connect.
@@ -123,35 +124,10 @@ test.afterAll(async () => {
 });
 
 test('xverseConnector.connect via the harness page returns the expected BIP-84/BIP-86 regtest addresses for the test seed', async () => {
-  // Prime the wallet popup. Wallet boots from the cloned
-  // user-data-dir into an UNLOCK screen (vault is encrypted at
-  // rest, in-memory key is wiped on context restart). Type the
-  // known test password to unlock, then proceed.
-  const primer = await context.newPage();
-  await primer.setViewportSize({ width: 400, height: 800 });
-  await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  await primer.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { polling: 250 });
-  await shot(primer, '00a-primer-locked');
-
-  if (/unlock/i.test(await primer.locator('body').innerText())) {
-    const pwInput = primer.locator('input[type="password"]').first();
-    await expect(pwInput).toBeVisible();
-    await pwInput.fill('TestPassword123!');
-    await primer.getByRole('button', { name: /^unlock$/i }).first().click();
-    await primer.waitForFunction(() => {
-      const t = (document.body.innerText || '').toLowerCase();
-      return t.includes('account 1') || t.includes('not now') || t.includes('zest');
-    }, undefined, { polling: 250 });
-  }
-  await shot(primer, '00b-primer-unlocked');
-
-  const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible().catch(() => false)) {
-    await notNow.click({ force: true }).catch(() => undefined);
-  }
+  // Unlock the wallet: it boots from the cloned user-data-dir into the lock
+  // screen (the vault is encrypted at rest, the key is not kept across a
+  // context restart).
+  const primer = await unlockXverse(context, extensionId);
   await shot(primer, '00c-primer-dashboard');
 
   // Open the harness page after priming. Close any leftover tabs
@@ -167,46 +143,14 @@ test('xverseConnector.connect via the harness page returns the expected BIP-84/B
   await page.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined);
   await shot(page, '01-harness-loaded');
 
-  // sats-connect's getAddress triggers Xverse to open its approval
-  // UI in a separate extension window (chrome-extension:// origin),
-  // not the harness page. Listen for the new page; when it appears,
-  // click whatever Approve/Connect/Confirm button it renders.
+  // sats-connect's getAddress makes Xverse open its approval UI in a
+  // separate extension window (chrome-extension:// origin), not the
+  // harness page; approveXverseConnect finds it by its consent button.
   // Wallet was switched into Bitcoin Regtest above via the primer's
   // Settings → Networks panel. Ask the SDK to connect on Regtest;
   // our toBitcoinNetworkType maps Network.Regtest to the literal
   // string "Regtest" which Xverse's mismatch-check accepts.
-  const approvalPage: Promise<Page> = context.waitForEvent('page');
-  const resultPromise = page.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
-
-  const approval = await approvalPage;
-  await approval.waitForLoadState('domcontentloaded');
-  await shot(approval, '02a-approval-initial');
-  // eslint-disable-next-line no-console
-  console.log(`[xverse:sdk-handshake] approval URL = ${approval.url()}`);
-
-  // Snapshot the approval body periodically while waiting for
-  // consent UI — gives us visual evidence of what Xverse renders
-  // during the wait.
-  const snapshots = [5, 15, 30, 45].map(seconds =>
-    setTimeout(() => { void approval.screenshot({ path: path.resolve(RESULTS_DIR, `handshake-02a-approval-${seconds}s.png`), fullPage: true }).catch(() => undefined); }, seconds * 1000)
-  );
-
-  try {
-    await approval.waitForFunction(() => {
-      const t = (document.body.innerText || '').toLowerCase();
-      return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-    }, undefined, { polling: 500 });
-  } finally {
-    snapshots.forEach(clearTimeout);
-  }
-  await shot(approval, '02b-approval-with-consent');
-
-  const consentBtn = approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first();
-  await expect(consentBtn).toBeVisible();
-  await consentBtn.click();
-  await shot(approval, '02b-after-approve');
-
-  const info = await resultPromise;
+  const info = await approveXverseConnect(context, () => page.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest')));
   // eslint-disable-next-line no-console
   console.log(`[xverse:sdk-handshake] payment  = ${info.paymentAddress}`);
   // eslint-disable-next-line no-console

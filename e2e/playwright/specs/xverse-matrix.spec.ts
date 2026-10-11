@@ -1,13 +1,13 @@
-import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
+import { test, expect, chromium, Page } from '@playwright/test';
 import { isOneAddressWallet } from '../../../src/cat21-fee/funding-safety.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 import { applyXverseVariant, XverseVariant } from '../xverse-vault';
-import { waitForApprovalPopup } from '../approval-popup';
 import { waitForChromeStorageKey, waitForSingletonLockGone } from '../wait-helpers';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
+import { approveXverseConnect, unlockXversePage } from '../xverse-popup';
 
 /**
  * Matrix coverage for every Xverse Network × Payment-Address-Type
@@ -32,7 +32,6 @@ import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
-const TEST_PASSWORD = 'TestPassword123!';
 
 // BIP-49/84/86 derivations of the BIP-39 test seed `abandon × 11 +
 // about` at account 0 / index 0, per the click-onboarded dump. The
@@ -60,43 +59,6 @@ async function shot(page: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `matrix-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-async function unlockWallet(page: Page): Promise<void> {
-  await page.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { polling: 250 });
-  if (/unlock/i.test(await page.locator('body').innerText())) {
-    await page.locator('input[type="password"]').first().fill(TEST_PASSWORD);
-    await page.getByRole('button', { name: /^unlock$/i }).first().click();
-    await page.waitForFunction(() => {
-      const t = (document.body.innerText || '').toLowerCase();
-      return t.includes('account 1') || t.includes('not now') || t.includes('zest') || t.includes('send');
-    }, undefined, { polling: 250 });
-  }
-  const notNow = page.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible().catch(() => false)) {
-    await notNow.click({ force: true }).catch(() => undefined);
-  }
-}
-
-async function approveSatsConnectInline(context: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  // sats-connect getAddress opens an approval popup on a new
-  // chrome-extension:// page. Match by the visible Connect/Approve
-  // button's role+name on the popup itself — no URL anchor (the
-  // sats-connect surface URL has varied across Xverse builds).
-  const approval = await waitForApprovalPopup({
-    context,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  await approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click({ force: true });
 }
 
 test.beforeAll(async () => {
@@ -239,7 +201,7 @@ for (const variant of VARIANTS) {
       expect(verify2.activeAccountType, 'persistentStore::activeAccount.value.btcPaymentAddressType schema changed; the zustand SOT may have moved (see WALLETS.md)').toBe(variant.paymentType);
       expect(verify2.legacyType, 'persist:walletState.btcPaymentAddressType did not retain our write; the SW shutdown-flush race may have changed (see WALLETS.md)').toBe(variant.paymentType);
 
-      await unlockWallet(primer);
+      await unlockXversePage(primer);
       await shot(primer, `${variant.network}-${variant.paymentType}-dashboard`);
 
       // Drive the SDK harness for the address.
@@ -250,10 +212,8 @@ for (const variant of VARIANTS) {
       const networkArg = variant.network === 'bitcoin-mainnet' ? 'mainnet'
         : variant.network === 'bitcoin-testnet4' ? 'testnet4'
         : 'regtest';
-      const knownPages = new Set(context.pages());
-      const resultPromise = harness.evaluate((n) => window.ordpoolSdkHarness.connectXverse(n), networkArg as 'mainnet' | 'testnet4' | 'regtest');
-      await approveSatsConnectInline(context, knownPages);
-      const info = await resultPromise;
+      const info = await approveXverseConnect(context, () =>
+        harness.evaluate((n) => window.ordpoolSdkHarness.connectXverse(n), networkArg as 'mainnet' | 'testnet4' | 'regtest'));
 
       // eslint-disable-next-line no-console
       console.log(`[matrix] ${variant.network} + ${variant.paymentType} → payment = ${info.paymentAddress}`);

@@ -5,10 +5,11 @@ import * as fs from 'node:fs';
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages, clickConfirmUntilClosed } from '../approval-popup';
+import { waitForApprovalPopup, closeLeftoverExtensionPages, clickApprovalAndRequireClose } from '../approval-popup';
 import { installContextErrorGuard } from '../browser-error-guard';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
+import { approveXverseConnect, unlockXverse } from '../xverse-popup';
 
 /**
  * Iteration 3c — full cat21 mint roundtrip with the real Xverse
@@ -36,7 +37,6 @@ import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
-const TEST_PASSWORD = 'TestPassword123!';
 
 // In regtest 1 BTC = 100M sats; fund the wallet with 0.001 BTC so
 // the mint has plenty of headroom plus a meaningful change output.
@@ -117,25 +117,7 @@ test.afterAll(async () => {
 
 test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popup, broadcast via local electrs, verify via parser', async () => {
   // ─── Unlock + dashboard ready ───────────────────────────────────
-  const primer = await context.newPage();
-  await primer.setViewportSize({ width: 400, height: 800 });
-  await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  await primer.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { polling: 250 });
-  if (/unlock/i.test(await primer.locator('body').innerText())) {
-    await primer.locator('input[type="password"]').first().fill(TEST_PASSWORD);
-    await primer.getByRole('button', { name: /^unlock$/i }).first().click();
-    await primer.waitForFunction(() => {
-      const t = (document.body.innerText || '').toLowerCase();
-      return t.includes('account 1') || t.includes('not now') || t.includes('zest') || t.includes('send');
-    }, undefined, { polling: 250 });
-  }
-  const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible().catch(() => false)) {
-    await notNow.click({ force: true }).catch(() => undefined);
-  }
+  const primer = await unlockXverse(context, extensionId);
   await shot(primer, '01-dashboard-ready');
 
   // ─── Get the wallet's bcrt1 addresses via the SDK harness ──────
@@ -143,25 +125,7 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined);
 
-  const connectPagePromise = context.waitForEvent('page');
-  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
-  const approvalConnect = await connectPagePromise;
-  await approvalConnect.waitForLoadState('domcontentloaded');
-  await approvalConnect.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { polling: 500 });
-  await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
-  const wallet = await connectResultPromise;
-  // Xverse leaves the connect popup tab open after approval; in CI
-  // it then displays the wallet dashboard. When signTransaction
-  // fires later, Xverse sometimes reuses that tab — but our
-  // `knownPagesAtStart` snapshot below would filter it, so
-  // waitForApprovalPopup never sees the "Review transaction" page
-  // and times out at 120s. Closing it forces Xverse to open a
-  // fresh tab for the sign step, which `context.on('page')`
-  // reliably catches.
-  await approvalConnect.close().catch(() => undefined);
+  const wallet = await approveXverseConnect(context, () => harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest')));
   // eslint-disable-next-line no-console
   console.log(`[mint] payment = ${wallet.paymentAddress}  ordinals = ${wallet.ordinalsAddress}`);
   expect(wallet.paymentAddress).toMatch(/^bcrt1q/);
@@ -233,12 +197,9 @@ test('mint a cat21 on regtest via xverse: build PSBT in SDK, sign in Xverse popu
   // so the next click can't land in the pre-binding window.
   await expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeEnabled();
 
-  // Click Confirm until it took effect: Xverse closes the popup itself,
-  // or signs and the harness's signedHexPromise resolves, or the screen
-  // moves on. A click that did none of those is sent again.
-  await clickConfirmUntilClosed(approvalSign.getByRole('button', { name: /^confirm$/i }).first(), approvalSign, {
-    resolved: signedHexPromise, maxClicks: 3, label: 'mint',
-  });
+  // Xverse closes the popup when it accepts Confirm; the click requires
+  // that close and fails at the click, with a diagnosis, when it does not.
+  await clickApprovalAndRequireClose(approvalSign.getByRole('button', { name: /^confirm$/i }).first(), approvalSign, { label: 'Xverse mint sign popup' });
   const signed = await signedHexPromise;
   // eslint-disable-next-line no-console
   console.log(`[mint] signed tx hex (${signed.txHex.length} chars), broadcasting via local electrs…`);

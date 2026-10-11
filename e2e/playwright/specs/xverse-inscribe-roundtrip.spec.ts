@@ -12,9 +12,10 @@ import {
   mineBlocks,
   postTx,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, clickConfirmUntilClosed } from '../approval-popup';
+import { waitForApprovalPopup, clickApprovalAndRequireClose } from '../approval-popup';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
+import { approveXverseConnect, unlockXverse } from '../xverse-popup';
 
 /**
  * Full inscribe roundtrip with the real Xverse extension.
@@ -42,7 +43,6 @@ import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
 const HARNESS_URL = 'http://localhost:4500/';
-const TEST_PASSWORD = 'TestPassword123!';
 
 const FUND_AMOUNT_BTC = 0.001;
 
@@ -112,25 +112,7 @@ test.afterAll(async () => {
 test('inscribe an artifact on regtest via xverse: build commit+reveal in SDK, sign commit in Xverse popup, broadcast both via local electrs, verify via ordpool-parser', async () => {
 
   // ─── Unlock + dashboard ready ───────────────────────────────────
-  const primer = await context.newPage();
-  await primer.setViewportSize({ width: 400, height: 800 });
-  await primer.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
-  await primer.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return t.includes('unlock') || t.includes('account 1');
-  }, undefined, { polling: 250 });
-  if (/unlock/i.test(await primer.locator('body').innerText())) {
-    await primer.locator('input[type="password"]').first().fill(TEST_PASSWORD);
-    await primer.getByRole('button', { name: /^unlock$/i }).first().click();
-    await primer.waitForFunction(() => {
-      const t = (document.body.innerText || '').toLowerCase();
-      return t.includes('account 1') || t.includes('not now') || t.includes('zest') || t.includes('send');
-    }, undefined, { polling: 250 });
-  }
-  const notNow = primer.getByText('Not now', { exact: true }).first();
-  if (await notNow.isVisible().catch(() => false)) {
-    await notNow.click({ force: true }).catch(() => undefined);
-  }
+  const primer = await unlockXverse(context, extensionId);
   await shot(primer, '01-dashboard-ready');
 
   // ─── Connect via the SDK harness ────────────────────────────────
@@ -138,17 +120,7 @@ test('inscribe an artifact on regtest via xverse: build commit+reveal in SDK, si
   await harness.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
   await harness.waitForFunction(() => (window as unknown as { ordpoolSdkHarnessReady?: true }).ordpoolSdkHarnessReady === true, undefined);
 
-  const connectPagePromise = context.waitForEvent('page');
-  const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest'));
-  const approvalConnect = await connectPagePromise;
-  await approvalConnect.waitForLoadState('domcontentloaded');
-  await approvalConnect.waitForFunction(() => {
-    const t = (document.body.innerText || '').toLowerCase();
-    return ['connect', 'approve', 'confirm', 'allow'].some(s => t.includes(s));
-  }, undefined, { polling: 500 });
-  await approvalConnect.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first().click();
-  const wallet = await connectResultPromise;
-  await approvalConnect.close().catch(() => undefined);
+  const wallet = await approveXverseConnect(context, () => harness.evaluate(() => window.ordpoolSdkHarness.connectXverse('regtest')));
   // eslint-disable-next-line no-console
   console.log(`[inscribe] payment=${wallet.paymentAddress} ordinals=${wallet.ordinalsAddress}`);
   expect(wallet.paymentAddress).toMatch(/^bcrt1q/);
@@ -166,8 +138,6 @@ test('inscribe an artifact on regtest via xverse: build commit+reveal in SDK, si
   // ─── Build commit+reveal + sign commit via Xverse popup ────────
   const knownPagesAtStart = new Set(context.pages());
   const signedPromise = harness.evaluate((args) => window.ordpoolSdkHarness.runOperation(args), {
-    kind: 'inscribe' as const,
-    walletType: 'xverse' as const,
     kind: 'inscribe' as const,
     walletType: 'xverse' as const,
     utxo: { txid: utxo.txid, vout: utxo.vout, value: utxo.value },
@@ -202,9 +172,7 @@ test('inscribe an artifact on regtest via xverse: build commit+reveal in SDK, si
   }, undefined, { polling: 250 });
   await expect(approvalSign.getByRole('button', { name: /^confirm$/i }).first()).toBeEnabled();
 
-  await clickConfirmUntilClosed(approvalSign.getByRole('button', { name: /^confirm$/i }).first(), approvalSign, {
-    resolved: signedPromise, maxClicks: 3, label: 'inscribe',
-  });
+  await clickApprovalAndRequireClose(approvalSign.getByRole('button', { name: /^confirm$/i }).first(), approvalSign, { label: 'Xverse inscribe sign popup' });
   const signed = await signedPromise;
   // eslint-disable-next-line no-console
   console.log(`[inscribe] commit=${signed.commitTxid.slice(0, 12)}… reveal=${signed.revealTxid.slice(0, 12)}…`);
