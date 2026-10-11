@@ -3,8 +3,7 @@ import type { ClickableControl } from './click-until-effect';
 /**
  * `isApproval` anchored on the control the caller is about to use. `url` only
  * narrows; `control` decides. Both waits run under the runner config's
- * timeouts (`navigationTimeout` / `actionTimeout`, unset meaning the test
- * timeout).
+ * per-wait bound (`navigationTimeout` / `actionTimeout`).
  */
 export declare function approvalGate(opts: {
     url?: RegExp;
@@ -46,9 +45,9 @@ export interface ApprovalPopupSearch {
  * which is the right behaviour: one page failing the match shouldn't abort
  * the search.
  *
- * There is no deadline of its own. The waits inside `isApproval` run under the
- * runner config's timeouts and the search as a whole under the test timeout,
- * whose report names the pending wait.
+ * The search as a whole is one wait and ends at the per-wait bound
+ * (`e2eTimeoutMs`), rejecting with the last reason a page failed the match.
+ * The waits inside `isApproval` run under the runner config's per-wait bound.
  */
 export declare function waitForApprovalPopup(opts: ApprovalPopupSearch): Promise<Page>;
 /** What `raceApprovalPopup` observed first. */
@@ -81,7 +80,7 @@ export interface AwaitableState {
  *     });
  *     if (race.outcome === 'popup') await approve(race.page);
  *
- * Both sides wait on states under the runner config's timeouts; nothing here
+ * Both sides wait on states under the per-wait bound; nothing here
  * hopes for an absence. The loser is cleaned up: the popup search stops
  * listening, and a later rejection of the losing `waitFor` (when its page
  * closes at teardown) is absorbed here because the race was already decided.
@@ -225,8 +224,8 @@ export declare function clickUntilApprovalPopup(trigger: ClickableControl, opts:
  * search covers pages that are ALREADY open as well as ones that appear, which
  * matters for wallets that reuse one notification page across approvals.
  *
- * When nothing matches, the test timeout reports, and its call log names the
- * pending `getByText` wait. A page that never painted, or a stale page the
+ * When nothing matches, the search rejects at the per-wait bound naming the
+ * last `getByText` miss. A page that never painted, or a stale page the
  * wallet reuses without re-rendering, both show up there as the same pending
  * wait; the trace's page list separates them.
  */
@@ -255,6 +254,12 @@ export declare function waitForApprovalByConfirmButton(opts: {
 export declare function waitForPageShowing(opts: {
     context: BrowserContext;
     text: RegExp;
+    /**
+     * Selector of the iframe the step renders in, when it is not the page's own
+     * document (OKX draws its onboarding steps inside `#ui-ses-iframe`, leaving
+     * the page body empty). Omitted, the text is looked for in the page itself.
+     */
+    frame?: string;
 }): Promise<Page>;
 /**
  * Probe: how long one confirm click gets to take effect (the popup closes, the

@@ -1,11 +1,16 @@
 /**
- * The one timeout of this config (TESTING.md): every test and hook, and, through
- * ORDPOOL_E2E_TIMEOUT_MS, the bound of the e2e helpers whose unit specs run
- * here on fake timers. Sized for the slowest unit spec; one that needs longer
- * is a defect in that spec, never a per-spec bound.
+ * The per-wait bound of the e2e helpers whose unit specs run here on fake
+ * timers, read through ORDPOOL_E2E_TIMEOUT_MS: the same value the e2e runner
+ * configs set, so the specs prove the bound the helpers run under.
  */
-const TIMEOUT_MS = 60_000;
-process.env.ORDPOOL_E2E_TIMEOUT_MS = String(TIMEOUT_MS);
+const WAIT_TIMEOUT_MS = 30_000;
+process.env.ORDPOOL_E2E_TIMEOUT_MS = String(WAIT_TIMEOUT_MS);
+
+/**
+ * The per-test bound, for every test and hook.
+ * Twice the longest green spec file, rounded up: 26.4 s, src/cat21-fee/vsize-max-signatures in ordpool-sdk run 38074082493.
+ */
+const TEST_TIMEOUT_MS = 60_000;
 
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
@@ -72,5 +77,5 @@ module.exports = {
   // filter typo) silently excluded everything.
   passWithNoTests: false,
 
-  testTimeout: TIMEOUT_MS,
+  testTimeout: TEST_TIMEOUT_MS,
 };

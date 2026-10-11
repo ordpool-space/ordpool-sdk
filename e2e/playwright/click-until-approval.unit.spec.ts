@@ -3,8 +3,10 @@
  * Real:   clickUntilApprovalPopup and the popup search behind it
  * Faked:  the clock (jest fake timers), the BrowserContext (pages/on/off), the popup page (title/isClosed) and the
  *         trigger (click/isVisible/isEnabled) (shapes: @playwright/test types)
- * Proves: a swallowed click is re-sent after the probe, a trigger that reacted is never clicked twice
+ * Proves: a swallowed click is re-sent after the probe, a trigger that reacted is never clicked twice, and its popup
+ *         gets the per-wait bound and no more
  */
+import { e2eTimeoutMs } from '../e2e-timeout';
 import { POPUP_AFTER_CLICK_PROBE_MS, clickUntilApprovalPopup } from './approval-popup';
 
 /** A context whose `page` event fires only after `appearsAfterClicks` clicks. */
@@ -75,12 +77,23 @@ describe('clickUntilApprovalPopup', () => {
   it('waits for a slow wallet without a second click when the trigger accepted the first one', async () => {
     // The money-path guard: a CTA that disables itself has taken the click, so
     // a second one would be a second signing request. The popup then gets the
-    // rest of the test, and arrives late on its own.
+    // per-wait bound, and arrives late on its own.
     const h = harness({ appearsAfterClicks: 99, triggerReactsToClick: true });
     const result = clickUntilApprovalPopup(h.trigger, opts(h) as never);
-    await jest.advanceTimersByTimeAsync(POPUP_AFTER_CLICK_PROBE_MS * 5);
+    await jest.advanceTimersByTimeAsync(POPUP_AFTER_CLICK_PROBE_MS + e2eTimeoutMs() - 1);
     h.openLate();
     const res = await result;
     expect({ clicks: res.clicks, page: res.page }).toEqual({ clicks: 1, page: h.page });
+  });
+
+  it('fails at the per-wait bound, clicked once, when the trigger accepted the click and no popup ever comes', async () => {
+    const h = harness({ appearsAfterClicks: 99, triggerReactsToClick: true });
+    const outcome = clickUntilApprovalPopup(h.trigger, opts(h) as never).then(() => 'resolved', (e: Error) => e.message);
+    await jest.advanceTimersByTimeAsync(POPUP_AFTER_CLICK_PROBE_MS + e2eTimeoutMs());
+    expect(await outcome).toBe(
+      'clickUntilEffect: mint-cta reacted to the click (visible=false enabled=false) and the effect never became visible. ' +
+        'The click registered; the effect itself never arrived, so the defect is downstream of the control rather than a swallowed click.',
+    );
+    expect(h.state.clicks).toBe(1);
   });
 });

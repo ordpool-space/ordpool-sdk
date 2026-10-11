@@ -17,8 +17,7 @@ const click_until_effect_core_1 = require("./click-until-effect-core");
 /**
  * `isApproval` anchored on the control the caller is about to use. `url` only
  * narrows; `control` decides. Both waits run under the runner config's
- * timeouts (`navigationTimeout` / `actionTimeout`, unset meaning the test
- * timeout).
+ * per-wait bound (`navigationTimeout` / `actionTimeout`).
  */
 function approvalGate(opts) {
     return async (page) => {
@@ -37,6 +36,9 @@ function startApprovalPopupSearch(opts) {
         resolveFound = resolve;
         rejectFound = reject;
     });
+    // The last reason a page failed the match, named in the bound's error so the
+    // report says what the search saw rather than only that it saw nothing.
+    let lastMiss;
     const tryPage = async (p) => {
         if (settled || knownPages.has(p))
             return;
@@ -65,15 +67,28 @@ function startApprovalPopupSearch(opts) {
             cancel();
             resolveFound(p);
         }
-        catch {
+        catch (e) {
             // isApproval rejected (the page closed, or its own wait gave up), or the
             // liveness probe failed because the page went away. Don't abort the
             // search: another page may still match.
+            lastMiss = e;
         }
     };
     const onPage = (p) => void tryPage(p);
+    const boundMs = (0, e2e_timeout_1.e2eTimeoutMs)();
+    // The search is one wait, so it ends at the per-wait bound like every other:
+    // without it a missing popup would surface only as the TEST timing out, with
+    // no word about which page or control the search was waiting for.
+    const bound = setTimeout(() => {
+        if (settled)
+            return;
+        cancel();
+        const miss = lastMiss instanceof Error ? lastMiss.message.split('\n')[0] : lastMiss === undefined ? 'none, every page was still waiting' : String(lastMiss);
+        rejectFound(new Error(`no page in the context satisfied isApproval within ${boundMs}ms (last miss: ${miss})`));
+    }, boundMs);
     const cancel = () => {
         settled = true;
+        clearTimeout(bound);
         context.off('page', onPage);
     };
     try {
@@ -119,9 +134,9 @@ function startApprovalPopupSearch(opts) {
  * which is the right behaviour: one page failing the match shouldn't abort
  * the search.
  *
- * There is no deadline of its own. The waits inside `isApproval` run under the
- * runner config's timeouts and the search as a whole under the test timeout,
- * whose report names the pending wait.
+ * The search as a whole is one wait and ends at the per-wait bound
+ * (`e2eTimeoutMs`), rejecting with the last reason a page failed the match.
+ * The waits inside `isApproval` run under the runner config's per-wait bound.
  */
 async function waitForApprovalPopup(opts) {
     return startApprovalPopupSearch(opts).found;
@@ -143,7 +158,7 @@ async function waitForApprovalPopup(opts) {
  *     });
  *     if (race.outcome === 'popup') await approve(race.page);
  *
- * Both sides wait on states under the runner config's timeouts; nothing here
+ * Both sides wait on states under the per-wait bound; nothing here
  * hopes for an absence. The loser is cleaned up: the popup search stops
  * listening, and a later rejection of the losing `waitFor` (when its page
  * closes at teardown) is absorbed here because the race was already decided.
@@ -420,7 +435,7 @@ async function clickUntilApprovalPopup(trigger, opts) {
     const effect = {
         // With `timeout`, the probe after a click: no popup within it is an
         // expected answer that sends the trigger back for inspection. Without,
-        // the trigger reacted and the popup gets the rest of the test.
+        // the trigger reacted and the popup gets the per-wait bound of the search.
         waitFor: async ({ timeout }) => {
             const search = startApprovalPopupSearch(opts);
             if (timeout === undefined) {
@@ -471,8 +486,8 @@ async function clickUntilApprovalPopup(trigger, opts) {
  * search covers pages that are ALREADY open as well as ones that appear, which
  * matters for wallets that reuse one notification page across approvals.
  *
- * When nothing matches, the test timeout reports, and its call log names the
- * pending `getByText` wait. A page that never painted, or a stale page the
+ * When nothing matches, the search rejects at the per-wait bound naming the
+ * last `getByText` miss. A page that never painted, or a stale page the
  * wallet reuses without re-rendering, both show up there as the same pending
  * wait; the trace's page list separates them.
  */
@@ -509,14 +524,23 @@ async function waitForApprovalByConfirmButton(opts) {
  * never caught.
  */
 async function waitForPageShowing(opts) {
-    return waitForApprovalPopup({
-        context: opts.context,
-        knownPages: new Set(),
-        isApproval: async (p) => {
-            await p.getByText(opts.text).first().waitFor({ state: 'visible' });
-            return true;
-        },
-    });
+    const { frame, text } = opts;
+    try {
+        return await waitForApprovalPopup({
+            context: opts.context,
+            knownPages: new Set(),
+            isApproval: async (p) => {
+                const root = frame ? p.frameLocator(frame) : p;
+                await root.getByText(text).first().waitFor({ state: 'visible' });
+                return true;
+            },
+        });
+    }
+    catch (e) {
+        // Rethrown with the text and frame searched for, which the search's own
+        // error cannot know.
+        throw new Error(`no page showed ${text}${frame ? ` inside ${frame}` : ''}: ${e.message}`);
+    }
 }
 /**
  * Probe: how long one confirm click gets to take effect (the popup closes, the

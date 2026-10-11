@@ -3,17 +3,20 @@ import * as path from 'node:path';
 import { E2E_TIMEOUT_ENV } from '../e2e-timeout';
 
 /**
- * The one timeout of this config (TESTING.md). It bounds the test, every
- * assertion and, with `actionTimeout` / `navigationTimeout` left unset, every
- * action and navigation, so any single wait may take as long as the test. The
- * SDK's polling helpers read the same value through ORDPOOL_E2E_TIMEOUT_MS.
- *
- * Sized for the slowest wallet roundtrip (onboard, connect, sign, mine and wait
- * for electrs and ord). A spec that needs longer is a defect in the app or the
- * harness, fixed there, never a per-spec bound.
+ * The per-wait bound (TESTING.md): every assertion, `expect.poll`, action,
+ * navigation and page event, and, through ORDPOOL_E2E_TIMEOUT_MS, every SDK
+ * polling helper (electrs, ord, bitcoind, a wallet's service worker). A state
+ * that needs longer to arrive is a defect in the app, the harness or the
+ * helper, fixed there, never by raising this bound.
  */
-const TIMEOUT_MS = 600_000;
-process.env[E2E_TIMEOUT_ENV] = String(TIMEOUT_MS);
+const WAIT_TIMEOUT_MS = 30_000;
+process.env[E2E_TIMEOUT_ENV] = String(WAIT_TIMEOUT_MS);
+
+/**
+ * The per-test bound. A test is a sequence of waits, not one wait.
+ * Twice the longest green test: 216 s, xverse-inscribe-child-roundtrip in ordpool-sdk run 38066808952.
+ */
+const TEST_TIMEOUT_MS = 450_000;
 
 /**
  * Cat21 Wallet-only Playwright config — runs the three transfer /
@@ -33,11 +36,13 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
-  timeout: TIMEOUT_MS,
+  timeout: TEST_TIMEOUT_MS,
   expect: {
-    timeout: TIMEOUT_MS,
+    timeout: WAIT_TIMEOUT_MS,
   },
   use: {
+    actionTimeout: WAIT_TIMEOUT_MS,
+    navigationTimeout: WAIT_TIMEOUT_MS,
     headless: false,
     screenshot: 'on',
     video: 'retain-on-failure',
@@ -49,6 +54,6 @@ export default defineConfig({
     cwd: __dirname,
     port: 4500,
     reuseExistingServer: true,
-    timeout: TIMEOUT_MS,
+    timeout: WAIT_TIMEOUT_MS,
   },
 });

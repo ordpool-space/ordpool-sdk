@@ -5,14 +5,19 @@
 // (the bootstrap script emits them as JSON).
 
 /**
- * The one timeout of this config (TESTING.md): every test and hook, and, through
- * ORDPOOL_E2E_TIMEOUT_MS, every poll the SDK's regtest helpers run against
- * bitcoind, electrs and ord. Sized for the slowest spec (seeding a rune, which
- * mines through the etching commitment's maturity). A spec that needs longer is
- * a defect in the harness, fixed there, never a per-spec bound.
+ * The per-wait bound (TESTING.md): through ORDPOOL_E2E_TIMEOUT_MS, every poll
+ * the SDK's regtest helpers run against bitcoind, electrs and ord. A state that
+ * needs longer to arrive is a defect in the stack or the helper, fixed there,
+ * never by raising this bound.
  */
-const TIMEOUT_MS = 900_000;
-process.env.ORDPOOL_E2E_TIMEOUT_MS = String(TIMEOUT_MS);
+const WAIT_TIMEOUT_MS = 30_000;
+process.env.ORDPOOL_E2E_TIMEOUT_MS = String(WAIT_TIMEOUT_MS);
+
+/**
+ * The per-test bound, for every test and hook: a sequence of waits, not one wait.
+ * Twice the longest green spec file: 161 s, inscribe-satpoint-parity in ordpool-sdk run 38074082476.
+ */
+const TEST_TIMEOUT_MS = 330_000;
 
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 module.exports = {
@@ -43,7 +48,7 @@ module.exports = {
     '^base58-js$': '<rootDir>/node_modules/base58-js/index.js',
   },
 
-  testTimeout: TIMEOUT_MS,
+  testTimeout: TEST_TIMEOUT_MS,
   maxWorkers: 1,
   passWithNoTests: false,
 };
