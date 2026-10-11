@@ -66,5 +66,4 @@ __exportStar(require("./playwright/okx-sign-popup"), exports);
 __exportStar(require("./playwright/launch-wallet-context"), exports);
 __exportStar(require("./playwright/net-log"), exports);
 __exportStar(require("./playwright/okx-connect-popup"), exports);
-__exportStar(require("./playwright/leather-unlock"), exports);
 //# sourceMappingURL=index.js.map

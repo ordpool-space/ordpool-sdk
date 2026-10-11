@@ -96,8 +96,8 @@ test('cat21walletConnector.connect via the harness page returns the BIP-84 / BIP
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectCat21Wallet());
 
   // The approval surface is the `get-addresses-approve-button` testid on
-  // whichever chrome-extension:// page renders it; the helper unlocks a popup
-  // that booted locked and requires the popup to close after the click.
+  // whichever chrome-extension:// page renders it; the helper requires the
+  // popup to close after the click.
   await approveCat21WalletConnectPopup(context, knownPages);
 
   const info = await resultPromise;
