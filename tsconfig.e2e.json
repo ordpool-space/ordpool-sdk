@@ -11,7 +11,17 @@
     "target": "es2022",
     "lib": ["dom", "esnext"],
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // The e2e helpers reach SDK code only through a built subpath, never
+    // through src/ (outside this rootDir). Types come from the main build's
+    // declarations; at run time Node resolves the same specifier through the
+    // package's own `exports` map (its `require` condition, dist-cjs). That
+    // self-reference needs dist-e2e/ inside the package's scope, so the build
+    // writes no package.json there: the root one, without a `type`, already
+    // makes these files CommonJS.
+    "paths": {
+      "ordpool-sdk/testing": ["./dist/testing.d.ts"]
+    }
   },
   "include": ["e2e/index.ts", "e2e/globals.d.ts"],
   // Specs are excluded because they import from src/, which is outside this

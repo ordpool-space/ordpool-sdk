@@ -63,6 +63,9 @@ module.exports = {
   // extension back off. (ESM-extension mapping)
   moduleNameMapper: {
     '^(\.{1,2}/.*)\.js$': '$1',
+    // The e2e helpers import the fixtures subpath by its package name; under
+    // jest that is the source barrel, so a spec runs the code it proves.
+    '^ordpool-sdk/testing$': '<rootDir>/src/testing.ts',
     // base58-js's exports map only declares an `import` condition;
     // map it directly to the file so Jest's resolver doesn't bail.
     '^base58-js$': '<rootDir>/node_modules/base58-js/index.js',

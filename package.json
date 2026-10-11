@@ -71,6 +71,11 @@
       "require": "./dist-cjs/network.js",
       "default": "./dist/network.js"
     },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "require": "./dist-cjs/testing.js",
+      "default": "./dist/testing.js"
+    },
     "./e2e": {
       "types": "./dist-e2e/index.d.ts",
       "default": "./dist-e2e/index.js"
@@ -91,7 +96,7 @@
     "clean": "rimraf dist dist-cjs dist-e2e",
     "build": "npm run build:main && npm run build:e2e",
     "build:main": "tsc -p tsconfig.lib.json && node -e \"require('fs').writeFileSync('dist/package.json', JSON.stringify({type:'module'},null,2))\" && npm run build:server-cjs",
-    "build:e2e": "tsc -p tsconfig.e2e.json && node -e \"require('fs').writeFileSync('dist-e2e/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
+    "build:e2e": "tsc -p tsconfig.e2e.json",
     "prepare": "npm run build:main",
     "start": "npm run test",
     "test": "npm run check:playwright-slots && npm run check:test-kinds:selftest && npm run check:harness-types && npm run check:dist-e2e && npm run test:node && npm run test:browser",

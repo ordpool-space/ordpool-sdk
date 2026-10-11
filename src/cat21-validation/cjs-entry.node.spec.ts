@@ -16,7 +16,7 @@ import * as path from 'node:path';
  */
 const ROOT = path.resolve(__dirname, '../..');
 const PKG = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-const SUBPATHS = ['./cat21-validation', './cat21-session', './network'];
+const SUBPATHS = ['./cat21-validation', './cat21-session', './network', './testing'];
 const built = SUBPATHS.every((s) => fs.existsSync(path.join(ROOT, PKG.exports[s].require)));
 
 describe('server-facing subpaths ship a CommonJS build', () => {
@@ -33,5 +33,17 @@ describe('server-facing subpaths ship a CommonJS build', () => {
       { cwd: ROOT, encoding: 'utf8' },
     );
     expect(out).toBe('function,function,number');
+  });
+
+  // The `ordpool-sdk/e2e` helpers (CommonJS, run by Node) answer a wallet's fee
+  // lookup from this subpath, so its CommonJS emit must load on its own.
+  (built ? it : it.skip)('the testing emit loads and carries the captured fee sample', () => {
+    const file = path.join(ROOT, PKG.exports['./testing'].require);
+    const out = execFileSync(
+      process.execPath,
+      ['-e', `process.stdout.write(JSON.stringify(require(${JSON.stringify(file)}).recommendedFeesFixture()))`],
+      { cwd: ROOT, encoding: 'utf8' },
+    );
+    expect(JSON.parse(out)).toEqual({ fastestFee: 2, halfHourFee: 1, hourFee: 1, economyFee: 1, minimumFee: 1 });
   });
 });

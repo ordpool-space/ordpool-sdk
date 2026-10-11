@@ -11,7 +11,14 @@
     "module": "es2015",
     "sourceMap": true,
     "strict": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    // The e2e helpers import the fixtures subpath by its package name, as a
+    // consumer does. Inside this repo that name means the source barrel, for
+    // ts-jest and for Playwright's loader alike; tsconfig.e2e.json points it
+    // at the built declarations instead.
+    "paths": {
+      "ordpool-sdk/testing": ["./src/testing.ts"]
+    }
   },
   "exclude": [
     "node_modules"

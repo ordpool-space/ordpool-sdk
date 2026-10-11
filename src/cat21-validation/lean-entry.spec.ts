@@ -35,7 +35,7 @@ const DIST = path.resolve(__dirname, '../../dist');
 const built = fs.existsSync(path.join(DIST, 'cat21-validation/index.js'));
 
 (built ? describe : describe.skip)('the server-facing subpaths carry no wallet graph', () => {
-  it.each(['cat21-validation/index.js', 'cat21-session/index.js'])(
+  it.each(['cat21-validation/index.js', 'cat21-session/index.js', 'testing.js'])(
     '%s resolves without sats-connect',
     (entry) => {
       const { bare } = graphOf(path.join(DIST, entry));
