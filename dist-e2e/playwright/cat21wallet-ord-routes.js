@@ -4,6 +4,8 @@ exports.CAT21_WALLET_ORD_HOST = void 0;
 exports.mainnetAddressOnRegtest = mainnetAddressOnRegtest;
 exports.cat21OrdRegtestUrl = cat21OrdRegtestUrl;
 exports.installCat21WalletOrdRoutes = installCat21WalletOrdRoutes;
+exports.wasCancelledByItsPage = wasCancelledByItsPage;
+exports.closeCat21WalletPage = closeCat21WalletPage;
 const btc_signer_1 = require("@scure/btc-signer");
 const network_1 = require("ordpool-sdk/network");
 const regtest_helpers_1 = require("../regtest/regtest-helpers");
@@ -64,11 +66,43 @@ async function installCat21WalletOrdRoutes(context, opts = {}) {
     const ordUrl = opts.ordUrl ?? regtest_helpers_1.ORD_URL;
     await context.route(exports.CAT21_WALLET_ORD_HOST, async (route) => {
         const request = route.request();
-        const response = await route.fetch({ url: cat21OrdRegtestUrl(new URL(request.url()), ordUrl) });
+        let response;
+        try {
+            response = await route.fetch({ url: cat21OrdRegtestUrl(new URL(request.url()), ordUrl) });
+        }
+        catch (e) {
+            if (wasCancelledByItsPage(request))
+                return;
+            throw e;
+        }
         await route.fulfill({
             response,
             headers: { ...response.headers(), 'access-control-allow-origin': '*' },
         });
     });
+}
+/**
+ * Whether the browser cancelled `request` because its page navigated away or
+ * closed (`net::ERR_ABORTED`): its page no longer waits for an answer, so there
+ * is none to forward, and `route.fetch` rejects for it. Any other failure,
+ * such as the regtest cat21-ord refusing the connection, is not this.
+ */
+function wasCancelledByItsPage(request) {
+    return request.failure()?.errorText === 'net::ERR_ABORTED';
+}
+/**
+ * Close a Cat21 Wallet page without sending its pending cat21-ord reads to the
+ * network.
+ *
+ * A page closed while `installCat21WalletOrdRoutes` forwards one of its reads
+ * leaves that read paused in the browser; when the page's DevTools session
+ * goes away the browser lets it continue to `ord.cat21.space`, where the
+ * offline launch blocks it, and it shows in the net log as blocked. Navigating
+ * the page away first makes the browser cancel those reads (`net::ERR_ABORTED`)
+ * before anything is sent, and only then is the page closed.
+ */
+async function closeCat21WalletPage(page) {
+    await page.goto('about:blank');
+    await page.close();
 }
 //# sourceMappingURL=cat21wallet-ord-routes.js.map

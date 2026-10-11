@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CONFIRM_EFFECT_PROBE_MS = exports.POPUP_AFTER_CLICK_PROBE_MS = exports.WIZZ_FEE_WARNING_ACKNOWLEDGE = exports.CLICKABLE_MIN_OPACITY = void 0;
+exports.POPUP_AFTER_CLICK_PROBE_MS = exports.WIZZ_FEE_WARNING_ACKNOWLEDGE = exports.CLICKABLE_MIN_OPACITY = void 0;
 exports.approvalGate = approvalGate;
 exports.waitForApprovalPopup = waitForApprovalPopup;
 exports.raceApprovalPopup = raceApprovalPopup;
@@ -13,7 +13,6 @@ exports.clickApprovalAndRequireClose = clickApprovalAndRequireClose;
 exports.clickUntilApprovalPopup = clickUntilApprovalPopup;
 exports.waitForApprovalByConfirmButton = waitForApprovalByConfirmButton;
 exports.waitForPageShowing = waitForPageShowing;
-exports.clickConfirmUntilClosed = clickConfirmUntilClosed;
 const e2e_timeout_1 = require("../e2e-timeout");
 const click_until_effect_core_1 = require("./click-until-effect-core");
 /**
@@ -567,63 +566,5 @@ async function waitForPageShowing(opts) {
         // error cannot know.
         throw new Error(`no page showed ${text}${frame ? ` inside ${frame}` : ''}: ${e.message}`);
     }
-}
-/**
- * Probe: how long one confirm click gets to take effect (the popup closes, the
- * caller's `resolved` settles, or the confirm button goes away) before it
- * counts as absorbed and is sent again. Xverse absorbs a dispatch that lands
- * before its handlers attach; long enough for an accepted click to sign and
- * close the popup on a loaded runner.
- */
-exports.CONFIRM_EFFECT_PROBE_MS = 15_000;
-/**
- * Click a wallet popup's confirm button until the approval took effect: the
- * popup closed, `resolved` (the dapp-side call waiting on the signature)
- * settled, or the button went away. Each click gets `CONFIRM_EFFECT_PROBE_MS`;
- * a click that changed none of the three within it was absorbed and is sent
- * again, up to `maxClicks`. Returns the clicks sent, so a caller can log or
- * assert that one was enough.
- *
- * The click is forced and its own error only logged: the popup closing under
- * the click is the success shape, and the three effects above, not the click's
- * promise, say whether it landed. The caller's await on `resolved` (or on the
- * signed transaction) is what fails when nothing was ever signed.
- */
-async function clickConfirmUntilClosed(confirm, popup, opts = {}) {
-    const maxClicks = opts.maxClicks ?? 4;
-    const label = opts.label ?? 'confirm';
-    let settled = false;
-    opts.resolved?.then(() => { settled = true; }, () => { settled = true; });
-    let clicks = 0;
-    while (clicks < maxClicks && !popup.isClosed() && !settled) {
-        await confirm.click({ force: true }).catch((e) => {
-            // eslint-disable-next-line no-console
-            console.log(`[${label}] confirm click ${clicks + 1}: ${e.message.split('\n')[0]}`);
-        });
-        clicks++;
-        const tookEffect = await new Promise((resolve) => {
-            if (popup.isClosed() || settled) {
-                resolve(true);
-                return;
-            }
-            let done = false;
-            const finish = (effect) => {
-                if (done)
-                    return;
-                done = true;
-                clearTimeout(timer);
-                popup.off('close', onClose);
-                resolve(effect);
-            };
-            const onClose = () => finish(true);
-            const timer = setTimeout(() => finish(false), exports.CONFIRM_EFFECT_PROBE_MS);
-            popup.once('close', onClose);
-            opts.resolved?.then(() => finish(true), () => finish(true));
-            confirm.waitFor({ state: 'hidden', timeout: exports.CONFIRM_EFFECT_PROBE_MS }).then(() => finish(true), () => undefined);
-        });
-        if (tookEffect)
-            break;
-    }
-    return { clicks };
 }
 //# sourceMappingURL=approval-popup.js.map

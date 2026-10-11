@@ -11,12 +11,13 @@ set -euo pipefail
 
 COMPOSE="docker compose -f $(dirname "$0")/docker-compose.regtest.yml"
 
-# The electrs and cat21-ord checkouts the compose builds from, compared with
+# The electrs, cat21-ord and ordpool checkouts the compose builds from, compared with
 # build-pins.env. Paths as the compose resolves them: relative to e2e/.
 # shellcheck source=build-pins.sh
 . "$(dirname "$0")/build-pins.sh"
 check_build_pin ordpool-electrs "${ELECTRS_SRC:-$(dirname "$0")/../../ordpool-electrs}" "$ORDPOOL_ELECTRS_SHA"
 check_build_pin cat21-ord "${CAT21_ORD_SRC:-$(dirname "$0")/../../cat21-ord}" "$CAT21_ORD_SHA"
+check_build_pin ordpool "${ORDPOOL_SRC:-$(dirname "$0")/../../ordpool}" "$ORDPOOL_SHA"
 BITCOIND_CONTAINER="${REGTEST_BITCOIND_CONTAINER:-ordpool-e2e-bitcoind}"
 RPC="docker exec $BITCOIND_CONTAINER bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
 # The wallet name these helpers spend from. A consumer stack brings this

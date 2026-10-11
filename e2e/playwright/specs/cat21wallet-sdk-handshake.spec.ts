@@ -2,10 +2,10 @@ import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
 import { onboardCat21Wallet } from '../onboard-cat21wallet';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { installCat21WalletOrdRoutes } from '../cat21wallet-ord-routes';
+import { approveCat21WalletConnectPopup } from '../cat21wallet-sign-popup';
 import { launchWalletContext } from '../launch-wallet-context';
 
 /**
@@ -95,30 +95,10 @@ test('cat21walletConnector.connect via the harness page returns the BIP-84 / BIP
   const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectCat21Wallet());
 
-  // Cat21 Wallet's approval surface is identified by the stable testid
-  // `get-addresses-approve-button` on whichever chrome-extension://
-  // page renders it.
-  let approval: Page;
-  try {
-    approval = await waitForApprovalPopup({
-      context,
-      knownPages,
-      isApproval: async (p) => {
-        if (!p.url().startsWith('chrome-extension://')) return false;
-        await p.getByTestId('get-addresses-approve-button')
-          .waitFor({ state: 'visible' });
-        return true;
-      },
-    });
-  } catch {
-    throw new Error('cat21wallet get-addresses approval popup never appeared');
-  }
-  await shot(approval, '02a-approval');
-  // The wallet closes the popup the moment it accepts the approval, so the
-  // close is the proof the click landed.
-  await clickApprovalAndRequireClose(approval.getByTestId('get-addresses-approve-button'), approval, {
-    label: 'Cat21 Wallet connect popup',
-  });
+  // The approval surface is the `get-addresses-approve-button` testid on
+  // whichever chrome-extension:// page renders it; the helper unlocks a popup
+  // that booted locked and requires the popup to close after the click.
+  await approveCat21WalletConnectPopup(context, knownPages);
 
   const info = await resultPromise;
   // eslint-disable-next-line no-console

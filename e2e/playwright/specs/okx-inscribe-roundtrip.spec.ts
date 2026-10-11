@@ -12,12 +12,13 @@ import {
   mineBlocks,
   postTx,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
+import { closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
 import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { approveOkxConnectPopup } from '../okx-connect-popup';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
@@ -40,24 +41,6 @@ async function shot(p: Page, name: string): Promise<void> {
 
 function utf8ToHex(s: string): string {
   return Array.from(new TextEncoder().encode(s)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText('Connect account').first()
-        .waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  // OKX closes the popup the moment it accepts the approval, so the close is
-  // the proof the click landed.
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
-    label: 'OKX connect popup',
-  });
 }
 
 async function approveSignPopup(ctx: BrowserContext): Promise<void> {
@@ -123,7 +106,7 @@ test('inscribe an artifact on regtest via OKX: build commit+reveal in SDK, sign 
 
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
-  await approveConnectPopup(context, connectKnownPages);
+  await approveOkxConnectPopup({ context });
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
 

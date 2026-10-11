@@ -24,7 +24,7 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   rootDir: '..',
-  testMatch: ['<rootDir>/e2e/regtest/**/*.spec.ts'],
+  testMatch: ['<rootDir>/e2e/regtest/**/*.spec.ts', '<rootDir>/e2e/chain/**/*.chain.spec.ts'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
 
   // Same sats-connect-v4 ESM workaround as jest.config.node.js. The

@@ -26,3 +26,7 @@ export { verifyBip322Signature } from '../wallet/verify-bip322-signature.js';
 
 // The ask ceiling a listing is checked against.
 export { MAX_ASK_SATS } from '../cat21-listing/cat21-listing.types.js';
+
+// The cats on an output, read from cat21-ord: a listing's bundle is checked
+// against it. `fetch` only, no connector graph.
+export * from '../cat21-ord/cats-at-output.js';

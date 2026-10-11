@@ -7,10 +7,11 @@ import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
 import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
 import { extensionOnboardingPage } from '../wallet-onboarders';
-import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
+import { closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { approveOkxConnectPopup } from '../okx-connect-popup';
 
 /**
  * Iteration 5 — full cat21 mint roundtrip with the real OKX
@@ -42,29 +43,6 @@ async function shot(p: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `okx-mint-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  // CRITICAL: anchor on "Connect account" page header (not just any
-  // button named Connect/Confirm/Approve) — OKX opens a "Confirm
-  // Trade" sign popup pre-emptively during connect (iter 39 trace).
-  // Loose button matching would accept that wrong popup and our
-  // signPsbt would land later with no popup to approve.
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText('Connect account').first()
-        .waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  // OKX closes the popup the moment it accepts the approval, so the close is
-  // the proof the click landed.
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
-    label: 'OKX connect popup',
-  });
 }
 
 async function approveSignPopup(ctx: BrowserContext): Promise<void> {
@@ -149,7 +127,7 @@ test('mint a cat21 on regtest via OKX: build PSBT in SDK, sign in popup (BIP-86 
 
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
-  await approveConnectPopup(context, connectKnownPages);
+  await approveOkxConnectPopup({ context });
   const wallet = await connectResultPromise;
   // Close any extension popups left over from the connect step
   // (OKX leaves a "Connected" notification tab open which races

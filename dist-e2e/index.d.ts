@@ -35,4 +35,6 @@ export * from './playwright/workaround-wait-for-timeout';
 export * from './playwright/okx-sign-popup';
 export * from './playwright/launch-wallet-context';
 export * from './playwright/net-log';
+export * from './playwright/okx-connect-popup';
+export * from './playwright/leather-unlock';
 //# sourceMappingURL=index.d.ts.map

@@ -1,4 +1,4 @@
-import { type BrowserContext } from '@playwright/test';
+import { type Browser, type BrowserContext, type BrowserType } from '@playwright/test';
 /**
  * The loopback names every launch lets through: the SDK harness page
  * (`fixtures-server.js` on localhost), a consumer's served app, and the
@@ -60,6 +60,15 @@ export interface LaunchWalletContextOptions {
     /** Further Chromium switches. */
     args?: readonly string[];
 }
+/**
+ * The switches every test browser gets, with or without an extension: no
+ * sandbox and no `/dev/shm` (CI containers), offline except for
+ * `reachableHosts(env, extraHosts)`, then `args`.
+ */
+export declare function offlineBrowserArgs(opts?: {
+    extraHosts?: readonly string[];
+    args?: readonly string[];
+}, env?: NodeJS.ProcessEnv): string[];
 /** The switches `launchWalletContext` passes, without the net log. */
 export declare function walletLaunchArgs(opts: LaunchWalletContextOptions, env?: NodeJS.ProcessEnv): string[];
 /** `--log-net-log=<dir>/<wallet>-<pid>-<n>.json` when `NET_LOG_DIR_ENV` is set, else nothing. */
@@ -78,4 +87,41 @@ export declare function assertPortRefuses(host: string, port: number): Promise<v
  * requests a flow needs; install them right after this resolves.
  */
 export declare function launchWalletContext(opts: LaunchWalletContextOptions): Promise<BrowserContext>;
+/** `launchPersistentContext`'s options, less the two every offline launch sets itself. */
+export type OfflineContextOptions = Omit<NonNullable<Parameters<BrowserType['launchPersistentContext']>[1]>, 'args' | 'headless'>;
+/** `launch`'s options, less the two every offline launch sets itself. */
+export type OfflineBrowserOptions = Omit<NonNullable<Parameters<BrowserType['launch']>[0]>, 'args' | 'headless'>;
+/** What a test browser without an extension takes. */
+export interface LaunchOfflineOptions {
+    /** Names the net log file (`<name>-<pid>-<n>.json`); default `context`. */
+    name?: string;
+    /** Default `true`: a browser without an extension needs no window. */
+    headless?: boolean;
+    /** Hosts beyond `reachableHosts()` the browser must reach, such as a consumer's app server. */
+    extraHosts?: readonly string[];
+    /** Further Chromium switches. */
+    args?: readonly string[];
+}
+/** The switches `launchOfflineBrowser` and `launchOfflineContext` pass, net log included. */
+export declare function offlineLaunchSwitches(opts?: LaunchOfflineOptions, env?: NodeJS.ProcessEnv): string[];
+/**
+ * Launch Chromium without an extension, under the guarantees of
+ * `launchWalletContext`: the dead proxy is checked first, nothing but
+ * `reachableHosts()` and `extraHosts` resolves or connects, and with
+ * `ORDPOOL_E2E_NET_LOG_DIR` set one net log records the whole browser, every
+ * context it opens included. For a watch-only (xpub) account or a page that
+ * needs no wallet; each test opens its own `browser.newContext()`.
+ */
+export declare function launchOfflineBrowser(opts?: LaunchOfflineOptions & {
+    options?: OfflineBrowserOptions;
+}): Promise<Browser>;
+/**
+ * `launchOfflineBrowser` as one persistent context, for a spec that keeps a
+ * single context across its tests. `userDataDir` `''` (the default) is a fresh
+ * temporary profile; `options` carries context settings such as `viewport`.
+ */
+export declare function launchOfflineContext(opts?: LaunchOfflineOptions & {
+    userDataDir?: string;
+    options?: OfflineContextOptions;
+}): Promise<BrowserContext>;
 //# sourceMappingURL=launch-wallet-context.d.ts.map

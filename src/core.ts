@@ -85,6 +85,7 @@ export * from './wallet/wallet-deeplink.js';
 export * from './wallet/xpub/derive-watch-only.js';
 export * from './wallet/xpub/scan-watch-only.js';
 export * from './wallet/xpub/cats-at-address.js';
+export * from './cat21-ord/cats-at-output.js';
 export * from './wallet/xpub/classify-outpoint.js';
 export * from './wallet/xpub/make-watch-only-probe.js';
 

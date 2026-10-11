@@ -1,4 +1,4 @@
-import type { BrowserContext } from '@playwright/test';
+import type { BrowserContext, Page } from '@playwright/test';
 /**
  * The cat21-ord instance Cat21 Wallet reads: `https://ord.cat21.space`, a
  * constant in the wallet (`CAT21_ORD_DEFAULT_BASE_URL`,
@@ -41,4 +41,27 @@ export declare function cat21OrdRegtestUrl(url: URL, ordUrl: string): string;
 export declare function installCat21WalletOrdRoutes(context: BrowserContext, opts?: {
     ordUrl?: string;
 }): Promise<void>;
+/**
+ * Whether the browser cancelled `request` because its page navigated away or
+ * closed (`net::ERR_ABORTED`): its page no longer waits for an answer, so there
+ * is none to forward, and `route.fetch` rejects for it. Any other failure,
+ * such as the regtest cat21-ord refusing the connection, is not this.
+ */
+export declare function wasCancelledByItsPage(request: {
+    failure(): {
+        errorText: string;
+    } | null;
+}): boolean;
+/**
+ * Close a Cat21 Wallet page without sending its pending cat21-ord reads to the
+ * network.
+ *
+ * A page closed while `installCat21WalletOrdRoutes` forwards one of its reads
+ * leaves that read paused in the browser; when the page's DevTools session
+ * goes away the browser lets it continue to `ord.cat21.space`, where the
+ * offline launch blocks it, and it shows in the net log as blocked. Navigating
+ * the page away first makes the browser cancel those reads (`net::ERR_ABORTED`)
+ * before anything is sent, and only then is the page closed.
+ */
+export declare function closeCat21WalletPage(page: Page): Promise<void>;
 //# sourceMappingURL=cat21wallet-ord-routes.d.ts.map

@@ -1,25 +1,33 @@
 /**
  * @test-kind unit
- * Real:   reachableHosts, offlineLaunchArgs, walletLaunchArgs, netLogArgs, assertPortRefuses, launchWalletContext
- * Faked:  chromium.launchPersistentContext (the browser launch, @playwright/test's BrowserType signature),
- *         returning a placeholder context
+ * Real:   reachableHosts, offlineLaunchArgs, offlineBrowserArgs, walletLaunchArgs, netLogArgs, offlineLaunchSwitches,
+ *         assertPortRefuses, launchWalletContext, launchOfflineBrowser, launchOfflineContext
+ * Faked:  chromium.launch and chromium.launchPersistentContext (the browser launch, @playwright/test's BrowserType
+ *         signature), returning a placeholder; net.connect in the refusal case, emitting the 'connect' a listener sends
  * Proves: the exceptions come from the regtest environment and nothing else, the switches spell them the way
- *         Chromium matches them, a wallet gets its own launch switches, the net log lands where the env says,
- *         and the launch refuses to start when the dead proxy port answers
+ *         Chromium matches them, a wallet gets its own launch switches, a browser without an extension gets the
+ *         same offline switches and net log, the net log lands where the env says, and every launch refuses to
+ *         start when the dead proxy port answers
  */
+import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
 const mockLaunchPersistentContext = jest.fn(async () => ({ placeholder: 'context' }));
-jest.mock('@playwright/test', () => ({ chromium: { launchPersistentContext: mockLaunchPersistentContext } }));
+const mockLaunch = jest.fn(async () => ({ placeholder: 'browser' }));
+jest.mock('@playwright/test', () => ({ chromium: { launchPersistentContext: mockLaunchPersistentContext, launch: mockLaunch } }));
 
 import {
   assertPortRefuses,
+  launchOfflineBrowser,
+  launchOfflineContext,
   launchWalletContext,
   netLogArgs,
+  offlineBrowserArgs,
   offlineLaunchArgs,
+  offlineLaunchSwitches,
   reachableHosts,
   walletLaunchArgs,
 } from './launch-wallet-context';
@@ -158,5 +166,106 @@ describe('launchWalletContext', () => {
     mockLaunchPersistentContext.mockClear();
     await launchWalletContext({ wallet: 'xverse', extensionPath: '/ext/xverse', userDataDir: '/seed/dir' });
     expect((mockLaunchPersistentContext.mock.calls[0] as unknown[])[0]).toBe('/seed/dir');
+  });
+});
+
+describe('offlineBrowserArgs', () => {
+  it('is the wallet launch less the extension: no sandbox, no /dev/shm, offline, then the caller switches', () => {
+    expect(offlineBrowserArgs({ args: ['--x'] }, {})).toEqual([
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1, EXCLUDE ::1',
+      '--proxy-server=http://127.0.0.1:9',
+      '--proxy-bypass-list=localhost;127.0.0.1;[::1]',
+      '--x',
+    ]);
+    expect(walletLaunchArgs({ extensionPath: '/e', args: ['--x'] }, {}).slice(2)).toEqual(offlineBrowserArgs({ args: ['--x'] }, {}));
+  });
+
+  it('takes the regtest hosts from env and the extra hosts from the caller', () => {
+    expect(offlineBrowserArgs({ extraHosts: ['app.local'] }, { REGTEST_ORD_URL: 'http://ord.regtest.test:8080' }).slice(2)).toEqual([
+      '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1, EXCLUDE ::1, EXCLUDE ord.regtest.test, EXCLUDE app.local',
+      '--proxy-server=http://127.0.0.1:9',
+      '--proxy-bypass-list=localhost;127.0.0.1;[::1];ord.regtest.test;app.local',
+    ]);
+  });
+});
+
+describe('offlineLaunchSwitches', () => {
+  it('adds no net log without ORDPOOL_E2E_NET_LOG_DIR', () => {
+    expect(offlineLaunchSwitches({ name: 'xpub' }, {})).toEqual(offlineBrowserArgs({}, {}));
+  });
+
+  it('ends with the net log named after the launch', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'netlog-'));
+    const switches = offlineLaunchSwitches({ name: 'xpub' }, { ORDPOOL_E2E_NET_LOG_DIR: dir });
+    expect(switches.slice(0, -1)).toEqual(offlineBrowserArgs({}, {}));
+    expect(switches[switches.length - 1]).toMatch(new RegExp(`^--log-net-log=${dir}/xpub-${process.pid}-\\d+\\.json$`));
+  });
+});
+
+/** What every launch without an extension passes on the default stack, no net log. */
+const OFFLINE_SWITCHES = [
+  '--no-sandbox',
+  '--disable-dev-shm-usage',
+  '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1, EXCLUDE ::1',
+  '--proxy-server=http://127.0.0.1:9',
+  '--proxy-bypass-list=localhost;127.0.0.1;[::1]',
+];
+
+describe('launchOfflineBrowser', () => {
+  it('launches headless with the offline switches and passes launch options through', async () => {
+    mockLaunch.mockClear();
+    const browser = await launchOfflineBrowser({ name: 'site-routes', options: { slowMo: 7 } });
+    expect(browser).toEqual({ placeholder: 'browser' });
+    expect(mockLaunch.mock.calls).toEqual([[{ slowMo: 7, headless: true, args: OFFLINE_SWITCHES }]]);
+  });
+
+  it('launches headed when asked', async () => {
+    mockLaunch.mockClear();
+    await launchOfflineBrowser({ headless: false });
+    expect(mockLaunch.mock.calls).toEqual([[{ headless: false, args: OFFLINE_SWITCHES }]]);
+  });
+});
+
+describe('launchOfflineContext', () => {
+  it('launches one headless persistent context on a fresh profile with the context options', async () => {
+    mockLaunchPersistentContext.mockClear();
+    const context = await launchOfflineContext({ name: 'xpub', options: { viewport: { width: 1280, height: 900 } } });
+    expect(context).toEqual({ placeholder: 'context' });
+    expect(mockLaunchPersistentContext.mock.calls).toEqual([['', {
+      viewport: { width: 1280, height: 900 },
+      headless: true,
+      args: OFFLINE_SWITCHES,
+    }]]);
+  });
+});
+
+describe('every launch checks the dead proxy first', () => {
+  /** net.connect answering as if something listened on the dead proxy port. */
+  function deadProxyAccepts(): jest.SpyInstance {
+    const realNet = jest.requireActual<typeof net>('node:net');
+    return jest.spyOn(realNet, 'connect').mockImplementation(() => {
+      const socket = Object.assign(new EventEmitter(), { destroy: () => undefined });
+      setImmediate(() => socket.emit('connect'));
+      return socket as unknown as net.Socket;
+    });
+  }
+
+  it.each([
+    ['launchOfflineBrowser', () => launchOfflineBrowser()],
+    ['launchOfflineContext', () => launchOfflineContext()],
+    ['launchWalletContext', () => launchWalletContext({ extensionPath: '/ext/okx' })],
+  ])('%s refuses and launches nothing', async (_name, launch) => {
+    mockLaunch.mockClear();
+    mockLaunchPersistentContext.mockClear();
+    const spy = deadProxyAccepts();
+    try {
+      await expect(launch()).rejects.toThrow('127.0.0.1:9 accepts connections');
+      expect(spy.mock.calls).toEqual([[9, '127.0.0.1']]);
+      expect(mockLaunch.mock.calls.length + mockLaunchPersistentContext.mock.calls.length).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

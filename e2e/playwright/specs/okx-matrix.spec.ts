@@ -4,7 +4,7 @@ import { extensionOnboardingPage } from '../wallet-onboarders';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
+import { approveOkxConnectPopup } from '../okx-connect-popup';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
@@ -61,24 +61,6 @@ async function shot(p: Page, name: string): Promise<void> {
   }).catch(() => undefined);
 }
 
-async function approveOkxPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  // OKX closes the popup the moment it accepts the approval, so the close is
-  // the proof the click landed.
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first(), approval, {
-    label: 'OKX connect popup',
-  });
-}
-
 test.beforeAll(async () => {
   if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
     throw new Error(`OKX extension not unpacked at ${EXT_PATH}. This is a missing prerequisite, not a test failure: run e2e/playwright/playwright-bootstrap.sh okx.`);
@@ -115,9 +97,8 @@ for (const variant of VARIANTS) {
       undefined,
     );
 
-    const knownPages = new Set(context.pages());
     const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
-    await approveOkxPopup(context, knownPages);
+    await approveOkxConnectPopup({ context });
     const info = await resultPromise;
 
     // eslint-disable-next-line no-console

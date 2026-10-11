@@ -6,7 +6,6 @@ import * as fs from 'node:fs';
 import {
   clickApprovalAndRequireClose,
   waitForApprovalByConfirmButton,
-  waitForApprovalPopup,
   closeLeftoverExtensionPages,
 } from '../approval-popup';
 import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
@@ -16,6 +15,7 @@ import { Network } from '../../../src/network';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { approveOkxConnectPopup } from '../okx-connect-popup';
 
 /**
  * BIP-322 sign-message roundtrip with the real OKX extension. Promotes OKX's
@@ -35,23 +35,6 @@ let extensionId: string;
 
 async function shot(p: Page, name: string): Promise<void> {
   await p.screenshot({ path: path.resolve(RESULTS_DIR, `okx-sign-message-${name}.png`), fullPage: true }).catch(() => undefined);
-}
-
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText('Connect account').first().waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  // OKX closes the popup the moment it accepts the approval, so the close is
-  // the proof the click landed.
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
-    label: 'OKX connect popup',
-  });
 }
 
 /**
@@ -131,7 +114,7 @@ test('sign a BIP-322 message via OKX: real extension signs, SDK verifies', async
 
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
-  await approveConnectPopup(context, connectKnownPages);
+  await approveOkxConnectPopup({ context });
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
   console.log(`[okx-sign-message] ordinals address = ${wallet.ordinalsAddress}`);

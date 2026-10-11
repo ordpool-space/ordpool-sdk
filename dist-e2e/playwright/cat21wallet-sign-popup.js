@@ -4,6 +4,19 @@ exports.approveCat21WalletConnectPopup = approveCat21WalletConnectPopup;
 exports.approveCat21WalletSignPopup = approveCat21WalletSignPopup;
 const test_1 = require("@playwright/test");
 const approval_popup_1 = require("./approval-popup");
+const leather_unlock_1 = require("./leather-unlock");
+const wallet_test_vectors_1 = require("./wallet-test-vectors");
+/**
+ * Wait for `control` on a Cat21 Wallet popup, unlocking a popup that booted
+ * locked (`waitForControlUnlockingIfAsked`), and say so in the log: each one is
+ * an instance of the wallet's boot race, worth counting.
+ */
+async function showCat21WalletControl(page, control, password, label) {
+    if (await (0, leather_unlock_1.waitForControlUnlockingIfAsked)(page, control, password) === 'unlocked') {
+        // eslint-disable-next-line no-console
+        console.log(`[${label}] the popup booted locked; unlocked it with the wallet password`);
+    }
+}
 /**
  * Wait for the Cat21 Wallet's getAddresses approval popup to open
  * in `context`, then click the approve button.
@@ -11,18 +24,18 @@ const approval_popup_1 = require("./approval-popup");
  * Identified by the `get-addresses-approve-button` testid on a
  * chrome-extension:// page (see the wallet's OnboardingSelectors
  * bundle). Every cat21wallet spec that connects to the dapp goes
- * through this surface.
+ * through this surface. A popup that booted locked is unlocked with
+ * `password` (default: the onboarding password, `PASSWORD_BY_WALLET`).
  */
-async function approveCat21WalletConnectPopup(context, knownPages) {
+async function approveCat21WalletConnectPopup(context, knownPages, opts = {}) {
+    const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.cat21wallet;
     const approval = await (0, approval_popup_1.waitForApprovalPopup)({
         context,
         knownPages,
         isApproval: async (p) => {
             if (!p.url().startsWith('chrome-extension://'))
                 return false;
-            await p
-                .getByTestId('get-addresses-approve-button')
-                .waitFor({ state: 'visible' });
+            await showCat21WalletControl(p, p.getByTestId('get-addresses-approve-button'), password, 'Cat21 Wallet connect popup');
             return true;
         },
     });
@@ -48,6 +61,7 @@ async function approveCat21WalletConnectPopup(context, knownPages) {
  */
 async function approveCat21WalletSignPopup(args) {
     const { context, knownPages, screenshot, expectedSignAtIndex } = args;
+    const password = args.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.cat21wallet;
     const requireSignPsbtUrl = expectedSignAtIndex !== undefined;
     const approval = await (0, approval_popup_1.waitForApprovalPopup)({
         context,
@@ -57,10 +71,7 @@ async function approveCat21WalletSignPopup(args) {
                 return false;
             if (requireSignPsbtUrl && !p.url().includes('sign-psbt'))
                 return false;
-            await p
-                .getByRole('button', { name: /^(confirm|sign|approve)$/i })
-                .first()
-                .waitFor({ state: 'visible' });
+            await showCat21WalletControl(p, p.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first(), password, 'Cat21 Wallet sign popup');
             return true;
         },
     });

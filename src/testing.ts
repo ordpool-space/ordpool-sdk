@@ -6,3 +6,4 @@
 // lookup from here; `/core` and the main entry re-export the same module, so
 // there is one fixture and every consumer reads it.
 export * from './cat21-mint/recommended-fees.fixtures.js';
+export * from './cat21-ord/cats-at-output.fixtures.js';

@@ -2,7 +2,8 @@ import { test, expect, BrowserContext, Page } from '@playwright/test';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
-import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-popup';
+import { clickApprovalAndRequireClose } from '../approval-popup';
+import { waitForOkxConnectApproval } from '../okx-connect-popup';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
@@ -76,26 +77,16 @@ test('okxConnector.connect via the harness page returns the BIP-86 mainnet Tapro
     undefined,
   );
 
-  const knownPages = new Set(context.pages());
   const resultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
   resultPromise.catch(() => undefined);
 
-  // OKX's approval surface — try URL-anchor first, then fall back to
-  // a generic "Connect/Approve" button on any new chrome-extension page.
-  const approval = await waitForApprovalPopup({
-    context,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first()
-        .waitFor({ state: 'visible' });
-      return true;
-    },
-  });
+  // OKX's connect request, on a new page or one already open (OKX reuses its
+  // popup window), anchored on the connect route and its Connect button.
+  const approval = await waitForOkxConnectApproval({ context });
   await shot(approval, '01-approval');
   // OKX closes the popup the moment it accepts the approval, so the close is
   // the proof the click landed.
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^(connect|approve|confirm|allow)$/i }).first(), approval, {
+  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
     label: 'OKX connect popup',
   });
 

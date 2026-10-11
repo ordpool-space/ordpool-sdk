@@ -1,4 +1,4 @@
-import type { BrowserContext, Route } from '@playwright/test';
+import type { BrowserContext, Page, Route } from '@playwright/test';
 import { Address, NETWORK } from '@scure/btc-signer';
 import { Network, toScureNetwork } from 'ordpool-sdk/network';
 
@@ -67,10 +67,42 @@ export async function installCat21WalletOrdRoutes(
   const ordUrl = opts.ordUrl ?? ORD_URL;
   await context.route(CAT21_WALLET_ORD_HOST, async (route: Route) => {
     const request = route.request();
-    const response = await route.fetch({ url: cat21OrdRegtestUrl(new URL(request.url()), ordUrl) });
+    let response;
+    try {
+      response = await route.fetch({ url: cat21OrdRegtestUrl(new URL(request.url()), ordUrl) });
+    } catch (e) {
+      if (wasCancelledByItsPage(request)) return;
+      throw e;
+    }
     await route.fulfill({
       response,
       headers: { ...response.headers(), 'access-control-allow-origin': '*' },
     });
   });
+}
+
+/**
+ * Whether the browser cancelled `request` because its page navigated away or
+ * closed (`net::ERR_ABORTED`): its page no longer waits for an answer, so there
+ * is none to forward, and `route.fetch` rejects for it. Any other failure,
+ * such as the regtest cat21-ord refusing the connection, is not this.
+ */
+export function wasCancelledByItsPage(request: { failure(): { errorText: string } | null }): boolean {
+  return request.failure()?.errorText === 'net::ERR_ABORTED';
+}
+
+/**
+ * Close a Cat21 Wallet page without sending its pending cat21-ord reads to the
+ * network.
+ *
+ * A page closed while `installCat21WalletOrdRoutes` forwards one of its reads
+ * leaves that read paused in the browser; when the page's DevTools session
+ * goes away the browser lets it continue to `ord.cat21.space`, where the
+ * offline launch blocks it, and it shows in the net log as blocked. Navigating
+ * the page away first makes the browser cancel those reads (`net::ERR_ABORTED`)
+ * before anything is sent, and only then is the page closed.
+ */
+export async function closeCat21WalletPage(page: Page): Promise<void> {
+  await page.goto('about:blank');
+  await page.close();
 }

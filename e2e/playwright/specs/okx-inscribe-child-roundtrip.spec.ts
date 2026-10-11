@@ -21,12 +21,12 @@ import {
 import {
   clickApprovalAndRequireClose,
   waitForApprovalByConfirmButton,
-  waitForApprovalPopup,
   closeLeftoverExtensionPages,
 } from '../approval-popup';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { waitForOkxConnectApproval } from '../okx-connect-popup';
 
 /**
  * OKX PARENT/CHILD inscribe on regtest.
@@ -94,17 +94,9 @@ const SIGN_HEADING = /Signature request|Confirm Trade|Asset transfer pending/i;
  * opens — `done` flips and we return), and a fresh dApp shows the popup
  * (we click Connect, swallowing the close-race if OKX dismisses it mid-click).
  */
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>, done: () => boolean): Promise<void> {
+async function approveConnectPopup(ctx: BrowserContext, done: () => boolean): Promise<void> {
   const approval = await Promise.race([
-    waitForApprovalPopup({
-      context: ctx,
-      knownPages,
-      isApproval: async (p) => {
-        if (!p.url().startsWith('chrome-extension://')) return false;
-        await p.getByText('Connect account').first().waitFor({ state: 'visible' });
-        return true;
-      },
-    }),
+    waitForOkxConnectApproval({ context: ctx }),
     (async () => {
       while (!done()) await new Promise(r => setTimeout(r, 250));
       return null;
@@ -241,7 +233,7 @@ test('inscribe a parent then a child via OKX: wallet signs the Taproot reveal pa
   let connectDone = false;
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx())
     .then((r) => { connectDone = true; return r; });
-  await approveConnectPopup(context, connectKnownPages, () => connectDone);
+  await approveConnectPopup(context, () => connectDone);
   const walletMainnet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
 

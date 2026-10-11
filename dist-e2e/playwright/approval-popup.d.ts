@@ -321,48 +321,4 @@ export declare function waitForPageShowing(opts: {
      */
     frame?: string;
 }): Promise<Page>;
-/**
- * Probe: how long one confirm click gets to take effect (the popup closes, the
- * caller's `resolved` settles, or the confirm button goes away) before it
- * counts as absorbed and is sent again. Xverse absorbs a dispatch that lands
- * before its handlers attach; long enough for an accepted click to sign and
- * close the popup on a loaded runner.
- */
-export declare const CONFIRM_EFFECT_PROBE_MS = 15000;
-/** The part of a Playwright `Locator` the confirm button needs. */
-export interface ConfirmButton {
-    click(options: {
-        force: true;
-    }): Promise<void>;
-    waitFor(options: {
-        state: 'hidden';
-        timeout: number;
-    }): Promise<void>;
-}
-/** The part of a Playwright `Page` the popup needs. */
-export interface ClosablePopup {
-    isClosed(): boolean;
-    once(event: 'close', listener: () => void): unknown;
-    off(event: 'close', listener: () => void): unknown;
-}
-/**
- * Click a wallet popup's confirm button until the approval took effect: the
- * popup closed, `resolved` (the dapp-side call waiting on the signature)
- * settled, or the button went away. Each click gets `CONFIRM_EFFECT_PROBE_MS`;
- * a click that changed none of the three within it was absorbed and is sent
- * again, up to `maxClicks`. Returns the clicks sent, so a caller can log or
- * assert that one was enough.
- *
- * The click is forced and its own error only logged: the popup closing under
- * the click is the success shape, and the three effects above, not the click's
- * promise, say whether it landed. The caller's await on `resolved` (or on the
- * signed transaction) is what fails when nothing was ever signed.
- */
-export declare function clickConfirmUntilClosed(confirm: ConfirmButton, popup: ClosablePopup, opts?: {
-    resolved?: Promise<unknown>;
-    maxClicks?: number;
-    label?: string;
-}): Promise<{
-    clicks: number;
-}>;
 //# sourceMappingURL=approval-popup.d.ts.map

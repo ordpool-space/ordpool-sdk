@@ -36,10 +36,14 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.NET_LOG_DIR_ENV = exports.DEAD_PROXY_PORT = exports.DEAD_PROXY_HOST = exports.LOOPBACK_HOSTS = void 0;
 exports.reachableHosts = reachableHosts;
 exports.offlineLaunchArgs = offlineLaunchArgs;
+exports.offlineBrowserArgs = offlineBrowserArgs;
 exports.walletLaunchArgs = walletLaunchArgs;
 exports.netLogArgs = netLogArgs;
 exports.assertPortRefuses = assertPortRefuses;
 exports.launchWalletContext = launchWalletContext;
+exports.offlineLaunchSwitches = offlineLaunchSwitches;
+exports.launchOfflineBrowser = launchOfflineBrowser;
+exports.launchOfflineContext = launchOfflineContext;
 const test_1 = require("@playwright/test");
 const fs = __importStar(require("node:fs"));
 const net = __importStar(require("node:net"));
@@ -116,16 +120,28 @@ function offlineLaunchArgs(hosts) {
         `--proxy-bypass-list=${hosts.join(';')}`,
     ];
 }
+/**
+ * The switches every test browser gets, with or without an extension: no
+ * sandbox and no `/dev/shm` (CI containers), offline except for
+ * `reachableHosts(env, extraHosts)`, then `args`.
+ */
+function offlineBrowserArgs(opts = {}, env = process.env) {
+    return [
+        '--no-sandbox',
+        '--disable-dev-shm-usage',
+        ...offlineLaunchArgs(reachableHosts(env, opts.extraHosts)),
+        ...(opts.args ?? []),
+    ];
+}
 /** The switches `launchWalletContext` passes, without the net log. */
 function walletLaunchArgs(opts, env = process.env) {
     return [
         `--disable-extensions-except=${opts.extensionPath}`,
         `--load-extension=${opts.extensionPath}`,
-        '--no-sandbox',
-        '--disable-dev-shm-usage',
-        ...offlineLaunchArgs(reachableHosts(env, opts.extraHosts)),
-        ...(opts.wallet ? WALLET_ARGS[opts.wallet] ?? [] : []),
-        ...(opts.args ?? []),
+        ...offlineBrowserArgs({
+            extraHosts: opts.extraHosts,
+            args: [...(opts.wallet ? WALLET_ARGS[opts.wallet] ?? [] : []), ...(opts.args ?? [])],
+        }, env),
     ];
 }
 let netLogSeq = 0;
@@ -167,10 +183,42 @@ function assertPortRefuses(host, port) {
  * requests a flow needs; install them right after this resolves.
  */
 async function launchWalletContext(opts) {
-    await assertPortRefuses(exports.DEAD_PROXY_HOST, exports.DEAD_PROXY_PORT);
-    return test_1.chromium.launchPersistentContext(opts.userDataDir ?? '', {
+    return launchPersistentOffline(opts.userDataDir ?? '', {
         headless: opts.headless ?? false,
         args: [...walletLaunchArgs(opts), ...netLogArgs(opts.wallet)],
+    });
+}
+/** The one persistent launch behind `launchWalletContext` and `launchOfflineContext`: dead proxy checked first. */
+async function launchPersistentOffline(userDataDir, options) {
+    await assertPortRefuses(exports.DEAD_PROXY_HOST, exports.DEAD_PROXY_PORT);
+    return test_1.chromium.launchPersistentContext(userDataDir, options);
+}
+/** The switches `launchOfflineBrowser` and `launchOfflineContext` pass, net log included. */
+function offlineLaunchSwitches(opts = {}, env = process.env) {
+    return [...offlineBrowserArgs(opts, env), ...netLogArgs(opts.name, env)];
+}
+/**
+ * Launch Chromium without an extension, under the guarantees of
+ * `launchWalletContext`: the dead proxy is checked first, nothing but
+ * `reachableHosts()` and `extraHosts` resolves or connects, and with
+ * `ORDPOOL_E2E_NET_LOG_DIR` set one net log records the whole browser, every
+ * context it opens included. For a watch-only (xpub) account or a page that
+ * needs no wallet; each test opens its own `browser.newContext()`.
+ */
+async function launchOfflineBrowser(opts = {}) {
+    await assertPortRefuses(exports.DEAD_PROXY_HOST, exports.DEAD_PROXY_PORT);
+    return test_1.chromium.launch({ ...opts.options, headless: opts.headless ?? true, args: offlineLaunchSwitches(opts) });
+}
+/**
+ * `launchOfflineBrowser` as one persistent context, for a spec that keeps a
+ * single context across its tests. `userDataDir` `''` (the default) is a fresh
+ * temporary profile; `options` carries context settings such as `viewport`.
+ */
+async function launchOfflineContext(opts = {}) {
+    return launchPersistentOffline(opts.userDataDir ?? '', {
+        ...opts.options,
+        headless: opts.headless ?? true,
+        args: offlineLaunchSwitches(opts),
     });
 }
 //# sourceMappingURL=launch-wallet-context.js.map

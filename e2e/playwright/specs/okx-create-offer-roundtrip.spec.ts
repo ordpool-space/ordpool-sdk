@@ -18,7 +18,7 @@ import {
   assertAllInputsSighashAll,
   getUtxos,
 } from '../../regtest/regtest-helpers';
-import { waitForApprovalPopup, closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
+import { closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
 import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
@@ -28,6 +28,7 @@ import { buildCat21MintPsbt } from '../../../src/cat21-mint/cat21-mint.helper';
 import { validateCat21BuyOfferPsbt } from '../../../src/cat21-offer/cat21-offer.helper';
 import { KnownOrdinalWalletType } from '../../../src/wallet/wallet.service.types';
 import { launchWalletContext } from '../launch-wallet-context';
+import { approveOkxConnectPopup } from '../okx-connect-popup';
 
 /**
  * OKX cat21 CREATE-OFFER roundtrip on regtest — OKX is the BUYER.
@@ -75,27 +76,6 @@ async function shot(p: Page, name: string): Promise<void> {
     path: path.resolve(RESULTS_DIR, `okx-create-offer-${name}.png`),
     fullPage: true,
   }).catch(() => undefined);
-}
-
-async function approveConnectPopup(ctx: BrowserContext, knownPages: Set<Page>): Promise<void> {
-  // Anchor on the "Connect account" page header — copied EXACTLY from
-  // okx-mint-roundtrip.spec.ts (OKX opens a stray sign popup during
-  // connect that loose button matching would wrongly accept).
-  const approval = await waitForApprovalPopup({
-    context: ctx,
-    knownPages,
-    isApproval: async (p) => {
-      if (!p.url().startsWith('chrome-extension://')) return false;
-      await p.getByText('Connect account').first()
-        .waitFor({ state: 'visible' });
-      return true;
-    },
-  });
-  // OKX closes the popup the moment it accepts the approval, so the close is
-  // the proof the click landed.
-  await clickApprovalAndRequireClose(approval.getByRole('button', { name: /^connect$/i }).first(), approval, {
-    label: 'OKX connect popup',
-  });
 }
 
 async function approveSignPopup(ctx: BrowserContext, tag: string): Promise<void> {
@@ -164,7 +144,7 @@ test('build + sign a CAT-21 buy-offer on regtest via OKX (buyer): seller raw-key
   // ── Connect ──
   const connectKnownPages = new Set(context.pages());
   const connectResultPromise = harness.evaluate(() => window.ordpoolSdkHarness.connectOkx());
-  await approveConnectPopup(context, connectKnownPages);
+  await approveOkxConnectPopup({ context });
   const wallet = await connectResultPromise;
   await closeLeftoverExtensionPages(context, connectKnownPages);
   expect(wallet.paymentAddress).toBe('bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr');

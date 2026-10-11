@@ -6,9 +6,12 @@ import { type BrowserContext, type Page } from '@playwright/test';
  * Identified by the `get-addresses-approve-button` testid on a
  * chrome-extension:// page (see the wallet's OnboardingSelectors
  * bundle). Every cat21wallet spec that connects to the dapp goes
- * through this surface.
+ * through this surface. A popup that booted locked is unlocked with
+ * `password` (default: the onboarding password, `PASSWORD_BY_WALLET`).
  */
-export declare function approveCat21WalletConnectPopup(context: BrowserContext, knownPages: Set<Page>): Promise<void>;
+export declare function approveCat21WalletConnectPopup(context: BrowserContext, knownPages: Set<Page>, opts?: {
+    password?: string;
+}): Promise<void>;
 interface ApproveCat21WalletSignPopupArgs {
     context: BrowserContext;
     /** Pages already known before the operation that opens the popup. */
@@ -28,6 +31,8 @@ interface ApproveCat21WalletSignPopupArgs {
      * RPC shape. Pass a single number when only one index is signed.
      */
     expectedSignAtIndex?: number | number[];
+    /** Unlocks a popup that booted locked; default: the onboarding password (`PASSWORD_BY_WALLET`). */
+    password?: string;
 }
 /**
  * Wait for the Cat21 Wallet's sign-PSBT popup to open in `context`,

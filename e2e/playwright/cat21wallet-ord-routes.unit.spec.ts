@@ -1,10 +1,22 @@
 /**
  * @test-kind unit
- * Real:   mainnetAddressOnRegtest, cat21OrdRegtestUrl, installCat21WalletOrdRoutes, @scure/btc-signer
- * Faked:  the BrowserContext (route) and the route (request/fetch/fulfill), shapes: @playwright/test types
- * Proves: Cat21 Wallet's ord.cat21.space reads go to the regtest cat21-ord, with its mainnet addresses as their regtest twins
+ * Real:   mainnetAddressOnRegtest, cat21OrdRegtestUrl, installCat21WalletOrdRoutes, wasCancelledByItsPage,
+ *         closeCat21WalletPage, @scure/btc-signer
+ * Faked:  the BrowserContext (route), the route (request/fetch/fulfill) and the page (goto/close), shapes:
+ *         @playwright/test types; the ERR_ABORTED failure is the one Chromium reports for a read whose page
+ *         navigated away (observed with Cat21 Wallet 1178faf, 2026-10-11)
+ * Proves: Cat21 Wallet's ord.cat21.space reads go to the regtest cat21-ord, with its mainnet addresses as their regtest
+ *         twins; a read its page cancelled ends quietly and any other forwarding failure fails loudly; a wallet page
+ *         is navigated away before it closes
  */
-import { CAT21_WALLET_ORD_HOST, cat21OrdRegtestUrl, installCat21WalletOrdRoutes, mainnetAddressOnRegtest } from './cat21wallet-ord-routes';
+import {
+  CAT21_WALLET_ORD_HOST,
+  cat21OrdRegtestUrl,
+  closeCat21WalletPage,
+  installCat21WalletOrdRoutes,
+  mainnetAddressOnRegtest,
+  wasCancelledByItsPage,
+} from './cat21wallet-ord-routes';
 
 // The test seed's BIP-84 payment and BIP-86 ordinals addresses (account 0),
 // with their regtest encodings computed outside @scure (a plain bech32 /
@@ -76,5 +88,66 @@ describe('installCat21WalletOrdRoutes', () => {
     expect(calls.fetched).toBe(`http://localhost:28080/address/${PAYMENT_REGTEST}`);
     expect(calls.fulfilled?.response).toBe(regtestAnswer);
     expect(calls.fulfilled?.headers).toEqual({ 'content-type': 'application/json', 'access-control-allow-origin': '*' });
+  });
+});
+
+describe('a read its page cancelled', () => {
+  type Handler = (route: unknown) => Promise<void>;
+
+  async function handler(): Promise<Handler> {
+    const routes: Handler[] = [];
+    await installCat21WalletOrdRoutes(
+      { route: async (_pattern: RegExp, h: Handler) => { routes.push(h); } } as never,
+      { ordUrl: 'http://localhost:28080' },
+    );
+    return routes[0];
+  }
+
+  /** A route whose forward rejects, for a request that failed with `errorText` (or did not fail). */
+  function failingRoute(errorText: string | null) {
+    const calls = { fulfilled: 0 };
+    return {
+      calls,
+      route: {
+        request: () => ({
+          url: () => `https://ord.cat21.space/address/${PAYMENT}`,
+          failure: () => (errorText === null ? null : { errorText }),
+        }),
+        fetch: async () => { throw new Error('route.fetch: Target page, context or browser has been closed'); },
+        fulfill: async () => { calls.fulfilled += 1; },
+      },
+    };
+  }
+
+  it('wasCancelledByItsPage is ERR_ABORTED and nothing else', () => {
+    expect(wasCancelledByItsPage({ failure: () => ({ errorText: 'net::ERR_ABORTED' }) })).toBe(true);
+    expect(wasCancelledByItsPage({ failure: () => ({ errorText: 'net::ERR_CONNECTION_REFUSED' }) })).toBe(false);
+    expect(wasCancelledByItsPage({ failure: () => null })).toBe(false);
+  });
+
+  it('ends without an answer when the page cancelled it', async () => {
+    const r = failingRoute('net::ERR_ABORTED');
+    await (await handler())(r.route);
+    expect(r.calls.fulfilled).toBe(0);
+  });
+
+  it.each([['the request still alive', null], ['a refused connection', 'net::ERR_CONNECTION_REFUSED']])(
+    'rethrows the forwarding error for %s',
+    async (_name, errorText) => {
+      const r = failingRoute(errorText);
+      await expect((await handler())(r.route)).rejects.toThrow('route.fetch: Target page, context or browser has been closed');
+      expect(r.calls.fulfilled).toBe(0);
+    },
+  );
+});
+
+describe('closeCat21WalletPage', () => {
+  it('navigates the page away, then closes it', async () => {
+    const steps: string[] = [];
+    await closeCat21WalletPage({
+      goto: async (url: string) => { steps.push(`goto ${url}`); return null; },
+      close: async () => { steps.push('close'); },
+    } as never);
+    expect(steps).toEqual(['goto about:blank', 'close']);
   });
 });
