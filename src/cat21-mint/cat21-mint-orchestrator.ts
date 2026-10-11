@@ -11,6 +11,7 @@ import {
   liftRecommendationByOutpoint,
   FundingTopologySetting,
   resolveFundingTopology,
+  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
 import { CandidateFeeRow, outpointKey } from '../cat21-fee/candidate-fees.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
@@ -343,7 +344,7 @@ export class Cat21MintOrchestrator {
     if (!selected) {
       throw new Error(
         rec.status === 'expert-required'
-          ? 'Select a funding UTXO (the available coins carry assets)'
+          ? expertRequiredMessage(rec)
           : 'No UTXO selected',
       );
     }

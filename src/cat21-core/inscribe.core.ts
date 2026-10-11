@@ -5,6 +5,7 @@ import {
   FundingRecommendation,
   recommendFunding,
   WalletAddressTopology,
+  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import {
@@ -330,7 +331,7 @@ export async function executeInscribe(
       plan.status === 'scanning'
         ? 'Still checking what the funding coins hold. Try again in a moment.'
         : plan.status === 'expert-required'
-        ? 'Select a funding UTXO (the available coins carry assets)'
+        ? expertRequiredMessage(plan.recommendation)
         : 'Insufficient funds for inscribe at the current fee rate',
     );
   }

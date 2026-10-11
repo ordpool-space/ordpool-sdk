@@ -5,6 +5,7 @@ import {
   FundingRecommendation,
   recommendFunding,
   WalletAddressTopology,
+  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
 import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { Network, toScureNetwork } from '../network.js';
@@ -326,7 +327,7 @@ export async function executeTransfer(
       plan.status === 'scanning'
         ? 'Still checking what the funding coins hold. Try again in a moment.'
         : plan.status === 'expert-required'
-        ? 'Select a funding UTXO (the available coins carry assets)'
+        ? expertRequiredMessage(plan.recommendation)
         : 'Insufficient funds for transfer at the current fee rate',
     );
   }

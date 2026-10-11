@@ -9,6 +9,7 @@ import {
   FundingRecommendation,
   FundingTopologySetting,
   resolveFundingTopology,
+  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { Network } from '../network.js';
@@ -651,7 +652,7 @@ export class InscribeMintOrchestrator {
     if (!selected) {
       throw new Error(
         rec.status === 'expert-required'
-          ? 'Select a funding UTXO (the available coins carry assets)'
+          ? expertRequiredMessage(rec)
           : 'No UTXO selected',
       );
     }

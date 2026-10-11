@@ -151,6 +151,20 @@ describe('mint.core — executeMint', () => {
     expect(sign.calls).toHaveLength(0);
   });
 
+  it('EXPERT-REQUIRED on a separate-payment-address wallet when the only covering coin failed its scan', async () => {
+    const unknown = coin('e', 100_000);
+    const sign = signPort();
+    const broadcast = broadcastPort();
+    const failingScan: ContentScanPort = { classify: async () => { throw new Error('ord unreachable'); } };
+    await expect(
+      executeMint(params({ fundingTopology: 'separate-payment-address' }), {
+        utxos: utxosPort([unknown]), scan: failingScan, sign: sign.port, broadcast: broadcast.port,
+      }),
+    ).rejects.toThrow('Select a funding UTXO (what the covering coins hold could not be checked)');
+    expect(sign.calls).toEqual([]);
+    expect(broadcast.calls).toEqual([]);
+  });
+
   it('EXPERT OVERRIDE: an explicit pick of the asset coin is honoured', async () => {
     const asset = coin('d', 100_000);
     const sign = signPort();

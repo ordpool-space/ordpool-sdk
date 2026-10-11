@@ -160,6 +160,33 @@ describe('the wallet topology decides whether a dirty-only wallet proceeds or bl
     expect(rec.status).toBe('asset-notice');
     expect(rec.candidates.find((c) => c.value === 20_000)?.bucket).toBe('failed');
   });
+
+  it('a separate-payment-address wallet BLOCKS when the only covering coin failed its scan', async () => {
+    const failing = u('e', 20_000);
+    const { port } = fakeScan({ [op(failing)]: 'reject' });
+    const rec = await selectFunding(
+      [u('a', 200), failing], 2_000, port, undefined, 'separate-payment-address',
+    );
+    expect(rec.status).toBe('expert-required');
+    expect(rec.recommended?.value).toBe(20_000);
+    expect(rec.recommended?.bucket).toBe('failed');
+    // No coin is handed to a flow that may proceed: content unknown.
+    expect(resolveFundingPick(rec, 2_000)).toBeNull();
+    // An explicit expert-mode pick of that coin is still the user's call.
+    expect(resolveFundingPick(rec, 2_000, { txid: failing.txid, vout: 0 })?.bucket).toBe('failed');
+  });
+
+  it('a failed coin that fits tighter never displaces the named asset coin behind a notice', async () => {
+    const failing = u('f', 3_000);
+    const dirty = u('b', 9_000);
+    const { port } = fakeScan({ [op(failing)]: 'reject', [op(dirty)]: 'has-assets' });
+    const rec = await selectFunding(
+      [failing, dirty], 2_000, port, undefined, 'separate-payment-address',
+    );
+    expect(rec.status).toBe('asset-notice');
+    expect(resolveFundingPick(rec, 2_000)?.value).toBe(9_000);
+    expect(resolveFundingPick(rec, 2_000)?.bucket).toBe('assets');
+  });
 });
 
 describe('the recommendation names what it found, so an API caller can decide like a person', () => {

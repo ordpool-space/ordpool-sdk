@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { AnnotatedFundingUtxo, isOneAddressWallet, recommendFunding } from './funding-safety.js';
+import { AnnotatedFundingUtxo, expertRequiredMessage, isOneAddressWallet, recommendFunding } from './funding-safety.js';
 import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
 
 let n = 0;
@@ -253,5 +253,111 @@ describe('isOneAddressWallet derives topology instead of listing wallet names', 
       paymentAddress: 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8zeqchgx',
       ordinalsAddress: 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxq7pkrz9',
     })).toBe(false);
+  });
+});
+
+describe('recommendFunding — a coin with unknown content is never behind a notice', () => {
+  // A failed scan means the content is UNKNOWN. A notice must name what the
+  // coin carries; a failed coin has nothing to name, so it can never be the coin
+  // an ENABLED CTA spends. That holds on every topology, and the recommendation
+  // carries `bucket: 'failed'` so a person's warning and an agent's decision read
+  // the same fact.
+  const detail = {
+    inscriptionIds: ['abc123i0'],
+    runeNames: [],
+    catIds: [],
+    rareSat: null,
+  };
+
+  describe('only failed coins cover', () => {
+    const onlyFailed = () => [u(200, 'clean'), u(9_000, 'failed'), u(50_000, 'failed')];
+
+    it('BLOCKS on a wallet with a separate payment address', () => {
+      const r = recommendFunding(onlyFailed(), 2_000, undefined, 'separate-payment-address');
+      expect(r.status).toBe('expert-required');
+      expect(r.recommended?.value).toBe(9_000);
+      expect(r.recommended?.bucket).toBe('failed');
+    });
+
+    it('BLOCKS on a wallet that uses one address for everything', () => {
+      const r = recommendFunding(onlyFailed(), 2_000, undefined, 'one-address-for-everything');
+      expect(r.status).toBe('expert-required');
+      expect(r.recommended?.value).toBe(9_000);
+      expect(r.recommended?.bucket).toBe('failed');
+    });
+
+    it('BLOCKS when the caller passes no topology', () => {
+      const r = recommendFunding(onlyFailed(), 2_000);
+      expect(r.status).toBe('expert-required');
+      expect(r.recommended?.value).toBe(9_000);
+      expect(r.recommended?.bucket).toBe('failed');
+    });
+  });
+
+  describe('a known-asset coin and a tighter failed coin both cover', () => {
+    // The failed 3_000 is the best fit by value; the 9_000 carries a named
+    // inscription. Only the named coin can stand behind a notice.
+    const mixed = (): AnnotatedFundingUtxo[] => [
+      u(3_000, 'failed'),
+      { ...u(9_000, 'assets'), assets: detail },
+      u(40_000, 'assets'),
+    ];
+
+    it('NOTICE on the known-asset coin on a separate-payment-address wallet', () => {
+      const r = recommendFunding(mixed(), 2_000, undefined, 'separate-payment-address');
+      expect(r.status).toBe('asset-notice');
+      expect(r.recommended?.value).toBe(9_000);
+      expect(r.recommended?.bucket).toBe('assets');
+      expect(r.recommended?.assets).toEqual(detail);
+    });
+
+    it('BLOCKS on the same known-asset coin on a one-address wallet', () => {
+      const r = recommendFunding(mixed(), 2_000, undefined, 'one-address-for-everything');
+      expect(r.status).toBe('expert-required');
+      expect(r.recommended?.value).toBe(9_000);
+      expect(r.recommended?.bucket).toBe('assets');
+      expect(r.recommended?.assets).toEqual(detail);
+    });
+
+    it('keeps the failed coin in the candidate list for the expert picker', () => {
+      const r = recommendFunding(mixed(), 2_000, undefined, 'separate-payment-address');
+      expect(r.candidates.map((c) => [c.value, c.bucket])).toEqual([
+        [3_000, 'failed'],
+        [9_000, 'assets'],
+        [40_000, 'assets'],
+      ]);
+    });
+  });
+
+  describe('expertRequiredMessage names the cause the recommendation carries', () => {
+    it('says the content could not be checked for a failed coin', () => {
+      const r = recommendFunding([u(9_000, 'failed')], 2_000, undefined, 'separate-payment-address');
+      expect(expertRequiredMessage(r)).toBe(
+        'Select a funding UTXO (what the covering coins hold could not be checked)',
+      );
+    });
+
+    it('says the coins carry assets for a known-asset coin', () => {
+      const r = recommendFunding([u(9_000, 'assets')], 2_000, undefined, 'one-address-for-everything');
+      expect(expertRequiredMessage(r)).toBe('Select a funding UTXO (the available coins carry assets)');
+    });
+  });
+
+  describe('a clean coin also covers', () => {
+    const withClean = () => [u(3_000, 'failed'), u(12_000, 'clean'), u(9_000, 'assets')];
+
+    it('stays AUTO on the clean coin on a separate-payment-address wallet', () => {
+      const r = recommendFunding(withClean(), 2_000, undefined, 'separate-payment-address');
+      expect(r.status).toBe('auto');
+      expect(r.recommended?.value).toBe(12_000);
+      expect(r.recommended?.bucket).toBe('clean');
+    });
+
+    it('stays AUTO on the clean coin on a one-address wallet', () => {
+      const r = recommendFunding(withClean(), 2_000, undefined, 'one-address-for-everything');
+      expect(r.status).toBe('auto');
+      expect(r.recommended?.value).toBe(12_000);
+      expect(r.recommended?.bucket).toBe('clean');
+    });
   });
 });

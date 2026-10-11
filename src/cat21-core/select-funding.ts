@@ -23,7 +23,10 @@ const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
  *                                   coin carries)
  * - only asset coins cover, and the wallet uses ONE address for everything
  *                                -> `expert-required` (block; surface the picker)
- * - a covering coin's scan fails -> that coin is `failed` (never auto-spent)
+ * - a covering coin's scan fails -> that coin is `failed`, never auto-spent;
+ *                                   when no clean or known-asset coin covers,
+ *                                   `expert-required` on every topology with
+ *                                   `recommended.bucket === 'failed'`
  * - nothing covers               -> `insufficient`
  *
  * Non-covering coins stay `unscanned` (never auto-picked anyway, so no wasted
@@ -90,11 +93,12 @@ export async function selectFunding<T extends FundingUtxo>(
  * - the user's EXPLICIT expert-mode pick when it still covers the target,
  *   honoured even when it carries assets, because they chose it;
  * - otherwise the recommended coin when the flow may PROCEED, which is `auto`
- *   (a clean coin covers) and `asset-notice` (only a dirty coin covers, but the
- *   wallet keeps a separate payment address, so the UI informs rather than
- *   obstructs);
+ *   (a clean coin covers) and `asset-notice` (only a coin with KNOWN assets
+ *   covers, but the wallet keeps a separate payment address, so the UI informs
+ *   rather than obstructs);
  * - otherwise null, which is what BLOCKS the flow: `expert-required` (a
- *   one-address wallet, where the user must override deliberately), `scanning`,
+ *   one-address wallet, or a recommended coin whose content is unknown because
+ *   its scan failed; the user must override deliberately), `scanning`,
  *   `insufficient`.
  *
  * Returning the coin on `asset-notice` is the half of the policy that makes it

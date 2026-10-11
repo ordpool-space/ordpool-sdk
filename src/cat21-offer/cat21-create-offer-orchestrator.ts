@@ -9,6 +9,7 @@ import {
   liftRecommendationByOutpoint,
   FundingTopologySetting,
   resolveFundingTopology,
+  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
@@ -260,7 +261,7 @@ export class Cat21CreateOfferOrchestrator {
     if (!sim) {
       throw new Error(
         this.snap.fundingRecommendation.status === 'expert-required'
-          ? 'Select a funding UTXO (the available coins carry assets)'
+          ? expertRequiredMessage(this.snap.fundingRecommendation)
           : 'Insufficient funds for buy-offer at the current price + fee rate',
       );
     }

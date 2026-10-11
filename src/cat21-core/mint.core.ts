@@ -5,6 +5,7 @@ import {
   FundingRecommendation,
   recommendFunding,
   WalletAddressTopology,
+  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
 import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
@@ -333,7 +334,7 @@ export async function executeMint(
       plan.status === 'scanning'
         ? 'Still checking what the funding coins hold. Try again in a moment.'
         : plan.status === 'expert-required'
-        ? 'Select a funding UTXO (the available coins carry assets)'
+        ? expertRequiredMessage(plan.recommendation)
         : 'Insufficient funds for mint at the current fee rate',
     );
   }
