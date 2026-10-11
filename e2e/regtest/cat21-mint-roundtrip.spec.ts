@@ -247,6 +247,9 @@ describe('cat21 mint roundtrip on regtest', () => {
 
     tip = mineBlocks(1);
     await waitForElectrsSync(tip);
+    // Tip height alone does not mean electrs has indexed the block's
+    // transactions; getTxHex below needs the funding tx itself.
+    await waitForTxConfirmed(sendResult.txid);
 
     // Legacy P2PKH input needs the full funding-tx hex (nonWitnessUtxo).
     // The sendmany tx hex is the same for every case, its vout index
