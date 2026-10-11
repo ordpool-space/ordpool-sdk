@@ -82,6 +82,13 @@ while [ $# -gt 0 ]; do
 done
 
 COMPOSE=( docker compose "${COMPOSE_BASE[@]}" "${EXTRA_FILES[@]}" "${PROFILES[@]}" )
+
+# The electrs and ord checkouts the compose builds from, compared with
+# build-pins.env. Paths as the compose resolves them: relative to e2e/.
+# shellcheck source=build-pins.sh
+. "$HERE/build-pins.sh"
+check_build_pin ordpool-electrs "${ELECTRS_SRC:-$HERE/../../ordpool-electrs}" "$ORDPOOL_ELECTRS_SHA"
+check_build_pin cat21-ord "${CAT21_ORD_SRC:-$HERE/../../cat21-ord}" "$CAT21_ORD_SHA"
 BITCOIND_CONTAINER="${REGTEST_BITCOIND_CONTAINER:-ordpool-e2e-consumer-bitcoind}"
 RPC="docker exec $BITCOIND_CONTAINER bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
 # The wallet name these helpers spend from. A consumer stack brings this

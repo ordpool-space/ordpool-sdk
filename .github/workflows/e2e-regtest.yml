@@ -22,6 +22,11 @@ jobs:
         with:
           path: ordpool-sdk
 
+      # The electrs and cat21-ord revisions this SDK commit builds, one
+      # KEY=sha per line (e2e/build-pins.env).
+      - name: Read the build pins
+        run: grep -E '^[A-Z0-9_]+=' ordpool-sdk/e2e/build-pins.env >> "$GITHUB_ENV"
+
       # cat21-mint-roundtrip + cat21-flow-roundtrip specs need the cat21-ord
       # service in the regtest stack (it's the reference PSBT producer and
       # the authoritative view of cat ownership). docker-compose.regtest.yml
@@ -31,7 +36,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ordpool-space/cat21-ord
-          ref: index-cat21
+          ref: ${{ env.CAT21_ORD_SHA }}
           path: cat21-ord
 
       # OUR electrs. docker-compose.regtest.yml builds the electrs service
@@ -42,7 +47,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ordpool-space/ordpool-electrs
-          ref: ordpool
+          ref: ${{ env.ORDPOOL_ELECTRS_SHA }}
           path: ordpool-electrs
 
       - uses: actions/setup-node@v6
@@ -85,7 +90,7 @@ jobs:
 
       # Compile the electrs + cat21-ord images through buildx bake so the
       # gha overlay's cache_from/to take effect. On an unchanged source
-      # tree (electrs + cat21-ord are pinned to a branch ref) this is a
+      # tree (electrs + cat21-ord are pinned by sha in build-pins.env) this is a
       # full cache hit and skips the multi-minute Rust compile. COMPOSE_BAKE
       # routes `compose build` through bake; bake loads each image (they all
       # have an `image:` name) into the local store for the up step.

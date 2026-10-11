@@ -29,6 +29,7 @@ on:
       - 'e2e/regtest/**'
       - 'e2e/docker-compose.*.yml'
       - 'e2e/regtest-bootstrap.sh'
+      - 'e2e/build-pins.*'
       - '.github/workflows/e2e-playwright.yml'
       - 'src/**'
       - 'package*.json'
@@ -38,6 +39,7 @@ on:
       - 'e2e/regtest/**'
       - 'e2e/docker-compose.*.yml'
       - 'e2e/regtest-bootstrap.sh'
+      - 'e2e/build-pins.*'
       - '.github/workflows/e2e-playwright.yml'
       - 'src/**'
       - 'package*.json'
@@ -86,6 +88,11 @@ jobs:
 
       - run: npm ci
 
+      # The electrs, cat21-ord and cat21-wallet revisions this SDK commit
+      # builds, one KEY=sha per line (e2e/build-pins.env).
+      - name: Read the build pins
+        run: grep -E '^[A-Z0-9_]+=' e2e/build-pins.env >> "$GITHUB_ENV"
+
       - name: Install Playwright browsers + system deps
         run: npx playwright install --with-deps chromium
 
@@ -124,24 +131,13 @@ jobs:
 
       # Cat21 Wallet — our own wallet (ordpool-space/cat21-wallet).
       # We build from source so a CRX release of the wallet isn't a
-      # prerequisite for SDK CI. Clone the public repo (read-only
-      # HTTPS, no auth, no main-identity attribution lands), pnpm
-      # build, then point the bootstrap at the resulting dist.
+      # prerequisite for SDK CI. Fetch the public repo at the pinned
+      # CAT21_WALLET_SHA (read-only HTTPS, no auth, no main-identity
+      # attribution lands), pnpm build, then point the bootstrap at the
+      # resulting dist.
       #
-      # Cache key includes cat21-wallet's remote HEAD SHA so the
-      # cached dist invalidates the moment the wallet repo gets a
-      # new commit (iter 121 lesson: the previous key was based on
-      # the bootstrap script's hash, which doesn't change across
-      # wallet commits → stale dist served, Cat21Provider injection
-      # missing).
-      - name: Compute cat21-wallet HEAD SHA (for cache invalidation)
-        id: cat21wallet-rev
-        if: matrix.wallet == 'cat21wallet'
-        run: |
-          REV=$(git ls-remote https://github.com/ordpool-space/cat21-wallet.git refs/heads/main | cut -f1)
-          echo "Cat21 Wallet main HEAD = $REV"
-          echo "rev=$REV" >> "$GITHUB_OUTPUT"
-
+      # The cache key is the pinned sha, so the cached dist is exactly the
+      # build of that revision and a pin move rebuilds.
       - name: Cache cat21-wallet source + build
         id: cat21wallet-cache
         if: matrix.wallet == 'cat21wallet'
@@ -150,7 +146,7 @@ jobs:
           path: |
             e2e/extensions/cat21wallet
             ~/.local/share/pnpm/store
-          key: cat21wallet-from-source-${{ steps.cat21wallet-rev.outputs.rev }}
+          key: cat21wallet-from-source-${{ env.CAT21_WALLET_SHA }}
 
       - name: Install pnpm for cat21-wallet build
         if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
@@ -167,7 +163,10 @@ jobs:
           set -euo pipefail
           WALLET_DIR="/tmp/cat21-wallet"
           rm -rf "$WALLET_DIR"
-          git clone --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$WALLET_DIR"
+          git init -q "$WALLET_DIR"
+          git -C "$WALLET_DIR" fetch --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$CAT21_WALLET_SHA"
+          git -C "$WALLET_DIR" checkout -q FETCH_HEAD
+          test "$(git -C "$WALLET_DIR" rev-parse HEAD)" = "$CAT21_WALLET_SHA"
           # cat21-wallet's prebuild hook (apps/extension/scripts/
           # check-sdk-fresh.cjs) expects ordpool-sdk to be checked
           # out as a sibling at /tmp/ordpool-sdk. This workflow
@@ -200,7 +199,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ordpool-space/ordpool-electrs
-          ref: ordpool
+          ref: ${{ env.ORDPOOL_ELECTRS_SHA }}
           path: _ordpool-electrs-src
       - name: Symlink ordpool-electrs at compose's expected location
         run: ln -s "$GITHUB_WORKSPACE/_ordpool-electrs-src" "$(dirname "$GITHUB_WORKSPACE")/ordpool-electrs"
@@ -216,7 +215,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: ordpool-space/cat21-ord
-          ref: index-cat21
+          ref: ${{ env.CAT21_ORD_SHA }}
           path: _cat21-ord-src
       - name: Symlink cat21-ord at compose's expected location
         if: matrix.wallet == 'cat21wallet'
