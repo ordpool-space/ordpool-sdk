@@ -1,5 +1,6 @@
 import { expect, Page } from '@playwright/test';
 import { clickUntilEffect } from './click-until-effect';
+import { waitForUnisatInstallTabBooted } from './onboard-unisat';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 
@@ -69,4 +70,11 @@ export async function onboardWizz(
     const t = (document.body.innerText || '').toLowerCase();
     return t.includes('receive') || t.includes('send') || t.includes('balance');
   }, undefined, { polling: 500 });
+
+  // Wizz is a UniSat fork and opens the same install tab once its background
+  // has initialised, on its own schedule, sometimes after onboarding has
+  // returned. Its boot rejects a pending approval that is not the notification
+  // window, so a connect sent before it booted fails with 4001 "User rejected
+  // the request".
+  await waitForUnisatInstallTabBooted(page, extensionId);
 }

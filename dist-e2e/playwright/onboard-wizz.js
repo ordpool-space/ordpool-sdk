@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardWizz = onboardWizz;
 const test_1 = require("@playwright/test");
 const click_until_effect_1 = require("./click-until-effect");
+const onboard_unisat_1 = require("./onboard-unisat");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 /**
  * Drive Wizz (a UniSat fork) onboarding from the BIP-39 test seed to the
@@ -53,5 +54,11 @@ async function onboardWizz(page, extensionId, opts = {}) {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes('receive') || t.includes('send') || t.includes('balance');
     }, undefined, { polling: 500 });
+    // Wizz is a UniSat fork and opens the same install tab once its background
+    // has initialised, on its own schedule, sometimes after onboarding has
+    // returned. Its boot rejects a pending approval that is not the notification
+    // window, so a connect sent before it booted fails with 4001 "User rejected
+    // the request".
+    await (0, onboard_unisat_1.waitForUnisatInstallTabBooted)(page, extensionId);
 }
 //# sourceMappingURL=onboard-wizz.js.map
