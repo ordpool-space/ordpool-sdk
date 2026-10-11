@@ -91,6 +91,7 @@ exports.waitForOrdStockSatpoint = waitForOrdStockSatpoint;
 exports.waitForOrdStockInscription = waitForOrdStockInscription;
 exports.ordStockCli = ordStockCli;
 exports.ordStockCliAsync = ordStockCliAsync;
+exports.ordStockWalletCli = ordStockWalletCli;
 exports.ordStockCreateWallet = ordStockCreateWallet;
 exports.writeOrdStockFile = writeOrdStockFile;
 exports.ordStockWalletInscribe = ordStockWalletInscribe;
@@ -121,6 +122,9 @@ exports.ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8
 // stand up their own compose with a different name (e.g.
 // `ordpool-e2e-consumer-bitcoind`) and override via env.
 const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? 'ordpool-e2e-bitcoind';
+// The cat21-ord container name, overridable for the same reason: a stack
+// brought up under another compose prefix names its containers after it.
+const ORD_CONTAINER = process.env.REGTEST_ORD_CONTAINER ?? 'ordpool-e2e-cat21-ord';
 // The bitcoind WALLET these helpers spend from. Overridable for the same
 // reason the container name is: a consumer stack brings the compose up under
 // its own project prefix and its bootstrap names the wallet to match, so a
@@ -502,7 +506,7 @@ async function waitForCatAtAddress(inscriptionId, expectedAddress) {
  */
 function ordCli(...args) {
     return (0, node_child_process_1.execFileSync)('docker', [
-        'exec', process.env.REGTEST_ORD_CONTAINER ?? 'ordpool-e2e-cat21-ord',
+        'exec', ORD_CONTAINER,
         'ord',
         '--regtest',
         '--index-cat21',
@@ -649,7 +653,7 @@ function ordCreateWallet(name = 'ord') {
  */
 function writeCat21OrdFile(containerPath, content) {
     const b64 = Buffer.from(content).toString('base64');
-    (0, node_child_process_1.execFileSync)('docker', ['exec', 'ordpool-e2e-cat21-ord', 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`], { encoding: 'utf8' });
+    (0, node_child_process_1.execFileSync)('docker', ['exec', ORD_CONTAINER, 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`], { encoding: 'utf8' });
 }
 /**
  * Run ord's OWN `wallet inscribe` (the reference implementation). Returns
@@ -1294,6 +1298,7 @@ function ordStockWalletArgs(walletName, subcommandArgs) {
         ...subcommandArgs,
     ];
 }
+/** `ord wallet …` on the stock-ord container, for a subcommand no dedicated helper covers. */
 function ordStockWalletCli(walletName, ...subcommandArgs) {
     return ordStockCli(...ordStockWalletArgs(walletName, subcommandArgs));
 }

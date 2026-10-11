@@ -32,6 +32,10 @@ export const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localh
 // `ordpool-e2e-consumer-bitcoind`) and override via env.
 const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? 'ordpool-e2e-bitcoind';
 
+// The cat21-ord container name, overridable for the same reason: a stack
+// brought up under another compose prefix names its containers after it.
+const ORD_CONTAINER = process.env.REGTEST_ORD_CONTAINER ?? 'ordpool-e2e-cat21-ord';
+
 // The bitcoind WALLET these helpers spend from. Overridable for the same
 // reason the container name is: a consumer stack brings the compose up under
 // its own project prefix and its bootstrap names the wallet to match, so a
@@ -567,7 +571,7 @@ export function ordCli(...args: string[]): string {
   return execFileSync(
     'docker',
     [
-      'exec', process.env.REGTEST_ORD_CONTAINER ?? 'ordpool-e2e-cat21-ord',
+      'exec', ORD_CONTAINER,
       'ord',
       '--regtest',
       '--index-cat21',
@@ -775,7 +779,7 @@ export function writeCat21OrdFile(containerPath: string, content: Uint8Array): v
   const b64 = Buffer.from(content).toString('base64');
   execFileSync(
     'docker',
-    ['exec', 'ordpool-e2e-cat21-ord', 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`],
+    ['exec', ORD_CONTAINER, 'sh', '-c', `printf %s '${b64}' | base64 -d > '${containerPath}'`],
     { encoding: 'utf8' },
   );
 }
@@ -1624,7 +1628,8 @@ function ordStockWalletArgs(walletName: string, subcommandArgs: string[]): strin
   ];
 }
 
-function ordStockWalletCli(walletName: string, ...subcommandArgs: string[]): string {
+/** `ord wallet …` on the stock-ord container, for a subcommand no dedicated helper covers. */
+export function ordStockWalletCli(walletName: string, ...subcommandArgs: string[]): string {
   return ordStockCli(...ordStockWalletArgs(walletName, subcommandArgs));
 }
 

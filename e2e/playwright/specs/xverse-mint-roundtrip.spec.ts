@@ -1,5 +1,4 @@
 import { test, expect, chromium, BrowserContext, Page } from '@playwright/test';
-import { execFileSync } from 'node:child_process';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
@@ -70,7 +69,7 @@ test.beforeAll(async () => {
   // workflow run it explicitly, so duplicate the minimal check
   // inline.
   try {
-    execFileSync('docker', ['exec', 'ordpool-e2e-bitcoind', 'bitcoin-cli', '-regtest', '-rpcuser=ordpool', '-rpcpassword=ordpool', 'getblockchaininfo'], { stdio: 'ignore' });
+    rpc('getblockchaininfo');
   } catch (e) {
     throw new Error(`bitcoind regtest container not reachable: ${(e as Error).message}`);
   }

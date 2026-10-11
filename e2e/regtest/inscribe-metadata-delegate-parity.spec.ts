@@ -13,7 +13,6 @@
  */
 
 import { describe, expect, it, beforeAll } from '@jest/globals';
-import { execFileSync } from 'node:child_process';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
@@ -29,6 +28,7 @@ import {
   postTx,
   waitForOrdStockInscription,
   fundOrdStockWallet,
+  ordStockWalletCli,
   ordStockWalletInscribe,
   rpc,
   waitForElectrsSync,
@@ -168,11 +168,6 @@ describe('SDK delegate-only inscription on chain', () => {
 
 /** `ord wallet inscribe --delegate <ID>` with no --file, which the shared helper cannot express. */
 function ordStockWalletInscribeDelegateOnly(delegateId: string): { reveal: string } {
-  const out = execFileSync('docker', [
-    'exec', 'ordpool-e2e-ord-stock', 'ord', '--regtest', '--index-sats', '--index-addresses',
-    '--bitcoin-rpc-url=bitcoind:18443', '--bitcoin-rpc-username=ordpool', '--bitcoin-rpc-password=ordpool',
-    '--data-dir=/data', 'wallet', '--no-sync', '--name', ORD_WALLET, '--server-url', 'http://localhost:8080',
-    'inscribe', '--no-backup', '--fee-rate', '5', '--delegate', delegateId,
-  ], { encoding: 'utf8' });
+  const out = ordStockWalletCli(ORD_WALLET, 'inscribe', '--no-backup', '--fee-rate', '5', '--delegate', delegateId);
   return { reveal: (JSON.parse(out) as { reveal: string }).reveal };
 }

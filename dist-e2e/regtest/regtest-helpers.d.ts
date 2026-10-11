@@ -641,6 +641,8 @@ export declare function ordStockCli(...args: string[]): string;
  * are never mined, the call waits forever.
  */
 export declare function ordStockCliAsync(...args: string[]): Promise<string>;
+/** `ord wallet …` on the stock-ord container, for a subcommand no dedicated helper covers. */
+export declare function ordStockWalletCli(walletName: string, ...subcommandArgs: string[]): string;
 export declare function ordStockCreateWallet(name: string): string;
 /**
  * Write `content` to `containerPath` inside the ord-stock container. The
