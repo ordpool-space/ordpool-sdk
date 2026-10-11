@@ -26,6 +26,11 @@ export declare function mainnetAddressOnRegtest(segment: string): string | null;
  */
 export declare function cat21OrdRegtestUrl(url: URL, ordUrl: string): string;
 /**
+ * True when `installCat21WalletOrdRoutes` runs on `context`, which makes every
+ * extension page in it a Cat21 Wallet page.
+ */
+export declare function hasCat21WalletOrdRoutes(context: BrowserContext): boolean;
+/**
  * Answer Cat21 Wallet's cat21-ord reads from the regtest cat21-ord the stack
  * runs, instead of our production `ord.cat21.space`.
  *

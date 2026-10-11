@@ -104,6 +104,11 @@ export declare function raceApprovalPopup(opts: ApprovalPopupSearch & {
  * Always call this AFTER the connect/approval result resolved —
  * we never close a popup that's still mid-handshake with the
  * wallet's SW, only ones that already did their job.
+ *
+ * In a context with `installCat21WalletOrdRoutes`, every extension page is a
+ * Cat21 Wallet page and closes through `closeCat21WalletPage`, so a cat21-ord
+ * read it still has in flight is cancelled instead of left to reach the
+ * network.
  */
 export declare function closeLeftoverExtensionPages(context: BrowserContext, keep: Iterable<Page>): Promise<void>;
 /**

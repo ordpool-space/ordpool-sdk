@@ -44,7 +44,8 @@ async function approveCat21WalletConnectPopup(context, knownPages) {
  *
  * After the click the approval page is added to `knownPages` so a
  * subsequent `waitForApprovalPopup` in the same spec doesn't
- * re-match this one.
+ * re-match this one. Returns the popup page, so a caller can add it to
+ * the `knownPages` of another search or tell two popups apart.
  */
 async function approveCat21WalletSignPopup(args) {
     const { context, knownPages, screenshot, expectedSignAtIndex } = args;
@@ -79,5 +80,6 @@ async function approveCat21WalletSignPopup(args) {
     await (0, test_1.expect)(confirmBtn).toBeVisible();
     await (0, approval_popup_1.clickApprovalAndRequireClose)(confirmBtn, approval, { label: 'Cat21 Wallet sign popup' });
     knownPages.add(approval);
+    return approval;
 }
 //# sourceMappingURL=cat21wallet-sign-popup.js.map

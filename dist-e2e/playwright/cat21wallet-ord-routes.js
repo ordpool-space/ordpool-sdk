@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.CAT21_WALLET_ORD_HOST = void 0;
 exports.mainnetAddressOnRegtest = mainnetAddressOnRegtest;
 exports.cat21OrdRegtestUrl = cat21OrdRegtestUrl;
+exports.hasCat21WalletOrdRoutes = hasCat21WalletOrdRoutes;
 exports.installCat21WalletOrdRoutes = installCat21WalletOrdRoutes;
 exports.wasCancelledByItsPage = wasCancelledByItsPage;
 exports.closeCat21WalletPage = closeCat21WalletPage;
@@ -50,6 +51,19 @@ function cat21OrdRegtestUrl(url, ordUrl) {
     return `${ordUrl.replace(/\/$/, '')}${path}${url.search}`;
 }
 /**
+ * The contexts `installCat21WalletOrdRoutes` forwards reads for. Their
+ * extension pages are Cat21 Wallet pages, which close through
+ * `closeCat21WalletPage` so no forwarded read is left paused.
+ */
+const contextsWithCat21WalletOrdRoutes = new WeakSet();
+/**
+ * True when `installCat21WalletOrdRoutes` runs on `context`, which makes every
+ * extension page in it a Cat21 Wallet page.
+ */
+function hasCat21WalletOrdRoutes(context) {
+    return contextsWithCat21WalletOrdRoutes.has(context);
+}
+/**
  * Answer Cat21 Wallet's cat21-ord reads from the regtest cat21-ord the stack
  * runs, instead of our production `ord.cat21.space`.
  *
@@ -64,6 +78,7 @@ function cat21OrdRegtestUrl(url, ordUrl) {
  */
 async function installCat21WalletOrdRoutes(context, opts = {}) {
     const ordUrl = opts.ordUrl ?? regtest_helpers_1.ORD_URL;
+    contextsWithCat21WalletOrdRoutes.add(context);
     await context.route(exports.CAT21_WALLET_ORD_HOST, async (route) => {
         const request = route.request();
         let response;

@@ -41,8 +41,9 @@ interface ApproveCat21WalletSignPopupArgs {
  *
  * After the click the approval page is added to `knownPages` so a
  * subsequent `waitForApprovalPopup` in the same spec doesn't
- * re-match this one.
+ * re-match this one. Returns the popup page, so a caller can add it to
+ * the `knownPages` of another search or tell two popups apart.
  */
-export declare function approveCat21WalletSignPopup(args: ApproveCat21WalletSignPopupArgs): Promise<void>;
+export declare function approveCat21WalletSignPopup(args: ApproveCat21WalletSignPopupArgs): Promise<Page>;
 export {};
 //# sourceMappingURL=cat21wallet-sign-popup.d.ts.map

@@ -66,11 +66,12 @@ interface ApproveCat21WalletSignPopupArgs {
  *
  * After the click the approval page is added to `knownPages` so a
  * subsequent `waitForApprovalPopup` in the same spec doesn't
- * re-match this one.
+ * re-match this one. Returns the popup page, so a caller can add it to
+ * the `knownPages` of another search or tell two popups apart.
  */
 export async function approveCat21WalletSignPopup(
   args: ApproveCat21WalletSignPopupArgs,
-): Promise<void> {
+): Promise<Page> {
   const { context, knownPages, screenshot, expectedSignAtIndex } = args;
   const requireSignPsbtUrl = expectedSignAtIndex !== undefined;
 
@@ -109,4 +110,5 @@ export async function approveCat21WalletSignPopup(
   await expect(confirmBtn).toBeVisible();
   await clickApprovalAndRequireClose(confirmBtn, approval, { label: 'Cat21 Wallet sign popup' });
   knownPages.add(approval);
+  return approval;
 }

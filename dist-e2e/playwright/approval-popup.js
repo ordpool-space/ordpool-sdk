@@ -15,6 +15,7 @@ exports.waitForApprovalByConfirmButton = waitForApprovalByConfirmButton;
 exports.waitForPageShowing = waitForPageShowing;
 const e2e_timeout_1 = require("../e2e-timeout");
 const click_until_effect_core_1 = require("./click-until-effect-core");
+const cat21wallet_ord_routes_1 = require("./cat21wallet-ord-routes");
 /**
  * `isApproval` anchored on the control the caller is about to use. `url` only
  * narrows; `control` decides. Both waits run under the runner config's
@@ -210,28 +211,43 @@ async function raceApprovalPopup(opts) {
  * Always call this AFTER the connect/approval result resolved —
  * we never close a popup that's still mid-handshake with the
  * wallet's SW, only ones that already did their job.
+ *
+ * In a context with `installCat21WalletOrdRoutes`, every extension page is a
+ * Cat21 Wallet page and closes through `closeCat21WalletPage`, so a cat21-ord
+ * read it still has in flight is cancelled instead of left to reach the
+ * network.
  */
 async function closeLeftoverExtensionPages(context, keep) {
     const keepSet = new Set(keep);
+    const close = (0, cat21wallet_ord_routes_1.hasCat21WalletOrdRoutes)(context)
+        ? cat21wallet_ord_routes_1.closeCat21WalletPage
+        : (p) => p.close();
     for (const p of context.pages()) {
         if (keepSet.has(p))
             continue;
         // OKX (and other wallets) tear their own pages down the instant they
         // auto-approve, so a page enumerated here can already be closing.
-        // `p.url()` on a closed page throws "guid not bound" — uncaught, that
-        // failed the whole spec during the connect/commit cleanup, before the
-        // flow even reached the next sign. Skip closed pages and swallow a page
-        // that closes between the isClosed() check and the url() read.
+        // `p.url()` on a closed page throws "guid not bound". Skip closed pages,
+        // and a page that closes between the isClosed() check and the url() read.
         if (p.isClosed())
             continue;
         try {
             if (!p.url().startsWith('chrome-extension://'))
                 continue;
         }
-        catch {
-            continue;
+        catch (e) {
+            if (p.isClosed())
+                continue;
+            throw e;
         }
-        await p.close().catch(() => undefined);
+        try {
+            await close(p);
+        }
+        catch (e) {
+            // The wallet closing the page itself is the outcome this call wants.
+            if (!p.isClosed())
+                throw e;
+        }
     }
 }
 /**

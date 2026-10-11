@@ -2,6 +2,7 @@ import type { BrowserContext, Locator, Page } from '@playwright/test';
 import { e2eTimeoutMs } from '../e2e-timeout';
 import type { ClickableControl } from './click-until-effect';
 import { clickUntilEffectWithProbe } from './click-until-effect-core';
+import { closeCat21WalletPage, hasCat21WalletOrdRoutes } from './cat21wallet-ord-routes';
 
 /**
  * `isApproval` anchored on the control the caller is about to use. `url` only
@@ -228,27 +229,39 @@ export async function raceApprovalPopup(
  * Always call this AFTER the connect/approval result resolved —
  * we never close a popup that's still mid-handshake with the
  * wallet's SW, only ones that already did their job.
+ *
+ * In a context with `installCat21WalletOrdRoutes`, every extension page is a
+ * Cat21 Wallet page and closes through `closeCat21WalletPage`, so a cat21-ord
+ * read it still has in flight is cancelled instead of left to reach the
+ * network.
  */
 export async function closeLeftoverExtensionPages(
   context: BrowserContext,
   keep: Iterable<Page>,
 ): Promise<void> {
   const keepSet = new Set(keep);
+  const close = hasCat21WalletOrdRoutes(context)
+    ? closeCat21WalletPage
+    : (p: Page) => p.close();
   for (const p of context.pages()) {
     if (keepSet.has(p)) continue;
     // OKX (and other wallets) tear their own pages down the instant they
     // auto-approve, so a page enumerated here can already be closing.
-    // `p.url()` on a closed page throws "guid not bound" — uncaught, that
-    // failed the whole spec during the connect/commit cleanup, before the
-    // flow even reached the next sign. Skip closed pages and swallow a page
-    // that closes between the isClosed() check and the url() read.
+    // `p.url()` on a closed page throws "guid not bound". Skip closed pages,
+    // and a page that closes between the isClosed() check and the url() read.
     if (p.isClosed()) continue;
     try {
       if (!p.url().startsWith('chrome-extension://')) continue;
-    } catch {
-      continue;
+    } catch (e) {
+      if (p.isClosed()) continue;
+      throw e;
     }
-    await p.close().catch(() => undefined);
+    try {
+      await close(p);
+    } catch (e) {
+      // The wallet closing the page itself is the outcome this call wants.
+      if (!p.isClosed()) throw e;
+    }
   }
 }
 
