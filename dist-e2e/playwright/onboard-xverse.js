@@ -5,7 +5,7 @@ exports.onboardXverse = onboardXverse;
 exports.dismissXversePromo = dismissXversePromo;
 exports.primeAndSwitchToRegtest = primeAndSwitchToRegtest;
 exports.overrideRegtestElectrsUrl = overrideRegtestElectrsUrl;
-const test_1 = require("@playwright/test");
+const e2e_expect_1 = require("./e2e-expect");
 const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 /**
@@ -79,7 +79,7 @@ async function clickAndAwaitTransition(page, buttonText, sentinelGoneRegex, atte
             });
         }, buttonText, { polling: 250 });
         const btn = page.getByRole('button', { name: buttonText, exact: true }).first();
-        await (0, test_1.expect)(btn).toBeVisible();
+        await (0, e2e_expect_1.e2eExpect)(btn).toBeVisible();
         await btn.click();
         const transitioned = await page.waitForFunction((re) => !(new RegExp(re, 'i')).test(document.body.innerText || ''), sentinelGoneRegex.source, { timeout: XVERSE_TRANSITION_PROBE_MS, polling: 250 }).then(() => true).catch(() => false);
         if (transitioned)
@@ -123,28 +123,29 @@ async function gotoAndHydrate(page, url, ready, opts) {
 async function onboardXverse(context, extensionId, opts = {}) {
     const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.xverse;
     const mnemonic = opts.mnemonic ?? wallet_test_vectors_1.TEST_MNEMONIC;
+    (0, e2e_expect_1.boundByE2eTimeout)(context);
     const page = await context.newPage();
     await gotoAndHydrate(page, `chrome-extension://${extensionId}/options.html`, () => {
         const t = (document.body.innerText || '').toLowerCase();
         return t.includes('restore') && t.includes('create');
     }, { what: 'onboarding page' });
     await page.getByText(/restore an existing wallet|restore.*wallet/i).first().click();
-    await (0, test_1.expect)(page.getByText(/legal/i).first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByText(/legal/i).first()).toBeVisible();
     const dc = page.getByText(/authorize data collection/i).first();
     if (await (0, is_visible_within_1.isVisibleWithin)(dc, XVERSE_DATA_COLLECTION_PROBE_MS))
         await dc.click();
     await page.getByRole('button', { name: /^accept$/i }).first().click();
     const pws = page.locator('input[type="password"]');
-    await (0, test_1.expect)(pws.first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(pws.first()).toBeVisible();
     const pwCount = await pws.count();
     for (let i = 0; i < pwCount; i++)
         await pws.nth(i).fill(password);
     await page.getByRole('button', { name: /continue|next|confirm|done|create/i }).first().click();
-    await (0, test_1.expect)(page.getByText(/restore your wallet|what wallet are you importing/i).first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByText(/restore your wallet|what wallet are you importing/i).first()).toBeVisible();
     await page.getByText(/^xverse$/i).first().click();
-    await (0, test_1.expect)(page.getByText(/enter seed phrase/i).first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByText(/enter seed phrase/i).first()).toBeVisible();
     const seedInputs = page.locator('input[type="password"]');
-    await (0, test_1.expect)(seedInputs.first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(seedInputs.first()).toBeVisible();
     await seedInputs.first().click();
     await seedInputs.first().pressSequentially(mnemonic, { delay: 25 });
     await page.getByRole('button', { name: /continue|next|restore|confirm|done/i }).first().click();
@@ -180,6 +181,7 @@ async function dismissXversePromo(notNow) {
 }
 /** Switch a just-onboarded Xverse to Bitcoin Regtest (Testnet mode + Regtest). */
 async function primeAndSwitchToRegtest(context, extensionId) {
+    (0, e2e_expect_1.boundByE2eTimeout)(context);
     const primer = await context.newPage();
     await primer.setViewportSize({ width: 400, height: 800 });
     await gotoAndHydrate(primer, `chrome-extension://${extensionId}/popup.html`, () => {
@@ -200,7 +202,7 @@ async function primeAndSwitchToRegtest(context, extensionId) {
         .first();
     const pageSwitch = primer.locator('[role="switch"], [role="checkbox"], input[type="checkbox"]').first();
     const testnetToggle = (await rowSwitch.count()) > 0 ? rowSwitch : pageSwitch;
-    await (0, test_1.expect)(testnetToggle).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(testnetToggle).toBeVisible();
     await testnetToggle.click();
     await primer.waitForFunction(() => {
         const txt = document.body.innerText || '';
@@ -220,6 +222,7 @@ async function primeAndSwitchToRegtest(context, extensionId) {
  * in chrome.storage.local under `persistentStore::networks` as JSON.
  */
 async function overrideRegtestElectrsUrl(context, extensionId, electrsUrl) {
+    (0, e2e_expect_1.boundByE2eTimeout)(context);
     const page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
     await page.evaluate(async ([key, url]) => {

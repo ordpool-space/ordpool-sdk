@@ -1,4 +1,5 @@
-import { expect, type BrowserContext, type Page } from '@playwright/test';
+import { type BrowserContext, type Page } from '@playwright/test';
+import { e2eExpect as expect } from './e2e-expect';
 
 import { clickApprovalAndRequireClose, waitForApprovalPopup } from './approval-popup';
 

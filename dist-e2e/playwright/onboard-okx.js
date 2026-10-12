@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardOkx = onboardOkx;
-const test_1 = require("@playwright/test");
+const e2e_expect_1 = require("./e2e-expect");
 const e2e_timeout_1 = require("../e2e-timeout");
 const is_visible_within_1 = require("./is-visible-within");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
@@ -38,6 +38,7 @@ const OKX_START_BUTTON_IFRAME_PROBE_MS = 3_000;
  * is hidden; without it the welcome-screen click is absorbed.
  */
 async function onboardOkx(page, extensionId, opts = {}) {
+    (0, e2e_expect_1.boundByE2eTimeout)(page);
     const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.okx;
     const mnemonicWords = (opts.mnemonicWords ?? wallet_test_vectors_1.TEST_MNEMONIC_WORDS.join(' ')).split(' ');
     const mnemonic = mnemonicWords.join(' ');
@@ -51,16 +52,16 @@ async function onboardOkx(page, extensionId, opts = {}) {
         return !!wrapper && getComputedStyle(wrapper).opacity === '1';
     }, undefined, { polling: 250 });
     const importBtn = page.getByTestId('onboard-page-import-wallet-button');
-    await (0, test_1.expect)(importBtn).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(importBtn).toBeVisible();
     await (0, cdp_click_1.cdpClick)(page, importBtn, 'the OKX import-wallet button');
     const seedOption = page.getByText('Seed phrase or private key', { exact: true });
-    await (0, test_1.expect)(seedOption).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(seedOption).toBeVisible();
     await (0, cdp_click_1.cdpClick)(page, seedOption, 'the OKX seed-phrase option');
     // Seed form inside #ui-ses-iframe.
     const seedFrame = page.frameLocator('#ui-ses-iframe');
-    await (0, test_1.expect)(seedFrame.locator('text="My seed phrase has"').first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(seedFrame.locator('text="My seed phrase has"').first()).toBeVisible();
     const mnemonicInputs = seedFrame.locator('input');
-    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(mnemonicInputs.first()).toBeVisible();
     const inputCount = await mnemonicInputs.count();
     if (inputCount >= 12) {
         for (let i = 0; i < mnemonicWords.length; i++) {
@@ -71,7 +72,7 @@ async function onboardOkx(page, extensionId, opts = {}) {
         await mnemonicInputs.first().fill(mnemonic);
     }
     const confirmAfterMnemonic = seedFrame.getByRole('button', { name: /^(confirm|continue|next|import|restore)$/i }).first();
-    await (0, test_1.expect)(confirmAfterMnemonic).toBeEnabled();
+    await (0, e2e_expect_1.e2eExpect)(confirmAfterMnemonic).toBeEnabled();
     await confirmAfterMnemonic.click();
     // "Secure your wallet" is drawn inside #ui-ses-iframe (the page body stays
     // empty), on whichever extension page OKX routes to it.
@@ -80,7 +81,7 @@ async function onboardOkx(page, extensionId, opts = {}) {
     const secureFrame = page.frameLocator('#ui-ses-iframe');
     const nextBtn = secureFrame.getByRole('button', { name: /^next$/i }).first();
     if (await (0, is_visible_within_1.isVisibleWithin)(nextBtn, OKX_OPTIONAL_STEP_PROBE_MS)) {
-        await (0, test_1.expect)(nextBtn).toBeEnabled();
+        await (0, e2e_expect_1.e2eExpect)(nextBtn).toBeEnabled();
         await nextBtn.click();
     }
     const pwInputs = secureFrame.locator('input[type="password"]');
@@ -90,7 +91,7 @@ async function onboardOkx(page, extensionId, opts = {}) {
             await pwInputs.nth(i).fill(password);
         }
         const pwContinue = secureFrame.getByRole('button', { name: /^(confirm|continue|next|create|done)$/i }).first();
-        await (0, test_1.expect)(pwContinue).toBeEnabled();
+        await (0, e2e_expect_1.e2eExpect)(pwContinue).toBeEnabled();
         await pwContinue.click();
     }
     // The "Welcome to OKX Wallet" completion gate, drawn in the page itself, or

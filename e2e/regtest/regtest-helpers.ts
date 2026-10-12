@@ -7,6 +7,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 
 import { e2eTimeoutMs } from '../e2e-timeout';
+import { regtestWallet } from '../regtest-wallet';
 import { stackContainers, stackUrl } from '../stack-ports';
 import type { RpcAddressInfo, RpcRawTransaction, RpcUnspent } from './rpc-types';
 import { randomBytes } from 'node:crypto';
@@ -89,13 +90,9 @@ const DEFAULT_CONTAINERS = stackContainers(process.env.E2E_PREFIX || 'ordpool-e2
 const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? DEFAULT_CONTAINERS.bitcoind;
 const ORD_CONTAINER = process.env.REGTEST_ORD_CONTAINER ?? DEFAULT_CONTAINERS.ord;
 
-// The bitcoind WALLET these helpers spend from. Overridable for the same
-// reason the container name is: a consumer stack brings the compose up under
-// its own project prefix and its bootstrap names the wallet to match, so a
-// hardcoded name fails with bitcoind's `-18 Requested wallet does not exist or
-// is not loaded`, which reads like a stack that is down rather than a naming
-// mismatch.
-const RPC_WALLET = process.env.REGTEST_WALLET ?? 'ordpool-e2e';
+// The bitcoind WALLET these helpers spend from (`regtestWallet`, REGTEST_WALLET
+// or `ordpool-e2e`), the name the bootstraps create it under.
+const RPC_WALLET = regtestWallet();
 /** `-rpcwallet=<name>` for a `bitcoin-cli` call, honouring REGTEST_WALLET. */
 const RPC_WALLET_ARG = `-rpcwallet=${RPC_WALLET}`;
 

@@ -1,5 +1,7 @@
 import { Page } from '@playwright/test';
 
+import { boundByE2eTimeout } from './e2e-expect';
+
 import { ALBY_LNDHUB_PLACEHOLDER_URL } from './alby-offline-routes';
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from './wallet-test-vectors';
 
@@ -14,6 +16,7 @@ export async function seedAlbyAccount(
   page: Page,
   opts: { bitcoinNetwork?: 'bitcoin' | 'regtest'; password?: string; mnemonic?: string } = {},
 ): Promise<string> {
+  boundByE2eTimeout(page);
   const password = opts.password ?? PASSWORD_BY_WALLET.alby;
   const mnemonic = opts.mnemonic ?? TEST_MNEMONIC;
   const bitcoinNetwork = opts.bitcoinNetwork ?? 'regtest';

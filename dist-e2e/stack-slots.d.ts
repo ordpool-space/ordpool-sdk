@@ -126,35 +126,58 @@ export declare function reclaimIfStale(root: string, slot: number, io?: SlotIo):
 export declare function reclaimStaleSlots(root: string, io?: SlotIo): number[];
 export interface AcquireOptions {
     root: string;
-    /** Slots `0..max-1` are candidates. */
+    /** How many slots may be held machine-wide, by every session together. */
     max: number;
     /** The process whose life holds the slot. */
     ownerPid: number;
     kind?: StackKind;
     label?: string;
 }
-/** A slot whose number is free but whose ports something outside the slots holds. */
+/** A slot whose number is free but one of whose ports something outside the slots holds. */
 export interface BlockedSlot {
     slot: number;
     port: number;
 }
+/**
+ * Why nothing was acquired: `cap` when `max` slots are held machine-wide,
+ * `blocked` when fewer are held but every free slot number has a port that
+ * something outside the slots already serves.
+ */
+export type NotAcquiredReason = 'cap' | 'blocked';
 export type TryAcquireResult = {
     record: SlotRecord;
+    skipped: BlockedSlot[];
 } | {
     record: null;
+    reason: NotAcquiredReason;
     holders: SlotStatus[];
     blocked: BlockedSlot[];
 };
 /**
- * One pass over slots `0..max-1`: takes the lowest free one, reclaiming a stale
- * one on the way. A slot whose number is free but one of whose ports (those a
- * stack of `kind` opens, `stackServices`) already accepts connections (a stack
- * started outside the slots, another app) is skipped and reported as blocked:
- * it is in use, whoever uses it.
+ * How long `tryAcquireSlot` waits for the cap lock. The holder counts the
+ * slots, probes the ports of the free slot numbers it walks (one slot's ports
+ * in parallel, each probe bounded by {@link PORT_PROBE_MS}) and writes one
+ * record, so it holds the lock for milliseconds in the usual case and for one
+ * probe bound per blocked slot number at worst.
+ */
+export declare const CAP_LOCK_WAIT_MS = 60000;
+/**
+ * One pass, under the cap lock: reclaims the stale slots, counts the held
+ * ones, and while fewer than `max` are held takes the lowest free slot number
+ * whose ports (those a stack of `kind` opens, `stackServices`) nothing serves
+ * yet. Every slot number the port layout supports
+ * (`0..MAX_SLOTS_SUPPORTED-1`) is a candidate: `max` caps how many stacks run,
+ * not which numbers they get, so a port held outside the slots (another
+ * project's MariaDB on 3306) moves the stack to the next number instead of
+ * stopping it. The numbers passed over that way come back as `skipped`.
  */
 export declare function tryAcquireSlot(opts: AcquireOptions, io?: SlotIo): Promise<TryAcquireResult>;
 /** One line per holder: slot, prefix, owner, age, why it is held. */
 export declare function describeHolders(holders: readonly SlotStatus[], blocked?: readonly BlockedSlot[]): string[];
+/** `slot 0: port 3306 in use by a non-slot process (lsof ...)`: why a free slot number was passed over. */
+export declare function describeBlocked(b: BlockedSlot): string;
+/** Why a pass took no slot, one line. */
+export declare function describeNotAcquired(reason: NotAcquiredReason, held: number, max: number): string;
 /** `1h02m`, `3m05s`, `12s`. */
 export declare function formatAge(ms: number): string;
 export interface WaitOptions {
@@ -166,11 +189,13 @@ export interface WaitOptions {
     sleep?: (ms: number) => Promise<void>;
 }
 /**
- * Takes a slot, waiting in line while all `max` are held. Prints who holds
- * each slot when the picture changes and again every minute, so a wait is
- * never silent, and gives up after `waitMs` with the holders and the command
- * that lists and reclaims slots. Ctrl-C ends the wait at once; nothing is held
- * until this resolves.
+ * Takes a slot, waiting in line while `max` are held or no free slot number
+ * has its ports clear. Prints why it waits (cap reached, or ports in use by a
+ * non-slot process) and who holds each slot when the picture changes and again
+ * every minute, so a wait is never silent, and gives up after `waitMs` with
+ * the holders and the command that lists and reclaims slots. A slot number
+ * passed over for a port in use is logged once the slot is taken. Ctrl-C ends
+ * the wait at once; nothing is held until this resolves.
  */
 export declare function acquireSlot(opts: AcquireOptions, wait: WaitOptions, io?: SlotIo): Promise<SlotRecord>;
 /**

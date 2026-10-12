@@ -1,4 +1,5 @@
-import { expect, Locator, Page } from '@playwright/test';
+import { Locator, Page } from '@playwright/test';
+import { boundByE2eTimeout, e2eExpect as expect } from './e2e-expect';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 import { cdpClick } from './cdp-click';
@@ -31,6 +32,7 @@ export async function onboardPhantom(
   extensionId: string,
   opts: { password?: string; mnemonicWords?: string } = {},
 ): Promise<void> {
+  boundByE2eTimeout(page);
   const password = opts.password ?? PASSWORD_BY_WALLET.phantom;
   const mnemonicWords = (opts.mnemonicWords ?? TEST_MNEMONIC_WORDS.join(' ')).split(' ');
   const mnemonic = mnemonicWords.join(' ');

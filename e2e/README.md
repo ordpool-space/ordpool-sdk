@@ -31,12 +31,21 @@ repo) each starting their own is what saturates the machine, so every stack
 takes a slot first, and there are only `ORDPOOL_E2E_MAX_STACKS` of them
 (default 1, measured and derived in `stack-slots.ts`, `DEFAULT_MAX_STACKS`).
 
-A slot is a directory `~/.ordpool-e2e/slots/slot-<N>` created with `mkdir`
-(atomic: two racing acquirers never get the same one), holding `owner.json`:
+A slot is a directory `~/.ordpool-e2e/slots/slot-<N>` holding `owner.json`:
 owner pid and its start time, prefix, ports. It stays held while its owner runs
 OR its compose projects have a running container, so a stack keeps its ports
 after the bootstrap that started it exits. A slot that meets neither is stale
 and the next acquirer reclaims it (under a lock, so exactly one does).
+
+`ORDPOOL_E2E_MAX_STACKS` caps how many slots are HELD, not which numbers they
+get. An acquirer takes the lowest free slot number whose ports nothing serves
+yet; a number with a port already in use outside the slots (another project's
+MariaDB on 3306, say) is passed over for the next one. With the default of 1
+and 3306 taken, a `--kind consumer` stack therefore runs in slot 1 (MariaDB on
+3316), and a second request waits until it is torn down. Counting the held
+slots and creating the next one happen under one machine-wide lock
+(`<slot dir>/.cap-lock`), so racing acquirers never hold more than the cap
+between them.
 
 Slot N gives the stack everything it publishes:
 
@@ -72,10 +81,14 @@ node scripts/e2e-slots.mjs reclaim                     # drop stale slots
 Never `down` another session's slot: `list` shows the owner, and a slot whose
 owner still runs needs `--force`.
 
-**Waiting in line.** When all slots are held, an acquirer waits: it prints who
-holds each slot (prefix, pid, age, why) at once, whenever that changes and
-every minute, and gives up after `ORDPOOL_E2E_SLOT_WAIT_MS` with the holders
-and these commands. Ctrl-C leaves the line at once; nothing is held until the
+**Waiting in line.** When the cap is reached, or below it every free slot
+number has a port in use outside the slots, an acquirer waits: it prints which
+of the two it is (`cap reached: 1 of ORDPOOL_E2E_MAX_STACKS=1 slots held`, or
+`slot 0: port 3306 in use by a non-slot process`), who holds each slot (prefix,
+pid, age, why) at once, whenever that changes and every minute, and gives up
+after `ORDPOOL_E2E_SLOT_WAIT_MS` with the holders and these commands. A slot
+number passed over on the way to a free one is logged as `skipped slot 0: port
+3306 in use by a non-slot process`. Ctrl-C leaves the line at once; nothing is held until the
 slot is. This is not a spec wait and not under the 30 s per-wait bound: it runs
 before the runner starts, and what it waits for, another lane finishing, takes
 minutes by design. Its bound is the job cap of the longest lane (40 min,
@@ -101,6 +114,30 @@ the same variables `launchWalletContext` lets through. A workflow step reads
 `$E2E_ELECTRS_HOST_PORT` and its siblings. Its app is served on `E2E_APP_PORT`
 and its own backend on `E2E_APP_BACKEND_PORT`, so two consumers' lanes in two
 slots never meet.
+
+**Without Playwright.** `ordpool-sdk/e2e/stack` serves `stackPort`, `stackUrl`,
+`slotEnv` and the rest of `stack-ports.ts`, `e2eTimeoutMs`, and
+`regtestWallet()` (the bitcoind wallet the bootstraps create and the helpers
+spend from: `REGTEST_WALLET`, default `ordpool-e2e`), and loads nothing of
+`@playwright/test`. A backend's jest specs import from there, with no
+`moduleNameMapper`; `ordpool-sdk/e2e` re-exports the same bindings.
+
+**The per-wait bound outside a test.** Every SDK helper asserts through
+`e2eExpect` (Playwright's `expect` configured with `e2eTimeoutMs()` at each
+call), and every SDK launch (`launchWalletContext`, `launchOfflineContext`,
+each context `launchOfflineBrowser` opens) sets the context's default action
+and navigation timeout to `e2eTimeoutMs()`. The onboarders set the same
+defaults on the page or context they are handed. So a helper in a consumer's
+globalSetup, where no test exists and Playwright would wait its built-in 5 s
+per assertion and 30 s per action, stops at the runner config's bound.
+
+**Files into a container go through a build context, never a bind mount.** A
+bind mount resolves its host path inside the Docker VM, and a VM that shares
+only some host directories (colima shares `/var/folders`, not `/Users`) mounts
+an empty directory for a checkout elsewhere, without an error. The consumer
+MariaDB image COPYs `mariadb-init/*.sql` instead, and the bootstrap builds it
+before every `up` and waits until users `mempool` and `cat21` log in over TCP.
+`stack-ports.unit.spec.ts` fails on a host path in any compose file.
 
 ## The content-scan ord wiring (read this before bumping a consumer)
 

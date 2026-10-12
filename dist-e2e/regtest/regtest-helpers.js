@@ -104,6 +104,7 @@ exports.seedListedCat = seedListedCat;
 exports.seedDirtyCoin = seedDirtyCoin;
 const node_child_process_1 = require("node:child_process");
 const e2e_timeout_1 = require("../e2e-timeout");
+const regtest_wallet_1 = require("../regtest-wallet");
 const stack_ports_1 = require("../stack-ports");
 const node_crypto_1 = require("node:crypto");
 const node_util_1 = require("node:util");
@@ -154,13 +155,9 @@ const IN_CONTAINER_ORD_URL = 'http://localhost:8080';
 const DEFAULT_CONTAINERS = (0, stack_ports_1.stackContainers)(process.env.E2E_PREFIX || 'ordpool-e2e', 'regtest');
 const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? DEFAULT_CONTAINERS.bitcoind;
 const ORD_CONTAINER = process.env.REGTEST_ORD_CONTAINER ?? DEFAULT_CONTAINERS.ord;
-// The bitcoind WALLET these helpers spend from. Overridable for the same
-// reason the container name is: a consumer stack brings the compose up under
-// its own project prefix and its bootstrap names the wallet to match, so a
-// hardcoded name fails with bitcoind's `-18 Requested wallet does not exist or
-// is not loaded`, which reads like a stack that is down rather than a naming
-// mismatch.
-const RPC_WALLET = process.env.REGTEST_WALLET ?? 'ordpool-e2e';
+// The bitcoind WALLET these helpers spend from (`regtestWallet`, REGTEST_WALLET
+// or `ordpool-e2e`), the name the bootstraps create it under.
+const RPC_WALLET = (0, regtest_wallet_1.regtestWallet)();
 /** `-rpcwallet=<name>` for a `bitcoin-cli` call, honouring REGTEST_WALLET. */
 const RPC_WALLET_ARG = `-rpcwallet=${RPC_WALLET}`;
 function getFundedAccount() {

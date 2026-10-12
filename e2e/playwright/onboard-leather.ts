@@ -1,4 +1,5 @@
-import { expect, Page } from '@playwright/test';
+import { Page } from '@playwright/test';
+import { boundByE2eTimeout, e2eExpect as expect } from './e2e-expect';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from './wallet-test-vectors';
 
@@ -17,6 +18,7 @@ export async function onboardLeather(
   extensionId: string,
   opts: { password?: string; mnemonic?: string } = {},
 ): Promise<void> {
+  boundByE2eTimeout(page);
   const password = opts.password ?? PASSWORD_BY_WALLET.leather;
   const mnemonic = opts.mnemonic ?? TEST_MNEMONIC;
 

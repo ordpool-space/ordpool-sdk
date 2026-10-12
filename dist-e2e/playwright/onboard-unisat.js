@@ -6,7 +6,7 @@ exports.dismissUnisatNotice = dismissUnisatNotice;
 exports.dismissUnisatNoticeControls = dismissUnisatNoticeControls;
 exports.onboardUnisat = onboardUnisat;
 exports.waitForUnisatInstallTabSettled = waitForUnisatInstallTabSettled;
-const test_1 = require("@playwright/test");
+const e2e_expect_1 = require("./e2e-expect");
 const is_visible_within_1 = require("./is-visible-within");
 const select_card_1 = require("./select-card");
 const unisat_install_tab_1 = require("./unisat-install-tab");
@@ -94,19 +94,20 @@ async function dismissUnisatNoticeControls(c) {
  * roundtrip specs derive the regtest bcrt1 equivalents from the same pubkey.
  */
 async function onboardUnisat(page, extensionId, opts = {}) {
+    (0, e2e_expect_1.boundByE2eTimeout)(page);
     const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.unisat;
     const words = opts.mnemonicWords ?? wallet_test_vectors_1.TEST_MNEMONIC_WORDS;
     await page.setViewportSize({ width: 400, height: 800 });
     await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-    await (0, test_1.expect)(page.getByTestId('welcome-title')).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByTestId('welcome-title')).toBeVisible();
     await page.getByTestId('import-wallet-button').click();
-    await (0, test_1.expect)(page.getByTestId('create-password-input')).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByTestId('create-password-input')).toBeVisible();
     await page.getByTestId('create-password-input').fill(password);
     await page.getByTestId('create-password-confirm-input').fill(password);
     await page.getByTestId('create-password-continue-button').click();
-    await (0, test_1.expect)(page.getByTestId('restore-wallet-type-option-0')).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByTestId('restore-wallet-type-option-0')).toBeVisible();
     await page.getByTestId('restore-wallet-type-option-0').click();
-    await (0, test_1.expect)(page.getByTestId('mnemonic-import-word-0')).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByTestId('mnemonic-import-word-0')).toBeVisible();
     for (let i = 0; i < words.length; i++) {
         await page.getByTestId(`mnemonic-import-word-${i}`).fill(words[i]);
     }
@@ -134,7 +135,7 @@ async function onboardUnisat(page, extensionId, opts = {}) {
     // every click meant for it, so it goes first.
     await dismissUnisatUpdateNag(page);
     await dismissUnisatNotice(page);
-    await (0, test_1.expect)(page.getByTestId('tab-home')).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByTestId('tab-home')).toBeVisible();
     await waitForUnisatInstallTabSettled(page, extensionId);
 }
 /**
@@ -160,7 +161,7 @@ async function onboardUnisat(page, extensionId, opts = {}) {
  */
 async function waitForUnisatInstallTabSettled(onboardPage, extensionId) {
     const context = onboardPage.context();
-    await test_1.expect
+    await e2e_expect_1.e2eExpect
         .poll(() => (0, unisat_install_tab_1.installTabState)({
         extensionId,
         otherPageUrls: context.pages().filter((p) => p !== onboardPage).map((p) => p.url()),

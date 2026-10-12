@@ -1,5 +1,7 @@
 import { Page } from '@playwright/test';
 
+import { boundByE2eTimeout } from './e2e-expect';
+
 import { onboardLeather } from './onboard-leather';
 import { PASSWORD_BY_WALLET } from './wallet-test-vectors';
 
@@ -16,6 +18,7 @@ export async function onboardCat21Wallet(
   extensionId: string,
   opts: { mnemonic?: string; password?: string } = {},
 ): Promise<void> {
+  boundByE2eTimeout(page);
   return onboardLeather(page, extensionId, {
     mnemonic: opts.mnemonic,
     password: opts.password ?? PASSWORD_BY_WALLET.cat21wallet,

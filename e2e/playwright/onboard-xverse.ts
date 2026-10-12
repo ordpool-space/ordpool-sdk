@@ -1,4 +1,5 @@
-import { expect, BrowserContext, Locator, Page } from '@playwright/test';
+import { BrowserContext, Locator, Page } from '@playwright/test';
+import { boundByE2eTimeout, e2eExpect as expect } from './e2e-expect';
 import { isVisibleWithin } from './is-visible-within';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from './wallet-test-vectors';
@@ -140,6 +141,7 @@ export async function onboardXverse(
   const password = opts.password ?? PASSWORD_BY_WALLET.xverse;
   const mnemonic = opts.mnemonic ?? TEST_MNEMONIC;
 
+  boundByE2eTimeout(context);
   const page = await context.newPage();
   await gotoAndHydrate(
     page,
@@ -203,6 +205,7 @@ export async function dismissXversePromo(notNow: Pick<Locator, 'waitFor' | 'clic
 
 /** Switch a just-onboarded Xverse to Bitcoin Regtest (Testnet mode + Regtest). */
 export async function primeAndSwitchToRegtest(context: BrowserContext, extensionId: string): Promise<void> {
+  boundByE2eTimeout(context);
   const primer = await context.newPage();
   await primer.setViewportSize({ width: 400, height: 800 });
   await gotoAndHydrate(
@@ -253,6 +256,7 @@ export async function primeAndSwitchToRegtest(context: BrowserContext, extension
  * in chrome.storage.local under `persistentStore::networks` as JSON.
  */
 export async function overrideRegtestElectrsUrl(context: BrowserContext, extensionId: string, electrsUrl: string): Promise<void> {
+  boundByE2eTimeout(context);
   const page = await context.newPage();
   await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'domcontentloaded' });
   await page.evaluate(async ([key, url]) => {

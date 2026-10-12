@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardWizz = onboardWizz;
-const test_1 = require("@playwright/test");
+const e2e_expect_1 = require("./e2e-expect");
 const cdp_click_1 = require("./cdp-click");
 const click_until_effect_1 = require("./click-until-effect");
 const onboard_unisat_1 = require("./onboard-unisat");
@@ -14,15 +14,16 @@ const wallet_test_vectors_1 = require("./wallet-test-vectors");
  * equivalents. Shared by the e2e specs + the local wallet-runner.
  */
 async function onboardWizz(page, extensionId, opts = {}) {
+    (0, e2e_expect_1.boundByE2eTimeout)(page);
     const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.wizz;
     const words = opts.mnemonicWords ?? wallet_test_vectors_1.TEST_MNEMONIC_WORDS;
     const addressTypeRowLabel = opts.addressTypeRowLabel ?? 'Native Segwit (P2WPKH)';
     await page.setViewportSize({ width: 400, height: 800 });
     await page.goto(`chrome-extension://${extensionId}/index.html`, { waitUntil: 'domcontentloaded' });
-    await (0, test_1.expect)(page.getByText('I already have a wallet', { exact: true })).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByText('I already have a wallet', { exact: true })).toBeVisible();
     await page.getByText('I already have a wallet', { exact: true }).click();
     const pwInputs = page.locator('input[type="password"]');
-    await (0, test_1.expect)(pwInputs.first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(pwInputs.first()).toBeVisible();
     const pwCount = await pwInputs.count();
     for (let i = 0; i < pwCount; i++)
         await pwInputs.nth(i).fill(password);
@@ -34,11 +35,11 @@ async function onboardWizz(page, extensionId, opts = {}) {
     // what `cdpClick` sends; the mnemonic form appearing is the proof it landed.
     await (0, cdp_click_1.cdpClick)(page, page.getByRole('button', { name: 'Wizz Wallet', exact: true }), 'the "Wizz Wallet" restore source');
     const mnemonicInputs = page.locator('input[type="text"], input[type="password"]');
-    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(mnemonicInputs.first()).toBeVisible();
     for (let i = 0; i < words.length; i++)
         await mnemonicInputs.nth(i).fill(words[i]);
     await (0, click_until_effect_1.clickUntilEffect)(page.getByRole('button', { name: /^continue$/i }).first(), page.getByText(addressTypeRowLabel, { exact: true }).first(), { label: 'wizz onboarding: continue after mnemonic' });
-    await (0, test_1.expect)(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible();
     await page.getByText(addressTypeRowLabel, { exact: true }).first().click();
     const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
     await continueBtn.scrollIntoViewIfNeeded();
@@ -48,9 +49,9 @@ async function onboardWizz(page, extensionId, opts = {}) {
     await (0, click_until_effect_1.clickUntilEffect)(continueBtn, page.getByText('Security Tips', { exact: true }), {
         label: 'wizz onboarding: continue after address type',
     });
-    await (0, test_1.expect)(page.getByText('Security Tips', { exact: true })).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(page.getByText('Security Tips', { exact: true })).toBeVisible();
     const checkboxes = page.locator('label.ant-checkbox-wrapper');
-    await (0, test_1.expect)(checkboxes).toHaveCount(3);
+    await (0, e2e_expect_1.e2eExpect)(checkboxes).toHaveCount(3);
     const cbCount = await checkboxes.count();
     for (let i = 0; i < cbCount; i++)
         await checkboxes.nth(i).click();

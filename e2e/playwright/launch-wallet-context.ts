@@ -4,6 +4,7 @@ import * as net from 'node:net';
 import * as path from 'node:path';
 
 import { regtestServiceUrls } from '../regtest/regtest-helpers';
+import { boundByE2eTimeout } from './e2e-expect';
 
 /**
  * The loopback names every launch lets through: the SDK harness page
@@ -188,7 +189,9 @@ async function launchPersistentOffline(
   options: OfflineContextOptions & { headless: boolean; args: string[] },
 ): Promise<BrowserContext> {
   await assertPortRefuses(DEAD_PROXY_HOST, DEAD_PROXY_PORT);
-  return chromium.launchPersistentContext(userDataDir, options);
+  const context = await chromium.launchPersistentContext(userDataDir, options);
+  boundByE2eTimeout(context);
+  return context;
 }
 
 /** What a test browser without an extension takes. */
@@ -220,7 +223,29 @@ export async function launchOfflineBrowser(
   opts: LaunchOfflineOptions & { options?: OfflineBrowserOptions } = {},
 ): Promise<Browser> {
   await assertPortRefuses(DEAD_PROXY_HOST, DEAD_PROXY_PORT);
-  return chromium.launch({ ...opts.options, headless: opts.headless ?? true, args: offlineLaunchSwitches(opts) });
+  const browser = await chromium.launch({ ...opts.options, headless: opts.headless ?? true, args: offlineLaunchSwitches(opts) });
+  boundEveryNewContext(browser);
+  return browser;
+}
+
+/**
+ * Makes every context `browser` opens, through `newContext` or `newPage`,
+ * start bounded by `e2eTimeoutMs()` (`boundByE2eTimeout`). A Browser has no
+ * default timeout of its own; its contexts do.
+ */
+function boundEveryNewContext(browser: Browser): void {
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (...args: Parameters<Browser['newContext']>) => {
+    const context = await newContext(...args);
+    boundByE2eTimeout(context);
+    return context;
+  };
+  const newPage = browser.newPage.bind(browser);
+  browser.newPage = async (...args: Parameters<Browser['newPage']>) => {
+    const page = await newPage(...args);
+    boundByE2eTimeout(page.context());
+    return page;
+  };
 }
 
 /**

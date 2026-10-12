@@ -1,4 +1,5 @@
-import { expect, Locator, Page } from '@playwright/test';
+import { Locator, Page } from '@playwright/test';
+import { boundByE2eTimeout, e2eExpect as expect } from './e2e-expect';
 import { isVisibleWithin } from './is-visible-within';
 import { selectCard } from './select-card';
 import { INSTALL_TAB_SETTLED, installTabState, walletBackgroundInitialisedAt } from './unisat-install-tab';
@@ -104,6 +105,7 @@ export async function onboardUnisat(
   extensionId: string,
   opts: { addressTypeIndex?: number; password?: string; mnemonicWords?: string[] } = {},
 ): Promise<void> {
+  boundByE2eTimeout(page);
   const password = opts.password ?? PASSWORD_BY_WALLET.unisat;
   const words = opts.mnemonicWords ?? TEST_MNEMONIC_WORDS;
 

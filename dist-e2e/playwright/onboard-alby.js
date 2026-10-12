@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.seedAlbyAccount = seedAlbyAccount;
+const e2e_expect_1 = require("./e2e-expect");
 const alby_offline_routes_1 = require("./alby-offline-routes");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 /**
@@ -11,6 +12,7 @@ const wallet_test_vectors_1 = require("./wallet-test-vectors");
  * the created accountId. Shared by the e2e specs + the local wallet-runner.
  */
 async function seedAlbyAccount(page, opts = {}) {
+    (0, e2e_expect_1.boundByE2eTimeout)(page);
     const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.alby;
     const mnemonic = opts.mnemonic ?? wallet_test_vectors_1.TEST_MNEMONIC;
     const bitcoinNetwork = opts.bitcoinNetwork ?? 'regtest';

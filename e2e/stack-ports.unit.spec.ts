@@ -185,6 +185,36 @@ describe('the compose files and scripts', () => {
     for (const n of names) expect(n.startsWith('${E2E_PREFIX:-ordpool-e2e}-') && n).toBe(n);
   });
 
+  /**
+   * A bind mount resolves its host path inside the Docker VM, and a VM that
+   * shares only some host directories (colima: /var/folders, not /Users) mounts
+   * an empty directory for a checkout elsewhere, silently. Files reach a
+   * container through a build context (sent over the API) instead.
+   */
+  const composeFiles = fs.readdirSync(e2eDir).filter((f) => /^docker-compose\..*\.yml$/.test(f)).sort();
+
+  it('every compose file is checked for host paths', () => {
+    expect(composeFiles).toEqual([
+      'docker-compose.consumer-environment.yml',
+      'docker-compose.consumer-gha-cache.yml',
+      'docker-compose.gha-cache-ro.yml',
+      'docker-compose.gha-cache.yml',
+      'docker-compose.regtest.yml',
+    ]);
+  });
+
+  it.each(composeFiles)('%s mounts named volumes only, no host path', (file) => {
+    const text = fs.readFileSync(path.join(e2eDir, file), 'utf8');
+    expect(/type:\s*bind/.exec(text)?.[0] ?? null).toBe(null);
+    const declared = new Set([...(/^volumes:\n((?:[ \t]+\S.*\n?)*)/m.exec(text)?.[1] ?? '').matchAll(/^ {2}([\w.-]+):/gm)].map((m) => m[1]));
+    const serviceVolumes = [...text.matchAll(/^ {4}volumes:\n((?:\s*#.*\n| {6}- .*\n)*)/gm)]
+      .flatMap((m) => [...m[1].matchAll(/^ {6}- ([^:\s]+):/gm)].map((v) => v[1]));
+    for (const source of serviceVolumes) {
+      expect(`${file}: ${source} is ${declared.has(source) ? 'a named volume' : 'a host path'}`)
+        .toBe(`${file}: ${source} is a named volume`);
+    }
+  });
+
   it.each(['regtest-bootstrap.sh', 'consumer-environment-bootstrap.sh'])('%s takes its ports from the slot and names none', (file) => {
     const text = fs.readFileSync(path.join(e2eDir, file), 'utf8');
     expect(text).toContain('use_stack_slot');

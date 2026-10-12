@@ -120,6 +120,10 @@ if ! docker ps --format '{{.Names}}' | grep -qx "$BITCOIND_CONTAINER"; then
     COMPOSE_BAKE=true "${COMPOSE[@]}" build >&2
     "${COMPOSE[@]}" up -d --no-build >&2
   else
+    # The MariaDB image carries the init scripts (COPY, not a bind mount; see
+    # the compose file). `up` reuses an existing image, so build it first:
+    # cached, it takes a moment, and an edited script always reaches the stack.
+    "${COMPOSE[@]}" build mariadb >&2
     "${COMPOSE[@]}" up -d >&2
   fi
 fi
@@ -176,11 +180,29 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-# --- wait for mariadb to accept connections ---
-for _ in $(seq 1 30); do
-  if docker exec "$MARIADB_CONTAINER" mariadb -uroot -pordpool -e 'SELECT 1' >/dev/null 2>&1; then break; fi
+# --- wait for mariadb to serve both consumer users over TCP ---
+# Logging in as each consumer user over 127.0.0.1 proves the init scripts ran
+# (they create the users) and the real server is up: the entrypoint runs the
+# scripts against a temporary server without networking, which a root login
+# over the socket would already reach.
+mariadb_users_ready() {
+  docker exec "$MARIADB_CONTAINER" mariadb -h127.0.0.1 -umempool -pmempool mempool -e 'SELECT 1' >/dev/null 2>&1 &&
+    docker exec "$MARIADB_CONTAINER" mariadb -h127.0.0.1 -ucat21 -pcat21 cat21 -e 'SELECT 1' >/dev/null 2>&1
+}
+for _ in $(seq 1 60); do
+  if mariadb_users_ready; then break; fi
   sleep 1
 done
+if ! mariadb_users_ready; then
+  echo "consumer-environment-bootstrap: $MARIADB_CONTAINER does not let users mempool and cat21 log in over TCP; its init scripts did not run:" >&2
+  if ! docker exec "$MARIADB_CONTAINER" mariadb -h127.0.0.1 -ucat21 -pcat21 cat21 -e 'SELECT 1' >&2; then
+    echo "consumer-environment-bootstrap: the cat21 login above is the one that fails" >&2
+  fi
+  if ! docker exec "$MARIADB_CONTAINER" ls -la /docker-entrypoint-initdb.d >&2; then
+    echo "consumer-environment-bootstrap: could not list the init scripts in $MARIADB_CONTAINER" >&2
+  fi
+  exit 1
+fi
 
 REDIS_BLOCK="null"
 if [ "$WITH_REDIS" = 1 ]; then

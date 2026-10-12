@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardCat21Wallet = onboardCat21Wallet;
+const e2e_expect_1 = require("./e2e-expect");
 const onboard_leather_1 = require("./onboard-leather");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 /**
@@ -12,6 +13,7 @@ const wallet_test_vectors_1 = require("./wallet-test-vectors");
  * local wallet-runner.
  */
 async function onboardCat21Wallet(page, extensionId, opts = {}) {
+    (0, e2e_expect_1.boundByE2eTimeout)(page);
     return (0, onboard_leather_1.onboardLeather)(page, extensionId, {
         mnemonic: opts.mnemonic,
         password: opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.cat21wallet,

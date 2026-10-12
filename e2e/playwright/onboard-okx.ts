@@ -1,4 +1,5 @@
-import { expect, Page } from '@playwright/test';
+import { Page } from '@playwright/test';
+import { boundByE2eTimeout, e2eExpect as expect } from './e2e-expect';
 import { e2eTimeoutMs } from '../e2e-timeout';
 import { isVisibleWithin } from './is-visible-within';
 
@@ -43,6 +44,7 @@ export async function onboardOkx(
   extensionId: string,
   opts: { password?: string; mnemonicWords?: string } = {},
 ): Promise<Page> {
+  boundByE2eTimeout(page);
   const password = opts.password ?? PASSWORD_BY_WALLET.okx;
   const mnemonicWords = (opts.mnemonicWords ?? TEST_MNEMONIC_WORDS.join(' ')).split(' ');
   const mnemonic = mnemonicWords.join(' ');

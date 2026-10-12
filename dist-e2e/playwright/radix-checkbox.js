@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.clickRadixCheckbox = clickRadixCheckbox;
-const test_1 = require("@playwright/test");
+const e2e_expect_1 = require("./e2e-expect");
 /**
  * Click a Radix UI Checkbox primitive and assert the toggle landed.
  *
@@ -26,8 +26,8 @@ const test_1 = require("@playwright/test");
 async function clickRadixCheckbox(page, options = {}) {
     const { nth = 0 } = options;
     const checkbox = page.getByRole('checkbox').nth(nth);
-    await (0, test_1.expect)(checkbox).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(checkbox).toBeVisible();
     await checkbox.click();
-    await (0, test_1.expect)(checkbox).toHaveAttribute('data-state', 'checked');
+    await (0, e2e_expect_1.e2eExpect)(checkbox).toHaveAttribute('data-state', 'checked');
 }
 //# sourceMappingURL=radix-checkbox.js.map

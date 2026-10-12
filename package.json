@@ -79,6 +79,10 @@
     "./e2e": {
       "types": "./dist-e2e/index.d.ts",
       "default": "./dist-e2e/index.js"
+    },
+    "./e2e/stack": {
+      "types": "./dist-e2e/stack.d.ts",
+      "default": "./dist-e2e/stack.js"
     }
   },
   "files": [

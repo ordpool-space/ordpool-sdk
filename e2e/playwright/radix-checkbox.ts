@@ -1,4 +1,5 @@
-import { expect, type Page, type Locator } from '@playwright/test';
+import { type Page, type Locator } from '@playwright/test';
+import { e2eExpect as expect } from './e2e-expect';
 
 /**
  * Click a Radix UI Checkbox primitive and assert the toggle landed.

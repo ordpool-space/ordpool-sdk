@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardPhantom = onboardPhantom;
 exports.tickPhantomTerms = tickPhantomTerms;
 exports.tickPhantomTermsControls = tickPhantomTermsControls;
-const test_1 = require("@playwright/test");
+const e2e_expect_1 = require("./e2e-expect");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
 const cdp_click_1 = require("./cdp-click");
 const approval_popup_1 = require("./approval-popup");
@@ -30,6 +30,7 @@ const approval_popup_1 = require("./approval-popup");
  *     which does not depend on Get Started.
  */
 async function onboardPhantom(page, extensionId, opts = {}) {
+    (0, e2e_expect_1.boundByE2eTimeout)(page);
     const password = opts.password ?? wallet_test_vectors_1.PASSWORD_BY_WALLET.phantom;
     const mnemonicWords = (opts.mnemonicWords ?? wallet_test_vectors_1.TEST_MNEMONIC_WORDS.join(' ')).split(' ');
     const mnemonic = mnemonicWords.join(' ');
@@ -38,13 +39,13 @@ async function onboardPhantom(page, extensionId, opts = {}) {
         await page.goto(`chrome-extension://${extensionId}/popup.html`, { waitUntil: 'networkidle' });
     }
     const importBtn = page.getByRole('button', { name: 'I Already Have a Wallet' });
-    await (0, test_1.expect)(importBtn).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(importBtn).toBeVisible();
     await (0, cdp_click_1.cdpClick)(page, importBtn, 'the "I Already Have a Wallet" button');
     const recoveryBtn = page.getByRole('button', { name: /Import Recovery Phrase/i });
-    await (0, test_1.expect)(recoveryBtn).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(recoveryBtn).toBeVisible();
     await (0, cdp_click_1.cdpClick)(page, recoveryBtn, 'the "Import Recovery Phrase" button');
     const mnemonicInputs = page.locator('input, textarea');
-    await (0, test_1.expect)(mnemonicInputs.first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(mnemonicInputs.first()).toBeVisible();
     const inputCount = await mnemonicInputs.count();
     if (inputCount >= 12) {
         for (let i = 0; i < mnemonicWords.length; i++) {
@@ -55,7 +56,7 @@ async function onboardPhantom(page, extensionId, opts = {}) {
         await mnemonicInputs.first().fill(mnemonic);
     }
     const confirmAfterMnemonic = page.getByRole('button', { name: /^import wallet$/i });
-    await (0, test_1.expect)(confirmAfterMnemonic).toBeEnabled();
+    await (0, e2e_expect_1.e2eExpect)(confirmAfterMnemonic).toBeEnabled();
     await confirmAfterMnemonic.click();
     // The import result, on whichever page shows it: Phantom replaces the tab
     // for it in some releases and renders it in place in others. Its heading is
@@ -81,7 +82,7 @@ async function onboardPhantom(page, extensionId, opts = {}) {
     // "Create a password", again on whichever page shows it.
     page = await (0, approval_popup_1.waitForPageShowing)({ context: ctx, text: /Create a password/i });
     const pwInputs = page.locator('input[type="password"]');
-    await (0, test_1.expect)(pwInputs.first()).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(pwInputs.first()).toBeVisible();
     await pwInputs.nth(0).fill(password);
     await pwInputs.nth(1).fill(password);
     await tickPhantomTerms(page);

@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.approveCat21WalletConnectPopup = approveCat21WalletConnectPopup;
 exports.approveCat21WalletSignPopup = approveCat21WalletSignPopup;
-const test_1 = require("@playwright/test");
+const e2e_expect_1 = require("./e2e-expect");
 const approval_popup_1 = require("./approval-popup");
 /**
  * Wait for the Cat21 Wallet's getAddresses approval popup to open
@@ -69,15 +69,15 @@ async function approveCat21WalletSignPopup(args) {
         await screenshot(approval);
     if (expectedSignAtIndex !== undefined) {
         const url = approval.url();
-        (0, test_1.expect)(url, 'sign popup URL must encode the sign-psbt route').toContain('sign-psbt');
+        (0, e2e_expect_1.e2eExpect)(url, 'sign popup URL must encode the sign-psbt route').toContain('sign-psbt');
         const expected = Array.isArray(expectedSignAtIndex) ? expectedSignAtIndex : [expectedSignAtIndex];
         for (const idx of expected) {
-            (0, test_1.expect)(url, `sign popup URL must carry signAtIndex=${idx}`).toContain(`signAtIndex=${idx}`);
+            (0, e2e_expect_1.e2eExpect)(url, `sign popup URL must carry signAtIndex=${idx}`).toContain(`signAtIndex=${idx}`);
         }
-        await (0, test_1.expect)(approval.getByTestId('psbt-signer-card'), 'psbt-signer-card must render in the sign popup').toBeVisible();
+        await (0, e2e_expect_1.e2eExpect)(approval.getByTestId('psbt-signer-card'), 'psbt-signer-card must render in the sign popup').toBeVisible();
     }
     const confirmBtn = approval.getByRole('button', { name: /^(confirm|sign|approve)$/i }).first();
-    await (0, test_1.expect)(confirmBtn).toBeVisible();
+    await (0, e2e_expect_1.e2eExpect)(confirmBtn).toBeVisible();
     await (0, approval_popup_1.clickApprovalAndRequireClose)(confirmBtn, approval, { label: 'Cat21 Wallet sign popup' });
     knownPages.add(approval);
     return approval;

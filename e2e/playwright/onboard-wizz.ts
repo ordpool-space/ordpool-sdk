@@ -1,4 +1,5 @@
-import { expect, Page } from '@playwright/test';
+import { Page } from '@playwright/test';
+import { boundByE2eTimeout, e2eExpect as expect } from './e2e-expect';
 import { cdpClick } from './cdp-click';
 import { clickUntilEffect } from './click-until-effect';
 import { waitForUnisatInstallTabSettled } from './onboard-unisat';
@@ -17,6 +18,7 @@ export async function onboardWizz(
   extensionId: string,
   opts: { addressTypeRowLabel?: string; password?: string; mnemonicWords?: string[] } = {},
 ): Promise<void> {
+  boundByE2eTimeout(page);
   const password = opts.password ?? PASSWORD_BY_WALLET.wizz;
   const words = opts.mnemonicWords ?? TEST_MNEMONIC_WORDS;
   const addressTypeRowLabel = opts.addressTypeRowLabel ?? 'Native Segwit (P2WPKH)';

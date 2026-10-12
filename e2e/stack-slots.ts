@@ -4,10 +4,14 @@
  * starts them.
  *
  * A slot is a directory `<root>/slot-<N>` (root: `ORDPOOL_E2E_SLOT_DIR`, default
- * `~/.ordpool-e2e/slots`). `mkdir` is atomic, so two processes racing for slot N
- * cannot both create it: the one that does holds it, the other moves on. The
- * holder writes `owner.json` (owner PID, start time, prefix, ports) into it.
- * Slot N gives the stack its ports and prefix (`stack-ports.ts`).
+ * `~/.ordpool-e2e/slots`) holding `owner.json` (owner PID, start time, prefix,
+ * ports). Slot N gives the stack its ports and prefix (`stack-ports.ts`).
+ *
+ * `ORDPOOL_E2E_MAX_STACKS` caps how many slots are held, not which numbers:
+ * any number the port layout supports may be taken, the lowest whose ports
+ * nothing outside the slots serves yet. Counting the held slots and creating
+ * the next one happen under one machine-wide lock (`<root>/.cap-lock`), so two
+ * racing acquirers never take more than the cap between them.
  *
  * A slot is held while its owner process lives OR its compose projects have a
  * running container. The second condition is what keeps a stack's ports
@@ -346,7 +350,7 @@ export function reclaimStaleSlots(root: string, io: SlotIo = defaultSlotIo): num
 
 export interface AcquireOptions {
   root: string;
-  /** Slots `0..max-1` are candidates. */
+  /** How many slots may be held machine-wide, by every session together. */
   max: number;
   /** The process whose life holds the slot. */
   ownerPid: number;
@@ -354,70 +358,181 @@ export interface AcquireOptions {
   label?: string;
 }
 
-/** A slot whose number is free but whose ports something outside the slots holds. */
+/** A slot whose number is free but one of whose ports something outside the slots holds. */
 export interface BlockedSlot {
   slot: number;
   port: number;
 }
 
+/**
+ * Why nothing was acquired: `cap` when `max` slots are held machine-wide,
+ * `blocked` when fewer are held but every free slot number has a port that
+ * something outside the slots already serves.
+ */
+export type NotAcquiredReason = 'cap' | 'blocked';
+
 export type TryAcquireResult =
-  | { record: SlotRecord }
-  | { record: null; holders: SlotStatus[]; blocked: BlockedSlot[] };
+  | { record: SlotRecord; skipped: BlockedSlot[] }
+  | { record: null; reason: NotAcquiredReason; holders: SlotStatus[]; blocked: BlockedSlot[] };
 
 /**
- * One pass over slots `0..max-1`: takes the lowest free one, reclaiming a stale
- * one on the way. A slot whose number is free but one of whose ports (those a
- * stack of `kind` opens, `stackServices`) already accepts connections (a stack
- * started outside the slots, another app) is skipped and reported as blocked:
- * it is in use, whoever uses it.
+ * How long `tryAcquireSlot` waits for the cap lock. The holder counts the
+ * slots, probes the ports of the free slot numbers it walks (one slot's ports
+ * in parallel, each probe bounded by {@link PORT_PROBE_MS}) and writes one
+ * record, so it holds the lock for milliseconds in the usual case and for one
+ * probe bound per blocked slot number at worst.
+ */
+export const CAP_LOCK_WAIT_MS = 60_000;
+
+/** How often a process waiting for the cap lock looks again. */
+const CAP_LOCK_POLL_MS = 10;
+
+/**
+ * Runs `fn` under the machine-wide cap lock `<root>/.cap-lock`: a file put in
+ * place by `link` (atomic, fails when the name exists) that names its holder's
+ * pid from the first instant. Counting the held slots and taking one is a
+ * single step only under this lock; without it two acquirers could both count
+ * `max - 1` held and both take a slot.
+ *
+ * A lock whose holder is gone is moved away and checked: when the moved file
+ * names another pid than the one judged gone, a live acquirer took the lock in
+ * between, and the file goes back unless a newer lock already exists.
+ */
+async function withCapLock<T>(root: string, io: SlotIo, fn: () => Promise<T>): Promise<T> {
+  const lock = path.join(root, '.cap-lock');
+  const mine =`${lock}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(mine, String(process.pid));
+  const deadline = Date.now() + CAP_LOCK_WAIT_MS;
+  try {
+    for (;;) {
+      try {
+        fs.linkSync(mine, lock);
+        break;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      }
+      const holder = readLockPid(lock);
+      if (holder === 'absent') continue;
+      const abandoned = holder === null
+        ? lockAgeMs(lock, io) > RECORD_GRACE_MS
+        : !io.isOwnerAlive(holder, null);
+      if (abandoned) {
+        clearAbandonedLock(lock, holder);
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`the slot cap lock ${lock} stayed held by pid ${holder ?? '(unknown)'} for ${formatAge(CAP_LOCK_WAIT_MS)}`);
+      }
+      await new Promise<void>((r) => setTimeout(r, CAP_LOCK_POLL_MS));
+    }
+  } finally {
+    fs.rmSync(mine, { force: true });
+  }
+  try {
+    return await fn();
+  } finally {
+    fs.rmSync(lock, { force: true });
+  }
+}
+
+/** The pid a lock file names, null when it names none, `'absent'` when the file is gone. */
+function readLockPid(lock: string): number | null | 'absent' {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(lock, 'utf8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 'absent';
+    throw err;
+  }
+  const pid = Number(raw.trim());
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function lockAgeMs(lock: string, io: SlotIo): number {
+  try {
+    return io.now() - fs.statSync(lock).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/** Moves an abandoned lock away; puts it back when it turns out to be a live acquirer's. */
+function clearAbandonedLock(lock: string, judgedPid: number | null): void {
+  const tomb = `${lock}.removed-${process.pid}-${Date.now()}`;
+  try {
+    fs.renameSync(lock, tomb);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw err;
+  }
+  if (readLockPid(tomb) !== judgedPid) {
+    try {
+      fs.linkSync(tomb, lock);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+    }
+  }
+  fs.rmSync(tomb, { force: true });
+}
+
+/** The first port of slot `slot` that a stack of `kind` opens and that already accepts connections, else null. */
+async function firstBusyPort(slot: number, kind: StackKind, io: SlotIo): Promise<number | null> {
+  const ports = slotPorts(slot);
+  const wanted = stackServices(kind).map((s) => ports[s]);
+  const busy = await Promise.all(wanted.map((p) => io.portInUse(p)));
+  const i = busy.indexOf(true);
+  return i === -1 ? null : wanted[i];
+}
+
+/**
+ * One pass, under the cap lock: reclaims the stale slots, counts the held
+ * ones, and while fewer than `max` are held takes the lowest free slot number
+ * whose ports (those a stack of `kind` opens, `stackServices`) nothing serves
+ * yet. Every slot number the port layout supports
+ * (`0..MAX_SLOTS_SUPPORTED-1`) is a candidate: `max` caps how many stacks run,
+ * not which numbers they get, so a port held outside the slots (another
+ * project's MariaDB on 3306) moves the stack to the next number instead of
+ * stopping it. The numbers passed over that way come back as `skipped`.
  */
 export async function tryAcquireSlot(opts: AcquireOptions, io: SlotIo = defaultSlotIo): Promise<TryAcquireResult> {
   fs.mkdirSync(opts.root, { recursive: true });
-  const holders: SlotStatus[] = [];
-  const blocked: BlockedSlot[] = [];
-  for (let slot = 0; slot < opts.max; slot++) {
-    if (!mkdirSlot(opts.root, slot)) {
-      const status = slotStatus(opts.root, slot, io);
-      if (status !== null && status.state === 'stale') reclaimIfStale(opts.root, slot, io);
-      if (!mkdirSlot(opts.root, slot)) {
-        const now = slotStatus(opts.root, slot, io);
-        if (now !== null) holders.push(now);
+  return withCapLock(opts.root, io, async (): Promise<TryAcquireResult> => {
+    for (const s of listSlots(opts.root, io)) {
+      if (s.state === 'stale') reclaimIfStale(opts.root, s.slot, io);
+    }
+    const present = listSlots(opts.root, io);
+    const holders = present.filter((s) => s.state === 'held');
+    if (holders.length >= opts.max) return { record: null, reason: 'cap', holders, blocked: [] };
+    const taken = new Set(present.map((s) => s.slot));
+    const kind = opts.kind ?? 'regtest';
+    const blocked: BlockedSlot[] = [];
+    for (let slot = 0; slot < MAX_SLOTS_SUPPORTED; slot++) {
+      if (taken.has(slot)) continue;
+      const busy = await firstBusyPort(slot, kind, io);
+      if (busy !== null) {
+        blocked.push({ slot, port: busy });
         continue;
       }
+      if (!mkdirSlot(opts.root, slot)) continue;
+      const prefix = slotPrefix(slot);
+      const record: SlotRecord = {
+        slot,
+        ownerPid: opts.ownerPid,
+        ownerStartedAt: io.processStartTime(opts.ownerPid),
+        acquiredAt: new Date(io.now()).toISOString(),
+        prefix,
+        kind,
+        projects: stackProjects(prefix),
+        ports: slotPorts(slot),
+        label: opts.label ?? '',
+      };
+      const tmp = `${recordPath(opts.root, slot)}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`);
+      fs.renameSync(tmp, recordPath(opts.root, slot));
+      return { record, skipped: blocked };
     }
-    const kind = opts.kind ?? 'regtest';
-    const ports = slotPorts(slot);
-    let busy: number | null = null;
-    for (const service of stackServices(kind)) {
-      const port = ports[service];
-      if (await io.portInUse(port)) {
-        busy = port;
-        break;
-      }
-    }
-    if (busy !== null) {
-      removeSlotDir(opts.root, slot);
-      blocked.push({ slot, port: busy });
-      continue;
-    }
-    const prefix = slotPrefix(slot);
-    const record: SlotRecord = {
-      slot,
-      ownerPid: opts.ownerPid,
-      ownerStartedAt: io.processStartTime(opts.ownerPid),
-      acquiredAt: new Date(io.now()).toISOString(),
-      prefix,
-      kind,
-      projects: stackProjects(prefix),
-      ports,
-      label: opts.label ?? '',
-    };
-    const tmp = `${recordPath(opts.root, slot)}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`);
-    fs.renameSync(tmp, recordPath(opts.root, slot));
-    return { record };
-  }
-  return { record: null, holders, blocked };
+    return { record: null, reason: 'blocked', holders, blocked };
+  });
 }
 
 function mkdirSlot(root: string, slot: number): boolean {
@@ -436,10 +551,20 @@ export function describeHolders(holders: readonly SlotStatus[], blocked: readonl
     const who = h.record ? `${h.record.prefix} pid ${h.record.ownerPid}${h.record.label ? ` (${h.record.label})` : ''}` : '(no record yet)';
     return `  slot ${h.slot}: ${who}, ${formatAge(h.ageMs)} old, ${h.state}: ${h.reason}`;
   });
-  for (const b of blocked) {
-    lines.push(`  slot ${b.slot}: free, but port ${b.port} already accepts connections outside the slots (lsof -nP -iTCP:${b.port} -sTCP:LISTEN)`);
-  }
+  for (const b of blocked) lines.push(`  ${describeBlocked(b)}`);
   return lines;
+}
+
+/** `slot 0: port 3306 in use by a non-slot process (lsof ...)`: why a free slot number was passed over. */
+export function describeBlocked(b: BlockedSlot): string {
+  return `slot ${b.slot}: port ${b.port} in use by a non-slot process (lsof -nP -iTCP:${b.port} -sTCP:LISTEN)`;
+}
+
+/** Why a pass took no slot, one line. */
+export function describeNotAcquired(reason: NotAcquiredReason, held: number, max: number): string {
+  return reason === 'cap'
+    ? `cap reached: ${held} of ${MAX_STACKS_ENV}=${max} slots held`
+    : `${held} of ${MAX_STACKS_ENV}=${max} slots held, but every free slot number has a port in use by a non-slot process`;
 }
 
 /** `1h02m`, `3m05s`, `12s`. */
@@ -463,11 +588,13 @@ export interface WaitOptions {
 }
 
 /**
- * Takes a slot, waiting in line while all `max` are held. Prints who holds
- * each slot when the picture changes and again every minute, so a wait is
- * never silent, and gives up after `waitMs` with the holders and the command
- * that lists and reclaims slots. Ctrl-C ends the wait at once; nothing is held
- * until this resolves.
+ * Takes a slot, waiting in line while `max` are held or no free slot number
+ * has its ports clear. Prints why it waits (cap reached, or ports in use by a
+ * non-slot process) and who holds each slot when the picture changes and again
+ * every minute, so a wait is never silent, and gives up after `waitMs` with
+ * the holders and the command that lists and reclaims slots. A slot number
+ * passed over for a port in use is logged once the slot is taken. Ctrl-C ends
+ * the wait at once; nothing is held until this resolves.
  */
 export async function acquireSlot(opts: AcquireOptions, wait: WaitOptions, io: SlotIo = defaultSlotIo): Promise<SlotRecord> {
   const sleep = wait.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
@@ -476,21 +603,25 @@ export async function acquireSlot(opts: AcquireOptions, wait: WaitOptions, io: S
   let lastPrinted = 0;
   for (;;) {
     const res = await tryAcquireSlot(opts, io);
-    if (res.record) return res.record;
+    if (res.record) {
+      for (const b of res.skipped) wait.log(`skipped ${describeBlocked(b)}`);
+      return res.record;
+    }
+    const why = describeNotAcquired(res.reason, res.holders.length, opts.max);
     const lines = describeHolders(res.holders, res.blocked);
-    const picture = lines.map((l) => l.replace(/, \S+ old,/, ',')).join('\n');
+    const picture = [why, ...lines.map((l) => l.replace(/, \S+ old,/, ','))].join('\n');
     const now = io.now();
     const waited = now - start;
     if (waited >= wait.waitMs) {
       throw new Error([
-        `no regtest stack slot came free within ${formatAge(wait.waitMs)} (${MAX_STACKS_ENV}=${opts.max}). Held:`,
+        `no regtest stack slot came free within ${formatAge(wait.waitMs)}, ${why}:`,
         ...lines,
         'A slot held longer than the longest lane runs is a stack nobody tore down.',
         `List them: node scripts/e2e-slots.mjs list (in the ordpool-sdk package). Tear down YOUR OWN: node scripts/e2e-slots.mjs down <slot>.`,
       ].join('\n'));
     }
     if (picture !== lastPicture || now - lastPrinted >= SLOT_HEARTBEAT_MS) {
-      wait.log(`waiting for a regtest stack slot (${MAX_STACKS_ENV}=${opts.max}, waited ${formatAge(waited)} of ${formatAge(wait.waitMs)}, Ctrl-C to stop):`);
+      wait.log(`waiting for a regtest stack slot, ${why} (waited ${formatAge(waited)} of ${formatAge(wait.waitMs)}, Ctrl-C to stop):`);
       for (const l of lines) wait.log(l);
       lastPicture = picture;
       lastPrinted = now;

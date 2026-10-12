@@ -8,9 +8,11 @@
  *         `docker ps --format '{{.Label "com.docker.compose.project"}}'` prints one per line), portInUse where a
  *         case decides which ports are taken, the clock and sleep of the waiting queue, and the teardown of runInSlot
  *         (a recorder instead of `docker compose down`)
- * Proves: concurrent acquirers never share a slot, at most max are held, a stale slot is reclaimed exactly once,
- *         a slot whose owner is gone stays held while its containers run, a slot whose ports are taken is skipped,
- *         the queue reports its holders and gives up at its bound, and runInSlot hands the slot's environment to
+ * Proves: concurrent acquirers never share a slot and never hold more than max between them, wherever the held
+ *         slots sit, a stale slot is reclaimed exactly once, a slot whose owner is gone stays held while its
+ *         containers run, a slot number whose ports are served outside the slots is passed over for the next one
+ *         (max caps the count, not the numbers), the cap lock of a dead process is taken over, the queue says
+ *         whether the cap or a port stops it, reports its holders and gives up at its bound, and runInSlot hands the slot's environment to
  *         the command, then tears down and releases on success and failure alike
  */
 import { spawn, spawnSync } from 'node:child_process';
@@ -103,6 +105,7 @@ describe('tryAcquireSlot', () => {
     const third = await tryAcquireSlot({ root, max: 2, ownerPid: me }, io);
     expect(third.record).toBe(null);
     if (third.record !== null) throw new Error('unreachable');
+    expect(third.reason).toBe('cap');
     expect(third.holders.map((h) => [h.slot, h.state, h.reason])).toEqual([
       [0, 'held', `owner pid ${me} runs`],
       [1, 'held', `owner pid ${me} runs`],
@@ -139,25 +142,65 @@ describe('tryAcquireSlot', () => {
     );
   });
 
-  it('skips a free slot whose ports something else already serves', async () => {
+  it('with max 1, a port of slot 0 served outside the slots moves the stack to slot 1 instead of stopping it', async () => {
     const root = tempRoot();
     const io = fakeIo({ portInUse: async (port) => port === 8080 });
-    const got = await tryAcquireSlot({ root, max: 2, ownerPid: me }, io);
-    expect(got.record?.slot).toBe(1);
-    expect(fs.existsSync(path.join(root, 'slot-0'))).toBe(false);
-    const none = await tryAcquireSlot({ root, max: 1, ownerPid: me }, io);
-    expect(none.record === null ? none.blocked : 'acquired').toEqual([{ slot: 0, port: 8080 }]);
+    const got = await tryAcquireSlot({ root, max: 1, ownerPid: me }, io);
+    expect(got.record === null ? 'none' : [got.record.slot, got.record.prefix, got.record.ports.electrs, got.skipped])
+      .toEqual([1, 'ordpool-e2e-s1', 3020, [{ slot: 0, port: 8080 }]]);
+    expect(fs.readdirSync(root).filter((n) => n.startsWith('slot-'))).toEqual(['slot-1']);
+    // The one stack the cap allows runs, so the next acquirer meets the cap, not the port.
+    const next = await tryAcquireSlot({ root, max: 1, ownerPid: me }, io);
+    expect(next.record === null ? [next.reason, next.holders.map((h) => h.slot), next.blocked] : 'acquired')
+      .toEqual(['cap', [1], []]);
+  });
+
+  it('counts held slots wherever they sit: one held at slot 7 fills a cap of 1', async () => {
+    const root = tempRoot();
+    plantSlot(root, 7, me, 'ordpool-e2e-s7');
+    const got = await tryAcquireSlot({ root, max: 1, ownerPid: me }, fakeIo());
+    expect(got.record === null ? [got.reason, got.holders.map((h) => h.slot)] : 'acquired').toEqual(['cap', [7]]);
+    expect((await tryAcquireSlot({ root, max: 2, ownerPid: me }, fakeIo())).record?.slot).toBe(0);
+  });
+
+  it('reports blocked, not cap, when below the cap every slot number has a port in use', async () => {
+    const root = tempRoot();
+    const got = await tryAcquireSlot({ root, max: 1, ownerPid: me }, fakeIo({ portInUse: async () => true }));
+    expect(got.record === null ? [got.reason, got.holders, got.blocked.length, got.blocked[0]] : 'acquired')
+      .toEqual(['blocked', [], 30, { slot: 0, port: 18443 }]);
+    expect(fs.readdirSync(root)).toEqual([]);
   });
 
   it('probes only the ports its kind of stack opens', async () => {
     const root = tempRoot();
-    // Another session's consumer MariaDB on slot 0's 3306 does not stop a regtest stack there ...
+    // A MariaDB outside the slots on slot 0's 3306 does not stop a regtest stack there ...
     const mariadbTaken = fakeIo({ portInUse: async (port) => port === 3306 });
-    expect((await tryAcquireSlot({ root, max: 2, ownerPid: me, kind: 'regtest' }, mariadbTaken)).record?.slot).toBe(0);
-    // ... but does stop a consumer stack, which publishes MariaDB.
+    expect((await tryAcquireSlot({ root, max: 1, ownerPid: me, kind: 'regtest' }, mariadbTaken)).record?.slot).toBe(0);
+    // ... but moves a consumer stack, which publishes MariaDB, to slot 1 (MariaDB 3316).
     const other = tempRoot();
     const got = await tryAcquireSlot({ root: other, max: 1, ownerPid: me, kind: 'consumer' }, mariadbTaken);
-    expect(got.record === null ? got.blocked : 'acquired').toEqual([{ slot: 0, port: 3306 }]);
+    expect(got.record === null ? 'none' : [got.record.slot, got.record.ports.mariadb, got.skipped])
+      .toEqual([1, 3316, [{ slot: 0, port: 3306 }]]);
+  });
+
+  it('takes the cap lock left by a process that died, and waits for one whose holder runs', async () => {
+    const root = tempRoot();
+    const lock = path.join(root, '.cap-lock');
+    fs.writeFileSync(lock, String(deadPid()));
+    expect((await tryAcquireSlot({ root, max: 1, ownerPid: me }, fakeIo())).record?.slot).toBe(0);
+    expect(fs.existsSync(lock)).toBe(false);
+
+    const other = tempRoot();
+    const held = path.join(other, '.cap-lock');
+    fs.writeFileSync(held, String(me));
+    let settled = false;
+    const pending = tryAcquireSlot({ root: other, max: 1, ownerPid: me }, fakeIo()).then((r) => { settled = true; return r; });
+    // One turn of the event loop runs every step that needs no timer: a pass that ignored the live lock
+    // would have taken it over and created slot-0 by now.
+    await new Promise((r) => setImmediate(r));
+    expect([settled, fs.readFileSync(held, 'utf8'), fs.existsSync(path.join(other, 'slot-0'))]).toEqual([false, String(me), false]);
+    fs.rmSync(held);
+    expect((await pending).record?.slot).toBe(0);
   });
 
   it('treats a directory without a record as being acquired, and as abandoned after the grace minute', async () => {
@@ -258,10 +301,36 @@ describe('acquireSlot (the queue)', () => {
     }, io);
     expect(record.slot).toBe(0);
     expect(polls).toBe(3);
-    expect(lines[0]).toBe('waiting for a regtest stack slot (ORDPOOL_E2E_MAX_STACKS=1, waited 0s of 10m00s, Ctrl-C to stop):');
+    expect(lines[0]).toBe('waiting for a regtest stack slot, cap reached: 1 of ORDPOOL_E2E_MAX_STACKS=1 slots held (waited 0s of 10m00s, Ctrl-C to stop):');
     expect(lines[1]).toBe(`  slot 0: ordpool-e2e pid ${me} (planted), 1h00m old, held: owner pid ${me} runs`);
     // The picture did not change and no minute passed: one report, not one per poll.
     expect(lines.length).toBe(2);
+  });
+
+  it('says which slot number it passed over and why, once it holds a slot', async () => {
+    const root = tempRoot();
+    const lines: string[] = [];
+    // waitMs 0: the first pass must take slot 1; a pass that waits instead throws.
+    const record = await acquireSlot({ root, max: 1, ownerPid: me, kind: 'consumer' }, {
+      waitMs: 0,
+      log: (l) => lines.push(l),
+    }, fakeIo({ portInUse: async (port) => port === 3306 }));
+    expect(record.slot).toBe(1);
+    expect(lines).toEqual(['skipped slot 0: port 3306 in use by a non-slot process (lsof -nP -iTCP:3306 -sTCP:LISTEN)']);
+  });
+
+  it('names the ports in use, not the cap, when below the cap no slot number is clear', async () => {
+    const root = tempRoot();
+    const io = fakeIo({ portInUse: async (port) => port % 10 === 6 && port >= 3306 && port <= 3306 + 290 });
+    const lines: string[] = [];
+    await expect(acquireSlot({ root, max: 1, ownerPid: me, kind: 'consumer' }, {
+      waitMs: 0,
+      log: (l) => lines.push(l),
+    }, io)).rejects.toThrow([
+      'no regtest stack slot came free within 0s, 0 of ORDPOOL_E2E_MAX_STACKS=1 slots held, but every free slot number has a port in use by a non-slot process:',
+      '  slot 0: port 3306 in use by a non-slot process (lsof -nP -iTCP:3306 -sTCP:LISTEN)',
+      '  slot 1: port 3316 in use by a non-slot process (lsof -nP -iTCP:3316 -sTCP:LISTEN)',
+    ].join('\n'));
   });
 
   it('repeats the holders every minute while nothing changes', async () => {
@@ -280,7 +349,7 @@ describe('acquireSlot (the queue)', () => {
       },
     }, io);
     expect(lines.filter((l) => l.startsWith('waiting for')).length).toBe(2);
-    expect(lines[2]).toBe('waiting for a regtest stack slot (ORDPOOL_E2E_MAX_STACKS=1, waited 1m00s of 10m00s, Ctrl-C to stop):');
+    expect(lines[2]).toBe('waiting for a regtest stack slot, cap reached: 1 of ORDPOOL_E2E_MAX_STACKS=1 slots held (waited 1m00s of 10m00s, Ctrl-C to stop):');
   });
 
   it('gives up at its bound with the holders and how to list and tear down', async () => {
@@ -293,7 +362,7 @@ describe('acquireSlot (the queue)', () => {
       log: () => undefined,
       sleep: async (ms) => { io.clock.t += ms; polls += 1; },
     }, io)).rejects.toThrow([
-      'no regtest stack slot came free within 20s (ORDPOOL_E2E_MAX_STACKS=1). Held:',
+      'no regtest stack slot came free within 20s, cap reached: 1 of ORDPOOL_E2E_MAX_STACKS=1 slots held:',
       `  slot 0: ordpool-e2e pid ${me} (planted), 1h00m old, held: owner pid ${me} runs`,
       'A slot held longer than the longest lane runs is a stack nobody tore down.',
     ].join('\n'));
@@ -370,19 +439,22 @@ const COMPILED = path.resolve(__dirname, '../dist-e2e/stack-slots.js');
 const RACER = `
   const fs = require('node:fs');
   const slots = require(${JSON.stringify(COMPILED)});
-  const [root, max, owner, go] = process.argv.slice(1);
-  const io = { ...slots.defaultSlotIo, runningProjects: () => new Set(), portInUse: async () => false };
+  const [root, max, owner, go, busyPort, kind] = process.argv.slice(1);
+  const io = { ...slots.defaultSlotIo, runningProjects: () => new Set(), portInUse: async (p) => p === Number(busyPort) };
   process.stderr.write('ready\\n');
   const tick = new Int32Array(new SharedArrayBuffer(4));
   while (!fs.existsSync(go)) Atomics.wait(tick, 0, 0, 1);
-  slots.tryAcquireSlot({ root, max: Number(max), ownerPid: Number(owner) }, io)
+  slots.tryAcquireSlot({ root, max: Number(max), ownerPid: Number(owner), kind }, io)
     .then((r) => process.stdout.write(JSON.stringify(r.record ? r.record.slot : null)));
 `;
 
-/** Starts `racers` processes, releases them together once all are loaded, returns the slot each got. */
-async function race(root: string, max: number, racers: number): Promise<(number | null)[]> {
+/**
+ * Starts `racers` processes, releases them together once all are loaded, returns the slot each got.
+ * Every racer sees `busyPort` as served outside the slots (0: no port).
+ */
+async function race(root: string, max: number, racers: number, busyPort = 0, kind: 'regtest' | 'consumer' = 'regtest'): Promise<(number | null)[]> {
   const go = path.join(root, '..', `${path.basename(root)}.go`);
-  const children = Array.from({ length: racers }, () => spawn(process.execPath, ['-e', RACER, root, String(max), String(me), go]));
+  const children = Array.from({ length: racers }, () => spawn(process.execPath, ['-e', RACER, root, String(max), String(me), go, String(busyPort), kind]));
   const ready = children.map((c) => new Promise<void>((resolve) => {
     c.stderr.once('data', () => resolve());
   }));
@@ -398,13 +470,34 @@ async function race(root: string, max: number, racers: number): Promise<(number 
   return Promise.all(outputs);
 }
 
+/** The slot directories under `root`. */
+function slotDirs(root: string): string[] {
+  return fs.readdirSync(root).filter((n) => n.startsWith('slot-')).sort();
+}
+
 describe('racing processes', () => {
-  it.each([1, 2, 3, 4, 5])('round %i: 12 processes, max 3, never share a slot', async () => {
+  it.each([1, 2, 3, 4, 5])('round %i: 12 processes, max 3, never share a slot and never exceed the cap', async () => {
     const root = tempRoot();
     const got = await race(root, 3, 12);
     const slots = got.filter((s): s is number => s !== null).sort();
     expect(slots).toEqual([0, 1, 2]);
     expect(got.filter((s) => s === null).length).toBe(9);
+    expect(slotDirs(root)).toEqual(['slot-0', 'slot-1', 'slot-2']);
+  });
+
+  it.each([1, 2, 3, 4, 5])('round %i: 10 processes, max 2, one slot already held at 7: exactly one more is taken', async () => {
+    const root = tempRoot();
+    plantSlot(root, 7, me, 'ordpool-e2e-s7');
+    const got = await race(root, 2, 10);
+    expect(got.filter((s) => s !== null)).toEqual([0]);
+    expect(slotDirs(root)).toEqual(['slot-0', 'slot-7']);
+  });
+
+  it.each([1, 2, 3, 4, 5])('round %i: 10 consumer processes, max 1, slot 0 MariaDB port served outside: exactly one gets slot 1', async () => {
+    const root = tempRoot();
+    const got = await race(root, 1, 10, 3306, 'consumer');
+    expect(got.filter((s) => s !== null)).toEqual([1]);
+    expect(slotDirs(root)).toEqual(['slot-1']);
   });
 
   it.each([1, 2, 3])('round %i: 8 processes reclaiming one stale slot, exactly one gets it', async () => {

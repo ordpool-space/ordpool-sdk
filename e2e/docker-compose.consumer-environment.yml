@@ -138,15 +138,23 @@ services:
       start_period: 90s
 
   mariadb:
-    image: mariadb:11
+    # The init scripts are COPIED into the image, never bind-mounted. A build
+    # context travels to the daemon over its API, so it works wherever the
+    # checkout lives; a bind mount resolves the host path inside the Docker
+    # VM instead, and a VM that shares only some host directories (colima
+    # shares /var/folders, not /Users) mounts an empty directory: MariaDB then
+    # starts without the databases and users, and a backend fails with
+    # "Access denied". The scripts run on first start and create both
+    # databases and both per-consumer users, so no workflow scripts DDL.
+    build:
+      context: ./mariadb-init
+      dockerfile_inline: |
+        FROM mariadb:11
+        COPY *.sql /docker-entrypoint-initdb.d/
+    image: ${E2E_PREFIX:-ordpool-e2e}-consumer-mariadb:local
     container_name: ${E2E_PREFIX:-ordpool-e2e}-consumer-mariadb
     environment:
       MARIADB_ROOT_PASSWORD: ordpool
-    volumes:
-      # init.d scripts run on first start. Creates both databases +
-      # both per-consumer users so each backend can connect without
-      # the CI workflow having to script DDL.
-      - ./mariadb-init:/docker-entrypoint-initdb.d:ro
     ports:
       - "${E2E_MARIADB_HOST_PORT:-3306}:3306"
     healthcheck:

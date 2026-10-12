@@ -49,6 +49,7 @@ const fs = __importStar(require("node:fs"));
 const net = __importStar(require("node:net"));
 const path = __importStar(require("node:path"));
 const regtest_helpers_1 = require("../regtest/regtest-helpers");
+const e2e_expect_1 = require("./e2e-expect");
 /**
  * The loopback names every launch lets through: the SDK harness page
  * (`fixtures-server.js` on localhost), a consumer's served app, and the
@@ -191,7 +192,9 @@ async function launchWalletContext(opts) {
 /** The one persistent launch behind `launchWalletContext` and `launchOfflineContext`: dead proxy checked first. */
 async function launchPersistentOffline(userDataDir, options) {
     await assertPortRefuses(exports.DEAD_PROXY_HOST, exports.DEAD_PROXY_PORT);
-    return test_1.chromium.launchPersistentContext(userDataDir, options);
+    const context = await test_1.chromium.launchPersistentContext(userDataDir, options);
+    (0, e2e_expect_1.boundByE2eTimeout)(context);
+    return context;
 }
 /** The switches `launchOfflineBrowser` and `launchOfflineContext` pass, net log included. */
 function offlineLaunchSwitches(opts = {}, env = process.env) {
@@ -207,7 +210,28 @@ function offlineLaunchSwitches(opts = {}, env = process.env) {
  */
 async function launchOfflineBrowser(opts = {}) {
     await assertPortRefuses(exports.DEAD_PROXY_HOST, exports.DEAD_PROXY_PORT);
-    return test_1.chromium.launch({ ...opts.options, headless: opts.headless ?? true, args: offlineLaunchSwitches(opts) });
+    const browser = await test_1.chromium.launch({ ...opts.options, headless: opts.headless ?? true, args: offlineLaunchSwitches(opts) });
+    boundEveryNewContext(browser);
+    return browser;
+}
+/**
+ * Makes every context `browser` opens, through `newContext` or `newPage`,
+ * start bounded by `e2eTimeoutMs()` (`boundByE2eTimeout`). A Browser has no
+ * default timeout of its own; its contexts do.
+ */
+function boundEveryNewContext(browser) {
+    const newContext = browser.newContext.bind(browser);
+    browser.newContext = async (...args) => {
+        const context = await newContext(...args);
+        (0, e2e_expect_1.boundByE2eTimeout)(context);
+        return context;
+    };
+    const newPage = browser.newPage.bind(browser);
+    browser.newPage = async (...args) => {
+        const page = await newPage(...args);
+        (0, e2e_expect_1.boundByE2eTimeout)(page.context());
+        return page;
+    };
 }
 /**
  * `launchOfflineBrowser` as one persistent context, for a spec that keeps a
