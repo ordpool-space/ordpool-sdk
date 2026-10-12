@@ -37,4 +37,5 @@ export * from './playwright/okx-sign-popup';
 export * from './playwright/launch-wallet-context';
 export * from './playwright/net-log';
 export * from './playwright/okx-connect-popup';
+export * from './playwright/e2e-expect';
 //# sourceMappingURL=index.d.ts.map

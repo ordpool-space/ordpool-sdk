@@ -27,7 +27,7 @@ describe('regtestWallet', () => {
  * Requires `specifier` from the package root in a fresh node process, recording every module request, and
  * prints what a consumer reads from it.
  */
-function loadInFreshProcess(specifier: string): { loadedPlaywright: string[]; wallet: string; electrsUrl: string; bound: number; exported: string[] } {
+function loadInFreshProcess(specifier: string): { loadedPlaywright: string[]; wallet: string; electrsUrl: string; bound: number; exported: string[]; boundedHelpers: string[] } {
   const script = `
     const Module = require('node:module');
     const requested = [];
@@ -41,6 +41,7 @@ function loadInFreshProcess(specifier: string): { loadedPlaywright: string[]; wa
       bound: m.e2eTimeoutMs(),
       exported: ['regtestWallet', 'DEFAULT_REGTEST_WALLET', 'REGTEST_WALLET_ENV', 'stackPort', 'stackUrl', 'slotEnv', 'e2eTimeoutMs']
         .filter((k) => k in m),
+      boundedHelpers: ['e2eExpect', 'boundByE2eTimeout'].filter((k) => typeof m[k] === 'function'),
     }));
   `;
   const r = spawnSync(process.execPath, ['-e', script], {
@@ -62,6 +63,7 @@ describe('the ordpool-sdk/e2e/stack subpath', () => {
       electrsUrl: 'http://localhost:3020',
       bound: 1234,
       exported: all,
+      boundedHelpers: [],
     });
   });
 
@@ -69,5 +71,9 @@ describe('the ordpool-sdk/e2e/stack subpath', () => {
     const e2e = loadInFreshProcess('ordpool-sdk/e2e');
     expect([e2e.wallet, e2e.electrsUrl, e2e.bound, e2e.exported]).toEqual(['consumer-wallet', 'http://localhost:3020', 1234, all]);
     expect(e2e.loadedPlaywright).toContain('@playwright/test');
+  });
+
+  it('ordpool-sdk/e2e also exports the helpers that bound a wait outside a test', () => {
+    expect(loadInFreshProcess('ordpool-sdk/e2e').boundedHelpers).toEqual(['e2eExpect', 'boundByE2eTimeout']);
   });
 });
