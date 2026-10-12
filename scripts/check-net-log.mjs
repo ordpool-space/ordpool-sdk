@@ -9,14 +9,16 @@
  * let through (`reachableHosts()`, from the same environment the run used),
  * and prints per file the leaks, the URL requests that failed inside the
  * browser, and the UDP probes (see e2e/playwright/net-log.ts for what each
- * means). Exit 1 on any leak, and on a directory with no net log: a gate that
- * read nothing proves nothing.
+ * means). Exit 1 on any leak, and on a directory with no net log or no
+ * directory at all: a gate that read nothing proves nothing. The directory is
+ * created by the first launch that writes a log, so it is missing when the run
+ * failed before any browser started.
  *
  * It reads the compiled helpers in dist-e2e/, so it runs wherever the
  * package is installed, in this repo and in a consumer.
  */
 import { createRequire } from 'node:module';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const require = createRequire(import.meta.url);
@@ -27,6 +29,11 @@ const dir = process.argv[2];
 if (!dir) {
   console.error('usage: node scripts/check-net-log.mjs <dir>');
   process.exit(2);
+}
+
+if (!existsSync(dir)) {
+  console.error(`${dir}: no such directory, so no browser wrote a net log. Either the run failed before its first browser launch, or ORDPOOL_E2E_NET_LOG_DIR was not set for it. Nothing was checked.`);
+  process.exit(1);
 }
 
 const files = readdirSync(dir).filter((f) => f.endsWith('.json')).sort();
