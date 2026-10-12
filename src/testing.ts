@@ -10,6 +10,7 @@
 // (`buildSignedTestBuyOffer`, `signTestBip322Message`): `@scure` and `@noble`
 // only, so they run in Node and in a browser.
 export * from './cat21-mint/recommended-fees.fixtures.js';
+export * from './cat21-mint/electrs-utxo.fixtures.js';
 export * from './cat21-ord/cats-at-output.fixtures.js';
 export * from './testing/buy-offer-psbt.js';
 export * from './testing/bip322-signer.js';
