@@ -93,10 +93,11 @@ export class UtxoContentScanner implements ContentScanPort {
       // one decision and a place for them to disagree.
       return { verdict: 'has-assets', assets: toAssetDetail(state.content) };
     }
-    // scanning / not-scanned / scan-failed: content unknown, so fail closed
-    // with no detail to offer. `recommendFunding` reads a `has-assets` with no
-    // naming detail as unnamed and blocks it on every wallet topology.
-    return { verdict: 'has-assets' };
+    // scanning / not-scanned / scan-failed: the content is unknown, which is a
+    // different fact from "carries assets". Rejecting makes `selectFunding`
+    // bucket the coin as `failed`, so `recommendFunding` blocks it on every
+    // wallet topology and `expertRequiredCause` reports `unknown-content`.
+    throw new Error(`content of ${outpoint} is unknown: ${state.kind}`);
   }
 
   /**

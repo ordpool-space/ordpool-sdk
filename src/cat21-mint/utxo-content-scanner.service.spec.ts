@@ -4,6 +4,8 @@ import { firstValueFrom, of } from 'rxjs';
 import { Cat21SdkConfig } from './cat21-sdk-config.js';
 import { AUTO_SCAN_MAX_VALUE_SAT, UtxoContentScanner } from './utxo-content-scanner.service.js';
 import { UtxoScanState } from './utxo-content.types.js';
+import { selectFunding } from '../cat21-core/select-funding.js';
+import { expertRequiredCause } from '../cat21-fee/funding-safety.js';
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -169,12 +171,23 @@ describe('UtxoContentScanner.classify (ContentScanPort adapter)', () => {
     });
   });
 
-  it('scan-failed => has-assets (FAIL-CLOSED — an unverified coin is never auto-spent)', async () => {
+  it('scan-failed rejects, so the coin is bucketed as unknown content, never as clean or as named assets', async () => {
     const scanner = makeScanner();
     jest.spyOn(scanner, 'scan').mockReturnValue(of<UtxoScanState>({ kind: 'scan-failed', message: 'ord down' }));
-    // Unknown content fails closed AND offers no detail, because there is none
-    // to offer. A caller must not read absent detail as "nothing on the coin".
-    expect(await scanner.classify('aa:0')).toEqual({ verdict: 'has-assets' });
+    await expect(scanner.classify('aa:0')).rejects.toThrow('content of aa:0 is unknown: scan-failed');
+  });
+
+  it('seam: a scan-failed coin through selectFunding blocks with cause unknown-content', async () => {
+    // Load-bearing seam test: the scanner and the funding policy are proven
+    // apart; this pins that the scanner's answer reaches the policy as
+    // "content unknown", not as "carries unnamed assets".
+    const scanner = makeScanner();
+    jest.spyOn(scanner, 'scan').mockReturnValue(of<UtxoScanState>({ kind: 'scan-failed', message: 'ord down' }));
+    const coin = { txid: 'e'.repeat(64), vout: 0, value: 20_000 };
+    const rec = await selectFunding([coin], 2_000, scanner, undefined, 'separate-payment-address');
+    expect(rec.status).toBe('expert-required');
+    expect(rec.recommended?.bucket).toBe('failed');
+    expect(expertRequiredCause(rec)).toBe('unknown-content');
   });
 });
 
