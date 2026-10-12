@@ -137,6 +137,30 @@ describe('InscribeMintOrchestrator: sourcing the padding coin', () => {
     expect(s.padding).toEqual({ utxo: coin('c', 250), shortfallSats: SHORTFALL, automatic: true });
   });
 
+  it('reads the OBJECT verdict too, the shape UtxoContentScanner.classify returns', async () => {
+    const o = new InscribeMintOrchestrator(deps({
+      scan: { classify: async () => ({ verdict: 'clean' as const }) },
+    }));
+    const s = await settle(o, content());
+    expect(s.errorMessage).toBeNull();
+    expect(s.padding).toEqual({ utxo: coin('c', 250), shortfallSats: SHORTFALL, automatic: true });
+  });
+
+  it('an object has-assets verdict on the closest fit pads with the next clean coin', async () => {
+    const assetCoin = coin('c', 250);
+    const cleanSpare = coin('e', 600);
+    const o = new InscribeMintOrchestrator(deps({
+      getUtxos: async () => [coin('a', 100_000), assetCoin, cleanSpare],
+      scan: {
+        classify: async (outpoint: string) => outpoint.startsWith(assetCoin.txid)
+          ? ({ verdict: 'has-assets' as const, assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null } })
+          : ({ verdict: 'clean' as const }),
+      },
+    }));
+    const s = await settle(o, content());
+    expect(s.padding).toEqual({ utxo: cleanSpare, shortfallSats: SHORTFALL, automatic: true });
+  });
+
   it('never offers the padding coin as funding as well', async () => {
     const o = new InscribeMintOrchestrator(deps());
     await settle(o, content());

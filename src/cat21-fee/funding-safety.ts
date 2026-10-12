@@ -18,7 +18,7 @@
  */
 
 import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
-import { UtxoAssetDetail } from '../cat21-core/ports.js';
+import { namesAssets, UtxoAssetDetail } from '../cat21-core/ports.js';
 import { FundingUtxo } from './coin-selection.helper.js';
 import { selectCardinalUtxo } from './ord-coin-select.js';
 
@@ -36,6 +36,11 @@ export interface AnnotatedFundingUtxo extends FundingUtxo {
    * NAME the assets rather than say "this coin carries assets" — a person
    * cannot consent to a loss they cannot see, and an agent deciding on an API
    * is making that same decision without a screen.
+   *
+   * A `bucket: 'assets'` coin counts as NAMED only when `namesAssets(assets)`
+   * holds (a non-empty `inscriptionIds`, `runeNames` or `catIds`, or a non-null
+   * `rareSat`). Without that it is an UNNAMED-asset coin: the scan says
+   * something is there and cannot say what, so it is never behind a notice.
    */
   assets?: UtxoAssetDetail;
 }
@@ -45,30 +50,35 @@ export interface AnnotatedFundingUtxo extends FundingUtxo {
  *   - `auto`             — a CLEAN UTXO covers the spend; `recommended` is
  *                          auto-selected. No coin picker needed (the default).
  *   - `asset-notice`     — no clean UTXO covers, but a coin whose scan FOUND
- *                          assets (bucket `assets`) does, AND the wallet keeps a
- *                          separate payment address. Show a NOTICE naming what
- *                          the coin carries and PROCEED; do not block. Expert
- *                          mode stays available but is optional.
+ *                          and NAMED assets (bucket `assets`, `namesAssets`)
+ *                          does, AND the wallet keeps a separate payment
+ *                          address. Show a NOTICE naming what the coin carries
+ *                          and PROCEED; do not block. Expert mode stays
+ *                          available but is optional.
  *   - `expert-required`  — BLOCK until the user enters expert mode and
- *                          overrides. Two causes, told apart by
- *                          `recommended.bucket`:
- *                          `assets`: the same situation as `asset-notice` on a
- *                          wallet that uses ONE address for everything, where
- *                          assets and spending money share a lane.
- *                          `failed`: every covering coin that is not clean has
- *                          UNKNOWN content (its scan failed), on ANY topology.
- *                          Nothing can be named, so there is no notice to show,
- *                          and the warning says the content is unknown.
+ *                          overrides. Three causes, told apart by
+ *                          `expertRequiredCause(rec)`:
+ *                          `named-assets`: the same situation as `asset-notice`
+ *                          on a wallet that uses ONE address for everything,
+ *                          where assets and spending money share a lane.
+ *                          `unnamed-assets`: the covering coins carry assets
+ *                          the scan did not name (a bare `has-assets`
+ *                          verdict, or a detail that names nothing), on ANY
+ *                          topology. There is nothing for a notice to say.
+ *                          `unknown-content`: every covering coin that is not
+ *                          clean has UNKNOWN content (its scan failed), on ANY
+ *                          topology, and the warning says so.
  *   - `scanning`         — a covering candidate hasn't finished scanning; wait
  *                          for the scan, then re-evaluate. `recommended` null.
  *   - `insufficient`     — nothing covers the spend. `recommended` null.
  *
- * For a coin with KNOWN assets, `asset-notice` and `expert-required` describe
+ * For a coin with NAMED assets, `asset-notice` and `expert-required` describe
  * the SAME coin risk; they differ only in how hard the UI stands in the way,
  * because the two wallet topologies make an accidental spend differently likely
- * and differently visible. A coin with UNKNOWN content is never behind a
- * notice: a notice that cannot say what is on the coin does not inform anyone,
- * so it cannot be the thing that enables the spend.
+ * and differently visible. A coin whose assets are UNNAMED, or whose content is
+ * UNKNOWN, is never behind a notice: a notice that cannot say what is on the
+ * coin does not inform anyone, so it cannot be the thing that enables the
+ * spend.
  */
 export type FundingRecommendationStatus =
   | 'auto'
@@ -148,12 +158,16 @@ export function resolveFundingTopology(
  * `FundingRecommendationStatus`). Returns `scanning` while a covering
  * candidate's scan is unfinished, and `insufficient` when nothing covers.
  *
- * A coin whose scan FAILED is never auto-spent on any topology. Among dirty
- * covering coins the recommendation is the best-fit coin with KNOWN assets,
- * because only that one can carry a notice naming what it holds; a `failed`
- * coin is recommended only when no `assets` coin covers, and then the status
- * is `expert-required` regardless of topology. `recommended.bucket` is the
- * fact a person's warning and an agent's decision both read.
+ * Among dirty covering coins the recommendation is the best-fit coin from the
+ * first non-empty tier, in this order:
+ *   1. NAMED assets (bucket `assets`, `namesAssets(assets)`), because only that
+ *      coin can carry a notice saying what it holds;
+ *   2. UNNAMED assets (bucket `assets`, nothing named);
+ *   3. scan `failed` (content unknown).
+ * Only a tier-1 coin on a separate-payment-address wallet yields
+ * `asset-notice`; tiers 2 and 3 are `expert-required` on every topology.
+ * `expertRequiredCause(rec)` is the fact a person's warning and an agent's
+ * decision both read.
  *
  * Same result shape for every action, so mint / transfer / offer / inscribe —
  * and every consumer (cat21.space, cat21-wallet, bots) — get identical
@@ -208,20 +222,22 @@ export function recommendFunding<T extends AnnotatedFundingUtxo>(
   // 3. Every covering candidate is scanned and either carries assets or its
   //    scan failed (content unknown). Never auto-spend those.
   //
-  //    The recommendation is the best-fit among coins whose assets are KNOWN.
-  //    A failed coin is recommended only when no such coin covers: a notice
-  //    must name what the coin carries, and a failed coin has nothing to name,
-  //    so it can never be the coin a notice waves through. Picking by value
-  //    across both buckets would make the outcome depend on which coin happens
-  //    to fit tighter, not on what the user can be told.
+  //    The recommendation is the best-fit within the first non-empty tier:
+  //    NAMED assets, then UNNAMED assets, then failed. A notice must name what
+  //    the coin carries, and an unnamed or failed coin has nothing to name, so
+  //    it can never be the coin a notice waves through. Picking by value
+  //    across the tiers would make the outcome depend on which coin happens to
+  //    fit tighter, not on what the user can be told. An unnamed coin ranks
+  //    above a failed one because a scan did answer for it: it is known to
+  //    carry something, where a failed coin is not known at all.
   //
-  //    How hard to stand in the way of a KNOWN-asset coin depends on the
+  //    How hard to stand in the way of a NAMED-asset coin depends on the
   //    wallet's address layout: on a separate-payment-address wallet a dirty
   //    funding coin is unusual and the user is assumed to know what a funding
   //    address is for, so inform and step aside; on a one-address wallet the
   //    assets and the spending money share a lane, so an accidental spend is
   //    likelier and less visible and a notice they can walk past is not enough.
-  //    An UNKNOWN-content coin blocks on every topology.
+  //    An unnamed-asset or unknown-content coin blocks on every topology.
   //
   //    Default topology is the blocking branch, so a caller that has not yet
   //    threaded its topology over-blocks rather than under-blocks.
@@ -234,27 +250,72 @@ export function recommendFunding<T extends AnnotatedFundingUtxo>(
   //    biasing toward the bigger coin could burn the more valuable asset.
   //    Consequence a surface must RENDER rather than hide: the recommended row
   //    can carry an over-pay flag at the same time as the recommendation.
-  const knownAssets = covering.filter((c) => c.bucket === 'assets');
-  const pool = knownAssets.length > 0 ? knownAssets : covering;
+  const namedAssets = covering.filter((c) => isNamedAssetCoin(c));
+  const unnamedAssets = covering.filter((c) => c.bucket === 'assets' && !isNamedAssetCoin(c));
+  const pool =
+    namedAssets.length > 0 ? namedAssets : unnamedAssets.length > 0 ? unnamedAssets : covering;
   const recommended = annotatedFor(selectCardinalUtxo(pool, targetSpendSats, false)!);
   const status: FundingRecommendationStatus =
-    recommended.bucket === 'assets' && topology === 'separate-payment-address'
+    isNamedAssetCoin(recommended) && topology === 'separate-payment-address'
       ? 'asset-notice'
       : 'expert-required';
   return { status, recommended, candidates };
 }
 
+/** A coin whose scan found assets AND named at least one of them. */
+function isNamedAssetCoin(c: { bucket: UtxoScanBucket; assets?: UtxoAssetDetail }): boolean {
+  return c.bucket === 'assets' && namesAssets(c.assets);
+}
+
+/**
+ * Why a recommendation's coin is not simply spendable, read off the
+ * recommended coin:
+ *   - `named-assets`: it carries assets the scan named; this blocks only on
+ *     a one-address wallet (elsewhere it is `asset-notice`).
+ *   - `unnamed-assets`: the scan says it carries assets but names none.
+ *   - `unknown-content`: its scan failed, so nothing is known about it.
+ * `null` when there is no recommended coin, or it is clean.
+ *
+ * A surface picks its warning copy from this, the same fact the agent message
+ * is built from, instead of re-deriving it from the bucket and the detail.
+ */
+export type ExpertRequiredCause = 'named-assets' | 'unnamed-assets' | 'unknown-content';
+
+export function expertRequiredCause(rec: {
+  recommended: { bucket: UtxoScanBucket; assets?: UtxoAssetDetail } | null;
+}): ExpertRequiredCause | null {
+  const r = rec.recommended;
+  if (!r) {
+    return null;
+  }
+  if (r.bucket === 'failed') {
+    return 'unknown-content';
+  }
+  if (r.bucket !== 'assets') {
+    return null;
+  }
+  return namesAssets(r.assets) ? 'named-assets' : 'unnamed-assets';
+}
+
 /**
  * The error a flow throws when it stops on `expert-required` with no explicit
- * pick. It names the cause the recommendation carries, so a caller reading
- * only the message (an agent, a log) learns the same fact a warning shows: the
- * covering coin's content is unknown (`failed`), or it carries assets.
- * Both texts start with `Select a funding UTXO`, which consumers match on.
+ * pick. It names the cause the recommendation carries (`expertRequiredCause`),
+ * so a caller reading only the message (an agent, a log) learns the same fact
+ * a warning shows: the covering coin's content is unknown, it carries assets
+ * the scan could not name, or it carries named assets.
+ * Every text starts with `Select a funding UTXO`, which consumers match on.
  */
-export function expertRequiredMessage(rec: { recommended: { bucket: UtxoScanBucket } | null }): string {
-  return rec.recommended?.bucket === 'failed'
-    ? 'Select a funding UTXO (what the covering coins hold could not be checked)'
-    : 'Select a funding UTXO (the available coins carry assets)';
+export function expertRequiredMessage(rec: {
+  recommended: { bucket: UtxoScanBucket; assets?: UtxoAssetDetail } | null;
+}): string {
+  switch (expertRequiredCause(rec)) {
+    case 'unknown-content':
+      return 'Select a funding UTXO (what the covering coins hold could not be checked)';
+    case 'unnamed-assets':
+      return 'Select a funding UTXO (the covering coins carry assets the scan could not name)';
+    default:
+      return 'Select a funding UTXO (the available coins carry assets)';
+  }
 }
 
 /**

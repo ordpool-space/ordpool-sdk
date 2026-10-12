@@ -45,12 +45,37 @@ export interface UtxoAssetDetail {
 }
 
 /**
+ * True when `detail` NAMES at least one asset: a non-empty `inscriptionIds`,
+ * `runeNames` or `catIds`, or a non-null `rareSat`. Those four fields are what
+ * a notice or a picker row renders, so they are the only ones that count.
+ *
+ * An absent detail names nothing, and so does a detail whose three arrays are
+ * empty and whose `rareSat` is null: it has the shape of an answer and the
+ * content of none. A coin flagged `has-assets` without a naming detail is
+ * treated like a coin of unknown content, because a notice that cannot say
+ * what is on the coin informs nobody.
+ */
+export function namesAssets(detail: UtxoAssetDetail | undefined): boolean {
+  if (!detail) {
+    return false;
+  }
+  return (
+    detail.inscriptionIds.length > 0 ||
+    detail.runeNames.length > 0 ||
+    detail.catIds.length > 0 ||
+    detail.rareSat !== null
+  );
+}
+
+/**
  * Content-safety verdict for one outpoint. The core auto-spends only `clean`.
  *
- * The bare strings remain valid, so a port that only knows yes-or-no keeps
- * working. Returning the object form additionally carries WHAT was found
- * through to the recommendation, which is what lets a caller name the assets
- * rather than say "this coin carries assets".
+ * Both forms are valid. The object form with a detail that `namesAssets`
+ * carries WHAT was found through to the recommendation, which is what lets a
+ * caller name the assets rather than say "this coin carries assets". A bare
+ * `'has-assets'`, or `{ verdict: 'has-assets' }` without a naming detail, says
+ * only that something is there: such a coin is never spent behind a notice,
+ * it blocks (`expert-required`) on every wallet topology.
  */
 export type UtxoClassification =
   | 'clean'
@@ -76,8 +101,10 @@ export interface UtxosPort {
  * Classifies one outpoint's on-chain content. Scan DEPTH is the consumer's
  * choice — cat-only (cat21-wallet today) or full (cat21.space: cats +
  * inscriptions + runes + rare sats). The core avoids whatever the port flags as
- * `has-assets`. Reject to signal a scan failure; the core treats a failed scan
- * as not-auto (expert-mode), never as clean.
+ * `has-assets`, and lets a separate-payment-address wallet proceed behind a
+ * notice only when the port also NAMES the assets (`namesAssets`). Reject to
+ * signal a scan failure; the core treats a failed scan as not-auto
+ * (expert-mode), never as clean.
  */
 export interface ContentScanPort {
   classify(outpoint: string): Promise<UtxoClassification>;

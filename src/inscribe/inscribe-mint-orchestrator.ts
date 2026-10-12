@@ -1,7 +1,7 @@
 import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
-import { ContentScanPort } from '../cat21-core/ports.js';
+import { classificationVerdict, ContentScanPort } from '../cat21-core/ports.js';
 import { resolveFundingPick, selectFunding } from '../cat21-core/select-funding.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
@@ -1257,7 +1257,7 @@ export class InscribeMintOrchestrator {
       const outpoint = `${u.txid}:${u.vout}`;
       if (this.scanVerdicts.has(outpoint)) return;
       try {
-        this.scanVerdicts.set(outpoint, (await this.deps.scan.classify(outpoint)) === 'clean');
+        this.scanVerdicts.set(outpoint, classificationVerdict(await this.deps.scan.classify(outpoint)) === 'clean');
       } catch {
         this.scanVerdicts.set(outpoint, false);
       }

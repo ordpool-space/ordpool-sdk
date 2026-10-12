@@ -27,7 +27,11 @@ class FakeScanner {
 
 const u = (id: string, value: number) => ({ txid: id.repeat(64).slice(0, 64), vout: 0, value });
 const op = (x: { txid: string; vout: number }) => `${x.txid}:${x.vout}`;
-const assets = (): UtxoScanState => ({ kind: 'scanned-with-assets', content: {} as never });
+/** A completed scan that found one inscription, in the scanner's own `UtxoContent` shape. */
+const assets = (): UtxoScanState => ({
+  kind: 'scanned-with-assets',
+  content: { outpoint: 'unused', inscriptionIds: ['abc123i0'], runes: null, catIds: [], catSat: null, rareSat: null },
+});
 
 describe('FundingRecommendationService', () => {
   let service: FundingRecommendationService;
@@ -62,6 +66,28 @@ describe('FundingRecommendationService', () => {
     expect(rec.status).toBe('expert-required');
     expect(rec.recommended?.value).toBe(50_000);
     expect(rec.recommended?.bucket).toBe('assets');
+  });
+
+  it('carries the scan detail onto the coin, so a separate-address wallet gets a NAMED notice', async () => {
+    // recommendFunding lets a coin stand behind a notice only when it is named.
+    // The bucket alone would block every asset coin on every wallet.
+    const utxos = [u('a', 50_000)];
+    scanner.set(op(utxos[0]), assets());
+    const rec = await firstValueFrom(
+      service.recommend(of(utxos), of(2_000), of(null), of('separate-payment-address' as const)),
+    );
+    expect(rec.status).toBe('asset-notice');
+    expect(rec.recommended?.assets).toEqual({ inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null });
+  });
+
+  it('a failed scan carries no detail and blocks on a separate-address wallet', async () => {
+    const utxos = [u('a', 50_000)];
+    scanner.set(op(utxos[0]), { kind: 'scan-failed', message: 'ord unreachable' });
+    const rec = await firstValueFrom(
+      service.recommend(of(utxos), of(2_000), of(null), of('separate-payment-address' as const)),
+    );
+    expect(rec.status).toBe('expert-required');
+    expect(rec.recommended?.bucket).toBe('failed');
   });
 
   it('never auto-spends the tighter ASSET coin when a clean coin also covers', async () => {

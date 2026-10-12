@@ -6,7 +6,7 @@ import { changeDustFloor } from '../cat21-script/address-format.js';
 import { CAT21_MINT_POSTAGE_SATS } from '../cat21-mint/cat21-mint.helper.js';
 import { Network } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
-import { BroadcastPort, ContentScanPort, CoreFundingUtxo, SignPort, UtxosPort } from './ports.js';
+import { BroadcastPort, ContentScanPort, CoreFundingUtxo, SignPort, UtxoClassification, UtxosPort } from './ports.js';
 import { MintCoreParams, executeMint, simulateMint } from './mint.core.js';
 
 // Plain NODE unit test — no jsdom.
@@ -32,9 +32,17 @@ const params = (over: Partial<MintCoreParams> = {}): MintCoreParams => ({
 });
 
 const utxosPort = (coins: CoreFundingUtxo[]): UtxosPort => ({ spendableUtxos: async () => coins });
-const scanPort = (verdicts: Record<string, 'clean' | 'has-assets'> = {}): ContentScanPort => ({
+const scanPort = (verdicts: Record<string, UtxoClassification> = {}): ContentScanPort => ({
   classify: async (outpoint) => verdicts[outpoint] ?? 'clean',
 });
+/**
+ * A `has-assets` verdict that NAMES what it found, which is what a coin needs to
+ * stand behind a notice. A bare `'has-assets'` blocks on every topology.
+ */
+const NAMED: UtxoClassification = {
+  verdict: 'has-assets',
+  assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null },
+};
 const signPort = () => {
   const calls: Array<'all' | number[]> = [];
   return { calls, port: { sign: async (_p: Uint8Array, i: 'all' | number[]) => { calls.push(i); return { hex: 'mintsigned', weight: 500 }; } } as SignPort };
@@ -165,6 +173,42 @@ describe('mint.core — executeMint', () => {
     expect(broadcast.calls).toEqual([]);
   });
 
+  it('EXPERT-REQUIRED on a separate-payment-address wallet when the scan port answers a bare has-assets', async () => {
+    // Seam: a consumer port that knows only yes-or-no. The notice would have
+    // nothing to name, so the separate-address wallet blocks like a one-address
+    // one, and the message says the assets could not be named.
+    const asset = coin('d', 100_000);
+    const sign = signPort();
+    const broadcast = broadcastPort();
+    const ports = { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: 'has-assets' }) };
+
+    const sim = await simulateMint(params({ fundingTopology: 'separate-payment-address' }), ports);
+    expect(sim.status).toBe('expert-required');
+    expect(sim.fundingUtxo).toBeNull();
+    expect(sim.recommendation.recommended?.txid).toBe(asset.txid);
+
+    await expect(
+      executeMint(params({ fundingTopology: 'separate-payment-address' }), {
+        ...ports, sign: sign.port, broadcast: broadcast.port,
+      }),
+    ).rejects.toThrow('Select a funding UTXO (the covering coins carry assets the scan could not name)');
+    expect(sign.calls).toEqual([]);
+    expect(broadcast.calls).toEqual([]);
+  });
+
+  it('a NAMED verdict through the same port proceeds behind the notice', async () => {
+    // The other half of the seam above: same coin, same wallet, the port names
+    // the inscription, and the mint goes out.
+    const asset = coin('d', 100_000);
+    const sign = signPort();
+    const broadcast = broadcastPort();
+    const out = await executeMint(params({ fundingTopology: 'separate-payment-address' }), {
+      utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: NAMED }), sign: sign.port, broadcast: broadcast.port,
+    });
+    expect(out.txid).toBe('mint-txid');
+    expect(broadcast.calls).toEqual(['mintsigned']);
+  });
+
   it('EXPERT OVERRIDE: an explicit pick of the asset coin is honoured', async () => {
     const asset = coin('d', 100_000);
     const sign = signPort();
@@ -247,7 +291,7 @@ describe('mint.core — the pre-click preview is where a notice comes from', () 
   // computation the execute path will later repeat.
   const dirtyOnly = () => {
     const asset = coin('d', 100_000);
-    return { asset, ports: { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: 'has-assets' }) } };
+    return { asset, ports: { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: NAMED }) } };
   };
 
   it('a separate-address wallet previews ASSET-NOTICE and gets a spendable coin', async () => {
@@ -362,7 +406,7 @@ describe('mint.core — a caller sizing a coin needs BOTH targets', () => {
 describe('the asset verdict is about the COIN, not the wallet topology', () => {
   const dirty = coin('d', 100_000);
   const utxos = utxosPort([dirty]);
-  const scan = scanPort({ [op(dirty)]: 'has-assets' });
+  const scan = scanPort({ [op(dirty)]: NAMED });
 
   it('an explicit pick of an asset coin reports asset-notice on BOTH topologies', async () => {
     // Measured before this: the same user action answered 'asset-notice' on a

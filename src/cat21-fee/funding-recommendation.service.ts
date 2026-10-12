@@ -1,7 +1,7 @@
 import { WalletAddressTopology } from './funding-safety.js';
 import { Observable, combineLatest, map, of, switchMap } from 'rxjs';
 
-import { UtxoContentScanner } from '../cat21-mint/utxo-content-scanner.service.js';
+import { toAssetDetail, UtxoContentScanner } from '../cat21-mint/utxo-content-scanner.service.js';
 import { bucketOf } from '../cat21-mint/utxo-content.types.js';
 import { FundingUtxo } from './coin-selection.helper.js';
 import {
@@ -83,12 +83,17 @@ export class FundingRecommendationService {
         // BehaviorSubject, so this also emits the current snapshot immediately).
         return this.scanner.states$.pipe(
           map(() => {
-            const annotated = utxos.map(
-              (u): T & AnnotatedFundingUtxo => ({
+            // The asset detail rides along with the bucket: `recommendFunding`
+            // lets a coin stand behind a notice only when it is NAMED, so a
+            // bucket without its detail would block every asset coin.
+            const annotated = utxos.map((u): T & AnnotatedFundingUtxo => {
+              const state = this.scanner.getState(outpointKey(u));
+              return {
                 ...u,
-                bucket: bucketOf(this.scanner.getState(outpointKey(u))),
-              }),
-            );
+                bucket: bucketOf(state),
+                ...(state.kind === 'scanned-with-assets' ? { assets: toAssetDetail(state.content) } : {}),
+              };
+            });
             return recommendFunding(annotated, target, preferred ?? undefined, topology);
           }),
         );

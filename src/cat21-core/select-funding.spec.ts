@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { ContentScanPort, UtxoClassification } from './ports.js';
 import { resolveFundingPick, selectFunding } from './select-funding.js';
+import { expertRequiredCause, expertRequiredMessage } from '../cat21-fee/funding-safety.js';
 
 // A plain NODE unit test — no jsdom. That the framework-agnostic
 // core selection is testable this way is the whole point of the migration.
@@ -12,6 +13,15 @@ const u = (id: string, value: number, vout = 0) => ({
   value,
 });
 const op = (x: { txid: string; vout: number }) => `${x.txid}:${x.vout}`;
+
+/**
+ * A `has-assets` verdict that NAMES what it found. Only such a coin may stand
+ * behind a notice; a bare `'has-assets'` blocks on every topology.
+ */
+const named: UtxoClassification = {
+  verdict: 'has-assets',
+  assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null },
+};
 
 /** Fake ContentScanPort: map outpoint -> verdict, or 'reject' to fail the scan. */
 function fakeScan(verdicts: Record<string, UtxoClassification | 'reject'>): {
@@ -107,7 +117,7 @@ describe('selectFunding (framework-agnostic content-checked selection)', () => {
 describe('the wallet topology decides whether a dirty-only wallet proceeds or blocks', () => {
   // The same pool, the same risk, two wallets. Only the obstruction differs.
   const dirtyOnly = [u('a', 200), u('b', 9_000)];
-  const verdicts = { [op(u('b', 9_000))]: 'has-assets' as const };
+  const verdicts = { [op(u('b', 9_000))]: named };
 
   it('a separate-payment-address wallet PROCEEDS on the dirty coin, with a notice', async () => {
     const { port } = fakeScan(verdicts);
@@ -151,7 +161,7 @@ describe('the wallet topology decides whether a dirty-only wallet proceeds or bl
   });
 
   it('never proceeds while a covering coin is still being scanned', async () => {
-    const { port } = fakeScan({ [op(u('b', 9_000))]: 'has-assets', [op(u('d', 20_000))]: 'reject' });
+    const { port } = fakeScan({ [op(u('b', 9_000))]: named, [op(u('d', 20_000))]: 'reject' });
     const rec = await selectFunding(
       [u('b', 9_000), u('d', 20_000)], 2_000, port, undefined, 'separate-payment-address',
     );
@@ -179,7 +189,7 @@ describe('the wallet topology decides whether a dirty-only wallet proceeds or bl
   it('a failed coin that fits tighter never displaces the named asset coin behind a notice', async () => {
     const failing = u('f', 3_000);
     const dirty = u('b', 9_000);
-    const { port } = fakeScan({ [op(failing)]: 'reject', [op(dirty)]: 'has-assets' });
+    const { port } = fakeScan({ [op(failing)]: 'reject', [op(dirty)]: named });
     const rec = await selectFunding(
       [failing, dirty], 2_000, port, undefined, 'separate-payment-address',
     );
@@ -233,15 +243,85 @@ describe('the recommendation names what it found, so an API caller can decide li
     expect(rec.recommended?.assets).toEqual(detail);
   });
 
-  it('a port that reports only a bare verdict still works, with no detail', async () => {
+  it('a port that reports only a bare verdict BLOCKS, because nothing can be named', async () => {
+    // A notice that does not say what is on the coin is not a notice, so a
+    // bare `has-assets` cannot be what enables the spend.
     const dirty = u('b', 9_000);
     const { port } = fakeScan({ [op(dirty)]: 'has-assets' });
     const rec = await selectFunding(
       [u('a', 200), dirty], 2_000, port, undefined, 'separate-payment-address',
     );
-    expect(rec.status).toBe('asset-notice');
+    expect(rec.status).toBe('expert-required');
+    expect(rec.recommended?.value).toBe(9_000);
     expect(rec.recommended?.bucket).toBe('assets');
     expect(rec.recommended?.assets).toBeUndefined();
+    expect(expertRequiredCause(rec)).toBe('unnamed-assets');
+    expect(resolveFundingPick(rec, 2_000)).toBeNull();
+  });
+
+  it('the object verdict without a detail blocks the same way as the bare string', async () => {
+    const dirty = u('b', 9_000);
+    const { port } = fakeScan({ [op(dirty)]: { verdict: 'has-assets' } });
+    const rec = await selectFunding(
+      [u('a', 200), dirty], 2_000, port, undefined, 'separate-payment-address',
+    );
+    expect(rec.status).toBe('expert-required');
+    expect(expertRequiredCause(rec)).toBe('unnamed-assets');
+    expect(resolveFundingPick(rec, 2_000)).toBeNull();
+  });
+
+  it('an EMPTY detail (arrays empty, no rare sat) counts as unnamed and blocks', async () => {
+    const empty = { inscriptionIds: [], runeNames: [], catIds: [], rareSat: null };
+    const dirty = u('b', 9_000);
+    const { port } = fakeScan({ [op(dirty)]: { verdict: 'has-assets', assets: empty } });
+    const rec = await selectFunding(
+      [u('a', 200), dirty], 2_000, port, undefined, 'separate-payment-address',
+    );
+    expect(rec.status).toBe('expert-required');
+    // The detail travels as reported; it is the policy that reads it as unnamed.
+    expect(rec.recommended?.assets).toEqual(empty);
+    expect(expertRequiredCause(rec)).toBe('unnamed-assets');
+    expect(expertRequiredMessage(rec)).toBe(
+      'Select a funding UTXO (the covering coins carry assets the scan could not name)',
+    );
+  });
+
+  it('a bare verdict also blocks on a one-address wallet, with the unnamed cause', async () => {
+    const dirty = u('b', 9_000);
+    const { port } = fakeScan({ [op(dirty)]: 'has-assets' });
+    const rec = await selectFunding(
+      [u('a', 200), dirty], 2_000, port, undefined, 'one-address-for-everything',
+    );
+    expect(rec.status).toBe('expert-required');
+    expect(expertRequiredCause(rec)).toBe('unnamed-assets');
+  });
+
+  it('a NAMED coin wins over a tighter bare-verdict coin and stands behind the notice', async () => {
+    // The bare 3_000 is the best fit by value; only the 9_000 can be named.
+    const bare = u('n', 3_000);
+    const namedCoin = u('b', 9_000);
+    const { port } = fakeScan({ [op(bare)]: 'has-assets', [op(namedCoin)]: named });
+    const rec = await selectFunding(
+      [bare, namedCoin], 2_000, port, undefined, 'separate-payment-address',
+    );
+    expect(rec.status).toBe('asset-notice');
+    expect(rec.recommended?.value).toBe(9_000);
+    expect(rec.recommended?.assets?.inscriptionIds).toEqual(['abc123i0']);
+    expect(resolveFundingPick(rec, 2_000)?.value).toBe(9_000);
+    // The unnamed coin stays in the list for the expert picker.
+    expect(rec.candidates.find((c) => c.value === 3_000)?.bucket).toBe('assets');
+  });
+
+  it('a bare-verdict coin is recommended over a tighter FAILED coin, still blocking', async () => {
+    const failing = u('f', 3_000);
+    const bare = u('n', 9_000);
+    const { port } = fakeScan({ [op(failing)]: 'reject', [op(bare)]: 'has-assets' });
+    const rec = await selectFunding(
+      [failing, bare], 2_000, port, undefined, 'separate-payment-address',
+    );
+    expect(rec.status).toBe('expert-required');
+    expect(rec.recommended?.value).toBe(9_000);
+    expect(expertRequiredCause(rec)).toBe('unnamed-assets');
   });
 
   it('a clean coin carries no asset detail', async () => {

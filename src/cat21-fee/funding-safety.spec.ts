@@ -1,15 +1,35 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { AnnotatedFundingUtxo, expertRequiredMessage, isOneAddressWallet, recommendFunding } from './funding-safety.js';
+import {
+  AnnotatedFundingUtxo,
+  expertRequiredCause,
+  expertRequiredMessage,
+  isOneAddressWallet,
+  recommendFunding,
+} from './funding-safety.js';
+import { namesAssets, UtxoAssetDetail } from '../cat21-core/ports.js';
 import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
 
 let n = 0;
+/** What an `assets` coin built by `u` carries: one named inscription. */
+const NAMED: UtxoAssetDetail = { inscriptionIds: ['0'.repeat(64) + 'i0'], runeNames: [], catIds: [], rareSat: null };
+/** An `assets` coin from `u` is NAMED, so these specs pin the named-asset branch. */
 const u = (value: number, bucket: UtxoScanBucket): AnnotatedFundingUtxo => ({
   txid: (n++).toString(16).padStart(64, '0'),
   vout: 0,
   value,
   bucket,
+  ...(bucket === 'assets' ? { assets: NAMED } : {}),
 });
+/** An `assets` coin whose scan names nothing: no detail, or the one given. */
+const unnamed = (value: number, assets?: UtxoAssetDetail): AnnotatedFundingUtxo => ({
+  txid: (n++).toString(16).padStart(64, '0'),
+  vout: 0,
+  value,
+  bucket: 'assets',
+  ...(assets ? { assets } : {}),
+});
+const EMPTY: UtxoAssetDetail = { inscriptionIds: [], runeNames: [], catIds: [], rareSat: null };
 
 describe('recommendFunding — safe-auto with expert fallback', () => {
   it('AUTO: picks the best-fit (smallest covering) CLEAN UTXO', () => {
@@ -358,6 +378,107 @@ describe('recommendFunding — a coin with unknown content is never behind a not
       expect(r.status).toBe('auto');
       expect(r.recommended?.value).toBe(12_000);
       expect(r.recommended?.bucket).toBe('clean');
+    });
+  });
+});
+
+describe('namesAssets: what counts as a NAMED asset', () => {
+  it('an absent detail names nothing', () => {
+    expect(namesAssets(undefined)).toBe(false);
+  });
+
+  it('a detail whose arrays are empty and whose rare sat is null names nothing', () => {
+    expect(namesAssets(EMPTY)).toBe(false);
+  });
+
+  it('each renderable field names on its own', () => {
+    expect(namesAssets({ ...EMPTY, inscriptionIds: ['abc123i0'] })).toBe(true);
+    expect(namesAssets({ ...EMPTY, runeNames: ['UNCOMMON•GOODS'] })).toBe(true);
+    expect(namesAssets({ ...EMPTY, catIds: ['def456i0'] })).toBe(true);
+    expect(namesAssets({ ...EMPTY, rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' } })).toBe(true);
+  });
+});
+
+describe('recommendFunding: assets the scan did not NAME block like unknown content', () => {
+  // A notice that does not say what is on the coin is not a notice. A coin the
+  // scan flags as carrying assets without naming any of them therefore blocks
+  // on every topology, exactly like a coin whose scan failed.
+
+  describe('only an unnamed-asset coin covers', () => {
+    for (const [label, coin] of [
+      ['no detail', () => unnamed(9_000)],
+      ['an empty detail', () => unnamed(9_000, EMPTY)],
+    ] as const) {
+      it(`BLOCKS on a separate-payment-address wallet (${label})`, () => {
+        const r = recommendFunding([u(200, 'clean'), coin()], 2_000, undefined, 'separate-payment-address');
+        expect(r.status).toBe('expert-required');
+        expect(r.recommended?.value).toBe(9_000);
+        expect(r.recommended?.bucket).toBe('assets');
+        expect(expertRequiredCause(r)).toBe('unnamed-assets');
+      });
+
+      it(`BLOCKS on a one-address wallet (${label})`, () => {
+        const r = recommendFunding([u(200, 'clean'), coin()], 2_000, undefined, 'one-address-for-everything');
+        expect(r.status).toBe('expert-required');
+        expect(expertRequiredCause(r)).toBe('unnamed-assets');
+      });
+    }
+  });
+
+  describe('the preference order among covering coins: named, then unnamed, then failed', () => {
+    it('a NAMED coin wins over tighter unnamed and failed coins, and gets the notice', () => {
+      const r = recommendFunding(
+        [u(3_000, 'failed'), unnamed(4_000), u(9_000, 'assets')],
+        2_000, undefined, 'separate-payment-address',
+      );
+      expect(r.status).toBe('asset-notice');
+      expect(r.recommended?.value).toBe(9_000);
+      expect(r.recommended?.assets).toEqual(NAMED);
+      expect(expertRequiredCause(r)).toBe('named-assets');
+    });
+
+    it('an UNNAMED coin wins over a tighter failed coin, and still blocks', () => {
+      const r = recommendFunding(
+        [u(3_000, 'failed'), unnamed(9_000)],
+        2_000, undefined, 'separate-payment-address',
+      );
+      expect(r.status).toBe('expert-required');
+      expect(r.recommended?.value).toBe(9_000);
+      expect(expertRequiredCause(r)).toBe('unnamed-assets');
+    });
+
+    it('best-fit applies WITHIN the unnamed tier', () => {
+      const r = recommendFunding(
+        [unnamed(40_000), unnamed(9_000, EMPTY)],
+        2_000, undefined, 'separate-payment-address',
+      );
+      expect(r.recommended?.value).toBe(9_000);
+    });
+
+    it('a clean coin still wins over all of them, silently', () => {
+      const r = recommendFunding(
+        [u(3_000, 'failed'), unnamed(4_000), u(9_000, 'assets'), u(20_000, 'clean')],
+        2_000, undefined, 'separate-payment-address',
+      );
+      expect(r.status).toBe('auto');
+      expect(r.recommended?.value).toBe(20_000);
+      expect(expertRequiredCause(r)).toBeNull();
+    });
+  });
+
+  describe('expertRequiredMessage says the assets could not be named', () => {
+    it('for a coin with no detail', () => {
+      const r = recommendFunding([unnamed(9_000)], 2_000, undefined, 'separate-payment-address');
+      expect(expertRequiredMessage(r)).toBe(
+        'Select a funding UTXO (the covering coins carry assets the scan could not name)',
+      );
+    });
+
+    it('for a coin with an empty detail', () => {
+      const r = recommendFunding([unnamed(9_000, EMPTY)], 2_000, undefined, 'one-address-for-everything');
+      expect(expertRequiredMessage(r)).toBe(
+        'Select a funding UTXO (the covering coins carry assets the scan could not name)',
+      );
     });
   });
 });

@@ -15,7 +15,7 @@ pipeline. Everything that differs per consumer is an injected **port**.
 | Port | Shape | cat21.space wires to | cat21-wallet wires to |
 |---|---|---|---|
 | `UtxosPort` | `spendableUtxos(addr) => Promise<CoreFundingUtxo[]>` | `Cat21Service.getUtxos` | `utxos.service` (spendable bucket) |
-| `ContentScanPort` | `classify(outpoint) => Promise<'clean' \| 'has-assets'>` | full scanner (cats + inscriptions + runes + rare sats) | cat21-ord (cats only, its current posture) |
+| `ContentScanPort` | `classify(outpoint) => Promise<UtxoClassification>` (`'clean'`, `'has-assets'`, or `{ verdict, assets? }`) | full scanner (cats + inscriptions + runes + rare sats) | cat21-ord (cats only, its current posture) |
 | `SignPort` | `sign(psbt, inputIndexes) => Promise<{ hex; weight }>` | `findSignerOrThrow(walletType)` | `signWithConfirmation` / `signSilently` |
 | `BroadcastPort` | `broadcast(hex) => Promise<{ txid; channel }>` | `Cat21Service.postTransaction` | mempool / Slipstream dispatcher |
 
@@ -23,6 +23,13 @@ pipeline. Everything that differs per consumer is an injected **port**.
 core avoids whatever the port flags as `has-assets`. The wallet reports cats
 only today; when it later cares about inscriptions too, it deepens its port and
 the core is unchanged.
+
+A `has-assets` coin stands behind a notice (`asset-notice`) only when the port
+also NAMES what it found: `{ verdict: 'has-assets', assets }` with at least one
+inscription id, rune name or cat id, or a rare sat (`namesAssets`). A bare
+`'has-assets'`, or a detail that names nothing, blocks (`expert-required`) on
+every wallet topology, because a notice that cannot say what is on the coin
+informs nobody.
 
 The core exposes, per operation: `simulate(params)` (pure preview), and
 `execute(params, ports)` (the full async flow). Selection is

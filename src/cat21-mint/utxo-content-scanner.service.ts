@@ -94,7 +94,8 @@ export class UtxoContentScanner implements ContentScanPort {
       return { verdict: 'has-assets', assets: toAssetDetail(state.content) };
     }
     // scanning / not-scanned / scan-failed: content unknown, so fail closed
-    // with no detail to offer.
+    // with no detail to offer. `recommendFunding` reads a `has-assets` with no
+    // naming detail as unnamed and blocks it on every wallet topology.
     return { verdict: 'has-assets' };
   }
 
@@ -249,7 +250,7 @@ function trimSlash(url: string): string {
  * behind; the names are what a notice or a picker row shows, and ord's balance
  * objects are not renderable without `formatRunePile`.
  */
-function toAssetDetail(content: UtxoContent): UtxoAssetDetail {
+export function toAssetDetail(content: UtxoContent): UtxoAssetDetail {
   return {
     inscriptionIds: content.inscriptionIds,
     runeNames: content.runes ? Object.keys(content.runes) : [],

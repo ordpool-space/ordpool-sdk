@@ -18,15 +18,22 @@ const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
  * `recommendFunding`:
  *
  * - a content-clean coin covers  -> `auto` (auto-selected, no picker)
- * - only asset coins cover, and the wallet keeps a SEPARATE payment address
+ * - only asset coins cover, the port NAMED the assets (`namesAssets`), and
+ *   the wallet keeps a SEPARATE payment address
  *                                -> `asset-notice` (proceed, but say what the
  *                                   coin carries)
- * - only asset coins cover, and the wallet uses ONE address for everything
- *                                -> `expert-required` (block; surface the picker)
+ * - only named-asset coins cover, and the wallet uses ONE address for
+ *   everything                   -> `expert-required` (block; surface the picker)
+ * - the port answers `has-assets` without naming anything (the bare string,
+ *   or an object whose detail is absent or names nothing)
+ *                                -> that coin is an UNNAMED-asset coin; when no
+ *                                   clean or named-asset coin covers,
+ *                                   `expert-required` on every topology,
+ *                                   cause `unnamed-assets`
  * - a covering coin's scan fails -> that coin is `failed`, never auto-spent;
- *                                   when no clean or known-asset coin covers,
- *                                   `expert-required` on every topology with
- *                                   `recommended.bucket === 'failed'`
+ *                                   when no clean or asset coin covers,
+ *                                   `expert-required` on every topology,
+ *                                   cause `unknown-content`
  * - nothing covers               -> `insufficient`
  *
  * Non-covering coins stay `unscanned` (never auto-picked anyway, so no wasted
@@ -64,8 +71,10 @@ export async function selectFunding<T extends FundingUtxo>(
             outpoint(u),
             classificationVerdict(classification) === 'clean' ? 'clean' : 'assets',
           );
-          // Carried through when the port reports it, so the caller can name
-          // what it found instead of only that it found something.
+          // Carried through as the port reported it, so the caller can name
+          // what it found instead of only that it found something. Whether it
+          // names anything is `recommendFunding`'s call (`namesAssets`), so an
+          // empty detail travels too and reads as unnamed there.
           const detail = classificationAssets(classification);
           if (detail) {
             assetsByOutpoint.set(outpoint(u), detail);
@@ -93,13 +102,13 @@ export async function selectFunding<T extends FundingUtxo>(
  * - the user's EXPLICIT expert-mode pick when it still covers the target,
  *   honoured even when it carries assets, because they chose it;
  * - otherwise the recommended coin when the flow may PROCEED, which is `auto`
- *   (a clean coin covers) and `asset-notice` (only a coin with KNOWN assets
+ *   (a clean coin covers) and `asset-notice` (only a coin with NAMED assets
  *   covers, but the wallet keeps a separate payment address, so the UI informs
  *   rather than obstructs);
  * - otherwise null, which is what BLOCKS the flow: `expert-required` (a
- *   one-address wallet, or a recommended coin whose content is unknown because
- *   its scan failed; the user must override deliberately), `scanning`,
- *   `insufficient`.
+ *   one-address wallet, or a recommended coin whose assets are unnamed or
+ *   whose content is unknown because its scan failed; the user must override
+ *   deliberately), `scanning`, `insufficient`.
  *
  * Returning the coin on `asset-notice` is the half of the policy that makes it
  * a notice and not a wall. The UI still owes the user the notice; this only
