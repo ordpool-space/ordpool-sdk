@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 import * as path from 'node:path';
 import { E2E_TIMEOUT_ENV } from '../e2e-timeout';
+import { stackPort } from '../stack-ports';
 
 /**
  * The per-wait bound (TESTING.md): every assertion, `expect.poll`, action,
@@ -58,12 +59,12 @@ export default defineConfig({
     }],
   ],
   // Serves the SDK harness page (HTML + bundled connector/signer/
-  // helper code) over http://localhost:4500. Xverse's content
+  // helper code) over http://localhost on the slot's E2E_HARNESS_PORT. Xverse's content
   // script only injects on http(s) origins, so file:// won't work.
   webServer: {
     command: 'node fixtures-server.js',
     cwd: __dirname,
-    port: 4500,
+    port: stackPort('harness'),
     reuseExistingServer: !process.env.CI,
     timeout: WAIT_TIMEOUT_MS,
   },

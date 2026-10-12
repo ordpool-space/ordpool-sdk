@@ -14,10 +14,10 @@ import {
   waitForOrdStockReady,
   waitForOrdStockSync,
   writeOrdStockFile,
+  ORD_STOCK_URL,
 } from './regtest-helpers';
 
 const ORD_WALLET = `existence-stock-${Date.now().toString(36)}`;
-const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
 
 describe('checkInscriptionsExist → live stock ord', () => {
   let existing: string;

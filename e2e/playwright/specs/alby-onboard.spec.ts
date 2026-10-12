@@ -6,6 +6,7 @@ import { AlbyAutoApproveHandle, installAlbyAutoApprove } from '../alby-auto-appr
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC } from '../wallet-test-vectors';
 import { installAlbyOfflineRoutes, ALBY_LNDHUB_PLACEHOLDER_URL } from '../alby-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 
 /**
@@ -149,7 +150,7 @@ test('restores a wallet from the BIP-39 test seed via SW-message envelope and de
   const approver = installAlbyAutoApprove(context, { labels: /^(connect|allow|confirm|approve)$/i });
 
   const probePage = await context.newPage();
-  await probePage.goto('http://localhost:4500/', { waitUntil: 'domcontentloaded' });
+  await probePage.goto(HARNESS_URL, { waitUntil: 'domcontentloaded' });
 
   // When the call hangs on a permission popup that was never approved (a
   // renamed button label, or one Alby served from a page the listener missed),

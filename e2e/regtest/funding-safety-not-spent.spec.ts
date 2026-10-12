@@ -50,12 +50,11 @@ import {
   waitForOrdReady,
   waitForOrdStockReady,
   waitForOrdSync,
+  ORD_URL,
+  ORD_STOCK_URL,
+  ELECTRS_URL,
 } from './regtest-helpers';
 
-const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
-const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
-const ELECTRS_URL =
-  process.env.REGTEST_ELECTRS_URL ?? `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
 
 /** Just above a mint's requirement, so best-fit would take it. */
 const DIRTY_SATS = 3_000;

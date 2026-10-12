@@ -61,6 +61,8 @@ __exportStar(require("./playwright/cat21wallet-sign-popup"), exports);
 __exportStar(require("./regtest/dirty-coin-placement"), exports);
 __exportStar(require("./regtest/regtest-helpers"), exports);
 __exportStar(require("./e2e-timeout"), exports);
+__exportStar(require("./stack-ports"), exports);
+__exportStar(require("./stack-slots"), exports);
 __exportStar(require("./playwright/workaround-wait-for-timeout"), exports);
 __exportStar(require("./playwright/okx-sign-popup"), exports);
 __exportStar(require("./playwright/launch-wallet-context"), exports);

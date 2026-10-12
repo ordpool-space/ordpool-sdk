@@ -8,6 +8,7 @@ import { approveOkxConnectPopup } from '../okx-connect-popup';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 4 of the OKX E2E pipeline: matrix spec.
@@ -36,7 +37,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 interface OkxAddressVariant {
   label: string;

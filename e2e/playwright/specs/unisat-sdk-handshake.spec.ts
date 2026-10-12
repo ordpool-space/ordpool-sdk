@@ -6,13 +6,14 @@ import { clickApprovalAndRequireClose, approvalGate, waitForApprovalPopup } from
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 3 of the Unisat E2E pipeline: SDK ↔ Unisat handshake.
  *
  * - Onboard Unisat with the BIP-39 test seed via its UI
  *   (data-testid-driven, same flow as unisat-onboard.spec.ts)
- * - Open the SDK harness page (http://localhost:4500/) which
+ * - Open the SDK harness page (HARNESS_URL) which
  *   imports the real `unisatConnector`
  * - Drive `window.ordpoolSdkHarness.connectUnisat()` via
  *   page.evaluate; this triggers `window.unisat.requestAccounts()`
@@ -29,7 +30,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // BIP-84 native segwit derivation of TEST_MNEMONIC on mainnet:
 //   m/84'/0'/0'/0/0

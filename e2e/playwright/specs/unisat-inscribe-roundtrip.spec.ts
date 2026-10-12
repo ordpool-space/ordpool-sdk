@@ -11,6 +11,7 @@ import {
   rpc,
   mineBlocks,
   postTx,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 import { clickApprovalAndRequireClose, approvalGate, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardUnisat } from '../onboard-unisat';
@@ -28,7 +29,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const FUND_AMOUNT_BTC = 0.001;
 

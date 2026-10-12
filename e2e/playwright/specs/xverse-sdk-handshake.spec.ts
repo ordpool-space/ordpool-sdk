@@ -5,13 +5,14 @@ import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 import { approveXverseConnect, unlockXverse } from '../xverse-popup';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 3a — SDK ↔ Xverse handshake via sats-connect.
  *
  * After Iteration 2's onboarding spec commits a wallet to extension
  * storage, this spec loads the SDK harness page (HTML + bundled
- * connector/signer code served from http://localhost:4500), drives
+ * connector/signer code served from HARNESS_URL), drives
  * our `xverseConnector.connect(Network.Testnet4)`, and asserts the
  * returned `paymentAddress` / `ordinalsAddress` match the well-known
  * BIP-84 / BIP-86 testnet derivations of the BIP-39 test seed
@@ -33,7 +34,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const TEST_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 const TEST_PASSWORD = 'TestPassword123!';

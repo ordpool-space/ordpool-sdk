@@ -23,7 +23,8 @@ export declare const NET_LOG_DIR_ENV = "ORDPOOL_E2E_NET_LOG_DIR";
 export type LaunchableWallet = 'xverse' | 'unisat' | 'leather' | 'okx' | 'phantom' | 'wizz' | 'alby' | 'cat21wallet';
 /**
  * The hosts a test browser may reach: loopback, plus the host of every regtest
- * service URL in `env` (`regtestServiceUrls`: electrs, cat21-ord, stock ord)
+ * service URL in `env` (`regtestServiceUrls`: electrs, cat21-ord, stock ord,
+ * the ordpool backend, the fees stub, the harness, the consumer app and its backend)
  * and of `XVERSE_REGTEST_ELECTRS_URL`, plus `extraHosts` (a consumer's own
  * server). Derived from the same environment the stack and its helpers read,
  * so pointing a service elsewhere moves the exception with it. No production

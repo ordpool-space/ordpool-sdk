@@ -9,6 +9,7 @@ import { Network } from '../../../src/network';
 import { onboardLeather } from '../onboard-leather';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * BIP-322 sign-message roundtrip with the real Leather extension. Promotes
@@ -21,7 +22,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/leather');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 const MESSAGE = 'ordpool sign-message e2e — prove BIP-322 roundtrip';
 
 let context: BrowserContext;

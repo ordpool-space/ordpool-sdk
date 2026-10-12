@@ -6,6 +6,7 @@ import { approvalGate, clickApprovalAndRequireClose, waitForApprovalPopup } from
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 3 of the Wizz E2E pipeline: SDK ↔ Wizz handshake.
@@ -25,7 +26,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // BIP-84 native segwit derivation of TEST_MNEMONIC on mainnet:
 //   m/84'/0'/0'/0/0

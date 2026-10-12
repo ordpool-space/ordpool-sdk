@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient, HARNESS_URL } from '../../regtest/regtest-helpers';
 import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
@@ -30,7 +30,6 @@ import { approveOkxConnectPopup } from '../okx-connect-popup';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const FUND_AMOUNT_BTC = 0.001;
 

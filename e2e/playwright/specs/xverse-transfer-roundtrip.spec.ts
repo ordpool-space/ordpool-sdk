@@ -17,6 +17,7 @@ import {
   postTx,
   assertAllInputsSighashAll,
   getUtxos,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 import { Network, toScureNetwork } from '../../../src/network';
 import { SEED_USER_DATA_DIR } from '../global-setup';
@@ -62,7 +63,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const FUND_AMOUNT_BTC = 0.001;
 const MINT_FEE_SATS = 1500;

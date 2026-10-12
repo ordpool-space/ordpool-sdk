@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 import * as path from 'node:path';
 import { E2E_TIMEOUT_ENV } from '../e2e-timeout';
+import { stackPort } from '../stack-ports';
 
 /**
  * The per-wait bound (TESTING.md): every assertion, `expect.poll`, action,
@@ -52,7 +53,7 @@ export default defineConfig({
   webServer: {
     command: 'node fixtures-server.js',
     cwd: __dirname,
-    port: 4500,
+    port: stackPort('harness'),
     reuseExistingServer: true,
     timeout: WAIT_TIMEOUT_MS,
   },

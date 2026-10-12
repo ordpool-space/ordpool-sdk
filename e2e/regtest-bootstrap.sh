@@ -3,11 +3,27 @@
 # coinbase rewards mature. Prints a regtest funder keypair (address +
 # WIF) on stdout (as JSON) so the E2E suite can pick them up.
 #
+# The stack runs in a machine-wide slot (e2e/stack-slot.sh): its host ports and
+# compose project come from the slot, and no more than ORDPOOL_E2E_MAX_STACKS
+# stacks run at once. The JSON carries the slot and its environment (`env`),
+# which the specs need to reach this stack.
+#
 # Usage:
+#   node scripts/e2e-slots.mjs run -- bash -c './e2e/regtest-bootstrap.sh && npm run test:e2e:regtest'
+#       (slot, stack, specs and teardown in one command)
 #   ./e2e/regtest-bootstrap.sh
+#       (acquires a slot of its own; the stack keeps it until
+#        `node scripts/e2e-slots.mjs down <slot>`)
 #   eval $(./e2e/regtest-bootstrap.sh | jq -r '"export REGTEST_FUNDED_ADDR=" + .address + " REGTEST_FUNDED_WIF=" + .wif')
+#
+# Profiles beyond bitcoind + electrs come from compose's own COMPOSE_PROFILES,
+# e.g. COMPOSE_PROFILES=cat21-ord,ord-stock,ordpool-backend.
 
 set -euo pipefail
+
+# shellcheck source=stack-slot.sh
+. "$(dirname "$0")/stack-slot.sh"
+use_stack_slot regtest
 
 COMPOSE="docker compose -f $(dirname "$0")/docker-compose.regtest.yml"
 
@@ -18,7 +34,7 @@ COMPOSE="docker compose -f $(dirname "$0")/docker-compose.regtest.yml"
 check_build_pin ordpool-electrs "${ELECTRS_SRC:-$(dirname "$0")/../../ordpool-electrs}" "$ORDPOOL_ELECTRS_SHA"
 check_build_pin cat21-ord "${CAT21_ORD_SRC:-$(dirname "$0")/../../cat21-ord}" "$CAT21_ORD_SHA"
 check_build_pin ordpool "${ORDPOOL_SRC:-$(dirname "$0")/../../ordpool}" "$ORDPOOL_SHA"
-BITCOIND_CONTAINER="${REGTEST_BITCOIND_CONTAINER:-ordpool-e2e-bitcoind}"
+BITCOIND_CONTAINER="$REGTEST_BITCOIND_CONTAINER"
 RPC="docker exec $BITCOIND_CONTAINER bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
 # The wallet name these helpers spend from. A consumer stack brings this
 # compose up under its own project prefix, so the name must match what its
@@ -26,7 +42,7 @@ RPC="docker exec $BITCOIND_CONTAINER bitcoin-cli -regtest -rpcuser=ordpool -rpcp
 WALLET="${REGTEST_WALLET:-ordpool-e2e}"
 
 # --- bring containers up if not already running ---
-if ! docker ps --format '{{.Names}}' | grep -q "$BITCOIND_CONTAINER"; then
+if ! docker ps --format '{{.Names}}' | grep -qx "$BITCOIND_CONTAINER"; then
   $COMPOSE up -d >&2
 fi
 
@@ -80,15 +96,25 @@ fi
 # --- wait for electrs to catch up to bitcoind's tip ---
 TIP=$($RPC getblockcount)
 for _ in $(seq 1 30); do
-  if [ "$(curl -s "http://localhost:${E2E_ELECTRS_HOST_PORT:-3010}/blocks/tip/height" || echo 0)" -ge "$TIP" ]; then break; fi
+  if [ "$(curl -s "http://localhost:${E2E_ELECTRS_HOST_PORT}/blocks/tip/height" || echo 0)" -ge "$TIP" ]; then break; fi
   sleep 1
 done
 
-# --- emit the credentials as JSON ---
+# --- emit the credentials and the slot as JSON ---
 BALANCE=$($RPC -rpcwallet="$WALLET" getbalance)
+SLOT_ENV_JSON="$(node "$STACK_SLOTS_CLI" env --slot "$E2E_SLOT" --kind regtest --format json)"
 jq -n \
   --arg address "$ADDR" \
   --arg wif "$WIF" \
   --arg balance "$BALANCE" \
   --arg tipHeight "$TIP" \
-  '{ address: $address, wif: $wif, balance: $balance, tipHeight: $tipHeight }'
+  --argjson slot "$E2E_SLOT" \
+  --arg prefix "$E2E_PREFIX" \
+  --argjson env "$SLOT_ENV_JSON" \
+  '{ address: $address, wif: $wif, balance: $balance, tipHeight: $tipHeight, slot: $slot, prefix: $prefix, env: $env }'
+
+if [ "$STACK_SLOT_ACQUIRED_HERE" = 1 ]; then
+  echo "regtest-bootstrap: the stack holds slot $E2E_SLOT ($E2E_PREFIX) until it is torn down." >&2
+  echo "  its environment, for the specs: eval \"\$(node $STACK_SLOTS_CLI env --slot $E2E_SLOT)\"" >&2
+  echo "  tear it down:                   node $STACK_SLOTS_CLI down $E2E_SLOT" >&2
+fi

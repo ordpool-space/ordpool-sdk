@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient, HARNESS_URL } from '../../regtest/regtest-helpers';
 import { closeLeftoverExtensionPages } from '../approval-popup';
 import { installContextErrorGuard } from '../browser-error-guard';
 import { SEED_USER_DATA_DIR } from '../global-setup';
@@ -37,7 +37,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // In regtest 1 BTC = 100M sats; fund the wallet with 0.001 BTC so
 // the mint has plenty of headroom plus a meaningful change output.

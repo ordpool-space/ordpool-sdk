@@ -7,13 +7,14 @@ import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { installCat21WalletOrdRoutes } from '../cat21wallet-ord-routes';
 import { approveCat21WalletConnectPopup } from '../cat21wallet-sign-popup';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 3 of the Cat21 Wallet E2E pipeline: SDK ↔ Cat21 Wallet handshake.
  *
  * - Onboard Cat21 Wallet with the BIP-39 test seed via its UI
  *   (testid-driven, same flow as cat21wallet-onboard.spec.ts)
- * - Open the SDK harness page (http://localhost:4500/) which
+ * - Open the SDK harness page (HARNESS_URL) which
  *   imports the real `cat21walletConnector`
  * - Drive `window.ordpoolSdkHarness.connectCat21Wallet()` — this
  *   calls `Cat21Provider.request('getAddresses')` inside the
@@ -30,7 +31,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/cat21wallet');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // Expected derivations for `abandon × 11 + about` on mainnet:
 //   m/84'/0'/0'/0/0  BIP-84 P2WPKH  Native SegWit  = paymentAddress

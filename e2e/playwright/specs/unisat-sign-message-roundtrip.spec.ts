@@ -9,6 +9,7 @@ import { Network } from '../../../src/network';
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * BIP-322 sign-message roundtrip with the real Unisat extension. Promotes
@@ -26,7 +27,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 const MESSAGE = 'ordpool sign-message e2e — prove BIP-322 roundtrip';
 
 // BIP-86 Taproot derivation of `abandon × 11 + about` on mainnet — the same

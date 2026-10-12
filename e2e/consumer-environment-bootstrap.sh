@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Bring up the consumer-environment compose stack — bitcoind, electrs,
 # THE SUPERSET. Do NOT also run regtest-bootstrap.sh: that brings up a SECOND
-# bitcoind publishing the same host port, and since stacks are isolated by
-# compose project the two no longer silently merge, they collide. This script
+# stack with its own bitcoind (in the same slot it collides on every host port,
+# in another it takes a second slot of the machine's few). This script
 # already creates the wallet (REGTEST_WALLET, default ordpool-e2e), mines, and emits the SAME
 # fundedAddress / fundedWif that regtest-bootstrap.sh emits, so a consumer
 # needs only this one.
@@ -30,38 +30,50 @@
 
 set -euo pipefail
 
-# Host port electrs is published on. Container side stays 3000; only the host
-# mapping moves, so a developer can keep port 3000 for their own services.
-# Must match docker-compose.regtest.yml's ${E2E_ELECTRS_HOST_PORT:-3010}.
-ELECTRS_HTTP_URL="http://localhost:${E2E_ELECTRS_HOST_PORT:-3010}"
-
 HERE="$(cd "$(dirname "$0")" && pwd)"
+
+# The stack runs in a machine-wide slot (e2e/stack-slot.sh): every host port
+# and container name below comes from it, and no more than
+# ORDPOOL_E2E_MAX_STACKS stacks run on this machine at once. A caller that
+# acquired the slot exports E2E_SLOT; otherwise this script acquires one, and
+# the stack keeps it until `node scripts/e2e-slots.mjs down <slot>`.
+# shellcheck source=stack-slot.sh
+. "$HERE/stack-slot.sh"
+use_stack_slot consumer
+
+# Host port electrs is published on. Container side stays 3000; only the host
+# mapping moves.
+ELECTRS_HTTP_URL="http://localhost:${E2E_ELECTRS_HOST_PORT}"
+MARIADB_CONTAINER="${E2E_PREFIX}-consumer-mariadb"
+REDIS_CONTAINER="${E2E_PREFIX}-consumer-redis"
 COMPOSE_BASE=( -f "$HERE/docker-compose.consumer-environment.yml" )
 PROFILES=()
 EXTRA_FILES=()
 BUILDX_CACHE=0
+WITH_REDIS=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --with-redis)
       PROFILES+=( --profile redis )
+      WITH_REDIS=1
       shift
       ;;
     --with-cat21-ord)
       # Requires CAT21_ORD_SRC pointing at a cat21-ord checkout (or the
-      # ../../cat21-ord workspace sibling). Consumers poll :8080/status
-      # for readiness before running ord-dependent specs.
+      # ../../cat21-ord workspace sibling). Consumers poll its /status on
+      # E2E_ORD_HOST_PORT for readiness before running ord-dependent specs.
       PROFILES+=( --profile cat21-ord )
       shift
       ;;
     --with-ord-stock)
-      # A full ord WITHOUT --index-cat21, on :8081, so a consumer can read
+      # A full ord WITHOUT --index-cat21, on E2E_ORD_STOCK_HOST_PORT, so a consumer can read
       # real inscriptions / runes / sat ranges. Needed by any spec that
       # proves the funding-safety scan: cat21-ord indexes only cats and its
       # /output carries no `inscriptions` field, so pointing an ord base URL
       # there makes every inscribed coin read back clean and silently
       # disables the guard. Built from ORD_SRC (defaults to the cat21-ord
-      # checkout, which is the same binary). Poll :8081/status for readiness.
+      # checkout, which is the same binary). Poll its /status for readiness.
       PROFILES+=( --profile ord-stock )
       shift
       ;;
@@ -81,7 +93,9 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-COMPOSE=( docker compose "${COMPOSE_BASE[@]}" "${EXTRA_FILES[@]}" "${PROFILES[@]}" )
+# `${a[@]+"${a[@]}"}`: an empty array under `set -u` is an unbound variable in
+# bash 3.2 (macOS's /bin/bash), so expand each optional array only when set.
+COMPOSE=( docker compose "${COMPOSE_BASE[@]}" ${EXTRA_FILES[@]+"${EXTRA_FILES[@]}"} ${PROFILES[@]+"${PROFILES[@]}"} )
 
 # The electrs and ord checkouts the compose builds from, compared with
 # build-pins.env. Paths as the compose resolves them: relative to e2e/.
@@ -89,7 +103,7 @@ COMPOSE=( docker compose "${COMPOSE_BASE[@]}" "${EXTRA_FILES[@]}" "${PROFILES[@]
 . "$HERE/build-pins.sh"
 check_build_pin ordpool-electrs "${ELECTRS_SRC:-$HERE/../../ordpool-electrs}" "$ORDPOOL_ELECTRS_SHA"
 check_build_pin cat21-ord "${CAT21_ORD_SRC:-$HERE/../../cat21-ord}" "$CAT21_ORD_SHA"
-BITCOIND_CONTAINER="${REGTEST_BITCOIND_CONTAINER:-ordpool-e2e-consumer-bitcoind}"
+BITCOIND_CONTAINER="$REGTEST_BITCOIND_CONTAINER"
 RPC="docker exec $BITCOIND_CONTAINER bitcoin-cli -regtest -rpcuser=ordpool -rpcpassword=ordpool"
 # The wallet name these helpers spend from. A consumer stack brings this
 # compose up under its own project prefix, so the name must match what its
@@ -97,7 +111,7 @@ RPC="docker exec $BITCOIND_CONTAINER bitcoin-cli -regtest -rpcuser=ordpool -rpcp
 WALLET="${REGTEST_WALLET:-ordpool-e2e}"
 
 # --- bring containers up if not already running ---
-if ! docker ps --format '{{.Names}}' | grep -q "$BITCOIND_CONTAINER"; then
+if ! docker ps --format '{{.Names}}' | grep -qx "$BITCOIND_CONTAINER"; then
   if [ "$BUILDX_CACHE" = 1 ]; then
     # Build every buildable service of the ACTIVE profile set through
     # buildx bake so the gha overlay's cache_from/to take effect (electrs
@@ -164,38 +178,44 @@ done
 
 # --- wait for mariadb to accept connections ---
 for _ in $(seq 1 30); do
-  if docker exec ordpool-e2e-consumer-mariadb mariadb -uroot -pordpool -e 'SELECT 1' >/dev/null 2>&1; then break; fi
+  if docker exec "$MARIADB_CONTAINER" mariadb -uroot -pordpool -e 'SELECT 1' >/dev/null 2>&1; then break; fi
   sleep 1
 done
 
 REDIS_BLOCK="null"
-if [ "${#PROFILES[@]}" -gt 0 ]; then
+if [ "$WITH_REDIS" = 1 ]; then
   for _ in $(seq 1 15); do
-    if docker exec ordpool-e2e-consumer-redis redis-cli ping >/dev/null 2>&1; then break; fi
+    if docker exec "$REDIS_CONTAINER" redis-cli ping >/dev/null 2>&1; then break; fi
     sleep 1
   done
-  REDIS_BLOCK='{"url":"redis://localhost:6379"}'
+  REDIS_BLOCK="{\"url\":\"redis://localhost:${E2E_REDIS_HOST_PORT}\"}"
 fi
+
+SLOT_ENV_JSON="$(node "$STACK_SLOTS_CLI" env --slot "$E2E_SLOT" --kind consumer --format json)"
 
 # --- dump the environment descriptor ---
 # Schema mirrors ConsumerEnvironmentUrls in e2e/playwright/consumer-environment.ts.
 # When you add a field here, mirror it there too.
 cat <<EOF
 {
+  "slot": ${E2E_SLOT},
+  "prefix": "${E2E_PREFIX}",
+  "env": ${SLOT_ENV_JSON},
   "bitcoind": {
-    "rpcUrl": "http://localhost:18443",
+    "rpcUrl": "http://localhost:${E2E_BITCOIND_RPC_HOST_PORT}",
     "rpcUser": "ordpool",
     "rpcPassword": "ordpool",
-    "zmqRawBlock": "tcp://localhost:28332",
-    "zmqRawTx": "tcp://localhost:28333"
+    "zmqRawBlock": "tcp://localhost:${E2E_ZMQ_RAWBLOCK_HOST_PORT}",
+    "zmqRawTx": "tcp://localhost:${E2E_ZMQ_RAWTX_HOST_PORT}",
+    "container": "${BITCOIND_CONTAINER}"
   },
   "electrs": {
     "httpUrl": "${ELECTRS_HTTP_URL}",
-    "electrumRpcUrl": "tcp://localhost:50001"
+    "electrumRpcUrl": "tcp://localhost:${E2E_ELECTRUM_HOST_PORT}"
   },
   "mariadb": {
     "host": "localhost",
-    "port": 3306,
+    "port": ${E2E_MARIADB_HOST_PORT},
     "rootPassword": "ordpool",
     "ordpool": {"database": "mempool", "user": "mempool", "password": "mempool"},
     "cat21":   {"database": "cat21",   "user": "cat21",   "password": "cat21"}
@@ -205,3 +225,9 @@ cat <<EOF
   "fundedWif": "${WIF}"
 }
 EOF
+
+if [ "$STACK_SLOT_ACQUIRED_HERE" = 1 ]; then
+  echo "consumer-environment-bootstrap: the stack holds slot $E2E_SLOT ($E2E_PREFIX) until it is torn down." >&2
+  echo "  its environment, for the specs: eval \"\$(node $STACK_SLOTS_CLI env --slot $E2E_SLOT --kind consumer)\"" >&2
+  echo "  tear it down:                   node $STACK_SLOTS_CLI down $E2E_SLOT" >&2
+fi

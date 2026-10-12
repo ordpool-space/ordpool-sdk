@@ -48,15 +48,15 @@ function hostOf(url: string): string {
 
 /**
  * The hosts a test browser may reach: loopback, plus the host of every regtest
- * service URL in `env` (`regtestServiceUrls`: electrs, cat21-ord, stock ord)
+ * service URL in `env` (`regtestServiceUrls`: electrs, cat21-ord, stock ord,
+ * the ordpool backend, the fees stub, the harness, the consumer app and its backend)
  * and of `XVERSE_REGTEST_ELECTRS_URL`, plus `extraHosts` (a consumer's own
  * server). Derived from the same environment the stack and its helpers read,
  * so pointing a service elsewhere moves the exception with it. No production
  * host is ever on this list.
  */
 export function reachableHosts(env: NodeJS.ProcessEnv = process.env, extraHosts: readonly string[] = []): string[] {
-  const services = regtestServiceUrls(env);
-  const urls = [services.electrs, services.ord, services.ordStock];
+  const urls = Object.values(regtestServiceUrls(env));
   if (env.XVERSE_REGTEST_ELECTRS_URL) urls.push(env.XVERSE_REGTEST_ELECTRS_URL);
   return [...new Set([...LOOPBACK_HOSTS, ...urls.map(hostOf), ...extraHosts])];
 }

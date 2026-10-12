@@ -90,6 +90,7 @@
     "wasm",
     "scripts/check-test-kinds.mjs",
     "scripts/check-net-log.mjs",
+    "scripts/e2e-slots.mjs",
     "*.js",
     "*.json"
   ],
@@ -118,6 +119,7 @@
     "create-link": "npm run build && cd dist && npm link",
     "build:server-cjs": "tsc -p tsconfig.server-cjs.json && node -e \"require('fs').writeFileSync('dist-cjs/package.json', JSON.stringify({type:'commonjs'},null,2))\"",
     "check:net-log": "node scripts/check-net-log.mjs",
+    "e2e:slots": "node scripts/e2e-slots.mjs",
     "check:harness-types": "tsc -p e2e/playwright/tsconfig.harness.json",
     "check:dist-e2e": "npm run build:e2e && node -e \"require('./dist-e2e/index.js')\" && git diff --exit-code dist-e2e/"
   },

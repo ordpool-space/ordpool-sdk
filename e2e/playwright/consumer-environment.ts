@@ -21,12 +21,24 @@ import * as path from 'node:path';
  * When you add a field here, mirror it in the bootstrap script too.
  */
 export interface ConsumerEnvironmentUrls {
+  /** The machine-wide slot the stack runs in (`e2e/stack-slots.ts`). */
+  slot: number;
+  /** Compose project / container prefix of the slot. */
+  prefix: string;
+  /**
+   * The slot's environment (`slotEnv(slot, 'consumer')`): `E2E_*` host ports,
+   * `E2E_PREFIX`, the `REGTEST_*_CONTAINER` names. Export it into every step
+   * that reaches the stack, so the SDK helpers find this stack.
+   */
+  env: Record<string, string>;
   bitcoind: {
     rpcUrl: string;
     rpcUser: string;
     rpcPassword: string;
     zmqRawBlock: string;
     zmqRawTx: string;
+    /** The container `docker exec` reaches bitcoin-cli in. */
+    container: string;
   };
   electrs: {
     httpUrl: string;
@@ -109,13 +121,14 @@ export function readConsumerEnvironment(jsonPath: string): ConsumerEnvironmentUr
 }
 
 /**
- * Tear the stack down. Optional — CI runners are ephemeral, so the
- * "always teardown" step in the workflow YAML is usually enough.
+ * Tear the stack down and free its slot (`scripts/e2e-slots.mjs down`).
+ * Optional: CI runners are ephemeral, so the "always teardown" step in
+ * the workflow YAML is usually enough.
  */
-export function teardownConsumerEnvironment(options: { sdkE2eDir?: string } = {}): void {
+export function teardownConsumerEnvironment(env: ConsumerEnvironmentUrls, options: { sdkE2eDir?: string } = {}): void {
   const sdkE2eDir = options.sdkE2eDir ?? path.resolve(__dirname, '..');
-  const composeFile = path.join(sdkE2eDir, 'docker-compose.consumer-environment.yml');
-  execSync(`docker compose -f "${composeFile}" down -v`, { stdio: 'inherit' });
+  const cli = path.join(sdkE2eDir, '..', 'scripts', 'e2e-slots.mjs');
+  execSync(`node "${cli}" down ${env.slot} --force`, { stdio: 'inherit' });
 }
 
 /**
@@ -126,7 +139,7 @@ export function teardownConsumerEnvironment(options: { sdkE2eDir?: string } = {}
 export function mineBlocks(env: ConsumerEnvironmentUrls, count = 1, toAddress?: string): void {
   const addr = toAddress ?? env.fundedAddress;
   execSync(
-    `docker exec ordpool-e2e-consumer-bitcoind ` +
+    `docker exec ${env.bitcoind.container} ` +
     `bitcoin-cli -regtest -rpcuser=${env.bitcoind.rpcUser} -rpcpassword=${env.bitcoind.rpcPassword} ` +
     `-rpcwallet=ordpool-e2e generatetoaddress ${count} ${addr}`,
     { stdio: 'inherit' },

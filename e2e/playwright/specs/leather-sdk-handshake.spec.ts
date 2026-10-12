@@ -6,13 +6,14 @@ import { clickApprovalAndRequireClose, waitForApprovalPopup } from '../approval-
 import { onboardLeather } from '../onboard-leather';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 3 of the Leather E2E pipeline: SDK ↔ Leather handshake.
  *
  * - Onboard Leather with the BIP-39 test seed via its UI
  *   (testid-driven, same flow as leather-onboard.spec.ts)
- * - Open the SDK harness page (http://localhost:4500/) which
+ * - Open the SDK harness page (HARNESS_URL) which
  *   imports the real `leatherConnector`
  * - Drive `window.ordpoolSdkHarness.connectLeather()` — this
  *   calls `LeatherProvider.request('getAddresses')` inside the
@@ -29,7 +30,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/leather');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // Expected derivations for `abandon × 11 + about` on mainnet:
 //   m/84'/0'/0'/0/0  BIP-84 P2WPKH  Native SegWit  = paymentAddress

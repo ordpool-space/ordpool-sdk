@@ -11,6 +11,7 @@ const onboard_phantom_1 = require("./onboard-phantom");
 const onboard_alby_1 = require("./onboard-alby");
 const onboard_cat21wallet_1 = require("./onboard-cat21wallet");
 const wallet_test_vectors_1 = require("./wallet-test-vectors");
+const regtest_helpers_1 = require("../regtest/regtest-helpers");
 // ONE place that answers "how do I onboard wallet X" — consumed by the e2e
 // specs AND the local regtest wallet-runner. The `onboard-<wallet>.ts` helpers
 // take either (page) or (context); this registry normalizes them all to
@@ -26,7 +27,7 @@ exports.walletOnboarders = {
             await (0, onboard_xverse_1.onboardXverse)(ctx, id);
             await (0, onboard_xverse_1.primeAndSwitchToRegtest)(ctx, id);
             const electrsUrl = process.env.XVERSE_REGTEST_ELECTRS_URL ??
-                `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
+                (0, regtest_helpers_1.regtestServiceUrls)().electrs;
             await (0, onboard_xverse_1.overrideRegtestElectrsUrl)(ctx, id, electrsUrl);
         },
         password: wallet_test_vectors_1.PASSWORD_BY_WALLET.xverse,

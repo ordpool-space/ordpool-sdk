@@ -6,6 +6,7 @@ import { clickApprovalAndRequireClose } from '../approval-popup';
 import { seedAlbyAccount } from '../onboard-alby';
 import { installAlbyOfflineRoutes } from '../alby-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 
 /**
@@ -25,7 +26,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/alby');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // BIP-86 mainnet test-vector first address for the abandon×11+about
 // seed at m/86'/0'/0'/0/0. Same value published in BIP-86's

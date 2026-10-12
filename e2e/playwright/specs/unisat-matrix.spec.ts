@@ -7,6 +7,7 @@ import { clickApprovalAndRequireClose, approvalGate, waitForApprovalPopup } from
 import { onboardUnisat } from '../onboard-unisat';
 import { installUnisatOfflineRoutes } from '../unisat-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 5 of the Unisat E2E pipeline: matrix spec across every
@@ -36,7 +37,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/unisat');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 interface UnisatAddressTypeVariant {
   /** address-type-card-${addressTypeIndex} testid during onboard */

@@ -12,11 +12,22 @@ export interface RegtestServiceUrls {
      * uses it to verify a real upstream ord recognises the SDK's inscriptions.
      */
     ordStock: string;
+    /** The real ordpool backend (compose profile `ordpool-backend`). */
+    ordpoolBackend: string;
+    /** `regtest/fees-electrs-stub.mjs`. */
+    feesStub: string;
+    /** The SDK harness page (`playwright/fixtures-server.js`), no trailing slash. */
+    harness: string;
+    /** A consumer's static app server. */
+    app: string;
+    /** A consumer's own backend process. */
+    appBackend: string;
 }
 /**
- * Where the regtest stack's services answer, read from `env`: the `REGTEST_*_URL`
- * variables, else localhost on the compose file's host ports
- * (`E2E_ELECTRS_HOST_PORT`, default 3010). One function, so the helpers that
+ * Where the regtest stack's services answer, read from `env`: the
+ * `REGTEST_ELECTRS_URL` / `REGTEST_ORD_URL` / `REGTEST_ORD_STOCK_URL`
+ * overrides, else localhost on the slot's host ports (`E2E_*_HOST_PORT`,
+ * `stack-ports.ts`; slot 0's when unset). One function, so the helpers that
  * reach the services and the browser launch that must let them through
  * (`launchWalletContext`) read the same answer.
  */
@@ -27,6 +38,8 @@ export declare const ELECTRS_URL: string;
 export declare const ORD_URL: string;
 /** Base URL of the regtest stock ord. */
 export declare const ORD_STOCK_URL: string;
+/** The SDK harness page, as the wallet specs open it. */
+export declare const HARNESS_URL: string;
 export interface FundedAccount {
     address: string;
     wif: string;

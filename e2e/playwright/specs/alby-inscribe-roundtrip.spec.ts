@@ -11,6 +11,7 @@ import {
   rpc,
   mineBlocks,
   postTx,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 
 import { installAlbyAutoApprove } from '../alby-auto-approve';
@@ -34,7 +35,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/alby');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const EXPECTED_REGTEST_TAPROOT = 'bcrt1p8wpt9v4frpf3tkn0srd97pksgsxc5hs52lafxwru9kgeephvs7rqjeprhg';
 

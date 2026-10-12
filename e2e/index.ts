@@ -45,6 +45,8 @@ export * from './playwright/cat21wallet-sign-popup';
 export * from './regtest/dirty-coin-placement';
 export * from './regtest/regtest-helpers';
 export * from './e2e-timeout';
+export * from './stack-ports';
+export * from './stack-slots';
 export * from './playwright/workaround-wait-for-timeout';
 export * from './playwright/okx-sign-popup';
 export * from './playwright/launch-wallet-context';

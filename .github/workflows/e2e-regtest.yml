@@ -62,6 +62,14 @@ jobs:
         working-directory: ordpool-sdk
         run: npm run build
 
+      # The stack's slot (e2e/stack-slots.ts): its host ports, E2E_PREFIX and
+      # container names, exported to every later step. A runner holds one
+      # stack, so this is slot 0, the ports and names below. Held by the
+      # runner's worker process ($PPID of a step), which lives for the job.
+      - name: Acquire the regtest stack slot
+        working-directory: ordpool-sdk
+        run: node scripts/e2e-slots.mjs acquire --owner-pid "$PPID" --label "e2e-regtest" --format github | tee -a "$GITHUB_ENV"
+
       # A docker-container builder is what makes `type=gha` cache export
       # possible — the default `docker` driver can't export a cache.
       - name: Set up Docker Buildx
@@ -111,9 +119,9 @@ jobs:
         # the base compose is enough here (no gha overlay at up time).
         #
         # Two ord variants:
-        #   cat21-ord (port 8080) — with --index-cat21, used by
+        #   cat21-ord (E2E_ORD_HOST_PORT): with --index-cat21, used by
         #     cat21-mint + cat21-flow specs as the authoritative cat view.
-        #   ord-stock (port 8081) — without --index-cat21 (= stock ord),
+        #   ord-stock (E2E_ORD_STOCK_HOST_PORT): without --index-cat21 (= stock ord),
         #     used by inscribe-ord-indexing-roundtrip to prove the SDK's
         #     inscriptions are recognised by an upstream-style ord.
         # Both run from the same cat21-ord image — one build, two
@@ -139,15 +147,16 @@ jobs:
         if: failure()
         run: |
           echo "=== bitcoind ==="
-          docker logs ordpool-e2e-bitcoind || true
+          docker logs "$E2E_PREFIX-bitcoind" || true
           echo "=== electrs ==="
-          docker logs ordpool-e2e-electrs || true
+          docker logs "$E2E_PREFIX-electrs" || true
           echo "=== cat21-ord ==="
-          docker logs ordpool-e2e-cat21-ord || true
+          docker logs "$E2E_PREFIX-cat21-ord" || true
           echo "=== ord-stock ==="
-          docker logs ordpool-e2e-ord-stock || true
+          docker logs "$E2E_PREFIX-ord-stock" || true
 
+      # Tears the slot's compose projects down by name and releases the slot.
       - name: Tear down
-        if: always()
+        if: always() && env.E2E_SLOT != ''
         working-directory: ordpool-sdk
-        run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord --profile ord-stock down -v
+        run: node scripts/e2e-slots.mjs down "$E2E_SLOT" --force

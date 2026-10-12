@@ -17,6 +17,7 @@ import {
   postTx,
   assertAllInputsSighashAll,
   getUtxos,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 import { closeLeftoverExtensionPages, waitForApprovalByConfirmButton, clickApprovalAndRequireClose } from '../approval-popup';
 import { dismissOkxAssetTransferPromo } from '../okx-sign-popup';
@@ -56,7 +57,6 @@ import { approveOkxConnectPopup } from '../okx-connect-popup';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const FUND_AMOUNT_BTC = 0.001;
 const BUYER_FUND_AMOUNT_BTC = 0.001;

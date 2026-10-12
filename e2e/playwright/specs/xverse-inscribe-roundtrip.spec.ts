@@ -11,6 +11,7 @@ import {
   rpc,
   mineBlocks,
   postTx,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
@@ -42,7 +43,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const FUND_AMOUNT_BTC = 0.001;
 

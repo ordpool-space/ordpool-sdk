@@ -7,6 +7,7 @@ import { approvalGate, clickApprovalAndRequireClose, waitForApprovalPopup } from
 import { onboardWizz } from '../onboard-wizz';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 4 of the Wizz E2E pipeline: matrix spec across the
@@ -33,7 +34,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 interface WizzAddressTypeVariant {
   /** Exact label on the Step-3 address-type row */

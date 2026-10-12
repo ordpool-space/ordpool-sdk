@@ -16,6 +16,7 @@ import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
 import { approveOkxConnectPopup } from '../okx-connect-popup';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * BIP-322 sign-message roundtrip with the real OKX extension. Promotes OKX's
@@ -27,7 +28,6 @@ import { approveOkxConnectPopup } from '../okx-connect-popup';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 const MESSAGE = 'ordpool sign-message e2e — prove BIP-322 roundtrip';
 
 let context: BrowserContext;

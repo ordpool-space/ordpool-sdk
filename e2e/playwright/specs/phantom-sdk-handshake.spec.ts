@@ -7,6 +7,7 @@ import { extensionOnboardingPage } from '../wallet-onboarders';
 import { PASSWORD_BY_WALLET } from '../wallet-test-vectors';
 import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 3 of the Phantom E2E pipeline: SDK ↔ Phantom handshake.
@@ -19,7 +20,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/phantom');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const EXPECTED_PAYMENT_ADDRESS  = 'bc1qcr8te4kr609gcawutmrza0j4xv80jy8z306fyu';
 const EXPECTED_ORDINALS_ADDRESS = 'bc1p5cyxnuxmeuwuvkwfem96lqzszd02n6xdcjrs20cac6yqjjwudpxqkedrcr';
@@ -60,13 +60,13 @@ test.beforeAll(async () => {
     args: [
       // Treat the harness HTTP origin as secure. Iter 65 confirmed
       // Phantom injects .solana (chain-agnostic) but NEVER .bitcoin
-      // on http://localhost:4500 — a 30s timeline poll showed
+      // on the harness origin; a 30s timeline poll showed
       // .bitcoin permanently absent. The most plausible remaining
       // gate is "BTC sub-provider requires secure context"; this
       // flag tells Chrome to treat the harness origin as secure
       // so a BTC-on-HTTPS-only check inside Phantom's content
       // script returns true.
-      `--unsafely-treat-insecure-origin-as-secure=http://localhost:4500`,
+      `--unsafely-treat-insecure-origin-as-secure=${new URL(HARNESS_URL).origin}`,
     ],
   });
   // Phantom's vendor backends are aborted.
@@ -150,7 +150,7 @@ test.beforeAll(async () => {
     // We do it ourselves from the unlock page, which is on the
     // extension origin and inherits Phantom's "scripting"
     // permission.
-    const registerOutcome = await unlockPage.evaluate(async () => {
+    const registerOutcome = await unlockPage.evaluate(async (harnessMatch) => {
       try {
         const c = (globalThis as unknown as { chrome: { scripting: {
           registerContentScripts: (scripts: unknown[]) => Promise<void>;
@@ -159,7 +159,7 @@ test.beforeAll(async () => {
         await c.scripting.unregisterContentScripts({ ids: ['ordpool_btc_inject'] }).catch(() => undefined);
         await c.scripting.registerContentScripts([{
           id: 'ordpool_btc_inject',
-          matches: ['http://localhost:4500/*'],
+          matches: [harnessMatch],
           js: ['btc.js'],
           runAt: 'document_start',
           allFrames: true,
@@ -169,7 +169,7 @@ test.beforeAll(async () => {
       } catch (e) {
         return { ok: false, err: String(e).slice(0, 300) };
       }
-    });
+    }, `${new URL(HARNESS_URL).origin}/*`);
     console.log(`[phantom:btc-inject-register] ${JSON.stringify(registerOutcome)}`);
   } else {
     console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');

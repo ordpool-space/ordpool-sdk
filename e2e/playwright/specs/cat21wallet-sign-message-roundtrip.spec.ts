@@ -11,6 +11,7 @@ import { onboardCat21Wallet } from '../onboard-cat21wallet';
 import { installLeatherOfflineRoutes } from '../leather-offline-routes';
 import { installCat21WalletOrdRoutes } from '../cat21wallet-ord-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Full BIP-322 sign-message roundtrip with the real Cat21 Wallet extension.
@@ -37,7 +38,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/cat21wallet');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const MESSAGE = 'ordpool sign-message e2e — prove BIP-322 roundtrip';
 

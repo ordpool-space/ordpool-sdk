@@ -15,6 +15,7 @@ import {
   mineBlocks,
   postTx,
   getUtxos,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 import { clickApprovalAndRequireClose, waitForApprovalPopup, closeLeftoverExtensionPages } from '../approval-popup';
 import { onboardLeather } from '../onboard-leather';
@@ -37,7 +38,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/leather');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const FUND_AMOUNT_BTC = 0.001;
 const CAT21_POSTAGE_SATS = 546;

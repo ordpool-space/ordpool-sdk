@@ -11,8 +11,12 @@ const http = require('node:http');
 const fs   = require('node:fs');
 const path = require('node:path');
 
+// The slot's harness port (E2E_HARNESS_PORT), the same value HARNESS_URL and
+// the Playwright config's webServer read.
+const { stackPort } = require('../../dist-e2e/stack-ports.js');
+
 const ROOT = path.resolve(__dirname, 'fixtures');
-const PORT = Number(process.env.HARNESS_PORT || 4500);
+const PORT = stackPort('harness');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',

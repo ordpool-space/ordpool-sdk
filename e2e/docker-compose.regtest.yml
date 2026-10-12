@@ -16,6 +16,14 @@
 # session.
 name: ${E2E_PREFIX:-ordpool-e2e}-regtest
 
+# HOST PORTS: every `ports:` entry publishes `${E2E_*_HOST_PORT}`, which the
+# stack's slot sets (e2e/stack-ports.ts: slot N publishes base + 10*N, and
+# E2E_PREFIX is ordpool-e2e-s<N>). The defaults here are slot 0's values, the
+# ports a single CI runner uses (and slot 0's prefix is the default,
+# ordpool-e2e). The container side of each mapping is fixed:
+# services reach each other inside the compose network on those ports
+# (bitcoind:18443, electrs:3000, ord :8080), never on a host port.
+
 # Regtest backend for ordpool-sdk E2E tests.
 #
 # bitcoind serves the actual Bitcoin protocol in regtest mode — a
@@ -98,7 +106,7 @@ services:
       # Host port is configurable so the regtest stack does not squat the
       # developer's port 3000 (the NestJS default). Container side stays
       # 3000 — that is the Esplora default every consumer config expects.
-      - "${E2E_ELECTRS_HOST_PORT:-3010}:3000"   # Esplora HTTP API (host 3010: 3000 stays free for local dev servers)
+      - "${E2E_ELECTRS_HOST_PORT:-3010}:3000"   # Esplora HTTP API (slot 0: host 3010, so 3000 stays free for local dev servers)
       - "${E2E_ELECTRUM_HOST_PORT:-50001}:50001"   # Electrum protocol
     healthcheck:
       # debian-slim runtime has no wget/curl; bash /dev/tcp probes the port.
@@ -182,7 +190,7 @@ services:
       - ord-data:/data
     # No healthcheck. The runtime image is debian:bookworm-slim with only
     # openssl; wget and curl aren't installed. The test bootstrap polls
-    # the host-exposed :8080/status via `waitForOrdReady` instead.
+    # its /status on E2E_ORD_HOST_PORT via `waitForOrdReady` instead.
 
   # Stock ord — same cat21-ord binary, WITHOUT the --index-cat21 flag,
   # so it behaves 100% like upstream ord. Used to prove the inscriptions
@@ -233,7 +241,7 @@ services:
       - --http-port=8080
       - --address=0.0.0.0
     ports:
-      - "${E2E_ORD_STOCK_HOST_PORT:-8081}:8080"     # host :8081 → container :8080 to coexist with cat21-ord
+      - "${E2E_ORD_STOCK_HOST_PORT:-8081}:8080"     # its own host port, container :8080 like cat21-ord
     volumes:
       - ord-stock-data:/data
 
@@ -285,7 +293,7 @@ services:
       # Only used by the backend's /api/* esplora-proxy middleware; harmless.
       - ESPLORA_REST_API_URL=http://electrs:3000
     ports:
-      - "${E2E_ORDPOOL_BACKEND_HOST_PORT:-8999}:8999"
+      - "${E2E_ORDPOOL_BACKEND_HOST_PORT:-8998}:8999"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8999/api/v1/backend-info || exit 1"]
       interval: 3s

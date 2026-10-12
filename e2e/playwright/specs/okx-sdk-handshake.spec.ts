@@ -8,6 +8,7 @@ import { extensionOnboardingPage } from '../wallet-onboarders';
 import { onboardOkx } from '../onboard-okx';
 import { installOkxOfflineRoutes } from '../okx-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 3 of the OKX E2E pipeline: SDK ↔ OKX handshake.
@@ -21,7 +22,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/okx');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // OKX defaults to BIP-86 Taproot for its active `window.okxwallet.bitcoin`
 // provider (the user picks the type in settings — Taproot is the

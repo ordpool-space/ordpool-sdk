@@ -9,6 +9,7 @@ import { SEED_USER_DATA_DIR } from '../global-setup';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 import { approveXverseConnect, unlockXversePage } from '../xverse-popup';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Matrix coverage for every Xverse Network × Payment-Address-Type
@@ -32,7 +33,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // BIP-49/84/86 derivations of the BIP-39 test seed `abandon × 11 +
 // about` at account 0 / index 0, per the click-onboarded dump. The

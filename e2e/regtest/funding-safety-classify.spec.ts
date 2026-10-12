@@ -41,9 +41,9 @@ import {
   waitForOrdSync,
   waitForTxConfirmed,
   waitForUtxoAt,
+  ORD_URL,
 } from './regtest-helpers';
 
-const ORD_CAT21_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
 const FEE_SATS = 1_000;
 
 const regtestNetwork = toScureNetwork(Network.Regtest);
@@ -52,7 +52,7 @@ const regtestNetwork = toScureNetwork(Network.Regtest);
 function classify(txid: string, vout: number) {
   return classifyOutpoint(`${txid}:${vout}`, {
     ordApiUrl: ORD_STOCK_URL,
-    cat21OrdApiUrl: ORD_CAT21_URL,
+    cat21OrdApiUrl: ORD_URL,
   });
 }
 

@@ -6,6 +6,7 @@ import { waitForChromeStorageKey, waitForSingletonLockGone } from './wait-helper
 import { onboardXverse, primeAndSwitchToRegtest, overrideRegtestElectrsUrl } from './onboard-xverse';
 import { installXverseOfflineRoutes } from './xverse-offline-routes';
 import { launchWalletContext } from './launch-wallet-context';
+import { regtestServiceUrls } from '../regtest/regtest-helpers';
 
 /**
  * Playwright globalSetup — runs ONCE before any spec.
@@ -143,7 +144,7 @@ export default async function globalSetup(): Promise<void> {
     // getAddress, no API calls) but matters for signTransaction.
     const electrsUrl =
       process.env.XVERSE_REGTEST_ELECTRS_URL ??
-      `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
+      regtestServiceUrls().electrs;
     await overrideRegtestElectrsUrl(context, extensionId, electrsUrl);
     // eslint-disable-next-line no-console
     console.log(`[globalSetup] overrode bitcoin-regtest.electrsApiUrl = ${electrsUrl}`);

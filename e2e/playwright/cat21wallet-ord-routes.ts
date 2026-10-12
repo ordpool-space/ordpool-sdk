@@ -67,7 +67,7 @@ export function hasCat21WalletOrdRoutes(context: BrowserContext): boolean {
  * runs, instead of our production `ord.cat21.space`.
  *
  * Each request is forwarded to `ordUrl` (default: the regtest helpers'
- * `REGTEST_ORD_URL`, `http://localhost:8080`) with its mainnet addresses
+ * `ORD_URL`: `REGTEST_ORD_URL`, else the slot's `E2E_ORD_HOST_PORT`) with its mainnet addresses
  * translated (`cat21OrdRegtestUrl`), and the regtest ord's response is
  * returned to the wallet as it came. A cat21-ord that is not running fails the
  * request rather than falling back to production.

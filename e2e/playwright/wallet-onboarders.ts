@@ -9,6 +9,7 @@ import { onboardPhantom } from './onboard-phantom';
 import { seedAlbyAccount } from './onboard-alby';
 import { onboardCat21Wallet } from './onboard-cat21wallet';
 import { PASSWORD_BY_WALLET } from './wallet-test-vectors';
+import { regtestServiceUrls } from '../regtest/regtest-helpers';
 
 export interface WalletOnboarder {
   /** Onboard the wallet in the given context (extensionId = the loaded ext). */
@@ -37,7 +38,7 @@ export const walletOnboarders: Record<string, WalletOnboarder> = {
       await primeAndSwitchToRegtest(ctx, id);
       const electrsUrl =
         process.env.XVERSE_REGTEST_ELECTRS_URL ??
-        `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
+        regtestServiceUrls().electrs;
       await overrideRegtestElectrsUrl(ctx, id, electrsUrl);
     },
     password: PASSWORD_BY_WALLET.xverse,

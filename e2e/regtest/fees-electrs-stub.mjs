@@ -31,14 +31,20 @@
  *
  * Zero npm deps; uses node:http only. Run as:
  *
- *   PORT=8999 ELECTRS_URL=http://localhost:3010 node fees-electrs-stub.mjs
+ *   node fees-electrs-stub.mjs
+ *
+ * inside the stack's slot environment: it listens on E2E_FEES_STUB_PORT and
+ * proxies to electrs on E2E_ELECTRS_HOST_PORT (e2e/stack-ports.ts, slot 0's
+ * ports when unset). PORT and ELECTRS_URL override either.
  */
 import http from 'node:http';
+import { createRequire } from 'node:module';
 import { URL } from 'node:url';
 
-const PORT = Number(process.env.PORT ?? 8999);
-const ELECTRS_URL =
-  process.env.ELECTRS_URL ?? `http://localhost:${process.env.E2E_ELECTRS_HOST_PORT ?? 3010}`;
+const { stackPort, stackUrl } = createRequire(import.meta.url)('../../dist-e2e/stack-ports.js');
+
+const PORT = Number(process.env.PORT ?? stackPort('feesStub'));
+const ELECTRS_URL = process.env.ELECTRS_URL ?? stackUrl('electrs');
 // Optional. Set in the ordpool workflow because that frontend's
 // StateService.recommendedFees$ is fed by mempool's WebSocket
 // pipeline, not by the SDK's REST poll. The cat21-indexer workflow
@@ -105,7 +111,7 @@ function proxyToElectrs(req, res) {
     ? req.url.slice('/api'.length) // /api/address/.../utxo → /address/.../utxo
     : req.url;
   // Strip browser-side hop-by-hop / cache / origin headers — electrs
-  // doesn't need them and `host: localhost:8999` is misleading once the
+  // doesn't need them and the stub's own `host:` is misleading once the
   // request is forwarded.
   const upstreamHeaders = { ...req.headers };
   for (const h of ['host', 'origin', 'referer', 'cookie', 'if-none-match',

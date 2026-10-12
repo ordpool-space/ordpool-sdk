@@ -18,6 +18,7 @@ import {
   postTx,
   assertAllInputsSighashAll,
   getUtxos,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 import { approvalGate, approveWizzSignPopup, clickApprovalAndRequireClose, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
@@ -51,7 +52,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // BIP-86 Taproot derivation of `abandon × 11 + about` on mainnet — the
 // value wizz-matrix.spec.ts pins for the P2TR variant, and the value Wizz

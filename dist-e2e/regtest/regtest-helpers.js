@@ -38,7 +38,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ORD_STOCK_URL = exports.ORD_URL = exports.ELECTRS_URL = void 0;
+exports.HARNESS_URL = exports.ORD_STOCK_URL = exports.ORD_URL = exports.ELECTRS_URL = void 0;
 exports.regtestServiceUrls = regtestServiceUrls;
 exports.getFundedAccount = getFundedAccount;
 exports.rpc = rpc;
@@ -104,6 +104,7 @@ exports.seedListedCat = seedListedCat;
 exports.seedDirtyCoin = seedDirtyCoin;
 const node_child_process_1 = require("node:child_process");
 const e2e_timeout_1 = require("../e2e-timeout");
+const stack_ports_1 = require("../stack-ports");
 const node_crypto_1 = require("node:crypto");
 const node_util_1 = require("node:util");
 const bip32_1 = require("@scure/bip32");
@@ -111,17 +112,23 @@ const base_1 = require("@scure/base");
 const btc = __importStar(require("@scure/btc-signer"));
 const execFileAsync = (0, node_util_1.promisify)(node_child_process_1.execFile);
 /**
- * Where the regtest stack's services answer, read from `env`: the `REGTEST_*_URL`
- * variables, else localhost on the compose file's host ports
- * (`E2E_ELECTRS_HOST_PORT`, default 3010). One function, so the helpers that
+ * Where the regtest stack's services answer, read from `env`: the
+ * `REGTEST_ELECTRS_URL` / `REGTEST_ORD_URL` / `REGTEST_ORD_STOCK_URL`
+ * overrides, else localhost on the slot's host ports (`E2E_*_HOST_PORT`,
+ * `stack-ports.ts`; slot 0's when unset). One function, so the helpers that
  * reach the services and the browser launch that must let them through
  * (`launchWalletContext`) read the same answer.
  */
 function regtestServiceUrls(env = process.env) {
     return {
-        electrs: env.REGTEST_ELECTRS_URL ?? `http://localhost:${env.E2E_ELECTRS_HOST_PORT ?? 3010}`,
-        ord: env.REGTEST_ORD_URL ?? 'http://localhost:8080',
-        ordStock: env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081',
+        electrs: env.REGTEST_ELECTRS_URL ?? (0, stack_ports_1.stackUrl)('electrs', env),
+        ord: env.REGTEST_ORD_URL ?? (0, stack_ports_1.stackUrl)('ord', env),
+        ordStock: env.REGTEST_ORD_STOCK_URL ?? (0, stack_ports_1.stackUrl)('ordStock', env),
+        ordpoolBackend: (0, stack_ports_1.stackUrl)('ordpoolBackend', env),
+        feesStub: (0, stack_ports_1.stackUrl)('feesStub', env),
+        harness: (0, stack_ports_1.stackUrl)('harness', env),
+        app: (0, stack_ports_1.stackUrl)('app', env),
+        appBackend: (0, stack_ports_1.stackUrl)('appBackend', env),
     };
 }
 /** Base URL of the regtest electrs (Esplora REST), as the specs and helpers reach it. */
@@ -130,14 +137,23 @@ exports.ELECTRS_URL = regtestServiceUrls().electrs;
 exports.ORD_URL = regtestServiceUrls().ord;
 /** Base URL of the regtest stock ord. */
 exports.ORD_STOCK_URL = regtestServiceUrls().ordStock;
-// The bitcoind container name. Defaults to the SDK's own stack
-// (`ordpool-e2e-bitcoind`); consumer repos (cubes-frontend, ordpool)
-// stand up their own compose with a different name (e.g.
-// `ordpool-e2e-consumer-bitcoind`) and override via env.
-const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? 'ordpool-e2e-bitcoind';
-// The cat21-ord container name, overridable for the same reason: a stack
-// brought up under another compose prefix names its containers after it.
-const ORD_CONTAINER = process.env.REGTEST_ORD_CONTAINER ?? 'ordpool-e2e-cat21-ord';
+/** The SDK harness page, as the wallet specs open it. */
+exports.HARNESS_URL = `${regtestServiceUrls().harness}/`;
+/**
+ * Where the services answer INSIDE the compose network, for a command that
+ * runs in a container (`docker exec ... ord --bitcoin-rpc-url`). Fixed: only
+ * host ports move with the slot.
+ */
+const IN_CONTAINER_BITCOIND_RPC = 'bitcoind:18443';
+/** The ord server, as an `ord` CLI in the same container reaches it. */
+const IN_CONTAINER_ORD_URL = 'http://localhost:8080';
+// The container names. Defaults follow E2E_PREFIX as docker-compose.regtest.yml
+// names them; a consumer stack (docker-compose.consumer-environment.yml) names
+// them `<prefix>-consumer-<service>`, and its slot environment sets these
+// variables to match.
+const DEFAULT_CONTAINERS = (0, stack_ports_1.stackContainers)(process.env.E2E_PREFIX || 'ordpool-e2e', 'regtest');
+const BITCOIND_CONTAINER = process.env.REGTEST_BITCOIND_CONTAINER ?? DEFAULT_CONTAINERS.bitcoind;
+const ORD_CONTAINER = process.env.REGTEST_ORD_CONTAINER ?? DEFAULT_CONTAINERS.ord;
 // The bitcoind WALLET these helpers spend from. Overridable for the same
 // reason the container name is: a consumer stack brings the compose up under
 // its own project prefix and its bootstrap names the wallet to match, so a
@@ -525,7 +541,7 @@ function ordCli(...args) {
         '--index-cat21',
         '--index-sats',
         '--index-addresses',
-        '--bitcoin-rpc-url=bitcoind:18443',
+        `--bitcoin-rpc-url=${IN_CONTAINER_BITCOIND_RPC}`,
         '--bitcoin-rpc-username=ordpool',
         '--bitcoin-rpc-password=ordpool',
         '--data-dir=/data',
@@ -550,7 +566,7 @@ function ordCli(...args) {
  * the server has already indexed.
  */
 function ordWalletCli(walletName, ...subcommandArgs) {
-    return ordCli('wallet', '--no-sync', '--name', walletName, '--server-url', 'http://localhost:8080', ...subcommandArgs);
+    return ordCli('wallet', '--no-sync', '--name', walletName, '--server-url', IN_CONTAINER_ORD_URL, ...subcommandArgs);
 }
 function ordCreateOffer(inscriptionId, amountSats, feeRateSatPerVb, wallet = 'ord') {
     const stdout = ordWalletCli(wallet, 'offer', 'create', '--inscription', inscriptionId, '--amount', `${amountSats}sat`, '--fee-rate', String(feeRateSatPerVb));
@@ -1264,7 +1280,7 @@ async function waitForOrdStockInscription(id) {
 // stock-ord container, which indexes everything. These mirror the cat21-ord
 // helpers exactly, minus `--index-cat21`.
 // ---------------------------------------------------------------------------
-const ORD_STOCK_CONTAINER = process.env.REGTEST_ORD_STOCK_CONTAINER ?? 'ordpool-e2e-ord-stock';
+const ORD_STOCK_CONTAINER = process.env.REGTEST_ORD_STOCK_CONTAINER ?? DEFAULT_CONTAINERS.ordStock;
 /** The `docker exec` argv for one stock-ord CLI invocation. */
 function ordStockCliArgs(args) {
     return [
@@ -1273,7 +1289,7 @@ function ordStockCliArgs(args) {
         '--regtest',
         '--index-sats',
         '--index-addresses',
-        '--bitcoin-rpc-url=bitcoind:18443',
+        `--bitcoin-rpc-url=${IN_CONTAINER_BITCOIND_RPC}`,
         '--bitcoin-rpc-username=ordpool',
         '--bitcoin-rpc-password=ordpool',
         '--data-dir=/data',
@@ -1307,7 +1323,7 @@ function ordStockWalletArgs(walletName, subcommandArgs) {
         'wallet',
         '--no-sync',
         '--name', walletName,
-        '--server-url', 'http://localhost:8080',
+        '--server-url', IN_CONTAINER_ORD_URL,
         ...subcommandArgs,
     ];
 }

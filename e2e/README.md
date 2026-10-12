@@ -1,25 +1,106 @@
 # ordpool-sdk E2E (regtest)
 
 `docker-compose.regtest.yml` brings up a real Bitcoin regtest backend:
-bitcoind + electrs by default, plus three profile-gated services.
+bitcoind + electrs by default, plus three profile-gated services. Every stack
+runs in a machine-wide slot (below), which decides its host ports; the table
+gives slot 0's.
 
-| Profile | Service | Host port | What it is |
+| Profile | Service | Host port, slot 0 | What it is |
 |---|---|---|---|
 | (none) | `bitcoind`, `electrs` | 18443, 3010 | regtest node and our ordpool-electrs (Esplora API) |
 | `cat21-ord` | `ord` | 8080 | cat21-ord with `--index-cat21 --index-sats --index-addresses`: answers cats |
 | `ord-stock` | `ord-stock` | 8081 | the same binary without `--index-cat21`, with `--index-sats --index-runes --index-addresses`: answers inscriptions, runes and sat ranges |
-| `ordpool-backend` | `ordpool-backend` | 8999 | the real ordpool backend (`/content`, `/preview` decoded from bitcoind) |
+| `ordpool-backend` | `ordpool-backend` | 8998 | the real ordpool backend (`/content`, `/preview` decoded from bitcoind) |
 
 ```bash
-# default: bitcoind + electrs only
-docker compose -f e2e/docker-compose.regtest.yml up
-
-# both ords (required for any spec that content-scans a UTXO):
-docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord --profile ord-stock up
+# a slot, the stack (both ords), the chain specs, the teardown, in one command:
+COMPOSE_PROFILES=cat21-ord,ord-stock node scripts/e2e-slots.mjs run -- bash -c '
+  BOOT=$(./e2e/regtest-bootstrap.sh)
+  export REGTEST_FUNDED_ADDR=$(echo "$BOOT" | jq -r .address) REGTEST_FUNDED_WIF=$(echo "$BOOT" | jq -r .wif)
+  npm run test:e2e:regtest'
 ```
 
-The bootstrap polls `:8080/status` (`waitForOrdReady`) before the specs run;
+`waitForOrdReady` polls cat21-ord's `/status` before the specs run;
 `waitForOrdSync` and `waitForOrdStockSync` wait for each ord to reach a height.
+
+## Slots: at most `ORDPOOL_E2E_MAX_STACKS` stacks per machine
+
+A regtest stack is a handful of containers plus, in a wallet lane, a browser.
+Several sessions on one machine (other Claude sessions, a human, a consumer
+repo) each starting their own is what saturates the machine, so every stack
+takes a slot first, and there are only `ORDPOOL_E2E_MAX_STACKS` of them
+(default 1, measured and derived in `stack-slots.ts`, `DEFAULT_MAX_STACKS`).
+
+A slot is a directory `~/.ordpool-e2e/slots/slot-<N>` created with `mkdir`
+(atomic: two racing acquirers never get the same one), holding `owner.json`:
+owner pid and its start time, prefix, ports. It stays held while its owner runs
+OR its compose projects have a running container, so a stack keeps its ports
+after the bootstrap that started it exits. A slot that meets neither is stale
+and the next acquirer reclaims it (under a lock, so exactly one does).
+
+Slot N gives the stack everything it publishes:
+
+| | Slot N | Slot 0 |
+|---|---|---|
+| host port of a service | base + 10 N (`SLOT_PORT_BASES`, `stack-ports.ts`) | 3010 electrs, 8080 cat21-ord, 8081 ord-stock, 18443 bitcoind, ... |
+| `E2E_PREFIX` (compose project, container and image names) | `ordpool-e2e-s<N>` | `ordpool-e2e` |
+
+Up to 30 slots fit before two services would share a port. Container ports are
+fixed; only the host side of each mapping moves.
+
+| Variable | Set by | Meaning |
+|---|---|---|
+| `ORDPOOL_E2E_MAX_STACKS` | you, machine-wide (shell profile) | how many stacks at once; default 1 |
+| `ORDPOOL_E2E_SLOT_DIR` | rarely | slot directory, default `~/.ordpool-e2e/slots` |
+| `ORDPOOL_E2E_SLOT_WAIT_MS` | rarely | how long to wait in line; default 40 min, the longest lane's job cap |
+| `E2E_SLOT`, `E2E_PREFIX` | the slot | slot number and prefix |
+| `E2E_BITCOIND_RPC_HOST_PORT`, `E2E_BITCOIND_P2P_HOST_PORT`, `E2E_ZMQ_RAWBLOCK_HOST_PORT`, `E2E_ZMQ_RAWTX_HOST_PORT`, `E2E_ELECTRS_HOST_PORT`, `E2E_ELECTRUM_HOST_PORT`, `E2E_ORD_HOST_PORT`, `E2E_ORD_STOCK_HOST_PORT`, `E2E_ORDPOOL_BACKEND_HOST_PORT`, `E2E_MARIADB_HOST_PORT`, `E2E_REDIS_HOST_PORT` | the slot | the compose files' host ports |
+| `E2E_FEES_STUB_PORT`, `E2E_HARNESS_PORT`, `E2E_APP_PORT`, `E2E_APP_BACKEND_PORT` | the slot | ports of what runs beside the stack: the fees stub, the SDK harness page, a consumer's static app server and its own backend |
+| `REGTEST_BITCOIND_CONTAINER`, `REGTEST_ORD_CONTAINER`, `REGTEST_ORD_STOCK_CONTAINER` | the slot (`--kind consumer` names the consumer compose's containers) | what the helpers `docker exec` into |
+
+`scripts/e2e-slots.mjs` (`npm run e2e:slots -- <command>`):
+
+```bash
+node scripts/e2e-slots.mjs list                        # who holds which slot, how long, why
+node scripts/e2e-slots.mjs run [--kind consumer] -- <cmd...>   # slot, command, teardown, release
+node scripts/e2e-slots.mjs acquire --owner-pid "$PPID" --format github >> "$GITHUB_ENV"
+node scripts/e2e-slots.mjs env --slot N                # print slot N's environment (eval it)
+node scripts/e2e-slots.mjs down N                      # tear YOUR stack in slot N down, release it
+node scripts/e2e-slots.mjs reclaim                     # drop stale slots
+```
+
+Never `down` another session's slot: `list` shows the owner, and a slot whose
+owner still runs needs `--force`.
+
+**Waiting in line.** When all slots are held, an acquirer waits: it prints who
+holds each slot (prefix, pid, age, why) at once, whenever that changes and
+every minute, and gives up after `ORDPOOL_E2E_SLOT_WAIT_MS` with the holders
+and these commands. Ctrl-C leaves the line at once; nothing is held until the
+slot is. This is not a spec wait and not under the 30 s per-wait bound: it runs
+before the runner starts, and what it waits for, another lane finishing, takes
+minutes by design. Its bound is the job cap of the longest lane (40 min,
+`.github/workflows/e2e-playwright.yml`), because a slot held longer than any
+lane may run is a stack nobody tore down, and waiting longer cannot help.
+
+**The bootstraps.** `regtest-bootstrap.sh` and `consumer-environment-bootstrap.sh`
+source `stack-slot.sh`. With `E2E_SLOT` set (a `run`, a workflow's acquire step)
+they use that slot; without it they acquire one for themselves, and the stack
+keeps it until `down`. A failing bootstrap that acquired its own slot tears its
+stack down and releases it. Both print the slot and its environment (`slot`,
+`prefix`, `env`) in their JSON.
+
+**A runner** holds one stack: the SDK workflows acquire with `--owner-pid
+"$PPID"` (the runner's worker process, alive for the whole job) and get slot 0,
+the ports and container names above.
+
+**A consumer** gets its ports from the slot environment, never from a literal:
+`regtestServiceUrls()` (`electrs`, `ord`, `ordStock`, `ordpoolBackend`,
+`feesStub`, `harness`, `app`, `appBackend`), `stackPort(service)`,
+`stackUrl(service)`, `HARNESS_URL`, all from `ordpool-sdk/e2e`, all read from
+the same variables `launchWalletContext` lets through. A workflow step reads
+`$E2E_ELECTRS_HOST_PORT` and its siblings. Its app is served on `E2E_APP_PORT`
+and its own backend on `E2E_APP_BACKEND_PORT`, so two consumers' lanes in two
+slots never meet.
 
 ## The content-scan ord wiring (read this before bumping a consumer)
 
@@ -40,12 +121,11 @@ a 404 or a refused connection reads the same. A coin whose content could not be
 verified is never auto-treated as clean. Do NOT make the scan fail-open.
 
 **Reference wiring:** `regtest/core-flows-roundtrip.spec.ts` runs the shipping
-`UtxoContentScanner` with `ordApiUrl` on the stock ord (`:8081`) and
-`cat21OrdApiUrl` on cat21-ord (`:8080`):
+`UtxoContentScanner` with `ordApiUrl` on the stock ord and `cat21OrdApiUrl` on
+cat21-ord, both from the slot:
 
 ```ts
-const ORD_URL = process.env.REGTEST_ORD_URL ?? 'http://localhost:8080';
-const ORD_STOCK_URL = process.env.REGTEST_ORD_STOCK_URL ?? 'http://localhost:8081';
+import { ORD_URL, ORD_STOCK_URL } from './regtest-helpers';
 // UtxoContentScanner({ ordApiUrl: ORD_STOCK_URL, cat21OrdApiUrl: ORD_URL, ... })
 ```
 
@@ -62,8 +142,8 @@ answers come from a real ord synced to the regtest chain:
 
 1. Bring up both ords with the SDK compose profiles above (`cat21-ord` and
    `ord-stock`), and wait for them to sync to the tip before the page scans.
-2. Point `ordApiUrl` at the stock ord (`:8081`) and `cat21OrdApiUrl` at
-   cat21-ord (`:8080`). Rewrite both ord hosts in the workflow: rewriting
+2. Point `ordApiUrl` at the stock ord (`E2E_ORD_STOCK_HOST_PORT`) and
+   `cat21OrdApiUrl` at cat21-ord (`E2E_ORD_HOST_PORT`). Rewrite both ord hosts in the workflow: rewriting
    `api.ordpool.space` alone leaves the ord URLs on their production hosts.
    Confirm the port actually serves `/output`, because a connection refused
    reads to the scanner exactly like a 404 and the coin lands in `scan-failed`.
@@ -73,7 +153,7 @@ answers come from a real ord synced to the regtest chain:
 
 ### `regtest/fees-electrs-stub.mjs` is not an ord
 
-The stub on `:8999` serves fees (`/api/v1/fees/recommended`, `/admin/fees`,
+The stub on `E2E_FEES_STUB_PORT` (slot 0: 8999) serves fees (`/api/v1/fees/recommended`, `/admin/fees`,
 `/admin/fees/reset`, and the mempool WebSocket on `/api/v1/ws` with
 `WS_ENABLED=1`), empty cat21-indexer bodies (`/api/status`,
 `/api/cats/numbers/:ipp/:p`, `/api/cats/:ipp/:p`), and proxies every other

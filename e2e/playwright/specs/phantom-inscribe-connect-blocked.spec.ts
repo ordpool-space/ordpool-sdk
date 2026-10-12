@@ -6,6 +6,7 @@ import { onboardPhantom } from '../onboard-phantom';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Inscribe-roundtrip spec for Phantom — mirrors the structure of
@@ -29,7 +30,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/phantom');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 let context: BrowserContext;
 let extensionId: string;
@@ -57,7 +57,7 @@ test.beforeAll(async () => {
   context = await launchWalletContext({
     wallet: 'phantom',
     extensionPath: EXT_PATH,
-    args: [`--unsafely-treat-insecure-origin-as-secure=http://localhost:4500`],
+    args: [`--unsafely-treat-insecure-origin-as-secure=${new URL(HARNESS_URL).origin}`],
   });
   // Phantom's vendor backends are aborted.
   await installPhantomOfflineRoutes(context);
@@ -89,7 +89,7 @@ test.beforeAll(async () => {
         await c.runtime.sendMessage(JSON.stringify({ method: 'unlockExtension', params: pwd, id: 1 }));
       } catch { /* swallow */ }
     }, 'TestPassword123!');
-    await unlockPage.evaluate(async () => {
+    await unlockPage.evaluate(async (harnessMatch) => {
       try {
         const c = (globalThis as unknown as { chrome: { scripting: {
           registerContentScripts: (s: unknown[]) => Promise<void>;
@@ -98,14 +98,14 @@ test.beforeAll(async () => {
         await c.scripting.unregisterContentScripts({ ids: ['ordpool_btc_inject'] }).catch(() => undefined);
         await c.scripting.registerContentScripts([{
           id: 'ordpool_btc_inject',
-          matches: ['http://localhost:4500/*'],
+          matches: [harnessMatch],
           js: ['btc.js'],
           runAt: 'document_start',
           allFrames: true,
           world: 'MAIN',
         }]);
       } catch { /* swallow */ }
-    });
+    }, `${new URL(HARNESS_URL).origin}/*`);
   }
   await unlockPage.close().catch(() => undefined);
 });

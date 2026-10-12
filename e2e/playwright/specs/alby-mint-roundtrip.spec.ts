@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 
 import { Cat21ParserService, DigitalArtifactType } from 'ordpool-parser';
 
-import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient } from '../../regtest/regtest-helpers';
+import { waitForElectrsSync, waitForUtxoAt, waitForTxConfirmed, rpc, mineBlocks, postTx, assertAllInputsSighashAll, assertCatLandsAtRecipient, HARNESS_URL } from '../../regtest/regtest-helpers';
 
 import { clickApprovalAndRequireClose } from '../approval-popup';
 import { seedAlbyAccount } from '../onboard-alby';
@@ -50,7 +50,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/alby');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 // Alby v3.14.2's m/86'/1'/0'/0/0 derivation for the abandon×11+
 // about seed (bitcoinNetwork: "regtest" → testnet coin-type). Value

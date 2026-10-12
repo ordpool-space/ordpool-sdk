@@ -15,6 +15,7 @@ import {
   mineBlocks,
   postTx,
   getUtxos,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 import { approvalGate, approveWizzSignPopup, clickApprovalAndRequireClose, closeLeftoverExtensionPages, waitForApprovalPopup } from '../approval-popup';
 import { onboardWizz } from '../onboard-wizz';
@@ -43,7 +44,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/wizz');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const FUND_AMOUNT_BTC = 0.001;
 const CAT21_POSTAGE_SATS = 546;

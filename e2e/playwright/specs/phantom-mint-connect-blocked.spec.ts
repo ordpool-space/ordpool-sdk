@@ -6,6 +6,7 @@ import { onboardPhantom } from '../onboard-phantom';
 import { extensionOnboardingPage } from '../wallet-onboarders';
 import { installPhantomOfflineRoutes } from '../phantom-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { HARNESS_URL } from '../../regtest/regtest-helpers';
 
 /**
  * Iteration 5 — full cat21 mint roundtrip with the real Phantom
@@ -27,7 +28,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/phantom');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 let context: BrowserContext;
 let extensionId: string;
@@ -61,7 +61,7 @@ test.beforeAll(async () => {
       // See phantom-sdk-handshake for rationale: treat the harness
       // HTTP origin as secure so a possible BTC-on-HTTPS-only gate
       // inside Phantom's content script returns true.
-      `--unsafely-treat-insecure-origin-as-secure=http://localhost:4500`,
+      `--unsafely-treat-insecure-origin-as-secure=${new URL(HARNESS_URL).origin}`,
     ],
   });
   // Phantom's vendor backends are aborted.
@@ -114,7 +114,7 @@ test.beforeAll(async () => {
     // Register btc.js as a content script for the harness origin.
     // Phantom's SW never does this on its own. See phantom-sdk-
     // handshake for the reverse-engineering rationale.
-    const registerOutcome = await unlockPage.evaluate(async () => {
+    const registerOutcome = await unlockPage.evaluate(async (harnessMatch) => {
       try {
         const c = (globalThis as unknown as { chrome: { scripting: {
           registerContentScripts: (scripts: unknown[]) => Promise<void>;
@@ -123,7 +123,7 @@ test.beforeAll(async () => {
         await c.scripting.unregisterContentScripts({ ids: ['ordpool_btc_inject'] }).catch(() => undefined);
         await c.scripting.registerContentScripts([{
           id: 'ordpool_btc_inject',
-          matches: ['http://localhost:4500/*'],
+          matches: [harnessMatch],
           js: ['btc.js'],
           runAt: 'document_start',
           allFrames: true,
@@ -133,7 +133,7 @@ test.beforeAll(async () => {
       } catch (e) {
         return { ok: false, err: String(e).slice(0, 300) };
       }
-    });
+    }, `${new URL(HARNESS_URL).origin}/*`);
     console.log(`[phantom:btc-inject-register] ${JSON.stringify(registerOutcome)}`);
   } else {
     console.log('[phantom:unlock-page] chrome.runtime.sendMessage not available; unlock skipped.');

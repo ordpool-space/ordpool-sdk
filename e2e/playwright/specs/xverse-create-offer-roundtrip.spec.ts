@@ -17,6 +17,7 @@ import {
   postTx,
   assertAllInputsSighashAll,
   getUtxos,
+  HARNESS_URL,
 } from '../../regtest/regtest-helpers';
 import { Network, toScureNetwork } from '../../../src/network';
 import { buildCat21MintPsbt } from '../../../src/cat21-mint/cat21-mint.helper';
@@ -60,7 +61,6 @@ import { launchWalletContext } from '../launch-wallet-context';
 
 const EXT_PATH = path.resolve(__dirname, '../../extensions/xverse');
 const RESULTS_DIR = path.resolve(__dirname, '../../../test-results');
-const HARNESS_URL = 'http://localhost:4500/';
 
 const FUND_AMOUNT_BTC = 0.001;
 const SELLER_FUND_AMOUNT_BTC = 0.001;

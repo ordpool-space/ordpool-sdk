@@ -29,6 +29,9 @@ on:
       - 'e2e/regtest/**'
       - 'e2e/docker-compose.*.yml'
       - 'e2e/regtest-bootstrap.sh'
+      - 'e2e/stack-*'
+      - 'dist-e2e/**'
+      - 'scripts/e2e-slots.mjs'
       - 'e2e/build-pins.*'
       - 'scripts/check-net-log.mjs'
       - '.github/workflows/e2e-playwright.yml'
@@ -40,6 +43,9 @@ on:
       - 'e2e/regtest/**'
       - 'e2e/docker-compose.*.yml'
       - 'e2e/regtest-bootstrap.sh'
+      - 'e2e/stack-*'
+      - 'dist-e2e/**'
+      - 'scripts/e2e-slots.mjs'
       - 'e2e/build-pins.*'
       - 'scripts/check-net-log.mjs'
       - '.github/workflows/e2e-playwright.yml'
@@ -186,6 +192,13 @@ jobs:
           rm -rf "e2e/extensions/cat21wallet"
           bash e2e/playwright/playwright-bootstrap.sh cat21wallet
 
+      # The stack's slot (e2e/stack-slots.ts): its host ports, E2E_PREFIX,
+      # container names and harness port, exported to every later step. A
+      # runner holds one stack, so this is slot 0. Held by the runner's worker
+      # process ($PPID of a step), which lives for the job.
+      - name: Acquire the regtest stack slot
+        run: node scripts/e2e-slots.mjs acquire --owner-pid "$PPID" --label "e2e-playwright ${{ matrix.wallet }}" --format github | tee -a "$GITHUB_ENV"
+
       - name: Build SDK harness bundle for the fixtures server
         run: npm run e2e:harness:build
 
@@ -283,13 +296,11 @@ jobs:
         run: docker compose -f e2e/docker-compose.regtest.yml --profile cat21-ord up -d --no-build
 
       - name: Mine 101 blocks (coinbase maturity) + verify electrs is indexing
-        env:
-          REGTEST_ELECTRS_URL: http://localhost:3010
         run: |
           bash e2e/regtest-bootstrap.sh > /tmp/regtest-bootstrap.json
           cat /tmp/regtest-bootstrap.json
           for i in {1..60}; do
-            if curl -fsS http://localhost:3010/blocks/tip/height >/dev/null; then
+            if curl -fsS "http://localhost:${E2E_ELECTRS_HOST_PORT}/blocks/tip/height" >/dev/null; then
               echo "electrs ready"
               break
             fi
@@ -301,11 +312,11 @@ jobs:
             fi
           done
 
-      - name: Wait for cat21-ord to be ready on :8080/status
+      - name: Wait for cat21-ord to be ready on its /status
         if: matrix.wallet == 'cat21wallet'
         run: |
           for i in {1..120}; do
-            if curl -fsS http://localhost:8080/status >/dev/null; then
+            if curl -fsS "http://localhost:${E2E_ORD_HOST_PORT}/status" >/dev/null; then
               echo "cat21-ord ready"
               exit 0
             fi
@@ -332,9 +343,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: node scripts/check-net-log.mjs net-log
 
+      # Tears the slot's compose projects down by name and releases the slot.
       - name: Stop regtest stack
-        if: always()
-        run: docker compose -f e2e/docker-compose.regtest.yml down -v
+        if: always() && env.E2E_SLOT != ''
+        run: node scripts/e2e-slots.mjs down "$E2E_SLOT" --force
 
       - name: Upload artifacts (screenshots, traces, DOM dumps, manifest)
         if: always()
