@@ -6,7 +6,9 @@ import {
   simulateTransfer,
   TransferCoreParams,
   TransferSimulationResult,
+  TransferStatus,
 } from '../cat21-core/transfer.core.js';
+import { DroppedSelection } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
 import {
   AnnotatedFundingUtxo,
@@ -108,6 +110,26 @@ export interface TransferSnapshot {
    */
   fundingRequirementSats: number;
   fundingPreferredSats: number;
+  /**
+   * The coin the action WOULD spend, after the explicit pick is applied, and
+   * the verdict that goes with it. `fundingRecommendation` answers "what would
+   * we choose"; these answer "what happens if you press the button", which is
+   * the question a CTA is gated on. `resolvedFundingStatus` is `scanning` while
+   * a recompute is in flight and `null` after a failed one.
+   */
+  resolvedFundingUtxo: CoreFundingUtxo | null;
+  resolvedFundingStatus: TransferStatus | null;
+  /**
+   * Set when the coin the user PICKED is not the coin that will be spent,
+   * with the reason: `gone` (no longer among the candidates) or
+   * `below-requirement` (still there, no longer covers at this rate).
+   * Cleared the moment the selection changes, and by `setWallet` and `reset`.
+   *
+   * `selectedFundingUtxo` records what was asked for, so without this a
+   * consumer renders the resolved coin, is correct about the spend, and
+   * silently moves the user onto a different coin than the one they chose.
+   */
+  droppedSelection: DroppedSelection | null;
   errorMessage: string | null;
   successTxId: string | null;
 }
@@ -157,6 +179,9 @@ export class Cat21TransferOrchestrator {
     candidateFees: [],
     fundingRequirementSats: 0,
     fundingPreferredSats: 0,
+    resolvedFundingUtxo: null,
+    resolvedFundingStatus: 'scanning',
+    droppedSelection: null,
     errorMessage: null,
     successTxId: null,
   };
@@ -204,14 +229,17 @@ export class Cat21TransferOrchestrator {
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     {
       this.patch({
-        catUtxo: null, recipientAddress: null, selectedFundingUtxo: null,
+        catUtxo: null, recipientAddress: null, selectedFundingUtxo: null, droppedSelection: null,
         targetPostageSats: null, errorMessage: null, successTxId: null,
       });
     }
     if (!wallet) {
       this.utxos = [];
       this.utxosRead = false;
-      this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      this.patch({
+        state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0,
+        resolvedFundingUtxo: null, resolvedFundingStatus: 'scanning',
+      });
       return;
     }
     await this.loadUtxos(wallet);
@@ -259,7 +287,8 @@ export class Cat21TransferOrchestrator {
 
   setSelectedFundingUtxo(utxo: TxnOutput | null): void {
     if (sameSelection(this.snap.selectedFundingUtxo, utxo)) return;
-    this.patch({ selectedFundingUtxo: utxo });
+    // A drop describes the PREVIOUS pick; the recompute decides the new one.
+    this.patch({ selectedFundingUtxo: utxo, droppedSelection: null });
     void this.recompute();
   }
 
@@ -335,6 +364,7 @@ export class Cat21TransferOrchestrator {
     this.patch({
       catUtxo: null, recipientAddress: null, feeRate: null, selectedFundingUtxo: null,
       targetPostageSats: null, simulation: null, errorMessage: null, successTxId: null,
+      resolvedFundingUtxo: null, resolvedFundingStatus: 'scanning', droppedSelection: null,
       state: this.wallet ? 'ready' : 'idle',
     });
   }
@@ -350,8 +380,16 @@ export class Cat21TransferOrchestrator {
     if (!wallet || !feeRate || !cat || !recipient || this.utxos.length === 0) {
       // Read-and-empty is a verdict; a missing input is no verdict.
       const measuredEmpty = this.utxosRead && this.utxos.length === 0;
-      this.patch({ simulation: null, fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      this.patch({
+        simulation: null, fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0,
+        resolvedFundingUtxo: null, resolvedFundingStatus: measuredEmpty ? 'insufficient' : 'scanning', droppedSelection: null,
+      });
       return;
+    }
+    // The snapshot answer is now stale. `state` stays 'ready' through this
+    // window, so it is the wrong thing to gate a CTA on.
+    if (this.snap.resolvedFundingStatus !== 'scanning') {
+      this.patch({ resolvedFundingStatus: 'scanning' });
     }
     let sim: TransferSimulationResult;
     try {
@@ -369,6 +407,7 @@ export class Cat21TransferOrchestrator {
       this.patch({ simulation: null,
         fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [],
         fundingRequirementSats: 0, fundingPreferredSats: 0,
+        resolvedFundingUtxo: null, resolvedFundingStatus: null, droppedSelection: null,
         errorMessage: `Could not price the funding coins: ${errMsg(err)}`,
         state: 'error',
       });
@@ -380,6 +419,9 @@ export class Cat21TransferOrchestrator {
       candidateFees: sim.candidateFees,
       fundingRequirementSats: sim.fundingRequirementSats,
       fundingPreferredSats: sim.fundingPreferredSats,
+      resolvedFundingUtxo: sim.fundingUtxo,
+      resolvedFundingStatus: sim.status,
+      droppedSelection: sim.droppedSelection,
       // `asset-notice` is a PROCEED state: the plan is built and the coin is
       // chosen, the caller's obligation is to name what sits on it. Withholding
       // the summary here would leave a consumer with a buildable transaction it

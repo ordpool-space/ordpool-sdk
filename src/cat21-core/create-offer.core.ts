@@ -19,7 +19,7 @@ import {
   OfferCreateSignPort,
   UtxosPort,
 } from './ports.js';
-import { resolveFundingPick, selectFunding } from './select-funding.js';
+import { DroppedSelection, describeFundingPick, selectFunding } from './select-funding.js';
 
 
 /**
@@ -71,6 +71,12 @@ export type CreateOfferStatus = 'ready' | 'asset-notice' | 'expert-required' | '
 
 export interface CreateOfferSimulationResult {
   status: CreateOfferStatus;
+  /**
+   * Set when an explicit pick was replaced: the coin the user chose is gone,
+   * or no longer covers the action at this rate. `null` when the resolved coin
+   * IS the chosen one, or when nothing was chosen.
+   */
+  droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   buyerFundingUtxo: CoreFundingUtxo | null;
   vsize: number | null;
@@ -104,6 +110,7 @@ export interface CreateOfferArtifact {
 
 interface OfferPlan {
   status: CreateOfferStatus;
+  droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   pick: CoreFundingUtxo | null;
   vsize: number | null;
@@ -167,7 +174,7 @@ async function planOffer(
   const empty = recommendFunding<CoreFundingUtxo & AnnotatedFundingUtxo>([], 0);
   if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0 || !params.priceSats || params.priceSats <= 0) {
     return {
-      status: 'insufficient', recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null,
+      status: 'insufficient', droppedSelection: null, recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null,
       // Not measurable on this path: the targets come from a real build, and
       // there is either no fee rate or no coin to build against. 0 says
       // "unknown" honestly rather than implying a floor nobody computed.
@@ -191,7 +198,7 @@ async function planOffer(
   const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
   if (!largest || feeBudget(largest.value) < 0) {
     return {
-      status: 'insufficient', recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null,
+      status: 'insufficient', droppedSelection: null, recommendation: empty, pick: null, vsize: null, feeSats: null, changeSats: null,
       // Not measurable on this path: the targets come from a real build, and
       // there is either no fee rate or no coin to build against. 0 says
       // "unknown" honestly rather than implying a floor nobody computed.
@@ -232,10 +239,11 @@ async function planOffer(
     feeBudgetFor: (candidate) => feeBudget(candidate.value),
     feeRatePerVbyte: params.feeRatePerVbyte,
   });
-  const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
+  const { pick, droppedSelection } = describeFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
       status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
+      droppedSelection,
       recommendation,
       pick: null,
       vsize: null,
@@ -258,7 +266,7 @@ async function planOffer(
   });
   if (!resolved) {
     return {
-      status: 'insufficient', recommendation, pick: null, vsize: null, feeSats: null, changeSats: null,
+      status: 'insufficient', droppedSelection, recommendation, pick: null, vsize: null, feeSats: null, changeSats: null,
       requirementSats: target, preferredSats: preferredTarget, candidateFees,
     };
   }
@@ -268,6 +276,7 @@ async function planOffer(
   // with pick === null.
   return {
     status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
+    droppedSelection,
     recommendation,
     pick,
     vsize: resolved.vsize,
@@ -290,6 +299,7 @@ export async function simulateCreateOffer(
   const plan = await planOffer(params, ports);
   return {
     status: plan.status,
+    droppedSelection: plan.droppedSelection,
     recommendation: plan.recommendation,
     buyerFundingUtxo: plan.pick,
     vsize: plan.vsize,

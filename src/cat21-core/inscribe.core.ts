@@ -18,7 +18,7 @@ import { prepareInscribeFundingInput } from '../inscribe/inscription-input-adapt
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import { ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
 import type { InscribeBroadcastTransport } from '../inscribe/inscribe-package-broadcast.js';
-import { resolveFundingPick, selectFunding } from './select-funding.js';
+import { DroppedSelection, describeFundingPick, selectFunding } from './select-funding.js';
 
 /**
  * Everything the inscribe core needs, framework-agnostic. Reuses the existing
@@ -59,6 +59,12 @@ export type InscribeStatus = 'ready' | 'asset-notice' | 'expert-required' | 'sca
 
 export interface InscribeSimulation {
   status: InscribeStatus;
+  /**
+   * Set when an explicit pick was replaced: the coin the user chose is gone,
+   * or no longer covers the action at this rate. `null` when the resolved coin
+   * IS the chosen one, or when nothing was chosen.
+   */
+  droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   fundingUtxo: CoreFundingUtxo | null;
   /** commit output + commit fee the funding coin must cover. Null if the content is unbuildable. */
@@ -90,6 +96,7 @@ export interface InscribeSimulation {
 
 interface InscribePlan {
   status: InscribeStatus;
+  droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   pick: CoreFundingUtxo | null;
   fundingRequirementSats: number | null;
@@ -242,7 +249,7 @@ async function planInscribe(
   const { target, error: targetError } = inscribeFundingTarget(params);
   if (target == null) {
     return {
-      status: 'insufficient', recommendation: empty, pick: null,
+      status: 'insufficient', droppedSelection: null, recommendation: empty, pick: null,
       fundingRequirementSats: null, fundingPreferredSats: null, fundingTargetError: targetError,
       candidateFees: [],
     };
@@ -257,10 +264,11 @@ async function planInscribe(
   const preferredTarget = target + changeDustFloor(params.paymentAddress);
   const recommendation = await selectFunding(utxos, target, ports.scan, preferredTarget, params.fundingTopology);
   const candidateFees = inscribeCandidateFees(params, recommendation.candidates, target);
-  const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
+  const { pick, droppedSelection } = describeFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
       status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
+      droppedSelection,
       recommendation,
       pick: null,
       fundingRequirementSats: target,
@@ -275,6 +283,7 @@ async function planInscribe(
   // with pick === null.
   return {
     status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
+    droppedSelection,
     recommendation,
     pick,
     fundingRequirementSats: target,
@@ -295,6 +304,7 @@ export async function simulateInscribe(
   const plan = await planInscribe(params, ports);
   return {
     status: plan.status,
+    droppedSelection: plan.droppedSelection,
     recommendation: plan.recommendation,
     fundingUtxo: plan.pick,
     fundingRequirementSats: plan.fundingRequirementSats,

@@ -2,7 +2,7 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { classificationVerdict, ContentScanPort } from '../cat21-core/ports.js';
-import { resolveFundingPick, selectFunding } from '../cat21-core/select-funding.js';
+import { DroppedSelection, describeFundingPick, resolveFundingPick, selectFunding } from '../cat21-core/select-funding.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
   AnnotatedFundingUtxo,
@@ -317,6 +317,19 @@ export interface InscribeSnapshot {
    */
   resolvedFundingUtxo: TxnOutput | null;
   resolvedFundingStatus: InscribeFundingStatus | null;
+  /**
+   * Set when the coin the user PICKED is not the coin that will be spent,
+   * with the reason: `gone` (no longer among the candidates) or
+   * `below-requirement` (still there, no longer covers at this rate).
+   * Cleared the moment the selection changes, and by `setWallet` and `reset`.
+   * `null` while no funding requirement is measurable (no content yet): there
+   * is then no recommendation to replace the pick with.
+   *
+   * `selectedUtxo` records what was asked for, so without this a consumer
+   * renders the resolved coin, is correct about the spend, and silently moves
+   * the user onto a different coin than the one they chose.
+   */
+  droppedSelection: DroppedSelection | null;
   /** The developer-facing failure text, for logs and existing error handling. */
   errorMessage: string | null;
   /**
@@ -500,6 +513,7 @@ export class InscribeMintOrchestrator {
     fundingRecommendation: EMPTY_RECOMMENDATION,
     resolvedFundingUtxo: null,
     resolvedFundingStatus: 'scanning',
+    droppedSelection: null,
     errorMessage: null,
     userMessage: null,
     successResult: null,
@@ -556,12 +570,15 @@ export class InscribeMintOrchestrator {
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     {
-      this.patch({ selectedUtxo: null, content: null, batch: null, errorMessage: null, userMessage: null, successResult: null, compression: null, padding: null, parents: null });
+      this.patch({ selectedUtxo: null, droppedSelection: null, content: null, batch: null, errorMessage: null, userMessage: null, successResult: null, compression: null, padding: null, parents: null });
     }
     if (!wallet) {
       this.utxos = [];
       this.utxosRead = false;
-      this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION });
+      this.patch({
+        state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION,
+        resolvedFundingUtxo: null, resolvedFundingStatus: 'scanning',
+      });
       return;
     }
     await this.loadUtxos(wallet);
@@ -611,7 +628,8 @@ export class InscribeMintOrchestrator {
    */
   setSelectedUtxo(utxo: TxnOutput | null): void {
     if (sameSelection(this.snap.selectedUtxo, utxo)) return;
-    this.patch({ selectedUtxo: utxo });
+    // A drop describes the PREVIOUS pick; the recompute decides the new one.
+    this.patch({ selectedUtxo: utxo, droppedSelection: null });
     void this.recompute();
   }
 
@@ -793,6 +811,9 @@ export class InscribeMintOrchestrator {
       batch: null,
       simulations: [],
       fundingRecommendation: EMPTY_RECOMMENDATION,
+      resolvedFundingUtxo: null,
+      resolvedFundingStatus: 'scanning',
+      droppedSelection: null,
       errorMessage: null,
       userMessage: null,
       successResult: null,
@@ -842,6 +863,7 @@ export class InscribeMintOrchestrator {
         fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION,
         resolvedFundingUtxo: null,
         resolvedFundingStatus: measuredEmpty ? 'insufficient' : 'scanning',
+        droppedSelection: null,
       });
       return;
     }
@@ -937,9 +959,9 @@ export class InscribeMintOrchestrator {
     // "what would we choose" and deliberately does not follow an explicit pick,
     // so a consumer gating a CTA on it has to re-decide locally, which is what
     // the asset-safety rule forbids. Same derivation mint.core uses.
-    const resolvedFundingUtxo = target === null
-      ? null
-      : resolveFundingPick(fundingRecommendation, target, this.snap.selectedUtxo);
+    const { pick: resolvedFundingUtxo, droppedSelection } = target === null
+      ? { pick: null, droppedSelection: null }
+      : describeFundingPick(fundingRecommendation, target, this.snap.selectedUtxo);
     // The verdict reads the PICK's own content bucket. Hardcoding 'ready' for
     // any pick threw the asset warning away: an explicit "use anyway" choice
     // of an inscription-bearing coin reported clean. 'asset-notice' is an
@@ -949,7 +971,7 @@ export class InscribeMintOrchestrator {
       : fundingRecommendation.status === 'insufficient' ? 'insufficient'
       : fundingRecommendation.status === 'scanning' ? 'scanning' : 'expert-required';
     this.fundingTarget = target;
-    this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus });
+    this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus, droppedSelection });
   }
 
   /** The same grid and funding pick as a single inscription, for a batch. */
@@ -1026,9 +1048,9 @@ export class InscribeMintOrchestrator {
     // "what would we choose" and deliberately does not follow an explicit pick,
     // so a consumer gating a CTA on it has to re-decide locally, which is what
     // the asset-safety rule forbids. Same derivation mint.core uses.
-    const resolvedFundingUtxo = target === null
-      ? null
-      : resolveFundingPick(fundingRecommendation, target, this.snap.selectedUtxo);
+    const { pick: resolvedFundingUtxo, droppedSelection } = target === null
+      ? { pick: null, droppedSelection: null }
+      : describeFundingPick(fundingRecommendation, target, this.snap.selectedUtxo);
     // The verdict reads the PICK's own content bucket. Hardcoding 'ready' for
     // any pick threw the asset warning away: an explicit "use anyway" choice
     // of an inscription-bearing coin reported clean. 'asset-notice' is an
@@ -1038,7 +1060,7 @@ export class InscribeMintOrchestrator {
       : fundingRecommendation.status === 'insufficient' ? 'insufficient'
       : fundingRecommendation.status === 'scanning' ? 'scanning' : 'expert-required';
     this.fundingTarget = target;
-    this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus });
+    this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus, droppedSelection });
   }
 
   /**
@@ -1317,6 +1339,8 @@ export class InscribeMintOrchestrator {
     this.patchIfCurrent(seq, {
       simulations: [],
       fundingRecommendation: EMPTY_RECOMMENDATION,
+      resolvedFundingUtxo: null,
+      droppedSelection: null,
       errorMessage: errMsg(err),
       userMessage: fromInput ? inscribeUserMessage(err) : UNEXPECTED_FAILURE_MESSAGE,
       ...(fromInput ? {} : { state: 'error' as const }),

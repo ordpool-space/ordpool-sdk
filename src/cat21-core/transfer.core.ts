@@ -27,7 +27,7 @@ import {
   SignPort,
   UtxosPort,
 } from './ports.js';
-import { resolveFundingPick, selectFunding } from './select-funding.js';
+import { DroppedSelection, describeFundingPick, selectFunding } from './select-funding.js';
 
 
 /**
@@ -80,6 +80,12 @@ export type TransferStatus = 'ready' | 'asset-notice' | 'expert-required' | 'sca
 
 export interface TransferSimulationResult {
   status: TransferStatus;
+  /**
+   * Set when an explicit pick was replaced: the coin the user chose is gone,
+   * or no longer covers the action at this rate. `null` when the resolved coin
+   * IS the chosen one, or when nothing was chosen.
+   */
+  droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   fundingUtxo: CoreFundingUtxo | null;
   vsize: number | null;
@@ -108,6 +114,7 @@ export interface TransferSimulationResult {
 
 interface TransferPlan {
   status: TransferStatus;
+  droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
   pick: CoreFundingUtxo | null;
   /** Pass-2 build result (size numbers) + the fee to feed the real build. */
@@ -177,7 +184,7 @@ async function planTransfer(
   const empty = recommendFunding<CoreFundingUtxo & AnnotatedFundingUtxo>([], 0);
   if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
     return {
-      status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null,
+      status: 'insufficient', droppedSelection: null, recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null,
       // Not measurable on this path: the targets come from a real build, and
       // there is either no fee rate or no coin to build against. 0 says
       // "unknown" honestly rather than implying a floor nobody computed.
@@ -199,7 +206,7 @@ async function planTransfer(
   const largest = utxos.reduce<CoreFundingUtxo | null>((a, b) => (a && a.value >= b.value ? a : b), null);
   if (!largest) {
     return {
-      status: 'insufficient', recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null,
+      status: 'insufficient', droppedSelection: null, recommendation: empty, pick: null, built: null, vsize: null, buildFeeSats: null,
       // Not measurable on this path: the targets come from a real build, and
       // there is either no fee rate or no coin to build against. 0 says
       // "unknown" honestly rather than implying a floor nobody computed.
@@ -236,10 +243,11 @@ async function planTransfer(
     feeBudgetFor: (candidate) => feeBudget(candidate.value),
     feeRatePerVbyte: params.feeRatePerVbyte,
   });
-  const pick = resolveFundingPick(recommendation, target, params.selectedFundingUtxo);
+  const { pick, droppedSelection } = describeFundingPick(recommendation, target, params.selectedFundingUtxo);
   if (!pick) {
     return {
       status: recommendation.status === 'insufficient' ? 'insufficient' : 'expert-required',
+      droppedSelection,
       recommendation,
       pick: null,
       built: null,
@@ -261,7 +269,7 @@ async function planTransfer(
   });
   if (!resolved) {
     return {
-      status: 'insufficient', recommendation, pick: null, built: null, vsize: null, buildFeeSats: null,
+      status: 'insufficient', droppedSelection, recommendation, pick: null, built: null, vsize: null, buildFeeSats: null,
       requirementSats: target, preferredSats: preferredTarget, candidateFees,
     };
   }
@@ -271,6 +279,7 @@ async function planTransfer(
   // with pick === null.
   return {
     status: pick.bucket === 'clean' ? 'ready' : 'asset-notice',
+    droppedSelection,
     recommendation,
     pick,
     built: resolved.built,
@@ -295,6 +304,7 @@ export async function simulateTransfer(
   const plan = await planTransfer(params, ports);
   return {
     status: plan.status,
+    droppedSelection: plan.droppedSelection,
     recommendation: plan.recommendation,
     fundingUtxo: plan.pick,
     vsize: plan.vsize,

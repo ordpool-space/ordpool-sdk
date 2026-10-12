@@ -134,6 +134,8 @@ export interface MintSnapshot {
    * with the reason: `gone` (no longer among the candidates) or
    * `below-requirement` (still there, no longer covers at this rate).
    *
+   * Cleared the moment the selection changes, and by `setWallet` and `reset`.
+   *
    * `selectedUtxo` records what was asked for and is cleared only by
    * `setWallet` and `reset`, so without this a consumer renders the resolved
    * coin, is correct about the spend, and silently moves the user onto a
@@ -266,11 +268,14 @@ export class Cat21MintOrchestrator {
     if (sameWallet(this.wallet, wallet)) return;
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
-    this.patch({ selectedUtxo: null, errorMessage: null, successTxId: null });
+    this.patch({ selectedUtxo: null, droppedSelection: null, errorMessage: null, successTxId: null });
     if (!wallet) {
       this.utxos = [];
       this.utxosRead = false;
-      this.patch({ state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      this.patch({
+        state: 'idle', simulations: [], fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0,
+        resolvedFundingUtxo: null, resolvedFundingStatus: 'scanning',
+      });
       return;
     }
     await this.loadUtxos(wallet);
@@ -319,7 +324,8 @@ export class Cat21MintOrchestrator {
    */
   setSelectedUtxo(utxo: TxnOutput | null): void {
     if (sameSelection(this.snap.selectedUtxo, utxo)) return;
-    this.patch({ selectedUtxo: utxo });
+    // A drop describes the PREVIOUS pick; the recompute decides the new one.
+    this.patch({ selectedUtxo: utxo, droppedSelection: null });
     void this.recompute();
   }
 
@@ -407,6 +413,9 @@ export class Cat21MintOrchestrator {
       candidateFees: [],
       fundingRequirementSats: 0,
       fundingPreferredSats: 0,
+      resolvedFundingUtxo: null,
+      resolvedFundingStatus: 'scanning',
+      droppedSelection: null,
       errorMessage: null,
       successTxId: null,
       state: this.wallet ? 'ready' : 'idle',

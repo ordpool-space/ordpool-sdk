@@ -1,7 +1,8 @@
 import { firstValueFrom, from } from 'rxjs';
 import { base64, hex } from '@scure/base';
 
-import { buildOffer, CreateOfferCoreParams, simulateCreateOffer } from '../cat21-core/create-offer.core.js';
+import { buildOffer, CreateOfferCoreParams, CreateOfferStatus, simulateCreateOffer } from '../cat21-core/create-offer.core.js';
+import { DroppedSelection } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
 import {
   AnnotatedFundingUtxo,
@@ -98,6 +99,26 @@ export interface CreateOfferSnapshot {
    */
   fundingRequirementSats: number;
   fundingPreferredSats: number;
+  /**
+   * The coin the action WOULD spend, after the explicit pick is applied, and
+   * the verdict that goes with it. `fundingRecommendation` answers "what would
+   * we choose"; these answer "what happens if you press the button", which is
+   * the question a CTA is gated on. `resolvedFundingStatus` is `scanning` while
+   * a recompute is in flight and `null` after a failed one.
+   */
+  resolvedFundingUtxo: CoreFundingUtxo | null;
+  resolvedFundingStatus: CreateOfferStatus | null;
+  /**
+   * Set when the coin the user PICKED is not the coin that will be spent,
+   * with the reason: `gone` (no longer among the candidates) or
+   * `below-requirement` (still there, no longer covers at this rate).
+   * Cleared the moment the selection changes, and by `setWallet` and `reset`.
+   *
+   * `selectedFundingUtxo` records what was asked for, so without this a
+   * consumer renders the resolved coin, is correct about the spend, and
+   * silently moves the user onto a different coin than the one they chose.
+   */
+  droppedSelection: DroppedSelection | null;
   bid: OfferBidArtifact | null;
   errorMessage: string | null;
 }
@@ -148,6 +169,9 @@ export class Cat21CreateOfferOrchestrator {
     candidateFees: [],
     fundingRequirementSats: 0,
     fundingPreferredSats: 0,
+    resolvedFundingUtxo: null,
+    resolvedFundingStatus: 'scanning',
+    droppedSelection: null,
     bid: null,
     errorMessage: null,
   };
@@ -196,13 +220,16 @@ export class Cat21CreateOfferOrchestrator {
     {
       this.patch({
         targetCat: null, priceSats: null, sellerPaymentAddress: null, buyerReceiveAddress: wallet?.ordinalsAddress ?? null,
-        selectedFundingUtxo: null, bid: null, errorMessage: null,
+        selectedFundingUtxo: null, droppedSelection: null, bid: null, errorMessage: null,
       });
     }
     if (!wallet) {
       this.utxos = [];
       this.utxosRead = false;
-      this.patch({ state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      this.patch({
+        state: 'idle', simulation: null, fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0,
+        resolvedFundingUtxo: null, resolvedFundingStatus: 'scanning',
+      });
       return;
     }
     await this.loadUtxos(wallet);
@@ -244,7 +271,8 @@ export class Cat21CreateOfferOrchestrator {
   setFeeRate(rate: number): void { if (Number.isFinite(rate) && rate > 0) { this.patch({ feeRate: rate }); void this.recompute(); } }
   setSelectedFundingUtxo(utxo: TxnOutput | null): void {
     if (sameSelection(this.snap.selectedFundingUtxo, utxo)) return;
-    this.patch({ selectedFundingUtxo: utxo });
+    // A drop describes the PREVIOUS pick; the recompute decides the new one.
+    this.patch({ selectedFundingUtxo: utxo, droppedSelection: null });
     void this.recompute();
   }
 
@@ -297,6 +325,7 @@ export class Cat21CreateOfferOrchestrator {
       targetCat: null, priceSats: null, sellerPaymentAddress: null,
       buyerReceiveAddress: this.wallet?.ordinalsAddress ?? null,
       feeRate: null, selectedFundingUtxo: null, simulation: null, bid: null, errorMessage: null,
+      resolvedFundingUtxo: null, resolvedFundingStatus: 'scanning', droppedSelection: null,
       state: this.wallet ? 'ready' : 'idle',
     });
   }
@@ -309,8 +338,16 @@ export class Cat21CreateOfferOrchestrator {
     if (!params) {
       // Read-and-empty is a verdict whatever inputs are still missing.
       const measuredEmpty = this.utxosRead && this.utxos.length === 0;
-      this.patch({ simulation: null, fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0 });
+      this.patch({
+        simulation: null, fundingRecommendation: measuredEmpty ? INSUFFICIENT_RECOMMENDATION : EMPTY_RECOMMENDATION, candidateFees: [], fundingRequirementSats: 0, fundingPreferredSats: 0,
+        resolvedFundingUtxo: null, resolvedFundingStatus: measuredEmpty ? 'insufficient' : 'scanning', droppedSelection: null,
+      });
       return;
+    }
+    // The snapshot answer is now stale. `state` stays 'ready' through this
+    // window, so it is the wrong thing to gate a CTA on.
+    if (this.snap.resolvedFundingStatus !== 'scanning') {
+      this.patch({ resolvedFundingStatus: 'scanning' });
     }
     try {
       const sim = await simulateCreateOffer(params, { utxos: this.utxosPort(), scan: this.deps.scan });
@@ -320,6 +357,9 @@ export class Cat21CreateOfferOrchestrator {
         candidateFees: sim.candidateFees,
         fundingRequirementSats: sim.fundingRequirementSats,
         fundingPreferredSats: sim.fundingPreferredSats,
+        resolvedFundingUtxo: sim.buyerFundingUtxo,
+        resolvedFundingStatus: sim.status,
+        droppedSelection: sim.droppedSelection,
         // `asset-notice` is a PROCEED state: the plan is built and the coin is
         // chosen, the caller's obligation is to name what sits on it. Withholding
         // the summary here would leave a consumer with a buildable transaction it
@@ -341,6 +381,7 @@ export class Cat21CreateOfferOrchestrator {
       this.patch({ simulation: null,
         fundingRecommendation: EMPTY_RECOMMENDATION, candidateFees: [],
         fundingRequirementSats: 0, fundingPreferredSats: 0,
+        resolvedFundingUtxo: null, resolvedFundingStatus: null, droppedSelection: null,
         errorMessage: `Could not price the funding coins: ${errMsg(err)}`,
         state: 'error',
       });

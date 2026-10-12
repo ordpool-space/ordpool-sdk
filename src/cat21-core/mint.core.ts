@@ -266,7 +266,7 @@ async function planMint(
     // Past measurement, so the targets are known and worth reporting: a caller
     // seeing `insufficient` here can compare them against the coin it offered.
     return {
-      droppedSelection: null,
+      droppedSelection,
       status: 'insufficient', recommendation,
       requirementSats: target, preferredSats: preferredTarget,
       pick: null, built: null, vsize: null, buildFeeSats: null, candidateFees,
