@@ -1,6 +1,7 @@
 import { BrowserContext, Route } from '@playwright/test';
 import { recommendedFeesFixture } from 'ordpool-sdk/testing';
 
+import { markWalletBackgroundInitialised } from './unisat-install-tab';
 import { decodeUnisatPsbt } from './unisat-offline-routes';
 
 /**
@@ -102,9 +103,13 @@ export async function installWizzOfflineRoutes(context: BrowserContext): Promise
       : okJson({ address: '', xudt: [] }));
   });
   // The RGB++ testnet and signet APIs: Wizz requests an access token there
-  // (`POST /token/generate`) for networks it is not on. Nothing waits on the
-  // token; aborted.
-  await context.route(WIZZ_RGBPP_TEST_NETWORKS, route => route.abort('failed'));
+  // (`POST /token/generate`) for networks it is not on. Aborted: no popup
+  // needs a token. The background sets its initialised flag right after these
+  // settle, which decides its install tab (`waitForUnisatInstallTabSettled`).
+  await context.route(WIZZ_RGBPP_TEST_NETWORKS, route => {
+    markWalletBackgroundInitialised(context);
+    return route.abort('failed');
+  });
 
   // wallet-api.unisat.io — the Unisat wallet API Wizz inherits. The balance
   // aggregates multi-assets + brc20 + inscriptions here; ALL of them flake

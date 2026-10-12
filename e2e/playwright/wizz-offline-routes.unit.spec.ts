@@ -4,9 +4,10 @@
  * Faked:  the BrowserContext (route) and the route (request/fulfill/abort), shapes: @playwright/test types
  * Proves: Wizz's fee lookup on mempool.space is answered with the SDK's captured sample, and only that URL;
  *         its decode2 PSBT analysis is answered from the PSBT as UniSat's server answered it on the wizz lane;
- *         its RGB++ token requests for the test networks are aborted
+ *         its RGB++ token requests for the test networks are aborted and mark the background as initialised
  */
 import { recommendedFeesFixture } from 'ordpool-sdk/testing';
+import { walletBackgroundInitialisedAt } from './unisat-install-tab';
 import { installWizzOfflineRoutes, WIZZ_RECOMMENDED_FEES_URL, WIZZ_RGBPP_TEST_NETWORKS } from './wizz-offline-routes';
 
 // A fake BrowserContext recording `route()` registrations. The shield's IO
@@ -120,6 +121,24 @@ describe('installWizzOfflineRoutes: the RGB++ test networks', () => {
       request: () => ({ url: () => url }),
     });
     expect(outcome).toEqual({ aborted: 'failed' });
+  });
+
+  // Seam with waitForUnisatInstallTabSettled: Wizz sets its initialised flag
+  // right after these requests settle, so the route has to record it.
+  it('records the background as initialised at the first token request, and not before', async () => {
+    const { context, routes } = fakeContext();
+    await installWizzOfflineRoutes(context);
+    expect(walletBackgroundInitialisedAt(context)).toBeUndefined();
+    const [token] = routes.filter((r) => r.pattern === WIZZ_RGBPP_TEST_NETWORKS);
+    const before = Date.now();
+    await token.handler({
+      fulfill: async () => { throw new Error('fulfilled'); },
+      abort: async () => {},
+      request: () => ({ url: () => 'https://api.testnet.rgbpp.io/token/generate?_=0' }),
+    });
+    const at = walletBackgroundInitialisedAt(context);
+    expect(at).toBeGreaterThanOrEqual(before);
+    expect(at).toBeLessThanOrEqual(Date.now());
   });
 
   it.each([

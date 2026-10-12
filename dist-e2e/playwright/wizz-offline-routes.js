@@ -4,6 +4,7 @@ exports.WIZZ_RGBPP_TEST_NETWORKS = exports.WIZZ_RECOMMENDED_FEES_URL = void 0;
 exports.installWizzOfflineRoutes = installWizzOfflineRoutes;
 exports.recordWalletBackendRequests = recordWalletBackendRequests;
 const testing_1 = require("ordpool-sdk/testing");
+const unisat_install_tab_1 = require("./unisat-install-tab");
 const unisat_offline_routes_1 = require("./unisat-offline-routes");
 /**
  * The fee estimate Wizz 2.13.4 reads from its mempool client
@@ -97,9 +98,13 @@ async function installWizzOfflineRoutes(context) {
             : okJson({ address: '', xudt: [] }));
     });
     // The RGB++ testnet and signet APIs: Wizz requests an access token there
-    // (`POST /token/generate`) for networks it is not on. Nothing waits on the
-    // token; aborted.
-    await context.route(exports.WIZZ_RGBPP_TEST_NETWORKS, route => route.abort('failed'));
+    // (`POST /token/generate`) for networks it is not on. Aborted: no popup
+    // needs a token. The background sets its initialised flag right after these
+    // settle, which decides its install tab (`waitForUnisatInstallTabSettled`).
+    await context.route(exports.WIZZ_RGBPP_TEST_NETWORKS, route => {
+        (0, unisat_install_tab_1.markWalletBackgroundInitialised)(context);
+        return route.abort('failed');
+    });
     // wallet-api.unisat.io — the Unisat wallet API Wizz inherits. The balance
     // aggregates multi-assets + brc20 + inscriptions here; ALL of them flake
     // in CI (observed 503/-1 run-to-run), so intercept the whole host.

@@ -2,6 +2,8 @@ import type { BrowserContext, Route } from '@playwright/test';
 import { Address, NETWORK, OutScript, Transaction } from '@scure/btc-signer';
 import { hex } from '@scure/base';
 
+import { markWalletBackgroundInitialised } from './unisat-install-tab';
+
 /**
  * UniSat's wallet API on every network it knows: `wallet-api.unisat.space` and
  * `wallet-api.unisat.io` for mainnet (the extension's `endpoints` list, tried
@@ -178,7 +180,8 @@ export function unisatOfflineAnswer(url: URL, postData: string | null = null): u
  * An endpoint with no captured answer is aborted, so a new dependency fails at
  * once and is listed by `recordWalletBackendRequests` rather than waiting on a
  * live server. The phishing-list downloads (`UNISAT_PHISHING_LISTS`) are
- * aborted as well.
+ * aborted as well; the first of them also records that the background has
+ * finished initialising, which `waitForUnisatInstallTabSettled` needs.
  *
  * Install right after the context launches, before onboarding. The requests
  * the service worker sends while the extension starts, before this is
@@ -186,7 +189,12 @@ export function unisatOfflineAnswer(url: URL, postData: string | null = null): u
  * API unreachable, so none of them gates a popup.
  */
 export async function installUnisatOfflineRoutes(context: BrowserContext): Promise<void> {
-  await context.route(UNISAT_PHISHING_LISTS, (route: Route) => route.abort('failed'));
+  await context.route(UNISAT_PHISHING_LISTS, (route: Route) => {
+    // The background starts these downloads in the turn it sets its
+    // initialised flag, which is what decides its install tab.
+    markWalletBackgroundInitialised(context);
+    return route.abort('failed');
+  });
   await context.route(UNISAT_WALLET_API, (route: Route) => {
     const request = route.request();
     const answer = unisatOfflineAnswer(new URL(request.url()), request.postData());

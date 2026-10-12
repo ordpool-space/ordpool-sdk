@@ -1,6 +1,7 @@
 import { expect, Locator, Page } from '@playwright/test';
 import { isVisibleWithin } from './is-visible-within';
 import { selectCard } from './select-card';
+import { INSTALL_TAB_SETTLED, installTabState, walletBackgroundInitialisedAt } from './unisat-install-tab';
 
 import { PASSWORD_BY_WALLET, TEST_MNEMONIC_WORDS } from './wallet-test-vectors';
 
@@ -154,30 +155,41 @@ export async function onboardUnisat(
   await dismissUnisatNotice(page);
 
   await expect(page.getByTestId('tab-home')).toBeVisible();
-  await waitForUnisatInstallTabBooted(page, extensionId);
+  await waitForUnisatInstallTabSettled(page, extensionId);
 }
 
 /**
- * Wait until the tab UniSat opens on install has booted.
+ * Wait until UniSat's install tab can no longer reject an approval: it has
+ * booted past its root route, or the wallet will never open it.
  *
  * On a fresh install the background opens `index.html` in a new tab once its
- * own initialisation is done, polling every second until it is. That tab boots
- * through the root route, which rejects any pending approval when it is not
- * the notification window (`BoostScreen`: `isNotification || rejectApproval()`),
- * so the approval popup closes and the dapp gets 4001 "User rejected the
- * request". The tab arrives on the wallet's schedule, not onboarding's: a
- * connect request sent before it has booted is rejected by the wallet itself.
+ * own initialisation is done. That tab boots through the root route, which
+ * rejects any pending approval when it is not the notification window
+ * (`BoostScreen`: `isNotification || rejectApproval()`), so the approval popup
+ * closes and the dapp gets 4001 "User rejected the request". The tab arrives
+ * on the wallet's schedule, not onboarding's, and sometimes not at all: when
+ * Chrome's `onInstalled` reaches the worker before the wallet has registered
+ * its listener, the wallet never opens it (`unisat-install-tab.ts` has the
+ * mechanism). Both outcomes are settled. A tab still on its root route, a
+ * background that has not finished initialising, or one whose next poll may
+ * still open the tab, is not.
  *
- * Booted means the tab has left the root route for a screen (`#/main`, or
- * `#/welcome` when it booted before the vault existed); the rejection runs
- * once, on that boot.
+ * Needs the wallet's offline routes (`installUnisatOfflineRoutes`,
+ * `installWizzOfflineRoutes`) on the context from launch: they record when the
+ * background finished initialising. Without them this fails in state
+ * `background-initialising`.
  */
-export async function waitForUnisatInstallTabBooted(onboardPage: Page, extensionId: string): Promise<void> {
+export async function waitForUnisatInstallTabSettled(onboardPage: Page, extensionId: string): Promise<void> {
   const context = onboardPage.context();
-  const booted = new RegExp(`^chrome-extension://${extensionId}/index\\.html#/[a-z]`);
   await expect
-    .poll(() => context.pages().some((p) => p !== onboardPage && booted.test(p.url())), {
-      message: 'UniSat install tab did not boot past its root route',
-    })
-    .toBe(true);
+    .poll(
+      () => installTabState({
+        extensionId,
+        otherPageUrls: context.pages().filter((p) => p !== onboardPage).map((p) => p.url()),
+        initialisedAt: walletBackgroundInitialisedAt(context),
+        now: Date.now(),
+      }),
+      { message: 'UniSat install tab neither booted past its root route nor stayed away after the background initialised' },
+    )
+    .toMatch(new RegExp(`^(${INSTALL_TAB_SETTLED.join('|')})$`));
 }

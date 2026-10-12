@@ -61,9 +61,9 @@ async function onboardWizz(page, extensionId, opts = {}) {
     }, undefined, { polling: 500 });
     // Wizz is a UniSat fork and opens the same install tab once its background
     // has initialised, on its own schedule, sometimes after onboarding has
-    // returned. Its boot rejects a pending approval that is not the notification
-    // window, so a connect sent before it booted fails with 4001 "User rejected
-    // the request".
-    await (0, onboard_unisat_1.waitForUnisatInstallTabBooted)(page, extensionId);
+    // returned, and sometimes never. Its boot rejects a pending approval that is
+    // not the notification window, so a connect sent before it booted fails with
+    // 4001 "User rejected the request".
+    await (0, onboard_unisat_1.waitForUnisatInstallTabSettled)(page, extensionId);
 }
 //# sourceMappingURL=onboard-wizz.js.map

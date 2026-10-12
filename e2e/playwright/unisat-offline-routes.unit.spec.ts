@@ -1,3 +1,4 @@
+import { walletBackgroundInitialisedAt } from './unisat-install-tab';
 import { decodeUnisatPsbt, installUnisatOfflineRoutes, UNISAT_PHISHING_LISTS, UNISAT_WALLET_API, unisatOfflineAnswer } from './unisat-offline-routes';
 
 // Two `POST /v5/tx/decode2` exchanges captured from wallet-api.unisat.space on
@@ -124,6 +125,22 @@ describe('installUnisatOfflineRoutes', () => {
     const { route, calls } = fakeRoute(url);
     await matching[0].handler(route);
     expect(calls).toEqual({ aborted: 'failed' });
+  });
+
+  // Seam with waitForUnisatInstallTabSettled: these downloads are the only
+  // sign that the background has initialised, so the route has to record it.
+  it('records the background as initialised at the first phishing-list download, and only then', async () => {
+    const routes: { matcher: RegExp; handler: (route: unknown) => Promise<void> }[] = [];
+    const context = { route: async (matcher: RegExp, handler: (route: unknown) => Promise<void>) => { routes.push({ matcher, handler }); } };
+    const ctx = context as unknown as Parameters<typeof installUnisatOfflineRoutes>[0];
+    await installUnisatOfflineRoutes(ctx);
+    await routes[1].handler(fakeRoute('https://wallet-api.unisat.space/v5/default/config').route);
+    expect(walletBackgroundInitialisedAt(ctx)).toBeUndefined();
+    const before = Date.now();
+    await routes[0].handler(fakeRoute('https://raw.githubusercontent.com/unisat-wallet/phishing-detect/master/phishing_sites.json').route);
+    const at = walletBackgroundInitialisedAt(ctx);
+    expect(at).toBeGreaterThanOrEqual(before);
+    expect(at).toBeLessThanOrEqual(Date.now());
   });
 
   it.each([

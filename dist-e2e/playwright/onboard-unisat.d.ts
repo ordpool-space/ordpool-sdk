@@ -58,19 +58,25 @@ export declare function onboardUnisat(page: Page, extensionId: string, opts?: {
     mnemonicWords?: string[];
 }): Promise<void>;
 /**
- * Wait until the tab UniSat opens on install has booted.
+ * Wait until UniSat's install tab can no longer reject an approval: it has
+ * booted past its root route, or the wallet will never open it.
  *
  * On a fresh install the background opens `index.html` in a new tab once its
- * own initialisation is done, polling every second until it is. That tab boots
- * through the root route, which rejects any pending approval when it is not
- * the notification window (`BoostScreen`: `isNotification || rejectApproval()`),
- * so the approval popup closes and the dapp gets 4001 "User rejected the
- * request". The tab arrives on the wallet's schedule, not onboarding's: a
- * connect request sent before it has booted is rejected by the wallet itself.
+ * own initialisation is done. That tab boots through the root route, which
+ * rejects any pending approval when it is not the notification window
+ * (`BoostScreen`: `isNotification || rejectApproval()`), so the approval popup
+ * closes and the dapp gets 4001 "User rejected the request". The tab arrives
+ * on the wallet's schedule, not onboarding's, and sometimes not at all: when
+ * Chrome's `onInstalled` reaches the worker before the wallet has registered
+ * its listener, the wallet never opens it (`unisat-install-tab.ts` has the
+ * mechanism). Both outcomes are settled. A tab still on its root route, a
+ * background that has not finished initialising, or one whose next poll may
+ * still open the tab, is not.
  *
- * Booted means the tab has left the root route for a screen (`#/main`, or
- * `#/welcome` when it booted before the vault existed); the rejection runs
- * once, on that boot.
+ * Needs the wallet's offline routes (`installUnisatOfflineRoutes`,
+ * `installWizzOfflineRoutes`) on the context from launch: they record when the
+ * background finished initialising. Without them this fails in state
+ * `background-initialising`.
  */
-export declare function waitForUnisatInstallTabBooted(onboardPage: Page, extensionId: string): Promise<void>;
+export declare function waitForUnisatInstallTabSettled(onboardPage: Page, extensionId: string): Promise<void>;
 //# sourceMappingURL=onboard-unisat.d.ts.map

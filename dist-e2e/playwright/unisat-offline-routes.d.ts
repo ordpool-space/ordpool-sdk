@@ -51,7 +51,8 @@ export declare function unisatOfflineAnswer(url: URL, postData?: string | null):
  * An endpoint with no captured answer is aborted, so a new dependency fails at
  * once and is listed by `recordWalletBackendRequests` rather than waiting on a
  * live server. The phishing-list downloads (`UNISAT_PHISHING_LISTS`) are
- * aborted as well.
+ * aborted as well; the first of them also records that the background has
+ * finished initialising, which `waitForUnisatInstallTabSettled` needs.
  *
  * Install right after the context launches, before onboarding. The requests
  * the service worker sends while the extension starts, before this is
