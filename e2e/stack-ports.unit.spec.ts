@@ -32,8 +32,8 @@ const SLOT_0 = {
   electrum: 50001,
   ord: 8080,
   ordStock: 8081,
-  ordpoolBackend: 8998,
-  feesStub: 8999,
+  ordpoolBackend: 8999,
+  feesStub: 8998,
   mariadb: 3306,
   redis: 6379,
   harness: 4500,
@@ -54,7 +54,8 @@ describe('slotPorts', () => {
     expect(p.bitcoindRpc).toBe(18473);
     expect(p.harness).toBe(4530);
     expect(p.app).toBe(4230);
-    expect(p.feesStub).toBe(9029);
+    expect(p.feesStub).toBe(9028);
+    expect(p.ordpoolBackend).toBe(9029);
     expect(p.mariadb).toBe(3336);
   });
 
@@ -110,8 +111,8 @@ describe('slotPrefix and slotEnv', () => {
       E2E_ELECTRUM_HOST_PORT: '50021',
       E2E_ORD_HOST_PORT: '8100',
       E2E_ORD_STOCK_HOST_PORT: '8101',
-      E2E_ORDPOOL_BACKEND_HOST_PORT: '9018',
-      E2E_FEES_STUB_PORT: '9019',
+      E2E_ORDPOOL_BACKEND_HOST_PORT: '9019',
+      E2E_FEES_STUB_PORT: '9018',
       E2E_MARIADB_HOST_PORT: '3326',
       E2E_REDIS_HOST_PORT: '6399',
       E2E_HARNESS_PORT: '4520',
@@ -141,8 +142,8 @@ describe('regtestServiceUrls', () => {
       electrs: 'http://localhost:3030',
       ord: 'http://localhost:8100',
       ordStock: 'http://localhost:8101',
-      ordpoolBackend: 'http://localhost:9018',
-      feesStub: 'http://localhost:9019',
+      ordpoolBackend: 'http://localhost:9019',
+      feesStub: 'http://localhost:9018',
       harness: 'http://localhost:4520',
       app: 'http://localhost:4220',
       appBackend: 'http://localhost:10018',

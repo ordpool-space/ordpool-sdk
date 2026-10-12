@@ -293,7 +293,7 @@ services:
       # Only used by the backend's /api/* esplora-proxy middleware; harmless.
       - ESPLORA_REST_API_URL=http://electrs:3000
     ports:
-      - "${E2E_ORDPOOL_BACKEND_HOST_PORT:-8998}:8999"
+      - "${E2E_ORDPOOL_BACKEND_HOST_PORT:-8999}:8999"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS -o /dev/null http://127.0.0.1:8999/api/v1/backend-info || exit 1"]
       interval: 3s

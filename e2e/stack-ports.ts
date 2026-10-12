@@ -42,9 +42,10 @@ export type StackService =
  * Slot 0's host port per service: the ports a single CI runner publishes.
  *
  * - `ordpoolBackend` and `feesStub` are different services that both answered
- *   on 8999 by default. Consumer lanes run the fees stub there, so the stub
- *   keeps 8999 and the real ordpool backend (compose profile `ordpool-backend`)
- *   takes 8998: both can then run in one stack.
+ *   on 8999 by default. The real ordpool backend (compose profile
+ *   `ordpool-backend`) keeps 8999, the port cubes' regtest build compiles in;
+ *   the fees stub, which every consumer lane starts with an explicit `PORT`,
+ *   takes 8998. Both can then run in one stack.
  * - `app` is a consumer's static app server, `appBackend` its own backend
  *   process (cat21-indexer's NestJS). One value for every consumer, so two
  *   consumers' lanes in two slots never meet.
@@ -58,8 +59,8 @@ export const SLOT_PORT_BASES: Readonly<Record<StackService, number>> = {
   electrum: 50001,
   ord: 8080,
   ordStock: 8081,
-  ordpoolBackend: 8998,
-  feesStub: 8999,
+  ordpoolBackend: 8999,
+  feesStub: 8998,
   mariadb: 3306,
   redis: 6379,
   harness: 4500,

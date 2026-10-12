@@ -10,7 +10,7 @@ gives slot 0's.
 | (none) | `bitcoind`, `electrs` | 18443, 3010 | regtest node and our ordpool-electrs (Esplora API) |
 | `cat21-ord` | `ord` | 8080 | cat21-ord with `--index-cat21 --index-sats --index-addresses`: answers cats |
 | `ord-stock` | `ord-stock` | 8081 | the same binary without `--index-cat21`, with `--index-sats --index-runes --index-addresses`: answers inscriptions, runes and sat ranges |
-| `ordpool-backend` | `ordpool-backend` | 8998 | the real ordpool backend (`/content`, `/preview` decoded from bitcoind) |
+| `ordpool-backend` | `ordpool-backend` | 8999 | the real ordpool backend (`/content`, `/preview` decoded from bitcoind) |
 
 ```bash
 # a slot, the stack (both ords), the chain specs, the teardown, in one command:
@@ -153,7 +153,7 @@ answers come from a real ord synced to the regtest chain:
 
 ### `regtest/fees-electrs-stub.mjs` is not an ord
 
-The stub on `E2E_FEES_STUB_PORT` (slot 0: 8999) serves fees (`/api/v1/fees/recommended`, `/admin/fees`,
+The stub on `E2E_FEES_STUB_PORT` (slot 0: 8998) serves fees (`/api/v1/fees/recommended`, `/admin/fees`,
 `/admin/fees/reset`, and the mempool WebSocket on `/api/v1/ws` with
 `WS_ENABLED=1`), empty cat21-indexer bodies (`/api/status`,
 `/api/cats/numbers/:ipp/:p`, `/api/cats/:ipp/:p`), and proxies every other
