@@ -5,8 +5,8 @@ import {
   FundingRecommendation,
   recommendFunding,
   WalletAddressTopology,
-  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
+import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import { Network, toScureNetwork } from '../network.js';
@@ -317,8 +317,9 @@ export async function simulateMint(
 /**
  * Execute a mint end-to-end: select → fee → build → sign → broadcast. Creates a
  * fresh 546-sat cat at `recipientAddress`, funded by the safe-auto-selected coin
- * (or the explicit expert pick). Throws with a clear message when only asset
- * coins cover or nothing covers.
+ * (or the explicit expert pick). Throws `FundingBlockedError` (cause,
+ * recommended coin, named assets) when the recommendation is
+ * `expert-required`, and a plain `Error` when nothing covers.
  */
 export async function executeMint(
   params: MintCoreParams,
@@ -330,11 +331,12 @@ export async function executeMint(
   // refused the separate-payment-address auto-pick.
   const proceeds = plan.status === 'ready' || plan.status === 'asset-notice';
   if (!proceeds || !plan.pick || plan.buildFeeSats == null) {
+    if (plan.status === 'expert-required') {
+      throw new FundingBlockedError(plan.recommendation);
+    }
     throw new Error(
       plan.status === 'scanning'
         ? 'Still checking what the funding coins hold. Try again in a moment.'
-        : plan.status === 'expert-required'
-        ? expertRequiredMessage(plan.recommendation)
         : 'Insufficient funds for mint at the current fee rate',
     );
   }

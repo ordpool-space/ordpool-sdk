@@ -11,8 +11,8 @@ import {
   liftRecommendationByOutpoint,
   FundingTopologySetting,
   resolveFundingTopology,
-  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
+import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { CandidateFeeRow, outpointKey } from '../cat21-fee/candidate-fees.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { CAT21_POSTAGE_SATS } from '../cat21-protocol/cat21-postage.js';
@@ -342,11 +342,10 @@ export class Cat21MintOrchestrator {
     if (!wallet) throw new Error('No wallet connected');
     if (!feeRate) throw new Error('No fee rate set');
     if (!selected) {
-      throw new Error(
-        rec.status === 'expert-required'
-          ? expertRequiredMessage(rec)
-          : 'No UTXO selected',
-      );
+      if (rec.status === 'expert-required') {
+        throw new FundingBlockedError(rec);
+      }
+      throw new Error('No UTXO selected');
     }
 
     const paymentPublicKey = hex.decode(wallet.paymentPublicKey);

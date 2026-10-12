@@ -5,8 +5,8 @@ import {
   FundingRecommendation,
   recommendFunding,
   WalletAddressTopology,
-  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
+import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import {
   InscribeAndBroadcastArgs,
@@ -307,8 +307,9 @@ export async function simulateInscribe(
 /**
  * Execute an inscribe end-to-end: safe-auto funding selection, then the
  * commit+reveal engine (build both, collect the wallet's signature, validate
- * the pair and send it as one package). Throws when only asset coins cover
- * (`expert-required`) or nothing covers. `promptForSignedPsbt` is the
+ * the pair and send it as one package). Throws `FundingBlockedError`
+ * (cause, recommended coin, named assets) when the recommendation is
+ * `expert-required`, and a plain `Error` when nothing covers. `promptForSignedPsbt` is the
  * watch-only signing bridge (Promise form; adapted internally).
  */
 export async function executeInscribe(
@@ -327,11 +328,12 @@ export async function executeInscribe(
   // refused the separate-payment-address auto-pick.
   const proceeds = plan.status === 'ready' || plan.status === 'asset-notice';
   if (!proceeds || !plan.pick) {
+    if (plan.status === 'expert-required') {
+      throw new FundingBlockedError(plan.recommendation);
+    }
     throw new Error(
       plan.status === 'scanning'
         ? 'Still checking what the funding coins hold. Try again in a moment.'
-        : plan.status === 'expert-required'
-        ? expertRequiredMessage(plan.recommendation)
         : 'Insufficient funds for inscribe at the current fee rate',
     );
   }

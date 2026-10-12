@@ -298,11 +298,13 @@ export function expertRequiredCause(rec: {
 }
 
 /**
- * The error a flow throws when it stops on `expert-required` with no explicit
- * pick. It names the cause the recommendation carries (`expertRequiredCause`),
- * so a caller reading only the message (an agent, a log) learns the same fact
- * a warning shows: the covering coin's content is unknown, it carries assets
- * the scan could not name, or it carries named assets.
+ * The message of the `FundingBlockedError` a flow throws when it stops on
+ * `expert-required` with no explicit pick. It names the cause the
+ * recommendation carries (`expertRequiredCause`), so a caller reading only the
+ * message (a log, a toast) learns the same fact a warning shows: the covering
+ * coin's content is unknown, it carries assets the scan could not name, or it
+ * carries named assets. The error's typed fields carry the same fact plus the
+ * coin; a program branches on those, not on this text.
  * Every text starts with `Select a funding UTXO`, which consumers match on.
  */
 export function expertRequiredMessage(rec: {

@@ -9,8 +9,8 @@ import {
   liftRecommendationByOutpoint,
   FundingTopologySetting,
   resolveFundingTopology,
-  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
+import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import { Network } from '../network.js';
@@ -259,11 +259,10 @@ export class Cat21CreateOfferOrchestrator {
     const sim = this.snap.simulation;
     if (!params) throw new Error(this.missingInputError());
     if (!sim) {
-      throw new Error(
-        this.snap.fundingRecommendation.status === 'expert-required'
-          ? expertRequiredMessage(this.snap.fundingRecommendation)
-          : 'Insufficient funds for buy-offer at the current price + fee rate',
-      );
+      if (this.snap.fundingRecommendation.status === 'expert-required') {
+        throw new FundingBlockedError(this.snap.fundingRecommendation);
+      }
+      throw new Error('Insufficient funds for buy-offer at the current price + fee rate');
     }
 
     this.patch({ state: 'creating', errorMessage: null, bid: null });

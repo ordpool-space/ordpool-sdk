@@ -9,8 +9,8 @@ import {
   FundingRecommendation,
   FundingTopologySetting,
   resolveFundingTopology,
-  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
+import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { Network } from '../network.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
@@ -650,11 +650,10 @@ export class InscribeMintOrchestrator {
         'Choose the coin that holds the sat you want to inscribe on; the automatic choice would use a different coin.');
     }
     if (!selected) {
-      throw new Error(
-        rec.status === 'expert-required'
-          ? expertRequiredMessage(rec)
-          : 'No UTXO selected',
-      );
+      if (rec.status === 'expert-required') {
+        throw new FundingBlockedError(rec);
+      }
+      throw new Error('No UTXO selected');
     }
     if (!content && !batch) throw new Error('No inscription content set');
     if (batch) return this.mintBatch(wallet, feeRate, batch, selected, promptForSignedPsbt);

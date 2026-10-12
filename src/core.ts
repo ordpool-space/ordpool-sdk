@@ -131,6 +131,7 @@ export * from './cat21-fee/compute-psbt-vsize.helper.js';
 export * from './cat21-fee/min-relay-fee.js';
 export * from './cat21-fee/ord-coin-select.js';
 export * from './cat21-fee/funding-safety.js';
+export * from './cat21-fee/funding-blocked-error.js';
 export * from './cat21-fee/candidate-fees.js';
 export * from './wallet/wallet-identity.js';
 

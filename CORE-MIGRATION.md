@@ -36,6 +36,15 @@ The core exposes, per operation: `simulate(params)` (pure preview), and
 `selectFunding(utxos, targetSats, scanPort)` — the async, port-driven form of
 `FundingRecommendationService`, applying the pure `recommendFunding`.
 
+When the recommendation is `expert-required` and no explicit pick was passed,
+`execute` throws a `FundingBlockedError` (`isFundingBlockedError` checks it
+across realms) before anything is signed. It carries `cause`
+(`ExpertRequiredCause`), and `recommendation` with the recommended coin's
+outpoint, value, bucket and named assets plus every candidate, all plain JSON
+(`toJSON()`), so an agent receives the same facts a person's warning shows.
+Its `message` starts with `Select a funding UTXO`. Nothing covering, or a scan
+still running, throws a plain `Error` instead.
+
 ## Why async, not RxJS
 
 The core is a one-shot pipeline; `async`/Promise fits it and matches the

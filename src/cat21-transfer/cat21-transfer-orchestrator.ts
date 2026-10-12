@@ -14,8 +14,8 @@ import {
   liftRecommendationByOutpoint,
   FundingTopologySetting,
   resolveFundingTopology,
-  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
+import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import { Network } from '../network.js';
@@ -295,11 +295,10 @@ export class Cat21TransferOrchestrator {
     if (!recipient) throw new Error('No recipient address');
     if (!feeRate) throw new Error('No fee rate set');
     if (!sim) {
-      throw new Error(
-        this.snap.fundingRecommendation.status === 'expert-required'
-          ? expertRequiredMessage(this.snap.fundingRecommendation)
-          : 'Insufficient funds for transfer at the current fee rate',
-      );
+      if (this.snap.fundingRecommendation.status === 'expert-required') {
+        throw new FundingBlockedError(this.snap.fundingRecommendation);
+      }
+      throw new Error('Insufficient funds for transfer at the current fee rate');
     }
 
     this.patch({ state: 'transferring', errorMessage: null, successTxId: null });

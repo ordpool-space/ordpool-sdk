@@ -10,6 +10,7 @@
 export * from './coin-selection.helper.js';
 export * from './compute-psbt-vsize.helper.js';
 export * from './funding-safety.js';
+export * from './funding-blocked-error.js';
 export * from './min-relay-fee.js';
 export * from './ord-coin-select.js';
 export * from './resolve-cat-tx-fee.helper.js';

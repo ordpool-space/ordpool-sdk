@@ -5,8 +5,8 @@ import {
   FundingRecommendation,
   recommendFunding,
   WalletAddressTopology,
-  expertRequiredMessage,
 } from '../cat21-fee/funding-safety.js';
+import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -310,8 +310,9 @@ export async function simulateTransfer(
 /**
  * Execute a transfer end-to-end: select → fee → build → sign → broadcast. The
  * cat UTXO is preserved whole; the fee comes from the safe-auto-selected
- * funding coin (or the explicit expert pick). Throws with a clear message when
- * only asset coins cover (`expert-required`) or nothing covers.
+ * funding coin (or the explicit expert pick). Throws `FundingBlockedError`
+ * (cause, recommended coin, named assets) when the recommendation is
+ * `expert-required`, and a plain `Error` when nothing covers.
  */
 export async function executeTransfer(
   params: TransferCoreParams,
@@ -323,11 +324,12 @@ export async function executeTransfer(
   // refused the separate-payment-address auto-pick.
   const proceeds = plan.status === 'ready' || plan.status === 'asset-notice';
   if (!proceeds || !plan.pick || plan.buildFeeSats == null || plan.built == null) {
+    if (plan.status === 'expert-required') {
+      throw new FundingBlockedError(plan.recommendation);
+    }
     throw new Error(
       plan.status === 'scanning'
         ? 'Still checking what the funding coins hold. Try again in a moment.'
-        : plan.status === 'expert-required'
-        ? expertRequiredMessage(plan.recommendation)
         : 'Insufficient funds for transfer at the current fee rate',
     );
   }
