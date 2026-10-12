@@ -475,6 +475,13 @@ export class InscribeMintOrchestrator {
   // recompute whose captured seq is stale drops its result instead of
   // overwriting a newer snapshot (the plain-class replacement for switchMap).
   private recomputeSeq = 0;
+  /**
+   * The funding requirement the current `fundingRecommendation` was decided
+   * against, written in the same step. `mint()` resolves the pick with it, so
+   * the coin spent is the one the snapshot's verdict described. `null` when
+   * no requirement could be measured.
+   */
+  private fundingTarget: number | null = null;
   // Compressing is the expensive step, so each body's result is kept until the
   // body itself goes away: recompute runs on every fee-rate change and mint
   // needs the exact bytes the preview priced.
@@ -624,11 +631,12 @@ export class InscribeMintOrchestrator {
   }
 
   /**
-   * Execute the inscribe: pick (explicit override, else the safe auto-clean
-   * recommendation — never an asset coin unless the user chose it), then
-   * `inscribeAndBroadcast` (build commit + reveal, wallet-sign the commit's
-   * single funding input, broadcast both). Watch-only wallets bridge through
-   * `promptForSignedPsbt`.
+   * Execute the inscribe: pick via `resolveFundingPick` (the explicit override
+   * while it still covers, else the recommended coin on `auto` and on
+   * `asset-notice`, never an asset coin on `expert-required` unless the user
+   * chose it), then `inscribeAndBroadcast` (build commit + reveal,
+   * wallet-sign the commit's single funding input, broadcast both).
+   * Watch-only wallets bridge through `promptForSignedPsbt`.
    */
   async mint(
     promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Promise<string>,
@@ -638,12 +646,22 @@ export class InscribeMintOrchestrator {
     const content = this.snap.content;
     const batch = this.snap.batch;
     const rec = this.snap.fundingRecommendation;
-    const selected: TxnOutput | null =
-      this.snap.selectedUtxo ?? (rec.status === 'auto' ? rec.recommended : null);
+    // The same resolution as the snapshot's `resolvedFundingUtxo`, against the
+    // target of the recompute that produced `rec`, with the selection read
+    // now. On `asset-notice` that is the recommended asset coin, spent after
+    // the notice the enabled CTA carries. With no measured target (no content
+    // yet) there is no recommendation to fall back to, so only an explicit
+    // pick can stand.
+    const selected: TxnOutput | null = this.fundingTarget === null
+      ? this.snap.selectedUtxo
+      : resolveFundingPick(rec, this.fundingTarget, this.snap.selectedUtxo);
 
     if (!wallet) throw new Error('No wallet connected');
     if (!feeRate) throw new Error('No fee rate set');
-    if (content?.satTarget?.kind === 'in-funding' && this.snap.selectedUtxo === null) {
+    const satInSelected = content?.satTarget?.kind === 'in-funding';
+    const pickIsSelection = selected !== null && this.snap.selectedUtxo !== null
+      && selected.txid === this.snap.selectedUtxo.txid && selected.vout === this.snap.selectedUtxo.vout;
+    if (satInSelected && !pickIsSelection) {
       // The automatic pick would put the inscription on a sat of another coin.
       failInscribe('sat-utxo-must-be-selected',
         'Select the UTXO that holds the sat to inscribe onto (satOffset counts within it)',
@@ -930,6 +948,7 @@ export class InscribeMintOrchestrator {
       ? (resolvedFundingUtxo.bucket === 'clean' ? 'ready' : 'asset-notice')
       : fundingRecommendation.status === 'insufficient' ? 'insufficient'
       : fundingRecommendation.status === 'scanning' ? 'scanning' : 'expert-required';
+    this.fundingTarget = target;
     this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus });
   }
 
@@ -1018,6 +1037,7 @@ export class InscribeMintOrchestrator {
       ? (resolvedFundingUtxo.bucket === 'clean' ? 'ready' : 'asset-notice')
       : fundingRecommendation.status === 'insufficient' ? 'insufficient'
       : fundingRecommendation.status === 'scanning' ? 'scanning' : 'expert-required';
+    this.fundingTarget = target;
     this.patch({ simulations, fundingRecommendation, resolvedFundingUtxo, resolvedFundingStatus });
   }
 

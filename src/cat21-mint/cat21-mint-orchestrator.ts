@@ -3,7 +3,7 @@ import { hex } from '@scure/base';
 
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
 import { MintCoreParams, simulateMint, MintStatus } from '../cat21-core/mint.core.js';
-import { DroppedSelection } from '../cat21-core/select-funding.js';
+import { DroppedSelection, resolveFundingPick } from '../cat21-core/select-funding.js';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
@@ -324,11 +324,12 @@ export class Cat21MintOrchestrator {
   }
 
   /**
-   * Execute the mint: pick (explicit override, else the safe auto-clean
-   * recommendation — never an asset coin unless the user chose it), two-pass
-   * fee, build, and sign+broadcast via the wallet's internal signer. Browser
-   * wallets sign-and-broadcast in one call; watch-only wallets bridge through
-   * `promptForSignedPsbt`.
+   * Execute the mint: pick via `resolveFundingPick` (the explicit override
+   * while it still covers, else the recommended coin on `auto` and on
+   * `asset-notice`, never an asset coin on `expert-required` unless the user
+   * chose it), two-pass fee, build, and sign+broadcast via the wallet's
+   * internal signer. Browser wallets sign-and-broadcast in one call;
+   * watch-only wallets bridge through `promptForSignedPsbt`.
    */
   async mint(
     promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Promise<string>,
@@ -336,8 +337,14 @@ export class Cat21MintOrchestrator {
     const wallet = this.wallet;
     const feeRate = this.snap.feeRate;
     const rec = this.snap.fundingRecommendation;
-    const selected: TxnOutput | null =
-      this.snap.selectedUtxo ?? (rec.status === 'auto' ? rec.recommended : null);
+    // The same resolution the core and the snapshot's `resolvedFundingUtxo`
+    // use, so the coin spent is the coin the enabled CTA promised. On
+    // `asset-notice` that is the recommended asset coin, spent after the notice.
+    const selected: TxnOutput | null = resolveFundingPick(
+      rec,
+      this.snap.fundingRequirementSats,
+      this.snap.selectedUtxo,
+    );
 
     if (!wallet) throw new Error('No wallet connected');
     if (!feeRate) throw new Error('No fee rate set');
