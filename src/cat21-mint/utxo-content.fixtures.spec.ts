@@ -65,7 +65,8 @@ describe('canonical /output fixtures classify the way their names claim', () => 
 
     // The full ord half is indexed (it has ranges and no explicit false), yet
     // the coin is unknown because cat21-ord lags. A classifier that derived
-    // `indexed` from the full ord alone would call this clean and burn a cat.
+    // `indexed` from the full ord alone would call this clean, and the cat on
+    // it would be spent for fees.
     expect(c.indexed).toBe(false);
     expect(c.clean).toBe(false);
     expect(c.catIds).toEqual([]);

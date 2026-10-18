@@ -103,8 +103,8 @@ export function notIndexedOutputFixture(): OutputFixture {
  * nothing, but cat21-ord is still behind: a cat that just landed is really
  * there, cat21-ord has not caught up, so its `cats` is empty and its index
  * flag is false. A classifier that only checked the full ord would call this
- * clean and burn the cat. Proves the classifier fails CLOSED on cat21-ord's
- * own lag, not just the full ord's.
+ * clean, and the cat on it would be spent for fees. Proves the classifier
+ * fails CLOSED on cat21-ord's own lag, not just the full ord's.
  */
 export function cat21LaggingOutputFixture(): OutputFixture {
   return {
