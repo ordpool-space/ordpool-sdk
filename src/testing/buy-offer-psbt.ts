@@ -2,6 +2,8 @@ import { schnorr, secp256k1 } from '@noble/curves/secp256k1';
 import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
+import type { OfferPrevouts } from '../cat21-offer/verify-offer-input-signatures.js';
+
 /**
  * Signed buy-offer PSBTs for specs, in the shape a buyer's wallet hands one to
  * a seller: input 0 is the seller's cat UTXO (unsigned), inputs 1..N are the
@@ -85,8 +87,17 @@ const DEFAULT_CHANGE_SATS = 40_000;
 const DEFAULT_FUNDING_HEADROOM_SATS = 50_000;
 const DEFAULT_PRICE_SATS = 21_000;
 
-/** Build and buyer-sign a buy-offer PSBT. Returns it as base64 and as bytes. */
-export function buildSignedTestBuyOffer(opts: TestBuyOfferOptions): { base64: string; bytes: Uint8Array } {
+/**
+ * Build and buyer-sign a buy-offer PSBT. Returns it as base64 and as bytes,
+ * plus the `prevouts` map it signed over (every input's true script + amount,
+ * keyed `"<txid>:<vout>"`). A consumer verifying the crypto gate feeds that map
+ * to its electrs double so a genuine offer passes and only tampering fails; it
+ * is the authoritative prevout set because the builder is what chose the
+ * scripts and amounts the signatures commit to.
+ */
+export function buildSignedTestBuyOffer(
+  opts: TestBuyOfferOptions,
+): { base64: string; bytes: Uint8Array; prevouts: OfferPrevouts } {
   const priceSats = opts.priceSats ?? DEFAULT_PRICE_SATS;
   const catValue = opts.sellerUtxo.value;
   const buyerFunding = opts.buyerFunding ?? [
@@ -125,5 +136,21 @@ export function buildSignedTestBuyOffer(opts: TestBuyOfferOptions): { base64: st
     tx.signIdx(BUYER_PAYMENT_KEY, i, [sighash]);
   }
   const bytes = tx.toPSBT();
-  return { base64: base64.encode(bytes), bytes };
+
+  // The prevouts the signatures commit to: input 0 is the seller cat, 1..N the
+  // buyer funding coins. Exactly the scripts/amounts set as each input's
+  // witnessUtxo above, so a verifier fed this map accepts the genuine offer.
+  const prevouts: OfferPrevouts = new Map();
+  prevouts.set(`${opts.sellerUtxo.txid}:${opts.sellerUtxo.vout}`, {
+    script: opts.sellerOrdinalsScript ?? sellerOrdinals.script,
+    amountSats: catValue,
+  });
+  for (const coin of buyerFunding) {
+    prevouts.set(`${coin.txid}:${coin.vout}`, {
+      script: buyerPayment.script,
+      amountSats: coin.value,
+    });
+  }
+
+  return { base64: base64.encode(bytes), bytes, prevouts };
 }
