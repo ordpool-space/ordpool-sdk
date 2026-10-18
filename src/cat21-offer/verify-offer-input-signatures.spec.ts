@@ -86,19 +86,19 @@ function signedOffer(buyerKind: 'tr' | 'wpkh'): { tx: btc.Transaction; prevouts:
 describe('verifyOfferInputSignatures', () => {
   it('accepts a genuine Taproot (schnorr) buyer signature', () => {
     const { tx, prevouts } = signedOffer('tr');
-    expect(verifyOfferInputSignatures(tx, prevouts)).toEqual({ ok: true });
+    expect(verifyOfferInputSignatures(tx.toPSBT(), prevouts)).toEqual({ ok: true });
   });
 
   it('accepts a genuine P2WPKH (ECDSA) buyer signature', () => {
     const { tx, prevouts } = signedOffer('wpkh');
-    expect(verifyOfferInputSignatures(tx, prevouts)).toEqual({ ok: true });
+    expect(verifyOfferInputSignatures(tx.toPSBT(), prevouts)).toEqual({ ok: true });
   });
 
   it('rejects random bytes passed off as a Taproot signature', () => {
     const { tx, prevouts } = signedOffer('tr');
     // Overwrite the real tapKeySig with 64 random-looking bytes.
     tx.updateInput(1, { tapKeySig: hex.decode('cd'.repeat(64)) }, true);
-    const r = verifyOfferInputSignatures(tx, prevouts);
+    const r = verifyOfferInputSignatures(tx.toPSBT(), prevouts);
     expect(r.ok).toBe(false);
     expect(r).toMatchObject({ reason: 'signature-invalid', inputIndex: 1 });
   });
@@ -108,7 +108,7 @@ describe('verifyOfferInputSignatures', () => {
     // Chain says the funding coin is 200_000; claim it is 100 BTC.
     const lying: OfferPrevouts = new Map(prevouts);
     lying.set(key(FUND_TXID, 0), { script: buyerTr.script, amountSats: 10_000_000_000 });
-    const r = verifyOfferInputSignatures(tx, lying);
+    const r = verifyOfferInputSignatures(tx.toPSBT(), lying);
     expect(r.ok).toBe(false);
     expect(r).toMatchObject({ reason: 'prevout-amount-mismatch', inputIndex: 1 });
   });
@@ -117,7 +117,7 @@ describe('verifyOfferInputSignatures', () => {
     const { tx, prevouts } = signedOffer('tr');
     const wrong: OfferPrevouts = new Map(prevouts);
     wrong.set(key(FUND_TXID, 0), { script: sellerTr.script, amountSats: FUND_SATS });
-    const r = verifyOfferInputSignatures(tx, wrong);
+    const r = verifyOfferInputSignatures(tx.toPSBT(), wrong);
     expect(r.ok).toBe(false);
     expect(r).toMatchObject({ reason: 'prevout-script-mismatch', inputIndex: 1 });
   });
@@ -126,7 +126,7 @@ describe('verifyOfferInputSignatures', () => {
     const { tx, prevouts } = signedOffer('tr');
     const missing: OfferPrevouts = new Map(prevouts);
     missing.delete(key(CAT_TXID, 0)); // drop the seller input 0 prevout
-    const r = verifyOfferInputSignatures(tx, missing);
+    const r = verifyOfferInputSignatures(tx.toPSBT(), missing);
     expect(r.ok).toBe(false);
     expect(r).toMatchObject({ reason: 'prevout-missing', inputIndex: 0 });
   });
@@ -135,7 +135,7 @@ describe('verifyOfferInputSignatures', () => {
     const { tx, prevouts } = signedOffer('tr');
     // Rewrite the seller payment output from 100_000 to 1_000 after signing.
     tx.updateOutput(1, { amount: BigInt(1_000) }, true);
-    const r = verifyOfferInputSignatures(tx, prevouts);
+    const r = verifyOfferInputSignatures(tx.toPSBT(), prevouts);
     expect(r.ok).toBe(false);
     expect(r).toMatchObject({ reason: 'signature-invalid', inputIndex: 1 });
   });

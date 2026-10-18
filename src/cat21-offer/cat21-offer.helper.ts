@@ -636,7 +636,7 @@ export function validateCat21BuyOfferPsbt(
   //    can carry random bytes as its signature and a lied-about input value,
   //    pass every structural gate, and pollute or overwrite the orderbook.
   if (args.prevouts !== undefined) {
-    const sigResult = verifyOfferInputSignatures(tx, args.prevouts);
+    const sigResult = verifyOfferInputSignatures(args.psbt, args.prevouts);
     if (!sigResult.ok) {
       return fail(sigResult.reason, `input ${sigResult.inputIndex}: ${sigResult.detail}`);
     }

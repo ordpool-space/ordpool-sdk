@@ -91,17 +91,29 @@ function fail(
 }
 
 /**
- * Verify every signed input of a buy-offer transaction against the supplied
- * chain prevouts. Returns `{ ok: true }` only when every input's witnessUtxo
- * matches the chain AND every present signature verifies.
+ * Verify every signed input of a buy-offer PSBT against the supplied chain
+ * prevouts. Returns `{ ok: true }` only when every input's witnessUtxo matches
+ * the chain AND every present signature verifies.
  *
- * @param tx       a parsed buy-offer PSBT (`btc.Transaction.fromPSBT`)
+ * Takes the PSBT BYTES, not a parsed `Transaction`, for the same reason
+ * `validateCat21BuyOfferPsbt` does: a `btc.Transaction` in the signature would
+ * cross the package boundary and a consumer whose `@scure/btc-signer` resolves
+ * to a different subpath hits a nominal-type clash on the class's private
+ * fields. Bytes have no such identity.
+ *
+ * @param psbt     the buy-offer PSBT bytes
  * @param prevouts the TRUE prevouts for all inputs, keyed `"<txid>:<vout>"`
  */
 export function verifyOfferInputSignatures(
-  tx: btc.Transaction,
+  psbt: Uint8Array,
   prevouts: OfferPrevouts,
 ): OfferSignatureVerification {
+  let tx: btc.Transaction;
+  try {
+    tx = btc.Transaction.fromPSBT(psbt);
+  } catch (err) {
+    return fail('signature-invalid', `PSBT parse failed: ${err instanceof Error ? err.message : String(err)}`, -1);
+  }
   const n = tx.inputsLength;
 
   // Build the per-input prevout script/amount arrays the v1 (taproot) sighash
