@@ -15,7 +15,11 @@ const CAT21ORD = 'https://ord.cat21.space';
 const CONFIG = { esploraApiUrl: ESPLORA, ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD };
 
 const CLEAN_OUTPUT = { inscriptions: [], runes: null, sat_ranges: [[1_000_000_000, 1_000_000_010]] };
-const NO_CATS = { cats: [], sat_ranges: [] };
+// cat21-ord's /output for a coin holding no cat. A caught-up cat21-ord runs
+// `--index-sats`, so it returns the same ranges the full ord does; EMPTY ranges
+// would signal a lagging index, which the classifier treats as unknown (and
+// excludes from funds), not clean.
+const NO_CATS = { cats: [], sat_ranges: [[1_000_000_000, 1_000_000_010]] };
 
 /** Drive the whole probe with a per-URL handler. */
 function mockFetch(handler: (url: string) => { body: unknown; status?: number }) {

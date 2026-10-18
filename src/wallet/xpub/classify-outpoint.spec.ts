@@ -29,7 +29,7 @@ describe('classifyOutpoint', () => {
   it('is clean when neither ord reports any content (mid-block range, no assets)', async () => {
     routeFetch(
       { inscriptions: [], runes: null, sat_ranges: [[1_000_000_000, 1_000_000_010]] },
-      { cats: [], sat_ranges: [] },
+      { cats: [], sat_ranges: [[1_000_000_000, 1_000_000_010]] },
     );
 
     const c = await classifyOutpoint(OUTPOINT, { ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD });
@@ -44,7 +44,7 @@ describe('classifyOutpoint', () => {
   it('is NOT clean when the full ord reports an inscription', async () => {
     routeFetch(
       { inscriptions: ['bb'.repeat(32) + 'i0'], runes: null, sat_ranges: [[1_000_000_000, 1_000_000_010]] },
-      { cats: [], sat_ranges: [] },
+      { cats: [], sat_ranges: [[1_000_000_000, 1_000_000_010]] },
     );
 
     const c = await classifyOutpoint(OUTPOINT, { ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD });
@@ -69,7 +69,7 @@ describe('classifyOutpoint', () => {
   it('is NOT clean when the range holds a rare sat (sat 0 = mythic)', async () => {
     routeFetch(
       { inscriptions: [], runes: null, sat_ranges: [[0, 1]] },
-      { cats: [], sat_ranges: [] },
+      { cats: [], sat_ranges: [[1_000_000_000, 1_000_000_010]] },
     );
 
     const c = await classifyOutpoint(OUTPOINT, { ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD });
@@ -81,7 +81,7 @@ describe('classifyOutpoint', () => {
   it('is NOT clean when a rune is present', async () => {
     routeFetch(
       { inscriptions: [], runes: { 'UNCOMMON•GOODS': { amount: '1' } }, sat_ranges: [[1_000_000_000, 1_000_000_010]] },
-      { cats: [], sat_ranges: [] },
+      { cats: [], sat_ranges: [[1_000_000_000, 1_000_000_010]] },
     );
 
     const c = await classifyOutpoint(OUTPOINT, { ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD });
@@ -93,7 +93,7 @@ describe('classifyOutpoint', () => {
   it('requests /output with Accept: application/json from both ords', async () => {
     const spy = routeFetch(
       { inscriptions: [], runes: null, sat_ranges: [] },
-      { cats: [], sat_ranges: [] },
+      { cats: [], sat_ranges: [[1_000_000_000, 1_000_000_010]] },
     );
 
     await classifyOutpoint(OUTPOINT, { ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD });

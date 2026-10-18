@@ -28,12 +28,13 @@ export interface UtxoContentClassification {
   /** No inscription, rune, cat, or rare sat: safe to spend as funding. */
   clean: boolean;
   /**
-   * Whether the full ord has actually INDEXED this output.
-   *
-   * ord answers 200 with empty fields for an output whose block it has not
-   * finished indexing, which is byte-identical to its answer for an output
-   * that genuinely carries nothing. Absence of data is not absence of assets,
-   * and reading it as `clean` spends the coin.
+   * Whether BOTH indexes have actually INDEXED this output: the full ord
+   * (inscriptions, runes, rare sats) and cat21-ord (cats). Each answers 200
+   * with empty fields for an output whose block it has not finished indexing,
+   * byte-identical to its answer for an output that genuinely carries nothing.
+   * The two lag independently, so either one being behind makes the content
+   * unknown. Absence of data is not absence of assets, and reading it as
+   * `clean` spends the coin.
    */
   indexed: boolean;
   inscriptionIds: string[];
@@ -57,13 +58,20 @@ export function classifyUtxoContent(
   const catIds = cat21Ord.cats ?? [];
   const rareSat = detectRareSat(ord.sat_ranges);
 
-  // Every output ord has indexed carries sat ranges, because the scanner
-  // requires an ord running `--index-sats` (rare-sat detection depends on it).
-  // So empty ranges mean one of two things, and both must fail CLOSED: ord has
-  // not indexed this output yet, or it is running without `--index-sats` and
-  // cannot answer the question at all. Treating either as "no assets here" is
-  // how a freshly-confirmed inscription gets spent for fees.
-  const indexed = (ord.sat_ranges?.length ?? 0) > 0;
+  // Two SEPARATE indexes answer this question, and a coin is only safe to
+  // spend once BOTH have caught up to the output. The full ord knows
+  // inscriptions, runes and rare sats; cat21-ord knows cats. Either can lag
+  // behind the other after a restart or reindex, and a lagging index answers
+  // 200 with empty fields that are byte-identical to a genuinely empty output.
+  // So `indexed` fails CLOSED per instance: an instance counts as indexed only
+  // when it did not explicitly say `indexed: false` AND it returned sat ranges
+  // (every output a `--index-sats` ord has processed carries ranges; empty
+  // ranges mean "not caught up" or "running without --index-sats", never "no
+  // assets"). Reading a lagging cat21-ord's empty `cats` as clean is how a
+  // freshly-confirmed cat on a single-address wallet gets spent for fees.
+  const ordIndexed = ord.indexed !== false && (ord.sat_ranges?.length ?? 0) > 0;
+  const cat21Indexed = cat21Ord.indexed !== false && (cat21Ord.sat_ranges?.length ?? 0) > 0;
+  const indexed = ordIndexed && cat21Indexed;
 
   const clean = indexed && inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat;
 

@@ -28,6 +28,14 @@ import type { SatRarity } from './sat-rarity.helper.js';
 export interface OrdOutputResponse {
   /** The address the output sits at. */
   address?: string;
+  /**
+   * ord's own "have I processed the block this output is in" flag. `false`
+   * means ord answered 200 for an output it has not indexed yet, so its empty
+   * `inscriptions` / `runes` / `sat_ranges` are "no answer", not "no assets".
+   * Absent on older or captured responses: the classifier then falls back to
+   * the sat-range presence check, never reads absence as indexed.
+   */
+  indexed?: boolean;
   inscriptions?: string[];
   runes?: { [runeName: string]: unknown } | null;
   sat_ranges?: ReadonlyArray<readonly [number, number]>;
@@ -41,6 +49,17 @@ export interface OrdOutputResponse {
  */
 export interface Cat21OrdOutputResponse {
   cats?: string[];
+  /**
+   * cat21-ord's own index flag, a SEPARATE process from the full ord that can
+   * lag independently after a restart or reindex. `false` means it answered
+   * 200 for an output it has not caught up to, so its empty `cats` is "don't
+   * know yet", not "no cat here". A cat that just landed on a single-address
+   * wallet reads as a clean funding coin and gets spent for fees while this
+   * instance is behind, unless the classifier treats `indexed: false` as a
+   * failed scan. Absent on older or captured responses: the classifier falls
+   * back to the sat-range presence check.
+   */
+  indexed?: boolean;
   /**
    * cat21-ord runs with `--index-sats`, so its `/output` carries the same
    * `sat_ranges` a full ord does. This is the AUTHORITATIVE source for a

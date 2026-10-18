@@ -1,5 +1,6 @@
 import { classifyUtxoContent } from './utxo-content.classify.js';
 import {
+  cat21LaggingOutputFixture,
   catOutputFixture,
   cleanOutputFixture,
   inscribedOutputFixture,
@@ -56,5 +57,17 @@ describe('canonical /output fixtures classify the way their names claim', () => 
     expect(c.catIds).toEqual([]);
     expect(c.runes).toBeNull();
     expect(c.rareSat).toBeNull();
+  });
+
+  it('cat21LaggingOutputFixture is NOT indexed and NOT clean, though the full ord is caught up', () => {
+    const { ord, cat21Ord } = cat21LaggingOutputFixture();
+    const c = classifyUtxoContent(ord, cat21Ord);
+
+    // The full ord half is indexed (it has ranges and no explicit false), yet
+    // the coin is unknown because cat21-ord lags. A classifier that derived
+    // `indexed` from the full ord alone would call this clean and burn a cat.
+    expect(c.indexed).toBe(false);
+    expect(c.clean).toBe(false);
+    expect(c.catIds).toEqual([]);
   });
 });

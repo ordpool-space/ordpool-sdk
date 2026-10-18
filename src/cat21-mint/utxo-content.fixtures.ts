@@ -27,12 +27,16 @@ import {
 /** A mid-block sat range: real-looking, and definitively common. */
 const COMMON_RANGE: ReadonlyArray<readonly [number, number]> = [[1_002_000_000_001, 1_002_000_000_101]];
 
-/** Every fixture carries ranges, because an output with none reads as NOT INDEXED. */
+/**
+ * Every fixture carries `indexed: true` and ranges, because an output missing
+ * either reads as NOT INDEXED. Both mirror a real `/output` response from an
+ * instance that has caught up to the block.
+ */
 function base(over: Partial<OrdOutputResponse> = {}): OrdOutputResponse {
-  return { inscriptions: [], runes: null, sat_ranges: COMMON_RANGE, ...over };
+  return { indexed: true, inscriptions: [], runes: null, sat_ranges: COMMON_RANGE, ...over };
 }
 function cat21Base(over: Partial<Cat21OrdOutputResponse> = {}): Cat21OrdOutputResponse {
-  return { cats: [], sat_ranges: COMMON_RANGE, ...over };
+  return { indexed: true, cats: [], sat_ranges: COMMON_RANGE, ...over };
 }
 
 /** The pair of responses the scanner fetches for one outpoint. */
@@ -82,14 +86,29 @@ export function rareSatOutputFixture(): OutputFixture {
 }
 
 /**
- * An output ord has NOT indexed: 200 with empty fields.
+ * An output neither ord has indexed: 200 with empty fields from both.
  *
  * Byte-identical to a genuinely empty output, which is exactly why the
  * classifier cannot read it as clean. Use it to prove a consumer fails CLOSED.
  */
 export function notIndexedOutputFixture(): OutputFixture {
   return {
-    ord: { inscriptions: [], runes: null, sat_ranges: [] },
-    cat21Ord: { cats: [], sat_ranges: [] },
+    ord: { indexed: false, inscriptions: [], runes: null, sat_ranges: [] },
+    cat21Ord: { indexed: false, cats: [], sat_ranges: [] },
+  };
+}
+
+/**
+ * The dangerous case where the full ord HAS indexed the output and sees
+ * nothing, but cat21-ord is still behind: a cat that just landed is really
+ * there, cat21-ord has not caught up, so its `cats` is empty and its index
+ * flag is false. A classifier that only checked the full ord would call this
+ * clean and burn the cat. Proves the classifier fails CLOSED on cat21-ord's
+ * own lag, not just the full ord's.
+ */
+export function cat21LaggingOutputFixture(): OutputFixture {
+  return {
+    ord: base(),
+    cat21Ord: { indexed: false, cats: [], sat_ranges: [] },
   };
 }

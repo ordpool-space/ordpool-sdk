@@ -69,6 +69,45 @@ describe('classifyUtxoContent — the content-safety gate', () => {
       expect(c.clean).toBe(true);
     });
   });
+
+  // The two indexes lag INDEPENDENTLY. The full ord can be caught up while
+  // cat21-ord is still behind after a restart or reindex, and vice versa. A
+  // classifier that derived `indexed` from the full ord alone would call a coin
+  // carrying a just-landed cat clean, because cat21-ord has not reported the
+  // cat yet. Both halves must be caught up for the coin to be spendable.
+  describe('a lagging cat21-ord is never clean, even when the full ord is caught up', () => {
+
+    it('full ord indexed + empty, cat21-ord indexed:false => NOT clean (the A10 cat-burn shape)', () => {
+      // The load-bearing case. A cat just landed on this output; cat21-ord has
+      // not caught up, so its `cats` is empty and its index flag is false. The
+      // full ord (no cat index) sees nothing either way. Reading this as clean
+      // spends the cat for fees.
+      const c = classifyUtxoContent(ord(), cat21({ indexed: false, cats: [], sat_ranges: [] }));
+
+      expect(c.indexed).toBe(false);
+      expect(c.clean).toBe(false);
+    });
+
+    it('cat21-ord indexed + empty, full ord indexed:false => NOT clean (symmetry)', () => {
+      const c = classifyUtxoContent(ord({ indexed: false, sat_ranges: [] }), cat21());
+
+      expect(c.indexed).toBe(false);
+      expect(c.clean).toBe(false);
+    });
+
+    it.each([
+      ['cat21-ord', () => classifyUtxoContent(ord(), cat21({ indexed: false }))],
+      ['the full ord', () => classifyUtxoContent(ord({ indexed: false }), cat21())],
+    ])('an explicit indexed:false from %s vetoes even with sat_ranges present', (_who, run) => {
+      // The flag alone can fail the coin: an instance that returns ranges but
+      // still says indexed:false is not caught up, and the ranges do not
+      // override that.
+      const c = run();
+
+      expect(c.indexed).toBe(false);
+      expect(c.clean).toBe(false);
+    });
+  });
   it('CLEAN: no inscription, rune, cat, or rare sat → clean, everything empty', () => {
     const r = classifyUtxoContent(ord(), cat21());
     expect(r.clean).toBe(true);
