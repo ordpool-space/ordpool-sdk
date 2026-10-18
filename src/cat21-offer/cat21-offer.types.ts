@@ -88,7 +88,16 @@ export type Cat21OfferRejectionReason =
   | 'payment-output-wrong-address'
   | 'cat-output-not-spendable'
   | 'cat-output-wrong-address'
-  | 'change-output-wrong-address';
+  | 'change-output-wrong-address'
+  // Cryptographic checks, only run when `prevouts` is supplied (see
+  // verify-offer-input-signatures.ts). A structural pass proves a signature is
+  // PRESENT; these prove it is REAL and spends the coin it claims to.
+  | 'prevout-missing'
+  | 'prevout-script-mismatch'
+  | 'prevout-amount-mismatch'
+  | 'unsupported-input-type'
+  | 'signature-missing'
+  | 'signature-invalid';
 
 export interface Cat21OfferValidationResult {
   ok: true;

@@ -17,6 +17,10 @@ import {
   Cat21OfferSellerInput,
   Cat21OfferValidation,
 } from './cat21-offer.types.js';
+import {
+  OfferPrevouts,
+  verifyOfferInputSignatures,
+} from './verify-offer-input-signatures.js';
 
 /**
  * Arguments for `buildCat21BuyOfferPsbt`.
@@ -280,6 +284,17 @@ export interface ValidateCat21BuyOfferArgs {
    * declared a specific price and any deviation is signature drift.
    */
   expectedExactPrice?: number;
+  /**
+   * Optional. The TRUE prevouts for every input, keyed `"<txid>:<vout>"`,
+   * fetched from the chain by the caller (electrs), never trusted from the
+   * PSBT. When supplied, the validator pins each input's witnessUtxo to the
+   * chain and CRYPTOGRAPHICALLY verifies every buyer signature against the
+   * real sighash (see `verifyOfferInputSignatures`). Without it the validator
+   * does structural checks only — a signature is proven present, not real.
+   * A marketplace that INDEXES untrusted bids must supply it; a seller-side
+   * caller signing their own device's inbound offer MAY omit it.
+   */
+  prevouts?: OfferPrevouts;
 }
 
 /**
@@ -610,6 +625,20 @@ export function validateCat21BuyOfferPsbt(
         'change-output-wrong-address',
         `expected ${args.expectedBuyerChangeAddress}, got ${changeAddress}`,
       );
+    }
+  }
+
+  // 8. Cryptographic verification. Only when the caller supplied the chain
+  //    prevouts: pin every input's witnessUtxo to the chain and verify every
+  //    buyer signature against the real BIP-143/341 sighash. This is what
+  //    turns "a signature is present" (all the structural checks above) into
+  //    "the signature is real and spends the coin it names" — without it a bid
+  //    can carry random bytes as its signature and a lied-about input value,
+  //    pass every structural gate, and pollute or overwrite the orderbook.
+  if (args.prevouts !== undefined) {
+    const sigResult = verifyOfferInputSignatures(tx, args.prevouts);
+    if (!sigResult.ok) {
+      return fail(sigResult.reason, `input ${sigResult.inputIndex}: ${sigResult.detail}`);
     }
   }
 

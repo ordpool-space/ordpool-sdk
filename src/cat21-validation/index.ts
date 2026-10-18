@@ -21,6 +21,18 @@ export {
   validateCat21BuyOfferPsbt,
 } from '../cat21-offer/cat21-offer.helper.js';
 
+// Cryptographic buy-offer signature verification + its prevout-map types. A
+// marketplace indexing untrusted bids passes the chain prevouts to the
+// validator via `prevouts`; this is what proves a bid's signatures are real.
+// Crypto only (@noble + @scure), no connector graph.
+export {
+  verifyOfferInputSignatures,
+  type OfferPrevout,
+  type OfferPrevouts,
+  type OfferSignatureRejectionReason,
+  type OfferSignatureVerification,
+} from '../cat21-offer/verify-offer-input-signatures.js';
+
 // Proof that a message came from the address that claims it. Crypto only.
 export { verifyBip322Signature } from '../wallet/verify-bip322-signature.js';
 
