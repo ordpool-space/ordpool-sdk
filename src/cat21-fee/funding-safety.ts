@@ -346,3 +346,16 @@ export function liftRecommendationByOutpoint<
     candidates: rec.candidates.map(lift).filter((x): x is T & AnnotatedFundingUtxo => x !== null),
   };
 }
+
+/**
+ * The "no answer yet" recommendation: `scanning`, never `insufficient` (that is
+ * a measured verdict). Shared by every orchestrator's initial snapshot.
+ */
+export function emptyRecommendation<T extends AnnotatedFundingUtxo = AnnotatedFundingUtxo>(): FundingRecommendation<T> {
+  return { status: 'scanning', recommended: null, candidates: [] };
+}
+
+/** The funding set was READ and holds nothing that can cover the action. */
+export function insufficientRecommendation<T extends AnnotatedFundingUtxo = AnnotatedFundingUtxo>(): FundingRecommendation<T> {
+  return { status: 'insufficient', recommended: null, candidates: [] };
+}

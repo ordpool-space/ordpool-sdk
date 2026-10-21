@@ -4,10 +4,12 @@ import { base64, hex } from '@scure/base';
 import { buildOffer, CreateOfferCoreParams, CreateOfferStatus, simulateCreateOffer } from '../cat21-core/create-offer.core.js';
 import { DroppedSelection } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { makeUtxosPort, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
+import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
 import {
   AnnotatedFundingUtxo,
+  emptyRecommendation,
   FundingRecommendation,
+  insufficientRecommendation,
   liftRecommendationByOutpoint,
   FundingTopologySetting,
   resolveFundingTopology,
@@ -124,31 +126,16 @@ export interface CreateOfferSnapshot {
   errorMessage: string | null;
 }
 
-/** No answer yet. `scanning`, never `insufficient`: that is a measured verdict. */
-const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'scanning',
-  recommended: null,
-  candidates: [],
-};
-
-/** The funding set was READ and holds nothing. */
-const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'insufficient',
-  recommended: null,
-  candidates: [],
-};
-
-/**
- * Same coin? `setSelectedFundingUtxo` recomputes, so re-applying an unchanged
- * selection would loop a consumer that re-drives it from the snapshot.
- * Outpoint only: a refreshed row for the same coin is not a change.
- */
-function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
-  if (a === null || b === null) return a === b;
-  return a.txid === b.txid && a.vout === b.vout;
-}
+const EMPTY_RECOMMENDATION = emptyRecommendation<TxnOutput & AnnotatedFundingUtxo>();
+const INSUFFICIENT_RECOMMENDATION = insufficientRecommendation<TxnOutput & AnnotatedFundingUtxo>();
 
 export class Cat21CreateOfferOrchestrator {
+  /* jscpd:ignore-start -- per-operation orchestrator state and operational body, deliberately
+     mirrored across the mint / transfer / offer / inscribe orchestrators: the same shape of
+     held state plus setters, setWallet / loadUtxos, recompute and the operation method, each
+     driving its own per-operation snapshot and core flow (offer derives its fee from
+     changeSats, a distinct shape). Per the typed-triple rule these are parallel public
+     surfaces, not a shared base. The shared reactive plumbing is in orchestrator-support. */
   private wallet: CreateOfferWalletContext | null = null;
   private utxos: TxnOutput[] = [];
   /** True once `utxos` holds a completed read. An unread set is also `[]`, and only a read one can be called empty. */
@@ -422,6 +409,8 @@ export class Cat21CreateOfferOrchestrator {
   private utxosPort() {
     return makeUtxosPort(this.utxos);
   }
+
+  /* jscpd:ignore-end */
 
   private patch(next: Partial<CreateOfferSnapshot>): void {
     this.store.patch(next);

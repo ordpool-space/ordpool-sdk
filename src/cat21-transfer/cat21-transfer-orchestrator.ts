@@ -10,10 +10,12 @@ import {
 } from '../cat21-core/transfer.core.js';
 import { DroppedSelection } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { makeUtxosPort, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
+import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
 import {
   AnnotatedFundingUtxo,
+  emptyRecommendation,
   FundingRecommendation,
+  insufficientRecommendation,
   liftRecommendationByOutpoint,
   FundingTopologySetting,
   resolveFundingTopology,
@@ -135,31 +137,17 @@ export interface TransferSnapshot {
   successTxId: string | null;
 }
 
-/** No answer yet. `scanning`, never `insufficient`: that is a measured verdict. */
-const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'scanning',
-  recommended: null,
-  candidates: [],
-};
-
-/** The funding set was READ and holds nothing that can cover the action. */
-const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'insufficient',
-  recommended: null,
-  candidates: [],
-};
-
-/**
- * Same coin? `setSelectedFundingUtxo` recomputes, so re-applying an unchanged
- * selection would loop a consumer that re-drives it from the snapshot.
- * Outpoint only: a refreshed row for the same coin is not a change.
- */
-function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
-  if (a === null || b === null) return a === b;
-  return a.txid === b.txid && a.vout === b.vout;
-}
+const EMPTY_RECOMMENDATION = emptyRecommendation<TxnOutput & AnnotatedFundingUtxo>();
+const INSUFFICIENT_RECOMMENDATION = insufficientRecommendation<TxnOutput & AnnotatedFundingUtxo>();
 
 export class Cat21TransferOrchestrator {
+  /* jscpd:ignore-start -- per-operation orchestrator state and operational body, deliberately
+     mirrored across the mint / transfer / offer / inscribe orchestrators: the same shape of
+     held state plus setters, setWallet / loadUtxos, recompute and the operation method, each
+     driving its own per-operation snapshot and core flow (whose fee math and return shape
+     differ). Per the typed-triple rule these are parallel public surfaces, not a shared base.
+     The reactive plumbing they DID share (snapshot store, utxos port, toCore) is factored
+     into orchestrator-support; what stays is marked, not extracted. */
   private wallet: TransferWalletContext | null = null;
   private utxos: TxnOutput[] = [];
   /** True once `utxos` holds a completed read. An unread set is also `[]`, and only a read one can be called empty. */
@@ -214,13 +202,6 @@ export class Cat21TransferOrchestrator {
    * alone, since neither is invalidated by new coins arriving.
    */
   /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
-  /* jscpd:ignore-start -- the orchestrator's operational body (setters, setWallet /
-     loadUtxos, recompute and the operation method) is deliberately mirrored across the
-     mint / transfer / offer / inscribe orchestrators: each drives its own per-operation
-     snapshot and calls its own core flow, whose fee math and return shape differ. Per the
-     typed-triple rule these are parallel public surfaces, not a shared base, so the
-     structural parallelism is marked, not extracted. The reactive plumbing they DID share
-     (snapshot store, utxos port) is factored out in orchestrator-support. */
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;
     await this.loadUtxos(this.wallet);

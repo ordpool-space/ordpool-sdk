@@ -6,7 +6,9 @@ import { DroppedSelection, describeFundingPick, resolveFundingPick, selectFundin
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
   AnnotatedFundingUtxo,
+  emptyRecommendation,
   FundingRecommendation,
+  insufficientRecommendation,
   FundingTopologySetting,
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
@@ -36,7 +38,7 @@ import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from '.
 import { prepareInscribeFundingInput } from './inscription-input-adapter.js';
 import type { InscribeBroadcastTransport } from './inscribe-package-broadcast.js';
 import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos.js';
-import { SnapshotStore } from '../cat21-core/orchestrator-support.js';
+import { sameSelection, SnapshotStore } from '../cat21-core/orchestrator-support.js';
 import {
   InscribeAndBroadcastResult,
   inscribeAndBroadcast,
@@ -364,19 +366,8 @@ export interface InscribeSnapshot {
 const UNEXPECTED_FAILURE_MESSAGE =
   'Something went wrong while preparing this inscription. Nothing has been sent. Please try again, and report it if it keeps happening.';
 
-/** No answer yet. `scanning`, never `insufficient`: that is a measured verdict. */
-const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'scanning',
-  recommended: null,
-  candidates: [],
-};
-
-/** The funding set was READ and holds nothing that can cover the action. */
-const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'insufficient',
-  recommended: null,
-  candidates: [],
-};
+const EMPTY_RECOMMENDATION = emptyRecommendation<TxnOutput & AnnotatedFundingUtxo>();
+const INSUFFICIENT_RECOMMENDATION = insufficientRecommendation<TxnOutput & AnnotatedFundingUtxo>();
 
 /**
  * Several inscriptions in one commit and reveal, ord's batch. Entries use the
@@ -469,18 +460,15 @@ function batchArgs(
 /** Deterministic dummy x-only pubkey — only sizes the envelope (all 32-byte keys equal). */
 const DUMMY_PUBKEY_XONLY = new Uint8Array(32).fill(0x02);
 
-/**
- * Same coin? `setSelectedUtxo` recomputes, so re-applying an unchanged
- * selection would loop a consumer that re-drives it from the snapshot.
- * Outpoint only: a refreshed row for the same coin is not a change, and the
- * live annotated one is `resolvedFundingUtxo`.
- */
-function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
-  if (a === null || b === null) return a === b;
-  return a.txid === b.txid && a.vout === b.vout;
-}
 
 export class InscribeMintOrchestrator {
+  /* jscpd:ignore-start -- per-operation orchestrator state and operational body, deliberately
+     mirrored across the mint / transfer / offer / inscribe orchestrators: the same shape of
+     held state plus setters, setWallet / loadUtxos, recompute, batch and the operation method,
+     each driving its own per-operation snapshot and core flow (inscribe on its distinct
+     commit+reveal fee model). Per the typed-triple rule these are parallel public surfaces,
+     not a shared base. The reactive plumbing they shared is in orchestrator-support; what
+     stays is marked, not extracted. */
   private wallet: InscribeWalletContext | null = null;
   private utxos: TxnOutput[] = [];
   /** True once `utxos` holds a completed read. An unread set is also `[]`, and only a read one can be called empty. */
@@ -555,13 +543,6 @@ export class InscribeMintOrchestrator {
    * the consumer's call. Leaves the fee rate and any expert-mode selection
    * alone, since neither is invalidated by new coins arriving.
    */
-  /* jscpd:ignore-start -- the orchestrator's operational body (setters, setWallet /
-     loadUtxos, recompute, batch and the inscribe operation method) is deliberately
-     mirrored across the mint / transfer / offer / inscribe orchestrators: each drives its
-     own per-operation snapshot and calls its own core flow (inscribe on its distinct
-     commit+reveal fee model). Per the typed-triple rule these are parallel public
-     surfaces, not a shared base; the reactive plumbing they shared is in
-     orchestrator-support. Marked, not extracted. */
   /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;

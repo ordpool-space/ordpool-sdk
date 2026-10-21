@@ -50,3 +50,16 @@ export function makeUtxosPort(utxos: readonly UtxoLike[]): UtxosPort {
   const snapshot = [...utxos];
   return { spendableUtxos: async (): Promise<CoreFundingUtxo[]> => snapshot.map(toCoreFundingUtxo) };
 }
+
+/**
+ * Outpoint-equality for a funding selection. `setSelectedFundingUtxo` recomputes,
+ * so re-applying an unchanged selection would loop a consumer that re-drives it
+ * from the snapshot; a refreshed row for the same coin is not a change.
+ */
+export function sameSelection(
+  a: { txid: string; vout: number } | null,
+  b: { txid: string; vout: number } | null,
+): boolean {
+  if (a === null || b === null) return a === b;
+  return a.txid === b.txid && a.vout === b.vout;
+}

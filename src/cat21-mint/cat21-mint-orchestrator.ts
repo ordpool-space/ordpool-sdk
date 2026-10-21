@@ -2,13 +2,15 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { makeUtxosPort, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
+import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
 import { MintCoreParams, simulateMint, MintStatus } from '../cat21-core/mint.core.js';
 import { DroppedSelection, resolveFundingPick } from '../cat21-core/select-funding.js';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
+  emptyRecommendation,
   FundingRecommendation,
+  insufficientRecommendation,
   liftRecommendationByOutpoint,
   FundingTopologySetting,
   resolveFundingTopology,
@@ -147,32 +149,16 @@ export interface MintSnapshot {
   successTxId: string | null;
 }
 
-/** No answer yet. `scanning`, never `insufficient`: that is a measured verdict. */
-const EMPTY_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'scanning',
-  recommended: null,
-  candidates: [],
-};
-
-/** The funding set was READ and holds nothing that can cover the action. */
-const INSUFFICIENT_RECOMMENDATION: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo> = {
-  status: 'insufficient',
-  recommended: null,
-  candidates: [],
-};
-
-/**
- * Same coin? `setSelectedUtxo` recomputes, so re-applying an unchanged
- * selection would loop a consumer that re-drives it from the snapshot.
- * Outpoint only: a refreshed row for the same coin is not a change, and the
- * live annotated one is `resolvedFundingUtxo`.
- */
-function sameSelection(a: { txid: string; vout: number } | null, b: { txid: string; vout: number } | null): boolean {
-  if (a === null || b === null) return a === b;
-  return a.txid === b.txid && a.vout === b.vout;
-}
+const EMPTY_RECOMMENDATION = emptyRecommendation<TxnOutput & AnnotatedFundingUtxo>();
+const INSUFFICIENT_RECOMMENDATION = insufficientRecommendation<TxnOutput & AnnotatedFundingUtxo>();
 
 export class Cat21MintOrchestrator {
+  /* jscpd:ignore-start -- per-operation orchestrator state and operational body, deliberately
+     mirrored across the mint / transfer / offer / inscribe orchestrators: the same shape of
+     held state plus setters, setWallet / loadUtxos, recompute and the operation method, each
+     driving its own per-operation snapshot and core flow (whose fee math and return shape
+     differ). Per the typed-triple rule these are parallel public surfaces, not a shared base.
+     The reactive plumbing they shared is in orchestrator-support; what stays is marked. */
   private wallet: MintWalletContext | null = null;
   private utxos: TxnOutput[] = [];
   /** True once `utxos` holds a completed read. An unread set is also `[]`, and only a read one can be called empty. */
@@ -587,6 +573,8 @@ export class Cat21MintOrchestrator {
   private utxosPort() {
     return makeUtxosPort(this.utxos);
   }
+
+  /* jscpd:ignore-end */
 
   private patch(next: Partial<MintSnapshot>): void {
     this.store.patch(next);
