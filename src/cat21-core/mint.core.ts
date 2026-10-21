@@ -127,6 +127,10 @@ interface MintPlan {
   candidateFees: CandidateFeeRow[];
 }
 
+/* jscpd:ignore-start -- per-operation funding-plan and PSBT-build flow, deliberately
+   mirrored across mint/transfer/offer. Each has its own fee math (target, feeBudget)
+   and plan return shape; a shared abstraction over this money-path fee/funding pipeline
+   is what the typed-triple rule prevents, so the parallelism is marked, not extracted. */
 function buildMint(
   params: MintCoreParams,
   funding: CoreFundingUtxo,
@@ -295,6 +299,8 @@ async function planMint(
  * `ready` = a safe funding coin covers postage + tip + fee; `expert-required` =
  * only asset coins cover; `insufficient` = nothing covers.
  */
+/* jscpd:ignore-end */
+
 export async function simulateMint(
   params: MintCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort },

@@ -127,6 +127,11 @@ interface OfferPlan {
  * framework-agnostic create-offer orchestrator reuses it instead of
  * duplicating the prepare-inputs + `buildCat21BuyOfferPsbt` composition.
  */
+/* jscpd:ignore-start -- per-operation funding-plan and PSBT-build flow, deliberately
+   mirrored across mint/transfer/offer. Offer differs load-bearingly: its fee derives
+   from changeSats and its plan return carries feeSats/changeSats, not built/buildFeeSats.
+   A shared abstraction over this money-path fee/funding pipeline is what the typed-triple
+   rule prevents, so the parallelism is marked, not extracted. */
 export function buildOffer(
   params: CreateOfferCoreParams,
   funding: CoreFundingUtxo,
@@ -292,6 +297,8 @@ async function planOffer(
  * Preview a buy-offer: content-checked buyer-funding selection + two-pass fee,
  * no signing. `ready` = a safe funding coin covers price + cat value + fee.
  */
+/* jscpd:ignore-end */
+
 export async function simulateCreateOffer(
   params: CreateOfferCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort },

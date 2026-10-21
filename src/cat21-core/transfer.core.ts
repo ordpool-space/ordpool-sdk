@@ -132,6 +132,12 @@ interface TransferPlan {
  * Exported so the framework-agnostic transfer orchestrator reuses it instead
  * of duplicating the prepare-inputs + `buildCat21TransferPsbt` composition.
  */
+/* jscpd:ignore-start -- per-operation funding-plan and PSBT-build flow, deliberately
+   mirrored across mint/transfer/offer. Each has its own fee math (target, feeBudget),
+   its own simulate closure (transfer/mint read finalFeeSats; offer derives it from
+   changeSats) and its own plan return shape (built/buildFeeSats vs feeSats/changeSats).
+   A shared abstraction over this money-path fee/funding pipeline is exactly what the
+   typed-triple rule prevents, so the structural parallelism is marked, not extracted. */
 export function buildTransfer(
   params: TransferCoreParams,
   funding: CoreFundingUtxo,
@@ -290,6 +296,8 @@ async function planTransfer(
     candidateFees,
   };
 }
+
+/* jscpd:ignore-end */
 
 /**
  * Preview a transfer: content-checked funding selection + two-pass fee, no

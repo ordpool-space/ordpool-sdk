@@ -135,6 +135,10 @@ interface InscribePlan {
  * that is not a curve point all looked identical to "your coin is too small".
  * So the reason travels with the null.
  */
+/* jscpd:ignore-start -- per-operation funding-plan and PSBT-build flow. Inscribe mirrors
+   the mint/transfer/offer structure but on its own commit+reveal fee model (two-tx split,
+   simulations[].preview); folding it into a shared pipeline would couple that distinct
+   money-path fee logic. Marked, not extracted, per the typed-triple rule. */
 function inscribeFundingTarget(params: InscribeCoreParams): { target: number | null; error: string | null } {
   if (!params.feeRatePerVbyte || params.feeRatePerVbyte <= 0) {
     return { target: null, error: `feeRatePerVbyte must be positive; got ${String(params.feeRatePerVbyte)}` };
@@ -297,6 +301,8 @@ async function planInscribe(
  * Preview an inscribe: the funding requirement + content-checked selection, no
  * signing. `ready` = a safe funding coin covers the requirement.
  */
+/* jscpd:ignore-end */
+
 export async function simulateInscribe(
   params: InscribeCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort },
