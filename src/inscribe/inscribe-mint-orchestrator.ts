@@ -555,6 +555,13 @@ export class InscribeMintOrchestrator {
    * the consumer's call. Leaves the fee rate and any expert-mode selection
    * alone, since neither is invalidated by new coins arriving.
    */
+  /* jscpd:ignore-start -- the orchestrator's operational body (setters, setWallet /
+     loadUtxos, recompute, batch and the inscribe operation method) is deliberately
+     mirrored across the mint / transfer / offer / inscribe orchestrators: each drives its
+     own per-operation snapshot and calls its own core flow (inscribe on its distinct
+     commit+reveal fee model). Per the typed-triple rule these are parallel public
+     surfaces, not a shared base; the reactive plumbing they shared is in
+     orchestrator-support. Marked, not extracted. */
   /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;
@@ -1348,6 +1355,8 @@ export class InscribeMintOrchestrator {
       ...(fromInput ? {} : { state: 'error' as const }),
     });
   }
+
+  /* jscpd:ignore-end */
 
   private patchIfCurrent(seq: number, next: Partial<InscribeSnapshot>): void {
     if (seq !== this.recomputeSeq) return;

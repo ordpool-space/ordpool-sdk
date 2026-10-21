@@ -214,6 +214,13 @@ export class Cat21TransferOrchestrator {
    * alone, since neither is invalidated by new coins arriving.
    */
   /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
+  /* jscpd:ignore-start -- the orchestrator's operational body (setters, setWallet /
+     loadUtxos, recompute and the operation method) is deliberately mirrored across the
+     mint / transfer / offer / inscribe orchestrators: each drives its own per-operation
+     snapshot and calls its own core flow, whose fee math and return shape differ. Per the
+     typed-triple rule these are parallel public surfaces, not a shared base, so the
+     structural parallelism is marked, not extracted. The reactive plumbing they DID share
+     (snapshot store, utxos port) is factored out in orchestrator-support. */
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;
     await this.loadUtxos(this.wallet);
@@ -458,6 +465,8 @@ export class Cat21TransferOrchestrator {
       targetPostageSats: this.snap.targetPostageSats ?? undefined,
     };
   }
+
+  /* jscpd:ignore-end */
 
   private utxosPort() {
     return makeUtxosPort(this.utxos);
