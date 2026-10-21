@@ -671,47 +671,37 @@ export function planInscribeCommit(
     );
   }
 
-  // Layer-1 build at resolved fees (same changeDustLimitSats as the sim).
-  const commit = buildInscribeCommitPsbt({
-    fundingInput: realFundingInput,
-    senderChangeAddress: args.paymentAddress,
-    envelopeScript: envelope,
-    ephemeralPubkeyXonly,
-    commitFeeSats: fees.commitFeeSats,
-    revealFeeReserveSats: fees.revealFeeSats,
-    postageSats,
-    tipValueSats: args.tip?.value,
-    walletType: args.walletType,
-    changeDustLimitSats,
-    satOffset: args.satOffset,
-    satSource: args.satSource,
-    paddingInput: paddingInput(false),
-    commitPostageSats: assembly.commitPostageSats,
-    network: args.network,
-  });
+  // The real build and the simulation build differ only in the funding input
+  // (real vs dummy-keyed) and whether the padding input is in simulation mode;
+  // every fee, postage and envelope field is identical.
+  const buildCommit = (fundingInput: typeof realFundingInput, simulatePadding: boolean) =>
+    buildInscribeCommitPsbt({
+      fundingInput,
+      senderChangeAddress: args.paymentAddress,
+      envelopeScript: envelope,
+      ephemeralPubkeyXonly,
+      commitFeeSats: fees.commitFeeSats,
+      revealFeeReserveSats: fees.revealFeeSats,
+      postageSats,
+      tipValueSats: args.tip?.value,
+      walletType: args.walletType,
+      changeDustLimitSats,
+      satOffset: args.satOffset,
+      satSource: args.satSource,
+      paddingInput: paddingInput(simulatePadding),
+      commitPostageSats: assembly.commitPostageSats,
+      network: args.network,
+    });
 
-  // The reveal's input outpoint references the commit's txid, which must
-  // be known BEFORE the wallet signs. Build a simulation-mode commit at
-  // the same fees against the dummy-keyed funding input, then derive the
-  // txid via deriveUnsignedCommitTxid (which reconstructs the real
-  // P2SH-P2WPKH scriptSig so the reveal binds to the correct output).
-  const simCommit = buildInscribeCommitPsbt({
-    fundingInput: simulationFundingInput,
-    senderChangeAddress: args.paymentAddress,
-    envelopeScript: envelope,
-    ephemeralPubkeyXonly,
-    commitFeeSats: fees.commitFeeSats,
-    revealFeeReserveSats: fees.revealFeeSats,
-    postageSats,
-    tipValueSats: args.tip?.value,
-    walletType: args.walletType,
-    changeDustLimitSats,
-    satOffset: args.satOffset,
-    satSource: args.satSource,
-    paddingInput: paddingInput(true),
-    commitPostageSats: assembly.commitPostageSats,
-    network: args.network,
-  });
+  // Layer-1 build at resolved fees (same changeDustLimitSats as the sim).
+  const commit = buildCommit(realFundingInput, false);
+
+  // The reveal's input outpoint references the commit's txid, which must be
+  // known BEFORE the wallet signs. Build a simulation-mode commit at the same
+  // fees against the dummy-keyed funding input, then derive the txid via
+  // deriveUnsignedCommitTxid (which reconstructs the real P2SH-P2WPKH scriptSig
+  // so the reveal binds to the correct output).
+  const simCommit = buildCommit(simulationFundingInput, true);
   const commitTxidUnsigned = deriveUnsignedCommitTxid(
     simCommit.commitPsbt,
     args.paymentAddress,

@@ -65,6 +65,9 @@ export { KnownOrdinalWallets } from './wallet/known-ordinal-wallets.js';
 //     OrdinalsAddress vs PaymentAddress). Belongs at core so any
 //     consumer — a frontend or a plain-Node bot — can opt into the
 //     compile-time protection at critical boundaries.
+/* jscpd:ignore-start -- entry-point barrels: index.ts (full API) and core.ts (wallet
+   subset) deliberately re-export an overlapping set of modules. A shared barrel would
+   merge the two entry-point contracts, which is exactly what the split prevents. */
 export * from './wallet/address-types.js';
 export * from './format/mempool-format.js';
 export * from './wallet/connect-ui.js';
@@ -88,6 +91,7 @@ export * from './wallet/xpub/cats-at-address.js';
 export * from './cat21-ord/cats-at-output.js';
 export * from './wallet/xpub/classify-outpoint.js';
 export * from './wallet/xpub/make-watch-only-probe.js';
+/* jscpd:ignore-end */
 
 // --- CAT-21 mint (PSBT-build helpers; the stateful Cat21Service is at the
 //     main entry only). ---
@@ -201,6 +205,8 @@ export * from './cat21-session/session-message.js';
 export * from './wallet/verify-bip322-signature.js';
 
 // --- Inscribe (commit + reveal pipeline; ord-compatible envelope) ---
+/* jscpd:ignore-start -- entry-point barrels: the inscribe re-export run overlaps index.ts
+   by design (both expose the inscribe pipeline); the index/core split is the contract. */
 export * from './inscribe/inscription-envelope.js';
 export * from './inscribe/inscription-cbor.js';
 export * from './inscribe/inscription-commit.helper.js';
@@ -216,6 +222,7 @@ export * from './inscribe/inscribe-orchestrator.js';
 export * from './inscribe/inscribe-mint-orchestrator.js';
 export * from './inscribe/inscribe-child-orchestrator.js';
 export * from './inscribe/inscribe-compression.helper.js';
+/* jscpd:ignore-end */
 export * from './inscribe/brotli-wasm-encoder.js';
 
 // --- Agent-mode policy gate ---
