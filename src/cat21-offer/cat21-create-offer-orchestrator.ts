@@ -4,6 +4,7 @@ import { base64, hex } from '@scure/base';
 import { buildOffer, CreateOfferCoreParams, CreateOfferStatus, simulateCreateOffer } from '../cat21-core/create-offer.core.js';
 import { DroppedSelection } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
+import { makeUtxosPort, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
@@ -156,7 +157,7 @@ export class Cat21CreateOfferOrchestrator {
   // recompute whose captured seq is stale drops its result instead of
   // overwriting a newer snapshot (the plain-class replacement for switchMap).
   private recomputeSeq = 0;
-  private snap: CreateOfferSnapshot = {
+  private readonly store = new SnapshotStore<CreateOfferSnapshot>({
     state: 'idle',
     targetCat: null,
     priceSats: null,
@@ -174,19 +175,20 @@ export class Cat21CreateOfferOrchestrator {
     droppedSelection: null,
     bid: null,
     errorMessage: null,
-  };
-  private readonly listeners = new Set<(s: CreateOfferSnapshot) => void>();
+  });
+  /** Current snapshot; writes go only through `patch`. */
+  private get snap(): CreateOfferSnapshot {
+    return this.store.snapshot;
+  }
 
   constructor(private readonly deps: CreateOfferOrchestratorDeps) {}
 
   getSnapshot(): CreateOfferSnapshot {
-    return this.snap;
+    return this.store.snapshot;
   }
 
   subscribe(listener: (s: CreateOfferSnapshot) => void): () => void {
-    this.listeners.add(listener);
-    listener(this.snap);
-    return () => this.listeners.delete(listener);
+    return this.store.subscribe(listener);
   }
 
   /**
@@ -403,7 +405,7 @@ export class Cat21CreateOfferOrchestrator {
       targetCat: { txid: targetCat.txid, vout: targetCat.vout, value: targetCat.value, scriptPubKey: targetCat.scriptPubKey },
       priceSats,
       feeRatePerVbyte: feeRate,
-      selectedFundingUtxo: selectedFundingUtxo ? toCore(selectedFundingUtxo) : undefined,
+      selectedFundingUtxo: selectedFundingUtxo ? toCoreFundingUtxo(selectedFundingUtxo) : undefined,
       fundingTopology: resolveFundingTopology(this.deps.fundingTopology, w),
     };
   }
@@ -418,20 +420,12 @@ export class Cat21CreateOfferOrchestrator {
   }
 
   private utxosPort() {
-    const utxos = this.utxos;
-    return {
-      spendableUtxos: async (): Promise<CoreFundingUtxo[]> => utxos.map(toCore),
-    };
+    return makeUtxosPort(this.utxos);
   }
 
   private patch(next: Partial<CreateOfferSnapshot>): void {
-    this.snap = { ...this.snap, ...next };
-    for (const l of this.listeners) l(this.snap);
+    this.store.patch(next);
   }
-}
-
-function toCore(u: TxnOutput): CoreFundingUtxo {
-  return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
 }
 
 function errMsg(err: unknown): string {

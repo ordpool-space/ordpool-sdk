@@ -36,6 +36,7 @@ import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from '.
 import { prepareInscribeFundingInput } from './inscription-input-adapter.js';
 import type { InscribeBroadcastTransport } from './inscribe-package-broadcast.js';
 import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos.js';
+import { SnapshotStore } from '../cat21-core/orchestrator-support.js';
 import {
   InscribeAndBroadcastResult,
   inscribeAndBroadcast,
@@ -503,7 +504,7 @@ export class InscribeMintOrchestrator {
   // fee-rate change, so each verdict is kept for the session.
   private readonly scanVerdicts = new Map<string, boolean>();
   private readonly resolvedParents = new Map<string, BatchParent>();
-  private snap: InscribeSnapshot = {
+  private readonly store = new SnapshotStore<InscribeSnapshot>({
     state: 'idle',
     feeRate: null,
     selectedUtxo: null,
@@ -521,23 +522,24 @@ export class InscribeMintOrchestrator {
     compression: null,
     padding: null,
     parents: null,
-  };
-  private readonly listeners = new Set<(s: InscribeSnapshot) => void>();
+  });
+  /** Current snapshot; writes go only through `patch`. */
+  private get snap(): InscribeSnapshot {
+    return this.store.snapshot;
+  }
 
   constructor(private readonly deps: InscribeOrchestratorDeps) {}
 
   getSnapshot(): InscribeSnapshot {
-    return this.snap;
+    return this.store.snapshot;
   }
 
   /**
    * Subscribe to snapshot changes. Fires immediately with the current snapshot,
-   * then on every change. Returns an unsubscribe fn — bind in one line.
+   * then on every change. Returns an unsubscribe fn, bind in one line.
    */
   subscribe(listener: (s: InscribeSnapshot) => void): () => void {
-    this.listeners.add(listener);
-    listener(this.snap);
-    return () => this.listeners.delete(listener);
+    return this.store.subscribe(listener);
   }
 
   /** Set (or clear) the connected wallet. On a genuine change, resets + refetches. */
@@ -1353,8 +1355,7 @@ export class InscribeMintOrchestrator {
   }
 
   private patch(next: Partial<InscribeSnapshot>): void {
-    this.snap = { ...this.snap, ...next };
-    for (const l of this.listeners) l(this.snap);
+    this.store.patch(next);
   }
 }
 

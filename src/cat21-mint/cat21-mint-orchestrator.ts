@@ -2,6 +2,7 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
+import { makeUtxosPort, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
 import { MintCoreParams, simulateMint, MintStatus } from '../cat21-core/mint.core.js';
 import { DroppedSelection, resolveFundingPick } from '../cat21-core/select-funding.js';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
@@ -180,7 +181,7 @@ export class Cat21MintOrchestrator {
   // recompute whose captured seq is stale drops its result instead of
   // overwriting a newer snapshot (the plain-class replacement for switchMap).
   private recomputeSeq = 0;
-  private snap: MintSnapshot = {
+  private readonly store = new SnapshotStore<MintSnapshot>({
     state: 'idle',
     feeRate: null,
     selectedUtxo: null,
@@ -194,14 +195,17 @@ export class Cat21MintOrchestrator {
     droppedSelection: null,
     errorMessage: null,
     successTxId: null,
-  };
-  private readonly listeners = new Set<(s: MintSnapshot) => void>();
+  });
+  /** Current snapshot; writes go only through `patch`. */
+  private get snap(): MintSnapshot {
+    return this.store.snapshot;
+  }
 
   constructor(private readonly deps: MintOrchestratorDeps) {}
 
   /** Synchronous snapshot read. */
   getSnapshot(): MintSnapshot {
-    return this.snap;
+    return this.store.snapshot;
   }
 
   /**
@@ -210,9 +214,7 @@ export class Cat21MintOrchestrator {
    * binds this to its reactivity in one line.
    */
   subscribe(listener: (s: MintSnapshot) => void): () => void {
-    this.listeners.add(listener);
-    listener(this.snap);
-    return () => this.listeners.delete(listener);
+    return this.store.subscribe(listener);
   }
 
   /**
@@ -577,24 +579,18 @@ export class Cat21MintOrchestrator {
       paymentAddress: wallet.paymentAddress,
       recipientAddress: wallet.ordinalsAddress,
       feeRatePerVbyte: feeRate,
-      selectedFundingUtxo: this.snap.selectedUtxo ? toCore(this.snap.selectedUtxo) : undefined,
+      selectedFundingUtxo: this.snap.selectedUtxo ? toCoreFundingUtxo(this.snap.selectedUtxo) : undefined,
       fundingTopology: resolveFundingTopology(this.deps.fundingTopology, wallet),
     };
   }
 
   private utxosPort() {
-    const utxos = this.utxos;
-    return { spendableUtxos: async (): Promise<CoreFundingUtxo[]> => utxos.map(toCore) };
+    return makeUtxosPort(this.utxos);
   }
 
   private patch(next: Partial<MintSnapshot>): void {
-    this.snap = { ...this.snap, ...next };
-    for (const l of this.listeners) l(this.snap);
+    this.store.patch(next);
   }
-}
-
-function toCore(u: TxnOutput): CoreFundingUtxo {
-  return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
 }
 
 function errMsg(err: unknown): string {

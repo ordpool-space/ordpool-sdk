@@ -10,6 +10,7 @@ import {
 } from '../cat21-core/transfer.core.js';
 import { DroppedSelection } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
+import { makeUtxosPort, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
 import {
   AnnotatedFundingUtxo,
   FundingRecommendation,
@@ -167,7 +168,7 @@ export class Cat21TransferOrchestrator {
   // recompute whose captured seq is stale drops its result instead of
   // overwriting a newer snapshot (the plain-class replacement for switchMap).
   private recomputeSeq = 0;
-  private snap: TransferSnapshot = {
+  private readonly store = new SnapshotStore<TransferSnapshot>({
     state: 'idle',
     catUtxo: null,
     recipientAddress: null,
@@ -184,19 +185,20 @@ export class Cat21TransferOrchestrator {
     droppedSelection: null,
     errorMessage: null,
     successTxId: null,
-  };
-  private readonly listeners = new Set<(s: TransferSnapshot) => void>();
+  });
+  /** Current snapshot; writes go only through `patch`. */
+  private get snap(): TransferSnapshot {
+    return this.store.snapshot;
+  }
 
   constructor(private readonly deps: TransferOrchestratorDeps) {}
 
   getSnapshot(): TransferSnapshot {
-    return this.snap;
+    return this.store.snapshot;
   }
 
   subscribe(listener: (s: TransferSnapshot) => void): () => void {
-    this.listeners.add(listener);
-    listener(this.snap);
-    return () => this.listeners.delete(listener);
+    return this.store.subscribe(listener);
   }
 
   /**
@@ -451,27 +453,19 @@ export class Cat21TransferOrchestrator {
       catUtxo: { txid: cat.txid, vout: cat.vout, value: cat.value },
       recipientAddress: recipient,
       feeRatePerVbyte: feeRate,
-      selectedFundingUtxo: this.snap.selectedFundingUtxo ? toCore(this.snap.selectedFundingUtxo) : undefined,
+      selectedFundingUtxo: this.snap.selectedFundingUtxo ? toCoreFundingUtxo(this.snap.selectedFundingUtxo) : undefined,
       fundingTopology: resolveFundingTopology(this.deps.fundingTopology, wallet),
       targetPostageSats: this.snap.targetPostageSats ?? undefined,
     };
   }
 
   private utxosPort() {
-    const utxos = this.utxos;
-    return {
-      spendableUtxos: async (): Promise<CoreFundingUtxo[]> => utxos.map(toCore),
-    };
+    return makeUtxosPort(this.utxos);
   }
 
   private patch(next: Partial<TransferSnapshot>): void {
-    this.snap = { ...this.snap, ...next };
-    for (const l of this.listeners) l(this.snap);
+    this.store.patch(next);
   }
-}
-
-function toCore(u: TxnOutput): CoreFundingUtxo {
-  return { txid: u.txid, vout: u.vout, value: u.value, transactionHex: u.transactionHex };
 }
 
 function errMsg(err: unknown): string {
