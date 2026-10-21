@@ -1,22 +1,16 @@
-import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { defer, from, Observable, map, switchMap } from 'rxjs';
+import { Observable } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network.js';
-import { broadcastSignedPsbt } from '../psbt-extract.js';
 import { findCat21WalletProvider } from '../wallet.service.helper.js';
 import {
   KnownOrdinalWalletType,
-  SignAndBroadcastInput,
   SignMessageArgs,
   SignMessageResult,
-  SignMultiInputAndBroadcastInput,
-  SignPsbtOnlyInput,
   WalletSigner,
   WindowLike,
 } from '../wallet.service.types.js';
-import { operationNamedDefaults } from './operation-named-defaults.js';
-import { resolveSigningTargets } from './signing-targets.helper.js';
+import { makeLeatherFamilySigner } from './leather-family-signer.helper.js';
 import { wrapSignMessage } from './wrap-sign-message.js';
 
 
@@ -28,51 +22,41 @@ interface Cat21WalletSignPsbtParams {
   hex: string;
   allowedSighash: number[];
   /**
-   * Which input indexes to sign. Cat21-wallet accepts either a single
-   * number or an array — see
-   * `apps/extension/src/background/messaging/rpc-methods/sign-psbt.ts`
-   * (ensureArray). Passing an array lets the wallet sign multiple
-   * inputs in a SINGLE approval popup, which is essential for the
-   * transfer flow (cat input at ordinalsAddress + funding input at
-   * paymentAddress).
+   * Which input indexes to sign. cat21-wallet accepts either a single number
+   * or an array (see its `sign-psbt.ts` → ensureArray). Passing the array lets
+   * the wallet sign multiple inputs in a SINGLE approval popup, essential for
+   * the transfer flow (cat input at ordinalsAddress + funding input at
+   * paymentAddress), so this signer uses `multiInput: 'array'`.
    */
   signAtIndex: number | number[];
   network: 'mainnet' | 'testnet' | 'signet' | 'sbtcDevenv' | 'devnet' | 'regtest';
   broadcast: false;
 }
 
+interface Cat21WalletSignMessageResponse {
+  result: { signature: string };
+}
+
+function provider() {
+  const found = findCat21WalletProvider(window as unknown as WindowLike);
+  if (!found) {
+    throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
+  }
+  return found;
+}
+
 /**
- * CAT-21 wallet — `window.Cat21Provider.request('signPsbt', …)`.
- *
- * CAT-21 wallet is forked from Leather and inherits Leather's
- * Bitcoin signPsbt JSON-RPC shape verbatim. The wallet signs the
- * PSBT, hands the signed bytes back, and broadcasting is our job
- * via `input.broadcast(...)` (electrs `POST /tx`).
- *
- * Network mapping uses Leather's network strings even though
- * CAT-21 wallet is mainnet-only per its ADR-7 (Stacks/Lightning/
- * testnet UI hidden). The string is still in the request envelope
- * so the wallet's internal validators get what they expect.
- *
- * sighash whitelist is `[SigHash.ALL]` — same as Leather, same as
- * the rest of the SDK's cat-flow path.
- *
- * Multi-input signing: the wallet's `signPsbt` JSON-RPC accepts
- * `signAtIndex` as EITHER a single number or an array. Send the
- * array form for multi-input flows (transfer, offer-accept) — the
- * wallet signs every listed index inside ONE approval popup
- * (see `apps/extension/src/background/messaging/rpc-methods/sign-psbt.ts`
- * → ensureArray).
+ * Sign the given input index(es). CAT-21 wallet is forked from Leather and
+ * inherits its signPsbt JSON-RPC shape verbatim; the sighash whitelist is
+ * `[SigHash.ALL]`, same as Leather and the rest of the cat-flow path. Network
+ * mapping uses Leather's strings even though cat21-wallet is mainnet-only (its
+ * internal validators still expect the string in the envelope).
  */
 function callCat21WalletSignPsbt(
   psbtHex: string,
   signAtIndex: number | number[],
   network: Cat21WalletSignPsbtParams['network'],
 ): Promise<string> {
-  const provider = findCat21WalletProvider(window as unknown as WindowLike);
-  if (!provider) {
-    throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
-  }
   const params: Cat21WalletSignPsbtParams = {
     hex: psbtHex,
     allowedSighash: [btc.SigHash.ALL],
@@ -80,82 +64,34 @@ function callCat21WalletSignPsbt(
     network,
     broadcast: false,
   };
-  return (provider.request('signPsbt', params) as Promise<Cat21WalletPSBTResponse>)
+  return (provider().request('signPsbt', params) as Promise<Cat21WalletPSBTResponse>)
     .then((resp) => resp.result.hex);
 }
 
-const legacy = {
-
-  signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
-    const psbtHex = hex.encode(input.psbtBytes);
-    const network = toLeatherNetworkString(input.network);
-    return defer(() => from(callCat21WalletSignPsbt(psbtHex, 0, network))).pipe(
-      switchMap((signedHex) => broadcastSignedPsbt(input, hex.decode(signedHex))),
-    );
-  },
-
-  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
-    const targets = resolveSigningTargets(input);
-    const flatIndexes: number[] = [];
-    for (const t of targets) {
-      for (const i of t.indexes) flatIndexes.push(i);
-    }
-    const network = toLeatherNetworkString(input.network);
-    const psbtHex = hex.encode(input.psbtBytes);
-
-    return defer(() => from(callCat21WalletSignPsbt(psbtHex, flatIndexes, network))).pipe(
-      switchMap((finalHex) => broadcastSignedPsbt(input, hex.decode(finalHex))),
-    );
-  },
-
-  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
-    const targets = resolveSigningTargets(input);
-    const flatIndexes: number[] = [];
-    for (const t of targets) {
-      for (const i of t.indexes) flatIndexes.push(i);
-    }
-    const network = toLeatherNetworkString(input.network);
-    const psbtHex = hex.encode(input.psbtBytes);
-
-    return defer(() => from(callCat21WalletSignPsbt(psbtHex, flatIndexes, network))).pipe(
-      map((finalHex) => hex.decode(finalHex)),
-    );
-  },
-};
-
 /**
  * BIP-322 message signing via `window.Cat21Provider.request('signMessage', ...)`.
- *
- * CAT-21 wallet inherits Leather's `signMessage` RPC shape verbatim
- * (forked codebase, same wire format). Params:
- *   - `message`: the UTF-8 string to sign (wallet renders it verbatim
- *     to the user in the approval popup, so the caller MUST pass the
- *     final human-visible bytes — `buildListingMessage()`'s multi-
- *     line output is exactly this).
- *   - `paymentType`: `'p2tr'` forces the ordinals key. Cats live at
- *     the ordinals P2TR address per ordinal theory, and BIP-322
- *     ownership proof needs to be under that key.
- *
- * Wallet response shape: `{ result: { signature: string } }` — the
- * signature is already base64-encoded BIP-322 witness bytes (raw sig
- * OR wrapped-witness format; verifyListingSignature accepts both).
+ * Inherits Leather's shape verbatim. The caller passes the final human-visible
+ * bytes (the wallet renders them in the approval popup); `paymentType: 'p2tr'`
+ * forces the ordinals key, under which the BIP-322 ownership proof must sign.
+ * `result.signature` is base64 BIP-322 witness bytes (raw or wrapped-witness;
+ * verifyListingSignature accepts both).
  */
-interface Cat21WalletSignMessageResponse {
-  result: { signature: string };
-}
-
 function callCat21WalletSignMessage(message: string): Promise<string> {
-  const provider = findCat21WalletProvider(window as unknown as WindowLike);
-  if (!provider) {
-    throw new Error('CAT-21 wallet provider not present (window.Cat21Provider undefined or missing isCat21:true marker)');
-  }
-  return (provider.request('signMessage', { message, paymentType: 'p2tr' }) as Promise<Cat21WalletSignMessageResponse>)
+  return (provider().request('signMessage', { message, paymentType: 'p2tr' }) as Promise<Cat21WalletSignMessageResponse>)
     .then((resp) => resp.result.signature);
 }
 
-export const cat21walletSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.cat21wallet,
-  ...operationNamedDefaults(legacy),
+
+/**
+ * CAT-21 wallet — `window.Cat21Provider.request('signPsbt', …)`. A Leather fork
+ * that signs and hands the bytes back; the SDK broadcasts. It signs every listed
+ * index in ONE approval popup (`multiInput: 'array'`).
+ */
+export const cat21walletSigner: WalletSigner = makeLeatherFamilySigner({
+  walletType: KnownOrdinalWalletType.cat21wallet,
+  signPsbt: (psbtHex, signAtIndex, network) =>
+    callCat21WalletSignPsbt(psbtHex, signAtIndex, toLeatherNetworkString(network)),
+  multiInput: 'array',
   signMessage: (input: SignMessageArgs): Observable<SignMessageResult> =>
     wrapSignMessage(() => callCat21WalletSignMessage(input.message)),
-};
+});

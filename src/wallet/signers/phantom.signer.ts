@@ -10,7 +10,7 @@ import {
 } from '../wallet.service.types.js';
 import { operationNamedDefaults } from './operation-named-defaults.js';
 import { unsupportedSignMessage } from './unsupported-sign-message.js';
-import { resolveSigningTargets } from './signing-targets.helper.js';
+import { signingTargetsToInputsToSign } from './signing-targets.helper.js';
 
 
 interface PhantomBitcoinSigner {
@@ -77,12 +77,7 @@ const legacy = {
 
   signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
     const phantomBtc = (window as unknown as { phantom: { bitcoin: PhantomBitcoinSigner } }).phantom.bitcoin;
-    const targets = resolveSigningTargets(input);
-    const inputsToSign = targets.map((t) => ({
-      address: t.address,
-      signingIndexes: t.indexes,
-      sigHash: t.sigHash,
-    }));
+    const inputsToSign = signingTargetsToInputsToSign(input);
     const signPromise = phantomBtc.signPSBT(input.psbtBytes, { inputsToSign, finalize: false });
     return from(signPromise).pipe(
       switchMap((signedPsbtBytes) => broadcastSignedPsbt(input, signedPsbtBytes)),
@@ -91,12 +86,7 @@ const legacy = {
 
   signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
     const phantomBtc = (window as unknown as { phantom: { bitcoin: PhantomBitcoinSigner } }).phantom.bitcoin;
-    const targets = resolveSigningTargets(input);
-    const inputsToSign = targets.map((t) => ({
-      address: t.address,
-      signingIndexes: t.indexes,
-      sigHash: t.sigHash,
-    }));
+    const inputsToSign = signingTargetsToInputsToSign(input);
     return from(phantomBtc.signPSBT(input.psbtBytes, { inputsToSign, finalize: false }));
   },
 };

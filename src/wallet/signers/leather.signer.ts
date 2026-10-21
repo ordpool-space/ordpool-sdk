@@ -1,21 +1,15 @@
-import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
-import { defer, from, map, Observable, switchMap } from 'rxjs';
+import { Observable } from 'rxjs';
 
 import { toLeatherNetworkString } from '../../network.js';
 import { toWireNetworkFor } from '../network-address-shim.js';
-import { broadcastSignedPsbt } from '../psbt-extract.js';
 import {
   KnownOrdinalWalletType,
-  SignAndBroadcastInput,
   SignMessageArgs,
   SignMessageResult,
-  SignMultiInputAndBroadcastInput,
-  SignPsbtOnlyInput,
   WalletSigner,
 } from '../wallet.service.types.js';
-import { operationNamedDefaults } from './operation-named-defaults.js';
-import { resolveSigningTargets } from './signing-targets.helper.js';
+import { makeLeatherFamilySigner } from './leather-family-signer.helper.js';
 import { wrapSignMessage } from './wrap-sign-message.js';
 
 
@@ -34,9 +28,9 @@ interface LeatherSignPsbtRequestParams {
 interface LeatherSignMessageParams {
   message: string;
   /**
-   * Which key signs. `'p2tr'` selects the taproot / ordinals key —
-   * the one BIP-322 for CAT-21 listings needs (cats live on the
-   * ordinals key per ordinal theory).
+   * Which key signs. `'p2tr'` selects the taproot / ordinals key, the one
+   * BIP-322 for CAT-21 listings needs (cats live on the ordinals key per
+   * ordinal theory).
    */
   paymentType: 'p2tr' | 'p2wpkh';
 }
@@ -57,27 +51,12 @@ interface LeatherRpcWindow {
 
 
 /**
- * Leather — `window.LeatherProvider.request('signPsbt', …)`.
+ * Sign one input index. Leather's signPsbt takes a single `signAtIndex`, so
+ * multi-input flows chain one call per index (`multiInput: 'chain'`).
  *
- * Leather signs and hands the signed PSBT back to us; broadcasting
- * is our job. The signed PSBT is finalised via @scure/btc-signer,
- * then we delegate the broadcast to the caller's `broadcast`
- * callback (which hits electrs `POST /tx` via the caller's own
- * `fetch`).
- *
- * Namespace: `window.LeatherProvider`, NOT the historical
- * `window.btc`. The `window.btc` global is the old Hiro namespace
- * that other extensions (Unisat in some versions) have aggressively
- * overwritten; users with multiple wallet extensions installed have
- * hit our code routing to the wrong wallet. See the multi-injection
- * section of PLAN-wallet-roster.md.
- *
- * Multi-input signing: Leather's signPsbt takes a single
- * `signAtIndex`. For flows that need multiple inputs signed the
- * multi method iterates the flat index list, threading the
- * partially-signed PSBT hex through each call. Same pattern as
- * cat21-wallet (which is a Leather fork). Each call surfaces a
- * confirmation dialog in the wallet.
+ * Namespace: `window.LeatherProvider`, NOT the historical `window.btc` (the old
+ * Hiro namespace other extensions aggressively overwrote, which routed our code
+ * to the wrong wallet for users with several extensions installed).
  */
 function callLeatherSignPsbt(
   psbtHex: string,
@@ -95,56 +74,9 @@ function callLeatherSignPsbt(
   return win.LeatherProvider.request('signPsbt', params).then((resp) => resp.result.hex);
 }
 
-const legacy = {
-
-  signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
-    const psbtHex = hex.encode(input.psbtBytes);
-    const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
-    return defer(() => from(callLeatherSignPsbt(psbtHex, 0, network))).pipe(
-      switchMap((signedHex) => broadcastSignedPsbt(input, hex.decode(signedHex))),
-    );
-  },
-
-  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
-    const targets = resolveSigningTargets(input);
-    const flatIndexes: number[] = [];
-    for (const t of targets) {
-      for (const i of t.indexes) flatIndexes.push(i);
-    }
-    const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
-
-    return defer(() => {
-      let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));
-      for (const i of flatIndexes) {
-        chain = chain.then((currentHex) => callLeatherSignPsbt(currentHex, i, network));
-      }
-      return from(chain);
-    }).pipe(
-      switchMap((finalHex) => broadcastSignedPsbt(input, hex.decode(finalHex))),
-    );
-  },
-
-  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
-    const targets = resolveSigningTargets(input);
-    const flatIndexes: number[] = [];
-    for (const t of targets) {
-      for (const i of t.indexes) flatIndexes.push(i);
-    }
-    const network = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, input.network));
-
-    return defer(() => {
-      let chain: Promise<string> = Promise.resolve(hex.encode(input.psbtBytes));
-      for (const i of flatIndexes) {
-        chain = chain.then((currentHex) => callLeatherSignPsbt(currentHex, i, network));
-      }
-      return from(chain);
-    }).pipe(map((finalHex) => hex.decode(finalHex)));
-  },
-};
-
 /**
  * BIP-322 message signing via `window.LeatherProvider.request('signMessage', ...)`.
- * `paymentType: 'p2tr'` forces the ordinals key. Wallet response's
+ * `paymentType: 'p2tr'` forces the ordinals key. The response's
  * `result.signature` is already base64-encoded BIP-322 witness bytes.
  */
 function callLeatherSignMessage(message: string): Promise<string> {
@@ -153,9 +85,23 @@ function callLeatherSignMessage(message: string): Promise<string> {
     .then((resp) => resp.result.signature);
 }
 
-export const leatherSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.leather,
-  ...operationNamedDefaults(legacy),
+
+/**
+ * Leather — `window.LeatherProvider.request('signPsbt', …)`. Leather signs and
+ * hands the signed PSBT back; broadcasting is the SDK's job (the "WE broadcast"
+ * convention), delegated to the caller's `broadcast` callback. Each signPsbt
+ * call surfaces its own confirmation dialog in the wallet.
+ */
+export const leatherSigner: WalletSigner = makeLeatherFamilySigner({
+  walletType: KnownOrdinalWalletType.leather,
+  signPsbt: (psbtHex, signAtIndex, network) => {
+    if (Array.isArray(signAtIndex)) {
+      throw new Error('Leather signs one input index per call (multiInput: chain)');
+    }
+    const net = toLeatherNetworkString(toWireNetworkFor(KnownOrdinalWalletType.leather, network));
+    return callLeatherSignPsbt(psbtHex, signAtIndex, net);
+  },
+  multiInput: 'chain',
   signMessage: (input: SignMessageArgs): Observable<SignMessageResult> =>
     wrapSignMessage(() => callLeatherSignMessage(input.message)),
-};
+});

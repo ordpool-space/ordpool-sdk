@@ -22,7 +22,7 @@ import {
 } from '../wallet.service.types.js';
 import { childRevealParentIndexes, mergeParentSigAndBroadcast, prepareOfferAcceptWalletFacing } from './child-reveal-finalize.helper.js';
 import { operationNamedDefaults } from './operation-named-defaults.js';
-import { resolveSigningTargets } from './signing-targets.helper.js';
+import { signingTargetsToInputsToSign } from './signing-targets.helper.js';
 import { wrapSignMessage } from './wrap-sign-message.js';
 
 
@@ -70,6 +70,22 @@ function callXverseSignTransaction(
   });
 }
 
+/**
+ * Sign a multi-input PSBT via the v4 `signTransaction` callback and return the
+ * signed bytes. Shared by the broadcasting and the return-only paths; the
+ * `message` (the wallet's prompt title) is the only per-path difference.
+ */
+function signXverseMultiInput(
+  input: SignMultiInputAndBroadcastInput | SignPsbtOnlyInput,
+  message: string,
+): Observable<Uint8Array> {
+  const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
+  const inputsToSign = signingTargetsToInputsToSign(input);
+  return callXverseSignTransaction(input.psbtBytes, inputsToSign, networkType, message).pipe(
+    map((signedPsbtBase64) => base64.decode(signedPsbtBase64)),
+  );
+}
+
 const legacy = {
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
     const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
@@ -84,37 +100,13 @@ const legacy = {
   },
 
   signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
-    const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
-    const targets = resolveSigningTargets(input);
-    const inputsToSign = targets.map((t) => ({
-      address: t.address,
-      signingIndexes: t.indexes,
-      sigHash: t.sigHash,
-    }));
-    return callXverseSignTransaction(
-      input.psbtBytes,
-      inputsToSign,
-      networkType,
-      'Sign CAT-21 transaction',
-    ).pipe(
-      switchMap((signedPsbtBase64) => broadcastSignedPsbt(input, base64.decode(signedPsbtBase64))),
+    return signXverseMultiInput(input, 'Sign CAT-21 transaction').pipe(
+      switchMap((signedBytes) => broadcastSignedPsbt(input, signedBytes)),
     );
   },
 
   signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
-    const networkType = toBitcoinNetworkType(input.network) as unknown as Parameters<typeof signTransaction>[0]['payload']['network']['type'];
-    const targets = resolveSigningTargets(input);
-    const inputsToSign = targets.map((t) => ({
-      address: t.address,
-      signingIndexes: t.indexes,
-      sigHash: t.sigHash,
-    }));
-    return callXverseSignTransaction(
-      input.psbtBytes,
-      inputsToSign,
-      networkType,
-      'Sign CAT-21 buy offer (no broadcast)',
-    ).pipe(map((signedPsbtBase64) => base64.decode(signedPsbtBase64)));
+    return signXverseMultiInput(input, 'Sign CAT-21 buy offer (no broadcast)');
   },
 };
 

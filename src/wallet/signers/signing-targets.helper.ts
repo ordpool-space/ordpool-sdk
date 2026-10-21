@@ -35,3 +35,31 @@ export function resolveSigningTargets(
     publicKey: row.publicKey,
   }));
 }
+
+/**
+ * Project the resolved signing targets onto the `{ address, signingIndexes,
+ * sigHash }` row shape the sats-connect family (Xverse, Phantom) hands to its
+ * wallet: one row per target, indexes kept grouped.
+ */
+export function signingTargetsToInputsToSign(
+  input: WithSigningMap,
+): { address: string; signingIndexes: number[]; sigHash: number }[] {
+  return resolveSigningTargets(input).map((t) => ({
+    address: t.address,
+    signingIndexes: t.indexes,
+    sigHash: t.sigHash,
+  }));
+}
+
+/**
+ * Flatten the resolved signing targets to one ordered list of input indexes,
+ * for the Leather-family wallets (Leather, cat21-wallet) whose signPsbt
+ * addresses inputs by index rather than by address.
+ */
+export function flattenSigningIndexes(input: WithSigningMap): number[] {
+  const flat: number[] = [];
+  for (const t of resolveSigningTargets(input)) {
+    for (const i of t.indexes) flat.push(i);
+  }
+  return flat;
+}

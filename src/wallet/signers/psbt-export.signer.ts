@@ -29,36 +29,52 @@ import { decodePastedPsbt } from '../../cat21-offer/decode-pasted-psbt.js';
  * One signer implementation, universal reach. PSBT is a spec
  * (BIP-174 / BIP-370); every desktop and hardware wallet speaks it.
  */
+/**
+ * Prompt the user for the externally-signed PSBT and decode it to bytes.
+ * Throws (via the returned Observable) when no `promptForSignedPsbt` callback
+ * was wired. Shared by every watch-only path.
+ */
+function promptForSignedBytes(
+  input: SignAndBroadcastInput | SignMultiInputAndBroadcastInput | SignPsbtOnlyInput,
+): Observable<Uint8Array> {
+  if (!input.promptForSignedPsbt) {
+    return throwError(() => new Error(
+      'Watch-only signing requires a promptForSignedPsbt callback to be provided'
+    ));
+  }
+  return input.promptForSignedPsbt({
+    base64: base64.encode(input.psbtBytes),
+    hex: hex.encode(input.psbtBytes),
+  }).pipe(map((signedPsbt) => decodePastedPsbt(signedPsbt, 'Signed PSBT')));
+}
+
+/**
+ * Prompt for the externally-signed PSBT, finalize it and broadcast. External
+ * wallets may return either a partial-sig PSBT (BIP-174 partial sigs, no
+ * final_scriptWitness) which we finalize, or an already-finalized one (scure
+ * rejects a re-finalize with "Not enough partial sign"); `isFinal` picks the
+ * path. Both broadcast the same on-chain bytes via `tx.hex`. Shared by the
+ * single- and multi-input paths: the watch-only wallet reads the whole PSBT
+ * and signs every input it owns regardless, so neither path differs here.
+ */
+function promptFinalizeAndBroadcast(
+  input: SignAndBroadcastInput | SignMultiInputAndBroadcastInput,
+): Observable<{ txId: string }> {
+  return promptForSignedBytes(input).pipe(
+    switchMap((signedBytes) => {
+      const tx = btc.Transaction.fromPSBT(signedBytes);
+      if (!tx.isFinal) {
+        tx.finalize();
+      }
+      return input.broadcast(tx.hex).pipe(map((txId) => ({ txId })));
+    }),
+  );
+}
+
 const legacy = {
 
   signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
-    if (!input.promptForSignedPsbt) {
-      return throwError(() => new Error(
-        'Watch-only signing requires a promptForSignedPsbt callback to be provided'
-      ));
-    }
-
-    return input.promptForSignedPsbt({
-      base64: base64.encode(input.psbtBytes),
-      hex: hex.encode(input.psbtBytes),
-    }).pipe(
-      switchMap(signedPsbt => {
-        const signedBytes = decodePastedPsbt(signedPsbt, 'Signed PSBT');
-        const tx = btc.Transaction.fromPSBT(signedBytes);
-        // External wallets may return either shape:
-        //   - partial-sig PSBT (inputs have BIP-174 partial sigs but
-        //     no final_scriptWitness / final_scriptSig). We finalize.
-        //   - fully-finalized PSBT (final_scriptWitness present,
-        //     ready to extract). scure rejects a re-finalize attempt
-        //     here ("Not enough partial sign"), so we check isFinal
-        //     and skip finalize().
-        // Both shapes broadcast the same on-chain bytes via tx.hex.
-        if (!tx.isFinal) {
-          tx.finalize();
-        }
-        return input.broadcast(tx.hex).pipe(map(txId => ({ txId })));
-      })
-    );
+    return promptFinalizeAndBroadcast(input);
   },
 
   /**
@@ -70,22 +86,7 @@ const legacy = {
    * to do the right thing and finalise whatever comes back.
    */
   signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
-    if (!input.promptForSignedPsbt) {
-      return throwError(() => new Error(
-        'Watch-only signing requires a promptForSignedPsbt callback to be provided'
-      ));
-    }
-    return input.promptForSignedPsbt({
-      base64: base64.encode(input.psbtBytes),
-      hex: hex.encode(input.psbtBytes),
-    }).pipe(
-      switchMap((signedPsbt) => {
-        const signedBytes = decodePastedPsbt(signedPsbt, 'Signed PSBT');
-        const tx = btc.Transaction.fromPSBT(signedBytes);
-        if (!tx.isFinal) tx.finalize();
-        return input.broadcast(tx.hex).pipe(map((txId) => ({ txId })));
-      }),
-    );
+    return promptFinalizeAndBroadcast(input);
   },
 
   /**
@@ -95,15 +96,7 @@ const legacy = {
    * orchestrator surfaces them as the offer artifact.
    */
   signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
-    if (!input.promptForSignedPsbt) {
-      return throwError(() => new Error(
-        'Watch-only signing requires a promptForSignedPsbt callback to be provided'
-      ));
-    }
-    return input.promptForSignedPsbt({
-      base64: base64.encode(input.psbtBytes),
-      hex: hex.encode(input.psbtBytes),
-    }).pipe(map((signedPsbt) => decodePastedPsbt(signedPsbt, 'Signed PSBT')));
+    return promptForSignedBytes(input);
   },
 };
 
