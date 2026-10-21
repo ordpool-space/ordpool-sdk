@@ -132,6 +132,11 @@ const TAPROOT_ACTIVE_ADDRESS =
  * e2e exercises is `Adapter`. Platform values are verified against each
  * wallet's official developer docs.
  */
+/* jscpd:ignore-start -- declarative per-wallet capability matrix. Every row repeats the
+   same capability keys by design: each wallet states its own support level, caveats,
+   singleAddress flag and note independently, so the table reads row by row and a per-wallet
+   change is visible in place. A shared "all proven" default would hide exactly that
+   per-wallet explicitness. Data, not logic; marked rather than factored. */
 export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
   {
     wallet: KnownOrdinalWalletType.cat21wallet,
@@ -314,6 +319,8 @@ export const WALLET_MATRIX: readonly WalletMatrixEntry[] = [
     note: 'Paste your account key (xpub / ypub / zpub / tpub) to connect. Nothing is signed here: you get a file to sign in Sparrow, Coldcard, Ledger or any wallet holding that key. For a plain xpub, choose the Taproot account type.',
   },
 ];
+
+/* jscpd:ignore-end */
 
 const SUPPORT_RANK: Record<CapabilitySupport, number> = {
   [CapabilitySupport.Unsupported]: 0,

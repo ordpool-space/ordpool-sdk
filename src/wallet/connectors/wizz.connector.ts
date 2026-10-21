@@ -8,18 +8,11 @@ import {
 } from '../wallet.service.helper.js';
 import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types.js';
 import { KnownOrdinalWallets } from '../known-ordinal-wallets.js';
+import { UnisatFamilyProviderApi } from './injected-provider-api.js';
 
-
-interface WizzApi {
-  requestAccounts(): Promise<unknown>;
-  getAccounts(): Promise<string[]>;
-  getPublicKey(): Promise<string>;
-  on?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
-  removeListener?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
-}
 
 async function getBasicWizzInfo(): Promise<{ address: string; publicKey: string }> {
-  const wizz = (window as unknown as { wizz: WizzApi }).wizz;
+  const wizz = (window as unknown as { wizz: UnisatFamilyProviderApi }).wizz;
   await wizz.requestAccounts();
   const [address] = await wizz.getAccounts();
   const publicKey = await wizz.getPublicKey();
@@ -54,7 +47,7 @@ export const wizzConnector: WalletConnector = {
   },
 
   onAccountChange(handler: () => void): () => void {
-    const wizz = (window as unknown as { wizz?: WizzApi }).wizz;
+    const wizz = (window as unknown as { wizz?: UnisatFamilyProviderApi }).wizz;
     if (!wizz?.on || !wizz.removeListener) return () => undefined;
     wizz.on('accountsChanged', handler);
     wizz.on('networkChanged', handler);

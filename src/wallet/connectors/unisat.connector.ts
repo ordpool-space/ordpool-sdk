@@ -8,19 +8,12 @@ import {
 } from '../wallet.service.helper.js';
 import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types.js';
 import { KnownOrdinalWallets } from '../known-ordinal-wallets.js';
+import { UnisatFamilyProviderApi } from './injected-provider-api.js';
 
-
-interface UnisatApi {
-  requestAccounts(): Promise<unknown>;
-  getAccounts(): Promise<string[]>;
-  getPublicKey(): Promise<string>;
-  on?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
-  removeListener?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
-}
 
 // as seen here: https://github.com/unisat-wallet/unisat-web3-demo/blob/1109c79b07517ef4abe069c0c80b2d2118915e19/src/App.tsx#L18
 async function getBasicUnisatInfo(): Promise<{ address: string; publicKey: string }> {
-  const unisat = (window as unknown as { unisat: UnisatApi }).unisat;
+  const unisat = (window as unknown as { unisat: UnisatFamilyProviderApi }).unisat;
   await unisat.requestAccounts();
 
   // gets the address of the current account (which is only one, so it's weird that this is an array)
@@ -61,7 +54,7 @@ export const unisatConnector: WalletConnector = {
   },
 
   onAccountChange(handler: () => void): () => void {
-    const unisat = (window as unknown as { unisat?: UnisatApi }).unisat;
+    const unisat = (window as unknown as { unisat?: UnisatFamilyProviderApi }).unisat;
     if (!unisat?.on || !unisat.removeListener) return () => undefined;
     unisat.on('accountsChanged', handler);
     unisat.on('networkChanged', handler);

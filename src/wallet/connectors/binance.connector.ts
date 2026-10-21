@@ -7,13 +7,12 @@ import {
 } from '../wallet.service.helper.js';
 import { KnownOrdinalWalletType, WalletConnector, WalletInfo, WindowLike } from '../wallet.service.types.js';
 import { KnownOrdinalWallets } from '../known-ordinal-wallets.js';
+import { InjectedProviderEvents } from './injected-provider-api.js';
 
 
-interface BinanceBtcApi {
+interface BinanceBtcApi extends InjectedProviderEvents {
   requestAccounts(): Promise<string[]>;
   getPublicKey(): Promise<string>;
-  on?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
-  removeListener?(event: 'accountsChanged' | 'networkChanged', handler: () => void): void;
 }
 
 async function getBasicBinanceInfo(): Promise<{ address: string; publicKey: string }> {
