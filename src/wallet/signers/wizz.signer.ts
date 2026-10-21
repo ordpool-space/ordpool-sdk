@@ -1,106 +1,23 @@
-import { hex } from '@scure/base';
-import { from, map, Observable, switchMap } from 'rxjs';
-
-import { walletSidePaymentAddress } from '../network-address-shim.js';
-import { broadcastSignedPsbt } from '../psbt-extract.js';
-import { keypathSighashWhitelist } from '../sighash.js';
-import {
-  KnownOrdinalWalletType,
-  SignAndBroadcastInput,
-  SignMultiInputAndBroadcastInput,
-  SignPsbtOnlyInput,
-  WalletSigner,
-} from '../wallet.service.types.js';
-import { operationNamedDefaults } from './operation-named-defaults.js';
+import { KnownOrdinalWalletType, WalletSigner } from '../wallet.service.types.js';
+import { makeUnisatFamilySigner, UnisatFamilyRpc } from './unisat-family-signer.helper.js';
 import { unsupportedSignMessage } from './unsupported-sign-message.js';
-import { resolveSigningTargets } from './signing-targets.helper.js';
-
-
-interface WizzToSignInput {
-  index: number;
-  address?: string;
-  sighashTypes?: number[];
-}
-
-interface WizzRpc {
-  signPsbt(
-    psbtHex: string,
-    options?: { autoFinalized?: boolean; toSignInputs?: WizzToSignInput[] }
-  ): Promise<string>;
-}
 
 
 /**
  * Wizz — `window.wizz.signPsbt(hex, {autoFinalized: false})`.
  *
- * Wizz is a fork of Unisat (formerly Atom Wallet) and exposes the
- * same provider contract. Per the SDK-wide "WE broadcast" convention
- * (see `/Work/ordpool/WALLETS.md`): the wallet signs and hands back
- * a partial-sig PSBT; the SDK finalises and broadcasts via the
- * caller-supplied `input.broadcast` callback. We deliberately SKIP
- * `pushPsbt` — that would route to Wizz's vendor backend and take
- * broadcast-endpoint choice away from the SDK.
+ * Wizz is a fork of UniSat (formerly Atom Wallet) and exposes the same
+ * provider contract, so it rides the shared UniSat-family signer. Per the
+ * SDK-wide "WE broadcast" convention we SKIP `pushPsbt` (Wizz's vendor
+ * backend) and broadcast via the caller's callback.
  *
- * Wizz also injects itself as `window.atom` (legacy Atom Wallet
- * namespace) for backwards compatibility; both bindings reference
- * the same provider via Proxy. Prefer `window.wizz`.
+ * Wizz also injects itself as `window.atom` (legacy Atom namespace) for
+ * backwards compatibility; both bindings reference the same provider via
+ * Proxy. Prefer `window.wizz`.
  */
-const legacy = {
-
-  signAndBroadcast(input: SignAndBroadcastInput): Observable<{ txId: string }> {
-    const psbtHex: string = hex.encode(input.psbtBytes);
-    const wizz = (window as unknown as { wizz: WizzRpc }).wizz;
-
-    const walletAddress = walletSidePaymentAddress(
-      KnownOrdinalWalletType.wizz,
-      input.paymentAddress,
-      input.paymentPublicKey,
-      input.network,
-    );
-    const toSignInputs: WizzToSignInput[] = [{ index: 0, address: walletAddress }];
-
-    return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
-      switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
-    );
-  },
-
-  signMultiInputAndBroadcast(input: SignMultiInputAndBroadcastInput): Observable<{ txId: string }> {
-    const psbtHex = hex.encode(input.psbtBytes);
-    const wizz = (window as unknown as { wizz: WizzRpc }).wizz;
-
-    const targets = resolveSigningTargets(input);
-    const toSignInputs: WizzToSignInput[] = [];
-    for (const t of targets) {
-      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey, input.network);
-      for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
-      }
-    }
-
-    return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
-      switchMap(signedPsbtHex => broadcastSignedPsbt(input, hex.decode(signedPsbtHex))),
-    );
-  },
-
-  signPsbtOnly(input: SignPsbtOnlyInput): Observable<Uint8Array> {
-    const psbtHex = hex.encode(input.psbtBytes);
-    const wizz = (window as unknown as { wizz: WizzRpc }).wizz;
-    const targets = resolveSigningTargets(input);
-    const toSignInputs: WizzToSignInput[] = [];
-    for (const t of targets) {
-      const addr = walletSidePaymentAddress(KnownOrdinalWalletType.wizz, t.address, t.publicKey ?? input.paymentPublicKey, input.network);
-      for (const i of t.indexes) {
-        toSignInputs.push({ index: i, address: addr, sighashTypes: keypathSighashWhitelist(t.sigHash, addr) });
-      }
-    }
-    return from(wizz.signPsbt(psbtHex, { autoFinalized: false, toSignInputs })).pipe(
-      map((signedPsbtHex) => hex.decode(signedPsbtHex)),
-    );
-  },
-};
-
-export const wizzSigner: WalletSigner = {
-  providerId: KnownOrdinalWalletType.wizz,
-  ...operationNamedDefaults(legacy),
+export const wizzSigner: WalletSigner = makeUnisatFamilySigner({
+  walletType: KnownOrdinalWalletType.wizz,
+  getProvider: () => (window as unknown as { wizz: UnisatFamilyRpc }).wizz,
+  shimWalletAddress: true,
   signMessage: unsupportedSignMessage('Wizz'),
-};
+});

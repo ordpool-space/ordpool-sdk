@@ -1,7 +1,7 @@
 {
   "name": "ordpool-sdk",
   "version": "0.1.0",
-  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool \u2014 REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Framework-agnostic; runs in the browser and in plain Node.",
+  "description": "Higher-level Bitcoin / Ordinals SDK for ordpool — REST wrappers, calendar clients, signing helpers, and other domain code that doesn't fit in ordpool-parser. Framework-agnostic; runs in the browser and in plain Node.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ordpool-space/ordpool-sdk.git"
@@ -125,7 +125,8 @@
     "check:net-log": "node scripts/check-net-log.mjs",
     "e2e:slots": "node scripts/e2e-slots.mjs",
     "check:harness-types": "tsc -p e2e/playwright/tsconfig.harness.json",
-    "check:dist-e2e": "npm run build:e2e && node -e \"require('./dist-e2e/index.js')\" && git diff --exit-code dist-e2e/"
+    "check:dist-e2e": "npm run build:e2e && node -e \"require('./dist-e2e/index.js')\" && git diff --exit-code dist-e2e/",
+    "dupes": "jscpd"
   },
   "keywords": [
     "bitcoin",
@@ -176,6 +177,7 @@
     "esbuild": "^0.24.0",
     "jest": "^30.4.2",
     "jest-environment-jsdom": "^30.4.1",
+    "jscpd": "^4.3.0",
     "ordpool-parser": "github:ordpool-space/ordpool-parser#f090777a95ac3b9ca46cca1eac194b003f657ad6",
     "rimraf": "^5.0.7",
     "rxjs": "^7.8.1",
