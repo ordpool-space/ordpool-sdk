@@ -422,6 +422,46 @@ export interface CreateInscribeTransactionsResult {
  * scriptSig carries the actual signature, which is not knowable until the
  * wallet signs, so its commit txid genuinely cannot be predicted.
  */
+/**
+ * Synthesise the auto envelope fields, merge the caller's `envelopeFields` after
+ * them, and build the inscription envelope. Shared by the single-inscribe and
+ * child-inscribe paths; only the synthesise source differs (the child adds the
+ * parent tag).
+ */
+function buildMergedInscriptionEnvelope(
+  synthSource: Parameters<typeof synthesizeEnvelopeFields>[0],
+  ephemeralPubkeyXonly: Uint8Array,
+  envelopeArgs: {
+    body?: Uint8Array;
+    contentType?: string;
+    envelopeFields?: ReadonlyArray<OrdEnvelopeField>;
+    minimalTagPush?: boolean;
+  },
+): Uint8Array {
+  const autoFields = synthesizeEnvelopeFields(synthSource);
+  const mergedFields: ReadonlyArray<OrdEnvelopeField> = autoFields.length === 0
+    ? (envelopeArgs.envelopeFields ?? [])
+    : [...autoFields, ...(envelopeArgs.envelopeFields ?? [])];
+  return buildInscriptionEnvelope({
+    revealPubkeyXonly: ephemeralPubkeyXonly,
+    contentType: envelopeArgs.contentType,
+    body: envelopeArgs.body,
+    fields: mergedFields,
+    minimalTagPush: envelopeArgs.minimalTagPush,
+  });
+}
+
+/** Validate an optional tip: a non-negative integer value and a non-empty address. */
+function assertValidTip(tip: { address: string; value: number } | undefined): void {
+  if (tip === undefined) return;
+  if (!Number.isInteger(tip.value) || tip.value < 0) {
+    throw new Error('tip.value must be a non-negative integer');
+  }
+  if (typeof tip.address !== 'string' || tip.address.length === 0) {
+    throw new Error('tip.address must be a non-empty string');
+  }
+}
+
 function deriveUnsignedCommitTxid(
   simCommitPsbt: Uint8Array,
   paymentAddress: string,
@@ -479,18 +519,7 @@ export function createInscribeTransactions(
   // `content_type` / `content_encoding` first-wins (so caller-supplied
   // values behind an auto-field are ignored by downstream indexers).
   // Caller-side dedup is the consumer's responsibility.
-  const autoFields = synthesizeEnvelopeFields(args);
-  const mergedFields: ReadonlyArray<OrdEnvelopeField> = autoFields.length === 0
-    ? (args.envelopeFields ?? [])
-    : [...autoFields, ...(args.envelopeFields ?? [])];
-
-  const envelope = buildInscriptionEnvelope({
-    revealPubkeyXonly: ephemeralPubkeyXonly,
-    contentType: args.contentType,
-    body: args.body,
-    fields: mergedFields,
-    minimalTagPush: args.minimalTagPush,
-  });
+  const envelope = buildMergedInscriptionEnvelope(args, ephemeralPubkeyXonly, args);
 
   return assembleInscribeTransactions(args, {
     envelope,
@@ -563,14 +592,7 @@ export function planInscribeCommit(
       'This wallet pays from a legacy address, which cannot be used to inscribe. Switch it to Native SegWit or Taproot.',
       { paymentAddress: args.paymentAddress });
   }
-  if (args.tip !== undefined) {
-    if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
-      throw new Error('tip.value must be a non-negative integer');
-    }
-    if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
-      throw new Error('tip.address must be a non-empty string');
-    }
-  }
+  assertValidTip(args.tip);
 
   const { envelope, ephemeralPubkeyXonly } = assembly;
   // The commit funds the sum of the inscription outputs; for a single
@@ -849,14 +871,7 @@ export function createChildInscribeTransactions(
       `Switch the wallet to Native SegWit or Taproot and retry.`,
     );
   }
-  if (args.tip !== undefined) {
-    if (!Number.isInteger(args.tip.value) || args.tip.value < 0) {
-      throw new Error('tip.value must be a non-negative integer');
-    }
-    if (typeof args.tip.address !== 'string' || args.tip.address.length === 0) {
-      throw new Error('tip.address must be a non-empty string');
-    }
-  }
+  assertValidTip(args.tip);
   if ((args.satOffset !== undefined && args.satOffset !== 0) || args.satSource !== undefined || args.paddingUtxo !== undefined) {
     throw new Error('satOffset / satSource / paddingUtxo are not supported for child inscriptions');
   }
@@ -885,17 +900,11 @@ export function createChildInscribeTransactions(
   const ephemeralPubkeyXonly = deriveRevealPubkeyXonly(ephemeralPrivKey);
 
   // Envelope with the parent tag (0x03) synthesised from parentInscriptionId.
-  const autoFields = synthesizeEnvelopeFields({ ...args, parent: args.parentInscriptionId });
-  const mergedFields: ReadonlyArray<OrdEnvelopeField> = autoFields.length === 0
-    ? (args.envelopeFields ?? [])
-    : [...autoFields, ...(args.envelopeFields ?? [])];
-  const envelope = buildInscriptionEnvelope({
-    revealPubkeyXonly: ephemeralPubkeyXonly,
-    contentType: args.contentType,
-    body: args.body,
-    fields: mergedFields,
-    minimalTagPush: args.minimalTagPush,
-  });
+  const envelope = buildMergedInscriptionEnvelope(
+    { ...args, parent: args.parentInscriptionId },
+    ephemeralPubkeyXonly,
+    args,
+  );
 
   const { dummyPrivateKey } = getDummyKeypair(toScureNetwork(args.network));
   const dummyEphemeralPriv = new Uint8Array(32).fill(0x42);

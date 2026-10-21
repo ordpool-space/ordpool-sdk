@@ -89,6 +89,10 @@ export interface InscribeChildAndBroadcastResult {
   fees: CreateChildInscribeTransactionsResult['fees'];
 }
 
+/* jscpd:ignore-start -- the child-inscription reveal orchestration mirrors the standard
+   inscribe-orchestrator reveal flow (build, collect wallet signatures, testmempoolaccept,
+   submitpackage) because both must do the same validated-pair dance; child adds the
+   parent link. Deliberately parallel per the typed-triple rule, marked not extracted. */
 export function inscribeChildAndBroadcast(
   args: InscribeChildAndBroadcastArgs,
 ): Observable<InscribeChildAndBroadcastResult> {
@@ -158,3 +162,4 @@ export function inscribeChildAndBroadcast(
     );
   });
 }
+/* jscpd:ignore-end */

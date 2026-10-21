@@ -1,4 +1,5 @@
 import { encodeInscriptionId } from './inscription-envelope.js';
+import { resolveOrdFetchParams } from './ord-fetch-params.js';
 
 /**
  * Whether an inscription id exists, per an ord server. `unknown` is a
@@ -33,10 +34,7 @@ export async function checkInscriptionsExist(
   ids: ReadonlyArray<string>,
   options: CheckInscriptionsExistOptions,
 ): Promise<Map<string, InscriptionExistence>> {
-  const fetchFn = options.fetchFn ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 10_000;
-  const concurrency = Math.max(1, options.concurrency ?? 4);
-  const base = options.ordBaseUrl.replace(/\/+$/, '');
+  const { fetchFn, timeoutMs, concurrency, base } = resolveOrdFetchParams(options);
 
   const result = new Map<string, InscriptionExistence>();
   const toFetch: string[] = [];

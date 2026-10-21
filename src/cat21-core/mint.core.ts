@@ -299,8 +299,6 @@ async function planMint(
  * `ready` = a safe funding coin covers postage + tip + fee; `expert-required` =
  * only asset coins cover; `insufficient` = nothing covers.
  */
-/* jscpd:ignore-end */
-
 export async function simulateMint(
   params: MintCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort },
@@ -327,6 +325,8 @@ export async function simulateMint(
  * recommended coin, named assets) when the recommendation is
  * `expert-required`, and a plain `Error` when nothing covers.
  */
+/* jscpd:ignore-end */
+
 export async function executeMint(
   params: MintCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort; sign: SignPort; broadcast: BroadcastPort },

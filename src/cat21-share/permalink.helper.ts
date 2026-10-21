@@ -197,13 +197,17 @@ export interface ParsedBuyOfferQuery {
   catOutpoint: CatOutpoint | null;
 }
 
-export function buildBuyOfferQueryParams(args: BuyOfferQueryArgs): Record<string, string> {
-  if (!Number.isInteger(args.catNumber) || args.catNumber < 0) {
-    throw new Error(`catNumber must be a non-negative integer; got ${args.catNumber}`);
+/** Validate the cat number and seed a query-param map with it. Shared by the
+ *  buy-offer and transfer permalink builders. */
+function baseCatNumberParams(catNumber: number): Record<string, string> {
+  if (!Number.isInteger(catNumber) || catNumber < 0) {
+    throw new Error(`catNumber must be a non-negative integer; got ${catNumber}`);
   }
-  const params: Record<string, string> = {
-    [CAT21_QUERY_KEYS.catNumber]: String(args.catNumber),
-  };
+  return { [CAT21_QUERY_KEYS.catNumber]: String(catNumber) };
+}
+
+export function buildBuyOfferQueryParams(args: BuyOfferQueryArgs): Record<string, string> {
+  const params: Record<string, string> = baseCatNumberParams(args.catNumber);
   if (args.askSats !== undefined) {
     if (!Number.isInteger(args.askSats) || args.askSats <= 0) {
       throw new Error(`askSats must be a positive integer; got ${args.askSats}`);
@@ -277,12 +281,7 @@ export interface TransferQueryArgs {
 }
 
 export function buildTransferQueryParams(args: TransferQueryArgs): Record<string, string> {
-  if (!Number.isInteger(args.catNumber) || args.catNumber < 0) {
-    throw new Error(`catNumber must be a non-negative integer; got ${args.catNumber}`);
-  }
-  const params: Record<string, string> = {
-    [CAT21_QUERY_KEYS.catNumber]: String(args.catNumber),
-  };
+  const params: Record<string, string> = baseCatNumberParams(args.catNumber);
   writeCatOutpointParams(params, args.catOutpoint);
   return params;
 }

@@ -193,23 +193,28 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
   // We need the commit output's script/address first to construct
   // a reveal that points at it. Build a placeholder commit with
   // zero fees just to get the taptree metadata.
-  const placeholderCommit = buildInscribeCommitPsbt({
-    fundingInput: args.fundingInput,
-    senderChangeAddress: args.senderChangeAddress,
-    envelopeScript: envelope,
-    ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
-    commitFeeSats: 0,
-    revealFeeReserveSats: 0,
-    postageSats,
-    tipValueSats: args.tip?.value,
-    walletType: args.walletType,
-    changeDustLimitSats: args.changeDustLimitSats,
-    satOffset: args.satOffset,
-    commitPostageSats: args.commitPostageSats,
-    satSource: args.satSource,
-    paddingInput: args.paddingInput,
-    network: args.network,
-  });
+  // The placeholder and the per-fee simulation commits differ only in the two
+  // fee fields; every other field (funding, envelope, postage, sat source) is
+  // identical, so build them through one closure.
+  const buildFeeSimCommit = (commitFeeSats: number, revealFeeReserveSats: number) =>
+    buildInscribeCommitPsbt({
+      fundingInput: args.fundingInput,
+      senderChangeAddress: args.senderChangeAddress,
+      envelopeScript: envelope,
+      ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
+      commitFeeSats,
+      revealFeeReserveSats,
+      postageSats,
+      tipValueSats: args.tip?.value,
+      walletType: args.walletType,
+      changeDustLimitSats: args.changeDustLimitSats,
+      satOffset: args.satOffset,
+      commitPostageSats: args.commitPostageSats,
+      satSource: args.satSource,
+      paddingInput: args.paddingInput,
+      network: args.network,
+    });
+  const placeholderCommit = buildFeeSimCommit(0, 0);
   const tipValueSats = args.tip?.value ?? 0;
   // The reveal's vsize is deterministic given the envelope and outputs. The
   // placeholder commit (zero fees) supplies the taptree it spends; the reveal
@@ -263,23 +268,7 @@ export function simulateInscribeFees(args: SimulateInscribeFeesArgs): SimulateIn
     feeRatePerVbyte: commitFeeRate,
     feeBudgetSats: commitFeeBudget,
     simulate: (feeSats: number) => {
-      const commit = buildInscribeCommitPsbt({
-        fundingInput: args.fundingInput,
-        senderChangeAddress: args.senderChangeAddress,
-        envelopeScript: envelope,
-        ephemeralPubkeyXonly: args.ephemeralPubkeyXonly,
-        commitFeeSats: feeSats,
-        revealFeeReserveSats: revealFeeSats,
-        postageSats,
-        tipValueSats: args.tip?.value,
-        walletType: args.walletType,
-        changeDustLimitSats: args.changeDustLimitSats,
-        satOffset: args.satOffset,
-        commitPostageSats: args.commitPostageSats,
-        satSource: args.satSource,
-    paddingInput: args.paddingInput,
-        network: args.network,
-      });
+      const commit = buildFeeSimCommit(feeSats, revealFeeSats);
       // Dummy-sign the funding input + finalize to read the real vsize. DEFAULT
       // and ALL are both accepted (taproot funding via the Layer-2 sim adapter).
       const tx = btc.Transaction.fromPSBT(commit.commitPsbt);

@@ -33,6 +33,12 @@ import type {
 
 /* ──────────────────────────  Public entry  ────────────────────────── */
 
+/* jscpd:ignore-start -- agent-policy operation gate, deliberately parallel to the inscribe
+   gate. Each validates its own domain's operations (here mint / transfer / offer / buy /
+   accept; inscribe its own kinds) with its own intent shapes and reject reasons, and the
+   per-operation validators share a guard shape by nature of being guards. A shared
+   abstraction over two independent security gates would couple them, so the parallel
+   validators are marked, not extracted. */
 export function validateCat21Operation(args: {
   config: Cat21OperationGateConfig;
   operation: Cat21Operation;
@@ -489,6 +495,8 @@ function tryBase64(value: string): Uint8Array | undefined {
     return undefined;
   }
 }
+
+/* jscpd:ignore-end */
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

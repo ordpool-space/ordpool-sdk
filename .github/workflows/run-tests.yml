@@ -27,6 +27,10 @@ jobs:
         node-version: 24
 
     - run: npm install
+
+    - name: Duplicate check (jscpd)
+      run: npm run dupes
+
     - run: npm run test
 
     # dist/ is NOT checked in — regenerated per-install via the prepare hook.

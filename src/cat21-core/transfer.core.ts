@@ -297,8 +297,6 @@ async function planTransfer(
   };
 }
 
-/* jscpd:ignore-end */
-
 /**
  * Preview a transfer: content-checked funding selection + two-pass fee, no
  * signing or broadcast. `status: 'ready'` means a safe funding coin was found
@@ -332,6 +330,8 @@ export async function simulateTransfer(
  * (cause, recommended coin, named assets) when the recommendation is
  * `expert-required`, and a plain `Error` when nothing covers.
  */
+/* jscpd:ignore-end */
+
 export async function executeTransfer(
   params: TransferCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort; sign: SignPort; broadcast: BroadcastPort },

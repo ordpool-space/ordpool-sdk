@@ -3,6 +3,7 @@ import type { OrdOutputResponse } from '../cat21-mint/utxo-content.types.js';
 import type { Network } from '../network.js';
 import type { InscribeSatSource } from './inscription-commit.helper.js';
 import { findSatOffset } from './sat-offset.js';
+import { resolveOrdFetchParams } from './ord-fetch-params.js';
 import { deriveOwnedTaprootInput } from './taproot-owned-input.js';
 
 /**
@@ -61,10 +62,7 @@ export async function findRareSatsInOutputs<T extends { txid: string; vout: numb
   outputs: ReadonlyArray<T>,
   options: FindRareSatsOptions,
 ): Promise<Array<SatPickerRow<T>>> {
-  const fetchFn = options.fetchFn ?? fetch;
-  const timeoutMs = options.timeoutMs ?? 10_000;
-  const concurrency = Math.max(1, options.concurrency ?? 4);
-  const base = options.ordBaseUrl.replace(/\/+$/, '');
+  const { fetchFn, timeoutMs, concurrency, base } = resolveOrdFetchParams(options);
 
   const rows: Array<SatPickerRow<T>> = outputs.map((utxo) => ({
     utxo, address: null, rareSat: null, status: 'unknown',
