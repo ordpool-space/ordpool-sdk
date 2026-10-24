@@ -120,8 +120,7 @@ export function verifyOfferInputSignatures(
   // needs. Every input must have a chain prevout: a missing one means we cannot
   // compute the sighash honestly, so fail closed rather than fall back to the
   // PSBT's own (attacker-controlled) witnessUtxo.
-  const scripts: Uint8Array[] = [];
-  const amounts: bigint[] = [];
+  const chainPrevouts: OfferPrevout[] = [];
   for (let i = 0; i < n; i++) {
     const input = tx.getInput(i);
     const prevout = prevouts.get(outpointKey(input));
@@ -144,49 +143,89 @@ export function verifyOfferInputSignatures(
         );
       }
     }
-    scripts.push(prevout.script);
-    amounts.push(BigInt(prevout.amountSats));
+    chainPrevouts.push(prevout);
   }
+  const scripts = chainPrevouts.map((p) => p.script);
+  const amounts = chainPrevouts.map((p) => BigInt(p.amountSats));
 
-  // Verify every input that carries a signature. Input 0 (seller cat) is
-  // unsigned in a bid, so it contributes its prevout above but no signature
-  // here; the buyer funding inputs (1..N) are the signed ones.
+  // Verify every input that carries signature material in ANY form: partial
+  // (tapKeySig, partialSig) or finalised (finalScriptWitness, finalScriptSig).
+  // A finalised witness is what a broadcast would actually use, so it is
+  // decoded and verified like a partial one, never counted as signed unseen.
+  // Input 0 (seller cat) is unsigned in a bid, so it contributes its prevout
+  // above and nothing here.
   for (let i = 0; i < n; i++) {
     const input = tx.getInput(i);
-    const prevout = prevouts.get(outpointKey(input))!; // present: checked above
-
-    const hasTapKeySig = !!(input.tapKeySig && input.tapKeySig.length > 0);
-    const hasPartialSig = !!(input.partialSig && input.partialSig.length > 0);
-    if (!hasTapKeySig && !hasPartialSig) {
+    const prevout = chainPrevouts[i];
+    const witness = input.finalScriptWitness;
+    const signed =
+      (input.tapKeySig?.length ?? 0) > 0 ||
+      (input.partialSig?.length ?? 0) > 0 ||
+      (witness?.length ?? 0) > 0 ||
+      (input.finalScriptSig?.length ?? 0) > 0;
+    if (!signed) {
       continue; // unsigned input (e.g. seller input 0): prevout pinned, nothing to verify
     }
 
     if (isP2tr(prevout.script)) {
-      const sigBytes = input.tapKeySig!;
-      // 64-byte sig = SIGHASH_DEFAULT; 65-byte carries the flag in the last byte.
-      const sig = sigBytes.length === 65 ? sigBytes.slice(0, 64) : sigBytes;
-      const hashType = sigBytes.length === 65 ? sigBytes[64] : btc.SigHash.DEFAULT;
-      const msg = tx.preimageWitnessV1(i, scripts, hashType, amounts);
+      const sigs: Uint8Array[] = [];
+      if (input.tapKeySig && input.tapKeySig.length > 0) sigs.push(input.tapKeySig);
+      if (witness && witness.length > 0) {
+        if (witness.length !== 1) {
+          return fail('signature-invalid', `input ${i} taproot witness is not a single key-path signature`, i);
+        }
+        sigs.push(witness[0]);
+      }
+      if (sigs.length === 0) {
+        return fail('signature-missing', `input ${i} taproot input carries no key-path signature`, i);
+      }
       const xOnlyPubkey = prevout.script.slice(2); // OP_1 PUSH32 <x-only key>
-      if (!schnorr.verify(sig, msg, xOnlyPubkey)) {
-        return fail('signature-invalid', `input ${i} taproot schnorr signature does not verify`, i);
+      for (const sigBytes of sigs) {
+        // 64-byte sig = SIGHASH_DEFAULT; 65-byte carries the flag in the last byte.
+        if (sigBytes.length !== 64 && sigBytes.length !== 65) {
+          return fail('signature-invalid', `input ${i} taproot signature is ${sigBytes.length} bytes`, i);
+        }
+        const sig = sigBytes.length === 65 ? sigBytes.slice(0, 64) : sigBytes;
+        const hashType = sigBytes.length === 65 ? sigBytes[64] : btc.SigHash.DEFAULT;
+        let verified: boolean;
+        try {
+          verified = schnorr.verify(sig, tx.preimageWitnessV1(i, scripts, hashType, amounts), xOnlyPubkey);
+        } catch {
+          verified = false;
+        }
+        if (!verified) {
+          return fail('signature-invalid', `input ${i} taproot schnorr signature does not verify`, i);
+        }
       }
       continue;
     }
 
     if (isP2wpkh(prevout.script)) {
-      if (!hasPartialSig) {
-        return fail('signature-missing', `input ${i} P2WPKH carries no partialSig`, i);
+      if (input.finalScriptSig && input.finalScriptSig.length > 0) {
+        return fail('signature-invalid', `input ${i} P2WPKH input carries a scriptSig`, i);
       }
       // partialSig entries are [pubkey, sig||flag] per BIP-174; a single-sig
       // P2WPKH has exactly one.
-      for (const [pubKey, sigWithFlag] of input.partialSig!) {
+      const entries: [Uint8Array, Uint8Array][] = [...(input.partialSig ?? [])];
+      if (witness && witness.length > 0) {
+        if (witness.length !== 2) {
+          return fail('signature-invalid', `input ${i} P2WPKH witness is not [signature, pubkey]`, i);
+        }
+        entries.push([witness[1], witness[0]]);
+      }
+      if (entries.length === 0) {
+        return fail('signature-missing', `input ${i} P2WPKH carries no signature`, i);
+      }
+      const scriptCode = p2wpkhScriptCode(prevout.script);
+      for (const [pubKey, sigWithFlag] of entries) {
+        if (!pubkeyOwnsP2wpkh(pubKey, prevout.script)) {
+          return fail('signature-invalid', `input ${i} P2WPKH pubkey does not match the prevout key hash`, i);
+        }
         const der = sigWithFlag.slice(0, -1);
         const hashType = sigWithFlag[sigWithFlag.length - 1];
-        const scriptCode = p2wpkhScriptCode(prevout.script);
-        const digest = tx.preimageWitnessV0(i, scriptCode, hashType, BigInt(prevout.amountSats));
         let verified: boolean;
         try {
+          const digest = tx.preimageWitnessV0(i, scriptCode, hashType, BigInt(prevout.amountSats));
           // scure signs ECDSA as DER; @noble's verify takes the 64-byte
           // compact form, so re-encode before verifying.
           const compact = secp256k1.Signature.fromDER(der).toCompactRawBytes();
@@ -212,6 +251,14 @@ export function verifyOfferInputSignatures(
   }
 
   return { ok: true };
+}
+
+function pubkeyOwnsP2wpkh(pubKey: Uint8Array, prevoutScript: Uint8Array): boolean {
+  try {
+    return equalBytes(btc.p2wpkh(pubKey).script, prevoutScript);
+  } catch {
+    return false;
+  }
 }
 
 function equalBytes(a: Uint8Array, b: Uint8Array): boolean {

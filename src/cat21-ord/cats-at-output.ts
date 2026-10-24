@@ -61,7 +61,8 @@ const INSCRIPTION_ID = /^[0-9a-f]{64}i\d+$/;
  *
  * - `null`: cat21-ord answers 404 for the output (unknown or spent).
  * - `[]`: the output exists and carries no cat.
- * - throws: cat21-ord answers another error, `cats` is missing or holds
+ * - throws: cat21-ord has not indexed the output yet (`indexed: false`, or no
+ *   sat ranges), answers another error, `cats` is missing or holds
  *   something other than an inscription id, an id does not resolve, or its
  *   `number` is not a cat number.
  */
@@ -72,7 +73,10 @@ export async function getCatsAtOutput(reader: Cat21OrdReader, txid: string, vout
 
   const output = await reader.getJson(`/output/${outpoint}`);
   if (output === null) return null;
-  const cats = (output as { cats?: unknown }).cats;
+  const { cats, indexed, sat_ranges } = output as { cats?: unknown; indexed?: unknown; sat_ranges?: unknown };
+  if (indexed === false || !Array.isArray(sat_ranges) || sat_ranges.length === 0) {
+    throw new Error(`getCatsAtOutput: cat21-ord has not indexed /output/${outpoint} yet`);
+  }
   if (!Array.isArray(cats)) throw new Error(`getCatsAtOutput: cat21-ord /output/${outpoint} has no cats list`);
 
   const numbers = await Promise.all(cats.map(async (id: unknown) => {

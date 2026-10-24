@@ -254,7 +254,9 @@ export function recommendFunding<T extends AnnotatedFundingUtxo>(
   const unnamedAssets = covering.filter((c) => c.bucket === 'assets' && !isNamedAssetCoin(c));
   const pool =
     namedAssets.length > 0 ? namedAssets : unnamedAssets.length > 0 ? unnamedAssets : covering;
-  const recommended = annotatedFor(selectCardinalUtxo(pool, targetSpendSats, false)!);
+  const pick = selectCardinalUtxo(pool, targetSpendSats, false);
+  if (!pick) throw new Error('recommendFunding: no covering coin selected from a non-empty covering pool');
+  const recommended = annotatedFor(pick);
   const status: FundingRecommendationStatus =
     isNamedAssetCoin(recommended) && topology === 'separate-payment-address'
       ? 'asset-notice'

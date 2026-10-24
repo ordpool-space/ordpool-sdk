@@ -461,6 +461,11 @@ function batchArgs(
 const DUMMY_PUBKEY_XONLY = new Uint8Array(32).fill(0x02);
 
 
+function withoutWalletCoins(content: InscribeContent): InscribeContent {
+  const { satTarget: _satTarget, paddingUtxo: _paddingUtxo, ...rest } = content;
+  return rest;
+}
+
 export class InscribeMintOrchestrator {
   /* jscpd:ignore-start -- per-operation orchestrator state and operational body, deliberately
      mirrored across the mint / transfer / offer / inscribe orchestrators: the same shape of
@@ -560,7 +565,8 @@ export class InscribeMintOrchestrator {
     this.wallet = wallet;
     this.recomputeSeq++; // invalidate any in-flight recompute from the old wallet
     {
-      this.patch({ selectedUtxo: null, droppedSelection: null, content: null, batch: null, errorMessage: null, userMessage: null, successResult: null, compression: null, padding: null, parents: null });
+      const content = this.snap.content && withoutWalletCoins(this.snap.content);
+      this.patch({ selectedUtxo: null, droppedSelection: null, content, batch: null, errorMessage: null, userMessage: null, successResult: null, compression: null, padding: null, parents: null });
     }
     if (!wallet) {
       this.utxos = [];

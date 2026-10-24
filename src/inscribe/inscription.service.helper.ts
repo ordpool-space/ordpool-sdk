@@ -402,27 +402,6 @@ export interface CreateInscribeTransactionsResult {
 }
 
 /**
- * Compute the commit transaction's txid BEFORE the wallet signs it.
- *
- * The reveal spends the commit's output, so its input must reference the
- * exact txid the real wallet-signed commit will have. For witness funding
- * inputs (P2WPKH / P2TR) the scriptSig is empty, so the txid is witness-
- * independent and finalizing the dummy-keyed simulation commit yields the
- * real txid byte-for-byte.
- *
- * For P2SH-P2WPKH (Nested SegWit) the redeemScript push lives in the
- * scriptSig, which IS part of the non-witness txid — so the dummy pubkey
- * used during simulation would produce a DIFFERENT txid than the real
- * commit, the reveal would reference a non-existent output, and the
- * postage would lock. The real scriptSig is fully determined by the real
- * payment pubkey (`push(p2wpkh(pubkey))`, no signature required), so
- * override input 0's scriptSig with it before reading the txid.
- *
- * P2PKH is excluded upstream by `isInscribeSupportedPaymentAddress`: its
- * scriptSig carries the actual signature, which is not knowable until the
- * wallet signs, so its commit txid genuinely cannot be predicted.
- */
-/**
  * Synthesise the auto envelope fields, merge the caller's `envelopeFields` after
  * them, and build the inscription envelope. Shared by the single-inscribe and
  * child-inscribe paths; only the synthesise source differs (the child adds the
@@ -462,6 +441,27 @@ function assertValidTip(tip: { address: string; value: number } | undefined): vo
   }
 }
 
+/**
+ * Compute the commit transaction's txid BEFORE the wallet signs it.
+ *
+ * The reveal spends the commit's output, so its input must reference the
+ * exact txid the real wallet-signed commit will have. For witness funding
+ * inputs (P2WPKH / P2TR) the scriptSig is empty, so the txid is witness-
+ * independent and finalizing the dummy-keyed simulation commit yields the
+ * real txid byte-for-byte.
+ *
+ * For P2SH-P2WPKH (Nested SegWit) the redeemScript push lives in the
+ * scriptSig, which IS part of the non-witness txid — so the dummy pubkey
+ * used during simulation would produce a DIFFERENT txid than the real
+ * commit, the reveal would reference a non-existent output, and the
+ * postage would lock. The real scriptSig is fully determined by the real
+ * payment pubkey (`push(p2wpkh(pubkey))`, no signature required), so
+ * override input 0's scriptSig with it before reading the txid.
+ *
+ * P2PKH is excluded upstream by `isInscribeSupportedPaymentAddress`: its
+ * scriptSig carries the actual signature, which is not knowable until the
+ * wallet signs, so its commit txid genuinely cannot be predicted.
+ */
 function deriveUnsignedCommitTxid(
   simCommitPsbt: Uint8Array,
   paymentAddress: string,

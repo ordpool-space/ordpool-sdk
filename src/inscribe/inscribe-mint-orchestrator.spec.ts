@@ -591,3 +591,25 @@ describe('InscribeMintOrchestrator: the fee rate survives a wallet connect', () 
     expect(o.getSnapshot().feeRate).toBe(10);
   });
 });
+
+describe('InscribeMintOrchestrator: the content survives a wallet connect', () => {
+  it('content set before connect, then setWallet: a resolved funding coin, not an empty verdict', async () => {
+    // A form is filled before the user connects; the connect must not leave
+    // the orchestrator without content and the mint disabled.
+    const o = new InscribeMintOrchestrator(deps());
+    o.setFeeRate(10);
+    o.setContent(content);
+    await o.setWallet(wallet);
+    const s = await waitFor(o, (x) => x.resolvedFundingUtxo !== null);
+    expect(s.content).toEqual(content);
+    expect(s.fundingRecommendation.status).toBe('auto');
+  });
+
+  it('a wallet switch keeps the content and drops the coins the previous wallet chose', async () => {
+    const o = new InscribeMintOrchestrator(deps());
+    await o.setWallet(wallet);
+    o.setContent({ ...content, satTarget: { kind: 'in-funding', offset: 1_000 }, paddingUtxo: coin('p', 2_000) });
+    await o.setWallet({ ...wallet, ordinalsAddress: btc.p2tr(hex.decode('0'.repeat(63) + '2'), undefined, btc.NETWORK).address! });
+    expect(o.getSnapshot().content).toEqual(content);
+  });
+});

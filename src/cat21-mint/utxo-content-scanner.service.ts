@@ -74,8 +74,8 @@ export class UtxoContentScanner implements ContentScanPort {
    * (`scan()`), so the orchestrator's force-scan and the UI's per-row badges
    * hit the ord/cat21-ord endpoints once, not twice.
    *
-   * FAIL-CLOSED: a `scan-failed` (content unknown) maps to `'has-assets'`, never
-   * `'clean'` — an unverified coin must never be auto-spent. This is the whole
+   * FAIL-CLOSED: unknown content (`scan-failed`, still scanning) rejects, never
+   * `'clean'`; an unverified coin must never be auto-spent. This is the whole
    * point of the force-scan funding-safety layer; hand-rolling the map per
    * consumer risks one wrong fail-open reopening the auto-spend footgun, which
    * is why it lives here (single source of truth).

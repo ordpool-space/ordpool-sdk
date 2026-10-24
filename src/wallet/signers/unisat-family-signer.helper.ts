@@ -15,18 +15,18 @@ import {
 import { operationNamedDefaults } from './operation-named-defaults.js';
 import { resolveSigningTargets } from './signing-targets.helper.js';
 
-/**
- * The `signPsbt(hex, {autoFinalized, toSignInputs})` provider contract that
- * UniSat and its forks (Wizz, OKX, Binance) all expose. `autoFinalized: false`
- * is the SDK-wide "WE broadcast" convention: the wallet returns a partial-sig
- * PSBT and the SDK finalises and broadcasts via the caller's `broadcast`
- * callback, so the wallet's own `pushPsbt` / vendor backend is never used.
- */
 interface UnisatFamilyToSignInput {
   index: number;
   address?: string;
   sighashTypes?: number[];
 }
+/**
+ * The `signPsbt(hex, {autoFinalized, toSignInputs})` provider contract that
+ * UniSat exposes and Wizz, OKX and Binance speak too. `autoFinalized: false`
+ * is the SDK-wide "WE broadcast" convention: the wallet returns a partial-sig
+ * PSBT and the SDK finalises and broadcasts via the caller's `broadcast`
+ * callback, so the wallet's own `pushPsbt` / vendor backend is never used.
+ */
 export interface UnisatFamilyRpc {
   signPsbt(
     psbtHex: string,
