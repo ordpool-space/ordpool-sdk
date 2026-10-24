@@ -11,7 +11,10 @@
  *   isVisible({ timeout }) / isHidden    -> Playwright's own types mark the
  *                                           option `@deprecated This option is
  *                                           ignored`; the check answers
- *                                           instantly. Use isVisibleWithin.
+ *                                           instantly. In a spec, race the state
+ *                                           that means it is not coming
+ *                                           (raceApprovalPopup); in a helper,
+ *                                           use isVisibleWithin.
  *
  * Neither is a type error, so nothing else catches them.
  */
@@ -47,15 +50,6 @@ function args(src, openIdx) {
   return parts.filter((p) => p.trim());
 }
 
-/**
- * The isVisible class is a RATCHET, not a clean gate: 30 inherited sites are
- * harmless-by-accident (their stated timeout equals the config's actionTimeout)
- * and rewriting them blind is the mechanical-sweep mistake that has broken
- * specs here twice. New ones fail; the count may only go down. Lower this
- * number when you fix some, never raise it.
- */
-const IS_VISIBLE_BASELINE = 29;
-
 const slotFindings = [];
 const isVisibleFindings = [];
 for (const file of walk(ROOT)) {
@@ -74,7 +68,7 @@ for (const file of walk(ROOT)) {
 
   for (const m of src.matchAll(/\.(isVisible|isHidden)\(\s*\{/g)) {
     isVisibleFindings.push([file, src.slice(0, m.index).split('\n').length,
-      `${m[1]}() ignores its timeout (Playwright marks it deprecated-and-ignored); use isVisibleWithin`]);
+      `${m[1]}() ignores its timeout (Playwright marks it deprecated-and-ignored); race the state that means it is not coming (raceApprovalPopup), or use isVisibleWithin in a helper`]);
   }
 }
 
@@ -86,19 +80,11 @@ if (slotFindings.length) {
   failed = true;
 }
 
-if (isVisibleFindings.length > IS_VISIBLE_BASELINE) {
+if (isVisibleFindings.length) {
   for (const [file, line, why] of isVisibleFindings) console.error(`${file}:${line}  ${why}`);
-  console.error(
-    `\n${isVisibleFindings.length} isVisible/isHidden call(s) passing an ignored timeout, ` +
-      `up from the ${IS_VISIBLE_BASELINE} inherited. Use isVisibleWithin in new code.`,
-  );
+  console.error(`\n${isVisibleFindings.length} isVisible/isHidden call(s) passing an ignored timeout.`);
   failed = true;
-} else if (isVisibleFindings.length < IS_VISIBLE_BASELINE) {
-  console.log(
-    `isVisible ratchet: ${isVisibleFindings.length} left (baseline ${IS_VISIBLE_BASELINE}). ` +
-      'Lower IS_VISIBLE_BASELINE in this script to lock the improvement in.',
-  );
 }
 
 if (failed) process.exit(1);
-console.log(`Playwright argument slots clean (isVisible ratchet at ${isVisibleFindings.length}).`);
+console.log('Playwright argument slots clean.');

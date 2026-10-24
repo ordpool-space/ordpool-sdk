@@ -1575,11 +1575,9 @@ export async function waitForOrdStockSatpoint(
   const deadline = Date.now() + timeoutMs;
   let last = '<never read>';
   while (Date.now() < deadline) {
-    const insc = await getStockOrdInscription(id).catch(() => undefined);
-    if (insc) {
-      last = insc.satpoint ?? '';
-      if (insc.satpoint === expectedSatpoint) return insc;
-    }
+    const insc = await getStockOrdInscription(id);
+    last = insc.satpoint ?? '';
+    if (insc.satpoint === expectedSatpoint) return insc;
     await new Promise(r => setTimeout(r, 300));
   }
   throw new Error(`stock ord: ${id} still at ${last} after ${timeoutMs}ms, expected ${expectedSatpoint}`);
