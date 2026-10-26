@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { dismissXversePromo, xverseRestorePickerWallet1 } from '../onboard-xverse';
 import { waitForStyleClickable } from '../approval-popup';
+import { clickUntilEffect } from '../click-until-effect';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
 
@@ -250,8 +251,11 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
       const commit = page.getByRole('button', { name: 'Confirm', exact: true }).first();
       await expect(commit).toBeVisible();
       await waitForStyleClickable(commit, { label: 'Xverse restore picker: Confirm' });
-      await commit.click();
-      await expect(page.getByText(/select a wallet to restore|we found funds/i).first()).toBeHidden();
+      const picker = page.getByText(/select a wallet to restore|we found funds/i).first();
+      await clickUntilEffect(commit, page.getByText(/preferred address type|wallet restored/i).first(), {
+        label: 'Xverse restore picker: Confirm',
+        stillPreClick: () => picker.isVisible(),
+      });
       await shot(page, '07c-after-wallet-confirm');
     } else {
       // Native SegWit (BIP-84), the derivation the address assertions use, is
