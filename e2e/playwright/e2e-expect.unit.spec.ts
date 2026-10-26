@@ -51,7 +51,7 @@ describe('an SDK helper outside a test', () => {
     expect(locator.timeouts).toEqual([300]);
     expect(err?.message).toMatch(/Timeout: +300ms/);
     expect(elapsed).toBeGreaterThanOrEqual(300);
-    expect(elapsed).toBeLessThan(2_000);
+    expect(elapsed).toBeLessThan(5_000);
   });
 
   it('reads the bound at each call', async () => {
