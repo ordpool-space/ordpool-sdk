@@ -1,0 +1,82 @@
+name: Build the Cat21 Wallet
+description: >
+  Builds ordpool-space/cat21-wallet at a pinned sha on the Node its own
+  .nvmrc names, then stages the unpacked extension through this SDK's
+  playwright-bootstrap.sh into e2e/extensions/cat21wallet beside it.
+  Consumers that check the SDK out at their pinned sha call it as
+  `uses: ./<sdk-path>/.github/actions/build-cat21-wallet`.
+
+inputs:
+  wallet-sha:
+    description: Full 40-character cat21-wallet sha to build (CAT21_WALLET_SHA).
+    required: true
+  node-version:
+    description: The caller's Node, set again after the wallet build.
+    required: true
+
+outputs:
+  dist:
+    description: The wallet's unpacked extension build.
+    value: ${{ steps.src.outputs.dist }}
+
+runs:
+  using: composite
+  steps:
+    - name: Clone cat21-wallet at the pinned sha
+      id: src
+      shell: bash
+      env:
+        WALLET_SHA: ${{ inputs.wallet-sha }}
+        WALLET_DIR: ${{ runner.temp }}/cat21-wallet
+      run: |
+        set -euo pipefail
+        echo "$WALLET_SHA" | grep -Eq '^[0-9a-f]{40}$' || { echo "wallet-sha is not a full sha: $WALLET_SHA" >&2; exit 1; }
+        rm -rf "$WALLET_DIR"
+        git init -q "$WALLET_DIR"
+        git -C "$WALLET_DIR" fetch --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$WALLET_SHA"
+        git -C "$WALLET_DIR" checkout -q FETCH_HEAD
+        test "$(git -C "$WALLET_DIR" rev-parse HEAD)" = "$WALLET_SHA"
+        echo "node=$(tr -d '[:space:]' < "$WALLET_DIR/.nvmrc")" >> "$GITHUB_OUTPUT"
+        echo "dist=$WALLET_DIR/apps/extension/dist" >> "$GITHUB_OUTPUT"
+
+    - name: Cache the wallet build
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.src.outputs.dist }}
+        key: cat21wallet-dist-${{ inputs.wallet-sha }}-node${{ steps.src.outputs.node }}
+
+    - name: Install pnpm
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: pnpm/action-setup@v4
+      with:
+        version: 10
+        run_install: false
+
+    - name: Use the wallet's Node
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ steps.src.outputs.node }}
+
+    - name: Build the extension
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ runner.temp }}/cat21-wallet
+      run: |
+        set -euo pipefail
+        node --version
+        pnpm install --frozen-lockfile
+        pnpm build:extension
+
+    - name: Back to the caller's Node
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Stage the extension
+      shell: bash
+      env:
+        CAT21_WALLET_LOCAL_DIST: ${{ steps.src.outputs.dist }}
+      run: bash "$GITHUB_ACTION_PATH/../../../e2e/playwright/playwright-bootstrap.sh" cat21wallet
