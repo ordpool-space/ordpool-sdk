@@ -23,7 +23,8 @@ export interface XverseUnlockControls {
  *
  * A context cloned from the seeded profile boots into the lock screen (the
  * vault is encrypted at rest and the key is not kept across restarts); a
- * context that onboarded in this run is already unlocked. Which of the two
+ * context that onboarded in this run is usually unlocked, and can still show
+ * the lock screen when its popup opens. Which of the two
  * Xverse shows is read only after it settled on one of them, so the answer is
  * about the screen, not about a page that is still booting.
  */

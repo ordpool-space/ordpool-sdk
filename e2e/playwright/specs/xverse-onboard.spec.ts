@@ -5,6 +5,7 @@ import { dismissXversePromo, xverseRestorePickerWallet1 } from '../onboard-xvers
 import { waitForStyleClickable } from '../approval-popup';
 import { clickUntilEffect } from '../click-until-effect';
 import { installXverseOfflineRoutes } from '../xverse-offline-routes';
+import { unlockXversePage } from '../xverse-popup';
 import { launchWalletContext } from '../launch-wallet-context';
 
 /**
@@ -301,6 +302,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
     waitUntil: 'domcontentloaded',
   });
   await popup.waitForLoadState('domcontentloaded');
+  await unlockXversePage(popup);
 
   // Dismiss the feature announcement Xverse may show on the first popup open,
   // so the dashboard text is readable in the screenshot artifact.
@@ -310,7 +312,7 @@ test('restores a wallet from the BIP-39 test seed and reaches the "Wallet restor
 
   // Proof-of-onboarding: the dashboard renders "Account 1" header.
   // If the wallet hadn't committed, popup.html would show the
-  // pre-onboarding state (welcome / unlock prompt).
+  // pre-onboarding welcome screen and the test password would unlock nothing.
   await expect(popup.getByText(/account 1/i).first()).toBeVisible();
 
   // eslint-disable-next-line no-console
