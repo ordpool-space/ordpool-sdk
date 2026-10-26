@@ -153,29 +153,12 @@ jobs:
       # attribution lands), pnpm build, then point the bootstrap at the
       # resulting dist.
       #
-      # The cache key is the pinned sha, so the cached dist is exactly the
-      # build of that revision and a pin move rebuilds.
-      - name: Cache cat21-wallet source + build
-        id: cat21wallet-cache
+      # The wallet builds on its own Node (its .nvmrc). The cache key is the
+      # pinned sha plus that Node, so the cached dist is exactly the build of
+      # that revision on that toolchain and a pin move rebuilds.
+      - name: Clone cat21-wallet at the pinned sha
+        id: cat21wallet-src
         if: matrix.wallet == 'cat21wallet'
-        uses: actions/cache@v4
-        with:
-          path: |
-            e2e/extensions/cat21wallet
-            ~/.local/share/pnpm/store
-          key: cat21wallet-from-source-${{ env.CAT21_WALLET_SHA }}
-
-      - name: Install pnpm for cat21-wallet build
-        if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-
-      - name: Clone + build cat21-wallet from source
-        if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
-        env:
-          # GitHub-provided token is enough for read-only public clone.
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           WALLET_DIR="/tmp/cat21-wallet"
@@ -184,6 +167,36 @@ jobs:
           git -C "$WALLET_DIR" fetch --depth=1 https://github.com/ordpool-space/cat21-wallet.git "$CAT21_WALLET_SHA"
           git -C "$WALLET_DIR" checkout -q FETCH_HEAD
           test "$(git -C "$WALLET_DIR" rev-parse HEAD)" = "$CAT21_WALLET_SHA"
+          echo "node=$(tr -d '[:space:]' < "$WALLET_DIR/.nvmrc")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache cat21-wallet build
+        id: cat21wallet-cache
+        if: matrix.wallet == 'cat21wallet'
+        uses: actions/cache@v4
+        with:
+          path: |
+            e2e/extensions/cat21wallet
+            ~/.local/share/pnpm/store
+          key: cat21wallet-from-source-${{ env.CAT21_WALLET_SHA }}-node${{ steps.cat21wallet-src.outputs.node }}
+
+      - name: Install pnpm for cat21-wallet build
+        if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Use the wallet's Node for its build
+        if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ steps.cat21wallet-src.outputs.node }}
+
+      - name: Build cat21-wallet from source
+        if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          WALLET_DIR="/tmp/cat21-wallet"
+          node --version
           # cat21-wallet's prebuild hook (apps/extension/scripts/
           # check-sdk-fresh.cjs) expects ordpool-sdk to be checked
           # out as a sibling at /tmp/ordpool-sdk. This workflow
@@ -200,6 +213,12 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           rm -rf "e2e/extensions/cat21wallet"
           bash e2e/playwright/playwright-bootstrap.sh cat21wallet
+
+      - name: Back to the SDK's Node
+        if: matrix.wallet == 'cat21wallet' && steps.cat21wallet-cache.outputs.cache-hit != 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: '26'
 
       # The stack's slot (e2e/stack-slots.ts): its host ports, E2E_PREFIX,
       # container names and harness port, exported to every later step. A
