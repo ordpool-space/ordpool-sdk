@@ -120,15 +120,13 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // satoshi the existing cat ordinal travels to via FIFO.
   const tx = new btc.Transaction({ lockTime: CAT21_LOCK_TIME, allowUnknownInputs: true });
 
-  // Input 0: seller's cat UTXO, unsigned, sighash ALL pinned, sequence
-  // per the per-wallet policy resolved above.
-  // Detect Taproot from the scriptPubKey shape (OP_1 + 0x20-prefixed
-  // 32-byte push = 34 bytes total, starts with 0x51). On Taproot
-  // inputs we OMIT sighashType — same BIP-341 rationale as in
-  // cat21-mint.helper.ts.
-  const sellerIsTaproot =
-    args.sellerInput.scriptPubKey.length === 34 &&
-    args.sellerInput.scriptPubKey[0] === 0x51;
+  // Input 0: seller's cat UTXO, unsigned, sequence per the per-wallet policy
+  // resolved above. No input carries a `sighashType`: ord's `wallet offer
+  // accept` refuses an offer whose inputs specify one (cat21-ord
+  // `offer/accept.rs`, "inputs may not specify any sighash type"), because
+  // the field would dictate how the seller's wallet signs input 0. Every
+  // signer asks its wallet for SIGHASH_ALL explicitly, and the validator
+  // reads the flag byte of each signature.
   const sellerInput: TransactionInputUpdate = {
     txid: args.sellerInput.txid,
     index: args.sellerInput.vout,
@@ -138,7 +136,6 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
       amount: BigInt(args.sellerInput.value),
     },
   };
-  if (!sellerIsTaproot) sellerInput.sighashType = btc.SigHash.ALL;
   tx.addInput(sellerInput);
 
   // Inputs 1..N: buyer-funded. Same RBF-signalling sequence — keeps the
@@ -146,7 +143,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   let buyerInputTotalSats = 0;
   for (const input of args.buyerInputs) {
     buyerInputTotalSats += input.value;
-    addCat21Input(tx, input, sequenceNumber);
+    addCat21Input(tx, input, sequenceNumber, false);
   }
 
   // Output 0: the whole cat/inscription UTXO lands at the buyer, at its real
@@ -203,13 +200,8 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // locked into the transaction.
   for (let i = 0; i < tx.inputsLength; i++) {
     const input = tx.getInput(i);
-    // Taproot inputs intentionally omit sighashType (SIGHASH_DEFAULT ≡
-    // SIGHASH_ALL on the wire for key-path spends, BIP-341).
-    const isTaproot =
-      !!input.tapInternalKey ||
-      (input.witnessUtxo?.script?.length === 34 && input.witnessUtxo.script[0] === 0x51);
-    if (!isTaproot && input.sighashType !== btc.SigHash.ALL) {
-      throw new Error('Internal error: input sighashType drifted from SIGHASH_ALL');
+    if (input.sighashType !== undefined) {
+      throw new Error(`Internal error: input ${i} specifies sighashType=${input.sighashType}; ord refuses the offer`);
     }
     if (input.sequence !== sequenceNumber) {
       throw new Error(
@@ -309,9 +301,9 @@ export interface ValidateCat21BuyOfferArgs {
  * See `feedback_validator_audience_check` memory.
  *
  *   1. Input 0 references the seller's cat UTXO.
- *   2. Every input has `sighashType === SIGHASH_ALL` (or undefined
- *      for already-finalised inputs — the embedded signature itself
- *      commits to its sighash).
+ *   2. No input specifies a sighash type other than SIGHASH_ALL (absent
+ *      is the ord-compatible form), and every buyer signature, partial
+ *      or finalised, carries the SIGHASH_ALL flag.
  *   3. Every input 1..N carries a buyer signature (partialSig,
  *      tapKeySig, or finalScriptWitness).
  *   4. Output 0 (cat) postage ≥ configured minimum, script decodable.
@@ -428,8 +420,8 @@ export function validateCat21BuyOfferPsbt(
   }
   const sellerInputValueSats = Number(sellerInput.witnessUtxo.amount);
 
-  // 2a. SIGHASH_ALL on every input (PSBT field check). Already-finalised
-  //     inputs may have sighashType undefined; for those see 2b below.
+  // 2a. PSBT field check: absent or SIGHASH_ALL. A weaker field would make the
+  //     seller's wallet sign input 0 with it.
   for (let i = 0; i < tx.inputsLength; i++) {
     const input = tx.getInput(i);
     if (input.sighashType !== undefined && input.sighashType !== btc.SigHash.ALL) {
@@ -437,53 +429,14 @@ export function validateCat21BuyOfferPsbt(
     }
   }
 
-  // 2b. Actual signature-byte sighash flag. A malicious buyer could leave
-  //     the PSBT sighashType field unset (or ALL) while signing with
-  //     SIGHASH_SINGLE|ANYONECANPAY, so the field-only check (2a) is weaker
-  //     than the "all inputs committed under SIGHASH_ALL" promise. Read the
-  //     trailing byte of partialSig (ECDSA) and assert it's 0x01. Schnorr
-  //     signatures (Taproot key-path) omit the flag when sighash is DEFAULT
-  //     (= ALL); a 65-byte Schnorr sig carries the flag in its last byte.
-  //     Both shapes are wire-equivalent to SIGHASH_ALL when the flag is
-  //     absent or 0x01.
-  //
-  //     Scope: this inspects partialSig / tapKeySig only. A buyer input that
-  //     is already FINALISED (bytes in finalScriptWitness) is not re-decoded
-  //     here, so its sighash flag is not re-verified. That is safe by
-  //     construction: the SELLER signs input 0 (the cat) with SIGHASH_ALL,
-  //     which commits every input and every output. Once the seller signs,
-  //     the cat can move only via this exact transaction, paying the seller
-  //     the agreed amount to the agreed address; a buyer's own-input sighash
-  //     cannot redirect the cat or shrink the payout without invalidating
-  //     the seller's signature and making the tx un-broadcastable. The
-  //     seller's safety rests on input 0, not on re-checking a finalised
-  //     buyer input.
+  // 2b. Actual signature-byte sighash flag. A buyer could leave the PSBT field
+  //     unset while signing with SIGHASH_SINGLE|ANYONECANPAY, so the field
+  //     check alone is weaker than "every input committed under SIGHASH_ALL".
   for (let i = 1; i < tx.inputsLength; i++) {
-    const input = tx.getInput(i);
-    if (input.partialSig && input.partialSig.length > 0) {
-      for (const entry of input.partialSig) {
-        // partialSig entries are [pubkey, sig] tuples per BIP-174.
-        const sig = entry[1];
-        const flagByte = sig[sig.length - 1];
-        if (flagByte !== btc.SigHash.ALL) {
-          return fail(
-            'sighash-flag-byte-not-all',
-            `input ${i} ECDSA sig sighash flag byte = 0x${flagByte.toString(16)}, expected 0x01`,
-          );
-        }
-      }
+    const violation = nonAllSighashFlag(tx.getInput(i));
+    if (violation) {
+      return fail('sighash-flag-byte-not-all', `input ${i} ${violation}`);
     }
-    if (input.tapKeySig && input.tapKeySig.length === 65) {
-      // 65-byte Schnorr sig: last byte is the sighash flag.
-      const flagByte = input.tapKeySig[64];
-      if (flagByte !== btc.SigHash.ALL) {
-        return fail(
-          'sighash-flag-byte-not-all',
-          `input ${i} Schnorr sig sighash flag byte = 0x${flagByte.toString(16)}, expected 0x01`,
-        );
-      }
-    }
-    // 64-byte Schnorr sig = SIGHASH_DEFAULT = wire-equivalent to ALL ✓
   }
 
   // 3. Buyer inputs (1..N) must be signed.
@@ -648,4 +601,34 @@ export function validateCat21BuyOfferPsbt(
 
 function fail(reason: Cat21OfferRejectionReason, detail?: string): Cat21OfferValidation {
   return { ok: false, reason, detail };
+}
+
+/**
+ * The first buyer signature on `input` whose sighash flag is not SIGHASH_ALL,
+ * described, or null when every signature commits under ALL. Reads partialSig
+ * and a finalised P2WPKH witness `[sig, pubkey]` (DER plus the flag byte), and
+ * a Schnorr signature (tapKeySig, or a finalised key-path witness `[sig]`),
+ * which is 64 bytes for SIGHASH_DEFAULT (= ALL) or 65 with the flag last.
+ */
+export function nonAllSighashFlag(input: ReturnType<btc.Transaction['getInput']>): string | null {
+  const flags: { kind: string; flag: number }[] = [];
+  for (const [, sig] of input.partialSig ?? []) {
+    flags.push({ kind: 'ECDSA', flag: sig[sig.length - 1] });
+  }
+  if (input.tapKeySig && input.tapKeySig.length === 65) {
+    flags.push({ kind: 'Schnorr', flag: input.tapKeySig[64] });
+  }
+  const witness = input.finalScriptWitness;
+  if (witness && witness.length === 2 && witness[0].length > 0) {
+    flags.push({ kind: 'ECDSA', flag: witness[0][witness[0].length - 1] });
+  }
+  if (witness && witness.length === 1 && witness[0].length === 65) {
+    flags.push({ kind: 'Schnorr', flag: witness[0][64] });
+  }
+  for (const { kind, flag } of flags) {
+    if (flag !== btc.SigHash.ALL) {
+      return `${kind} sig sighash flag byte = 0x${flag.toString(16)}, expected 0x01`;
+    }
+  }
+  return null;
 }

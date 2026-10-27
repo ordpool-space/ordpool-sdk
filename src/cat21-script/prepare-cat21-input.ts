@@ -104,10 +104,14 @@ export function prepareCat21Input(args: PrepareCat21InputArgs): Cat21PreparedInp
  * place.
  *
  *   - Legacy P2PKH (`nonWitnessUtxo` set): `nonWitnessUtxo` +
- *     SIGHASH_ALL + optional `redeemScript` (scure refuses witnessUtxo
+ *     optional `redeemScript` (scure refuses witnessUtxo
  *     on legacy inputs).
  *   - SegWit: `witnessUtxo` + optional `redeemScript` (P2SH-wrap) +
  *     optional `tapInternalKey` (Taproot key-path).
+ *
+ * `pinSighashAll` writes `sighashType: SIGHASH_ALL` on non-Taproot inputs
+ * (mint, transfer). A buy-offer passes false: ord's `wallet offer accept`
+ * refuses any input that specifies a sighash type, ALL included.
  *
  * Taproot inputs OMIT `sighashType`. Per BIP-341 SIGHASH_DEFAULT
  * (absent) and SIGHASH_ALL commit to identical bytes for a key-path
@@ -122,15 +126,18 @@ export function addCat21Input(
   tx: btc.Transaction,
   input: Cat21PreparedInput,
   sequence: number,
+  pinSighashAll: boolean,
 ): void {
   if (input.nonWitnessUtxo) {
     const legacyInput: TransactionInputUpdate = {
       txid: input.txid,
       index: input.vout,
       sequence,
-      sighashType: btc.SigHash.ALL,
       nonWitnessUtxo: input.nonWitnessUtxo,
     };
+    if (pinSighashAll) {
+      legacyInput.sighashType = btc.SigHash.ALL;
+    }
     if (input.redeemScript) {
       legacyInput.redeemScript = input.redeemScript;
     }
@@ -148,7 +155,7 @@ export function addCat21Input(
       amount: BigInt(input.value),
     },
   };
-  if (!isTaproot) {
+  if (!isTaproot && pinSighashAll) {
     base.sighashType = btc.SigHash.ALL;
   }
   if (input.redeemScript) {

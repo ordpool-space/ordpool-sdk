@@ -136,7 +136,7 @@ export function buildCat21MintPsbt(args: BuildCat21MintArgs): BuildCat21MintResu
 
   // Input 0: the funding UTXO. The first sat of this UTXO becomes the
   // first sat of output 0; cat21-ord mints the cat there.
-  addCat21Input(tx, args.fundingInput, sequence);
+  addCat21Input(tx, args.fundingInput, sequence, true);
 
   // Output 0: recipient (cat lands here).
   tx.addOutputAddress(args.destinations.recipientAddress, BigInt(postageSats), scureNetwork);

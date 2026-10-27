@@ -697,6 +697,30 @@ export function ordCreateOffer(
   return JSON.parse(stdout) as OrdOfferCreateOutput;
 }
 
+/**
+ * The seller side of a buy-offer: `ord wallet offer accept --dry-run`. ord
+ * runs every check it would run before signing (no input specifies a sighash
+ * type, exactly one input owned by the wallet carrying `inscriptionId`, buyer
+ * inputs finalised, the wallet's balance change equals `amountSats`) and
+ * prints the txid it would broadcast. A refusal throws with ord's stderr.
+ */
+export function ordAcceptOfferDryRun(
+  inscriptionId: string,
+  amountSats: number,
+  psbtBase64: string,
+  wallet: string,
+): { txid: string } {
+  const stdout = ordWalletCli(
+    wallet,
+    'offer', 'accept',
+    '--inscription', inscriptionId,
+    '--amount', `${amountSats}sat`,
+    '--psbt', psbtBase64,
+    '--dry-run',
+  );
+  return JSON.parse(stdout) as { txid: string };
+}
+
 export interface OrdSendOutput {
   txid: string;
   psbt: string; // base64
@@ -792,7 +816,7 @@ export interface OrdAddressResponse {
  * child's stderr and stdout as well as the Error's own message. ord prints its
  * diagnostics to stderr, so `message` alone misses them.
  */
-function ordCliErrorSays(e: unknown, ...needles: string[]): boolean {
+export function ordCliErrorSays(e: unknown, ...needles: string[]): boolean {
   const err = e as { message?: string; stderr?: unknown; stdout?: unknown };
   const text = [err.message, err.stderr, err.stdout]
     .map(part => (part == null ? '' : String(part)))

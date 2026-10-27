@@ -71,15 +71,19 @@ describe('buildCat21BuyOfferPsbt', () => {
     }
   });
 
-  it('puts the seller input at index 0 with sighashType SIGHASH_ALL', () => {
+  it('puts the seller input at index 0, unsigned', () => {
     const args = makeBaseArgs();
     const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(args).psbt);
     const sellerInput = tx.getInput(0);
     expect(Array.from(sellerInput.txid!)).toEqual(Array.from(hex.decode(args.sellerInput.txid)));
     expect(sellerInput.index).toBe(args.sellerInput.vout);
-    expect(sellerInput.sighashType).toBe(btc.SigHash.ALL);
     expect(sellerInput.partialSig).toBeUndefined();
     expect(sellerInput.tapKeySig).toBeUndefined();
+  });
+
+  it('specifies no sighash type on any input, segwit v0 and legacy included (ord refuses an offer that does)', () => {
+    const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(makeBaseArgs()).psbt);
+    expect(Array.from({ length: tx.inputsLength }, (_, i) => tx.getInput(i).sighashType)).toEqual([undefined, undefined]);
   });
 
   it('places the cat at output 0 with the default postage', () => {
@@ -1298,6 +1302,43 @@ describe('validateCat21BuyOfferPsbt — security rejections (sighash splice + ca
     if (!result.ok) {
       expect(result.reason).toBe('sighash-flag-byte-not-all');
       expect(result.detail).toContain('0x82');
+    }
+  });
+
+  it('rejects a FINALISED P2WPKH buyer witness whose signature flag is SIGHASH_SINGLE|ANYONECANPAY', () => {
+    const built = buildCat21BuyOfferPsbt(makeBaseArgs());
+    const tx = btc.Transaction.fromPSBT(built.psbt);
+    const sig = new Uint8Array(71).fill(1);
+    sig[70] = 0x83;
+    tx.updateInput(1, { finalScriptWitness: [sig, publicKey] });
+    const result = validate(tx.toPSBT());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('sighash-flag-byte-not-all');
+      expect(result.detail).toBe('input 1 ECDSA sig sighash flag byte = 0x83, expected 0x01');
+    }
+  });
+
+  it('rejects a FINALISED 65-byte taproot key-path witness whose flag is not SIGHASH_ALL', () => {
+    const taprootPayment = btc.p2tr(publicKey.slice(1, 33), undefined, btc.TEST_NETWORK);
+    const args = makeBaseArgs({
+      buyerInputs: [{
+        txid: 'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210',
+        vout: 1,
+        value: 50_000,
+        scriptPubKey: taprootPayment.script,
+        tapInternalKey: publicKey.slice(1, 33),
+      }],
+    });
+    const tx = btc.Transaction.fromPSBT(buildCat21BuyOfferPsbt(args).psbt);
+    const schnorrSig = new Uint8Array(65).fill(2);
+    schnorrSig[64] = 0x82;
+    tx.updateInput(1, { finalScriptWitness: [schnorrSig] });
+    const result = validate(tx.toPSBT());
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.reason).toBe('sighash-flag-byte-not-all');
+      expect(result.detail).toBe('input 1 Schnorr sig sighash flag byte = 0x82, expected 0x01');
     }
   });
 

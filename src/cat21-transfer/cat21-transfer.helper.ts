@@ -157,13 +157,13 @@ export function buildCat21TransferPsbt(args: BuildCat21TransferArgs): BuildCat21
   });
 
   // Input 0: the cat-bearing UTXO.
-  addCat21Input(tx, args.catUtxo, sequence);
+  addCat21Input(tx, args.catUtxo, sequence, true);
 
   // Input 1..N: funding UTXOs (may be empty).
   let fundingInputTotalSats = 0;
   for (const funding of args.fundingInputs) {
     fundingInputTotalSats += funding.value;
-    addCat21Input(tx, funding, sequence);
+    addCat21Input(tx, funding, sequence, true);
   }
 
   // Output 0: the recipient's cat UTXO at `catOutputSats` (= catUtxo.value by

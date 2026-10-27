@@ -11,6 +11,7 @@ import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fe
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { buildCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper.js';
+import { finalizeOfferBuyerInputs } from '../cat21-offer/finalize-offer-buyer-inputs.js';
 import { prepareBuyOfferBuyerInput } from '../cat21-offer/cat21-offer-input-adapter.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
@@ -345,6 +346,6 @@ export async function createOffer(
   }
   const { psbt } = buildOffer(params, plan.pick, plan.feeSats, false);
   // Buyer inputs are 1..N (input 0 is the seller's cat). One funding coin => [1].
-  const offerPsbt = await ports.signOffer.signBuyerInputs(psbt, [1]);
+  const offerPsbt = finalizeOfferBuyerInputs(await ports.signOffer.signBuyerInputs(psbt, [1]));
   return { offerPsbt, buyerFundingUtxo: plan.pick, feeSats: plan.feeSats, changeSats: plan.changeSats };
 }

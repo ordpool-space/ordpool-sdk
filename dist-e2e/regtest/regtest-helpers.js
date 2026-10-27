@@ -67,8 +67,10 @@ exports.getOrdInscription = getOrdInscription;
 exports.waitForCatAtAddress = waitForCatAtAddress;
 exports.ordCli = ordCli;
 exports.ordCreateOffer = ordCreateOffer;
+exports.ordAcceptOfferDryRun = ordAcceptOfferDryRun;
 exports.ordWalletSend = ordWalletSend;
 exports.waitForOrdWalletCardinal = waitForOrdWalletCardinal;
+exports.ordCliErrorSays = ordCliErrorSays;
 exports.ordCreateWallet = ordCreateWallet;
 exports.writeCat21OrdFile = writeCat21OrdFile;
 exports.ordWalletInscribe = ordWalletInscribe;
@@ -567,6 +569,17 @@ function ordWalletCli(walletName, ...subcommandArgs) {
 }
 function ordCreateOffer(inscriptionId, amountSats, feeRateSatPerVb, wallet = 'ord') {
     const stdout = ordWalletCli(wallet, 'offer', 'create', '--inscription', inscriptionId, '--amount', `${amountSats}sat`, '--fee-rate', String(feeRateSatPerVb));
+    return JSON.parse(stdout);
+}
+/**
+ * The seller side of a buy-offer: `ord wallet offer accept --dry-run`. ord
+ * runs every check it would run before signing (no input specifies a sighash
+ * type, exactly one input owned by the wallet carrying `inscriptionId`, buyer
+ * inputs finalised, the wallet's balance change equals `amountSats`) and
+ * prints the txid it would broadcast. A refusal throws with ord's stderr.
+ */
+function ordAcceptOfferDryRun(inscriptionId, amountSats, psbtBase64, wallet) {
+    const stdout = ordWalletCli(wallet, 'offer', 'accept', '--inscription', inscriptionId, '--amount', `${amountSats}sat`, '--psbt', psbtBase64, '--dry-run');
     return JSON.parse(stdout);
 }
 /**

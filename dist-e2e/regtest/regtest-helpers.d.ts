@@ -339,6 +339,16 @@ export interface OrdOfferCreateOutput {
     seller_address: string;
 }
 export declare function ordCreateOffer(inscriptionId: string, amountSats: number, feeRateSatPerVb: number, wallet?: string): OrdOfferCreateOutput;
+/**
+ * The seller side of a buy-offer: `ord wallet offer accept --dry-run`. ord
+ * runs every check it would run before signing (no input specifies a sighash
+ * type, exactly one input owned by the wallet carrying `inscriptionId`, buyer
+ * inputs finalised, the wallet's balance change equals `amountSats`) and
+ * prints the txid it would broadcast. A refusal throws with ord's stderr.
+ */
+export declare function ordAcceptOfferDryRun(inscriptionId: string, amountSats: number, psbtBase64: string, wallet: string): {
+    txid: string;
+};
 export interface OrdSendOutput {
     txid: string;
     psbt: string;
@@ -370,6 +380,20 @@ export declare function waitForOrdWalletCardinal(walletName: string, minSats: nu
 export interface OrdAddressResponse {
     address: string;
 }
+/**
+ * Create + restore (idempotent) an ord-side bitcoin wallet. ord stores
+ * the wallet inside the regtest bitcoind via `wallet_process_psbt`-
+ * shaped RPCs; this helper exists so the test setup can construct one
+ * deterministically before mining funding blocks to it.
+ *
+ * Returns a fresh receive address from the wallet.
+ */
+/**
+ * Whether an `execFileSync` failure carries any of `needles`, looking at the
+ * child's stderr and stdout as well as the Error's own message. ord prints its
+ * diagnostics to stderr, so `message` alone misses them.
+ */
+export declare function ordCliErrorSays(e: unknown, ...needles: string[]): boolean;
 export declare function ordCreateWallet(name?: string): string;
 /**
  * Write arbitrary bytes to a file inside the cat21-ord container (via

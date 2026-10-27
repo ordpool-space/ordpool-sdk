@@ -4,6 +4,7 @@ import * as btc from '@scure/btc-signer';
 
 import { Network } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
+import { attachDummyBuyerSig } from '../testing/fixtures.js';
 import { ContentScanPort, CoreFundingUtxo, OfferCreateSignPort, UtxosPort } from './ports.js';
 import { CreateOfferCoreParams, createOffer, simulateCreateOffer } from './create-offer.core.js';
 
@@ -39,7 +40,7 @@ const scanPort = (verdicts: Record<string, 'clean' | 'has-assets'> = {}): Conten
 const signOfferPort = () => {
   const calls: number[][] = [];
   const port: OfferCreateSignPort = {
-    signBuyerInputs: async (_psbt, indexes) => { calls.push(indexes); return new Uint8Array([0xba, 0x1d]); },
+    signBuyerInputs: async (psbt, indexes) => { calls.push(indexes); return attachDummyBuyerSig(psbt, BUYER_KEY, 1); },
   };
   return { calls, port };
 };
@@ -86,7 +87,10 @@ describe('create-offer.core — createOffer', () => {
       signOffer: signOffer.port,
     });
     expect(signOffer.calls).toEqual([[1]]); // buyer input index; input 0 stays for the seller
-    expect(Array.from(artifact.offerPsbt)).toEqual([0xba, 0x1d]);
+    const offer = btc.Transaction.fromPSBT(artifact.offerPsbt);
+    expect(offer.getInput(1).finalScriptWitness).toEqual([new Uint8Array(71).fill(1), BUYER_KEY]);
+    expect(offer.getInput(1).partialSig).toBeUndefined();
+    expect(offer.getInput(0).finalScriptWitness).toBeUndefined();
     expect(artifact.feeSats).toBeGreaterThan(0);
   });
 

@@ -1,4 +1,4 @@
-import { hex } from '@scure/base';
+import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import { of, throwError } from 'rxjs';
 
@@ -12,6 +12,7 @@ jest.mock('../wallet/signers', () => ({
 }));
 
 import { Network } from '../network.js';
+import { attachDummyBuyerSig } from '../testing/fixtures.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import {
@@ -65,13 +66,17 @@ async function ready(o: Cat21CreateOfferOrchestrator): Promise<void> {
 describe('Cat21CreateOfferOrchestrator — buyer sign (signer mocked)', () => {
   beforeEach(() => mockSignOfferCreatePsbt.mockReset());
 
-  it('createOffer() success: encodes the signed bytes into the base64/hex bid', async () => {
-    mockSignOfferCreatePsbt.mockReturnValue(of(new Uint8Array([0x70, 0x73, 0x62, 0x74, 0xff, 0x01])));
+  it('createOffer() success: finalises the buyer input and encodes the offer into the base64/hex bid', async () => {
+    mockSignOfferCreatePsbt.mockImplementation(({ psbtBytes }: { psbtBytes: Uint8Array }) =>
+      of(attachDummyBuyerSig(psbtBytes, hex.decode(PAYMENT_PUB), 1)));
     const o = new Cat21CreateOfferOrchestrator(deps());
     await ready(o);
     const bid = await o.createOffer();
-    expect(bid.hex).toBe('70736274ff01');
-    expect(bid.base64.length).toBeGreaterThan(0);
+    const offer = btc.Transaction.fromPSBT(hex.decode(bid.hex));
+    expect(offer.getInput(1).finalScriptWitness).toEqual([new Uint8Array(71).fill(1), hex.decode(PAYMENT_PUB)]);
+    expect(offer.getInput(1).sighashType).toBeUndefined();
+    expect(offer.getInput(0).finalScriptWitness).toBeUndefined();
+    expect(base64.decode(bid.base64)).toEqual(hex.decode(bid.hex));
     expect(o.getSnapshot().state).toBe('success');
     expect(o.getSnapshot().bid).toEqual(bid);
     // No broadcast on the bid path (the seller accepts + broadcasts later).

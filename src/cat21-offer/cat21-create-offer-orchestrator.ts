@@ -22,6 +22,7 @@ import { findSignerOrThrow } from '../wallet/signers/index.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
 import { BuyOfferTargetCat } from './cat21-offer.types.js';
+import { finalizeOfferBuyerInputs } from './finalize-offer-buyer-inputs.js';
 import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos.js';
 
 /**
@@ -286,7 +287,7 @@ export class Cat21CreateOfferOrchestrator {
     try {
       const built = buildOffer(params, sim.buyerFundingUtxo, sim.feeSats, false);
       const signer = findSignerOrThrow(params.walletType);
-      const signedPsbtBytes = await firstValueFrom(
+      const walletSignedPsbtBytes = await firstValueFrom(
         signer.signOfferCreatePsbt({
           psbtBytes: built.psbt,
           paymentAddress: params.paymentAddress,
@@ -297,6 +298,7 @@ export class Cat21CreateOfferOrchestrator {
             : undefined,
         }),
       );
+      const signedPsbtBytes = finalizeOfferBuyerInputs(walletSignedPsbtBytes);
       const bid: OfferBidArtifact = {
         base64: base64.encode(signedPsbtBytes),
         hex: hex.encode(signedPsbtBytes),
