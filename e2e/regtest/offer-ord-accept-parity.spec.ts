@@ -12,7 +12,8 @@
  */
 import { describe, expect, it, beforeAll } from '@jest/globals';
 import { secp256k1 } from '@noble/curves/secp256k1';
-import { base64 } from '@scure/base';
+import { sha256 } from '@noble/hashes/sha2';
+import { base64, hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 
 import { buildCat21BuyOfferPsbt } from '../../src/cat21-offer/cat21-offer.helper';
@@ -128,8 +129,8 @@ describe('ord wallet offer accept takes an SDK-built offer', () => {
     expect(handedOut.getInput(0).finalScriptWitness).toBeUndefined();
 
     const accepted = ordAcceptOfferDryRun(cat.inscriptionId, PRICE_SATS, base64.encode(handedOut.toPSBT()), SELLER_WALLET);
-    const unsignedTxid = btc.Transaction.fromRaw(handedOut.toBytes(false, false), { allowUnknownInputs: true }).id;
-    expect(accepted.txid).toBe(unsignedTxid);
+    const txid = hex.encode(sha256(sha256(handedOut.toBytes(false, false))).reverse());
+    expect(accepted.txid).toBe(txid);
   });
 
   it('refuses an offer whose buyer input specifies SIGHASH_ALL and is left unfinalised', () => {
