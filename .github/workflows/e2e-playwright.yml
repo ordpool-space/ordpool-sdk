@@ -68,7 +68,7 @@ env:
 
 jobs:
   playwright:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
     # Per-shard cap. On a WARM cache the electrs/cat21-ord image build is an
     # ~8s import, so a shard is npm ci + stack + one wallet's specs. The
     # heaviest shard is xverse (its specs run ~17 min: it seeds the shared
