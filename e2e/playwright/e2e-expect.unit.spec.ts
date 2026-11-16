@@ -3,7 +3,7 @@
  * Real:   e2eExpect over Playwright's own expect and its toBeVisible matcher, clickRadixCheckbox (an SDK helper that
  *         asserts through it), boundByE2eTimeout; all run outside any Playwright test, the way a consumer's
  *         globalSetup runs them
- * Faked:  the checkbox locator, reduced to what Playwright's matcher calls on a Locator (playwright 1.60
+ * Faked:  the checkbox locator, reduced to what Playwright's matcher calls on a Locator (playwright 1.65.1
  *         lib/matchers/expect.js): `_apiName` (its type check), `_expect(expression, { isNot, timeout })` (the call
  *         to the browser, which waits up to `timeout` and answers `timedOut`) and `toString`; the context whose
  *         two default-timeout setters are recorded
