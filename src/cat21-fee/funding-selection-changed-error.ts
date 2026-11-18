@@ -2,7 +2,8 @@
  * The error every execute path throws when the caller pinned a funding coin
  * and that coin is no longer the one that would be spent: it left the wallet's
  * coin set (`gone`), or it no longer covers the action at this fee rate
- * (`below-requirement`).
+ * (`below-requirement`), or it now carries assets that were not shown when it
+ * was pinned (`contents-changed`).
  *
  * The plan would otherwise fall back to the SDK's own recommendation, a coin
  * the caller never confirmed. On a separate-payment-address wallet that coin
@@ -19,6 +20,12 @@ import { describeFundingPick, type DroppedSelection } from '../cat21-core/select
 import { AnnotatedFundingUtxo, FundingRecommendation } from './funding-safety.js';
 import type { FundingBlockedCoin } from './funding-blocked-error.js';
 import { toFundingCoinJson } from './funding-coin-json.js';
+
+const DROP_REASON_TEXT: Record<DroppedSelection['reason'], string> = {
+  'gone': 'is no longer available',
+  'below-requirement': 'no longer covers this action at the current fee rate',
+  'contents-changed': 'now carries assets that were not shown when it was selected',
+};
 
 /** Stable code for a dropped funding pick. */
 export type FundingSelectionChangedErrorCode = 'funding-selection-changed';
@@ -57,9 +64,7 @@ export class FundingSelectionChangedError extends Error {
 
   constructor(droppedSelection: DroppedSelection, rec: FundingRecommendation<AnnotatedFundingUtxo>) {
     super(
-      droppedSelection.reason === 'gone'
-        ? `The selected funding UTXO ${droppedSelection.txid}:${droppedSelection.vout} is no longer available. Confirm a funding UTXO again.`
-        : `The selected funding UTXO ${droppedSelection.txid}:${droppedSelection.vout} no longer covers this action at the current fee rate. Confirm a funding UTXO again.`,
+      `The selected funding UTXO ${droppedSelection.txid}:${droppedSelection.vout} ${DROP_REASON_TEXT[droppedSelection.reason]}. Confirm a funding UTXO again.`,
     );
     this.name = 'FundingSelectionChangedError';
     this.droppedSelection = { ...droppedSelection };

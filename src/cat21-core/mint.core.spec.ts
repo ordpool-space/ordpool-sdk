@@ -1,3 +1,4 @@
+import { FundingSelectionChangedError } from '../cat21-fee/funding-selection-changed-error.js';
 import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
@@ -39,10 +40,8 @@ const scanPort = (verdicts: Record<string, UtxoClassification> = {}): ContentSca
  * A `has-assets` verdict that NAMES what it found, which is what a coin needs to
  * stand behind a notice. A bare `'has-assets'` blocks on every topology.
  */
-const NAMED: UtxoClassification = {
-  verdict: 'has-assets',
-  assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null },
-};
+const NAMED_DETAIL = { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null };
+const NAMED: UtxoClassification = { verdict: 'has-assets', assets: NAMED_DETAIL };
 const signPort = () => {
   const calls: Array<'all' | number[]> = [];
   return { calls, port: { sign: async (_p: Uint8Array, i: 'all' | number[]) => { calls.push(i); return { hex: 'mintsigned', weight: 500 }; } } as SignPort };
@@ -209,11 +208,11 @@ describe('mint.core — executeMint', () => {
     expect(broadcast.calls).toEqual(['mintsigned']);
   });
 
-  it('EXPERT OVERRIDE: an explicit pick of the asset coin is honoured', async () => {
+  it('EXPERT OVERRIDE: an explicit pick of the asset coin, shown with its assets, is honoured', async () => {
     const asset = coin('d', 100_000);
     const sign = signPort();
     const broadcast = broadcastPort();
-    const out = await executeMint(params({ selectedFundingUtxo: asset }), {
+    const out = await executeMint(params({ selectedFundingUtxo: { ...asset, bucket: 'assets' } }), {
       utxos: utxosPort([asset]),
       scan: scanPort({ [op(asset)]: 'has-assets' }),
       sign: sign.port,
@@ -221,6 +220,19 @@ describe('mint.core — executeMint', () => {
     });
     expect(out.txid).toBe('mint-txid');
     expect(sign.calls).toHaveLength(1);
+  });
+
+  it('a pin shown as clean whose scan now finds assets is not spent: contents-changed, nothing signed', async () => {
+    const asset = coin('d', 100_000);
+    const sign = signPort();
+    const err = await executeMint(params({ selectedFundingUtxo: asset }), {
+      utxos: utxosPort([asset]),
+      scan: scanPort({ [op(asset)]: 'has-assets' }),
+      sign: sign.port,
+      broadcast: broadcastPort().port,
+    }).then(() => null, (e: unknown) => e);
+    expect({ err: err instanceof FundingSelectionChangedError ? err.droppedSelection.reason : err, signed: sign.calls })
+      .toEqual({ err: 'contents-changed', signed: [] });
   });
 });
 
@@ -416,7 +428,7 @@ describe('the asset verdict is about the COIN, not the wallet topology', () => {
     // unisat, wizz, okx, binance and alby, which is where the SDK is strictest.
     for (const topology of ['separate-payment-address', 'one-address-for-everything'] as const) {
       const sim = await simulateMint(
-        params({ fundingTopology: topology, selectedFundingUtxo: dirty }),
+        params({ fundingTopology: topology, selectedFundingUtxo: { ...dirty, bucket: 'assets', assets: NAMED_DETAIL } }),
         { utxos, scan },
       );
       expect(sim.fundingUtxo?.txid).toBe(dirty.txid);

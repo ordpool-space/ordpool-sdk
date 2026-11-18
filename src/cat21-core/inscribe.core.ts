@@ -19,7 +19,7 @@ import { prepareInscribeFundingInput } from '../inscribe/inscription-input-adapt
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import { ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
 import type { InscribeBroadcastTransport } from '../inscribe/inscribe-package-broadcast.js';
-import { DroppedSelection, describeFundingPick, selectFunding } from './select-funding.js';
+import { DroppedSelection, describeFundingPick, FundingPinContent, selectFunding } from './select-funding.js';
 
 /**
  * Everything the inscribe core needs, framework-agnostic. Reuses the existing
@@ -31,8 +31,14 @@ import { DroppedSelection, describeFundingPick, selectFunding } from './select-f
  */
 export interface InscribeCoreParams
   extends Omit<InscribeAndBroadcastArgs, 'paymentOutput' | 'transport' | 'promptForSignedPsbt'> {
-  /** Expert-mode explicit funding pick; omitted ⇒ the safe auto coin. */
-  selectedFundingUtxo?: CoreFundingUtxo | null;
+  /**
+   * Expert-mode explicit funding pick; omitted ⇒ the safe auto coin.
+   * Carries what was shown on the coin when it was chosen (`bucket`,
+   * `assets`); absent reads as clean. A coin whose scan now finds more is
+   * dropped as `contents-changed` and execute throws
+   * `FundingSelectionChangedError`.
+   */
+  selectedFundingUtxo?: (CoreFundingUtxo & FundingPinContent) | null;
   /**
    * How the CALLER's wallet lays out its addresses, from
    * `isOneAddressWallet({ paymentAddress, ordinalsAddress })`.

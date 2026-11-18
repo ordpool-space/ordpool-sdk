@@ -2,9 +2,9 @@ import { firstValueFrom, from } from 'rxjs';
 import { base64, hex } from '@scure/base';
 
 import { buildOffer, CreateOfferCoreParams, CreateOfferStatus, simulateCreateOffer } from '../cat21-core/create-offer.core.js';
-import { DroppedSelection } from '../cat21-core/select-funding.js';
+import { DroppedSelection, FundingPinContent } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
+import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingPin, toCoreFundingUtxo, withShownContent } from '../cat21-core/orchestrator-support.js';
 import {
   AnnotatedFundingUtxo,
   emptyRecommendation,
@@ -84,7 +84,12 @@ export interface CreateOfferSnapshot {
   sellerPaymentAddress: string | null;
   buyerReceiveAddress: string | null;
   feeRate: number | null;
-  selectedFundingUtxo: TxnOutput | null;
+  /**
+   * The pinned coin, with what was shown on it when it was chosen (`bucket`,
+   * `assets`, filled from the recommendation when the caller passed a bare
+   * coin). A later scan finding more on it drops the pin as `contents-changed`.
+   */
+  selectedFundingUtxo: (TxnOutput & FundingPinContent) | null;
   // Candidates are lifted to the consumer's TxnOutput domain (carrying `status`,
   // `transactionHex`, …) so a picker UI renders them directly.
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
@@ -265,10 +270,10 @@ export class Cat21CreateOfferOrchestrator {
   setSellerPaymentAddress(addr: string | null): void { this.patch({ sellerPaymentAddress: addr }); void this.recompute(); }
   setBuyerReceiveAddress(addr: string | null): void { this.patch({ buyerReceiveAddress: addr }); void this.recompute(); }
   setFeeRate(rate: number): void { if (Number.isFinite(rate) && rate > 0) { this.patch({ feeRate: rate }); void this.recompute(); } }
-  setSelectedFundingUtxo(utxo: TxnOutput | null): void {
+  setSelectedFundingUtxo(utxo: (TxnOutput & FundingPinContent) | null): void {
     if (sameSelection(this.snap.selectedFundingUtxo, utxo)) return;
     // A drop describes the PREVIOUS pick; the recompute decides the new one.
-    this.patch({ selectedFundingUtxo: utxo, droppedSelection: null });
+    this.patch({ selectedFundingUtxo: withShownContent(utxo, this.snap.fundingRecommendation), droppedSelection: null });
     void this.recompute();
   }
 
@@ -403,7 +408,7 @@ export class Cat21CreateOfferOrchestrator {
       targetCat: { txid: targetCat.txid, vout: targetCat.vout, value: targetCat.value, scriptPubKey: targetCat.scriptPubKey },
       priceSats,
       feeRatePerVbyte: feeRate,
-      selectedFundingUtxo: selectedFundingUtxo ? toCoreFundingUtxo(selectedFundingUtxo) : undefined,
+      selectedFundingUtxo: selectedFundingUtxo ? toCoreFundingPin(selectedFundingUtxo) : undefined,
       fundingTopology: resolveFundingTopology(this.deps.fundingTopology, w),
     };
   }

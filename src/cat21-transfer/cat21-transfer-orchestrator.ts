@@ -8,9 +8,9 @@ import {
   TransferSimulationResult,
   TransferStatus,
 } from '../cat21-core/transfer.core.js';
-import { DroppedSelection } from '../cat21-core/select-funding.js';
+import { DroppedSelection, FundingPinContent } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
+import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingPin, toCoreFundingUtxo, withShownContent } from '../cat21-core/orchestrator-support.js';
 import {
   AnnotatedFundingUtxo,
   emptyRecommendation,
@@ -88,7 +88,12 @@ export interface TransferSnapshot {
   catUtxo: Cat21Holding | null;
   recipientAddress: string | null;
   feeRate: number | null;
-  selectedFundingUtxo: TxnOutput | null;
+  /**
+   * The pinned coin, with what was shown on it when it was chosen (`bucket`,
+   * `assets`, filled from the recommendation when the caller passed a bare
+   * coin). A later scan finding more on it drops the pin as `contents-changed`.
+   */
+  selectedFundingUtxo: (TxnOutput & FundingPinContent) | null;
   /**
    * Optional cat-UTXO resize (GROW to rescue a sub-dust cat or
    * self-provision a cold wallet; SHRINK to trim a chunky one).
@@ -281,10 +286,10 @@ export class Cat21TransferOrchestrator {
     void this.recompute();
   }
 
-  setSelectedFundingUtxo(utxo: TxnOutput | null): void {
+  setSelectedFundingUtxo(utxo: (TxnOutput & FundingPinContent) | null): void {
     if (sameSelection(this.snap.selectedFundingUtxo, utxo)) return;
     // A drop describes the PREVIOUS pick; the recompute decides the new one.
-    this.patch({ selectedFundingUtxo: utxo, droppedSelection: null });
+    this.patch({ selectedFundingUtxo: withShownContent(utxo, this.snap.fundingRecommendation), droppedSelection: null });
     void this.recompute();
   }
 
@@ -450,7 +455,7 @@ export class Cat21TransferOrchestrator {
       catUtxo: { txid: cat.txid, vout: cat.vout, value: cat.value },
       recipientAddress: recipient,
       feeRatePerVbyte: feeRate,
-      selectedFundingUtxo: this.snap.selectedFundingUtxo ? toCoreFundingUtxo(this.snap.selectedFundingUtxo) : undefined,
+      selectedFundingUtxo: this.snap.selectedFundingUtxo ? toCoreFundingPin(this.snap.selectedFundingUtxo) : undefined,
       fundingTopology: resolveFundingTopology(this.deps.fundingTopology, wallet),
       targetPostageSats: this.snap.targetPostageSats ?? undefined,
     };

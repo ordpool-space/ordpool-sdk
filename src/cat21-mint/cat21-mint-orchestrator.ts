@@ -2,9 +2,9 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingUtxo } from '../cat21-core/orchestrator-support.js';
+import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingPin, toCoreFundingUtxo, withShownContent } from '../cat21-core/orchestrator-support.js';
 import { MintCoreParams, simulateMint, MintStatus } from '../cat21-core/mint.core.js';
-import { DroppedSelection, resolveFundingPick } from '../cat21-core/select-funding.js';
+import { DroppedSelection, FundingPinContent, resolveFundingPick } from '../cat21-core/select-funding.js';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
 import {
   AnnotatedFundingUtxo,
@@ -101,7 +101,12 @@ export interface MintOrchestratorDeps {
 export interface MintSnapshot {
   state: MintOrchestratorState;
   feeRate: number | null;
-  selectedUtxo: TxnOutput | null;
+  /**
+   * The pinned coin, with what was shown on it when it was chosen (`bucket`,
+   * `assets`, filled from the recommendation when the caller passed a bare
+   * coin). A later scan finding more on it drops the pin as `contents-changed`.
+   */
+  selectedUtxo: (TxnOutput & FundingPinContent) | null;
   fundingRecommendation: FundingRecommendation<TxnOutput & AnnotatedFundingUtxo>;
   simulations: UtxoSimulationRow[];
   /**
@@ -316,10 +321,10 @@ export class Cat21MintOrchestrator {
    * asset-safety rule forbids: the next asset class added to the scanner would
    * never reach it.
    */
-  setSelectedUtxo(utxo: TxnOutput | null): void {
+  setSelectedUtxo(utxo: (TxnOutput & FundingPinContent) | null): void {
     if (sameSelection(this.snap.selectedUtxo, utxo)) return;
     // A drop describes the PREVIOUS pick; the recompute decides the new one.
-    this.patch({ selectedUtxo: utxo, droppedSelection: null });
+    this.patch({ selectedUtxo: withShownContent(utxo, this.snap.fundingRecommendation), droppedSelection: null });
     void this.recompute();
   }
 
@@ -572,7 +577,7 @@ export class Cat21MintOrchestrator {
       paymentAddress: wallet.paymentAddress,
       recipientAddress: wallet.ordinalsAddress,
       feeRatePerVbyte: feeRate,
-      selectedFundingUtxo: this.snap.selectedUtxo ? toCoreFundingUtxo(this.snap.selectedUtxo) : undefined,
+      selectedFundingUtxo: this.snap.selectedUtxo ? toCoreFundingPin(this.snap.selectedUtxo) : undefined,
       fundingTopology: resolveFundingTopology(this.deps.fundingTopology, wallet),
     };
   }

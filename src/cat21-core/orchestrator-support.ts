@@ -1,4 +1,6 @@
+import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety.js';
 import { CoreFundingUtxo, UtxosPort } from './ports.js';
+import { FundingPinContent } from './select-funding.js';
 
 /**
  * A minimal reactive snapshot container shared by the operation orchestrators
@@ -62,4 +64,33 @@ export function sameSelection(
 ): boolean {
   if (a === null || b === null) return a === b;
   return a.txid === b.txid && a.vout === b.vout;
+}
+
+/**
+ * Map a pinned coin to the core funding shape, keeping what was shown on it
+ * when it was chosen (`bucket`, `assets`), which `describeFundingPick` checks
+ * the current scan against.
+ */
+export function toCoreFundingPin(u: UtxoLike & FundingPinContent): CoreFundingUtxo & FundingPinContent {
+  return {
+    ...toCoreFundingUtxo(u),
+    ...(u.bucket !== undefined ? { bucket: u.bucket } : {}),
+    ...(u.assets !== undefined ? { assets: u.assets } : {}),
+  };
+}
+
+/**
+ * The pin an orchestrator setter stores: the coin as given, plus what the
+ * current recommendation shows on it when the caller did not say. That is the
+ * content on screen when the person picked it, so a later scan finding more
+ * drops the pin as `contents-changed` instead of spending the coin.
+ */
+export function withShownContent<U extends { txid: string; vout: number } & FundingPinContent>(
+  utxo: U | null,
+  recommendation: FundingRecommendation<AnnotatedFundingUtxo>,
+): U | null {
+  if (!utxo || utxo.bucket !== undefined) return utxo;
+  const shown = recommendation.candidates.find((c) => c.txid === utxo.txid && c.vout === utxo.vout);
+  if (!shown) return utxo;
+  return { ...utxo, bucket: shown.bucket, ...(shown.assets ? { assets: shown.assets } : {}) };
 }

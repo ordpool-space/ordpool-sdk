@@ -21,7 +21,7 @@ import {
   OfferCreateSignPort,
   UtxosPort,
 } from './ports.js';
-import { DroppedSelection, describeFundingPick, selectFunding } from './select-funding.js';
+import { DroppedSelection, describeFundingPick, FundingPinContent, selectFunding } from './select-funding.js';
 
 
 /**
@@ -44,8 +44,14 @@ export interface CreateOfferCoreParams {
   targetCat: { txid: string; vout: number; value: number; scriptPubKey: Uint8Array };
   priceSats: number;
   feeRatePerVbyte: number;
-  /** Expert-mode explicit funding pick; omitted ⇒ the safe auto coin. */
-  selectedFundingUtxo?: CoreFundingUtxo | null;
+  /**
+   * Expert-mode explicit funding pick; omitted ⇒ the safe auto coin.
+   * Carries what was shown on the coin when it was chosen (`bucket`,
+   * `assets`); absent reads as clean. A coin whose scan now finds more is
+   * dropped as `contents-changed` and execute throws
+   * `FundingSelectionChangedError`.
+   */
+  selectedFundingUtxo?: (CoreFundingUtxo & FundingPinContent) | null;
   /**
    * How the CALLER's wallet lays out its addresses, from
    * `isOneAddressWallet({ paymentAddress, ordinalsAddress })`.

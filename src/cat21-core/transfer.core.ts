@@ -28,7 +28,7 @@ import {
   SignPort,
   UtxosPort,
 } from './ports.js';
-import { DroppedSelection, describeFundingPick, selectFunding } from './select-funding.js';
+import { DroppedSelection, describeFundingPick, FundingPinContent, selectFunding } from './select-funding.js';
 
 
 /**
@@ -50,8 +50,13 @@ export interface TransferCoreParams {
   /**
    * Expert-mode explicit funding pick — spent even if it carries assets (the
    * user chose it). Omitted ⇒ the safe auto-recommendation is used.
+   *
+   * Carries what was shown on the coin when it was chosen (`bucket`,
+   * `assets`); absent reads as clean. A coin whose scan now finds more is
+   * dropped as `contents-changed` and execute throws
+   * `FundingSelectionChangedError`.
    */
-  selectedFundingUtxo?: CoreFundingUtxo | null;
+  selectedFundingUtxo?: (CoreFundingUtxo & FundingPinContent) | null;
   /**
    * How the CALLER's wallet lays out its addresses, from
    * `isOneAddressWallet({ paymentAddress, ordinalsAddress })`.

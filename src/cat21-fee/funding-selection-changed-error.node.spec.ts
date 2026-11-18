@@ -20,7 +20,7 @@ import { executeMint } from '../cat21-core/mint.core.js';
 import { executeTransfer } from '../cat21-core/transfer.core.js';
 import { createOffer } from '../cat21-core/create-offer.core.js';
 import { executeInscribe } from '../cat21-core/inscribe.core.js';
-import { DroppedSelection } from '../cat21-core/select-funding.js';
+import { DroppedSelection, FundingPinContent } from '../cat21-core/select-funding.js';
 import { recordingInscribeTransport } from '../testing/inscribe-transport.js';
 import {
   FundingSelectionChangedError,
@@ -59,7 +59,7 @@ interface Recorder {
 /** One execute path, run with an explicit pick. */
 interface Flow {
   name: string;
-  run(pin: CoreFundingUtxo, rec: Recorder): Promise<unknown>;
+  run(pin: CoreFundingUtxo & FundingPinContent, rec: Recorder): Promise<unknown>;
 }
 
 const sign = (rec: Recorder) => ({ sign: async () => { rec.signed.push('sign'); return { hex: '00', weight: 600 }; } });
@@ -195,10 +195,10 @@ describe.each(FLOWS.map((f) => [f.name, f] as const))('%s with a pinned funding 
 describe.each(FLOWS.filter((f) => f.name === 'executeMint' || f.name === 'executeTransfer').map((f) => [f.name, f] as const))(
   '%s honours a pin that is still there and covers',
   (_name, flow) => {
-    it('spends the pinned asset coin: signed and broadcast once', async () => {
+    it('spends the pinned asset coin shown with its assets: signed and broadcast once', async () => {
       const rec: Recorder = { signed: [], sent: [] };
 
-      const err = await caught(flow.run(ASSET_COIN, rec));
+      const err = await caught(flow.run({ ...ASSET_COIN, bucket: 'assets', assets: ASSET_DETAIL }, rec));
 
       expect({ err, signed: rec.signed.length, sent: rec.sent }).toEqual({ err: null, signed: 1, sent: ['00'] });
     });

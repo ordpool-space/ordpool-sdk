@@ -6,7 +6,7 @@ import {
   WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
 import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
-import { classificationAssets, classificationVerdict, ContentScanPort, UtxoAssetDetail } from './ports.js';
+import { classificationAssets, classificationVerdict, ContentScanPort, namesAssets, UtxoAssetDetail } from './ports.js';
 
 const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
 
@@ -99,8 +99,9 @@ export async function selectFunding<T extends FundingUtxo>(
 /**
  * Resolve the funding coin a flow will spend:
  *
- * - the user's EXPLICIT expert-mode pick when it still covers the target,
- *   honoured even when it carries assets, because they chose it;
+ * - the user's EXPLICIT expert-mode pick when it still covers the target and
+ *   carries nothing beyond what was shown when it was pinned, honoured even
+ *   when it carries assets, because they chose it with those assets in view;
  * - otherwise the recommended coin when the flow may PROCEED, which is `auto`
  *   (a clean coin covers) and `asset-notice` (only a coin with NAMED assets
  *   covers, but the wallet keeps a separate payment address, so the UI informs
@@ -118,13 +119,52 @@ export async function selectFunding<T extends FundingUtxo>(
  * Why an explicit pick is not the coin that will be spent.
  *
  * `gone`: the outpoint left the candidate set. `below-requirement`: still
- * there, no longer covers at this rate. Different remedies, so a reason rather
- * than a boolean.
+ * there, no longer covers at this rate. `contents-changed`: still there and
+ * covering, but the scan now finds something on it that was not shown when it
+ * was pinned (`pinContentHeld`). Different remedies, so a reason rather than a
+ * boolean.
  */
 export interface DroppedSelection {
   txid: string;
   vout: number;
-  reason: 'gone' | 'below-requirement';
+  reason: 'gone' | 'below-requirement' | 'contents-changed';
+}
+
+/**
+ * What the person saw on a pinned coin when they chose it: its scan bucket and
+ * the assets the scan named. Absent means they saw nothing on it, which is
+ * read as `clean`.
+ */
+export type FundingPinContent = Partial<Pick<AnnotatedFundingUtxo, 'bucket' | 'assets'>>;
+
+/** A pinned funding coin: its outpoint, plus what was shown on it when it was chosen. */
+export type FundingPin = { txid: string; vout: number } & FundingPinContent;
+
+const namedAssetKeys = (d: UtxoAssetDetail | undefined): string[] => d
+  ? [
+      ...d.inscriptionIds.map((id) => `inscription:${id}`),
+      ...d.runeNames.map((name) => `rune:${name}`),
+      ...d.catIds.map((id) => `cat:${id}`),
+      ...(d.rareSat ? [`rare-sat:${d.rareSat.sat}`] : []),
+    ]
+  : [];
+
+/**
+ * Whether a pinned coin still carries nothing beyond what was shown when it was
+ * pinned. A coin now clean always passes. A coin that now carries assets passes
+ * only when it was shown with assets and every asset the scan names now was
+ * named then; an unnamed answer passes only against an unnamed one. A failed
+ * or missing scan passes only against the same bucket. A pin with no content
+ * was shown as clean.
+ */
+export function pinContentHeld(pin: FundingPinContent, current: AnnotatedFundingUtxo): boolean {
+  if (current.bucket === 'clean') return true;
+  const shown = pin.bucket ?? 'clean';
+  if (current.bucket !== 'assets') return shown === current.bucket;
+  if (shown !== 'assets') return false;
+  if (!namesAssets(current.assets)) return !namesAssets(pin.assets);
+  const seen = new Set(namedAssetKeys(pin.assets));
+  return namedAssetKeys(current.assets).every((k) => seen.has(k));
 }
 
 /**
@@ -137,14 +177,16 @@ export interface DroppedSelection {
 export function describeFundingPick<T extends AnnotatedFundingUtxo>(
   recommendation: FundingRecommendation<T>,
   target: number,
-  explicitSelection?: { txid: string; vout: number } | null,
+  explicitSelection?: FundingPin | null,
 ): { pick: T | null; droppedSelection: DroppedSelection | null } {
   const stillPresent = explicitSelection
     ? recommendation.candidates.find(
         (c) => c.txid === explicitSelection.txid && c.vout === explicitSelection.vout,
       )
     : undefined;
-  if (stillPresent && stillPresent.value >= target) {
+  const covers = stillPresent !== undefined && stillPresent.value >= target;
+  const contentHeld = covers && explicitSelection ? pinContentHeld(explicitSelection, stillPresent) : false;
+  if (stillPresent && covers && contentHeld) {
     return { pick: stillPresent, droppedSelection: null };
   }
   const mayProceed =
@@ -154,7 +196,7 @@ export function describeFundingPick<T extends AnnotatedFundingUtxo>(
     ? {
         txid: explicitSelection.txid,
         vout: explicitSelection.vout,
-        reason: stillPresent ? 'below-requirement' : 'gone',
+        reason: !stillPresent ? 'gone' : covers ? 'contents-changed' : 'below-requirement',
       }
     : null;
   return { pick, droppedSelection };
@@ -164,7 +206,7 @@ export function describeFundingPick<T extends AnnotatedFundingUtxo>(
 export function resolveFundingPick<T extends AnnotatedFundingUtxo>(
   recommendation: FundingRecommendation<T>,
   target: number,
-  explicitSelection?: { txid: string; vout: number } | null,
+  explicitSelection?: FundingPin | null,
 ): T | null {
   return describeFundingPick(recommendation, target, explicitSelection).pick;
 }

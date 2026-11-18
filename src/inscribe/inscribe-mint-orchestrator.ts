@@ -2,7 +2,7 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { classificationVerdict, ContentScanPort } from '../cat21-core/ports.js';
-import { DroppedSelection, describeFundingPick, resolveFundingPick, selectFunding } from '../cat21-core/select-funding.js';
+import { DroppedSelection, describeFundingPick, FundingPinContent, resolveFundingPick, selectFunding } from '../cat21-core/select-funding.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
   AnnotatedFundingUtxo,
@@ -39,7 +39,7 @@ import { synthesizeEnvelopeFields, type CreateInscribeTransactionsArgs } from '.
 import { prepareInscribeFundingInput } from './inscription-input-adapter.js';
 import type { InscribeBroadcastTransport } from './inscribe-package-broadcast.js';
 import { dedupeUtxosByOutpoint } from '../cat21-core/dedupe-utxos.js';
-import { sameSelection, SnapshotStore } from '../cat21-core/orchestrator-support.js';
+import { sameSelection, SnapshotStore, withShownContent } from '../cat21-core/orchestrator-support.js';
 import {
   InscribeAndBroadcastResult,
   inscribeAndBroadcast,
@@ -310,7 +310,12 @@ export type InscribeFundingStatus = 'ready' | 'asset-notice' | 'expert-required'
 export interface InscribeSnapshot {
   state: InscribeMintState;
   feeRate: number | null;
-  selectedUtxo: TxnOutput | null;
+  /**
+   * The pinned coin, with what was shown on it when it was chosen (`bucket`,
+   * `assets`, filled from the recommendation when the caller passed a bare
+   * coin). A later scan finding more on it drops the pin as `contents-changed`.
+   */
+  selectedUtxo: (TxnOutput & FundingPinContent) | null;
   content: InscribeContent | null;
   /** The batch being inscribed, when `setBatch` was used instead of `setContent`. */
   batch: InscribeBatchContent | null;
@@ -631,10 +636,10 @@ export class InscribeMintOrchestrator {
    * asset-safety rule forbids: the next asset class added to the scanner would
    * never reach it.
    */
-  setSelectedUtxo(utxo: TxnOutput | null): void {
+  setSelectedUtxo(utxo: (TxnOutput & FundingPinContent) | null): void {
     if (sameSelection(this.snap.selectedUtxo, utxo)) return;
     // A drop describes the PREVIOUS pick; the recompute decides the new one.
-    this.patch({ selectedUtxo: utxo, droppedSelection: null });
+    this.patch({ selectedUtxo: withShownContent(utxo, this.snap.fundingRecommendation), droppedSelection: null });
     void this.recompute();
   }
 

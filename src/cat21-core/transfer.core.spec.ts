@@ -128,11 +128,11 @@ describe('transfer.core — executeTransfer', () => {
     expect(broadcast.calls).toHaveLength(0);
   });
 
-  it('EXPERT OVERRIDE: an explicit pick of the asset coin is honoured', async () => {
+  it('EXPERT OVERRIDE: an explicit pick of the asset coin, shown with its assets, is honoured', async () => {
     const asset = coin('d', 100_000);
     const sign = signPort();
     const broadcast = broadcastPort();
-    const out = await executeTransfer(params({ selectedFundingUtxo: asset }), {
+    const out = await executeTransfer(params({ selectedFundingUtxo: { ...asset, bucket: 'assets' } }), {
       utxos: utxosPort([asset]),
       scan: scanPort({ [op(asset)]: 'has-assets' }),
       sign: sign.port,

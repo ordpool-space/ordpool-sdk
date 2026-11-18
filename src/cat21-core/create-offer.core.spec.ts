@@ -103,10 +103,10 @@ describe('create-offer.core — createOffer', () => {
     expect(signOffer.calls).toHaveLength(0);
   });
 
-  it('EXPERT OVERRIDE: an explicit pick of the asset coin is honoured', async () => {
+  it('EXPERT OVERRIDE: an explicit pick of the asset coin, shown with its assets, is honoured', async () => {
     const asset = coin('d', 100_000);
     const signOffer = signOfferPort();
-    const artifact = await createOffer(params({ selectedFundingUtxo: asset }), {
+    const artifact = await createOffer(params({ selectedFundingUtxo: { ...asset, bucket: 'assets' } }), {
       utxos: utxosPort([asset]),
       scan: scanPort({ [op(asset)]: 'has-assets' }),
       signOffer: signOffer.port,

@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { ContentScanPort, UtxoClassification } from './ports.js';
-import { resolveFundingPick, selectFunding } from './select-funding.js';
+import { describeFundingPick, pinContentHeld, resolveFundingPick, selectFunding } from './select-funding.js';
 import { expertRequiredCause, expertRequiredMessage } from '../cat21-fee/funding-safety.js';
 
 // A plain NODE unit test — no jsdom. That the framework-agnostic
@@ -137,8 +137,9 @@ describe('the wallet topology decides whether a dirty-only wallet proceeds or bl
   it('the one-address block is lifted by an EXPLICIT expert-mode pick', async () => {
     const { port } = fakeScan(verdicts);
     const rec = await selectFunding(dirtyOnly, 2_000, port, undefined, 'one-address-for-everything');
-    const chosen = resolveFundingPick(rec, 2_000, { txid: u('b', 9_000).txid, vout: 0 });
     // They were shown what sits on it and chose it anyway. Their call.
+    const shown = rec.candidates.find((c) => c.txid === u('b', 9_000).txid)!;
+    const chosen = resolveFundingPick(rec, 2_000, { txid: shown.txid, vout: 0, bucket: shown.bucket, assets: shown.assets });
     expect(chosen?.value).toBe(9_000);
     expect(chosen?.bucket).toBe('assets');
   });
@@ -182,8 +183,10 @@ describe('the wallet topology decides whether a dirty-only wallet proceeds or bl
     expect(rec.recommended?.bucket).toBe('failed');
     // No coin is handed to a flow that may proceed: content unknown.
     expect(resolveFundingPick(rec, 2_000)).toBeNull();
-    // An explicit expert-mode pick of that coin is still the user's call.
-    expect(resolveFundingPick(rec, 2_000, { txid: failing.txid, vout: 0 })?.bucket).toBe('failed');
+    // An explicit expert-mode pick of that coin, shown as unchecked, is still the user's call.
+    expect(resolveFundingPick(rec, 2_000, { txid: failing.txid, vout: 0, bucket: 'failed' })?.bucket).toBe('failed');
+    // Pinned without having been shown as unchecked, it reads as shown clean and is dropped.
+    expect(describeFundingPick(rec, 2_000, { txid: failing.txid, vout: 0 }).droppedSelection?.reason).toBe('contents-changed');
   });
 
   it('a failed coin that fits tighter never displaces the named asset coin behind a notice', async () => {
@@ -330,5 +333,25 @@ describe('the recommendation names what it found, so an API caller can decide li
     const rec = await selectFunding([clean, dirty], 2_000, detailPort(dirty), undefined, 'separate-payment-address');
     expect(rec.status).toBe('auto');
     expect(rec.recommended?.assets).toBeUndefined();
+  });
+});
+
+describe('pinContentHeld: a pin holds only while its coin carries nothing beyond what was shown', () => {
+  const detail = (inscriptionIds: string[]) => ({ inscriptionIds, runeNames: [], catIds: [], rareSat: null });
+  const coinNow = (bucket: 'clean' | 'assets' | 'failed', assets?: ReturnType<typeof detail>) =>
+    ({ txid: 'a'.repeat(64), vout: 0, value: 10_000, bucket, ...(assets ? { assets } : {}) });
+
+  it.each([
+    ['now clean, shown as anything', {}, coinNow('clean'), true],
+    ['shown with X, now X', { bucket: 'assets' as const, assets: detail(['x']) }, coinNow('assets', detail(['x'])), true],
+    ['shown with X and Y, now X', { bucket: 'assets' as const, assets: detail(['x', 'y']) }, coinNow('assets', detail(['x'])), true],
+    ['shown with X, now X and Y', { bucket: 'assets' as const, assets: detail(['x']) }, coinNow('assets', detail(['x', 'y'])), false],
+    ['shown nothing (bare pin), now X', {}, coinNow('assets', detail(['x'])), false],
+    ['shown unnamed assets, now unnamed', { bucket: 'assets' as const }, coinNow('assets'), true],
+    ['shown with X, now unnamed', { bucket: 'assets' as const, assets: detail(['x']) }, coinNow('assets'), false],
+    ['shown unchecked, now unchecked', { bucket: 'failed' as const }, coinNow('failed'), true],
+    ['shown nothing, now unchecked', {}, coinNow('failed'), false],
+  ])('%s => %s', (_label, pin, current, held) => {
+    expect(pinContentHeld(pin, current)).toBe(held);
   });
 });

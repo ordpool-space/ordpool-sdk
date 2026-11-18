@@ -289,3 +289,89 @@ describe('isFundingPreviewStaleError', () => {
     ]);
   });
 });
+
+describe('a pin whose coin gains assets after it was picked', () => {
+  /** The only covering coin; it carries inscription X, and later the scan also names Y. */
+  const COIN: TxnOutput = { txid: '9'.repeat(64), vout: 2, status: { confirmed: true }, value: 1_000_000 };
+  const X = 'a'.repeat(64) + 'i0';
+  const Y = 'b'.repeat(64) + 'i0';
+  const detail = (ids: string[]) => ({ inscriptionIds: ids, runeNames: [], catIds: [], rareSat: null });
+
+  /** A scan whose answer for COIN is switched by the test. */
+  function mutableScan() {
+    let ids = [X];
+    const port: ContentScanPort = {
+      classify: async (): Promise<UtxoClassification> => ({ verdict: 'has-assets', assets: detail(ids) }),
+    };
+    return { port, reveal: (next: string[]) => { ids = next; } };
+  }
+
+  /** The coin as a picker row hands it over: the bare wallet UTXO, no scan fields. */
+  const pickerRow = (): TxnOutput => ({ ...COIN });
+
+  const ONE_ADDRESS_WALLET = { ...wallet, ordinalsAddress: PAYMENT_ADDR };
+
+  const cases: Array<[string, (scan: ContentScanPort) => Promise<{
+    pick(): void;
+    refresh(): Promise<void>;
+    run(p: (u: { base64: string; hex: string }) => Promise<string>): Promise<unknown>;
+    view(): View;
+    until(pred: (v: View) => boolean): Promise<View>;
+  }>]> = [
+    ['Cat21MintOrchestrator (one address)', async (scan) => {
+      const o = new Cat21MintOrchestrator({ getUtxos: async () => [COIN], scan, broadcast: async () => 'unused', network: Network.Mainnet, fundingTopology: 'derive' });
+      await o.setWallet(ONE_ADDRESS_WALLET);
+      o.setFeeRate(LOW);
+      await settle(o, (v) => v.status === 'expert-required');
+      return { pick: () => o.setSelectedUtxo(pickerRow()), refresh: () => o.refreshUtxos(), run: (p) => o.mint(p), view: () => ({ status: o.getSnapshot().resolvedFundingStatus, resolvedTxid: o.getSnapshot().resolvedFundingUtxo?.txid ?? null, dropped: o.getSnapshot().droppedSelection?.reason ?? null }), until: (pred) => settle(o, pred) };
+    }],
+    ['InscribeMintOrchestrator (one address)', async (scan) => {
+      const o = new InscribeMintOrchestrator({ getUtxos: async () => [COIN], scan, transport: recordingInscribeTransport(), network: Network.Mainnet, fundingTopology: 'derive' });
+      await o.setWallet(ONE_ADDRESS_WALLET);
+      o.setContent({ source: { kind: 'file', body: new TextEncoder().encode('hello cat'), contentType: 'text/plain' } });
+      o.setFeeRate(LOW);
+      await settle(o, (v) => v.status === 'expert-required');
+      return { pick: () => o.setSelectedUtxo(pickerRow()), refresh: () => o.refreshUtxos(), run: (p) => o.mint(p), view: () => ({ status: o.getSnapshot().resolvedFundingStatus, resolvedTxid: o.getSnapshot().resolvedFundingUtxo?.txid ?? null, dropped: o.getSnapshot().droppedSelection?.reason ?? null }), until: (pred) => settle(o, pred) };
+    }],
+    ['Cat21TransferOrchestrator (separate address)', async (scan) => {
+      const o = new Cat21TransferOrchestrator({ getUtxos: async () => [COIN], scan, broadcast: async () => 'unused', network: Network.Mainnet, fundingTopology: 'derive' });
+      await o.setWallet({ ...wallet, ordinalsPublicKey: ORDINALS_XONLY });
+      o.setCatUtxo({ catNumber: 42, txid: 'f'.repeat(64), vout: 0, value: 546 });
+      o.setRecipientAddress(ORDINALS_ADDR);
+      o.setFeeRate(LOW);
+      await settle(o, (v) => v.status === 'asset-notice');
+      return { pick: () => o.setSelectedFundingUtxo(pickerRow()), refresh: () => o.refreshUtxos(), run: (p) => o.transfer(p), view: () => ({ status: o.getSnapshot().resolvedFundingStatus, resolvedTxid: o.getSnapshot().resolvedFundingUtxo?.txid ?? null, dropped: o.getSnapshot().droppedSelection?.reason ?? null }), until: (pred) => settle(o, pred) };
+    }],
+    ['Cat21CreateOfferOrchestrator (separate address)', async (scan) => {
+      const o = new Cat21CreateOfferOrchestrator({ getUtxos: async () => [COIN], scan, network: Network.Mainnet, fundingTopology: 'derive' });
+      await o.setWallet(wallet);
+      o.setTargetCat({ catNumber: 42, txid: 'f'.repeat(64), vout: 0, value: 546, scriptPubKey: btc.p2tr(hex.decode(SELLER_XONLY), undefined, btc.NETWORK).script });
+      o.setSellerPaymentAddress(PAYMENT_ADDR);
+      o.setPriceSats(21_000);
+      o.setFeeRate(LOW);
+      await settle(o, (v) => v.status === 'asset-notice');
+      return { pick: () => o.setSelectedFundingUtxo(pickerRow()), refresh: () => o.refreshUtxos(), run: (p) => o.createOffer(p), view: () => ({ status: o.getSnapshot().resolvedFundingStatus, resolvedTxid: o.getSnapshot().resolvedFundingUtxo?.txid ?? null, dropped: o.getSnapshot().droppedSelection?.reason ?? null }), until: (pred) => settle(o, pred) };
+    }],
+  ];
+
+  it.each(cases)('%s: the picked coin resolves as shown, and once the scan names more it is dropped and execute throws before any prompt', async (_name, make) => {
+    const scan = mutableScan();
+    const h = await make(scan.port);
+
+    h.pick();
+    const held = await h.until((v) => v.status === 'asset-notice' && v.resolvedTxid === COIN.txid);
+    expect(held.dropped).toBeNull();
+
+    scan.reveal([X, Y]);
+    await h.refresh();
+    const after = await h.until((v) => v.dropped !== null);
+    expect(after.dropped).toBe('contents-changed');
+
+    const prompts: string[] = [];
+    const err = await h.run(async (u) => { prompts.push(u.hex); return 'signed'; }).then(() => null, (e: unknown) => e);
+    expect({
+      reason: err instanceof FundingSelectionChangedError ? err.droppedSelection.reason : String(err),
+      prompts,
+    }).toEqual({ reason: 'contents-changed', prompts: [] });
+  });
+});
