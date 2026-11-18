@@ -68,6 +68,31 @@ test.beforeAll(async () => {
   extensionId = worker.url().split('/')[2];
 });
 
+/**
+ * On a failure, attach what every open page showed: the full HTML, the
+ * accessibility tree (what `getByRole` actually queries, so a button that is
+ * visible but has no `button` role or another name shows up here), and a
+ * screenshot. A dump that cannot be taken is attached as its error rather
+ * than skipped, so a missing artifact never reads as "nothing to see".
+ */
+test.afterEach(async ({}, testInfo) => {
+  if (testInfo.status === testInfo.expectedStatus || !context) return;
+  for (const [i, page] of context.pages().entries()) {
+    const tag = `failure-page-${i}`;
+    const record = async (name: string, contentType: string, read: () => Promise<string | Buffer>) => {
+      const body = await read().then(
+        (value) => value,
+        (err: unknown) => `could not read ${name}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      await testInfo.attach(`${tag}-${name}`, { body, contentType: typeof body === 'string' && contentType !== 'text/html' ? 'text/plain' : contentType });
+    };
+    await record('url', 'text/plain', async () => page.url());
+    await record('html', 'text/html', () => page.content());
+    await record('aria', 'text/plain', () => page.locator('body').ariaSnapshot());
+    await record('screenshot', 'image/png', () => page.screenshot({ fullPage: true }));
+  }
+});
+
 test.afterAll(async () => {
   await context?.close();
 });
