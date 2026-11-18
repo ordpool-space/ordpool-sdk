@@ -40,8 +40,22 @@ export interface UtxoAssetDetail {
   runeNames: string[];
   /** CAT-21 cat ids, from a cat21-ord index. */
   catIds: string[];
+  /**
+   * The same cats with their cat numbers, in `catIds` order, so a notice can
+   * say "Cat #1234" instead of an inscription id. `number` is null when the
+   * number lookup failed; the cat is an asset all the same, and no gate reads
+   * this field. Absent when the scan port that produced the detail does not
+   * look numbers up.
+   */
+  cats?: CatOnOutpoint[];
   /** The rare sat, when one is present. */
   rareSat: { sat: string; block: number; rarity: string } | null;
+}
+
+/** One CAT-21 cat on an outpoint: its inscription id and, when known, its cat number. */
+export interface CatOnOutpoint {
+  id: string;
+  number: number | null;
 }
 
 /**

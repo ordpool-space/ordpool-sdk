@@ -13,6 +13,7 @@
  * risk applies to a UTXO carrying a rare sat.
  */
 
+import type { CatOnOutpoint } from '../cat21-core/ports.js';
 import type { SatRarity } from './sat-rarity.helper.js';
 
 /**
@@ -89,6 +90,15 @@ export interface UtxoContent {
   runes: { [runeName: string]: unknown } | null;
   /** CAT-21 cat IDs at this outpoint, also in `{txid}i{index}` format. */
   catIds: string[];
+  /**
+   * The cats in `catIds` order with their cat numbers, read from cat21-ord's
+   * `GET /inscription/<id>` (`number`; cat21-ord indexes only cats, so its
+   * inscription number is the cat number). `number` is null when that lookup
+   * failed. Display only: the classification never depends on it.
+   * `UtxoContentScanner` always fills it; it is optional so content built
+   * elsewhere, without a number lookup, still type-checks.
+   */
+  cats?: CatOnOutpoint[];
   /**
    * Sat the cats at this outpoint sit on, or `null` when the outpoint holds
    * no cats or ord returned no sat ranges.

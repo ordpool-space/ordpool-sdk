@@ -1,8 +1,8 @@
-import { BehaviorSubject, Observable, catchError, firstValueFrom, forkJoin, from, map, mergeMap, of, shareReplay, tap } from 'rxjs';
+import { BehaviorSubject, Observable, catchError, firstValueFrom, forkJoin, from, mergeMap, of, shareReplay, tap } from 'rxjs';
 
-import { ContentScanPort, UtxoAssetDetail, UtxoClassification } from '../cat21-core/ports.js';
+import { CatOnOutpoint, ContentScanPort, UtxoAssetDetail, UtxoClassification } from '../cat21-core/ports.js';
 import { Cat21SdkConfig } from './cat21-sdk-config.js';
-import { fetchJson } from './http-fetch.helper.js';
+import { fetchJson, fetchJsonAsync } from './http-fetch.helper.js';
 import { classifyUtxoContent } from './utxo-content.classify.js';
 import {
   Cat21OrdOutputResponse,
@@ -133,7 +133,7 @@ export class UtxoContentScanner implements ContentScanPort {
       ord: this.fetchOrd(outpoint),
       cat21Ord: this.fetchCat21Ord(outpoint),
     }).pipe(
-      map(({ ord, cat21Ord }): UtxoScanState => {
+      mergeMap(async ({ ord, cat21Ord }): Promise<UtxoScanState> => {
         const c = classifyUtxoContent(ord, cat21Ord);
         if (c.clean) {
           return { kind: 'scanned-clean' };
@@ -162,6 +162,7 @@ export class UtxoContentScanner implements ContentScanPort {
           inscriptionIds: c.inscriptionIds,
           runes: c.runes,
           catIds: c.catIds,
+          cats: await this.catsWithNumbers(c.catIds),
           catSat: c.catSat,
           rareSat: c.rareSat,
         };
@@ -231,6 +232,31 @@ export class UtxoContentScanner implements ContentScanPort {
     this.statesSubject.next(new Map());
   }
 
+  /**
+   * Cat numbers by inscription id. A cat's number never changes, so a number
+   * once read stays cached for the scanner's lifetime, across `reset()` too.
+   * A failed lookup is not cached, so the next scan asks again.
+   */
+  private readonly catNumbers = new Map<string, number>();
+
+  /**
+   * The cats with their numbers, from cat21-ord's `GET /inscription/<id>`
+   * (`number`). A lookup that fails or answers without an integer `number`
+   * yields `number: null`: the number is for display, and its absence must
+   * not turn an asset scan into a failed one.
+   */
+  private async catsWithNumbers(catIds: string[]): Promise<CatOnOutpoint[]> {
+    return Promise.all(catIds.map(async (id): Promise<CatOnOutpoint> => {
+      const cached = this.catNumbers.get(id);
+      if (cached !== undefined) return { id, number: cached };
+      const number = await fetchJsonAsync<{ number?: unknown }>(`${trimSlash(this.config.cat21OrdApiUrl)}/inscription/${id}`)
+        .then((body) => (typeof body.number === 'number' && Number.isSafeInteger(body.number) ? body.number : null))
+        .catch(() => null);
+      if (number !== null) this.catNumbers.set(id, number);
+      return { id, number };
+    }));
+  }
+
   private fetchOrd(outpoint: string): Observable<OrdOutputResponse> {
     return fetchJson<OrdOutputResponse>(`${trimSlash(this.config.ordApiUrl)}/output/${outpoint}`);
   }
@@ -259,6 +285,7 @@ export function toAssetDetail(content: UtxoContent): UtxoAssetDetail {
     inscriptionIds: content.inscriptionIds,
     runeNames: content.runes ? Object.keys(content.runes) : [],
     catIds: content.catIds,
+    ...(content.cats ? { cats: content.cats } : {}),
     rareSat: content.rareSat,
   };
 }

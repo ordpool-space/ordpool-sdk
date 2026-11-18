@@ -4,6 +4,7 @@ import { firstValueFrom, of } from 'rxjs';
 import { Cat21SdkConfig } from './cat21-sdk-config.js';
 import { AUTO_SCAN_MAX_VALUE_SAT, UtxoContentScanner } from './utxo-content-scanner.service.js';
 import { UtxoScanState } from './utxo-content.types.js';
+import { cat21OrdCatInscriptionFixture, cat21OrdOutputWithCatFixture } from '../cat21-ord/cats-at-output.fixtures.js';
 import { selectFunding } from '../cat21-core/select-funding.js';
 import { expertRequiredCause } from '../cat21-fee/funding-safety.js';
 
@@ -167,6 +168,7 @@ describe('UtxoContentScanner.classify (ContentScanPort adapter)', () => {
           inscriptionIds: ['abc123i0'],
           runes: { 'UNCOMMON•GOODS': { amount: '1', divisibility: 0, symbol: '⧉' } },
           catIds: ['def456i0'],
+          cats: [{ id: 'def456i0', number: 1234 }],
           catSat: 1857900000000000,
           rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' },
         },
@@ -181,6 +183,7 @@ describe('UtxoContentScanner.classify (ContentScanPort adapter)', () => {
         // Rune BALANCES stay behind; a row renders the name.
         runeNames: ['UNCOMMON•GOODS'],
         catIds: ['def456i0'],
+        cats: [{ id: 'def456i0', number: 1234 }],
         rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' },
       },
     });
@@ -283,5 +286,83 @@ describe('UtxoContentScanner autoScan gates', () => {
     expect(scanned(fetchMock).sort()).toEqual(
       [`${'e'.repeat(64)}:0`, `${'f'.repeat(64)}:0`].sort(),
     );
+  });
+});
+
+describe('UtxoContentScanner cat numbers', () => {
+  /** cat #2 as captured from regtest cat21-ord (cats-at-output.fixtures.ts). */
+  const REGTEST_CAT_ID = cat21OrdCatInscriptionFixture.id;
+  const REGTEST_OUTPOINT = cat21OrdOutputWithCatFixture.outpoint;
+  const SECOND_OUTPOINT = `${'e'.repeat(64)}:0`;
+
+  /** A fetch answering per URL; `inscription` decides cat21-ord's /inscription answer. */
+  function routedScanner(inscription: () => { status: number; body: unknown }) {
+    const calls: string[] = [];
+    const fetchMock = jest.fn((input: string | URL | Request) => {
+      const url = String(input);
+      calls.push(url);
+      const answer = (status: number, body: unknown) =>
+        Promise.resolve({ ok: status < 300, status, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) } as unknown as Response);
+      if (url.includes('/inscription/')) {
+        const r = inscription();
+        return answer(r.status, r.body);
+      }
+      if (url.startsWith(cat21OrdApiUrl)) return answer(200, cat21OrdOutputWithCatFixture);
+      return answer(200, { value: 546, inscriptions: [], runes: null, sat_ranges: cat21OrdOutputWithCatFixture.sat_ranges });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    return { scanner: new UtxoContentScanner(cfg), calls };
+  }
+  const inscriptionCalls = (calls: string[]) => calls.filter((u) => u.includes('/inscription/'));
+
+  it('names each cat by its number from cat21-ord /inscription, and the port detail carries it', async () => {
+    const { scanner, calls } = routedScanner(() => ({ status: 200, body: cat21OrdCatInscriptionFixture }));
+
+    const detail = await scanner.classify(REGTEST_OUTPOINT);
+
+    expect(detail).toEqual({
+      verdict: 'has-assets',
+      assets: {
+        inscriptionIds: [],
+        runeNames: [],
+        catIds: [REGTEST_CAT_ID],
+        cats: [{ id: REGTEST_CAT_ID, number: 2 }],
+        rareSat: null,
+      },
+    });
+    expect(inscriptionCalls(calls)).toEqual([`${cat21OrdApiUrl}/inscription/${REGTEST_CAT_ID}`]);
+  });
+
+  it.each([
+    ['answers 500', { status: 500, body: 'boom' }],
+    ['answers without an integer number', { status: 200, body: { ...cat21OrdCatInscriptionFixture, number: '2' } }],
+  ])('a lookup that %s leaves the number null and the coin an asset coin', async (_label, answer) => {
+    const { scanner } = routedScanner(() => answer);
+
+    const state = await firstValueFrom(scanner.scan(REGTEST_OUTPOINT));
+
+    expect(state.kind === 'scanned-with-assets' ? state.content.cats : state).toEqual([{ id: REGTEST_CAT_ID, number: null }]);
+  });
+
+  it('a number once read is cached: the same cat on another outpoint, and after reset, asks nothing', async () => {
+    const { scanner, calls } = routedScanner(() => ({ status: 200, body: cat21OrdCatInscriptionFixture }));
+    await firstValueFrom(scanner.scan(REGTEST_OUTPOINT));
+    scanner.reset();
+
+    const again = await firstValueFrom(scanner.scan(SECOND_OUTPOINT));
+
+    expect(again.kind === 'scanned-with-assets' ? again.content.cats : again).toEqual([{ id: REGTEST_CAT_ID, number: 2 }]);
+    expect(inscriptionCalls(calls)).toHaveLength(1);
+  });
+
+  it('a failed lookup is not cached: the next scan asks again and gets the number', async () => {
+    let attempt = 0;
+    const { scanner, calls } = routedScanner(() => (attempt++ === 0 ? { status: 500, body: 'boom' } : { status: 200, body: cat21OrdCatInscriptionFixture }));
+    await firstValueFrom(scanner.scan(REGTEST_OUTPOINT));
+
+    const second = await firstValueFrom(scanner.scan(SECOND_OUTPOINT));
+
+    expect(second.kind === 'scanned-with-assets' ? second.content.cats : second).toEqual([{ id: REGTEST_CAT_ID, number: 2 }]);
+    expect(inscriptionCalls(calls)).toHaveLength(2);
   });
 });
