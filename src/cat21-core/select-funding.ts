@@ -11,6 +11,29 @@ import { classificationAssets, classificationVerdict, ContentScanPort, namesAsse
 const outpoint = (u: FundingUtxo): string => `${u.txid}:${u.vout}`;
 
 /**
+ * One coin's content as the funding policy reads it: the port's verdict as a
+ * bucket (`clean` / `assets`, `failed` when the scan rejects) plus the detail
+ * it named. The detail travels as the port reported it, so a caller can name
+ * what was found; whether it names anything is `recommendFunding`'s call
+ * (`namesAssets`), so an empty detail travels too and reads as unnamed there.
+ */
+export async function classifyFundingCoin(
+  scan: ContentScanPort,
+  outpointKey: string,
+): Promise<Required<Pick<FundingPinContent, 'bucket'>> & Pick<FundingPinContent, 'assets'>> {
+  try {
+    const classification = await scan.classify(outpointKey);
+    const assets = classificationAssets(classification);
+    return {
+      bucket: classificationVerdict(classification) === 'clean' ? 'clean' : 'assets',
+      ...(assets ? { assets } : {}),
+    };
+  } catch {
+    return { bucket: 'failed' };
+  }
+}
+
+/**
  * Content-checked coin selection — the async, port-driven form of
  * `FundingRecommendationService`. Force-classifies every COVERING candidate via
  * the `ContentScanPort` (regardless of size, so the "never auto-spend a valuable
@@ -65,22 +88,10 @@ export async function selectFunding<T extends FundingUtxo>(
     utxos
       .filter((u) => u.value >= targetSats)
       .map(async (u) => {
-        try {
-          const classification = await scan.classify(outpoint(u));
-          bucketByOutpoint.set(
-            outpoint(u),
-            classificationVerdict(classification) === 'clean' ? 'clean' : 'assets',
-          );
-          // Carried through as the port reported it, so the caller can name
-          // what it found instead of only that it found something. Whether it
-          // names anything is `recommendFunding`'s call (`namesAssets`), so an
-          // empty detail travels too and reads as unnamed there.
-          const detail = classificationAssets(classification);
-          if (detail) {
-            assetsByOutpoint.set(outpoint(u), detail);
-          }
-        } catch {
-          bucketByOutpoint.set(outpoint(u), 'failed');
+        const content = await classifyFundingCoin(scan, outpoint(u));
+        bucketByOutpoint.set(outpoint(u), content.bucket);
+        if (content.assets) {
+          assetsByOutpoint.set(outpoint(u), content.assets);
         }
       }),
   );

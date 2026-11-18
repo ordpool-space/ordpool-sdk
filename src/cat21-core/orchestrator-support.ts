@@ -1,6 +1,7 @@
 import { AnnotatedFundingUtxo, FundingRecommendation } from '../cat21-fee/funding-safety.js';
-import { CoreFundingUtxo, UtxosPort } from './ports.js';
-import { FundingPinContent } from './select-funding.js';
+import { FundingSelectionChangedError } from '../cat21-fee/funding-selection-changed-error.js';
+import { ContentScanPort, CoreFundingUtxo, UtxosPort } from './ports.js';
+import { classifyFundingCoin, FundingPinContent, pinContentHeld } from './select-funding.js';
 
 /**
  * A minimal reactive snapshot container shared by the operation orchestrators
@@ -93,4 +94,29 @@ export function withShownContent<U extends { txid: string; vout: number } & Fund
   const shown = recommendation.candidates.find((c) => c.txid === utxo.txid && c.vout === utxo.vout);
   if (!shown) return utxo;
   return { ...utxo, bucket: shown.bucket, ...(shown.assets ? { assets: shown.assets } : {}) };
+}
+
+/**
+ * The execute-time check of a pinned coin against a FRESH scan, run by every
+ * orchestrator just before it asks for a signature.
+ *
+ * The recommendation the orchestrator holds is only as fresh as its last
+ * recompute. A consumer can learn more about a coin in between (a "retry scan"
+ * that turns a failed scan into an inscription), and spending the pin on the
+ * old answer would spend an asset nobody was shown. So the pin's outpoint is
+ * classified again through the same port, and a coin that now carries more
+ * than was shown throws `FundingSelectionChangedError` (`contents-changed`)
+ * after `onStale` has started a recompute, so the snapshot shows the drop too.
+ */
+export async function assertPinnedContentFresh(
+  pin: ({ txid: string; vout: number } & FundingPinContent) | null,
+  scan: ContentScanPort,
+  recommendation: FundingRecommendation<AnnotatedFundingUtxo>,
+  onStale: () => void,
+): Promise<void> {
+  if (!pin) return;
+  const current = await classifyFundingCoin(scan, `${pin.txid}:${pin.vout}`);
+  if (pinContentHeld(pin, { txid: pin.txid, vout: pin.vout, value: 0, ...current })) return;
+  onStale();
+  throw new FundingSelectionChangedError({ txid: pin.txid, vout: pin.vout, reason: 'contents-changed' }, recommendation);
 }

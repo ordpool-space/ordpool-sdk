@@ -2,7 +2,7 @@ import { firstValueFrom, from } from 'rxjs';
 import { hex } from '@scure/base';
 
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingPin, toCoreFundingUtxo, withShownContent } from '../cat21-core/orchestrator-support.js';
+import { assertPinnedContentFresh, makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingPin, toCoreFundingUtxo, withShownContent } from '../cat21-core/orchestrator-support.js';
 import { MintCoreParams, simulateMint, MintStatus } from '../cat21-core/mint.core.js';
 import { DroppedSelection, FundingPinContent, resolveFundingPick } from '../cat21-core/select-funding.js';
 import { resolveCatTxFee } from '../cat21-fee/resolve-cat-tx-fee.helper.js';
@@ -236,6 +236,17 @@ export class Cat21MintOrchestrator {
    * invalidated by new coins arriving.
    */
   /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
+  /**
+   * Scan the covering coins again and recompute the recommendation and the
+   * resolved pick, resolving once the new snapshot is out. A consumer that
+   * re-scans a coin itself ("retry scan") calls this so the funding answer,
+   * and a pin's `contents-changed`, follow what the scan now knows. Execute
+   * re-checks a pinned coin against a fresh scan in any case.
+   */
+  async rescanFunding(): Promise<void> {
+    await this.recompute();
+  }
+
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;
     await this.loadUtxos(this.wallet);
@@ -351,6 +362,7 @@ export class Cat21MintOrchestrator {
       this.snap.selectedUtxo,
     );
     assertPinnedFundingResolved(this.snap.selectedUtxo, selected, rec, this.snap.fundingRequirementSats);
+    await assertPinnedContentFresh(this.snap.selectedUtxo, this.deps.scan, rec, () => void this.recompute());
 
     if (!wallet) throw new Error('No wallet connected');
     if (!feeRate) throw new Error('No fee rate set');

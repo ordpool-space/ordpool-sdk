@@ -375,3 +375,105 @@ describe('a pin whose coin gains assets after it was picked', () => {
     }).toEqual({ reason: 'contents-changed', prompts: [] });
   });
 });
+
+describe('a pin made on a failed scan, after a retry scan finds an inscription', () => {
+  /** The only covering coin. Its first scan fails; a retry finds inscription X. */
+  const COIN: TxnOutput = { txid: '8'.repeat(64), vout: 1, status: { confirmed: true }, value: 1_000_000 };
+  const X = 'e'.repeat(64) + 'i0';
+
+  /** A scan port whose answer the test flips, the way a consumer's own retry changes the shared scanner. */
+  function retryableScan() {
+    let found = false;
+    const port: ContentScanPort = {
+      classify: async (): Promise<UtxoClassification> => {
+        if (!found) throw new Error('ord unreachable');
+        return { verdict: 'has-assets', assets: { inscriptionIds: [X], runeNames: [], catIds: [], rareSat: null } };
+      },
+    };
+    return { port, retryFinds: () => { found = true; } };
+  }
+
+  const pickerRow = (): TxnOutput => ({ ...COIN });
+
+  type Driver = {
+    pick(): void;
+    rescan(): Promise<void>;
+    run(p: (u: { base64: string; hex: string }) => Promise<string>): Promise<unknown>;
+    view(): View;
+    until(pred: (v: View) => boolean): Promise<View>;
+  };
+  const viewOf = (s: SnapLike): View => ({
+    status: s.resolvedFundingStatus, resolvedTxid: s.resolvedFundingUtxo?.txid ?? null, dropped: s.droppedSelection?.reason ?? null,
+  });
+
+  const cases: Array<[string, (scan: ContentScanPort) => Promise<Driver>]> = [
+    ['Cat21MintOrchestrator.mint', async (scan) => {
+      const o = new Cat21MintOrchestrator({ getUtxos: async () => [COIN], scan, broadcast: async () => 'unused', network: Network.Mainnet, fundingTopology: 'derive' });
+      await o.setWallet(wallet);
+      o.setFeeRate(LOW);
+      await settle(o, (v) => v.status === 'expert-required');
+      return { pick: () => o.setSelectedUtxo(pickerRow()), rescan: () => o.rescanFunding(), run: (p) => o.mint(p), view: () => viewOf(o.getSnapshot()), until: (pred) => settle(o, pred) };
+    }],
+    ['InscribeMintOrchestrator.mint', async (scan) => {
+      const o = new InscribeMintOrchestrator({ getUtxos: async () => [COIN], scan, transport: recordingInscribeTransport(), network: Network.Mainnet, fundingTopology: 'derive' });
+      await o.setWallet(wallet);
+      o.setContent({ source: { kind: 'file', body: new TextEncoder().encode('hello cat'), contentType: 'text/plain' } });
+      o.setFeeRate(LOW);
+      await settle(o, (v) => v.status === 'expert-required');
+      return { pick: () => o.setSelectedUtxo(pickerRow()), rescan: () => o.rescanFunding(), run: (p) => o.mint(p), view: () => viewOf(o.getSnapshot()), until: (pred) => settle(o, pred) };
+    }],
+    ['Cat21TransferOrchestrator.transfer', async (scan) => {
+      const o = new Cat21TransferOrchestrator({ getUtxos: async () => [COIN], scan, broadcast: async () => 'unused', network: Network.Mainnet, fundingTopology: 'derive' });
+      await o.setWallet({ ...wallet, ordinalsPublicKey: ORDINALS_XONLY });
+      o.setCatUtxo({ catNumber: 42, txid: 'f'.repeat(64), vout: 0, value: 546 });
+      o.setRecipientAddress(ORDINALS_ADDR);
+      o.setFeeRate(LOW);
+      await settle(o, (v) => v.status === 'expert-required');
+      return { pick: () => o.setSelectedFundingUtxo(pickerRow()), rescan: () => o.rescanFunding(), run: (p) => o.transfer(p), view: () => viewOf(o.getSnapshot()), until: (pred) => settle(o, pred) };
+    }],
+    ['Cat21CreateOfferOrchestrator.createOffer', async (scan) => {
+      const o = new Cat21CreateOfferOrchestrator({ getUtxos: async () => [COIN], scan, network: Network.Mainnet, fundingTopology: 'derive' });
+      await o.setWallet(wallet);
+      o.setTargetCat({ catNumber: 42, txid: 'f'.repeat(64), vout: 0, value: 546, scriptPubKey: btc.p2tr(hex.decode(SELLER_XONLY), undefined, btc.NETWORK).script });
+      o.setSellerPaymentAddress(PAYMENT_ADDR);
+      o.setPriceSats(21_000);
+      o.setFeeRate(LOW);
+      await settle(o, (v) => v.status === 'expert-required');
+      return { pick: () => o.setSelectedFundingUtxo(pickerRow()), rescan: () => o.rescanFunding(), run: (p) => o.createOffer(p), view: () => viewOf(o.getSnapshot()), until: (pred) => settle(o, pred) };
+    }],
+  ];
+
+  const execute = async (h: Driver) => {
+    const prompts: string[] = [];
+    const err = await h.run(async (u) => { prompts.push(u.hex); return 'signed'; }).then(() => null, (e: unknown) => e);
+    return { reason: err instanceof FundingSelectionChangedError ? err.droppedSelection.reason : String(err), prompts };
+  };
+
+  it.each(cases)('%s: execute without a recompute re-checks the pin on a fresh scan and refuses', async (_name, make) => {
+    const scan = retryableScan();
+    const h = await make(scan.port);
+    h.pick();
+    // The pin holds, shown as unchecked, and the stale recommendation still lists the coin as failed.
+    const pinned = await h.until((v) => v.resolvedTxid === COIN.txid);
+    expect(pinned.dropped).toBeNull();
+
+    scan.retryFinds();
+    expect(h.view().dropped).toBeNull();
+
+    expect(await execute(h)).toEqual({ reason: 'contents-changed', prompts: [] });
+    // The refusal also started a recompute, so the snapshot names the drop.
+    expect((await h.until((v) => v.dropped !== null)).dropped).toBe('contents-changed');
+  });
+
+  it.each(cases)('%s: rescanFunding brings the snapshot up to the new scan before anyone clicks', async (_name, make) => {
+    const scan = retryableScan();
+    const h = await make(scan.port);
+    h.pick();
+    await h.until((v) => v.resolvedTxid === COIN.txid);
+
+    scan.retryFinds();
+    await h.rescan();
+
+    expect(h.view().dropped).toBe('contents-changed');
+  });
+});

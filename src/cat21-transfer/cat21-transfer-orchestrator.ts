@@ -10,7 +10,7 @@ import {
 } from '../cat21-core/transfer.core.js';
 import { DroppedSelection, FundingPinContent } from '../cat21-core/select-funding.js';
 import { ContentScanPort, CoreFundingUtxo } from '../cat21-core/ports.js';
-import { makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingPin, toCoreFundingUtxo, withShownContent } from '../cat21-core/orchestrator-support.js';
+import { assertPinnedContentFresh, makeUtxosPort, sameSelection, SnapshotStore, toCoreFundingPin, toCoreFundingUtxo, withShownContent } from '../cat21-core/orchestrator-support.js';
 import {
   AnnotatedFundingUtxo,
   emptyRecommendation,
@@ -213,6 +213,17 @@ export class Cat21TransferOrchestrator {
    * alone, since neither is invalidated by new coins arriving.
    */
   /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
+  /**
+   * Scan the covering coins again and recompute the recommendation and the
+   * resolved pick, resolving once the new snapshot is out. A consumer that
+   * re-scans a coin itself ("retry scan") calls this so the funding answer,
+   * and a pin's `contents-changed`, follow what the scan now knows. Execute
+   * re-checks a pinned coin against a fresh scan in any case.
+   */
+  async rescanFunding(): Promise<void> {
+    await this.recompute();
+  }
+
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;
     await this.loadUtxos(this.wallet);
@@ -333,6 +344,7 @@ export class Cat21TransferOrchestrator {
     assertPinnedFundingResolved(
       this.snap.selectedFundingUtxo, sim.fundingUtxo, this.snap.fundingRecommendation, this.snap.fundingRequirementSats,
     );
+    await assertPinnedContentFresh(this.snap.selectedFundingUtxo, this.deps.scan, this.snap.fundingRecommendation, () => void this.recompute());
 
     this.patch({ state: 'transferring', errorMessage: null, successTxId: null });
     try {
