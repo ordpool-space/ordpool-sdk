@@ -14,6 +14,7 @@ import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
 import { buildCat21BuyOfferPsbt } from '../cat21-offer/cat21-offer.helper.js';
 import { finalizeOfferBuyerInputs } from '../cat21-offer/finalize-offer-buyer-inputs.js';
+import { createOfferCounterparties } from '../cat21-offer/offer-counterparties.js';
 import { prepareBuyOfferBuyerInput } from '../cat21-offer/cat21-offer-input-adapter.js';
 import { changeDustFloor } from '../cat21-script/address-format.js';
 import {
@@ -113,6 +114,12 @@ export interface CreateOfferSimulationResult {
    * is part of the choice, not a constant.
    */
   candidateFees: CandidateFeeRow[];
+  /**
+   * The seller this offer trades with, as `AgentActionContext
+   * .counterpartyAddresses` takes it: the seller's payment address and the
+   * cat UTXO's address (`createOfferCounterparties`).
+   */
+  counterpartyAddresses: string[];
 }
 
 export interface CreateOfferArtifact {
@@ -330,6 +337,11 @@ export async function simulateCreateOffer(
     fundingRequirementSats: plan.requirementSats,
     fundingPreferredSats: plan.preferredSats,
     candidateFees: plan.candidateFees,
+    counterpartyAddresses: createOfferCounterparties({
+      sellerPaymentAddress: params.sellerPaymentAddress,
+      targetCatScriptPubKey: params.targetCat.scriptPubKey,
+      network: params.network,
+    }),
   };
 }
 

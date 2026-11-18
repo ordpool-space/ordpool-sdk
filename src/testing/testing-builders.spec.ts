@@ -24,6 +24,8 @@ import { verifyBip322Signature } from '../wallet/verify-bip322-signature.js';
 // are browser-safe as well as Node-safe.
 
 const CAT = { txid: testFundingTxid(0x11), vout: 0, value: 9_000 };
+/** The buyer the validator names: the cat's landing output, then the buyer's change. */
+const BUYER_ADDRESSES = [TEST_OFFER_BUYER_ORDINALS_ADDRESS, TEST_OFFER_BUYER_PAYMENT_ADDRESS];
 
 const validate = (psbt: Uint8Array, over: Partial<Parameters<typeof validateCat21BuyOfferPsbt>[0]> = {}) =>
   validateCat21BuyOfferPsbt({
@@ -43,7 +45,7 @@ describe('buildSignedTestBuyOffer', () => {
         expectedBuyerChangeAddress: toPaymentAddress(TEST_OFFER_BUYER_PAYMENT_ADDRESS),
         expectedExactPrice: 21_000,
       }),
-    ).toEqual({ ok: true, pricePaidSats: 21_000, postageSats: 9_000 });
+    ).toEqual({ ok: true, pricePaidSats: 21_000, postageSats: 9_000, buyerAddresses: BUYER_ADDRESSES });
   });
 
   it('returns the same PSBT as base64 and as bytes', () => {
@@ -81,7 +83,7 @@ describe('buildSignedTestBuyOffer', () => {
     const tx = btc.Transaction.fromPSBT(bytes);
     expect(tx.inputsLength).toBe(3);
     expect([1, 2].map((i) => tx.getInput(i).partialSig?.length)).toEqual([1, 1]);
-    expect(validate(bytes)).toEqual({ ok: true, pricePaidSats: 21_000, postageSats: 9_000 });
+    expect(validate(bytes)).toEqual({ ok: true, pricePaidSats: 21_000, postageSats: 9_000, buyerAddresses: BUYER_ADDRESSES });
   });
 
   it('spends a consumer test wallet script at input 0 when given one', () => {
@@ -90,7 +92,7 @@ describe('buildSignedTestBuyOffer', () => {
     const input0 = btc.Transaction.fromPSBT(bytes).getInput(0);
     expect(input0.witnessUtxo?.script).toEqual(consumerScript);
     expect(input0.tapInternalKey).toBeUndefined();
-    expect(validate(bytes)).toEqual({ ok: true, pricePaidSats: 21_000, postageSats: 9_000 });
+    expect(validate(bytes)).toEqual({ ok: true, pricePaidSats: 21_000, postageSats: 9_000, buyerAddresses: BUYER_ADDRESSES });
   });
 
   it('defaults input 0 to the test seller, whose key is exported', () => {
@@ -124,7 +126,7 @@ describe('buildSignedTestBuyOffer', () => {
     const { bytes } = buildSignedTestBuyOffer({ sellerUtxo: CAT, sellerPaymentAddress: TEST_OFFER_STRANGER_ADDRESS });
     expect(
       validate(bytes, { expectedSellerPaymentAddress: toPaymentAddress(TEST_OFFER_STRANGER_ADDRESS) }),
-    ).toEqual({ ok: true, pricePaidSats: 21_000, postageSats: 9_000 });
+    ).toEqual({ ok: true, pricePaidSats: 21_000, postageSats: 9_000, buyerAddresses: BUYER_ADDRESSES });
   });
 });
 

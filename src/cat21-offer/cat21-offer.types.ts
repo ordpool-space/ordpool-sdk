@@ -103,6 +103,16 @@ export interface Cat21OfferValidationResult {
   ok: true;
   pricePaidSats: number;
   postageSats: number;
+  /**
+   * The BUYER, as the seller's agent-policy allowlist takes it
+   * (`AgentActionContext.counterpartyAddresses`): the address of every
+   * output except output 1, the seller's payment, so the cat's landing
+   * output and any buyer change. An output whose script is no address is
+   * listed as `script:<hex>` when it carries value, so it fails an
+   * allowlist rather than slipping past it; a zero-value one carries
+   * nothing and is left out.
+   */
+  buyerAddresses: string[];
 }
 
 export interface Cat21OfferValidationFailure {

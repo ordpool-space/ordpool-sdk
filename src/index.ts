@@ -98,6 +98,7 @@ export * from './cat21-core/accept-offer.core.js';
 // --- cat21 offer (ord-style buyer-initiated PSBT builder + seller-side validator) ---
 export * from './cat21-offer/cat21-offer.helper.js';
 export * from './cat21-offer/cat21-offer.types.js';
+export * from './cat21-offer/offer-counterparties.js';
 export * from './cat21-offer/cat21-offer-input-adapter.js';
 export * from './cat21-offer/cat21-create-offer-orchestrator.js';
 export * from './cat21-offer/cat21-accept-offer-orchestrator.js';

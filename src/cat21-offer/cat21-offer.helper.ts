@@ -1,3 +1,4 @@
+import { counterpartyOfScript } from './offer-counterparties.js';
 import { hex } from '@scure/base';
 import * as btc from '@scure/btc-signer';
 import type { TransactionInputUpdate } from '@scure/btc-signer/psbt';
@@ -593,7 +594,18 @@ export function validateCat21BuyOfferPsbt(
     }
   }
 
-  return { ok: true, pricePaidSats, postageSats };
+  const buyerAddresses: string[] = [];
+  for (let i = 0; i < tx.outputsLength; i++) {
+    if (i === 1) continue;
+    const output = tx.getOutput(i);
+    if (!output.script) continue;
+    const party = counterpartyOfScript(output.script, args.network ?? Network.Mainnet);
+    // A zero-value output that is no address (an OP_RETURN) pays nobody.
+    if (party.startsWith('script:') && (output.amount ?? 0n) === 0n) continue;
+    if (!buyerAddresses.includes(party)) buyerAddresses.push(party);
+  }
+
+  return { ok: true, pricePaidSats, postageSats, buyerAddresses };
 }
 
 

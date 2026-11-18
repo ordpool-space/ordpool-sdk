@@ -55,6 +55,15 @@ describe('create-offer.core — simulateCreateOffer', () => {
     expect(sim.feeSats).toBeGreaterThan(0);
   });
 
+  it('names the seller it trades with: the payment address and the cat UTXO address', async () => {
+    const sim = await simulateCreateOffer(params(), { utxos: utxosPort([coin('c', 100_000)]), scan: scanPort() });
+
+    expect(sim.counterpartyAddresses).toEqual([
+      SELLER_PAYMENT,
+      btc.p2tr(SELLER_KEY.slice(1, 33), undefined, btc.NETWORK).address!,
+    ]);
+  });
+
   it('funds price + the cat REAL value + fee on a NON-546 cat (ord parity)', async () => {
     const clean = coin('c', 100_000);
     const sim = await simulateCreateOffer(params({ targetCat: { txid: 'a'.repeat(64), vout: 0, value: 9_000, scriptPubKey: SELLER_CAT_SCRIPT } }), {

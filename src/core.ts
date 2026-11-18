@@ -163,6 +163,7 @@ export * from './cat21-transfer/cat21-transfer-orchestrator.js';
 // --- CAT-21 offer (ord-style buy-offer builder + seller validator) ---
 export * from './cat21-offer/cat21-offer.helper.js';
 export * from './cat21-offer/cat21-offer.types.js';
+export * from './cat21-offer/offer-counterparties.js';
 export * from './cat21-offer/cat21-offer-input-adapter.js';
 
 // --- CAT-21 create-offer framework-agnostic orchestrator (subscribe-based). ---
