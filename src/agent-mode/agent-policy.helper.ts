@@ -115,12 +115,13 @@ export function evaluateAgentPolicyCaps(
       );
     }
   }
-  // Counterparty allowlist. Applies to every action that HAS a
-  // counterparty (all kinds except cat21_mint, which pays the network,
-  // not a party). When an allowlist is configured, a counterparty-
-  // bearing action MUST carry an address that is on it. A MISSING
-  // address fails CLOSED: a malformed intent that dropped the
-  // counterparty must not slip past the allowlist (matching the
+  // Counterparty allowlist. Applies to every action kind, a mint included:
+  // a mint pays its recipient (the postage and the fresh cat) and, with a
+  // tip, the tip address. When an allowlist is configured, EVERY address
+  // the action sends value to must be on it, except the signing account's
+  // own addresses, where nothing leaves the wallet. An empty counterparty
+  // list fails CLOSED: every action pays someone, so a malformed intent that
+  // dropped its parties must not slip past the allowlist (matching the
   // fail-closed posture of the numeric shape guards above).
   //
   // Matching is EXACT string equality, by design. This is intentionally
@@ -133,12 +134,16 @@ export function evaluateAgentPolicyCaps(
   // it. Consumers must list counterparties in the exact form the action
   // will carry; the authoritative script-level allow happens at the
   // operation gate.
-  if (policy.allowedCounterparties.length > 0 && action.kind !== 'cat21_mint') {
-    if (
-      action.counterpartyAddress === undefined ||
-      !policy.allowedCounterparties.includes(action.counterpartyAddress)
-    ) {
-      return deny('counterparty-not-allowed', action.counterpartyAddress ?? '(missing counterparty address)');
+  if (policy.allowedCounterparties.length > 0) {
+    if (action.counterpartyAddresses.length === 0) {
+      return deny('counterparty-not-allowed', '(missing counterparty address)');
+    }
+    const own = new Set(action.ownAddresses);
+    const unlisted = action.counterpartyAddresses.find(
+      (address) => !own.has(address) && !policy.allowedCounterparties.includes(address),
+    );
+    if (unlisted !== undefined) {
+      return deny('counterparty-not-allowed', unlisted);
     }
   }
   return { allowed: true };

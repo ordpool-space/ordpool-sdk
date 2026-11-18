@@ -70,14 +70,28 @@ export interface AgentActionContext {
   /** sat/vB the agent intends to pay. */
   feeRateSatPerVbyte: number;
   /**
-   * Counterparty address.
-   *   - `cat21_create_offer`: the buyer we'd accept BTC from (we are
-   *     the seller; this is where the BTC payment lands).
+   * EVERY address this action sends value to, other than fees. The
+   * allowlist checks each one.
+   *   - `cat21_mint`: the recipient of the fresh cat (its postage), plus the
+   *     tip address when the mint carries a tip.
+   *   - `cat21_create_offer`: the buyer we'd accept BTC from (we are the
+   *     seller; this is where the BTC payment lands).
    *   - `cat21_accept_offer`: the buyer whose PSBT we're signing.
    *   - `cat21_transfer`: the recipient of the cat.
-   *   - `cat21_mint`: unused (no counterparty — we're paying the network).
+   *   - `cat21_buy`: the seller being paid.
+   * An address listed in `ownAddresses` is not a counterparty and passes.
+   * Empty with an allowlist configured fails closed: every action pays at
+   * least one party, so an empty list is a malformed intent.
    */
-  counterpartyAddress?: string;
+  counterpartyAddresses: string[];
+  /**
+   * The SIGNING account's own addresses (payment and ordinals). Value sent
+   * to them does not leave the wallet, so they pass a configured allowlist
+   * without being listed; a mint to the account's own ordinals address is
+   * the normal case. Other accounts of the same wallet are counterparties
+   * like any other address.
+   */
+  ownAddresses: string[];
   /**
    * For `cat21_accept_offer`: the price we'd receive when the buyer's
    * PSBT confirms.

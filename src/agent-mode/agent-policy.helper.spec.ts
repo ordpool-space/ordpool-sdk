@@ -12,11 +12,18 @@ const basePolicy: AgentPolicy = {
   allowedCounterparties: [],
 };
 
+/** The signing account's own addresses. */
+const OWN_PAYMENT = 'bc1qownpayment';
+const OWN_ORDINALS = 'bc1pownordinals';
+
 const baseAction: AgentActionContext = {
   kind: 'cat21_mint',
   spendSats: 5_000,
   feeRateSatPerVbyte: 10,
   spentTodaySats: 0,
+  // A mint to the account's own ordinals address, no tip.
+  counterpartyAddresses: [OWN_ORDINALS],
+  ownAddresses: [OWN_PAYMENT, OWN_ORDINALS],
 };
 
 describe('AgentActionKind — wallet RPC method names verbatim', () => {
@@ -142,7 +149,7 @@ describe('evaluateAgentPolicy', () => {
       evaluateAgentPolicy(basePolicy, {
         ...baseAction,
         kind: 'cat21_transfer',
-        counterpartyAddress: 'bc1qbuy',
+        counterpartyAddresses: ['bc1qbuy'],
       })
     ).toEqual({ allowed: true });
   });
@@ -150,7 +157,7 @@ describe('evaluateAgentPolicy', () => {
   it('denies counterparty not on allowlist when allowlist is non-empty', () => {
     const decision = evaluateAgentPolicy(
       { ...basePolicy, allowedCounterparties: ['bc1qknownseller'] },
-      { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: 'bc1qstranger' }
+      { ...baseAction, kind: 'cat21_transfer', counterpartyAddresses: ['bc1qstranger'] }
     );
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
@@ -160,7 +167,7 @@ describe('evaluateAgentPolicy', () => {
     expect(
       evaluateAgentPolicy(
         { ...basePolicy, allowedCounterparties: ['bc1qknownbuyer'] },
-        { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: 'bc1qknownbuyer' }
+        { ...baseAction, kind: 'cat21_transfer', counterpartyAddresses: ['bc1qknownbuyer'] }
       )
     ).toEqual({ allowed: true });
   });
@@ -169,29 +176,62 @@ describe('evaluateAgentPolicy', () => {
     expect(
       evaluateAgentPolicy(basePolicy, {
         ...baseAction,
-        counterpartyAddress: 'bc1qanyone',
+        counterpartyAddresses: ['bc1qanyone'],
       })
     ).toEqual({ allowed: true });
   });
 
-  it('cat21_mint is exempt from the allowlist (it pays the network, not a counterparty)', () => {
-    // baseAction is cat21_mint with no counterparty. A mint has no
-    // counterparty to match, so a configured allowlist does not apply.
+  it('a mint to the account\'s own ordinals address passes a configured allowlist without being listed', () => {
+    // Nothing leaves the wallet, so the allowlist does not apply to it.
     expect(
-      evaluateAgentPolicy(
-        { ...basePolicy, allowedCounterparties: ['bc1qknown'] },
-        baseAction
-      )
+      evaluateAgentPolicy({ ...basePolicy, allowedCounterparties: ['bc1qknown'] }, baseAction),
     ).toEqual({ allowed: true });
   });
 
+  it('a mint whose tip address is not on the allowlist is denied, naming the tip address', () => {
+    expect(
+      evaluateAgentPolicy(
+        { ...basePolicy, allowedCounterparties: ['bc1qknown'] },
+        { ...baseAction, counterpartyAddresses: [OWN_ORDINALS, 'bc1qtipjar'] },
+      ),
+    ).toEqual({ allowed: false, reason: 'counterparty-not-allowed', detail: 'bc1qtipjar' });
+  });
+
+  it('a mint to a foreign recipient not on the allowlist is denied', () => {
+    expect(
+      evaluateAgentPolicy(
+        { ...basePolicy, allowedCounterparties: ['bc1qknown'] },
+        { ...baseAction, counterpartyAddresses: ['bc1qstranger'] },
+      ),
+    ).toEqual({ allowed: false, reason: 'counterparty-not-allowed', detail: 'bc1qstranger' });
+  });
+
+  it('a mint whose recipient and tip are both listed passes', () => {
+    expect(
+      evaluateAgentPolicy(
+        { ...basePolicy, allowedCounterparties: ['bc1qfriend', 'bc1qtipjar'] },
+        { ...baseAction, counterpartyAddresses: ['bc1qfriend', 'bc1qtipjar'] },
+      ),
+    ).toEqual({ allowed: true });
+  });
+
+  it('only the signing account\'s addresses pass: another account of the same wallet is a counterparty', () => {
+    expect(
+      evaluateAgentPolicy(
+        { ...basePolicy, allowedCounterparties: ['bc1qknown'] },
+        { ...baseAction, kind: 'cat21_transfer', counterpartyAddresses: ['bc1psecondaccount'] },
+      ),
+    ).toEqual({ allowed: false, reason: 'counterparty-not-allowed', detail: 'bc1psecondaccount' });
+  });
+
   it.each([
+    'cat21_mint',
     'cat21_transfer',
     'cat21_create_offer',
     'cat21_accept_offer',
     'cat21_buy',
   ] as const)(
-    'FAILS CLOSED: %s with a configured allowlist but NO counterpartyAddress is denied',
+    'FAILS CLOSED: %s with a configured allowlist but NO counterparty address is denied',
     (kind) => {
       // A counterparty-bearing action that dropped its address (malformed
       // intent, or an LLM tool-call that omitted the field) must not slip
@@ -199,7 +239,7 @@ describe('evaluateAgentPolicy', () => {
       // bug where the allowlist branch was skipped on undefined address.
       const decision = evaluateAgentPolicy(
         { ...basePolicy, allowedCounterparties: ['bc1qknown'], floorPriceSatsPerCat: 0 },
-        { ...baseAction, kind, receivePriceSats: 0 /* counterpartyAddress omitted */ },
+        { ...baseAction, kind, receivePriceSats: 0, counterpartyAddresses: [] },
       );
       expect(decision.allowed).toBe(false);
       if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
@@ -271,7 +311,8 @@ describe('evaluateAgentPolicy', () => {
           spentTodaySats: 1_000_000,
           feeRateSatPerVbyte: 1_000,
           receivePriceSats: 1,
-          counterpartyAddress: 'bc1qstranger',
+          counterpartyAddresses: ['bc1qstranger'],
+          ownAddresses: [OWN_PAYMENT, OWN_ORDINALS],
         }
       );
       expect(decision).toEqual({ allowed: false, reason: 'agent-disabled' });
@@ -288,7 +329,7 @@ describe('evaluateAgentPolicy', () => {
           ...baseAction,
           kind: 'cat21_accept_offer',
           receivePriceSats: 1,
-          counterpartyAddress: 'bc1qstranger',
+          counterpartyAddresses: ['bc1qstranger'],
         }
       );
       expect(decision.allowed).toBe(false);
@@ -296,12 +337,12 @@ describe('evaluateAgentPolicy', () => {
     });
   });
 
-  describe('Finding #11 — counterpartyAddress: "" (empty string) edge case', () => {
+  describe('Finding #11 — an empty-string counterparty address', () => {
 
-    it('treats empty-string counterpartyAddress as a normal allowlist miss when allowlist is non-empty', () => {
+    it('treats an empty-string counterparty address as a normal allowlist miss when allowlist is non-empty', () => {
       const decision = evaluateAgentPolicy(
         { ...basePolicy, allowedCounterparties: ['bc1qknown'] },
-        { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: '' }
+        { ...baseAction, kind: 'cat21_transfer', counterpartyAddresses: [''] }
       );
       expect(decision.allowed).toBe(false);
       if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
@@ -361,7 +402,7 @@ describe('evaluateAgentPolicy', () => {
       expect(
         evaluateAgentPolicy(
           { ...basePolicy, floorPriceSatsPerCat: 1_000_000 },
-          { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: 'bc1qrecipient' }
+          { ...baseAction, kind: 'cat21_transfer', counterpartyAddresses: ['bc1qrecipient'] }
         )
       ).toEqual({ allowed: true });
     });
@@ -376,7 +417,7 @@ describe('evaluateAgentPolicy', () => {
           ...baseAction,
           kind: 'cat21_accept_offer',
           receivePriceSats: basePolicy.floorPriceSatsPerCat + 1_000,
-          counterpartyAddress: 'bc1qstranger',
+          counterpartyAddresses: ['bc1qstranger'],
         }
       );
       expect(decision.allowed).toBe(false);
@@ -391,7 +432,7 @@ describe('evaluateAgentPolicy', () => {
             ...baseAction,
             kind: 'cat21_accept_offer',
             receivePriceSats: basePolicy.floorPriceSatsPerCat + 1_000,
-            counterpartyAddress: 'bc1qknownbuyer',
+            counterpartyAddresses: ['bc1qknownbuyer'],
           }
         )
       ).toEqual({ allowed: true });
@@ -516,7 +557,7 @@ describe('evaluateAgentPolicyCaps: caps bind regardless of enabled (both signing
         ...baseAction,
         kind: 'cat21_create_offer',
         receivePriceSats: 21_000,
-        counterpartyAddress: 'bc1qbuyer',
+        counterpartyAddresses: ['bc1qbuyer'],
       }
     );
     expect(decision.allowed).toBe(false);
@@ -526,7 +567,7 @@ describe('evaluateAgentPolicyCaps: caps bind regardless of enabled (both signing
   it('ignores enabled: a disabled policy STILL enforces the counterparty allowlist', () => {
     const decision = evaluateAgentPolicyCaps(
       { ...basePolicy, enabled: false, allowedCounterparties: ['bc1qknown'] },
-      { ...baseAction, kind: 'cat21_transfer', counterpartyAddress: 'bc1qstranger' }
+      { ...baseAction, kind: 'cat21_transfer', counterpartyAddresses: ['bc1qstranger'] }
     );
     expect(decision.allowed).toBe(false);
     if (!decision.allowed) expect(decision.reason).toBe('counterparty-not-allowed');
