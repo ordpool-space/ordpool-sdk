@@ -15,7 +15,7 @@
  * `postMessage` boundary through `toJSON()` with nothing lost.
  */
 
-import type { DroppedSelection } from '../cat21-core/select-funding.js';
+import { describeFundingPick, type DroppedSelection } from '../cat21-core/select-funding.js';
 import { AnnotatedFundingUtxo, FundingRecommendation } from './funding-safety.js';
 import type { FundingBlockedCoin } from './funding-blocked-error.js';
 import { toFundingCoinJson } from './funding-coin-json.js';
@@ -110,5 +110,36 @@ export function assertPinnedFundingHeld(
 ): void {
   if (selected && plan.droppedSelection) {
     throw new FundingSelectionChangedError(plan.droppedSelection, plan.recommendation);
+  }
+}
+
+/**
+ * The orchestrator-side guard, run in every execute method before anything is
+ * signed. With a pinned coin (`selected`) it re-resolves the pick against the
+ * snapshot's recommendation and requirement and throws
+ * `FundingSelectionChangedError` when the pin is gone or no longer covers:
+ * the snapshot's `droppedSelection` only DISPLAYS that, and the recommendation
+ * the pick would fall back to is a coin the user never confirmed.
+ *
+ * `resolved` is the coin the method is about to spend. When it is not the pin
+ * although the pin still stands, the preview was built before the pin was
+ * set and has not caught up, which is a plain retry, not a changed selection.
+ *
+ * `requirementSats` null means no measurable requirement yet: there is no
+ * recommendation to fall back to, so the pin stands as given.
+ */
+export function assertPinnedFundingResolved(
+  selected: { txid: string; vout: number } | null | undefined,
+  resolved: { txid: string; vout: number } | null | undefined,
+  recommendation: FundingRecommendation<AnnotatedFundingUtxo>,
+  requirementSats: number | null,
+): void {
+  if (!selected) return;
+  if (requirementSats !== null) {
+    const { droppedSelection } = describeFundingPick(recommendation, requirementSats, selected);
+    if (droppedSelection) throw new FundingSelectionChangedError(droppedSelection, recommendation);
+  }
+  if (resolved && (resolved.txid !== selected.txid || resolved.vout !== selected.vout)) {
+    throw new Error('The funding preview is still being updated for the selected UTXO. Try again in a moment.');
   }
 }

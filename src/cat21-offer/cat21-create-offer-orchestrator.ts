@@ -15,6 +15,7 @@ import {
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
 import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
+import { assertPinnedFundingResolved } from '../cat21-fee/funding-selection-changed-error.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import { Network } from '../network.js';
@@ -287,6 +288,9 @@ export class Cat21CreateOfferOrchestrator {
       }
       throw new Error('Insufficient funds for buy-offer at the current price + fee rate');
     }
+    assertPinnedFundingResolved(
+      this.snap.selectedFundingUtxo, sim.buyerFundingUtxo, this.snap.fundingRecommendation, this.snap.fundingRequirementSats,
+    );
 
     this.patch({ state: 'creating', errorMessage: null, bid: null });
     try {

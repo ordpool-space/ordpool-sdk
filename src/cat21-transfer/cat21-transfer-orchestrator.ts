@@ -21,6 +21,7 @@ import {
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
 import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
+import { assertPinnedFundingResolved } from '../cat21-fee/funding-selection-changed-error.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import { Network } from '../network.js';
@@ -324,6 +325,9 @@ export class Cat21TransferOrchestrator {
       }
       throw new Error('Insufficient funds for transfer at the current fee rate');
     }
+    assertPinnedFundingResolved(
+      this.snap.selectedFundingUtxo, sim.fundingUtxo, this.snap.fundingRecommendation, this.snap.fundingRequirementSats,
+    );
 
     this.patch({ state: 'transferring', errorMessage: null, successTxId: null });
     try {

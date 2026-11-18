@@ -13,6 +13,7 @@ import {
   resolveFundingTopology,
 } from '../cat21-fee/funding-safety.js';
 import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
+import { assertPinnedFundingResolved } from '../cat21-fee/funding-selection-changed-error.js';
 import { sameWallet } from '../wallet/wallet-identity.js';
 import { Network } from '../network.js';
 import { TxnOutput } from '../cat21-mint/cat21.service.types.js';
@@ -677,6 +678,7 @@ export class InscribeMintOrchestrator {
     const selected: TxnOutput | null = this.fundingTarget === null
       ? this.snap.selectedUtxo
       : resolveFundingPick(rec, this.fundingTarget, this.snap.selectedUtxo);
+    assertPinnedFundingResolved(this.snap.selectedUtxo, selected, rec, this.fundingTarget);
 
     if (!wallet) throw new Error('No wallet connected');
     if (!feeRate) throw new Error('No fee rate set');
