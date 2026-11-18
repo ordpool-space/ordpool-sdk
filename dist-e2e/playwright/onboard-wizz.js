@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onboardWizz = onboardWizz;
+exports.continueAfterAddressType = continueAfterAddressType;
 const e2e_expect_1 = require("./e2e-expect");
 const cdp_click_1 = require("./cdp-click");
 const click_until_effect_1 = require("./click-until-effect");
@@ -41,14 +42,7 @@ async function onboardWizz(page, extensionId, opts = {}) {
     await (0, click_until_effect_1.clickUntilEffect)(page.getByRole('button', { name: /^continue$/i }).first(), page.getByText(addressTypeRowLabel, { exact: true }).first(), { label: 'wizz onboarding: continue after mnemonic' });
     await (0, e2e_expect_1.e2eExpect)(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible();
     await page.getByText(addressTypeRowLabel, { exact: true }).first().click();
-    const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-    await continueBtn.scrollIntoViewIfNeeded();
-    // The address-type row above re-renders on selection, so this button can be
-    // replaced between the locator resolving and the click landing. Observed in
-    // CI as "Security Tips: element(s) not found", one step from the cause.
-    await (0, click_until_effect_1.clickUntilEffect)(continueBtn, page.getByText('Security Tips', { exact: true }), {
-        label: 'wizz onboarding: continue after address type',
-    });
+    await continueAfterAddressType(page, 'wizz onboarding: continue after address type');
     await (0, e2e_expect_1.e2eExpect)(page.getByText('Security Tips', { exact: true })).toBeVisible();
     const checkboxes = page.locator('label.ant-checkbox-wrapper');
     await (0, e2e_expect_1.e2eExpect)(checkboxes).toHaveCount(3);
@@ -66,5 +60,31 @@ async function onboardWizz(page, extensionId, opts = {}) {
     // not the notification window, so a connect sent before it booted fails with
     // 4001 "User rejected the request".
     await (0, onboard_unisat_1.waitForUnisatInstallTabSettled)(page, extensionId);
+}
+/**
+ * Click Continue on the address-type step until Security Tips shows.
+ *
+ * A Continue click there can first make Wizz derive the account's addresses
+ * (the button shows ant-design's loading icon, the rows fill in) and leave the
+ * step on screen, so a second click is the one that advances. After the
+ * loading ends, the icon can stay in the DOM in its leave animation
+ * (`ant-btn-loading-icon-motion-leave`) with its `aria-label="loading"`, which
+ * names the button "loading Continue" in the accessibility tree. A failure's
+ * attached aria snapshot and HTML showed exactly that: the button idle (no
+ * `ant-btn-loading` class) and a role locator for "Continue" matching nothing,
+ * so the second click waited for the whole bound.
+ *
+ * The button is therefore found by its text, which the icon does not change.
+ * It counts as still pre-click while it is enabled and not loading, so
+ * clickUntilEffect clicks again then and otherwise waits for the effect.
+ */
+async function continueAfterAddressType(page, label) {
+    const continueBtn = page.locator('button', { hasText: /^\s*Continue\s*$/ }).last();
+    await (0, e2e_expect_1.e2eExpect)(continueBtn).toBeVisible();
+    await continueBtn.scrollIntoViewIfNeeded();
+    await (0, click_until_effect_1.clickUntilEffect)(continueBtn, page.getByText('Security Tips', { exact: true }), {
+        label,
+        stillPreClick: async () => (await continueBtn.isEnabled()) && !((await continueBtn.getAttribute('class')) ?? '').includes('ant-btn-loading'),
+    });
 }
 //# sourceMappingURL=onboard-wizz.js.map

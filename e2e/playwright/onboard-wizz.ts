@@ -57,14 +57,7 @@ export async function onboardWizz(
 
   await expect(page.getByText(addressTypeRowLabel, { exact: true }).first()).toBeVisible();
   await page.getByText(addressTypeRowLabel, { exact: true }).first().click();
-  const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-  await continueBtn.scrollIntoViewIfNeeded();
-  // The address-type row above re-renders on selection, so this button can be
-  // replaced between the locator resolving and the click landing. Observed in
-  // CI as "Security Tips: element(s) not found", one step from the cause.
-  await clickUntilEffect(continueBtn, page.getByText('Security Tips', { exact: true }), {
-    label: 'wizz onboarding: continue after address type',
-  });
+  await continueAfterAddressType(page, 'wizz onboarding: continue after address type');
 
   await expect(page.getByText('Security Tips', { exact: true })).toBeVisible();
   const checkboxes = page.locator('label.ant-checkbox-wrapper');
@@ -84,4 +77,32 @@ export async function onboardWizz(
   // not the notification window, so a connect sent before it booted fails with
   // 4001 "User rejected the request".
   await waitForUnisatInstallTabSettled(page, extensionId);
+}
+
+/**
+ * Click Continue on the address-type step until Security Tips shows.
+ *
+ * A Continue click there can first make Wizz derive the account's addresses
+ * (the button shows ant-design's loading icon, the rows fill in) and leave the
+ * step on screen, so a second click is the one that advances. After the
+ * loading ends, the icon can stay in the DOM in its leave animation
+ * (`ant-btn-loading-icon-motion-leave`) with its `aria-label="loading"`, which
+ * names the button "loading Continue" in the accessibility tree. A failure's
+ * attached aria snapshot and HTML showed exactly that: the button idle (no
+ * `ant-btn-loading` class) and a role locator for "Continue" matching nothing,
+ * so the second click waited for the whole bound.
+ *
+ * The button is therefore found by its text, which the icon does not change.
+ * It counts as still pre-click while it is enabled and not loading, so
+ * clickUntilEffect clicks again then and otherwise waits for the effect.
+ */
+export async function continueAfterAddressType(page: Page, label: string): Promise<void> {
+  const continueBtn = page.locator('button', { hasText: /^\s*Continue\s*$/ }).last();
+  await expect(continueBtn).toBeVisible();
+  await continueBtn.scrollIntoViewIfNeeded();
+  await clickUntilEffect(continueBtn, page.getByText('Security Tips', { exact: true }), {
+    label,
+    stillPreClick: async () =>
+      (await continueBtn.isEnabled()) && !((await continueBtn.getAttribute('class')) ?? '').includes('ant-btn-loading'),
+  });
 }

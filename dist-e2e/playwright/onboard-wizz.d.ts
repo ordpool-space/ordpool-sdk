@@ -11,4 +11,22 @@ export declare function onboardWizz(page: Page, extensionId: string, opts?: {
     password?: string;
     mnemonicWords?: string[];
 }): Promise<void>;
+/**
+ * Click Continue on the address-type step until Security Tips shows.
+ *
+ * A Continue click there can first make Wizz derive the account's addresses
+ * (the button shows ant-design's loading icon, the rows fill in) and leave the
+ * step on screen, so a second click is the one that advances. After the
+ * loading ends, the icon can stay in the DOM in its leave animation
+ * (`ant-btn-loading-icon-motion-leave`) with its `aria-label="loading"`, which
+ * names the button "loading Continue" in the accessibility tree. A failure's
+ * attached aria snapshot and HTML showed exactly that: the button idle (no
+ * `ant-btn-loading` class) and a role locator for "Continue" matching nothing,
+ * so the second click waited for the whole bound.
+ *
+ * The button is therefore found by its text, which the icon does not change.
+ * It counts as still pre-click while it is enabled and not loading, so
+ * clickUntilEffect clicks again then and otherwise waits for the effect.
+ */
+export declare function continueAfterAddressType(page: Page, label: string): Promise<void>;
 //# sourceMappingURL=onboard-wizz.d.ts.map

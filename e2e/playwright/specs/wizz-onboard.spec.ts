@@ -13,6 +13,7 @@ import * as fs from 'node:fs';
 import { TEST_MNEMONIC, TEST_MNEMONIC_WORDS, PASSWORD_BY_WALLET } from '../wallet-test-vectors';
 import { installWizzOfflineRoutes } from '../wizz-offline-routes';
 import { launchWalletContext } from '../launch-wallet-context';
+import { continueAfterAddressType } from '../onboard-wizz';
 
 /**
  * Iteration 2 of the Wizz E2E pipeline: drive the onboarding flow
@@ -182,32 +183,10 @@ test('restores a wallet from the BIP-39 test seed and reaches a screen mentionin
   await nativeSegwitRow.click();
   await shot(page, '08b-native-segwit-picked');
 
-  // CI 26418861365 showed both 08c (post-click 1) and 08e (post-click 2)
-  // still on the address-type screen with Native SegWit checked + an
-  // active orange Continue button. The previous theory was a
-  // two-click scan-then-advance dance; the actual evidence says the
-  // click is landing on the wrong target. Likely cause: `force:true`
-  // bypasses Playwright's actionability checks and dispatches at the
-  // geometric centre, which on Wizz's Continue lands on a child span
-  // or icon whose onClick handler is a no-op.
-  //
-  // Switch to `getByRole('button', { name: /^continue$/i }).last()`
-  // (the row-action button is the LAST button in tab-order, after
-  // "Back to Home" at the top), drop force:true, and scroll into
-  // view before clicking. One click should be enough; the wallet
-  // populates addresses synchronously after the mnemonic step.
-  const continueBtn = page.getByRole('button', { name: /^continue$/i }).last();
-  await expect(continueBtn).toBeVisible();
-  await continueBtn.scrollIntoViewIfNeeded();
+  // The click itself, the loading state Wizz enters after it, and the reason
+  // the button is found by text are in `continueAfterAddressType`.
   await shot(page, '08c-before-continue-click');
-  // The address-type row above re-renders on selection, so this button can be
-  // replaced between the locator resolving and the click landing. The shared
-  // onboard-wizz helper hit exactly this and reported it as "Security Tips:
-  // element(s) not found", one step from the cause; this spec drives the same
-  // screens with its own copy of the flow, so it needs the same treatment.
-  await clickUntilEffect(continueBtn, page.getByText('Security Tips', { exact: true }), {
-    label: 'wizz onboarding spec: continue after address type',
-  });
+  await continueAfterAddressType(page, 'wizz onboarding spec: continue after address type');
   await shot(page, '08d-after-continue-click');
 
   // ─── Phase 6b: Security Tips modal ───
