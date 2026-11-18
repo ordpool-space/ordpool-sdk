@@ -215,10 +215,23 @@ export class Cat21MintOrchestrator {
   }
 
   /**
-   * Set (or clear) the connected wallet. On a genuine wallet change, resets
-   * form state, fetches the new wallet's UTXOs, and recomputes.
+   * Scan the covering coins again and recompute the recommendation and the
+   * resolved pick, resolving once the new snapshot is out. A consumer that
+   * re-scans a coin itself ("retry scan") calls this so the funding answer,
+   * and a pin's `contents-changed`, follow what the scan now knows. Execute
+   * re-checks a pinned coin against a fresh scan in any case.
+   *
+   * Only coins that cover the action are scanned again. A consumer retrying a
+   * coin that does not cover scans that coin itself first; it is not a funding
+   * candidate until it covers.
    */
+  async rescanFunding(): Promise<void> {
+    await this.recompute();
+  }
+
   /**
+   * Re-read the UTXO set for the CURRENT wallet, without resetting the form.
+   *
    * Refetch the funding UTXOs for the connected wallet and recompute.
    *
    * The set is otherwise read ONCE, when the wallet connects. So a page that
@@ -235,24 +248,15 @@ export class Cat21MintOrchestrator {
    * Leaves the fee rate and any expert-mode selection alone, since neither is
    * invalidated by new coins arriving.
    */
-  /** Re-read the UTXO set for the CURRENT wallet, without resetting the form. */
-  /**
-   * Scan the covering coins again and recompute the recommendation and the
-   * resolved pick, resolving once the new snapshot is out. A consumer that
-   * re-scans a coin itself ("retry scan") calls this so the funding answer,
-   * and a pin's `contents-changed`, follow what the scan now knows. Execute
-   * re-checks a pinned coin against a fresh scan in any case.
-   */
-  async rescanFunding(): Promise<void> {
-    await this.recompute();
-  }
-
   async refreshUtxos(): Promise<void> {
     if (!this.wallet) return;
     await this.loadUtxos(this.wallet);
   }
 
   /**
+   * Set (or clear) the connected wallet. On a genuine wallet change, resets
+   * form state, fetches the new wallet's UTXOs, and recomputes.
+   *
    * Connect, switch or disconnect the wallet.
    *
    * A RE-EMISSION OF THE SAME WALLET IS A NO-OP. `WalletService`'s subject

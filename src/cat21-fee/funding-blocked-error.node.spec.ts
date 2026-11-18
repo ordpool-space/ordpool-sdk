@@ -56,6 +56,8 @@ const NAMED_DETAIL: UtxoAssetDetail = {
   inscriptionIds: ['abc123i0'],
   runeNames: ['UNCOMMON•GOODS'],
   catIds: ['cafe00i0'],
+  cats: [{ id: 'cafe00i0', number: null }],
+  catSat: null,
   rareSat: { sat: '1953000000000000', block: 390_600, rarity: 'uncommon' },
 };
 
@@ -448,6 +450,8 @@ describe('FundingBlockedError as data', () => {
             inscriptionIds: ['abc123i0'],
             runeNames: ['UNCOMMON•GOODS'],
             catIds: ['cafe00i0'],
+            cats: [{ id: 'cafe00i0', number: null }],
+            catSat: null,
             rareSat: { sat: '1953000000000000', block: 390_600, rarity: 'uncommon' },
           },
         },
@@ -461,6 +465,8 @@ describe('FundingBlockedError as data', () => {
               inscriptionIds: ['abc123i0'],
               runeNames: ['UNCOMMON•GOODS'],
               catIds: ['cafe00i0'],
+              cats: [{ id: 'cafe00i0', number: null }],
+              catSat: null,
               rareSat: { sat: '1953000000000000', block: 390_600, rarity: 'uncommon' },
             },
           },

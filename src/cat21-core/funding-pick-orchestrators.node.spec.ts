@@ -32,7 +32,7 @@ const ORDINALS_ADDR = btc.p2tr(hex.decode(ORDINALS_XONLY), undefined, btc.NETWOR
 
 /** The only coin in the wallet: it covers, and its scan names an inscription. */
 const ASSET_COIN: TxnOutput = { txid: 'd'.repeat(64), vout: 2, status: { confirmed: true }, value: 100_000 };
-const NAMED_DETAIL: UtxoAssetDetail = { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null };
+const NAMED_DETAIL: UtxoAssetDetail = { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
 const NAMED: UtxoClassification = { verdict: 'has-assets', assets: NAMED_DETAIL };
 const scan = { classify: async (): Promise<UtxoClassification> => NAMED };
 

@@ -30,7 +30,7 @@ const op = (x: { txid: string; vout: number }) => `${x.txid}:${x.vout}`;
 /** A completed scan that found one inscription, in the scanner's own `UtxoContent` shape. */
 const assets = (): UtxoScanState => ({
   kind: 'scanned-with-assets',
-  content: { outpoint: 'unused', inscriptionIds: ['abc123i0'], runes: null, catIds: [], catSat: null, rareSat: null },
+  content: { outpoint: 'unused', inscriptionIds: ['abc123i0'], runes: null, catIds: [], cats: [], catSat: null, rareSat: null },
 });
 
 describe('FundingRecommendationService', () => {
@@ -77,7 +77,7 @@ describe('FundingRecommendationService', () => {
       service.recommend(of(utxos), of(2_000), of(null), of('separate-payment-address' as const)),
     );
     expect(rec.status).toBe('asset-notice');
-    expect(rec.recommended?.assets).toEqual({ inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], catSat: null, rareSat: null });
+    expect(rec.recommended?.assets).toEqual({ inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null });
   });
 
   it('a failed scan carries no detail and blocks on a separate-address wallet', async () => {

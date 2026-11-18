@@ -42,7 +42,7 @@ const SELLER_CAT_SCRIPT = btc.p2tr(hex.decode(SELLER_XONLY), undefined, btc.NETW
 
 /** The only coin, covering every action at 10 sat/vB and carrying a named inscription. */
 const ASSET_COIN: CoreFundingUtxo = { txid: 'b'.repeat(64), vout: 1, value: 400_000 };
-const ASSET_DETAIL: UtxoAssetDetail = { inscriptionIds: ['y'.repeat(64) + 'i0'], runeNames: [], catIds: [], rareSat: null };
+const ASSET_DETAIL: UtxoAssetDetail = { inscriptionIds: ['y'.repeat(64) + 'i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
 const CLEAN_COIN: CoreFundingUtxo = { txid: 'c'.repeat(64), vout: 0, value: 400_000 };
 
 const scan: ContentScanPort = {

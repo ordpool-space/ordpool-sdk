@@ -51,7 +51,7 @@ const HIGH = 300;
 const scan: ContentScanPort = {
   classify: async (outpoint): Promise<UtxoClassification> =>
     outpoint === `${FALLBACK.txid}:1`
-      ? { verdict: 'has-assets', assets: { inscriptionIds: ['c'.repeat(64) + 'i0'], runeNames: [], catIds: [], rareSat: null } }
+      ? { verdict: 'has-assets', assets: { inscriptionIds: ['c'.repeat(64) + 'i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null } }
       : 'clean',
 };
 const getUtxos = async (): Promise<TxnOutput[]> => [PIN, FALLBACK];
@@ -295,7 +295,7 @@ describe('a pin whose coin gains assets after it was picked', () => {
   const COIN: TxnOutput = { txid: '9'.repeat(64), vout: 2, status: { confirmed: true }, value: 1_000_000 };
   const X = 'a'.repeat(64) + 'i0';
   const Y = 'b'.repeat(64) + 'i0';
-  const detail = (ids: string[]) => ({ inscriptionIds: ids, runeNames: [], catIds: [], rareSat: null });
+  const detail = (ids: string[]) => ({ inscriptionIds: ids, runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null });
 
   /** A scan whose answer for COIN is switched by the test. */
   function mutableScan() {
@@ -387,7 +387,7 @@ describe('a pin made on a failed scan, after a retry scan finds an inscription',
     const port: ContentScanPort = {
       classify: async (): Promise<UtxoClassification> => {
         if (!found) throw new Error('ord unreachable');
-        return { verdict: 'has-assets', assets: { inscriptionIds: [X], runeNames: [], catIds: [], rareSat: null } };
+        return { verdict: 'has-assets', assets: { inscriptionIds: [X], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null } };
       },
     };
     return { port, retryFinds: () => { found = true; } };

@@ -43,8 +43,8 @@ const coin = (id: string, value: number): TxnOutput => ({
 const COIN_X = coin('a', 300_000);
 const COIN_Y = coin('b', 400_000);
 const CLEAN = coin('c', 500_000);
-const DETAIL_X: UtxoAssetDetail = { inscriptionIds: ['x'.repeat(64) + 'i0'], runeNames: [], catIds: [], rareSat: null };
-const DETAIL_Y: UtxoAssetDetail = { inscriptionIds: ['y'.repeat(64) + 'i0'], runeNames: [], catIds: [], rareSat: null };
+const DETAIL_X: UtxoAssetDetail = { inscriptionIds: ['x'.repeat(64) + 'i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
+const DETAIL_Y: UtxoAssetDetail = { inscriptionIds: ['y'.repeat(64) + 'i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
 
 const scan: ContentScanPort = {
   classify: async (outpoint: string): Promise<UtxoClassification> => {

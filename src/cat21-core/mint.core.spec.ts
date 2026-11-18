@@ -40,7 +40,7 @@ const scanPort = (verdicts: Record<string, UtxoClassification> = {}): ContentSca
  * A `has-assets` verdict that NAMES what it found, which is what a coin needs to
  * stand behind a notice. A bare `'has-assets'` blocks on every topology.
  */
-const NAMED_DETAIL = { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null };
+const NAMED_DETAIL = { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
 const NAMED: UtxoClassification = { verdict: 'has-assets', assets: NAMED_DETAIL };
 const signPort = () => {
   const calls: Array<'all' | number[]> = [];

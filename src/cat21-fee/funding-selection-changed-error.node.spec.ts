@@ -39,7 +39,7 @@ const SELLER_CAT_SCRIPT = btc.p2tr(hex.decode(SELLER_XONLY), undefined, btc.NETW
 
 /** Covers every action at 10 sat/vB and carries a named inscription: the fallback would be `asset-notice`. */
 const ASSET_COIN: CoreFundingUtxo = { txid: 'b'.repeat(64), vout: 1, value: 400_000 };
-const ASSET_DETAIL: UtxoAssetDetail = { inscriptionIds: ['y'.repeat(64) + 'i0'], runeNames: [], catIds: [], rareSat: null };
+const ASSET_DETAIL: UtxoAssetDetail = { inscriptionIds: ['y'.repeat(64) + 'i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
 /** The coin the user confirmed, which has left the wallet by execute time. */
 const GONE_PIN: CoreFundingUtxo = { txid: 'a'.repeat(64), vout: 0, value: 300_000 };
 /** Present and clean, but covers no action at 10 sat/vB. */

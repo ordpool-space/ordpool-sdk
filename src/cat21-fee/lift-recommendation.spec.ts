@@ -16,6 +16,8 @@ const ASSETS = {
   inscriptionIds: ['abc123i0'],
   runeNames: ['UNCOMMON•GOODS'],
   catIds: ['def456i0'],
+  cats: [{ id: 'def456i0', number: null }],
+  catSat: null,
   rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' },
 };
 

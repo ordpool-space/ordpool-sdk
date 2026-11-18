@@ -153,7 +153,7 @@ describe('InscribeMintOrchestrator: sourcing the padding coin', () => {
       getUtxos: async () => [coin('a', 100_000), assetCoin, cleanSpare],
       scan: {
         classify: async (outpoint: string) => outpoint.startsWith(assetCoin.txid)
-          ? ({ verdict: 'has-assets' as const, assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null } })
+          ? ({ verdict: 'has-assets' as const, assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null } })
           : ({ verdict: 'clean' as const }),
       },
     }));

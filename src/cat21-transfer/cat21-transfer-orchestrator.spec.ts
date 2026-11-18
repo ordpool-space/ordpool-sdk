@@ -119,7 +119,7 @@ describe('Cat21TransferOrchestrator (framework-agnostic)', () => {
       deps({
         getUtxos: async () => [coin('d', 100_000)],
         // Named: only a coin whose assets the scan names stands behind a notice.
-        scan: { classify: async () => ({ verdict: 'has-assets' as const, assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null } }) },
+        scan: { classify: async () => ({ verdict: 'has-assets' as const, assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null } }) },
         fundingTopology: 'separate-payment-address',
       }),
     );

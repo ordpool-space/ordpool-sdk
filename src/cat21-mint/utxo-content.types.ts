@@ -95,10 +95,8 @@ export interface UtxoContent {
    * `GET /inscription/<id>` (`number`; cat21-ord indexes only cats, so its
    * inscription number is the cat number). `number` is null when that lookup
    * failed. Display only: the classification never depends on it.
-   * `UtxoContentScanner` always fills it; it is optional so content built
-   * elsewhere, without a number lookup, still type-checks.
    */
-  cats?: CatOnOutpoint[];
+  cats: CatOnOutpoint[];
   /**
    * Sat the cats at this outpoint sit on, or `null` when the outpoint holds
    * no cats or ord returned no sat ranges.

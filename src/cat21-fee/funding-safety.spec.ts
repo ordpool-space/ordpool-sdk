@@ -12,7 +12,7 @@ import { UtxoScanBucket } from '../cat21-mint/utxo-content.types.js';
 
 let n = 0;
 /** What an `assets` coin built by `u` carries: one named inscription. */
-const NAMED: UtxoAssetDetail = { inscriptionIds: ['0'.repeat(64) + 'i0'], runeNames: [], catIds: [], rareSat: null };
+const NAMED: UtxoAssetDetail = { inscriptionIds: ['0'.repeat(64) + 'i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
 /** An `assets` coin from `u` is NAMED, so these specs pin the named-asset branch. */
 const u = (value: number, bucket: UtxoScanBucket): AnnotatedFundingUtxo => ({
   txid: (n++).toString(16).padStart(64, '0'),
@@ -29,7 +29,7 @@ const unnamed = (value: number, assets?: UtxoAssetDetail): AnnotatedFundingUtxo 
   bucket: 'assets',
   ...(assets ? { assets } : {}),
 });
-const EMPTY: UtxoAssetDetail = { inscriptionIds: [], runeNames: [], catIds: [], rareSat: null };
+const EMPTY: UtxoAssetDetail = { inscriptionIds: [], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
 
 describe('recommendFunding — safe-auto with expert fallback', () => {
   it('AUTO: picks the best-fit (smallest covering) CLEAN UTXO', () => {
@@ -286,6 +286,8 @@ describe('recommendFunding — a coin with unknown content is never behind a not
     inscriptionIds: ['abc123i0'],
     runeNames: [],
     catIds: [],
+    cats: [],
+    catSat: null,
     rareSat: null,
   };
 

@@ -20,7 +20,7 @@ const op = (x: { txid: string; vout: number }) => `${x.txid}:${x.vout}`;
  */
 const named: UtxoClassification = {
   verdict: 'has-assets',
-  assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null },
+  assets: { inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null },
 };
 
 /** Fake ContentScanPort: map outpoint -> verdict, or 'reject' to fail the scan. */
@@ -211,6 +211,8 @@ describe('the recommendation names what it found, so an API caller can decide li
     inscriptionIds: ['abc123i0'],
     runeNames: ['UNCOMMON•GOODS'],
     catIds: ['def456i0'],
+    cats: [{ id: 'def456i0', number: null }],
+    catSat: null,
     rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' },
   };
 
@@ -274,7 +276,7 @@ describe('the recommendation names what it found, so an API caller can decide li
   });
 
   it('an EMPTY detail (arrays empty, no rare sat) counts as unnamed and blocks', async () => {
-    const empty = { inscriptionIds: [], runeNames: [], catIds: [], rareSat: null };
+    const empty = { inscriptionIds: [], runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null };
     const dirty = u('b', 9_000);
     const { port } = fakeScan({ [op(dirty)]: { verdict: 'has-assets', assets: empty } });
     const rec = await selectFunding(
@@ -337,7 +339,7 @@ describe('the recommendation names what it found, so an API caller can decide li
 });
 
 describe('pinContentHeld: a pin holds only while its coin carries nothing beyond what was shown', () => {
-  const detail = (inscriptionIds: string[]) => ({ inscriptionIds, runeNames: [], catIds: [], rareSat: null });
+  const detail = (inscriptionIds: string[]) => ({ inscriptionIds, runeNames: [], catIds: [], cats: [], catSat: null, rareSat: null });
   const coinNow = (bucket: 'clean' | 'assets' | 'failed', assets?: ReturnType<typeof detail>) =>
     ({ txid: 'a'.repeat(64), vout: 0, value: 10_000, bucket, ...(assets ? { assets } : {}) });
 

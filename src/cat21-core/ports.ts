@@ -44,17 +44,16 @@ export interface UtxoAssetDetail {
    * The same cats with their cat numbers, in `catIds` order, so a notice can
    * say "Cat #1234" instead of an inscription id. `number` is null when the
    * number lookup failed; the cat is an asset all the same, and no gate reads
-   * this field. Absent when the scan port that produced the detail does not
-   * look numbers up.
+   * this field. Empty when there are no cats. Required, so a port or a mapping
+   * that forgets it fails to compile instead of dropping the numbers.
    */
-  cats?: CatOnOutpoint[];
+  cats: CatOnOutpoint[];
   /**
    * The sat every cat here sits on (CAT-21 pins a cat to offset 0 of its
    * output), for linking a cat whose number is unknown to its sat page. Null
-   * when there are no cats or no sat ranges; absent when the scan port does
-   * not report it.
+   * when there are no cats or no sat ranges.
    */
-  catSat?: number | null;
+  catSat: number | null;
   /** The rare sat, when one is present. */
   rareSat: { sat: string; block: number; rarity: string } | null;
 }
