@@ -286,6 +286,7 @@ export function toAssetDetail(content: UtxoContent): UtxoAssetDetail {
     runeNames: content.runes ? Object.keys(content.runes) : [],
     catIds: content.catIds,
     ...(content.cats ? { cats: content.cats } : {}),
+    catSat: content.catSat,
     rareSat: content.rareSat,
   };
 }

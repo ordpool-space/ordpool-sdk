@@ -77,7 +77,7 @@ describe('FundingRecommendationService', () => {
       service.recommend(of(utxos), of(2_000), of(null), of('separate-payment-address' as const)),
     );
     expect(rec.status).toBe('asset-notice');
-    expect(rec.recommended?.assets).toEqual({ inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], rareSat: null });
+    expect(rec.recommended?.assets).toEqual({ inscriptionIds: ['abc123i0'], runeNames: [], catIds: [], catSat: null, rareSat: null });
   });
 
   it('a failed scan carries no detail and blocks on a separate-address wallet', async () => {

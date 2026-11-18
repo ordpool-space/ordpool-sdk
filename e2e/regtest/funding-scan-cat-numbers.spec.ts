@@ -5,7 +5,8 @@
  * nLockTime=21 transaction spends that output into a new output 0, which then
  * holds cat A (carried by FIFO) and the bonus cat B it mints onto the same sat.
  * `UtxoContentScanner.classify` on that output must list both cats in
- * `catIds` order with the numbers cat21-ord gives them, B one above A.
+ * `catIds` order with the numbers cat21-ord gives them, B one above A, and
+ * the sat they share as `catSat`.
  *
  * Real: bitcoind, electrs, cat21-ord (`--index-cat21`), stock ord, all regtest.
  */
@@ -127,5 +128,7 @@ describe('funding scan: cat numbers from cat21-ord', () => {
         cats: [{ id: catA, number: numberA }, { id: catB, number: numberB }].sort((a, b) => (a.id < b.id ? -1 : 1)),
       });
     expect(cats?.map((c) => c.id)).toEqual(catIds);
+    // The sat both cats sit on, for linking a cat whose number is unknown.
+    expect(classification.assets.catSat).toBe((await getOrdInscription(catA)).sat);
   });
 });

@@ -48,6 +48,13 @@ export interface UtxoAssetDetail {
    * look numbers up.
    */
   cats?: CatOnOutpoint[];
+  /**
+   * The sat every cat here sits on (CAT-21 pins a cat to offset 0 of its
+   * output), for linking a cat whose number is unknown to its sat page. Null
+   * when there are no cats or no sat ranges; absent when the scan port does
+   * not report it.
+   */
+  catSat?: number | null;
   /** The rare sat, when one is present. */
   rareSat: { sat: string; block: number; rarity: string } | null;
 }

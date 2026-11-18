@@ -14,6 +14,7 @@ export function toFundingCoinJson(c: AnnotatedFundingUtxo): FundingBlockedCoin {
           runeNames: [...c.assets.runeNames],
           catIds: [...c.assets.catIds],
           ...(c.assets.cats ? { cats: c.assets.cats.map((cat) => ({ id: cat.id, number: cat.number })) } : {}),
+          ...(c.assets.catSat !== undefined ? { catSat: c.assets.catSat } : {}),
           rareSat: c.assets.rareSat ? { ...c.assets.rareSat } : null,
         }
       : null,

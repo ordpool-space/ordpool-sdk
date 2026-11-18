@@ -184,6 +184,8 @@ describe('UtxoContentScanner.classify (ContentScanPort adapter)', () => {
         runeNames: ['UNCOMMON•GOODS'],
         catIds: ['def456i0'],
         cats: [{ id: 'def456i0', number: 1234 }],
+        // The sat the cats sit on, for a cat whose number is unknown.
+        catSat: 1857900000000000,
         rareSat: { sat: '1857900000000000', block: 371, rarity: 'uncommon' },
       },
     });
@@ -327,6 +329,8 @@ describe('UtxoContentScanner cat numbers', () => {
         runeNames: [],
         catIds: [REGTEST_CAT_ID],
         cats: [{ id: REGTEST_CAT_ID, number: 2 }],
+        // The opening sat of cat21-ord's first range, which is the cat's sat.
+        catSat: cat21OrdOutputWithCatFixture.sat_ranges[0][0],
         rareSat: null,
       },
     });
