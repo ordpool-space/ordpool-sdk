@@ -8,6 +8,7 @@ import {
 } from '../cat21-fee/funding-safety.js';
 import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { assertPinnedFundingHeld } from '../cat21-fee/funding-selection-changed-error.js';
+import { assertAssetSpendPermitted, ExecuteFundingOptions } from '../cat21-fee/asset-spend-not-permitted-error.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import {
   InscribeAndBroadcastArgs,
@@ -341,6 +342,8 @@ export async function simulateInscribe(
  * `expert-required`, and a plain `Error` when nothing covers. Throws
  * `FundingSelectionChangedError`, before anything is signed, when
  * `selectedFundingUtxo` is set and that coin is gone or no longer covers.
+ * Throws `AssetSpendNotPermittedError`, before anything is signed, when
+ * `options.assetSpend` is `'refuse'` and the coin to spend is not clean.
  * `promptForSignedPsbt` is the watch-only signing bridge (Promise form;
  * adapted internally).
  */
@@ -353,6 +356,7 @@ export async function executeInscribe(
     transport: InscribeBroadcastTransport;
     promptForSignedPsbt?: (unsigned: { base64: string; hex: string }) => Promise<string>;
   },
+  options: ExecuteFundingOptions,
 ): Promise<InscribeAndBroadcastResult> {
   const plan = await planInscribe(params, ports);
   assertPinnedFundingHeld(params.selectedFundingUtxo, plan);
@@ -370,6 +374,7 @@ export async function executeInscribe(
         : 'Insufficient funds for inscribe at the current fee rate',
     );
   }
+  assertAssetSpendPermitted(options, plan.pick, plan.recommendation);
   const { selectedFundingUtxo: _ignored, ...inscribeArgs } = params;
   const prompt = ports.promptForSignedPsbt;
   return firstValueFrom(

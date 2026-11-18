@@ -116,7 +116,8 @@ describe('inscribe.core — executeInscribe', () => {
         utxos: utxosPort([asset]),
         scan: scanPort({ [op(asset)]: 'has-assets' }),
         transport: recordingInscribeTransport(),
-      }),
+      },
+        { assetSpend: 'after-notice' }),
     ).rejects.toThrow(/Select a funding UTXO/);
   });
 
@@ -130,7 +131,8 @@ describe('inscribe.core — executeInscribe', () => {
       scan: scanPort(),
       transport: recordingInscribeTransport(),
       promptForSignedPsbt: prompt,
-    }).catch(() => undefined);
+    },
+      { assetSpend: 'after-notice' }).catch(() => undefined);
     expect(prompt).toHaveBeenCalledTimes(1);
   });
 });

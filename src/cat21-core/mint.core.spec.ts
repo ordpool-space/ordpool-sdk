@@ -141,7 +141,8 @@ describe('mint.core — executeMint', () => {
       scan: scanPort(),
       sign: sign.port,
       broadcast: broadcast.port,
-    });
+    },
+      { assetSpend: 'after-notice' });
     expect(out).toMatchObject({ txid: 'mint-txid', channel: 'mempool' });
     expect(out.feeSats).toBeGreaterThan(0);
     expect(sign.calls).toEqual(['all']);
@@ -153,7 +154,7 @@ describe('mint.core — executeMint', () => {
     const sign = signPort();
     const broadcast = broadcastPort();
     await expect(
-      executeMint(params(), { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: 'has-assets' }), sign: sign.port, broadcast: broadcast.port }),
+      executeMint(params(), { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: 'has-assets' }), sign: sign.port, broadcast: broadcast.port }, { assetSpend: 'after-notice' }),
     ).rejects.toThrow(/Select a funding UTXO/);
     expect(sign.calls).toHaveLength(0);
   });
@@ -166,7 +167,8 @@ describe('mint.core — executeMint', () => {
     await expect(
       executeMint(params({ fundingTopology: 'separate-payment-address' }), {
         utxos: utxosPort([unknown]), scan: failingScan, sign: sign.port, broadcast: broadcast.port,
-      }),
+      },
+        { assetSpend: 'after-notice' }),
     ).rejects.toThrow('Select a funding UTXO (what the covering coins hold could not be checked)');
     expect(sign.calls).toEqual([]);
     expect(broadcast.calls).toEqual([]);
@@ -189,7 +191,8 @@ describe('mint.core — executeMint', () => {
     await expect(
       executeMint(params({ fundingTopology: 'separate-payment-address' }), {
         ...ports, sign: sign.port, broadcast: broadcast.port,
-      }),
+      },
+        { assetSpend: 'after-notice' }),
     ).rejects.toThrow('Select a funding UTXO (the covering coins carry assets the scan could not name)');
     expect(sign.calls).toEqual([]);
     expect(broadcast.calls).toEqual([]);
@@ -203,7 +206,8 @@ describe('mint.core — executeMint', () => {
     const broadcast = broadcastPort();
     const out = await executeMint(params({ fundingTopology: 'separate-payment-address' }), {
       utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: NAMED }), sign: sign.port, broadcast: broadcast.port,
-    });
+    },
+      { assetSpend: 'after-notice' });
     expect(out.txid).toBe('mint-txid');
     expect(broadcast.calls).toEqual(['mintsigned']);
   });
@@ -217,7 +221,8 @@ describe('mint.core — executeMint', () => {
       scan: scanPort({ [op(asset)]: 'has-assets' }),
       sign: sign.port,
       broadcast: broadcast.port,
-    });
+    },
+      { assetSpend: 'after-notice' });
     expect(out.txid).toBe('mint-txid');
     expect(sign.calls).toHaveLength(1);
   });
@@ -230,7 +235,8 @@ describe('mint.core — executeMint', () => {
       scan: scanPort({ [op(asset)]: 'has-assets' }),
       sign: sign.port,
       broadcast: broadcastPort().port,
-    }).then(() => null, (e: unknown) => e);
+    },
+      { assetSpend: 'after-notice' }).then(() => null, (e: unknown) => e);
     expect({ err: err instanceof FundingSelectionChangedError ? err.droppedSelection.reason : err, signed: sign.calls })
       .toEqual({ err: 'contents-changed', signed: [] });
   });
@@ -445,6 +451,7 @@ describe('the asset verdict is about the COIN, not the wallet topology', () => {
     const out = await executeMint(
       params({ fundingTopology: 'separate-payment-address' }),
       { utxos, scan, sign: sign.port, broadcast: broadcast.port },
+      { assetSpend: 'after-notice' },
     );
     expect(out.txid).toBe('mint-txid');
     expect(broadcast.calls).toHaveLength(1);

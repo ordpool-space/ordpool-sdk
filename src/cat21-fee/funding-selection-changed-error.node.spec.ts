@@ -82,6 +82,7 @@ const FLOWS: Flow[] = [
         selectedFundingUtxo: pin,
       },
       { utxos, scan, sign: sign(rec), broadcast: broadcast(rec) },
+      { assetSpend: 'after-notice' },
     ),
   },
   {
@@ -101,6 +102,7 @@ const FLOWS: Flow[] = [
         selectedFundingUtxo: pin,
       },
       { utxos, scan, sign: sign(rec), broadcast: broadcast(rec) },
+      { assetSpend: 'after-notice' },
     ),
   },
   {
@@ -124,6 +126,7 @@ const FLOWS: Flow[] = [
         scan,
         signOffer: { signBuyerInputs: async (psbt) => { rec.signed.push('sign'); return psbt; } },
       },
+      { assetSpend: 'after-notice' },
     ),
   },
   {
@@ -149,6 +152,7 @@ const FLOWS: Flow[] = [
           transport,
           promptForSignedPsbt: async (unsigned) => { rec.signed.push(unsigned.hex); return 'signed'; },
         },
+        { assetSpend: 'after-notice' },
       ).finally(() => rec.sent.push(...transport.calls));
     },
   },

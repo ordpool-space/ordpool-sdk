@@ -191,6 +191,7 @@ describe.each(SCENARIOS)('core flows throw FundingBlockedError, cause $cause', (
           sign: { sign: async () => { signed.push('sign'); return { hex: 'signed', weight: 500 }; } },
           broadcast: { broadcast: async (h) => { broadcast.push(h); return { txid: 't', channel: 'mempool' }; } },
         },
+        { assetSpend: 'after-notice' },
       ),
       s,
     );
@@ -220,6 +221,7 @@ describe.each(SCENARIOS)('core flows throw FundingBlockedError, cause $cause', (
           sign: { sign: async () => { signed.push('sign'); return { hex: 'signed', weight: 600 }; } },
           broadcast: { broadcast: async (h) => { broadcast.push(h); return { txid: 't', channel: 'mempool' }; } },
         },
+        { assetSpend: 'after-notice' },
       ),
       s,
     );
@@ -247,6 +249,7 @@ describe.each(SCENARIOS)('core flows throw FundingBlockedError, cause $cause', (
           scan: s.scan,
           signOffer: { signBuyerInputs: async (_psbt, indexes) => { signed.push(indexes); return new Uint8Array([1]); } },
         },
+        { assetSpend: 'after-notice' },
       ),
       s,
     );
@@ -275,6 +278,7 @@ describe.each(SCENARIOS)('core flows throw FundingBlockedError, cause $cause', (
           transport,
           promptForSignedPsbt: async (unsigned) => { prompts.push(unsigned.hex); return 'signed'; },
         },
+        { assetSpend: 'after-notice' },
       ),
       s,
     );
@@ -420,6 +424,7 @@ describe('FundingBlockedError as data', () => {
           sign: { sign: async () => ({ hex: 'signed', weight: 500 }) },
           broadcast: { broadcast: async () => ({ txid: 't', channel: 'mempool' }) },
         },
+        { assetSpend: 'after-notice' },
       ),
       named,
     );

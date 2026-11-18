@@ -90,7 +90,8 @@ describe('transfer.core — executeTransfer', () => {
       scan: scanPort(),
       sign: sign.port,
       broadcast: broadcast.port,
-    });
+    },
+      { assetSpend: 'after-notice' });
     expect(out).toMatchObject({ txid: 'broadcast-txid', channel: 'mempool' });
     expect(out.feeSats).toBeGreaterThan(0);
     expect(sign.calls).toEqual([{ indexes: 'all' }]);
@@ -107,7 +108,8 @@ describe('transfer.core — executeTransfer', () => {
       scan: scanPort({ [op(asset)]: 'has-assets' }),
       sign: sign.port,
       broadcast: broadcast.port,
-    });
+    },
+      { assetSpend: 'after-notice' });
     // Broadcast happened (clean coin was used); the asset coin was not the pick.
     expect(broadcast.calls).toHaveLength(1);
   });
@@ -122,7 +124,8 @@ describe('transfer.core — executeTransfer', () => {
         scan: scanPort({ [op(asset)]: 'has-assets' }),
         sign: sign.port,
         broadcast: broadcast.port,
-      }),
+      },
+        { assetSpend: 'after-notice' }),
     ).rejects.toThrow(/Select a funding UTXO/);
     expect(sign.calls).toHaveLength(0);
     expect(broadcast.calls).toHaveLength(0);
@@ -137,7 +140,8 @@ describe('transfer.core — executeTransfer', () => {
       scan: scanPort({ [op(asset)]: 'has-assets' }),
       sign: sign.port,
       broadcast: broadcast.port,
-    });
+    },
+      { assetSpend: 'after-notice' });
     expect(out.txid).toBe('broadcast-txid');
     expect(sign.calls).toHaveLength(1);
   });

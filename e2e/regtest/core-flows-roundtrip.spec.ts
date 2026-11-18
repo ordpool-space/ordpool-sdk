@@ -120,6 +120,7 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
         feeRatePerVbyte: 2,
       },
       { utxos, scan, sign, broadcast },
+      { assetSpend: 'after-notice' },
     );
     expect(out.txid).toMatch(/^[0-9a-f]{64}$/);
     // The safe-auto selection actually scanned the covering funding coin.
@@ -152,6 +153,7 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
         feeRatePerVbyte: 2,
       },
       { utxos, scan, sign, broadcast },
+      { assetSpend: 'after-notice' },
     );
     expect(out.txid).toMatch(/^[0-9a-f]{64}$/);
 
@@ -224,7 +226,7 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
     expect(Math.abs(sim.feeSats! / sim.vsize! - RATE)).toBeLessThan(1);
 
     // Execute + broadcast + measure the ON-CHAIN realised rate.
-    const out = await executeMint(params, execPorts);
+    const out = await executeMint(params, execPorts, { assetSpend: 'after-notice' });
     expect(out.txid).toMatch(/^[0-9a-f]{64}$/);
     const tip = mineBlocks(1);
     await waitForElectrsSync(tip);
@@ -274,6 +276,7 @@ describe('cat21-core flows over REAL ports (high-level orchestrated flow, on-cha
         feeRatePerVbyte: 2,
       },
       { utxos, scan, sign, broadcast },
+      { assetSpend: 'after-notice' },
     );
     expect(out.txid).toMatch(/^[0-9a-f]{64}$/);
 

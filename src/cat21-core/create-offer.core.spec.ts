@@ -85,7 +85,8 @@ describe('create-offer.core — createOffer', () => {
       utxos: utxosPort([coin('c', 100_000)]),
       scan: scanPort(),
       signOffer: signOffer.port,
-    });
+    },
+      { assetSpend: 'after-notice' });
     expect(signOffer.calls).toEqual([[1]]); // buyer input index; input 0 stays for the seller
     const offer = btc.Transaction.fromPSBT(artifact.offerPsbt);
     expect(offer.getInput(1).finalScriptWitness).toEqual([new Uint8Array(71).fill(1), BUYER_KEY]);
@@ -98,7 +99,7 @@ describe('create-offer.core — createOffer', () => {
     const asset = coin('d', 100_000);
     const signOffer = signOfferPort();
     await expect(
-      createOffer(params(), { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: 'has-assets' }), signOffer: signOffer.port }),
+      createOffer(params(), { utxos: utxosPort([asset]), scan: scanPort({ [op(asset)]: 'has-assets' }), signOffer: signOffer.port }, { assetSpend: 'after-notice' }),
     ).rejects.toThrow(/Select a funding UTXO/);
     expect(signOffer.calls).toHaveLength(0);
   });
@@ -110,7 +111,8 @@ describe('create-offer.core — createOffer', () => {
       utxos: utxosPort([asset]),
       scan: scanPort({ [op(asset)]: 'has-assets' }),
       signOffer: signOffer.port,
-    });
+    },
+      { assetSpend: 'after-notice' });
     expect(signOffer.calls).toHaveLength(1);
     expect(artifact.buyerFundingUtxo.txid).toBe(asset.txid);
   });

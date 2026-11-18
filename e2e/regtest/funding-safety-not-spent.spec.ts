@@ -143,6 +143,7 @@ describe('funding safety end to end: an asset-bearing coin is never auto-spent',
           feeRatePerVbyte: 2,
         },
         { utxos, scan, sign, broadcast },
+        { assetSpend: 'after-notice' },
       );
       expect(out.txid).toMatch(/^[0-9a-f]{64}$/);
 

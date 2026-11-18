@@ -8,6 +8,7 @@ import {
 } from '../cat21-fee/funding-safety.js';
 import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { assertPinnedFundingHeld } from '../cat21-fee/funding-selection-changed-error.js';
+import { assertAssetSpendPermitted, ExecuteFundingOptions } from '../cat21-fee/asset-spend-not-permitted-error.js';
 import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -339,10 +340,13 @@ export async function simulateCreateOffer(
  * recommendation is `expert-required`, and a plain `Error` when nothing covers. Throws
  * `FundingSelectionChangedError`, before anything is signed, when
  * `selectedFundingUtxo` is set and that coin is gone or no longer covers.
+ * Throws `AssetSpendNotPermittedError`, before anything is signed, when
+ * `options.assetSpend` is `'refuse'` and the coin to spend is not clean.
  */
 export async function createOffer(
   params: CreateOfferCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort; signOffer: OfferCreateSignPort },
+  options: ExecuteFundingOptions,
 ): Promise<CreateOfferArtifact> {
   const plan = await planOffer(params, ports);
   assertPinnedFundingHeld(params.selectedFundingUtxo, plan);
@@ -360,6 +364,7 @@ export async function createOffer(
         : 'Insufficient funds for buy-offer at the current price + fee rate',
     );
   }
+  assertAssetSpendPermitted(options, plan.pick, plan.recommendation);
   const { psbt } = buildOffer(params, plan.pick, plan.feeSats, false);
   // Buyer inputs are 1..N (input 0 is the seller's cat). One funding coin => [1].
   const offerPsbt = finalizeOfferBuyerInputs(await ports.signOffer.signBuyerInputs(psbt, [1]));

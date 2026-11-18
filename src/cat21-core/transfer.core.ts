@@ -8,6 +8,7 @@ import {
 } from '../cat21-fee/funding-safety.js';
 import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
 import { assertPinnedFundingHeld } from '../cat21-fee/funding-selection-changed-error.js';
+import { assertAssetSpendPermitted, ExecuteFundingOptions } from '../cat21-fee/asset-spend-not-permitted-error.js';
 import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -343,12 +344,15 @@ export async function simulateTransfer(
  * `expert-required`, and a plain `Error` when nothing covers. Throws
  * `FundingSelectionChangedError`, before anything is signed, when
  * `selectedFundingUtxo` is set and that coin is gone or no longer covers.
+ * Throws `AssetSpendNotPermittedError`, before anything is signed, when
+ * `options.assetSpend` is `'refuse'` and the coin to spend is not clean.
  */
 /* jscpd:ignore-end */
 
 export async function executeTransfer(
   params: TransferCoreParams,
   ports: { utxos: UtxosPort; scan: ContentScanPort; sign: SignPort; broadcast: BroadcastPort },
+  options: ExecuteFundingOptions,
 ): Promise<BroadcastOutcome & { feeSats: number }> {
   const plan = await planTransfer(params, ports);
   assertPinnedFundingHeld(params.selectedFundingUtxo, plan);
@@ -366,6 +370,7 @@ export async function executeTransfer(
         : 'Insufficient funds for transfer at the current fee rate',
     );
   }
+  assertAssetSpendPermitted(options, plan.pick, plan.recommendation);
   const built = buildTransfer(params, plan.pick, plan.buildFeeSats, false);
   const signed = await ports.sign.sign(built.psbt, 'all');
   const outcome = await ports.broadcast.broadcast(signed.hex);
