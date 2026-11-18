@@ -4,7 +4,8 @@
  * Faked:  fetch, answering with the captured regtest cat21-ord /inscription body (cats-at-output.fixtures.ts) or
  *         failure shapes named per case
  * Proves: the cat number is read from `number`; every failure (a non-2xx even with a numeric body, cat21-ord's
- *         plain-text 404, a network error, a non-integer number) gives null instead of throwing
+ *         plain-text 404, a network error, a non-integer number) gives null instead of throwing; an answer for
+ *         another inscription gives null, and a malformed id is never asked for
  *
  * @jest-environment node
  */
@@ -42,5 +43,18 @@ describe('lookupCatNumber', () => {
     answer(make);
 
     expect(await lookupCatNumber(BASE, ID)).toBeNull();
+  });
+
+  it('an answer for another inscription gives null: cat21-ord also resolves a number, so a record must match the id asked', async () => {
+    answer(async () => new Response(JSON.stringify({ ...cat21OrdCatInscriptionFixture, id: 'cd'.repeat(32) + 'i0', number: 0 }), { status: 200 }));
+
+    expect(await lookupCatNumber(BASE, ID)).toBeNull();
+  });
+
+  it.each(['0', 'abc', `${'ab'.repeat(32)}`, `${'AB'.repeat(32)}i0`])('the malformed id %p is never asked for', async (id) => {
+    const spy = answer(async () => new Response(JSON.stringify({ ...cat21OrdCatInscriptionFixture, id, number: 0 }), { status: 200 }));
+
+    expect(await lookupCatNumber(BASE, id)).toBeNull();
+    expect(spy).not.toHaveBeenCalled();
   });
 });

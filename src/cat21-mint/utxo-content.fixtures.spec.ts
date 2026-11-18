@@ -1,4 +1,6 @@
 import { classifyUtxoContent } from './utxo-content.classify.js';
+import { UtxoContentScanner } from './utxo-content-scanner.service.js';
+import { cat21OrdCatInscriptionFixture } from '../cat21-ord/cats-at-output.fixtures.js';
 import {
   cat21LaggingOutputFixture,
   catOutputFixture,
@@ -70,5 +72,36 @@ describe('canonical /output fixtures classify the way their names claim', () => 
     expect(c.indexed).toBe(false);
     expect(c.clean).toBe(false);
     expect(c.catIds).toEqual([]);
+  });
+});
+
+describe('catOutputFixture carries the /inscription answer for its own cat', () => {
+  it('routed beside the /output answers, the scan names the cat by the fixture\'s number', async () => {
+    const catId = 'c'.repeat(64) + 'i3';
+    const fixture = catOutputFixture(catId, 1234);
+    const original = globalThis.fetch;
+    // A minimal response object, so the spec runs under jsdom too, which has no `Response`.
+    const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === `https://cat21ord.test/inscription/${catId}`) return ok(fixture.catInscription);
+      if (url.startsWith('https://cat21ord.test/output/')) return ok(fixture.cat21Ord);
+      return ok(fixture.ord);
+    }) as unknown as typeof fetch;
+    try {
+      const scanner = new UtxoContentScanner({ mempoolApiUrl: '', cat21ApiUrl: '', ordApiUrl: 'https://ord.test', cat21OrdApiUrl: 'https://cat21ord.test' });
+
+      const classification = await scanner.classify(`${'d'.repeat(64)}:0`);
+
+      expect(typeof classification === 'string' ? classification : classification.assets?.cats).toEqual([{ id: catId, number: 1234 }]);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('keeps the captured /inscription shape and only sets id and number', () => {
+    const { catInscription } = catOutputFixture('e'.repeat(64) + 'i0', 7);
+
+    expect(catInscription).toEqual({ ...cat21OrdCatInscriptionFixture, id: 'e'.repeat(64) + 'i0', number: 7 });
   });
 });

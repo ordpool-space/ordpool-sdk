@@ -337,7 +337,7 @@ describe('evaluateAgentPolicy', () => {
     });
   });
 
-  describe('Finding #11 — an empty-string counterparty address', () => {
+  describe('Finding #11: an empty-string counterparty address', () => {
 
     it('treats an empty-string counterparty address as a normal allowlist miss when allowlist is non-empty', () => {
       const decision = evaluateAgentPolicy(

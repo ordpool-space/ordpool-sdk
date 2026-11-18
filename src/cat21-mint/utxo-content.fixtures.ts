@@ -1,3 +1,4 @@
+import { cat21OrdCatInscriptionFixture } from '../cat21-ord/cats-at-output.fixtures.js';
 import {
   Cat21OrdOutputResponse,
   OrdOutputResponse,
@@ -59,9 +60,27 @@ export function inscribedOutputFixture(
   return { ord: base({ inscriptions: [inscriptionId] }), cat21Ord: cat21Base() };
 }
 
-/** A coin carrying a CAT-21 cat. Cats come from cat21-ord, not the full ord. */
-export function catOutputFixture(catId = 'b'.repeat(64) + 'i0'): OutputFixture {
-  return { ord: base(), cat21Ord: cat21Base({ cats: [catId] }) };
+/**
+ * cat21-ord's `GET /inscription/<catId>` answer for a cat, in the captured
+ * regtest shape (`cat21OrdCatInscriptionFixture`) with `id` and `number` set,
+ * so the number lookup the scan makes for a cat finds a matching record.
+ */
+export function catInscriptionFixture(catId: string, catNumber: number): typeof cat21OrdCatInscriptionFixture {
+  return { ...cat21OrdCatInscriptionFixture, id: catId, number: catNumber } as typeof cat21OrdCatInscriptionFixture;
+}
+
+/**
+ * A coin carrying a CAT-21 cat. Cats come from cat21-ord, not the full ord.
+ *
+ * `catInscription` is cat21-ord's `/inscription/<catId>` answer for the same
+ * cat, carrying `catNumber`: route it beside the two `/output` answers so the
+ * scan's number lookup names the cat instead of meeting a 404.
+ */
+export function catOutputFixture(
+  catId = 'b'.repeat(64) + 'i0',
+  catNumber = 2,
+): OutputFixture & { catInscription: typeof cat21OrdCatInscriptionFixture } {
+  return { ord: base(), cat21Ord: cat21Base({ cats: [catId] }), catInscription: catInscriptionFixture(catId, catNumber) };
 }
 
 /** A coin carrying a rune balance. */
