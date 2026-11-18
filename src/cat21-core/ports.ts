@@ -119,9 +119,9 @@ export interface UtxosPort {
 }
 
 /**
- * Classifies one outpoint's on-chain content. Scan DEPTH is the consumer's
- * choice — cat-only (cat21-wallet today) or full (cat21.space: cats +
- * inscriptions + runes + rare sats). The core avoids whatever the port flags as
+ * Classifies one outpoint's on-chain content. Every consumer runs the full
+ * scan (cats, inscriptions, runes, rare sats): the web surfaces through
+ * `UtxoContentScanner`, cat21-wallet through `classifyOutpoint`. The core avoids whatever the port flags as
  * `has-assets`, and lets a separate-payment-address wallet proceed behind a
  * notice only when the port also NAMES the assets (`namesAssets`). Reject to
  * signal a scan failure; the core treats a failed scan as not-auto

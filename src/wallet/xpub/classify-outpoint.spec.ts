@@ -7,6 +7,7 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { classifyOutpoint } from './classify-outpoint.js';
+import { cat21OrdCatInscriptionFixture, cat21OrdOutputWithCatFixture } from '../../cat21-ord/cats-at-output.fixtures.js';
 
 const ORD = 'https://ord.ordpool.space';
 const CAT21ORD = 'https://ord.cat21.space';
@@ -108,5 +109,52 @@ describe('classifyOutpoint', () => {
 
     await expect(classifyOutpoint(OUTPOINT, { ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD }))
       .rejects.toThrow(/returned 502/);
+  });
+});
+
+describe('classifyOutpoint cat numbers', () => {
+  const CAT_ID = cat21OrdCatInscriptionFixture.id;
+
+  /** cat21-ord answers the captured regtest bodies; `inscription` decides /inscription. */
+  function route(inscription: { status: number; body: unknown }) {
+    const spy = jest.fn((url: string) => {
+      if (url.startsWith(`${CAT21ORD}/inscription/`)) return new Response(JSON.stringify(inscription.body), { status: inscription.status });
+      if (url.startsWith(CAT21ORD)) return new Response(JSON.stringify(cat21OrdOutputWithCatFixture), { status: 200 });
+      return new Response(JSON.stringify({ inscriptions: [], runes: null, sat_ranges: cat21OrdOutputWithCatFixture.sat_ranges }), { status: 200 });
+    });
+    (globalThis as unknown as { fetch: typeof fetch }).fetch = spy as unknown as typeof fetch;
+    return spy;
+  }
+  const inscriptionCalls = (spy: ReturnType<typeof route>) =>
+    spy.mock.calls.map(([url]) => url).filter((url) => url.includes('/inscription/'));
+
+  it('names each cat by its number from cat21-ord /inscription', async () => {
+    const spy = route({ status: 200, body: cat21OrdCatInscriptionFixture });
+
+    const c = await classifyOutpoint(cat21OrdOutputWithCatFixture.outpoint, { ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD });
+
+    expect({ clean: c.clean, cats: c.cats }).toEqual({ clean: false, cats: [{ id: CAT_ID, number: 2 }] });
+    expect(inscriptionCalls(spy)).toEqual([`${CAT21ORD}/inscription/${CAT_ID}`]);
+  });
+
+  it.each([
+    ['answers 500', { status: 500, body: 'boom' }],
+    ['answers without an integer number', { status: 200, body: { ...cat21OrdCatInscriptionFixture, number: '2' } }],
+  ])('a lookup that %s gives number null and the coin stays not clean', async (_label, answer) => {
+    route(answer);
+
+    const c = await classifyOutpoint(cat21OrdOutputWithCatFixture.outpoint, { ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD });
+
+    expect({ clean: c.clean, cats: c.cats }).toEqual({ clean: false, cats: [{ id: CAT_ID, number: null }] });
+  });
+
+  it('catNumbers: false asks nothing and lists the cats without numbers', async () => {
+    const spy = route({ status: 200, body: cat21OrdCatInscriptionFixture });
+
+    const c = await classifyOutpoint(cat21OrdOutputWithCatFixture.outpoint, {
+      ordApiUrl: ORD, cat21OrdApiUrl: CAT21ORD, catNumbers: false,
+    });
+
+    expect({ cats: c.cats, lookups: inscriptionCalls(spy) }).toEqual({ cats: [{ id: CAT_ID, number: null }], lookups: [] });
   });
 });

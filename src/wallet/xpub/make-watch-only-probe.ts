@@ -66,6 +66,7 @@ export function makeWatchOnlyProbe(
             ordApiUrl: config.ordApiUrl,
             cat21OrdApiUrl: config.cat21OrdApiUrl,
             signal: config.signal,
+            catNumbers: false,
           });
           return { value: u.value, clean: c.clean };
         } catch {

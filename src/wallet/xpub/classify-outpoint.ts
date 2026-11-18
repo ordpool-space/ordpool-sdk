@@ -10,6 +10,8 @@
  * `makeWatchOnlyProbe` excludes it from spendable funds, conservatively).
  */
 
+import { CatOnOutpoint } from '../../cat21-core/ports.js';
+import { lookupCatNumber } from '../../cat21-ord/cat-number.js';
 import {
   classifyUtxoContent,
   UtxoContentClassification,
@@ -25,10 +27,23 @@ export interface ClassifyOutpointOptions {
   /** cat21-ord (`--index-cat21`, cats), e.g. `https://ord.cat21.space`. */
   cat21OrdApiUrl: string;
   signal?: AbortSignal;
+  /**
+   * Look up each cat's number on cat21-ord (one `GET /inscription/<id>` per
+   * cat). On by default, because a notice names a cat by its number. A caller
+   * that only needs `clean` (`makeWatchOnlyProbe`) passes false and `cats`
+   * then carries every cat with `number: null`.
+   */
+  catNumbers?: boolean;
 }
 
 export interface OutpointClassification extends UtxoContentClassification {
   outpoint: string;
+  /**
+   * The cats in `catIds` order with their cat numbers; `number` is null when
+   * the lookup failed or was not asked for. Display only: `clean` never
+   * depends on it.
+   */
+  cats: CatOnOutpoint[];
 }
 
 export async function classifyOutpoint(
@@ -39,7 +54,13 @@ export async function classifyOutpoint(
     fetchOutput<OrdOutputResponse>(options.ordApiUrl, outpoint, options.signal),
     fetchOutput<Cat21OrdOutputResponse>(options.cat21OrdApiUrl, outpoint, options.signal),
   ]);
-  return { outpoint, ...classifyUtxoContent(ord, cat21Ord) };
+  const classification = classifyUtxoContent(ord, cat21Ord);
+  const lookUp = options.catNumbers ?? true;
+  const cats = await Promise.all(classification.catIds.map(async (id): Promise<CatOnOutpoint> => ({
+    id,
+    number: lookUp ? await lookupCatNumber(options.cat21OrdApiUrl, id, { signal: options.signal }) : null,
+  })));
+  return { outpoint, ...classification, cats };
 }
 
 async function fetchOutput<T>(baseUrl: string, outpoint: string, signal?: AbortSignal): Promise<T> {
