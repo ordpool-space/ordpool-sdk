@@ -7,6 +7,7 @@ import {
   WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
 import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
+import { assertPinnedFundingHeld } from '../cat21-fee/funding-selection-changed-error.js';
 import { CandidateFeeRow, resolveCandidateFees } from '../cat21-fee/candidate-fees.js';
 import { Network, toScureNetwork } from '../network.js';
 import { KnownOrdinalWalletType } from '../wallet/wallet.service.types.js';
@@ -87,7 +88,13 @@ export interface TransferSimulationResult {
    */
   droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
-  fundingUtxo: CoreFundingUtxo | null;
+  /**
+   * The coin that will be SPENT, an explicit pick included, with its scan
+   * bucket and the assets the scan named on it (`assets`). That is what an
+   * `asset-notice` must show; `recommendation.recommended` is the coin the SDK
+   * would choose, which differs whenever the user picked another one.
+   */
+  fundingUtxo: (CoreFundingUtxo & AnnotatedFundingUtxo) | null;
   vsize: number | null;
   /** Realised miner fee (incl. absorbed sub-dust change). */
   feeSats: number | null;
@@ -116,7 +123,7 @@ interface TransferPlan {
   status: TransferStatus;
   droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
-  pick: CoreFundingUtxo | null;
+  pick: (CoreFundingUtxo & AnnotatedFundingUtxo) | null;
   /** Pass-2 build result (size numbers) + the fee to feed the real build. */
   built: BuildCat21TransferResult | null;
   vsize: number | null;
@@ -328,7 +335,9 @@ export async function simulateTransfer(
  * cat UTXO is preserved whole; the fee comes from the safe-auto-selected
  * funding coin (or the explicit expert pick). Throws `FundingBlockedError`
  * (cause, recommended coin, named assets) when the recommendation is
- * `expert-required`, and a plain `Error` when nothing covers.
+ * `expert-required`, and a plain `Error` when nothing covers. Throws
+ * `FundingSelectionChangedError`, before anything is signed, when
+ * `selectedFundingUtxo` is set and that coin is gone or no longer covers.
  */
 /* jscpd:ignore-end */
 
@@ -337,6 +346,7 @@ export async function executeTransfer(
   ports: { utxos: UtxosPort; scan: ContentScanPort; sign: SignPort; broadcast: BroadcastPort },
 ): Promise<BroadcastOutcome & { feeSats: number }> {
   const plan = await planTransfer(params, ports);
+  assertPinnedFundingHeld(params.selectedFundingUtxo, plan);
   // 'asset-notice' executes: a coin will be spent and it carries assets, which
   // the money-path rule calls an enabled CTA with a notice. Requiring 'ready'
   // refused the separate-payment-address auto-pick.

@@ -23,8 +23,9 @@ git ref is installed.
 - CAT-21 mint, transfer, buy-offer, accept-offer flows — PSBT
   builders + validators that emit ord-compatible bytes.
 - Multi-wallet picker + per-wallet signer adapters. Detection is
-  signature-based: only wallets whose `window.<wallet>` surface
-  is live at runtime show up.
+  signature-based: a wallet whose `window.<wallet>` surface is live
+  at runtime offers Connect, every other supported wallet offers
+  Install (or the in-app browser on mobile).
 - Broadcast dispatcher (Bitcoin mempool + miner-direct fallback for
   oversize / non-standard txs).
 - Network helpers (`Network` enum, address-network detection for
@@ -62,11 +63,13 @@ intentionally minimal and additive.
 | Wallet | Status |
 |---|---|
 | Cat21 Wallet | Our own wallet (ordpool-space/cat21-wallet) |
-| Xverse, Leather, Unisat, Wizz, OKX, Alby | Connector + signer ship; detection gates picker visibility |
+| Xverse, Leather, Unisat, Wizz, OKX, Alby, Phantom, Binance | Connector + signer ship; detection decides Connect or Install |
 | Watch-only (Sparrow, Electrum, Coldcard, Ledger, Trezor, Specter, Bitcoin Core) | Via PSBT export round-trip |
 
-Wallets without a runtime surface simply don't appear in the
-picker. The same registry serves every consumer.
+`walletPickerRows()` lists every supported wallet: Connect when its
+runtime surface is live, Install when it is not, and an inert "Desktop
+only" / "Mobile only" row when it runs only on the other platform. The
+same registry serves every consumer.
 
 ## Code conventions
 

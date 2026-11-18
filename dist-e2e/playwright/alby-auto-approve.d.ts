@@ -17,10 +17,16 @@ import { BrowserContext } from '@playwright/test';
  *     closes — the success signal of an accepted approval.
  */
 export interface AlbyAutoApproveHandle {
-    /** How many popups this listener actually clicked through. */
+    /** How many popups this listener clicked through: each one CLOSED after its clicks. */
     approved: () => number;
     /** Every extension page it considered, with the first line it was showing. */
     seen: () => string[];
+    /**
+     * Every prompt it could not approve, with why: the popup was still open
+     * after the last click (and what that click answered), or a wait or read on
+     * it failed.
+     */
+    failures: () => string[];
 }
 export declare function installAlbyAutoApprove(context: BrowserContext, opts?: {
     labels?: RegExp;

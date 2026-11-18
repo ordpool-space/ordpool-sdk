@@ -72,6 +72,8 @@ test.afterEach(async ({}, testInfo) => {
   console.log(
     `[alby-onboard] auto-approver clicked ${albyApprover.approved()} popup(s); extension pages it considered:\n` +
       (albyApprover.seen().length ? albyApprover.seen().map((l) => `  - ${l}`).join('\n') : '  <none>') +
+      '\nprompts it could not approve:\n' +
+      (albyApprover.failures().length ? albyApprover.failures().map((l) => `  - ${l}`).join('\n') : '  <none>') +
       '\nZero approvals with pages listed means a permission popup appeared and its button ' +
       'did not match the label regex. Zero approvals with none listed means no popup was ever ' +
       'opened, so the call is stuck before the permission step.',

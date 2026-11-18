@@ -37,9 +37,9 @@ the picker.
 
 Evidence (same machine, all sessions can open these):
 
-- `/Users/johanneshoppe/Shots/Screenshot 2026-09-09 at 15.19.03.png` — cat21.space
-- `/Users/johanneshoppe/Shots/Screenshot 2026-09-09 at 15.20.18.png` — ordpool.space
-- `/Users/johanneshoppe/Shots/Screenshot 2026-09-09 at 15.20.45.png` — cubes
+- `~/Shots/Screenshot 2026-09-09 at 15.19.03.png`: cat21.space
+- `~/Shots/Screenshot 2026-09-09 at 15.20.18.png`: ordpool.space
+- `~/Shots/Screenshot 2026-09-09 at 15.20.45.png`: cubes
 
 ## 2. Who is at fault
 
@@ -136,7 +136,7 @@ complain about waiting.** The SDK session holds the token.
 - Wait for "MCP granted". Then it is exclusively yours.
 - Release with "MCP released" the moment you are done. Do not hold it
   while you edit code.
-- Screenshots go to `/Users/johanneshoppe/Work/ordpool/ux-round2/<session>/`
+- Screenshots go to `~/Work/ordpool/ux-round2/<session>/`
   so every session can open every other session's evidence.
 
 Default order if everyone is ready at once: cubes → cat21.space →

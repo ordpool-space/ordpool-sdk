@@ -37,6 +37,12 @@ export interface UtxoContentClassification {
    * `clean` spends the coin.
    */
   indexed: boolean;
+  /**
+   * Whether the rare-sat check actually ran over this output's sat ranges.
+   * It is skipped above `RARE_SAT_MAX_RANGES`, and a skipped check is an
+   * unknown rarity, never a common one, so such an output is not `clean`.
+   */
+  rarityChecked: boolean;
   inscriptionIds: string[];
   runes: { [runeName: string]: unknown } | null;
   catIds: string[];
@@ -73,7 +79,10 @@ export function classifyUtxoContent(
   const cat21Indexed = cat21Ord.indexed !== false && (cat21Ord.sat_ranges?.length ?? 0) > 0;
   const indexed = ordIndexed && cat21Indexed;
 
-  const clean = indexed && inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat;
+  const rarityChecked = (ord.sat_ranges?.length ?? 0) <= RARE_SAT_MAX_RANGES;
+
+  const clean = indexed && rarityChecked
+    && inscriptionIds.length === 0 && !runes && catIds.length === 0 && !rareSat;
 
   // Source the cat's sat from cat21-ord (the cat indexer, authoritative and
   // always in step with `cats`); fall back to the full ord only if cat21-ord
@@ -83,7 +92,7 @@ export function classifyUtxoContent(
     ? (firstSat(cat21Ord.sat_ranges) ?? firstSat(ord.sat_ranges))
     : null;
 
-  return { clean, indexed, inscriptionIds, runes, catIds, catSat, rareSat };
+  return { clean, indexed, rarityChecked, inscriptionIds, runes, catIds, catSat, rareSat };
 }
 
 /**
@@ -102,8 +111,10 @@ export function firstSat(
 
 /**
  * Turn ord's `sat_ranges` into a rare-sat finding if one exists. Skips the
- * scan when the range count exceeds `RARE_SAT_MAX_RANGES` — pathological
- * UTXOs with thousands of ranges would dominate the per-UTXO cost budget.
+ * scan when the range count exceeds `RARE_SAT_MAX_RANGES`, because
+ * pathological UTXOs with thousands of ranges would dominate the per-UTXO cost
+ * budget. A skipped scan returns null too, so callers deciding spendability
+ * read `rarityChecked` from `classifyUtxoContent`, not this null.
  */
 export function detectRareSat(
   ranges: ReadonlyArray<readonly [number, number]> | undefined,

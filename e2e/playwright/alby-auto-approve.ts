@@ -18,10 +18,16 @@ import { BrowserContext, Page } from '@playwright/test';
  *     closes — the success signal of an accepted approval.
  */
 export interface AlbyAutoApproveHandle {
-  /** How many popups this listener actually clicked through. */
+  /** How many popups this listener clicked through: each one CLOSED after its clicks. */
   approved: () => number;
   /** Every extension page it considered, with the first line it was showing. */
   seen: () => string[];
+  /**
+   * Every prompt it could not approve, with why: the popup was still open
+   * after the last click (and what that click answered), or a wait or read on
+   * it failed.
+   */
+  failures: () => string[];
 }
 
 /**
@@ -45,8 +51,10 @@ export function installAlbyAutoApprove(
   const labels = opts.labels ?? /^(connect|allow|confirm|approve|sign)$/i;
   let approved = 0;
   const seen: string[] = [];
+  const failures: string[] = [];
 
   const handle = async (popup: Page) => {
+    const label = () => popup.url().slice(0, 60);
     try {
       await popup.waitForLoadState('domcontentloaded');
       // Alby draws every permission and confirm prompt on `prompt.html`. Any
@@ -54,21 +62,33 @@ export function installAlbyAutoApprove(
       // shows an approval button, and waiting on it would only run out the
       // per-wait bound.
       if (!/^chrome-extension:\/\/[^/]+\/prompt\.html/.test(popup.url())) return;
-      const first = await popup.locator('body').innerText().catch(() => '<unreadable>');
-      seen.push(`${popup.url().slice(0, 60)} => ${first.trim().split('\n')[0]?.slice(0, 60) || '<empty>'}`);
+      const first = await popup.locator('body').innerText();
+      seen.push(`${label()} => ${first.trim().split('\n')[0]?.slice(0, 60) || '<empty>'}`);
       const btn = popup.locator('button', { hasText: labels }).first();
       await btn.waitFor({ state: 'visible' });
       await btn.click({ trial: true });
+      // The popup closing is the only proof an approval was accepted, so the
+      // loop decides on that state. A click that throws because the popup
+      // closed under it is that success; a click that throws while the popup
+      // stays open is the pre-hydration miss, kept as the reason if no later
+      // click lands.
+      let lastClick = 'not clicked';
       for (let attempt = 0; attempt < 8 && !popup.isClosed(); attempt++) {
-        await btn.click({ timeout: ALBY_CLICK_PROBE_MS }).catch(() => undefined);
-        await popup.waitForEvent('close', { timeout: ALBY_CLOSE_PROBE_MS }).catch(() => undefined);
+        const closed = popup.waitForEvent('close', { timeout: ALBY_CLICK_PROBE_MS + ALBY_CLOSE_PROBE_MS })
+          .then(() => true, () => false);
+        lastClick = await btn.click({ timeout: ALBY_CLICK_PROBE_MS }).then(
+          () => 'clicked',
+          (err: unknown) => `click failed: ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`,
+        );
+        await closed;
       }
-      approved += 1;
-    } catch {
-      // Best-effort by design, but no longer SILENT: a popup this listener
-      // could not approve is recorded in `seen` without an approval, which is
-      // what lets a caller say "a permission popup appeared and was never
-      // clicked" instead of timing out with nothing to show.
+      if (popup.isClosed()) {
+        approved += 1;
+      } else {
+        failures.push(`${label()} => still open after 8 clicks, last: ${lastClick}`);
+      }
+    } catch (err) {
+      failures.push(`${label()} => ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`);
     }
   };
 
@@ -78,5 +98,5 @@ export function installAlbyAutoApprove(
   // made the okx sign-message wait miss its popup.
   for (const p of context.pages()) void handle(p);
 
-  return { approved: () => approved, seen: () => [...seen] };
+  return { approved: () => approved, seen: () => [...seen], failures: () => [...failures] };
 }

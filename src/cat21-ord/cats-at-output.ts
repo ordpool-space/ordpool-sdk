@@ -59,10 +59,12 @@ const INSCRIPTION_ID = /^[0-9a-f]{64}i\d+$/;
 /**
  * The cat numbers on `txid:vout`, ascending and without duplicates.
  *
- * - `null`: cat21-ord answers 404 for the output (unknown or spent).
- * - `[]`: the output exists and carries no cat.
- * - throws: cat21-ord has not indexed the output yet (`indexed: false`, or no
- *   sat ranges), answers another error, `cats` is missing or holds
+ * - `null`: the output carries no cat any more, or never existed: cat21-ord
+ *   answers 404 (unknown), or 200 with `spent: true` (spent; that answer also
+ *   says `indexed: false` and drops the sat ranges, so it is read first).
+ * - `[]`: the output exists, is unspent and carries no cat.
+ * - throws: cat21-ord has not indexed the unspent output yet (`indexed: false`,
+ *   or no sat ranges), answers another error, `cats` is missing or holds
  *   something other than an inscription id, an id does not resolve, or its
  *   `number` is not a cat number.
  */
@@ -73,7 +75,10 @@ export async function getCatsAtOutput(reader: Cat21OrdReader, txid: string, vout
 
   const output = await reader.getJson(`/output/${outpoint}`);
   if (output === null) return null;
-  const { cats, indexed, sat_ranges } = output as { cats?: unknown; indexed?: unknown; sat_ranges?: unknown };
+  const { cats, indexed, sat_ranges, spent } = output as {
+    cats?: unknown; indexed?: unknown; sat_ranges?: unknown; spent?: unknown;
+  };
+  if (spent === true) return null;
   if (indexed === false || !Array.isArray(sat_ranges) || sat_ranges.length === 0) {
     throw new Error(`getCatsAtOutput: cat21-ord has not indexed /output/${outpoint} yet`);
   }

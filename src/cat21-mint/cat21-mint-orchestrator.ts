@@ -130,7 +130,12 @@ export interface MintSnapshot {
    * funding policy is what the asset-safety rule forbids: the next asset class
    * added to the scanner would never reach it.
    */
-  resolvedFundingUtxo: CoreFundingUtxo | null;
+  /**
+   * Carries the coin's scan bucket and the assets the scan named on it
+   * (`assets`): what an `asset-notice` must show, read off the coin that will
+   * be spent, never off `fundingRecommendation.recommended`.
+   */
+  resolvedFundingUtxo: (CoreFundingUtxo & AnnotatedFundingUtxo) | null;
   resolvedFundingStatus: MintStatus | null;
   /**
    * Set when the coin the user PICKED is not the coin that will be spent,
@@ -442,7 +447,7 @@ export class Cat21MintOrchestrator {
     let recomputeError: string | null = null;
     let fundingRequirementSats = 0;
     let fundingPreferredSats = 0;
-    let resolvedFundingUtxo: CoreFundingUtxo | null = null;
+    let resolvedFundingUtxo: (CoreFundingUtxo & AnnotatedFundingUtxo) | null = null;
     let resolvedFundingStatus: MintStatus | null = null;
     let droppedSelection: DroppedSelection | null = null;
     try {

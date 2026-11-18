@@ -104,8 +104,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   if (args.feeSats < 0) throw new Error('feeSats must be non-negative');
 
   const scureNetwork = toScureNetwork(args.network);
-  // Per-wallet RBF sequence — same policy as mint and transfer (audit M4).
-  // RBF-on (0xfffffffd) for every wallet on offers. The mint-only
+  // RBF-on (0xfffffffd) for every wallet on offers, the same as transfer. The mint-only
   // RBF-off policy (`resolveCat21MintInputSequence`) does NOT apply
   // here: the cat is already on chain, so a third-party wallet's
   // accelerate UI dropping `lockTime=21` on an RBF replacement only
@@ -120,8 +119,7 @@ export function buildCat21BuyOfferPsbt(args: BuildCat21BuyOfferArgs): BuildCat21
   // satoshi the existing cat ordinal travels to via FIFO.
   const tx = new btc.Transaction({ lockTime: CAT21_LOCK_TIME, allowUnknownInputs: true });
 
-  // Input 0: seller's cat UTXO, unsigned, sequence per the per-wallet policy
-  // resolved above. No input carries a `sighashType`: ord's `wallet offer
+  // Input 0: seller's cat UTXO, unsigned, with the RBF-on sequence above. No input carries a `sighashType`: ord's `wallet offer
   // accept` refuses an offer whose inputs specify one (cat21-ord
   // `offer/accept.rs`, "inputs may not specify any sighash type"), because
   // the field would dictate how the seller's wallet signs input 0. Every

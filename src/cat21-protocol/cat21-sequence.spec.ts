@@ -26,16 +26,32 @@ describe('resolveCat21MintInputSequence (single source of truth)', () => {
     expect(CAT21_OTHER_WALLET_MINT_INPUT_SEQUENCE).toBe(0xfffffffe);
   });
 
-  it('cat21wallet → 0xfffffffd', () => {
-    expect(resolveCat21MintInputSequence(KnownOrdinalWalletType.cat21wallet)).toBe(0xfffffffd);
+  /**
+   * The mint sequence every wallet type must get, written out literally per
+   * type, so a change for any single wallet reds here. Only our own wallet
+   * signals RBF; every third-party wallet must not, or its accelerate UI can
+   * replace the mint without nLockTime=21.
+   */
+  const EXPECTED_MINT_SEQUENCE: Record<KnownOrdinalWalletType, number> = {
+    [KnownOrdinalWalletType.cat21wallet]: 0xfffffffd,
+    [KnownOrdinalWalletType.xverse]: 0xfffffffe,
+    [KnownOrdinalWalletType.leather]: 0xfffffffe,
+    [KnownOrdinalWalletType.unisat]: 0xfffffffe,
+    [KnownOrdinalWalletType.wizz]: 0xfffffffe,
+    [KnownOrdinalWalletType.okx]: 0xfffffffe,
+    [KnownOrdinalWalletType.phantom]: 0xfffffffe,
+    [KnownOrdinalWalletType.alby]: 0xfffffffe,
+    [KnownOrdinalWalletType.binance]: 0xfffffffe,
+    [KnownOrdinalWalletType.xpub]: 0xfffffffe,
+  };
+  const ALL_WALLET_TYPES = Object.values(KnownOrdinalWalletType);
+
+  it('the expectation table covers every wallet type there is', () => {
+    expect(Object.keys(EXPECTED_MINT_SEQUENCE).sort()).toEqual([...ALL_WALLET_TYPES].sort());
   });
 
-  it.each([
-    KnownOrdinalWalletType.xverse,
-    KnownOrdinalWalletType.unisat,
-    KnownOrdinalWalletType.leather,
-  ])('%s → 0xfffffffe', wallet => {
-    expect(resolveCat21MintInputSequence(wallet)).toBe(0xfffffffe);
+  it.each(ALL_WALLET_TYPES)('%s gets its literal mint sequence', wallet => {
+    expect(resolveCat21MintInputSequence(wallet)).toBe(EXPECTED_MINT_SEQUENCE[wallet]);
   });
 
   describe('cat-flow builders — mint-only RBF-off, everything else RBF-on', () => {
@@ -53,7 +69,7 @@ describe('resolveCat21MintInputSequence (single source of truth)', () => {
     // missed bonus mint. Third-party sellers CAN bump.
     //
     // What this spec pins:
-    //   - mint + createTransaction: sequence == resolveCat21MintInputSequence(wallet)
+    //   - mint + createTransaction: sequence == EXPECTED_MINT_SEQUENCE[wallet]
     //     (per-wallet: cat21wallet=RBF-on, others=RBF-off)
     //   - transfer + offer: sequence == CAT21_WALLET_INPUT_SEQUENCE
     //     (RBF-on for EVERY wallet — no more mint-only gate)
@@ -163,23 +179,12 @@ describe('resolveCat21MintInputSequence (single source of truth)', () => {
       return result.tx.getInput(0).sequence!;
     }
 
-    it.each([
-      KnownOrdinalWalletType.cat21wallet,
-      KnownOrdinalWalletType.xverse,
-      KnownOrdinalWalletType.unisat,
-      KnownOrdinalWalletType.leather,
-    ])('mint + createTransaction use the per-wallet mint gate for %s', wallet => {
-      const expected = resolveCat21MintInputSequence(wallet);
-      expect(mintSequence(wallet)).toBe(expected);
-      expect(createTransactionSequence(wallet)).toBe(expected);
+    it.each(ALL_WALLET_TYPES)('mint + createTransaction write the literal mint sequence for %s', wallet => {
+      expect(mintSequence(wallet)).toBe(EXPECTED_MINT_SEQUENCE[wallet]);
+      expect(createTransactionSequence(wallet)).toBe(EXPECTED_MINT_SEQUENCE[wallet]);
     });
 
-    it.each([
-      KnownOrdinalWalletType.cat21wallet,
-      KnownOrdinalWalletType.xverse,
-      KnownOrdinalWalletType.unisat,
-      KnownOrdinalWalletType.leather,
-    ])('transfer + offer use RBF-on unconditionally for %s (no mint-only gate)', wallet => {
+    it.each(ALL_WALLET_TYPES)('transfer + offer use RBF-on unconditionally for %s (no mint-only gate)', wallet => {
       expect(transferSequence(wallet)).toBe(CAT21_WALLET_INPUT_SEQUENCE);
       expect(offerSellerSequence(wallet)).toBe(CAT21_WALLET_INPUT_SEQUENCE);
     });

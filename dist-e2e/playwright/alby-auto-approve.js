@@ -17,7 +17,9 @@ function installAlbyAutoApprove(context, opts = {}) {
     const labels = opts.labels ?? /^(connect|allow|confirm|approve|sign)$/i;
     let approved = 0;
     const seen = [];
+    const failures = [];
     const handle = async (popup) => {
+        const label = () => popup.url().slice(0, 60);
         try {
             await popup.waitForLoadState('domcontentloaded');
             // Alby draws every permission and confirm prompt on `prompt.html`. Any
@@ -26,22 +28,32 @@ function installAlbyAutoApprove(context, opts = {}) {
             // per-wait bound.
             if (!/^chrome-extension:\/\/[^/]+\/prompt\.html/.test(popup.url()))
                 return;
-            const first = await popup.locator('body').innerText().catch(() => '<unreadable>');
-            seen.push(`${popup.url().slice(0, 60)} => ${first.trim().split('\n')[0]?.slice(0, 60) || '<empty>'}`);
+            const first = await popup.locator('body').innerText();
+            seen.push(`${label()} => ${first.trim().split('\n')[0]?.slice(0, 60) || '<empty>'}`);
             const btn = popup.locator('button', { hasText: labels }).first();
             await btn.waitFor({ state: 'visible' });
             await btn.click({ trial: true });
+            // The popup closing is the only proof an approval was accepted, so the
+            // loop decides on that state. A click that throws because the popup
+            // closed under it is that success; a click that throws while the popup
+            // stays open is the pre-hydration miss, kept as the reason if no later
+            // click lands.
+            let lastClick = 'not clicked';
             for (let attempt = 0; attempt < 8 && !popup.isClosed(); attempt++) {
-                await btn.click({ timeout: ALBY_CLICK_PROBE_MS }).catch(() => undefined);
-                await popup.waitForEvent('close', { timeout: ALBY_CLOSE_PROBE_MS }).catch(() => undefined);
+                const closed = popup.waitForEvent('close', { timeout: ALBY_CLICK_PROBE_MS + ALBY_CLOSE_PROBE_MS })
+                    .then(() => true, () => false);
+                lastClick = await btn.click({ timeout: ALBY_CLICK_PROBE_MS }).then(() => 'clicked', (err) => `click failed: ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`);
+                await closed;
             }
-            approved += 1;
+            if (popup.isClosed()) {
+                approved += 1;
+            }
+            else {
+                failures.push(`${label()} => still open after 8 clicks, last: ${lastClick}`);
+            }
         }
-        catch {
-            // Best-effort by design, but no longer SILENT: a popup this listener
-            // could not approve is recorded in `seen` without an approval, which is
-            // what lets a caller say "a permission popup appeared and was never
-            // clicked" instead of timing out with nothing to show.
+        catch (err) {
+            failures.push(`${label()} => ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`);
         }
     };
     context.on('page', (p) => void handle(p));
@@ -50,6 +62,6 @@ function installAlbyAutoApprove(context, opts = {}) {
     // made the okx sign-message wait miss its popup.
     for (const p of context.pages())
         void handle(p);
-    return { approved: () => approved, seen: () => [...seen] };
+    return { approved: () => approved, seen: () => [...seen], failures: () => [...failures] };
 }
 //# sourceMappingURL=alby-auto-approve.js.map

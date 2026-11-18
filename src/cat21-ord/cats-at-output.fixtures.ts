@@ -70,3 +70,24 @@ export const cat21OrdCatInscriptionFixture = {
 
 /** The plain-text body of cat21-ord's 404 for an output it never saw (`/output/abab…abab:0`). */
 export const cat21OrdOutputNotFoundBody = 'output abababababababababababababababababababababababababababababababab:0 not found';
+
+/**
+ * `GET /output/97b4…af9a:11` on mainnet cat21-ord (ord.cat21.space), captured
+ * 2026-11-18 with `curl -H 'Accept: application/json'`: the funding output the
+ * Genesis Cat's mint spent. cat21-ord answers a SPENT output with 200,
+ * `spent: true`, `indexed: false` and `sat_ranges: null`, because it drops the
+ * sat ranges of an output once it is spent.
+ */
+export const cat21OrdSpentOutputFixture = {
+  address: '3PhEFGZSE4JhMa8JPoX5rf9gUZnsDwCcJt',
+  confirmations: 152227,
+  indexed: false,
+  cats: [],
+  outpoint: '97b4ecfe7c015aa35f3a2e0299be09a0dc3d02c6dbcff31a23c80f806a19af9a:11',
+  runes: null,
+  sat_ranges: null,
+  script_pubkey: 'a914f15d0dc87fc1cd6d2395870a7c6a6788854c03ec87',
+  spent: true,
+  transaction: '97b4ecfe7c015aa35f3a2e0299be09a0dc3d02c6dbcff31a23c80f806a19af9a',
+  value: 634426,
+} as const;

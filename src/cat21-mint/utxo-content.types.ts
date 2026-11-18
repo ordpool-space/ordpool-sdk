@@ -102,10 +102,10 @@ export interface UtxoContent {
    */
   catSat: number | null;
   /**
-   * Rarest sat inside the UTXO's `sat_ranges`, when the scanner ran
-   * the rare-sat check (small-UTXO gate — see `RARE_SAT_SCAN_MAX_VALUE_SAT`).
-   * `null` when no rare sat was found OR when the check was skipped
-   * for cost reasons (large UTXO, pathological range count).
+   * Rarest sat inside the UTXO's `sat_ranges`. `null` when no rare sat was
+   * found. A UTXO whose rare-sat check was skipped (more than
+   * `RARE_SAT_MAX_RANGES` ranges) never reaches `scanned-with-assets` on that
+   * account alone: it is `scan-failed`, unknown content.
    */
   rareSat: { sat: string; block: number; rarity: SatRarity } | null;
 }
@@ -120,8 +120,9 @@ export interface UtxoContent {
  * we can at least skip the parse.
  *
  * Below the cap: rarity math is O(1) per tuple, so bounded work.
- * Above the cap: `rareSat` on `UtxoContent` stays null; the picker
- * treats the UTXO as "rarity unchecked" rather than "clean".
+ * Above the cap: `classifyUtxoContent` reports `rarityChecked: false` and
+ * the output is not clean; the scanner returns `scan-failed` (unknown content)
+ * unless another asset was detected, so the coin is never auto-spent.
  */
 export const RARE_SAT_MAX_RANGES = 500;
 

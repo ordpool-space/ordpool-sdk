@@ -29,18 +29,14 @@ export type WalletPickerAction =
  * support level. Someone at this screen is trying to connect; anything we
  * know about a wallet waits until it can change what they do.
  *
- * Platform is the one exception, and it earns it. A wallet unreachable on
- * this device used to be dropped from the list entirely, on the reasoning
- * that telling a phone user about a desktop extension answers a question
- * they did not ask. That reasoning does not survive its own picker: the
- * `install` action exists purely to tell someone about a wallet they do
- * NOT have, so the list already answers unasked questions. Meanwhile
- * someone holding Leather on their phone saw no Leather and no reason,
- * and concluded the site does not support it.
- *
- * So nothing is hidden. `reachableHere` says whether this wallet can be
- * used on this device, and the unreachable rows carry an inert
- * `use-on-desktop` / `use-on-mobile` action instead of vanishing.
+ * Platform is the one exception, and it earns it. Nothing is hidden: a
+ * wallet missing from the list reads as "this site does not support it",
+ * so someone holding Leather on their phone must see Leather and why it
+ * does not work here. The list already names wallets a person does NOT
+ * have (the `install` action), so naming one that runs only on the other
+ * platform is the same kind of answer. `reachableHere` says whether this
+ * wallet can be used on this device, and the unreachable rows carry an
+ * inert `use-on-desktop` / `use-on-mobile` action.
  */
 export interface WalletPickerRow {
   wallet: KnownOrdinalWalletType;
@@ -70,9 +66,10 @@ export interface WalletPickerOptions {
   /** The window to detect providers in. Omit in SSR: every row comes back not-installed. */
   win?: WindowLike;
   /**
-   * Where this picker is rendering. Wallets unreachable here are absent,
-   * never badged. Defaults to {@link detectWalletPlatform} over `win`;
-   * pass it only to override, never from a CSS breakpoint.
+   * Where this picker is rendering. Wallets unreachable here stay in the
+   * list with `reachableHere: false` and an inert action. Defaults to
+   * {@link detectWalletPlatform} over `win`; pass it only to override,
+   * never from a CSS breakpoint.
    */
   platform?: WalletPlatform;
   /**
@@ -115,9 +112,11 @@ export function detectWalletPlatform(win: WindowLike | undefined): WalletPlatfor
 /**
  * The rows of a wallet picker, in matrix order, ready to render.
  *
- * Platform is a filter here, never a badge: a wallet unreachable on this
- * device is simply not in the list, because telling someone their phone
- * cannot run a browser extension answers a question they did not ask.
+ * Every wallet the SDK supports is a row, installed or not: an installed
+ * one says `connect`, one that is not injected here says `install` (or
+ * `open-in-app` on mobile, where a verified deep link exists), and one that
+ * runs only on the other platform says `use-on-desktop` / `use-on-mobile`
+ * with `reachableHere: false`. Only `capability` removes rows.
  */
 export function walletPickerRows(options: WalletPickerOptions = {}): WalletPickerRow[] {
   const platform = options.platform ?? detectWalletPlatform(options.win);

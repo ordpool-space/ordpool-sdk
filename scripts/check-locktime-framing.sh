@@ -3,7 +3,7 @@
 # Guard against the "nLockTime=21 as protocol requirement on non-mint
 # txs" framing bug. See workspace HQ HARD RULE:
 #   "nLockTime=21 is PROTOCOL for MINT, CONVENTION for everything else"
-# in /Users/johanneshoppe/Work/ordpool/CLAUDE.md.
+# in ~/Work/ordpool/CLAUDE.md.
 #
 # The bug: reviewers / AI agents keep writing comments that claim
 # non-mint transactions (transfers, offer settles, bid settles) MUST

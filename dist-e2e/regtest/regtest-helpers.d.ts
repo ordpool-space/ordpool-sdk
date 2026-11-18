@@ -340,13 +340,14 @@ export interface OrdOfferCreateOutput {
 }
 export declare function ordCreateOffer(inscriptionId: string, amountSats: number, feeRateSatPerVb: number, wallet?: string): OrdOfferCreateOutput;
 /**
- * The seller side of a buy-offer: `ord wallet offer accept --dry-run`. ord
- * runs every check it would run before signing (no input specifies a sighash
- * type, exactly one input owned by the wallet carrying `inscriptionId`, buyer
- * inputs finalised, the wallet's balance change equals `amountSats`) and
- * prints the txid it would broadcast. A refusal throws with ord's stderr.
+ * The seller side of a buy-offer: `ord wallet offer accept`. ord runs every
+ * check it runs before signing (no input specifies a sighash type, exactly one
+ * input owned by the wallet carrying `inscriptionId`, buyer inputs finalised,
+ * the wallet's balance change equals `amountSats`). `dry-run` stops there and
+ * prints the txid it would broadcast; `broadcast` signs the seller input and
+ * sends the transaction through the node. A refusal throws with ord's stderr.
  */
-export declare function ordAcceptOfferDryRun(inscriptionId: string, amountSats: number, psbtBase64: string, wallet: string): {
+export declare function ordAcceptOffer(inscriptionId: string, amountSats: number, psbtBase64: string, wallet: string, mode: 'dry-run' | 'broadcast'): {
     txid: string;
 };
 export interface OrdSendOutput {

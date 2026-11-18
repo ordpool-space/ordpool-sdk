@@ -2,9 +2,11 @@
  * @test-kind unit
  * Real:   getCatsAtOutput, cat21OrdFetchReader
  * Faked:  fetch (the reader's IO), answering with cat21-ord bodies captured in cats-at-output.fixtures.ts
- *         (cat21-ord 486f5338, regtest, 2026-10-11) and variations of those bodies named per case
+ *         (cat21-ord 486f5338, regtest, 2026-10-11; the spent output from ord.cat21.space, 2026-11-18)
+ *         and variations of those bodies named per case
  * Proves: a cat's output reads as its cat number from /inscription, never the id's index; an output without
- *         cats reads as []; a 404 as null; every other shape throws instead of shrinking the list
+ *         cats reads as []; a 404 and a spent output (200, spent:true) as null; every other shape throws
+ *         instead of shrinking the list
  *
  * @jest-environment node
  */
@@ -13,6 +15,7 @@ import {
   cat21OrdOutputNotFoundBody,
   cat21OrdOutputWithCatFixture,
   cat21OrdOutputWithoutCatsFixture,
+  cat21OrdSpentOutputFixture,
 } from './cats-at-output.fixtures';
 import { cat21OrdFetchReader, getCatsAtOutput } from './cats-at-output';
 
@@ -56,6 +59,14 @@ describe('getCatsAtOutput', () => {
   it('answers null for the 404 cat21-ord gives an output it never saw', async () => {
     const f = fakeFetch({});
     expect(await getCatsAtOutput(cat21OrdFetchReader(BASE, { fetch: f.impl }), 'ab'.repeat(32), 0)).toBeNull();
+  });
+
+  it('answers null for the 200 spent:true cat21-ord gives a spent output, and looks nothing up', async () => {
+    const txid = cat21OrdSpentOutputFixture.transaction;
+    const f = fakeFetch({ [`${BASE}/output/${txid}:11`]: { body: cat21OrdSpentOutputFixture } });
+
+    expect(await getCatsAtOutput(cat21OrdFetchReader(BASE, { fetch: f.impl }), txid, 11)).toBeNull();
+    expect(f.calls.map((c) => c.url)).toEqual([`${BASE}/output/${txid}:11`]);
   });
 
   it('asks for the txid in lower case', async () => {

@@ -115,6 +115,21 @@ describe('UtxoContentScanner catSat', () => {
     expect(state.message).toContain('has not indexed');
   });
 
+  it('routes an output with more sat ranges than the rare-sat check covers to scan-failed, not to clean', async () => {
+    const ranges: Array<[number, number]> = [[5_000_000_000, 5_000_000_001]];
+    for (let i = 0; i < 500; i++) ranges.push([5_000_000_001 + i * 2, 5_000_000_002 + i * 2]);
+    const { scanner } = buildScanner(
+      { value: 546, inscriptions: [], runes: null, sat_ranges: ranges },
+      { value: 546, cats: [], sat_ranges: [[5_000_000_000, 5_000_000_546]] },
+    );
+
+    const state = await firstValueFrom(scanner.scan(OUTPOINT));
+
+    expect(state.kind).toBe('scan-failed');
+    if (state.kind !== 'scan-failed') throw new Error('expected scan-failed');
+    expect(state.message).toContain('rarity is unknown');
+  });
+
   it('sources catSat from cat21-ord (authoritative) when the full ord has not indexed the output', async () => {
     const { scanner } = buildScanner(
       // Full ord lagging: no sat ranges for this output yet.

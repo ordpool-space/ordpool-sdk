@@ -59,10 +59,13 @@ import {
  *
  * Every inscribe produces a commit + reveal pair. The simulation grid shows the
  * sum of both fees + the funding requirement. `mint()` calls
- * `inscribeAndBroadcast`, which signs the commit's single funding input via the
- * wallet, broadcasts commit, signs the reveal with the ephemeral key, and
- * broadcasts the reveal. The ephemeral bearer key lands on
- * `successResult.ephemeral` — persistence is a consumer concern.
+ * `inscribeAndBroadcast`, which collects the wallet's signature on the commit's
+ * funding input, signs the reveal with the ephemeral key, and only then sends
+ * both through the required `transport` as one validated package
+ * (`testmempoolaccept`, then `submitpackage`). Nothing reaches the network
+ * before every signature is in. The ephemeral bearer key lands on
+ * `successResult.ephemeral`, and on `InscribeRevealPendingError` when the
+ * commit may be out without its reveal; persisting it is a consumer concern.
  */
 
 /**
@@ -318,7 +321,12 @@ export interface InscribeSnapshot {
    * answers "what would we choose"; these answer "what happens if you press
    * the button", which is the question a CTA is gated on.
    */
-  resolvedFundingUtxo: TxnOutput | null;
+  /**
+   * Carries the coin's scan bucket and the assets the scan named on it
+   * (`assets`): what an `asset-notice` must show, read off the coin that will
+   * be spent, never off `fundingRecommendation.recommended`.
+   */
+  resolvedFundingUtxo: (TxnOutput & AnnotatedFundingUtxo) | null;
   resolvedFundingStatus: InscribeFundingStatus | null;
   /**
    * Set when the coin the user PICKED is not the coin that will be spent,

@@ -325,13 +325,15 @@ export function buildInscribeCommitPsbt(args: InscribeCommitArgs): InscribeCommi
   // NOTE: this is a DIFFERENT reason for RBF-off than the mint case.
   // On mint, a third-party accelerate would drop `lockTime=21` and
   // kill the mint (no cat is produced). On inscribe commit, an RBF
-  // replacement changes the commit's inputs → its txid changes → the
-  // pre-built reveal (which
-  // references the SIMULATION commit txid) becomes invalid and the
-  // postage locks in an output nobody can spend (the ephemeral reveal
-  // key is not returned to the caller). Both cases warrant RBF-off
-  // for third-party wallets; the "mint" in the resolver's name refers
-  // to the CAT-flow rule, but the same value happens to protect us here.
+  // replacement gives the commit a new txid, so the pre-signed reveal
+  // (which spends the ORIGINAL commit txid) no longer has an input and
+  // the commit output waits for a reveal re-signed against the new
+  // txid. Only the ephemeral key can sign that, and the caller holds it
+  // only if it persisted `successResult.ephemeral` or the key on
+  // `InscribeRevealPendingError`. Both cases warrant RBF-off for
+  // third-party wallets; the "mint" in the resolver's name refers to the
+  // CAT-flow rule, but the same value happens to protect us here.
+  // cat21wallet resolves to RBF-on (0xfffffffd) here too.
   const sequence = resolveCat21MintInputSequence(args.walletType ?? KnownOrdinalWalletType.xverse);
 
   // Funding input shape mirrors the cat21 mint adapter: witnessUtxo

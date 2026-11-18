@@ -22,6 +22,7 @@ import {
   expertRequiredCause,
   expertRequiredMessage,
 } from './funding-safety.js';
+import { toFundingCoinJson } from './funding-coin-json.js';
 
 /** Stable code for a blocked funding decision. */
 export type FundingBlockedErrorCode = 'funding-blocked';
@@ -53,23 +54,6 @@ export interface FundingBlockedErrorJson {
   message: string;
   cause: ExpertRequiredCause;
   recommendation: FundingBlockedRecommendation;
-}
-
-function toBlockedCoin(c: AnnotatedFundingUtxo): FundingBlockedCoin {
-  return {
-    txid: c.txid,
-    vout: c.vout,
-    value: c.value,
-    bucket: c.bucket,
-    assets: c.assets
-      ? {
-          inscriptionIds: [...c.assets.inscriptionIds],
-          runeNames: [...c.assets.runeNames],
-          catIds: [...c.assets.catIds],
-          rareSat: c.assets.rareSat ? { ...c.assets.rareSat } : null,
-        }
-      : null,
-  };
 }
 
 /**
@@ -112,8 +96,8 @@ export class FundingBlockedError extends Error {
     this.cause = cause;
     this.recommendation = {
       status: 'expert-required',
-      recommended: toBlockedCoin(rec.recommended),
-      candidates: rec.candidates.map(toBlockedCoin),
+      recommended: toFundingCoinJson(rec.recommended),
+      candidates: rec.candidates.map(toFundingCoinJson),
     };
   }
 

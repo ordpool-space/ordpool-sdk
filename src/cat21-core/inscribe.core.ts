@@ -7,6 +7,7 @@ import {
   WalletAddressTopology,
 } from '../cat21-fee/funding-safety.js';
 import { FundingBlockedError } from '../cat21-fee/funding-blocked-error.js';
+import { assertPinnedFundingHeld } from '../cat21-fee/funding-selection-changed-error.js';
 import { CandidateFeeRow } from '../cat21-fee/candidate-fees.js';
 import {
   InscribeAndBroadcastArgs,
@@ -66,7 +67,13 @@ export interface InscribeSimulation {
    */
   droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
-  fundingUtxo: CoreFundingUtxo | null;
+  /**
+   * The coin that will be SPENT, an explicit pick included, with its scan
+   * bucket and the assets the scan named on it (`assets`). That is what an
+   * `asset-notice` must show; `recommendation.recommended` is the coin the SDK
+   * would choose, which differs whenever the user picked another one.
+   */
+  fundingUtxo: (CoreFundingUtxo & AnnotatedFundingUtxo) | null;
   /** commit output + commit fee the funding coin must cover. Null if the content is unbuildable. */
   fundingRequirementSats: number | null;
   /**
@@ -98,7 +105,7 @@ interface InscribePlan {
   status: InscribeStatus;
   droppedSelection: DroppedSelection | null;
   recommendation: FundingRecommendation<CoreFundingUtxo & AnnotatedFundingUtxo>;
-  pick: CoreFundingUtxo | null;
+  pick: (CoreFundingUtxo & AnnotatedFundingUtxo) | null;
   fundingRequirementSats: number | null;
   /**
    * The CHANGE-HEADROOM target: the requirement plus this payment address's
@@ -325,8 +332,11 @@ export async function simulateInscribe(
  * commit+reveal engine (build both, collect the wallet's signature, validate
  * the pair and send it as one package). Throws `FundingBlockedError`
  * (cause, recommended coin, named assets) when the recommendation is
- * `expert-required`, and a plain `Error` when nothing covers. `promptForSignedPsbt` is the
- * watch-only signing bridge (Promise form; adapted internally).
+ * `expert-required`, and a plain `Error` when nothing covers. Throws
+ * `FundingSelectionChangedError`, before anything is signed, when
+ * `selectedFundingUtxo` is set and that coin is gone or no longer covers.
+ * `promptForSignedPsbt` is the watch-only signing bridge (Promise form;
+ * adapted internally).
  */
 export async function executeInscribe(
   params: InscribeCoreParams,
@@ -339,6 +349,7 @@ export async function executeInscribe(
   },
 ): Promise<InscribeAndBroadcastResult> {
   const plan = await planInscribe(params, ports);
+  assertPinnedFundingHeld(params.selectedFundingUtxo, plan);
   // 'asset-notice' executes: a coin will be spent and it carries assets, which
   // the money-path rule calls an enabled CTA with a notice. Requiring 'ready'
   // refused the separate-payment-address auto-pick.

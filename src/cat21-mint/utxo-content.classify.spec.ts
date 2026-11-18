@@ -96,6 +96,18 @@ describe('classifyUtxoContent — the content-safety gate', () => {
     });
 
     it.each([
+      ['an empty sat_ranges array', [] as ReadonlyArray<readonly [number, number]>],
+      ['no sat_ranges field at all', undefined],
+    ])('cat21-ord with %s and no indexed flag => NOT clean, even with the full ord caught up', (_label, ranges) => {
+      // cat21-ord lagging without saying so: no `indexed` field, no ranges.
+      // The missing ranges alone must fail the coin, since the flag is absent.
+      const c = classifyUtxoContent(ord(), cat21({ cats: [], sat_ranges: ranges }));
+
+      expect(c.indexed).toBe(false);
+      expect(c.clean).toBe(false);
+    });
+
+    it.each([
       ['cat21-ord', () => classifyUtxoContent(ord(), cat21({ indexed: false }))],
       ['the full ord', () => classifyUtxoContent(ord({ indexed: false }), cat21())],
     ])('an explicit indexed:false from %s vetoes even with sat_ranges present', (_who, run) => {
@@ -169,6 +181,39 @@ describe('classifyUtxoContent — the content-safety gate', () => {
   });
 });
 
+// Above RARE_SAT_MAX_RANGES the rare-sat check is skipped for cost. A skipped
+// check is an unknown rarity: a coin there may carry an uncommon sat, so it must
+// never be classified clean and auto-spent as fee money.
+describe('an output beyond the rare-sat range cap is never clean', () => {
+  const commonRanges = (n: number): Array<readonly [number, number]> =>
+    Array.from({ length: n }, (_, i) => [BLOCK1_FIRST_SAT + 1 + i * 2, BLOCK1_FIRST_SAT + 2 + i * 2] as const);
+
+  it('501 ranges with an uncommon sat among them => NOT clean, rarity unchecked', () => {
+    const ranges = [[BLOCK1_FIRST_SAT, BLOCK1_FIRST_SAT + 1] as const, ...commonRanges(RARE_SAT_MAX_RANGES)];
+    expect(ranges.length).toBe(501);
+
+    const c = classifyUtxoContent(ord({ sat_ranges: ranges }), cat21());
+
+    expect(c.indexed).toBe(true);
+    expect(c.rarityChecked).toBe(false);
+    expect(c.clean).toBe(false);
+  });
+
+  it('501 ranges of common sats => still NOT clean: the check did not run, so rarity is unknown', () => {
+    const c = classifyUtxoContent(ord({ sat_ranges: commonRanges(501) }), cat21());
+
+    expect(c.rarityChecked).toBe(false);
+    expect(c.clean).toBe(false);
+  });
+
+  it('exactly RARE_SAT_MAX_RANGES common ranges => checked and clean, so the cap is not off by one', () => {
+    const c = classifyUtxoContent(ord({ sat_ranges: commonRanges(500) }), cat21());
+
+    expect(c.rarityChecked).toBe(true);
+    expect(c.clean).toBe(true);
+  });
+});
+
 describe('detectRareSat — rarity ladder over sat_ranges', () => {
   it('common range (mid-block) → null', () => {
     expect(detectRareSat([[BLOCK1_FIRST_SAT + 1, BLOCK1_FIRST_SAT + 6]])).toBeNull();
@@ -199,9 +244,9 @@ describe('detectRareSat — rarity ladder over sat_ranges', () => {
   });
 
   it('cost tradeoff: > RARE_SAT_MAX_RANGES ranges are SKIPPED (returns null even if one is rare)', () => {
-    // Documented behaviour: a pathological UTXO with too many ranges skips the
-    // scan, so a rare sat there is NOT detected and classifyUtxoContent would
-    // call it clean. Pinned so a future change to the cap is deliberate.
+    // A pathological UTXO with too many ranges skips the scan, so a rare sat
+    // there is NOT detected here. classifyUtxoContent compensates with
+    // `rarityChecked: false` (pinned above). Pinned so a cap change is deliberate.
     const many: Array<readonly [number, number]> = [
       [BLOCK1_FIRST_SAT, BLOCK1_FIRST_SAT + 1], // a genuinely uncommon range...
     ];

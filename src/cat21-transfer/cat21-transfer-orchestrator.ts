@@ -120,7 +120,12 @@ export interface TransferSnapshot {
    * the question a CTA is gated on. `resolvedFundingStatus` is `scanning` while
    * a recompute is in flight and `null` after a failed one.
    */
-  resolvedFundingUtxo: CoreFundingUtxo | null;
+  /**
+   * Carries the coin's scan bucket and the assets the scan named on it
+   * (`assets`): what an `asset-notice` must show, read off the coin that will
+   * be spent, never off `fundingRecommendation.recommended`.
+   */
+  resolvedFundingUtxo: (CoreFundingUtxo & AnnotatedFundingUtxo) | null;
   resolvedFundingStatus: TransferStatus | null;
   /**
    * Set when the coin the user PICKED is not the coin that will be spent,

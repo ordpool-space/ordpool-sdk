@@ -110,7 +110,12 @@ export interface CreateOfferSnapshot {
    * the question a CTA is gated on. `resolvedFundingStatus` is `scanning` while
    * a recompute is in flight and `null` after a failed one.
    */
-  resolvedFundingUtxo: CoreFundingUtxo | null;
+  /**
+   * Carries the coin's scan bucket and the assets the scan named on it
+   * (`assets`): what an `asset-notice` must show, read off the coin that will
+   * be spent, never off `fundingRecommendation.recommended`.
+   */
+  resolvedFundingUtxo: (CoreFundingUtxo & AnnotatedFundingUtxo) | null;
   resolvedFundingStatus: CreateOfferStatus | null;
   /**
    * Set when the coin the user PICKED is not the coin that will be spent,
@@ -349,7 +354,7 @@ export class Cat21CreateOfferOrchestrator {
         fundingRequirementSats: sim.fundingRequirementSats,
         fundingPreferredSats: sim.fundingPreferredSats,
         resolvedFundingUtxo: sim.buyerFundingUtxo,
-        resolvedFundingStatus: sim.status,
+          resolvedFundingStatus: sim.status,
         droppedSelection: sim.droppedSelection,
         // `asset-notice` is a PROCEED state: the plan is built and the coin is
         // chosen, the caller's obligation is to name what sits on it. Withholding
