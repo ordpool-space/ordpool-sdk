@@ -489,10 +489,9 @@ describe('cat21 full ownership flow on regtest: mint → transfer → offer → 
     expect(ordTx.getOutput(1).amount).toBe(BigInt(PRICE_SATS + CAT21_POSTAGE_SATS));
     expect(ordTx.getOutput(1).amount).toBe(sdkTx.getOutput(1).amount);
 
-    // The sole intentional structural diff: lockTime. ord sets 0; the
-    // SDK sets 21 so the accept tx ALSO mints a fresh cat onto the same
-    // ordinal (wallet HARD RULE #1).
-    expect(ordTx.lockTime).toBe(0);
+    // The SDK sets lockTime 21 so the accept tx ALSO mints a fresh cat onto
+    // the same ordinal (wallet HARD RULE #1). Nothing is asserted about the
+    // lockTime of ord's offer: that is ord's choice, not our code.
     expect(sdkTx.lockTime).toBe(21);
   });
 

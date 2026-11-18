@@ -9,7 +9,8 @@
  *         longer covers after a fee change: it throws FundingSelectionChangedError (reason
  *         `below-requirement`, the fallback named in the recommendation) before any signer or prompt runs,
  *         even though the snapshot would let the CTA proceed on the asset-notice fallback; transfer and
- *         create-offer, which spend the previewed coin, refuse a preview that predates a new pin.
+ *         create-offer, which spend the previewed coin, refuse a preview that predates a new pin with a
+ *         typed FundingPreviewStaleError that its guard tells apart from a changed selection.
  */
 import { describe, expect, it } from '@jest/globals';
 import { hex } from '@scure/base';
@@ -23,7 +24,15 @@ import { InscribeMintOrchestrator } from '../inscribe/inscribe-mint-orchestrator
 import { Cat21MintOrchestrator } from '../cat21-mint/cat21-mint-orchestrator.js';
 import { Cat21TransferOrchestrator } from '../cat21-transfer/cat21-transfer-orchestrator.js';
 import { Cat21CreateOfferOrchestrator } from '../cat21-offer/cat21-create-offer-orchestrator.js';
-import { FundingSelectionChangedError } from '../cat21-fee/funding-selection-changed-error.js';
+import {
+  FundingPreviewStaleError,
+  FundingPreviewStaleErrorJson,
+  FundingSelectionChangedError,
+  isFundingPreviewStaleError,
+  isFundingSelectionChangedError,
+} from '../cat21-fee/funding-selection-changed-error.js';
+import * as mainEntry from '../index.js';
+import * as coreEntry from '../core.js';
 import { ContentScanPort, UtxoClassification } from './ports.js';
 
 const PAYMENT_PUB = '0278875d226dd610b06c41d698c9fe0ea4915c797ddc31a3310299d9acd07ff37b';
@@ -191,6 +200,7 @@ describe.each(HARNESSES.map((make) => [make().name, make] as const))('%s with a 
     }
 
     expect(err).toBeInstanceOf(FundingSelectionChangedError);
+    expect(isFundingPreviewStaleError(err)).toBe(false);
     if (!(err instanceof FundingSelectionChangedError)) throw new Error(`expected the error, got ${String(err)}`);
     expect({
       dropped: err.droppedSelection,
@@ -242,9 +252,40 @@ describe('an execute call that races the recompute after a new pin', () => {
 
     const err: unknown = await h.run(async (u) => { prompts.push(u.hex); return 'signed'; }).then(() => null, (e: unknown) => e);
 
-    expect({ message: err instanceof Error ? err.message : String(err), prompts }).toEqual({
-      message: 'The funding preview is still being updated for the selected UTXO. Try again in a moment.',
+    expect(err).toBeInstanceOf(FundingPreviewStaleError);
+    expect({
+      stale: isFundingPreviewStaleError(err),
+      changed: isFundingSelectionChangedError(err),
+      json: JSON.parse(JSON.stringify(err)) as FundingPreviewStaleErrorJson,
+      prompts,
+    }).toEqual({
+      stale: true,
+      changed: false,
+      json: {
+        name: 'FundingPreviewStaleError',
+        code: 'funding-preview-stale',
+        message: 'The funding preview is still being updated for the selected UTXO. Try again in a moment.',
+        selected: { txid: OTHER.txid, vout: 0 },
+      },
       prompts: [],
     });
+  });
+});
+
+describe('isFundingPreviewStaleError', () => {
+  it('recognises the error by name and code across a realm, and nothing else', () => {
+    expect([
+      isFundingPreviewStaleError({ name: 'FundingPreviewStaleError', code: 'funding-preview-stale' }),
+      isFundingPreviewStaleError({ name: 'FundingSelectionChangedError', code: 'funding-selection-changed' }),
+      isFundingPreviewStaleError(new Error('The funding preview is still being updated for the selected UTXO. Try again in a moment.')),
+      isFundingPreviewStaleError(null),
+    ]).toEqual([true, false, false, false]);
+  });
+
+  it('ships on the main and the /core entry', () => {
+    expect([mainEntry.isFundingPreviewStaleError, coreEntry.FundingPreviewStaleError]).toEqual([
+      isFundingPreviewStaleError,
+      FundingPreviewStaleError,
+    ]);
   });
 });

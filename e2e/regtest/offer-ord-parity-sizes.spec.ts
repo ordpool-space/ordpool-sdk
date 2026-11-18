@@ -232,8 +232,8 @@ describe('cat UTXO size preservation at non-546 sizes (offer ord-parity + transf
       expect(sdkSeller.partialSig).toBeUndefined();
       expect(sdkSeller.tapKeySig).toBeUndefined();
 
-      // the sole intentional structural diff: lockTime (ord 0, SDK 21).
-      expect(ordTx.lockTime).toBe(0);
+      // The SDK's offer carries lockTime 21 for the bonus mint. Nothing is
+      // asserted about the lockTime of ord's offer: that is ord's choice.
       expect(sdkTx.lockTime).toBe(21);
     },
     120_000,

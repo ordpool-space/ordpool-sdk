@@ -97,6 +97,59 @@ export function isFundingSelectionChangedError(err: unknown): err is FundingSele
   return e.name === 'FundingSelectionChangedError' && e.code === 'funding-selection-changed';
 }
 
+/** Stable code for a preview that has not caught up with a new pin. */
+export type FundingPreviewStaleErrorCode = 'funding-preview-stale';
+
+/** What `FundingPreviewStaleError.toJSON()` returns. */
+export interface FundingPreviewStaleErrorJson {
+  name: 'FundingPreviewStaleError';
+  code: FundingPreviewStaleErrorCode;
+  message: string;
+  selected: { txid: string; vout: number };
+}
+
+/**
+ * Thrown by an orchestrator's execute method when the user pinned a coin that
+ * still stands, but the funding preview it would spend was priced for another
+ * coin, because execute ran before the recompute for the new pin landed.
+ *
+ * Not a changed selection: the pin is kept and nothing needs confirming
+ * again. The caller waits for the next snapshot and retries.
+ * `FundingSelectionChangedError` is the other case, where the pin itself no
+ * longer works. `code` survives a realm or serialisation boundary;
+ * `isFundingPreviewStaleError` checks it.
+ */
+export class FundingPreviewStaleError extends Error {
+  readonly code: FundingPreviewStaleErrorCode = 'funding-preview-stale';
+  readonly selected: { txid: string; vout: number };
+
+  constructor(selected: { txid: string; vout: number }) {
+    super('The funding preview is still being updated for the selected UTXO. Try again in a moment.');
+    this.name = 'FundingPreviewStaleError';
+    this.selected = { txid: selected.txid, vout: selected.vout };
+  }
+
+  /** The error as plain data, for an agent on the other side of a bridge. */
+  toJSON(): FundingPreviewStaleErrorJson {
+    return { name: 'FundingPreviewStaleError', code: this.code, message: this.message, selected: this.selected };
+  }
+}
+
+/**
+ * True for a `FundingPreviewStaleError`, also one from another copy of the SDK
+ * or another realm: it checks `name` and `code` rather than the prototype.
+ */
+export function isFundingPreviewStaleError(err: unknown): err is FundingPreviewStaleError {
+  if (err instanceof FundingPreviewStaleError) {
+    return true;
+  }
+  if (typeof err !== 'object' || err === null) {
+    return false;
+  }
+  const e = err as { name?: unknown; code?: unknown };
+  return e.name === 'FundingPreviewStaleError' && e.code === 'funding-preview-stale';
+}
+
 /**
  * The execute-path guard: throws `FundingSelectionChangedError` when the
  * caller pinned a coin (`selected`) and the plan dropped it. A pinned coin
@@ -123,7 +176,8 @@ export function assertPinnedFundingHeld(
  *
  * `resolved` is the coin the method is about to spend. When it is not the pin
  * although the pin still stands, the preview was built before the pin was
- * set and has not caught up, which is a plain retry, not a changed selection.
+ * set and has not caught up: `FundingPreviewStaleError`, a retry, not a
+ * changed selection.
  *
  * `requirementSats` null means no measurable requirement yet: there is no
  * recommendation to fall back to, so the pin stands as given.
@@ -140,6 +194,6 @@ export function assertPinnedFundingResolved(
     if (droppedSelection) throw new FundingSelectionChangedError(droppedSelection, recommendation);
   }
   if (resolved && (resolved.txid !== selected.txid || resolved.vout !== selected.vout)) {
-    throw new Error('The funding preview is still being updated for the selected UTXO. Try again in a moment.');
+    throw new FundingPreviewStaleError(selected);
   }
 }
